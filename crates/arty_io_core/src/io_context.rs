@@ -58,8 +58,7 @@ pub trait IoContext: Clone + ThreadAware + 'static {
     /// # Errors
     ///
     /// Returns an error if driver creation fails. Implementations can also return an
-    /// error for repeated calls for the same registration and worker. The implementation
-    /// must clean up partial construction before returning. The runtime does not retry
+    /// error for repeated calls for the same registration and worker. The runtime does not retry
     /// driver creation. It treats the failure as fatal and starts runtime shutdown on
     /// every async worker. Contexts that other workers already returned must reject new
     /// operations after shutdown closes them. The runtime calls
