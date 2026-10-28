@@ -417,32 +417,17 @@ anvil-toolchain-stable-install: (_anvil-resolve-stable "install")
 # `source_prereq`, when set, runs immediately before a source installation,
 # including a binstall fallback.
 [script("pwsh", "-NoProfile")]
-_install-tool-core name version installer source_prereq="" git_url="" git_rev="":
+_install-tool-core name version installer source_prereq="":
     $ErrorActionPreference = 'Stop'
     $name = '{{name}}'
     $version = '{{version}}'
     $installer = '{{installer}}'
     $sourcePrereq = '{{source_prereq}}'
-    $gitUrl = '{{git_url}}'
-    $gitRev = '{{git_rev}}'
 
     if ($installer -ne 'install' -and $installer -ne 'binstall') {
         Write-Error "_install-tool-core: unknown installer '$installer' (expected 'install' or 'binstall')"
         exit 2
     }
-    if ([bool]$gitUrl -ne [bool]$gitRev) {
-        Write-Error '_install-tool-core: git_url and git_rev must be set together'
-        exit 2
-    }
-
-    $installRoot = if ($env:CARGO_INSTALL_ROOT) {
-        $env:CARGO_INSTALL_ROOT
-    } elseif ($env:CARGO_HOME) {
-        $env:CARGO_HOME
-    } else {
-        Join-Path $HOME '.cargo'
-    }
-    $sourceMarker = Join-Path (Join-Path $installRoot 'bin') "$name.source-rev"
 
     # Already at or above the pin: skip. We don't downgrade tools the
     # user upgraded for their own reasons; the validate side uses
@@ -451,18 +436,13 @@ _install-tool-core name version installer source_prereq="" git_url="" git_rev=""
     # every post-restore run would try to re-install on top of the
     # cached binaries and fail with "binary already exists in destination".
     $installed = $null
-    $pattern = '^' + [regex]::Escape($name) + ' v(\S+)(?: \([^)]+\))?:'
+    $pattern = '^' + [regex]::Escape($name) + ' v(\S+):'
     foreach ($line in (& cargo {{_anvil_stable_toolchain_args}} install --list 2>$null)) {
         if ($line -match $pattern) { $installed = $Matches[1]; break }
     }
     if ($installed) {
         try {
-            $versionSatisfied = ([version]$installed) -ge ([version]$version)
-            $sourceSatisfied = -not $gitRev
-            if ($gitRev -and (Test-Path -LiteralPath $sourceMarker)) {
-                $sourceSatisfied = (Get-Content -LiteralPath $sourceMarker -Raw).Trim() -eq $gitRev
-            }
-            if ($versionSatisfied -and $sourceSatisfied) {
+            if (([version]$installed) -ge ([version]$version)) {
                 Write-Host "$name >= $version (already satisfied; installed=$installed)"
                 exit 0
             }
@@ -472,7 +452,7 @@ _install-tool-core name version installer source_prereq="" git_url="" git_rev=""
     }
 
     Write-Host "Installing $name =$version (installer: $installer)"
-    if ($installer -eq 'binstall' -and -not $gitRev) {
+    if ($installer -eq 'binstall') {
         if (-not (Get-Command cargo-binstall -ErrorAction SilentlyContinue)) {
             Write-Host '  Bootstrapping cargo-binstall'
             & cargo {{_anvil_stable_toolchain_args}} install --locked cargo-binstall
@@ -493,40 +473,29 @@ _install-tool-core name version installer source_prereq="" git_url="" git_rev=""
         if ($LASTEXITCODE -eq 0) { exit 0 }
         Write-Host '  binstall failed; falling back to cargo install' -ForegroundColor Yellow
     }
-    if ($gitRev -and $installer -eq 'binstall') {
-        Write-Host '  Git-pinned tools require cargo install; skipping cargo-binstall'
-    }
     if ($sourcePrereq) {
         & "{{just_executable()}}" $sourcePrereq
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
-    if ($gitRev) {
-        & cargo {{_anvil_stable_toolchain_args}} install --locked --git $gitUrl --rev $gitRev $name --force
-    } else {
-        & cargo {{_anvil_stable_toolchain_args}} install --locked $name --version "=$version"
-    }
+    & cargo {{_anvil_stable_toolchain_args}} install --locked $name --version "=$version"
     if ($LASTEXITCODE -ne 0) {
         Write-Error "$name install FAILED"
         exit $LASTEXITCODE
     }
-    if ($gitRev) {
-        [System.IO.File]::WriteAllText($sourceMarker, $gitRev)
-    }
 
 # Provision stable before entering the Cargo tool installer.
-_install-tool name version installer source_prereq="" git_url="" git_rev="": anvil-toolchain-stable-install (_install-tool-core name version installer source_prereq git_url git_rev)
+_install-tool name version installer source_prereq="": anvil-toolchain-stable-install (_install-tool-core name version installer source_prereq)
 
 # _check-tool: verify a cargo subcommand is installed at or above the
 # pinned version. Errors with an install hint on missing or too-old.
 [script("pwsh", "-NoProfile")]
-_check-tool name version git_rev="":
+_check-tool name version:
     $ErrorActionPreference = 'Stop'
     $name = '{{name}}'
     $version = '{{version}}'
-    $gitRev = '{{git_rev}}'
 
     $installed = $null
-    $pattern = '^' + [regex]::Escape($name) + ' v(\S+)(?: \([^)]+\))?:'
+    $pattern = '^' + [regex]::Escape($name) + ' v(\S+):'
     $previousAutoInstall = $env:RUSTUP_AUTO_INSTALL
     try {
         # Validation must not let the rustup proxy provision a missing selection.
@@ -548,35 +517,20 @@ _check-tool name version git_rev="":
         [Console]::Error.WriteLine("anvil: selected stable Cargo is unavailable while checking '$name' (exit $cargoExit). Run: just anvil-toolchain-stable-install`n$diagnostic")
         exit $cargoExit
     }
-    $installHint = if ($gitRev) { 'just anvil-setup' } else { "cargo install --locked --version =$version $name" }
     if (-not $installed) {
-        Write-Error "anvil: required tool '$name' not found. Install: $installHint"
+        Write-Error "anvil: required tool '$name' not found. Install: cargo install --locked --version =$version $name"
         exit 1
     }
     try {
         $installedV = [version]$installed
         $pinV = [version]$version
     } catch {
-        Write-Error "anvil: cannot compare versions for '$name' (installed=$installed pin=$version). Reinstall: $installHint"
+        Write-Error "anvil: cannot compare versions for '$name' (installed=$installed pin=$version). Reinstall: cargo install --locked --version =$version $name"
         exit 1
     }
     if ($installedV -lt $pinV) {
-        Write-Error "anvil: '$name' v$installed is older than the required minimum v$version. Upgrade: $installHint"
+        Write-Error "anvil: '$name' v$installed is older than the required minimum v$version. Upgrade: cargo install --locked --version =$version $name"
         exit 1
-    }
-    if ($gitRev) {
-        $installRoot = if ($env:CARGO_INSTALL_ROOT) {
-            $env:CARGO_INSTALL_ROOT
-        } elseif ($env:CARGO_HOME) {
-            $env:CARGO_HOME
-        } else {
-            Join-Path $HOME '.cargo'
-        }
-        $sourceMarker = Join-Path (Join-Path $installRoot 'bin') "$name.source-rev"
-        if (-not (Test-Path -LiteralPath $sourceMarker) -or (Get-Content -LiteralPath $sourceMarker -Raw).Trim() -ne $gitRev) {
-            Write-Error "anvil: '$name' v$installed is not built from required Git revision $gitRev. Reinstall: $installHint"
-            exit 1
-        }
     }
 
 # _install-toolchain: install a specific rustup toolchain (no components).
@@ -918,14 +872,12 @@ anvil-component-nightly-llvm-tools-validate-prereqs: anvil-toolchain-nightly-val
 # parameter; the validate-prereqs recipes do not (they only read state).
 
 # Install the pinned `cargo-aprz` tool.
-# crates.io 1.2.0 predates the `username` CSV compatibility fix. Use the
-# upstream fix until a released version includes it.
 [private]
-anvil-tool-cargo-aprz-install installer="install": (_install-tool "cargo-aprz" cargo_aprz_version installer "" "https://github.com/microsoft/ox-tools" "8717bdca37094f7ed44cfa8b532e035dbbcb7d10")
+anvil-tool-cargo-aprz-install installer="install": (_install-tool "cargo-aprz" cargo_aprz_version installer)
 
 # Validate that the pinned `cargo-aprz` tool is available.
 [private]
-anvil-tool-cargo-aprz-validate-prereqs: (_check-tool "cargo-aprz" cargo_aprz_version "8717bdca37094f7ed44cfa8b532e035dbbcb7d10")
+anvil-tool-cargo-aprz-validate-prereqs: (_check-tool "cargo-aprz" cargo_aprz_version)
 
 # Install the pinned `cargo-audit` tool.
 [private]
