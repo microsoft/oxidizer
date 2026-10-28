@@ -8,6 +8,15 @@ Keep repository-specific automation only for capabilities outside Anvil's
 scope, such as release tooling and tests for that tooling. Generated Anvil
 files are updated with `cargo anvil`, not edited directly.
 
+Coverage collection uses `cargo coverage-gate run` on the pinned nightly toolchain.
+It runs both `--all-features` and `--no-default-features` configurations.
+The local gate and CI uploads use the same filtered LCOV files, which contain
+line-coverage counts, under `target/coverage`.
+Ordinary inline `#[cfg(test)]` modules need no `coverage(off)` attribute.
+If macros make source ownership uncertain, the filter keeps ambiguous counters.
+Keep explicit exclusions for exceptional production paths and helpers that the
+filter cannot classify.
+
 The handwritten `repository-checks.yml` also verifies the
 `http_headers_simd` `no_std` contract with package-isolated unit and integration
 tests on AArch64 and x86-family Linux. The generated Anvil test groups can select the

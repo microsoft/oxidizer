@@ -121,7 +121,6 @@ impl<R: 'static> Future for JoinHandle<R> {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
 

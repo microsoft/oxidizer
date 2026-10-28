@@ -50,6 +50,7 @@ observed_testing = { path = "../observed_testing" }
 scopeguard = { workspace = true }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
+thread_aware = { path = "../thread_aware", default-features = false, features = ["std"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]

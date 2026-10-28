@@ -32,7 +32,6 @@ fn abort_after_repeated_payload_panic(_panic: TaskPanicPayload) -> ! {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};

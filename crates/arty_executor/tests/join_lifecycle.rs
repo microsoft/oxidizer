@@ -20,6 +20,7 @@ use observed::enrichment::{Enrichment, EnrichmentEntry};
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
 use observed_testing::{TEST_ID, test_emitter};
+use thread_aware::ThreadBuilder;
 
 thread_local! {
     static THREAD_LOCAL_EXECUTOR: RefCell<Option<Executor>> = const { RefCell::new(None) };
@@ -199,6 +200,17 @@ fn failed_construction_preserves_existing_executor_notifications() {
 
     assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
     assert_eq!(poll_once(&mut handle), Poll::Ready(Ok(42)));
+}
+
+#[test]
+fn configured_current_thread_executes_tasks() {
+    let thread = ThreadBuilder::default().build(std::thread::current().id());
+    let mut executor = Executor::builder().thread(thread).build();
+    let mut handle = executor.tasks().add(async { 42 }, TaskOptions::default());
+
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+    assert_eq!(poll_once(&mut handle), Poll::Ready(Ok(42)));
+    assert!(!executor.has_tasks());
 }
 
 #[test]
@@ -432,8 +444,56 @@ impl Wake for PanickingRemoteJoinWake {
     #[expect(clippy::panic, reason = "this test injects a wake panic to verify containment")]
     fn wake(self: Arc<Self>) {
         self.0.store(true, Ordering::Release);
-        panic!("remote join disconnect notification");
+        panic!("remote join notification");
     }
+}
+
+#[test]
+fn remote_completion_contains_panicking_join_notification() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let mut executor = Executor::builder().sink(sink).build();
+    let (result_tx, mut remote_join) = RemotePool::new().channel::<usize>();
+    let wake = Arc::new(PanickingRemoteJoinWake(AtomicBool::new(false)));
+    let waker = Waker::from(Arc::clone(&wake));
+    assert!(Pin::new(&mut remote_join).poll(&mut Context::from_waker(&waker)).is_pending());
+    executor
+        .tasks()
+        .add_with_remote_result(async { 42 }, TaskOptions::default(), result_tx);
+
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+
+    assert!(wake.0.load(Ordering::Acquire));
+    assert_eq!(
+        Pin::new(&mut remote_join).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(Ok(42))
+    );
+    assert!(!executor.has_tasks());
+    let events = processor.events();
+    assert_eq!(events.iter().filter(|event| event.name() == "arty.rt.task.succeeded").count(), 1);
+    assert!(!events.iter().any(|event| event.name() == "arty.rt.task.panicked"));
+}
+
+#[test]
+fn remote_task_panic_contains_panicking_join_notification() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let mut executor = Executor::builder().sink(sink).build();
+    let (result_tx, mut remote_join) = RemotePool::new().channel::<usize>();
+    let wake = Arc::new(PanickingRemoteJoinWake(AtomicBool::new(false)));
+    let waker = Waker::from(Arc::clone(&wake));
+    assert!(Pin::new(&mut remote_join).poll(&mut Context::from_waker(&waker)).is_pending());
+    executor
+        .tasks()
+        .add_with_remote_result(async { panic!("remote task panic") }, TaskOptions::default(), result_tx);
+
+    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+
+    assert!(wake.0.load(Ordering::Acquire));
+    let error = ready_error(Pin::new(&mut remote_join).poll(&mut Context::from_waker(Waker::noop())));
+    assert!(matches!(error, JoinError::Panicked(payload) if payload.downcast_ref::<&str>() == Some(&"remote task panic")));
+    assert!(!executor.has_tasks());
+    let events = processor.events();
+    assert_eq!(events.iter().filter(|event| event.name() == "arty.rt.task.panicked").count(), 1);
+    assert!(!events.iter().any(|event| event.name() == "arty.rt.task.succeeded"));
 }
 
 #[test]

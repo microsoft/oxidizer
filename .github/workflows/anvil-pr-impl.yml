@@ -130,7 +130,7 @@ jobs:
         # target/anvil/impact/ so the group's scoped checks read it via their
         # `anvil-impact` dependency -- the same code path as a local run. arm
         # legs reuse their OS family's artifact.
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: anvil-impact-${{ startsWith(matrix.os, 'linux') && 'Linux' || 'Windows' }}
           path: target/anvil/impact
@@ -141,7 +141,7 @@ jobs:
       - name: Resolve current PR title
         id: pr_title
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           retries: 3
           script: |
@@ -205,7 +205,7 @@ jobs:
       - name: Download impact artifact
         # See pr-fast: pull the OS-family impact cache so scoped checks read it
         # via their `anvil-impact` dependency.
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: anvil-impact-${{ startsWith(matrix.os, 'linux') && 'Linux' || 'Windows' }}
           path: target/anvil/impact
@@ -226,11 +226,12 @@ jobs:
         # Codecov coalesces multiple uploads against the same commit;
         # the `flags:` tag distinguishes the per-leg slices in the
         # Codecov UI without changing the union total.
-        # lcov-*.info are produced by the anvil-llvm-cov recipe inside
-        # anvil-pr-test (one per feature config); if the affected set was
-        # empty the recipe no-ops and there are no files to upload. `always()`
-        # keeps completed reports publishable after the gate or a later recipe
-        # fails. The separate hashFiles predicates require both feature
+        # The released-surface-filtered lcov-*.info files are produced and
+        # gated by cargo-coverage-gate inside anvil-pr-test (one per feature
+        # config), so Codecov receives the exact reports behind the local
+        # verdict. If the affected set was empty the recipe no-ops and there
+        # are no files to upload. `always()` keeps completed reports publishable
+        # after the gate or a later recipe fails. The separate hashFiles predicates require both feature
         # configurations; one multi-pattern call would accept a partial pair.
         if: always() && matrix.os != 'windows-arm' && hashFiles('target/coverage/lcov-all-features.info') != '' && hashFiles('target/coverage/lcov-no-default.info') != ''
         uses: codecov/codecov-action@v7.1.1 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
@@ -256,7 +257,7 @@ jobs:
         with:
           lfs: true
       - name: Download impact artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: anvil-impact-${{ startsWith(matrix.os, 'linux') && 'Linux' || 'Windows' }}
           path: target/anvil/impact
@@ -289,7 +290,7 @@ jobs:
       - name: Download impact artifact
         # See pr-fast: pull the OS-family impact cache so scoped checks read it
         # via their `anvil-impact` dependency.
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: anvil-impact-${{ startsWith(matrix.os, 'linux') && 'Linux' || 'Windows' }}
           path: target/anvil/impact
@@ -324,7 +325,7 @@ jobs:
         if: matrix.os == 'windows'
         # See pr-fast: pull the OS-family impact cache so scoped checks read it
         # via their `anvil-impact` dependency.
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: anvil-impact-Windows
           path: target/anvil/impact

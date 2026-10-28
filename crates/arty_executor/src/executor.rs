@@ -431,7 +431,6 @@ thread_local! {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::future::{Ready, poll_fn, ready};
@@ -803,7 +802,6 @@ mod tests {
         impl Future for SetSignalOnDrop {
             type Output = ();
 
-            #[cfg_attr(coverage_nightly, coverage(off))] // The test verifies drop before the first poll.
             fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
                 Poll::Pending
             }

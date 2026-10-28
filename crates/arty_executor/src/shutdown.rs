@@ -113,7 +113,6 @@ impl Debug for ShutdownCause {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::error::Error;
     use std::fmt::{self, Debug, Display};
