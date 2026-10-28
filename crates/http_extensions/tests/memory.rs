@@ -18,15 +18,19 @@ use tick::Clock;
 #[derive(Debug)]
 struct ObservedMemory {
     reservations: Arc<Mutex<Vec<Reservation>>>,
+    clones: Arc<Mutex<usize>>,
     generation: usize,
     relocated: bool,
     extra_capacity: usize,
 }
 
 impl Clone for ObservedMemory {
+    #[expect(clippy::unwrap_used, reason = "test provider must fail if its observation lock is poisoned")]
     fn clone(&self) -> Self {
+        *self.clones.lock().unwrap() += 1;
         Self {
             reservations: Arc::clone(&self.reservations),
+            clones: Arc::clone(&self.clones),
             generation: self.generation + 1,
             relocated: self.relocated,
             extra_capacity: self.extra_capacity,
@@ -64,9 +68,11 @@ struct Reservation {
 #[test]
 fn bodies_keep_the_provider_clone_and_relocation_behavior() {
     let reservations = Arc::new(Mutex::new(Vec::new()));
+    let clone_count = Arc::new(Mutex::new(0));
     let builder = HttpBodyBuilder::new(
         OpaqueMemory::new(ObservedMemory {
             reservations: Arc::clone(&reservations),
+            clones: Arc::clone(&clone_count),
             generation: 0,
             relocated: false,
             extra_capacity: 0,
@@ -83,6 +89,7 @@ fn bodies_keep_the_provider_clone_and_relocation_behavior() {
     // Relocating the clone must not replace or relocate the original provider.
     assert_eq!(builder.reserve(3).capacity(), 3);
     assert_eq!(builder.memory().reserve(2).capacity(), 2);
+    assert_eq!(*clone_count.lock().unwrap(), 2);
     assert_eq!(
         *reservations.lock().unwrap(),
         [
@@ -121,9 +128,11 @@ fn body_lengths_do_not_include_extra_provider_capacity() {
     // Exact reservations and a deliberately oversized block exercise both provider choices.
     for extra_capacity in [0, 4096] {
         let reservations = Arc::new(Mutex::new(Vec::new()));
+        let clones = Arc::new(Mutex::new(0));
         let builder = HttpBodyBuilder::with_custom_memory(
             ObservedMemory {
                 reservations: Arc::clone(&reservations),
+                clones: Arc::clone(&clones),
                 generation: 0,
                 relocated: false,
                 extra_capacity,
@@ -139,5 +148,35 @@ fn body_lengths_do_not_include_extra_provider_capacity() {
             reservations.lock().unwrap().iter().map(|entry| entry.bytes).collect::<Vec<_>>(),
             [7, 7]
         );
+        assert_eq!(*clones.lock().unwrap(), 0);
     }
+}
+
+/// Reuses one provider for explicit reservations and all copied body representations.
+#[test]
+fn repeated_body_creation_does_not_clone_the_provider() {
+    let reservations = Arc::new(Mutex::new(Vec::new()));
+    let clones = Arc::new(Mutex::new(0));
+    let builder = HttpBodyBuilder::with_custom_memory(
+        ObservedMemory {
+            reservations: Arc::clone(&reservations),
+            clones: Arc::clone(&clones),
+            generation: 0,
+            relocated: false,
+            extra_capacity: 0,
+        },
+        &Clock::new_frozen(),
+    );
+
+    // Repetition catches provider acquisition hidden inside each public operation.
+    for _ in 0..3 {
+        assert_eq!(builder.reserve(7).capacity(), 7);
+        assert_eq!(BytesView::try_from(builder.slice(b"payload")).unwrap(), b"payload");
+        assert_eq!(BytesView::try_from(builder.text("payload")).unwrap(), b"payload");
+        #[cfg(feature = "json")]
+        assert_eq!(BytesView::try_from(builder.json(&"payload").unwrap()).unwrap(), b"\"payload\"");
+    }
+
+    assert_eq!(*clones.lock().unwrap(), 0);
+    assert!(reservations.lock().unwrap().iter().all(|reservation| reservation.generation == 0));
 }

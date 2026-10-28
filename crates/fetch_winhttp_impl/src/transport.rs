@@ -68,7 +68,7 @@ impl Service<HttpRequest> for WinHttpTransport {
             TransportState::Ready(ready) => match RequestDriver::new(
                 &mut input,
                 Arc::clone(&ready.session),
-                ready.body_builder.clone(),
+                &ready.body_builder,
                 &ready.clock,
                 ready.memory.clone(),
                 &ready.contexts,
@@ -121,8 +121,9 @@ enum TransportState {
 ///
 /// These resources belong to one materialized thread and pool slot: the session
 /// and its native connection pool, response-body services, read-buffer pool,
-/// request-context pool, and finalized options. A [`RequestDriver`] clones or
-/// rents what one request needs and owns its per-request handles and lifecycle.
+/// request-context pool, and finalized options. A [`RequestDriver`] borrows its
+/// body builder and owns its per-request handles and lifecycle. The response
+/// reader receives an owned provider because it can outlive the transport call.
 struct ReadyTransport {
     session: Arc<WinHttpSession>,
     body_builder: HttpBodyBuilder,

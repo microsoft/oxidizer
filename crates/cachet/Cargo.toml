@@ -30,6 +30,7 @@ all-features = true
 allowed_external_types = [
     # Workspace sibling crates
     "anyspawn::spawner::Spawner",
+    "bytesbuf::mem::opaque_memory::OpaqueMemory",
     "bytesbuf::view::BytesView",
     "cachet_memory::*",
     "cachet_service::*",
@@ -120,6 +121,11 @@ required-features = ["test-util"]
 name = "refresh"
 harness = false
 required-features = ["test-util"]
+
+[[bench]]
+name = "cachet_serialization"
+harness = false
+required-features = ["serialize"]
 
 [[test]]
 name = "eviction"

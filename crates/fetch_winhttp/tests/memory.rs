@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Caller-selected memory through the public WinHTTP facade, without network requests.
+//! WinHTTP facade wiring without operating-system resources.
 
 #![cfg(windows)]
 
@@ -11,18 +11,12 @@ use fetch_winhttp::{HttpClientWinHttpExt as _, WinHttpDeps};
 use observed::Sink;
 use tick::Clock;
 
-/// Makes sure that the facade preserves the selected provider when clients are cloned.
+/// Makes sure that the facade accepts caller-selected memory without opening a session.
+///
+/// The implementation's mock-backed builder tests cover allocations and client cloning.
 #[test]
-fn client_and_clone_use_the_supplied_provider() {
-    // Extra capacity distinguishes this provider from a global-pool reservation for a small request.
-    let extra_capacity = 4096;
-    let memory = OpaqueMemory::new(CallbackMemory::new(extra_capacity, |extra_capacity, min_bytes| {
-        GlobalPool::new().reserve(min_bytes + extra_capacity)
-    }));
+fn facade_accepts_memory_dependencies_without_building_a_client() {
+    let memory = OpaqueMemory::new(CallbackMemory::new((), |(), min_bytes| GlobalPool::new().reserve(min_bytes)));
     let deps = WinHttpDeps::builder(Clock::new_frozen(), memory, Sink::noop()).build();
-    let client = HttpClient::builder_winhttp(deps).minimal_pipeline().build();
-    let cloned = client.clone();
-
-    assert!(client.reserve(1).capacity() > extra_capacity);
-    assert!(cloned.reserve(1).capacity() > extra_capacity);
+    let _builder = HttpClient::builder_winhttp(deps).minimal_pipeline();
 }
