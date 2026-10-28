@@ -13,23 +13,23 @@
 
 </div>
 
-## Layered Services
+## Layered services
 
 Build composable async services with layered middleware.
 
-This crate provides the [`Service`][__link0] trait and a layer system for adding cross-cutting
-concerns like timeouts, retries, and logging.
+The [`Service`][__link0] trait defines an async operation. Layers wrap services to add behavior
+such as timeouts, retries, and logging.
 
 ### Why not Tower?
 
-[Tower][__link1] predates `async fn` in traits, requiring manual `Future` types
-or boxing and `poll_ready` back-pressure semantics. Tower’s `&mut self` also requires cloning
-for concurrent requests. This crate uses `async fn` with `&self`, enabling simpler middleware
-and natural concurrency. Tower interop is available via the `tower-service` feature.
+[Tower][__link1] predates `async fn` in traits. Its services use explicit
+`Future` types and `poll_ready` for back-pressure. They also use `&mut self`, so concurrent
+requests can require service clones. This crate uses `async fn` with `&self`.
+Enable the `tower-service` feature to use the Tower service adapters.
 
-### Quick Start
+### Quick start
 
-A [`Service`][__link2] transforms an input into an output asynchronously:
+A [`Service`][__link2] asynchronously transforms an input into an output:
 
 ```rust
 use layered::Service;
@@ -55,25 +55,21 @@ let greeter = Execute::new(|name: String| async move { format!("Hello, {name}!")
 assert_eq!(greeter.execute("World".into()).await, "Hello, World!");
 ```
 
-### Key Concepts
+### Key concepts
 
-* **Service**: A type implementing the [`Service`][__link4] trait that transforms inputs into outputs
-  asynchronously. Think of it as `async fn(&self, In) -> Out`.
-* **Middleware**: A service that wraps another service to add cross-cutting behavior such as
-  logging, timeouts, or retries. Middleware receives inputs before the inner service and can
-  process outputs after.
-* **Layer**: A type implementing the [`Layer`][__link5] trait that constructs middleware around a
-  service. Layers are composable and can be stacked using tuples like `(layer1, layer2, service)`.
+* A [`Service`][__link4] is similar to `async fn(&self, In) -> Out`.
+* Middleware wraps a service to add behavior before or after execution.
+* A [`Layer`][__link5] creates middleware around a service.
 
-### Layers and Middleware
+### Layers and middleware
 
-A [`Layer`][__link6] wraps a service with additional behavior. In this example, we create a logging
-middleware that prints inputs before passing them to the inner service:
+A [`Layer`][__link6] wraps a service with more behavior. This layer prints each input before it calls
+the inner service:
 
 ```rust
 use layered::{Execute, Layer, Service, Stack};
 
-// A simple logging layer
+// Define a layer that adds logging.
 struct LogLayer;
 
 impl<S> Layer<S> for LogLayer {
@@ -98,22 +94,22 @@ where
     }
 }
 
-// Stack layers with the service (layers apply outer to inner)
+// The first tuple element becomes the outer layer.
 let service = (LogLayer, Execute::new(|x: i32| async move { x * 2 })).into_service();
 
 let result = service.execute(21).await;
 ```
 
-### Thread Safety
+### Thread safety
 
-All services must implement [`Send`][__link7] and [`Sync`][__link8], and returned futures must be [`Send`][__link9].
-This ensures compatibility with multi-threaded async runtimes like Tokio.
+Each service must implement [`Send`][__link7] and [`Sync`][__link8]. Each returned future must implement
+[`Send`][__link9]. These bounds support multithreaded async runtimes such as Tokio.
 
 ### Features
 
-* **`intercept`**: Enables [`Intercept`][__link10] middleware
-* **`dynamic-service`**: Enables [`DynamicService`][__link11] for type erasure
-* **`tower-service`**: Enables Tower interoperability via the [`tower`][__link12] module
+* `intercept` enables [`Intercept`][__link10] middleware.
+* `dynamic-service` enables the type-erased [`DynamicService`][__link11].
+* `tower-service` enables Tower support through the [`tower`][__link12] module.
 
 
 <hr/>
@@ -121,7 +117,7 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb1x3f-sqleXEbdw9CAf8hrTobKWN7nCN8vwwbwhSXly9kwANhZIGCZ2xheWVyZWRlMC4zLjk
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbe3brLzpMi1obGPHAbdPVJrYbat9e_USDOP4bIvkdvp9GXy5hZIGCZ2xheWVyZWRlMC4zLjk
  [__link0]: https://docs.rs/layered/0.3.9/layered/?search=Service
  [__link1]: https://docs.rs/tower
  [__link10]: https://docs.rs/layered/0.3.9/layered/?search=Intercept

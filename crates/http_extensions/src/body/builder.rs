@@ -91,15 +91,6 @@ impl HttpBodyBuilder {
         }
     }
 
-    /// Creates a new instance of [`HttpBodyBuilder`] with custom memory.
-    ///
-    /// This convenience method wraps the provider in [`OpaqueMemory`].
-    #[inline]
-    #[must_use]
-    pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
-        Self::new(OpaqueMemory::new(memory), clock)
-    }
-
     /// Sets default [`HttpBodyOptions`] for all bodies created by this builder.
     ///
     /// Options for [`body`](Self::body) or [`stream`](Self::stream) override these defaults.
@@ -552,9 +543,9 @@ mod tests {
     }
 
     #[test]
-    fn with_custom_memory() {
+    fn new_accepts_a_custom_provider() {
         let clock = Clock::new_frozen();
-        let builder = HttpBodyBuilder::with_custom_memory(TransparentMemory::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(TransparentMemory::new()), &clock);
         let body = builder.text("hello");
         let data = BytesView::try_from(body).unwrap();
         assert_eq!(data.len(), 5);
@@ -762,7 +753,7 @@ mod tests {
         );
 
         let clock = Clock::new_frozen();
-        let builder = HttpBodyBuilder::with_custom_memory(TransparentMemory::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(TransparentMemory::new()), &clock);
         let body = builder.json(&payload).unwrap();
         let bytes_view = body.into_bytes_no_buffering().unwrap();
 

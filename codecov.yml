@@ -27,3 +27,4 @@ ignore:
 - "crates/metabench/**/*"
 - "crates/metabench_macros/**/*"
 - "crates/metabench_macros_impl/**/*"
+- "crates/performables/**/*"

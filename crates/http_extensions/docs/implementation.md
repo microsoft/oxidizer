@@ -9,6 +9,5 @@ Its `HasMemory` implementation returns a clone of the provider.
 The builder must not replace those operations with a shared wrapper.
 Providers can keep independent state in each clone.
 
-`with_custom_memory` forwards to `new` after it wraps the provider.
 `new_fake` explicitly wraps `GlobalPool` to keep the test default separate from caller-selected memory.
 The body representations, streaming policies, and timeout wrapper do not depend on the provider's concrete type.

@@ -129,14 +129,14 @@ fn body_lengths_do_not_include_extra_provider_capacity() {
     for extra_capacity in [0, 4096] {
         let reservations = Arc::new(Mutex::new(Vec::new()));
         let clones = Arc::new(Mutex::new(0));
-        let builder = HttpBodyBuilder::with_custom_memory(
-            ObservedMemory {
+        let builder = HttpBodyBuilder::new(
+            OpaqueMemory::new(ObservedMemory {
                 reservations: Arc::clone(&reservations),
                 clones: Arc::clone(&clones),
                 generation: 0,
                 relocated: false,
                 extra_capacity,
-            },
+            }),
             &Clock::new_frozen(),
         );
         let body = builder.slice(b"payload");
@@ -157,14 +157,14 @@ fn body_lengths_do_not_include_extra_provider_capacity() {
 fn repeated_body_creation_does_not_clone_the_provider() {
     let reservations = Arc::new(Mutex::new(Vec::new()));
     let clones = Arc::new(Mutex::new(0));
-    let builder = HttpBodyBuilder::with_custom_memory(
-        ObservedMemory {
+    let builder = HttpBodyBuilder::new(
+        OpaqueMemory::new(ObservedMemory {
             reservations: Arc::clone(&reservations),
             clones: Arc::clone(&clones),
             generation: 0,
             relocated: false,
             extra_capacity: 0,
-        },
+        }),
         &Clock::new_frozen(),
     );
 

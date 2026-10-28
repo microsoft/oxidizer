@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! An example of how the resilience of HTTP client can be customized.
+//! Changes HTTP client resilience.
 
 use std::time::Duration;
 
@@ -23,7 +23,7 @@ async fn main() -> Result<(), ohno::AppError> {
 
     let client = HttpClient::builder_fake(fake_handler, FakeDeps::default())
         .standard_pipeline(|pipeline, _| {
-            // customize the retry resilience middleware
+            // Change the retry layer.
             pipeline.retry(|retry| {
                 retry
                     .http_recovery(|response: &HttpResponse| response.recovery())

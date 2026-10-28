@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to enable native TLS support for the HTTP client.
+//! Enables native TLS for the HTTP client.
 
 use fetch::HttpClient;
 use fetch::tls::TlsOptions;

@@ -445,11 +445,11 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
                 group.throughput(Throughput::Elements(u64::try_from(elements).expect("benchmark counts fit in u64")));
                 group.bench_function(BenchmarkId::new(ARTY.benchmark_name(), &name), |bencher| {
                     let mut state = ArtyCase::new(workers, count, workload);
-                    bencher.iter_custom(|iterations| arty_workload(&mut state, iterations));
+                    bencher.iter_custom(|iterations| arty_workload(&mut state, iterations).0);
                 });
                 group.bench_function(BenchmarkId::new(TOKIO.benchmark_name(), &name), |bencher| {
                     let mut state = TokioCase::new(workers, count, workload);
-                    bencher.iter_custom(|iterations| tokio_workload(&mut state, iterations));
+                    bencher.iter_custom(|iterations| tokio_workload(&mut state, iterations).0);
                 });
             }
         }
@@ -458,69 +458,77 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 }
 
 #[benchmark(ARTY, "arty_scheduling/tasks", "Arty")]
-#[bench::spawn_w1_n1(&mut ArtyCase::new(1, 1, Workload::Spawn), 1)]
-#[bench::spawn_w1_n20(&mut ArtyCase::new(1, 20, Workload::Spawn), 1)]
-#[bench::spawn_w4_n1(&mut ArtyCase::new(4, 1, Workload::Spawn), 1)]
-#[bench::spawn_w4_n20(&mut ArtyCase::new(4, 20, Workload::Spawn), 1)]
-#[bench::yield_w1_n1(&mut ArtyCase::new(1, 1, Workload::Yield), 1)]
-#[bench::yield_w1_n20(&mut ArtyCase::new(1, 20, Workload::Yield), 1)]
-#[bench::yield_w4_n1(&mut ArtyCase::new(4, 1, Workload::Yield), 1)]
-#[bench::yield_w4_n20(&mut ArtyCase::new(4, 20, Workload::Yield), 1)]
-#[bench::wake_w1_n1(&mut ArtyCase::new(1, 1, Workload::RemoteWake), 1)]
-#[bench::wake_w1_n20(&mut ArtyCase::new(1, 20, Workload::RemoteWake), 1)]
-#[bench::wake_w4_n1(&mut ArtyCase::new(4, 1, Workload::RemoteWake), 1)]
-#[bench::wake_w4_n20(&mut ArtyCase::new(4, 20, Workload::RemoteWake), 1)]
-#[bench::timer_w1_n1(&mut ArtyCase::new(1, 1, Workload::Timer), 1)]
-#[bench::timer_w1_n20(&mut ArtyCase::new(1, 20, Workload::Timer), 1)]
-#[bench::timer_w4_n1(&mut ArtyCase::new(4, 1, Workload::Timer), 1)]
-#[bench::timer_w4_n20(&mut ArtyCase::new(4, 20, Workload::Timer), 1)]
-#[bench::timeout_w1_n1(&mut ArtyCase::new(1, 1, Workload::Timeout), 1)]
-#[bench::timeout_w1_n20(&mut ArtyCase::new(1, 20, Workload::Timeout), 1)]
-#[bench::timeout_w4_n1(&mut ArtyCase::new(4, 1, Workload::Timeout), 1)]
-#[bench::timeout_w4_n20(&mut ArtyCase::new(4, 20, Workload::Timeout), 1)]
-#[bench::nested_w1_n1(&mut ArtyCase::new(1, 1, Workload::FromTask), 1)]
-#[bench::nested_w1_n20(&mut ArtyCase::new(1, 20, Workload::FromTask), 1)]
-#[bench::nested_w4_n1(&mut ArtyCase::new(4, 1, Workload::FromTask), 1)]
-#[bench::nested_w4_n20(&mut ArtyCase::new(4, 20, Workload::FromTask), 1)]
-#[bench::blocking_w1_n1(&mut ArtyCase::new(1, 1, Workload::Blocking), 1)]
-#[bench::blocking_w1_n20(&mut ArtyCase::new(1, 20, Workload::Blocking), 1)]
-#[bench::blocking_w4_n1(&mut ArtyCase::new(4, 1, Workload::Blocking), 1)]
-#[bench::blocking_w4_n20(&mut ArtyCase::new(4, 20, Workload::Blocking), 1)]
-fn arty_workload(state: &mut ArtyCase, iterations: u64) -> Duration {
-    state.run(iterations)
+#[bench::spawn_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::Spawn)), 1)]
+#[bench::spawn_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::Spawn)), 1)]
+#[bench::spawn_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::Spawn)), 1)]
+#[bench::spawn_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::Spawn)), 1)]
+#[bench::yield_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::Yield)), 1)]
+#[bench::yield_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::Yield)), 1)]
+#[bench::yield_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::Yield)), 1)]
+#[bench::yield_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::Yield)), 1)]
+#[bench::wake_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::RemoteWake)), 1)]
+#[bench::wake_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::RemoteWake)), 1)]
+#[bench::wake_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::RemoteWake)), 1)]
+#[bench::wake_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::RemoteWake)), 1)]
+#[bench::timer_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::Timer)), 1)]
+#[bench::timer_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::Timer)), 1)]
+#[bench::timer_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::Timer)), 1)]
+#[bench::timer_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::Timer)), 1)]
+#[bench::timeout_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::Timeout)), 1)]
+#[bench::timeout_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::Timeout)), 1)]
+#[bench::timeout_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::Timeout)), 1)]
+#[bench::timeout_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::Timeout)), 1)]
+#[bench::nested_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::FromTask)), 1)]
+#[bench::nested_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::FromTask)), 1)]
+#[bench::nested_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::FromTask)), 1)]
+#[bench::nested_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::FromTask)), 1)]
+#[bench::blocking_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::Blocking)), 1)]
+#[bench::blocking_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::Blocking)), 1)]
+#[bench::blocking_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::Blocking)), 1)]
+#[bench::blocking_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::Blocking)), 1)]
+fn arty_workload<S: std::borrow::BorrowMut<ArtyCase>>(mut owned_input: S, iterations: u64) -> (Duration, S) {
+    let result = {
+        let state = owned_input.borrow_mut();
+        state.run(iterations)
+    };
+    (result, owned_input)
 }
 
 #[benchmark(TOKIO, "arty_scheduling/tasks", "Tokio")]
-#[bench::spawn_w1_n1(&mut TokioCase::new(1, 1, Workload::Spawn), 1)]
-#[bench::spawn_w1_n20(&mut TokioCase::new(1, 20, Workload::Spawn), 1)]
-#[bench::spawn_w4_n1(&mut TokioCase::new(4, 1, Workload::Spawn), 1)]
-#[bench::spawn_w4_n20(&mut TokioCase::new(4, 20, Workload::Spawn), 1)]
-#[bench::yield_w1_n1(&mut TokioCase::new(1, 1, Workload::Yield), 1)]
-#[bench::yield_w1_n20(&mut TokioCase::new(1, 20, Workload::Yield), 1)]
-#[bench::yield_w4_n1(&mut TokioCase::new(4, 1, Workload::Yield), 1)]
-#[bench::yield_w4_n20(&mut TokioCase::new(4, 20, Workload::Yield), 1)]
-#[bench::wake_w1_n1(&mut TokioCase::new(1, 1, Workload::RemoteWake), 1)]
-#[bench::wake_w1_n20(&mut TokioCase::new(1, 20, Workload::RemoteWake), 1)]
-#[bench::wake_w4_n1(&mut TokioCase::new(4, 1, Workload::RemoteWake), 1)]
-#[bench::wake_w4_n20(&mut TokioCase::new(4, 20, Workload::RemoteWake), 1)]
-#[bench::timer_w1_n1(&mut TokioCase::new(1, 1, Workload::Timer), 1)]
-#[bench::timer_w1_n20(&mut TokioCase::new(1, 20, Workload::Timer), 1)]
-#[bench::timer_w4_n1(&mut TokioCase::new(4, 1, Workload::Timer), 1)]
-#[bench::timer_w4_n20(&mut TokioCase::new(4, 20, Workload::Timer), 1)]
-#[bench::timeout_w1_n1(&mut TokioCase::new(1, 1, Workload::Timeout), 1)]
-#[bench::timeout_w1_n20(&mut TokioCase::new(1, 20, Workload::Timeout), 1)]
-#[bench::timeout_w4_n1(&mut TokioCase::new(4, 1, Workload::Timeout), 1)]
-#[bench::timeout_w4_n20(&mut TokioCase::new(4, 20, Workload::Timeout), 1)]
-#[bench::nested_w1_n1(&mut TokioCase::new(1, 1, Workload::FromTask), 1)]
-#[bench::nested_w1_n20(&mut TokioCase::new(1, 20, Workload::FromTask), 1)]
-#[bench::nested_w4_n1(&mut TokioCase::new(4, 1, Workload::FromTask), 1)]
-#[bench::nested_w4_n20(&mut TokioCase::new(4, 20, Workload::FromTask), 1)]
-#[bench::blocking_w1_n1(&mut TokioCase::new(1, 1, Workload::Blocking), 1)]
-#[bench::blocking_w1_n20(&mut TokioCase::new(1, 20, Workload::Blocking), 1)]
-#[bench::blocking_w4_n1(&mut TokioCase::new(4, 1, Workload::Blocking), 1)]
-#[bench::blocking_w4_n20(&mut TokioCase::new(4, 20, Workload::Blocking), 1)]
-fn tokio_workload(state: &mut TokioCase, iterations: u64) -> Duration {
-    state.run(iterations)
+#[bench::spawn_w1_n1(Box::new(TokioCase::new(1, 1, Workload::Spawn)), 1)]
+#[bench::spawn_w1_n20(Box::new(TokioCase::new(1, 20, Workload::Spawn)), 1)]
+#[bench::spawn_w4_n1(Box::new(TokioCase::new(4, 1, Workload::Spawn)), 1)]
+#[bench::spawn_w4_n20(Box::new(TokioCase::new(4, 20, Workload::Spawn)), 1)]
+#[bench::yield_w1_n1(Box::new(TokioCase::new(1, 1, Workload::Yield)), 1)]
+#[bench::yield_w1_n20(Box::new(TokioCase::new(1, 20, Workload::Yield)), 1)]
+#[bench::yield_w4_n1(Box::new(TokioCase::new(4, 1, Workload::Yield)), 1)]
+#[bench::yield_w4_n20(Box::new(TokioCase::new(4, 20, Workload::Yield)), 1)]
+#[bench::wake_w1_n1(Box::new(TokioCase::new(1, 1, Workload::RemoteWake)), 1)]
+#[bench::wake_w1_n20(Box::new(TokioCase::new(1, 20, Workload::RemoteWake)), 1)]
+#[bench::wake_w4_n1(Box::new(TokioCase::new(4, 1, Workload::RemoteWake)), 1)]
+#[bench::wake_w4_n20(Box::new(TokioCase::new(4, 20, Workload::RemoteWake)), 1)]
+#[bench::timer_w1_n1(Box::new(TokioCase::new(1, 1, Workload::Timer)), 1)]
+#[bench::timer_w1_n20(Box::new(TokioCase::new(1, 20, Workload::Timer)), 1)]
+#[bench::timer_w4_n1(Box::new(TokioCase::new(4, 1, Workload::Timer)), 1)]
+#[bench::timer_w4_n20(Box::new(TokioCase::new(4, 20, Workload::Timer)), 1)]
+#[bench::timeout_w1_n1(Box::new(TokioCase::new(1, 1, Workload::Timeout)), 1)]
+#[bench::timeout_w1_n20(Box::new(TokioCase::new(1, 20, Workload::Timeout)), 1)]
+#[bench::timeout_w4_n1(Box::new(TokioCase::new(4, 1, Workload::Timeout)), 1)]
+#[bench::timeout_w4_n20(Box::new(TokioCase::new(4, 20, Workload::Timeout)), 1)]
+#[bench::nested_w1_n1(Box::new(TokioCase::new(1, 1, Workload::FromTask)), 1)]
+#[bench::nested_w1_n20(Box::new(TokioCase::new(1, 20, Workload::FromTask)), 1)]
+#[bench::nested_w4_n1(Box::new(TokioCase::new(4, 1, Workload::FromTask)), 1)]
+#[bench::nested_w4_n20(Box::new(TokioCase::new(4, 20, Workload::FromTask)), 1)]
+#[bench::blocking_w1_n1(Box::new(TokioCase::new(1, 1, Workload::Blocking)), 1)]
+#[bench::blocking_w1_n20(Box::new(TokioCase::new(1, 20, Workload::Blocking)), 1)]
+#[bench::blocking_w4_n1(Box::new(TokioCase::new(4, 1, Workload::Blocking)), 1)]
+#[bench::blocking_w4_n20(Box::new(TokioCase::new(4, 20, Workload::Blocking)), 1)]
+fn tokio_workload<S: std::borrow::BorrowMut<TokioCase>>(mut owned_input: S, iterations: u64) -> (Duration, S) {
+    let result = {
+        let state = owned_input.borrow_mut();
+        state.run(iterations)
+    };
+    (result, owned_input)
 }
 
 #[cfg(target_os = "linux")]

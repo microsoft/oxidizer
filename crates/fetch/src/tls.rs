@@ -3,10 +3,8 @@
 
 //! TLS configuration for HTTP clients.
 //!
-//! All TLS types are defined in the [`fetch_tls`] crate and re-exported here so
-//! that `fetch` callers can configure TLS without depending on `fetch_tls`
-//! directly. The concrete backend is selected by the enabled Cargo features
-//! (`rustls` and/or `native-tls`), which `fetch` forwards to `fetch_tls`.
+//! [`fetch_tls`] defines the TLS types. This module re-exports them. The `rustls` and `native-tls`
+//! Cargo features select the available backends.
 
 #[cfg(any(feature = "native-tls", test))]
 pub use fetch_tls::NativeTlsOptions;

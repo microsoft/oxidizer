@@ -3,11 +3,10 @@
 
 //! Test-only constructors for [`HttpClient`].
 //!
-//! These factory methods produce HTTP clients backed by a fake handler so tests can exercise
-//! request flows without making real network calls. They are gated behind the `test-util`
-//! feature (and unconditionally available in test builds).
+//! These methods create clients that use a fake handler without network I/O. They require
+//! `test-util` outside test builds.
 //!
-//! The [`FakeHandler`] used to produce canned responses is re-exported here for convenience.
+//! This module re-exports [`FakeHandler`] for canned responses.
 
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 #[doc(no_inline)]
@@ -19,10 +18,9 @@ use crate::custom::{CustomContext, CustomDeps, Isolation};
 use crate::handlers::TransportHandler;
 use crate::{HttpClient, HttpClientBuilder};
 
-/// Configuration dependencies for fake/test HTTP operations.
+/// Dependencies for fake HTTP operations.
 ///
-/// Minimal configuration used in testing environments where only basic
-/// clock functionality is needed.
+/// Fake clients require only a clock.
 #[derive(Debug, Clone, ThreadAware)]
 pub struct FakeDeps {
     /// Clock for testing time-based operations.
@@ -38,18 +36,16 @@ impl Default for FakeDeps {
 }
 
 impl From<&Clock> for FakeDeps {
-    #[cfg_attr(test, mutants::skip)] // Mutations using a wrong clock will easily lead to timeouts.
+    #[cfg_attr(test, mutants::skip)] // A wrong clock causes test timeouts.
     fn from(clock: &Clock) -> Self {
         Self { clock: clock.clone() }
     }
 }
 
 impl HttpClient {
-    /// Creates a builder for a test-friendly HTTP client with a fake handler.
+    /// Creates an HTTP client builder with a fake handler.
     ///
-    /// Unlike [`HttpClient::new_fake`], this method returns a builder that can be further
-    /// customized before constructing the client. Use this when you need more control
-    /// over the client's configuration in test scenarios.
+    /// Unlike [`HttpClient::new_fake`], this method returns a builder for more configuration.
     ///
     /// # Examples
     ///
@@ -70,14 +66,12 @@ impl HttpClient {
     /// # }
     /// ```
     ///
-    /// Available only when compiled with the `test-util` feature.
+    /// This method requires `test-util` outside test builds.
     pub fn builder_fake(handler: impl Into<FakeHandler>, deps: impl Into<FakeDeps>) -> HttpClientBuilder {
         let deps = deps.into();
         let handler = handler.into();
 
-        // Re-layer on top of the in-crate `builder_custom_internal` path. The
-        // `FakeHandler` travels through `CustomDeps::extras` and is cloned
-        // into a fresh `TransportHandler` for every connection pool slot.
+        // Pass FakeHandler through CustomDeps::extras and clone it for each pool slot.
         Self::builder_custom_internal(
             crate::constants::FAKE_RUNTIME_NAME,
             crate::constants::FAKE_TRANSPORT_NAME,
@@ -91,11 +85,9 @@ impl HttpClient {
         )
     }
 
-    /// Creates a test-friendly HTTP client that uses mock responses.
+    /// Creates an HTTP client that returns fake responses.
     ///
-    /// This factory method provides a convenient way to create a client for testing without
-    /// making real network requests. It automatically configures the builder with test-friendly
-    /// defaults like allowing HTTP and using a minimal pipeline.
+    /// The client permits HTTP and uses the minimal pipeline. It performs no network I/O.
     ///
     /// # Examples
     ///
@@ -103,17 +95,17 @@ impl HttpClient {
     /// # use fetch::HttpClient;
     /// # use http::StatusCode;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// // Create a client that always returns a specific status code
+    /// // Always return one status code.
     /// let client = HttpClient::new_fake(StatusCode::OK);
     ///
-    /// // Now you can use this client in tests without real network requests
+    /// // Send a request without network I/O.
     /// let response = client.get("https://example.com").fetch().await?;
     /// assert_eq!(response.status(), StatusCode::OK);
     /// # Ok(())
     /// # }
     /// ```
     ///
-    /// Available only when compiled with the `test-util` feature.
+    /// This method requires `test-util` outside test builds.
     pub fn new_fake(handler: impl Into<FakeHandler>) -> Self {
         Self::builder_fake(handler, FakeDeps::default())
             .insecure_allow_http()

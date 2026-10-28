@@ -9,9 +9,9 @@ use tick::Clock;
 
 use crate::resilience::HttpResilienceContext;
 
-/// Context object provided when configuring a custom or standard request pipeline.
+/// Shared dependencies for a custom or standard request pipeline.
 ///
-/// This context is passed to the factory function in:
+/// These methods pass it to their factory closure:
 ///
 /// - [`HttpClientBuilder::custom_pipeline`][crate::HttpClientBuilder::custom_pipeline]
 /// - [`HttpClientBuilder::standard_pipeline`][crate::HttpClientBuilder::standard_pipeline]
@@ -45,37 +45,37 @@ impl PipelineContext {
         }
     }
 
-    /// Returns the clock used for time-related operations.
+    /// Returns the clock for time-related operations.
     #[must_use]
     pub fn clock(&self) -> &Clock {
         &self.clock
     }
 
-    /// Returns the meter used for telemetry and metrics.
+    /// Returns the telemetry meter.
     #[must_use]
     pub const fn meter(&self) -> &Meter {
         &self.meter
     }
 
-    /// Returns the resilience context used for configuring resilience patterns.
+    /// Returns the resilience context.
     #[must_use]
     pub fn resilience_context(&self) -> &HttpResilienceContext {
         &self.resilience_context
     }
 
-    /// Returns the redaction engine used for sensitive data handling.
+    /// Returns the redaction engine.
     #[must_use]
     pub const fn redaction_engine(&self) -> &RedactionEngine {
         &self.redaction_engine
     }
 
-    /// Returns the HTTP body builder used for constructing request and response bodies.
+    /// Returns the HTTP body builder.
     #[must_use]
     pub const fn body_builder(&self) -> &HttpBodyBuilder {
         &self.body_builder
     }
 
-    /// Returns the router used for routing requests.
+    /// Returns the request router.
     #[must_use]
     pub const fn router(&self) -> &Router {
         &self.router
@@ -111,8 +111,7 @@ mod tests {
         let body_builder = HttpBodyBuilder::new_fake().with_options(HttpBodyOptions::default().buffer_limit(4321));
         let context = test_context(body_builder);
 
-        // The accessor must expose the exact builder supplied at construction, including its
-        // distinctive buffer limit.
+        // Return the builder supplied at construction, including its buffer limit.
         assert!(format!("{:?}", context.body_builder()).contains("4321"));
     }
 
@@ -121,8 +120,7 @@ mod tests {
     fn accessors_return_constructed_dependencies() {
         let context = test_context(HttpBodyBuilder::new_fake());
 
-        // Every accessor must hand back the dependency wired in at construction; exercise each
-        // one and discard the value. The assertion is simply that accessing must not panic.
+        // Exercise every accessor. Each one must return without a panic.
         let _ = context.clock();
         let _ = context.meter();
         let _ = context.resilience_context();

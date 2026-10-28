@@ -34,6 +34,7 @@ bench = false
 
 [dependencies]
 alloc_tracker = { workspace = true }
+clap = { workspace = true, features = ["std"] }
 command-group = { workspace = true }
 criterion = { workspace = true }
 either-or-both = { workspace = true }

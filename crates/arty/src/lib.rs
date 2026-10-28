@@ -168,6 +168,9 @@ use arty_io_core as _;
 /// - `workers = all` starts one async worker per available processor.
 /// - `monitor = enabled` or `monitor = disabled` selects the runtime monitoring
 ///   policy. The default is `enabled`.
+/// - `panic = shutdown` or `panic = ignore` selects the runtime panic policy.
+///   The default is `shutdown`. This release stores the selected value but does
+///   not yet change panic behavior.
 ///
 /// The worker setting does not limit blocking-pool threads. Without a setting, the
 /// runtime uses [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
@@ -216,6 +219,15 @@ use arty_io_core as _;
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
+/// Select the ignore panic policy:
+///
+/// ```
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::main(panic = ignore)]
+/// async fn main(_cx: arty::task::Builtins) {}
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+/// ```
+///
 /// Set the async worker count:
 ///
 /// ```
@@ -243,11 +255,11 @@ pub use arty_macros::main;
 /// and `#[ignore]` are preserved. An ignored test starts no runtime unless
 /// the test harness runs it.
 ///
-/// Enable `macros` to use this attribute. The [`main`] attribute's `workers`
-/// and `monitor` options also apply. By default, a test uses one worker and
-/// selects the disabled monitoring policy. This keeps future monitor activation
-/// out of ordinary tests. A test that exercises monitoring must opt in with
-/// `monitor = enabled`.
+/// Enable `macros` to use this attribute. The [`main`] attribute's `workers`,
+/// `monitor`, and `panic` options also apply. By default, a test uses one
+/// worker, selects the disabled monitoring policy, and selects the shutdown
+/// panic policy. This keeps future monitor activation out of ordinary tests.
+/// A test that exercises monitoring must opt in with `monitor = enabled`.
 ///
 /// # Simulated time
 ///
@@ -301,6 +313,14 @@ pub use arty_macros::main;
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::test(monitor = enabled)]
 /// async fn monitored(_cx: arty::task::Builtins) {}
+/// ```
+///
+/// Select the ignore panic policy:
+///
+/// ```test_harness
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::test(panic = ignore)]
+/// async fn configured(_cx: arty::task::Builtins) {}
 /// ```
 ///
 /// Test a sequential delay without waiting for real time:

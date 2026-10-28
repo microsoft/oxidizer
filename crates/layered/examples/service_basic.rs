@@ -3,7 +3,7 @@
 
 //! Basic service with middleware.
 //!
-//! Shows a simple service with intercept middleware for logging.
+//! This example uses intercept middleware to log a service call.
 
 use layered::prelude::*;
 use layered::{Execute, Intercept};
@@ -20,9 +20,9 @@ async fn main() {
         }),
     );
 
-    // Build the service
+    // Build the service.
     let service = stack.into_service();
 
-    // Execute an input
+    // Execute one input.
     let _output = service.execute("Hello, World!".to_string()).await;
 }
