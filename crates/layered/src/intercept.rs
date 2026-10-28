@@ -11,13 +11,13 @@ use std::task::{Context, Poll};
 
 use crate::Service;
 
-/// Middleware for observing and modifying service inputs and outputs.
+/// Observes or changes service inputs and outputs.
 ///
-/// Useful for logging, debugging, metrics, validation, and other cross-cutting concerns.
+/// Use this middleware for logging, debugging, metrics, and validation.
 ///
 /// # Examples
 ///
-/// Simple usage that observes inputs and outputs without modification:
+/// Observe inputs and outputs without changing them:
 ///
 /// ```
 /// # use layered::{Execute, Stack, Intercept, Service};
@@ -34,21 +34,21 @@ use crate::Service;
 /// # }
 /// ```
 ///
-/// Advanced usage of `Intercept` allows you to modify and observe inputs and outputs:
+/// Observe and change inputs and outputs:
 ///
 /// ```
 /// # use layered::{Execute, Stack, Intercept, Service};
 /// # async fn example() {
 /// let stack = (
 ///     Intercept::<String, String, _>::layer()
-///         .on_input(|input| println!("request: {input}")) // input observers are called first
-///         .on_input(|input| println!("another: {input}")) // multiple observers supported
-///         .modify_input(|input| input.to_uppercase()) // then inputs are modified
-///         .modify_input(|input| input.to_lowercase()) // multiple modifications supported
-///         .on_output(|output| println!("response: {output}")) // output observers called first
-///         .on_output(|output| println!("another response: {output}")) // multiple observers supported
-///         .modify_output(|output| output.trim().to_string()) // then outputs are modified
-///         .modify_output(|output| format!("result: {output}")), // multiple modifications supported
+///         .on_input(|input| println!("request: {input}")) // Observe inputs first.
+///         .on_input(|input| println!("another: {input}")) // Add another input observer.
+///         .modify_input(|input| input.to_uppercase()) // Then change the input.
+///         .modify_input(|input| input.to_lowercase()) // Apply changes in registration order.
+///         .on_output(|output| println!("response: {output}")) // Observe outputs first.
+///         .on_output(|output| println!("another response: {output}")) // Add another output observer.
+///         .modify_output(|output| output.trim().to_string()) // Then change the output.
+///         .modify_output(|output| format!("result: {output}")), // Apply changes in registration order.
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
@@ -76,10 +76,9 @@ impl<In, Out, S: Debug> Debug for Intercept<In, Out, S> {
     }
 }
 
-/// Builder for creating `Intercept` middleware.
+/// Builds `Intercept` middleware.
 ///
-/// Provides a fluent API for configuring input and output observers and modifiers.
-/// Create with `Intercept::layer()`.
+/// Call `Intercept::layer()` first. Then add input and output observers or modifiers.
 ///
 /// # Examples
 ///
@@ -87,7 +86,7 @@ impl<In, Out, S: Debug> Debug for Intercept<In, Out, S> {
 /// # use layered::{Execute, Stack, Intercept, Service};
 /// # async fn example() {
 /// let stack = (
-///     Intercept::layer(), // Create a new interception layer
+///     Intercept::layer(), // Create an interception layer.
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
@@ -115,7 +114,7 @@ impl<In, Out> Debug for InterceptLayer<In, Out> {
 }
 
 impl<In, Out> Intercept<In, Out, ()> {
-    /// Creates a new `InterceptLayer` for building interception middleware.
+    /// Creates an `InterceptLayer`.
     ///
     /// # Examples
     ///
@@ -123,7 +122,7 @@ impl<In, Out> Intercept<In, Out, ()> {
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let stack = (
-    ///     Intercept::layer(), // Create a new interception layer, no observers yet
+    ///     Intercept::layer(), // Create a layer without observers.
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
@@ -148,11 +147,10 @@ where
 {
     type Out = Out;
 
-    /// Executes the wrapped service with interception and modification.
+    /// Executes the wrapped service and applies the configured operations.
     ///
-    /// Execution order: input observers → input modifications → service execution
-    /// → output observers → output modifications. Input modifications can short-circuit
-    /// execution by returning `ControlFlow::Break`.
+    /// The order is input observers, input modifiers, service execution, output observers,
+    /// and output modifiers.
     async fn execute(&self, mut input: In) -> Self::Out {
         match self.inner.before_execute(input) {
             ControlFlow::Break(output) => return output,
@@ -165,7 +163,8 @@ where
     }
 }
 
-/// Future returned by [`Intercept`] when used as a tower [`Service`](tower_service::Service).
+/// The future from [`Intercept`] when Tower uses it as a
+/// [`Service`](tower_service::Service).
 #[cfg(any(feature = "tower-service", test))]
 pub struct InterceptFuture<Out> {
     inner: Pin<Box<dyn Future<Output = Out> + Send>>,
@@ -228,9 +227,9 @@ where
 }
 
 impl<In, Out> InterceptLayer<In, Out> {
-    /// Adds an observer for incoming inputs.
+    /// Adds an input observer.
     ///
-    /// Called before input modifications. Multiple observers execute in registration order.
+    /// Input observers run before input modifiers and in registration order.
     ///
     /// # Examples
     ///
@@ -257,9 +256,9 @@ impl<In, Out> InterceptLayer<In, Out> {
         self
     }
 
-    /// Adds an observer for outgoing outputs.
+    /// Adds an output observer.
     ///
-    /// Called before output modifications. Multiple observers execute in registration order.
+    /// Output observers run before output modifiers and in registration order.
     ///
     /// # Examples
     ///
@@ -286,10 +285,10 @@ impl<In, Out> InterceptLayer<In, Out> {
         self
     }
 
-    /// Adds a transformation for incoming inputs.
+    /// Adds an input modifier.
     ///
-    /// Transforms inputs before service execution. Multiple modifications apply
-    /// in registration order, each receiving the previous output.
+    /// Input modifiers run before the service and in registration order. Each modifier
+    /// receives the value from the previous modifier.
     ///
     /// # Examples
     ///
@@ -315,8 +314,9 @@ impl<In, Out> InterceptLayer<In, Out> {
         self.input_control_flow(move |input| ControlFlow::Continue(f(input)))
     }
 
-    /// Adds a modification function with control flow for incoming requests.
-    /// Returns `ControlFlow::Break` to short-circuit execution and return early.
+    /// Adds an input modifier that can control execution.
+    ///
+    /// Return `ControlFlow::Break` to skip the service and return an output.
     pub(crate) fn input_control_flow<F>(mut self, f: F) -> Self
     where
         F: Fn(In) -> ControlFlow<Out, In> + Send + Sync + 'static,
@@ -325,10 +325,10 @@ impl<In, Out> InterceptLayer<In, Out> {
         self
     }
 
-    /// Adds a transformation for outgoing outputs.
+    /// Adds an output modifier.
     ///
-    /// Transforms outputs after service execution. Multiple modifications apply
-    /// in registration order, each receiving the previous output.
+    /// Output modifiers run after the service and in registration order. Each modifier
+    /// receives the value from the previous modifier.
     ///
     /// # Examples
     ///
@@ -463,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::similar_names, reason = "Test")]
+    #[expect(clippy::similar_names, reason = "paired counters record observer calls")]
     fn input_modification_order() {
         let called = Arc::new(AtomicU16::default());
         let called_clone = Arc::clone(&called);
@@ -492,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::similar_names, reason = "Test")]
+    #[expect(clippy::similar_names, reason = "paired counters record observer calls")]
     fn out_modification_order() {
         let called = Arc::new(AtomicU16::default());
         let called_clone = Arc::clone(&called);
@@ -521,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::similar_names, reason = "Test")]
+    #[expect(clippy::similar_names, reason = "paired counters record observer calls")]
     fn tower_service() {
         let called = Arc::new(AtomicU16::default());
         let called_clone = Arc::clone(&called);
@@ -555,7 +555,7 @@ mod tests {
         assert_eq!(called2_clone.load(Ordering::Relaxed), 1);
     }
 
-    // Mock service for testing poll_ready behavior
+    // This service returns a configured `poll_ready` result.
     struct MockService {
         poll_ready_response: Poll<Result<(), String>>,
     }
@@ -615,7 +615,7 @@ mod tests {
         let result = intercept.poll_ready(&mut cx);
         match result {
             Poll::Ready(Err(err)) => assert_eq!(err, "service error"),
-            _ => panic!("Expected Poll::Ready(Err), got {result:?}"),
+            _ => panic!("expected Poll::Ready(Err), got {result:?}"),
         }
     }
 
@@ -636,7 +636,7 @@ mod tests {
         let result = intercept.poll_ready(&mut cx);
         match result {
             Poll::Ready(Ok(())) => (),
-            _ => panic!("Expected Poll::Ready(Ok(())), got {result:?}"),
+            _ => panic!("expected Poll::Ready(Ok(())), got {result:?}"),
         }
     }
 
