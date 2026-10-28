@@ -42,6 +42,8 @@ pub struct LogFormatConfig {
     /// Expand attribute placeholders in the message body.
     ///
     /// For example, `request received, id={request.id}` becomes `request received, id=10`.
+    /// Doubled braces (`{{` and `}}`) produce literal braces (`{` and `}`).
+    /// Attribute values are inserted unchanged.
     /// When `true`, attributes are inlined into the message
     /// body template and not printed separately. If the body is absent, attributes are printed separately.
     pub format_body: bool,
@@ -318,17 +320,23 @@ pub fn print_log_record(
 }
 
 /// Expands placeholders by scanning only the original template, so inserted values remain literal.
-/// Doubled opening braces preserve escaped text in the Observed message syntax.
+/// Doubled braces produce literal braces in the Observed message syntax.
 fn write_interpolated(w: &mut (impl Write + ?Sized), template: &str, record: &SdkLogRecord) -> std::io::Result<()> {
     let mut remaining = template;
 
-    while let Some(offset) = remaining.find('{') {
+    while let Some(offset) = remaining.find(['{', '}']) {
         w.write_all(&remaining.as_bytes()[..offset])?;
         remaining = &remaining[offset..];
 
-        if remaining.starts_with("{{") {
-            w.write_all(&remaining.as_bytes()[..2])?;
+        if remaining.starts_with("{{") || remaining.starts_with("}}") {
+            w.write_all(&remaining.as_bytes()[..1])?;
             remaining = &remaining[2..];
+            continue;
+        }
+
+        if remaining.starts_with('}') {
+            w.write_all(b"}")?;
+            remaining = &remaining[1..];
             continue;
         }
 

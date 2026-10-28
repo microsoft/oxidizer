@@ -50,13 +50,13 @@ fn format_body_string_inlines_attributes() {
 fn interpolation_does_not_replace_twice() {
     let (record, scope) = create_record_and_scope(|r| {
         r.set_body(AnyValue::String("{path} {id}".into()));
-        r.add_attribute("path", "/tmp/{id}");
+        r.add_attribute("path", "/tmp/{{id}}/{id}");
         r.add_attribute("id", 42);
     });
 
     let output = format(&record, &scope, LogFormatConfig::minimal());
 
-    assert_eq!(output, "/tmp/{id} 42\n");
+    assert_eq!(output, "/tmp/{{id}}/{id} 42\n");
 }
 
 #[test]
@@ -68,7 +68,33 @@ fn interpolation_respects_escaped_braces() {
 
     let output = format(&record, &scope, LogFormatConfig::minimal());
 
-    assert_eq!(output, "{{name}} / Ada\n");
+    assert_eq!(output, "{name} / Ada\n");
+}
+
+#[test]
+fn interpolation_decodes_literal_brace_pairs() {
+    for (template, expected) in [("{{", "{\n"), ("}}", "}\n"), ("{{{{name}}}}", "{{name}}\n")] {
+        let (record, scope) = create_record_and_scope(|r| {
+            r.set_body(template.into());
+            r.add_attribute("name", "Ada");
+        });
+
+        let output = format(&record, &scope, LogFormatConfig::minimal());
+
+        assert_eq!(output, expected, "{template}");
+    }
+}
+
+#[test]
+fn interpolation_allows_literal_braces_around_a_placeholder() {
+    let (record, scope) = create_record_and_scope(|r| {
+        r.set_body("{{{name}}}".into());
+        r.add_attribute("name", "Ada");
+    });
+
+    let output = format(&record, &scope, LogFormatConfig::minimal());
+
+    assert_eq!(output, "{Ada}\n");
 }
 
 #[test]
@@ -104,7 +130,7 @@ fn interpolation_respects_escaped_braces_after_unicode() {
 
     let output = format(&record, &scope, LogFormatConfig::minimal());
 
-    assert_eq!(output, "é{{name}} / Ada\n");
+    assert_eq!(output, "é{name} / Ada\n");
 }
 
 #[test]
@@ -135,13 +161,13 @@ fn interpolation_keeps_empty_placeholder_literal() {
 #[test]
 fn interpolation_keeps_unmatched_braces_literal() {
     let (record, scope) = create_record_and_scope(|r| {
-        r.set_body(AnyValue::String("{id} {unfinished {".into()));
+        r.set_body(AnyValue::String("}{id} {unfinished {".into()));
         r.add_attribute("id", 42);
     });
 
     let output = format(&record, &scope, LogFormatConfig::minimal());
 
-    assert_eq!(output, "42 {unfinished {\n");
+    assert_eq!(output, "}42 {unfinished {\n");
 }
 
 #[test]
@@ -191,13 +217,13 @@ fn no_format_body_prints_attributes_separately() {
         r.set_severity_number(Severity::Warn);
         r.set_target("application");
         r.set_event_name("request.received");
-        r.set_body(AnyValue::String("template {x}".into()));
+        r.set_body(AnyValue::String("template {{x}} {x}".into()));
         r.add_attribute("x", "val");
     });
 
     assert_eq!(
         format(&record, &scope, LogFormatConfig::default()),
-        "WARN: application template {x} x=val [test-lib-?] <request.received>\n"
+        "WARN: application template {{x}} {x} x=val [test-lib-?] <request.received>\n"
     );
 }
 
@@ -214,6 +240,7 @@ fn formatting_reports_write_failures_at_every_output_position() {
     for body in [
         AnyValue::String("request {id}".into()),
         AnyValue::String("{{id}}".into()),
+        AnyValue::String("}".into()),
         AnyValue::String("{missing}".into()),
         AnyValue::ListAny(Box::new(vec![
             AnyValue::Boolean(true),
