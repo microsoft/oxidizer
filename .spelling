@@ -258,6 +258,7 @@ OWS
 SSE4
 SSSE3
 codings
+cryptographic
 cryptographically
 formatters
 indexable
