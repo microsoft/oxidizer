@@ -195,7 +195,7 @@ impl RuntimeBuilder {
     /// at submission, including their completion events. A regular sink with
     /// no processors preserves enrichment without dispatching events.
     /// Retrieve the sink inside a task with
-    /// [`Builtins::sink`](crate::task::Builtins::sink).
+    /// [`Context::sink`](crate::task::Context::sink).
     ///
     /// Configured event processors must not panic. Runtime events are emitted
     /// synchronously; Arty does not provide telemetry-panic recovery.

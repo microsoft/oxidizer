@@ -37,10 +37,10 @@ cargo add arty
 ```
 
 ```rust
-use arty::task::{Builtins, JoinError};
+use arty::task::{Context, JoinError};
 
 #[arty::main]
-async fn main(cx: Builtins) -> Result<(), JoinError> {
+async fn main(cx: Context) -> Result<(), JoinError> {
     let answer = cx.scheduler().spawn(async |_| 6 * 7).await?;
     println!("{answer}");
     Ok(())
@@ -56,7 +56,7 @@ Await child work before returning; shutdown cancels pending async tasks.
 * [`main`][__link3] and [`test`][__link4] manage a runtime for an
   async entry point or test; [`Runtime`][__link5] gives you
   direct control over its lifetime and settings.
-* [`Builtins`][__link6] gives each task its scheduler, clock,
+* [`Context`][__link6] gives each task its scheduler, clock,
   and worker. [`RuntimeScheduler`][__link7] lets the
   runtime place new work.
 * [`Io`][__link8] registers external `arty_io_core` contexts and lazily
@@ -89,7 +89,7 @@ same worker can poll.
 
 ```rust
 #[arty::main]
-async fn main(cx: arty::task::Builtins) {
+async fn main(cx: arty::task::Context) {
     let child = cx.scheduler().spawn(async |_| 42);
     let _ = futures::executor::block_on(child);
 }
@@ -144,7 +144,7 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbCvI0paKaZdgbXUOp2RZSfPsbllXwkvkd25AbHDOBNpqu_kdhZIOCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4wgmhvYnNlcnZlZGYwLjI5LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbcSYkZpsLEKgbquTpa-01FPYb79nz9TZvU3cb-PdlG0NnLEZhZIOCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4wgmhvYnNlcnZlZGYwLjI5LjA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.5.0/arty/?search=time::Clock
@@ -169,7 +169,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link3]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
  [__link4]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
  [__link5]: https://docs.rs/arty/0.5.0/arty/?search=runtime::Runtime
- [__link6]: https://docs.rs/arty/0.5.0/arty/?search=task::Builtins
+ [__link6]: https://docs.rs/arty/0.5.0/arty/?search=task::Context
  [__link7]: https://docs.rs/arty/0.5.0/arty/?search=task::RuntimeScheduler
  [__link8]: https://docs.rs/arty/0.5.0/arty/?search=io::Io
  [__link9]: https://docs.rs/arty/0.5.0/arty/?search=task::Scheduler

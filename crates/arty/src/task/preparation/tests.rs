@@ -7,7 +7,7 @@ use std::pin::pin;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::task::{Context, Poll, Wake, Waker};
+use std::task::{Context as PollContext, Poll, Wake, Waker};
 
 use arty_executor::{CycleOutcome, Executor, ShutdownCause, ShutdownError, TaskPlacement};
 use futures::executor::block_on;
@@ -16,13 +16,13 @@ use observed::Sink;
 use super::*;
 use crate::runtime::blocking_worker::BlockingPanicPolicy;
 use crate::runtime::{Runtime, Shutdown, WorkersPolicy};
-use crate::task::Builtins;
+use crate::task::Context;
 use crate::task::handle::JoinHandlePool;
 
-fn test_builtins() -> (Runtime, Builtins) {
+fn test_context() -> (Runtime, Context) {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-    let builtins = runtime.scheduler().block_on(async |builtins| builtins).unwrap();
-    (runtime, builtins)
+    let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
+    (runtime, cx)
 }
 
 #[test]
@@ -48,8 +48,8 @@ fn remote_factory_remains_deferred_until_poll() {
     );
 
     let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
-    let (_runtime, builtins) = test_builtins();
-    let _registered = factory.register(builtins, &executor.tasks());
+    let (_runtime, cx) = test_context();
+    let _registered = factory.register(cx, &executor.tasks());
     let before_poll = invoked.load(Ordering::Relaxed);
     run_to_completion(&mut executor);
     let result = block_on(handle).unwrap();
@@ -59,18 +59,18 @@ fn remote_factory_remains_deferred_until_poll() {
 
 #[test]
 fn shutdown_cancelled_deferred_task_stays_pending_without_invoking_factory() {
-    let (runtime, builtins) = test_builtins();
+    let (runtime, cx) = test_context();
     let invoked = Arc::new(AtomicBool::new(false));
     let factory_invoked = Arc::clone(&invoked);
-    builtins.control().request_stop();
+    cx.control().request_stop();
     let mut task = pin!(DeferredTask::new(
         move |_| {
             factory_invoked.store(true, Ordering::Release);
             std::future::ready(())
         },
-        builtins,
+        cx,
     ));
-    let mut cx = Context::from_waker(Waker::noop());
+    let mut cx = PollContext::from_waker(Waker::noop());
 
     assert!(task.as_mut().poll(&mut cx).is_pending());
     assert!(task.as_mut().poll(&mut cx).is_pending());
@@ -158,7 +158,7 @@ fn blocking_panic_publishes_its_cause_before_worker_and_join_notifications() {
             order: Arc::clone(&order),
             expected: worker_notifications,
         }));
-        assert!(handle.as_mut().poll(&mut Context::from_waker(&join_waker)).is_pending());
+        assert!(handle.as_mut().poll(&mut PollContext::from_waker(&join_waker)).is_pending());
 
         task();
 
@@ -192,8 +192,8 @@ fn remote_factory_panic_is_delivered_to_joiner() {
         TaskPlacement::Any,
     );
     let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
-    let (_runtime, builtins) = test_builtins();
-    let _registered = factory.register(builtins, &executor.tasks());
+    let (_runtime, cx) = test_context();
+    let _registered = factory.register(cx, &executor.tasks());
     run_to_completion(&mut executor);
     assert!(block_on(handle).unwrap_err().is_panic());
 }
@@ -206,7 +206,7 @@ fn discarded_preparation_reports_the_shutdown_cause() {
     let (task, handle) = prepare_blocking(&result_pool, || 42, BlockingPanicPolicy::Ignore);
     drop(task);
     let mut handle = pin!(handle);
-    let mut context = Context::from_waker(Waker::noop());
+    let mut context = PollContext::from_waker(Waker::noop());
 
     let Poll::Ready(Err(error)) = handle.as_mut().poll(&mut context) else {
         panic!("discarded work must report shutdown");
@@ -252,11 +252,11 @@ fn discarded_blocking_task_contains_join_waker_panic() {
     let (task, handle) = prepare_blocking(&result_pool, || 42, BlockingPanicPolicy::Ignore);
     let mut handle = pin!(handle);
     let waker = Waker::from(Arc::new(PanicWake));
-    assert!(handle.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+    assert!(handle.as_mut().poll(&mut PollContext::from_waker(&waker)).is_pending());
 
     catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
 
-    let Poll::Ready(Err(error)) = handle.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
+    let Poll::Ready(Err(error)) = handle.as_mut().poll(&mut PollContext::from_waker(Waker::noop())) else {
         panic!("discarded blocking work must report shutdown");
     };
     assert!(error.is_shutdown());

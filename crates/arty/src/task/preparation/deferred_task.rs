@@ -2,24 +2,24 @@
 // Licensed under the MIT License.
 
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::{Context as PollContext, Poll};
 
 use pin_project::pin_project;
 
 use crate::runtime::ShutdownState;
-use crate::task::Builtins;
+use crate::task::Context;
 
 #[pin_project]
 pub(crate) struct DeferredTask<FF, F> {
-    factory: Option<(FF, Builtins)>,
+    factory: Option<(FF, Context)>,
     #[pin]
     future: Option<F>,
 }
 
 impl<FF, F> DeferredTask<FF, F> {
-    pub(crate) fn new(factory: FF, builtins: Builtins) -> Self {
+    pub(crate) fn new(factory: FF, cx: Context) -> Self {
         Self {
-            factory: Some((factory, builtins)),
+            factory: Some((factory, cx)),
             future: None,
         }
     }
@@ -27,12 +27,12 @@ impl<FF, F> DeferredTask<FF, F> {
 
 impl<FF, F> Future for DeferredTask<FF, F>
 where
-    FF: FnOnce(Builtins) -> F,
+    FF: FnOnce(Context) -> F,
     F: Future,
 {
     type Output = F::Output;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
         if this.future.as_ref().get_ref().is_none() {
             if matches!(
@@ -47,8 +47,8 @@ where
             ) {
                 return Poll::Pending;
             }
-            let (factory, builtins) = this.factory.take().expect("a deferred task factory is invoked exactly once");
-            this.future.set(Some(factory(builtins)));
+            let (factory, cx) = this.factory.take().expect("a deferred task factory is invoked exactly once");
+            this.future.set(Some(factory(cx)));
         }
         this.future
             .as_mut()

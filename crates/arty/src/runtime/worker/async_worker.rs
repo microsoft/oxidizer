@@ -21,7 +21,7 @@ use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::protocol::AsyncWorkerCommand;
 use crate::runtime::worker::signal::WorkerSignal;
-use crate::task::{Builtins, Scheduler};
+use crate::task::{Context, Scheduler};
 
 const COMMANDS_PER_CYCLE: usize = 256;
 
@@ -75,7 +75,7 @@ pub(crate) struct AsyncWorker {
 
     // Dropped when shutdown starts so no more tasks can be enqueued and worker-local
     // services can release resources needed by shutdown.
-    builtins: Option<Builtins>,
+    cx: Option<Context>,
 
     shutdown: Shutdown,
 
@@ -129,12 +129,12 @@ impl AsyncWorker {
         let tasks = executor.tasks();
         let executor_shutdown = executor.shutdown();
 
-        let builtins = Builtins::new(dispatcher, clock, io, thread, sink);
-        Scheduler::register_current(builtins.clone(), tasks.clone(), executor_shutdown);
+        let cx = Context::new(dispatcher, clock, io, thread, sink);
+        Scheduler::register_current(cx.clone(), tasks.clone(), executor_shutdown);
 
         Self {
             command_rx: Some(command_rx),
-            builtins: Some(builtins),
+            cx: Some(cx),
             shutdown,
             executor: Some(executor),
             tasks,
@@ -231,7 +231,7 @@ impl AsyncWorker {
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
     fn process_commands(&mut self) -> bool {
-        let Some(builtins) = self.builtins.as_ref() else {
+        let Some(cx) = self.cx.as_ref() else {
             debug_assert!(self.command_rx.is_none());
 
             // We are shutting down and have dropped worker-local services.
@@ -239,7 +239,7 @@ impl AsyncWorker {
             return false;
         };
 
-        let command_rx = self.command_rx.as_ref().expect("builtins and command channel are dropped together");
+        let command_rx = self.command_rx.as_ref().expect("cx and command channel are dropped together");
 
         for _ in 0..COMMANDS_PER_CYCLE {
             if matches!(self.shutdown.state(), ShutdownState::Started) {
@@ -249,10 +249,10 @@ impl AsyncWorker {
             match command_rx.try_recv() {
                 Ok(command) => match command {
                     AsyncWorkerCommand::EnqueueTask { future_factory } => {
-                        let _registered = future_factory.into_inner().register(builtins.clone(), &self.tasks);
+                        let _registered = future_factory.into_inner().register(cx.clone(), &self.tasks);
                     }
                     AsyncWorkerCommand::AccessIo { access } => {
-                        access.into_inner()(builtins);
+                        access.into_inner()(cx);
                     }
                     AsyncWorkerCommand::Shutdown => {
                         self.begin_shutdown();
@@ -279,16 +279,16 @@ impl AsyncWorker {
         };
 
         let cause = self
-            .builtins
+            .cx
             .as_ref()
-            .expect("a running worker retains its builtins until shutdown")
+            .expect("a running worker retains its cx until shutdown")
             .dispatcher()
             .stop(self.shutdown.cause().unwrap_or_default());
 
         Scheduler::clear_current();
         // Drop worker-local services, as they may hold references to resources that
         // block executor shutdown (via various futures, waiters, etc).
-        self.builtins = None;
+        self.cx = None;
 
         // The command channel is henceforth closed. We will not receive any more commands.
         self.command_rx = None;
@@ -406,7 +406,7 @@ mod tests {
             InactiveClock::from(control.clone()),
             Arc::clone(&signal),
         );
-        let clock = worker.builtins.as_ref().unwrap().clock().clone();
+        let clock = worker.cx.as_ref().unwrap().clock().clone();
         let before_registration = time.instant();
         let mut delay = Box::pin(clock.delay(Duration::from_mins(1)));
         let mut context = std::task::Context::from_waker(Waker::noop());
@@ -440,7 +440,7 @@ mod tests {
                 InactiveClock::new_isolated(),
                 Arc::clone(&signal),
             );
-            let clock = worker.builtins.as_ref().unwrap().clock().clone();
+            let clock = worker.cx.as_ref().unwrap().clock().clone();
             let mut delay = Box::pin(clock.delay(Duration::from_mins(1)));
             assert!(delay.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())).is_pending());
             signal.wait(Duration::ZERO);
@@ -489,7 +489,7 @@ mod tests {
                 InactiveClock::new_isolated(),
                 signal,
             );
-            let clock = worker.builtins.as_ref().unwrap().clock().clone();
+            let clock = worker.cx.as_ref().unwrap().clock().clone();
             worker_ready.send((command_tx, worker_waker, clock)).unwrap();
             worker.run();
         });
@@ -520,9 +520,9 @@ mod tests {
         impl Wake for SpawnOnWake {
             fn wake(self: std::sync::Arc<Self>) {
                 let task_ran = Arc::clone(&self.task_ran);
-                drop(self.scheduler.spawn(move |builtins| async move {
+                drop(self.scheduler.spawn(move |cx| async move {
                     task_ran.store(true, Ordering::Relaxed);
-                    builtins.scheduler().dispatcher.stop(ShutdownCause::default());
+                    cx.scheduler().dispatcher.stop(ShutdownCause::default());
                 }));
             }
         }
@@ -543,8 +543,8 @@ mod tests {
                 Arc::clone(&signal),
             );
             let (scheduler, clock) = {
-                let builtins = worker.builtins.as_ref().unwrap();
-                (builtins.scheduler().clone(), builtins.clock().clone())
+                let cx = worker.cx.as_ref().unwrap();
+                (cx.scheduler().clone(), cx.clock().clone())
             };
             let task_ran = Arc::new(AtomicBool::new(false));
             let timer_waker = Waker::from(std::sync::Arc::new(SpawnOnWake {
@@ -762,7 +762,7 @@ mod tests {
                 task_ready.await.unwrap();
                 task_observer.store(true, Ordering::Relaxed);
             });
-            let clock = worker.builtins.as_ref().unwrap().clock().clone();
+            let clock = worker.cx.as_ref().unwrap().clock().clone();
             worker.tasks.add_test(async move {
                 clock.delay(Duration::from_secs(1)).await;
                 timer_observer.store(true, Ordering::Relaxed);
@@ -942,7 +942,7 @@ mod tests {
             progress.await.unwrap();
             task_observer.store(true, Ordering::Relaxed);
         });
-        let clock = worker.builtins.as_ref().unwrap().clock().clone();
+        let clock = worker.cx.as_ref().unwrap().clock().clone();
         worker.tasks.add_test(async move {
             clock.delay(Duration::from_secs(1)).await;
             timer_observer.store(true, Ordering::Relaxed);
@@ -1009,7 +1009,7 @@ mod tests {
         );
         let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
         let _context = worker
-            .builtins
+            .cx
             .as_ref()
             .unwrap()
             .io()
@@ -1047,7 +1047,7 @@ mod tests {
             InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
-        let clock = worker.builtins.as_ref().unwrap().clock().clone();
+        let clock = worker.cx.as_ref().unwrap().clock().clone();
         let mut timer = clock.delay(Duration::from_millis(1));
         let waker = Waker::from(Arc::into_std_arc(Arc::new(PanicWake)));
         assert!(Pin::new(&mut timer).poll(&mut std::task::Context::from_waker(&waker)).is_pending());
@@ -1092,7 +1092,7 @@ mod tests {
 
             command_tx
                 .send(enqueue(RemoteFutureFactory::new({
-                    move |_: Builtins, tasks: &TaskSet| {
+                    move |_: Context, tasks: &TaskSet| {
                         tasks.add_test(async move {
                             inner_completed_tx.send(());
                         });
@@ -1144,7 +1144,7 @@ mod tests {
 
             command_tx
                 .send(enqueue(RemoteFutureFactory::new({
-                    move |_: Builtins, tasks: &TaskSet| {
+                    move |_: Context, tasks: &TaskSet| {
                         tasks.add_test(async move {
                             spawned_completed_tx.send(());
                         });
@@ -1198,7 +1198,7 @@ mod tests {
 
         // We ignore the result because the worker is shutting down and the channel might be closed already.
         let _ = command_tx.send(enqueue(RemoteFutureFactory::new({
-            move |_: Builtins, tasks: &TaskSet| {
+            move |_: Context, tasks: &TaskSet| {
                 tasks.add_test(async move {
                     completed_tx.send(14);
                 });

@@ -165,14 +165,14 @@ fn validation_follows_accepted_worker(known_source: bool) {
         })
         .map(|handle| handle.join().expect("each worker must return its services"))
         .collect();
-    let mut builtins = workers[0].0.clone();
+    let mut context = workers[0].0.clone();
     let source = workers[0].2.clone();
     workers[1]
         .1
         .spawn(async move |cx| {
-            let _ = builtins.thread();
-            builtins.relocate(known_source.then_some(&source), cx.thread());
-            let _ = builtins.thread();
+            let _ = context.thread();
+            context.relocate(known_source.then_some(&source), cx.thread());
+            let _ = context.thread();
         })
         .join()
         .expect("relocation must complete on the destination worker");

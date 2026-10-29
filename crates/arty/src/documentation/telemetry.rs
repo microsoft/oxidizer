@@ -8,7 +8,7 @@
 //! Supply a regular sink with [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink)
 //! to enable enrichment; configure its processors to receive events.
 //! Tasks can access it through
-//! [`Builtins::sink`](crate::task::Builtins::sink).
+//! [`Context::sink`](crate::task::Context::sink).
 //! Configure processors that do not panic: event delivery is synchronous and
 //! Arty does not recover from telemetry-processor panics.
 //!

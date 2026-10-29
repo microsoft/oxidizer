@@ -14,13 +14,13 @@ use std::future::poll_fn;
 use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
-use std::task::{Context, Poll, Waker};
+use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
 use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
 #[cfg(all(feature = "macros", feature = "test-util"))]
-use arty::task::Builtins;
+use arty::task::Context;
 use arty::task::JoinError;
 use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
@@ -241,11 +241,11 @@ fn closed_runtime_rejects_factories_with_an_immediate_shutdown_error() {
     runtime.stop().unwrap();
     let invoked = Arc::new(AtomicBool::new(false));
     let captured = Arc::clone(&invoked);
-    let mut join = Box::pin(scheduler.spawn(move |_: arty::task::Builtins| {
+    let mut join = Box::pin(scheduler.spawn(move |_: arty::task::Context| {
         captured.store(true, Ordering::Relaxed);
         async {}
     }));
-    let mut cx = Context::from_waker(Waker::noop());
+    let mut cx = PollContext::from_waker(Waker::noop());
     let Poll::Ready(Err(error)) = join.as_mut().poll(&mut cx) else {
         panic!("a rejected join must be ready with a shutdown error");
     };
@@ -303,7 +303,7 @@ fn pending_future_is_woken_from_an_unrelated_thread() {
 
 #[cfg(all(feature = "macros", feature = "test-util"))]
 #[arty::test]
-async fn worker_can_drive_a_controlled_clock_without_io(cx: Builtins, control: ClockControl) {
+async fn worker_can_drive_a_controlled_clock_without_io(cx: Context, control: ClockControl) {
     let _control = control.auto_advance_timers(true);
     let watch = cx.clock().stopwatch();
     cx.clock().delay(Duration::from_secs(5)).await;
@@ -316,7 +316,7 @@ fn factory_and_poll_panics_return_errors_and_preserve_runtime_usability() {
     #[derive(Debug, PartialEq)]
     struct Payload(u32);
 
-    fn panic_factory(_: arty::task::Builtins) -> std::future::Ready<()> {
+    fn panic_factory(_: arty::task::Context) -> std::future::Ready<()> {
         panic_any(Payload(1))
     }
     let runtime = Runtime::builder()

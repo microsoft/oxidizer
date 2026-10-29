@@ -17,7 +17,7 @@
 //! ```
 //! # use std::task::Waker;
 //! # use arty::core::{Thread, ThreadAware};
-//! # use arty::task::Builtins;
+//! # use arty::task::Context;
 //! # use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
 //! # #[derive(Clone)]
 //! # struct ExampleIo;
@@ -55,7 +55,7 @@
 //! # }
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! #[arty::main]
-//! async fn main(cx: Builtins) {
+//! async fn main(cx: Context) {
 //!     let io = cx.io().context::<ExampleIo>(&());
 //!     io.submit("request");
 //! }

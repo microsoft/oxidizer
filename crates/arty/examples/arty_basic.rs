@@ -5,10 +5,10 @@
 
 use std::time::Duration;
 
-use arty::task::Builtins;
+use arty::task::Context;
 
 #[arty::main]
-async fn main(cx: Builtins) {
+async fn main(cx: Context) {
     cx.clock().delay(Duration::from_millis(1)).await;
     println!("Hello from Arty!");
 }

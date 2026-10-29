@@ -577,7 +577,7 @@ fn worker_schedulers(runtime: &Runtime, workers: usize) -> Vec<Scheduler> {
         .map(|_| {
             runtime
                 .scheduler()
-                .spawn_anywhere((), |builtins, ()| async move { builtins.scheduler().clone() })
+                .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
                 .join()
                 .unwrap()
         })

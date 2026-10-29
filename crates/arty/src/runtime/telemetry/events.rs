@@ -77,7 +77,7 @@ impl From<StdThreadId> for ThreadId {
 pub(crate) struct PanicMessage(pub String);
 
 /// A captured backtrace rendered as text.
-#[cfg(any(debug_assertions, test))] // Only captured by the debug-only `Builtins` thread check.
+#[cfg(any(debug_assertions, test))] // Only captured by the debug-only `Context` thread check.
 #[classified(SYSTEM_METADATA)]
 #[derive(Clone)]
 pub(crate) struct BacktraceText(pub String);
@@ -188,12 +188,12 @@ pub(crate) struct ThreadExiting {
     pub id: ThreadId,
 }
 
-/// Emitted (debug builds only) when `Builtins` is accessed from a thread other
+/// Emitted (debug builds only) when `Context` is accessed from a thread other
 /// than the one it was created on.
-#[cfg(any(debug_assertions, test))] // Emitted only by the debug-only `Builtins` thread check.
+#[cfg(any(debug_assertions, test))] // Emitted only by the debug-only `Context` thread check.
 #[event("arty.rt.builtins.thread_mismatch")]
-#[warning("Builtins accessed from a different thread than it was created on")]
-pub(crate) struct BuiltinsThreadMismatch {
+#[warning("Context accessed from a different thread than it was created on")]
+pub(crate) struct ContextThreadMismatch {
     #[dimension(log = "thread.name")]
     pub name: ThreadName,
     #[dimension(log = "arty.thread.id")]
@@ -461,12 +461,12 @@ mod tests {
     }
 
     #[test]
-    fn builtins_thread_mismatch_carries_backtrace() {
+    fn context_thread_mismatch_carries_backtrace() {
         let (sink, processor) = test_emitter(TEST_ID);
 
         emit!(
             sink,
-            BuiltinsThreadMismatch {
+            ContextThreadMismatch {
                 name: ThreadName::new("oxidizer-async-1"),
                 id: ThreadId("ThreadId(7)".to_owned()),
                 backtrace: BacktraceText("<backtrace>".to_owned()),
@@ -476,7 +476,7 @@ mod tests {
         assert_eq!(
             processor.single_event(),
             ExpectedEvent::new("arty.rt.builtins.thread_mismatch", Severity::Warn)
-                .body("Builtins accessed from a different thread than it was created on")
+                .body("Context accessed from a different thread than it was created on")
                 .dimension("thread.name", "oxidizer-async-1")
                 .dimension("arty.thread.id", "ThreadId(7)")
                 .dimension("backtrace", "<backtrace>")

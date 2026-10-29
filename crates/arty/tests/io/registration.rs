@@ -14,7 +14,7 @@ fn each_worker_initializes_its_driver_on_first_retrieval() {
     let first = workers[0]
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| builtins.io().context::<TestContext<CacheContext>>(&scenario)
+            async move |cx| cx.io().context::<TestContext<CacheContext>>(&scenario)
         })
         .join()
         .unwrap();
@@ -31,16 +31,16 @@ fn each_worker_initializes_its_driver_on_first_retrieval() {
     assert_eq!(scenario.driver_attempts.load(Ordering::SeqCst), 1);
 
     workers[0]
-        .spawn(async |builtins| {
-            let _ = builtins
+        .spawn(async |cx| {
+            let _ = cx
                 .io()
                 .context::<TestContext<CacheContext>>(&Scenario::options(RolePlan::PreferPrimary));
         })
         .join()
         .unwrap();
     workers[1]
-        .spawn(async |builtins| {
-            let _ = builtins
+        .spawn(async |cx| {
+            let _ = cx
                 .io()
                 .context::<TestContext<CacheContext>>(&Scenario::options(RolePlan::PreferPrimary));
         })
@@ -66,8 +66,8 @@ fn runtime_registries_are_isolated() {
         .scheduler()
         .block_on({
             let first = first.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<IsolatedContext>>(&first);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<IsolatedContext>>(&first);
             }
         })
         .unwrap();
@@ -75,8 +75,8 @@ fn runtime_registries_are_isolated() {
         .scheduler()
         .block_on({
             let second = second.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<IsolatedContext>>(&second);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<IsolatedContext>>(&second);
             }
         })
         .unwrap();
@@ -101,8 +101,8 @@ fn waiting_registration_observes_another_workers_failure() {
 
     let first = workers[0].spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let outcome = builtins
+        async move |cx| {
+            let outcome = cx
                 .io()
                 .try_context::<TestContext<ConcurrentFirstFailure>>(&scenario)
                 .map_or_else(|error| error.to_string(), |_| "ok".to_owned());
@@ -113,8 +113,8 @@ fn waiting_registration_observes_another_workers_failure() {
 
     let second = workers[1].spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let outcome = builtins
+        async move |cx| {
+            let outcome = cx
                 .io()
                 .try_context::<TestContext<ConcurrentFirstFailure>>(&scenario)
                 .map_or_else(|error| error.to_string(), |_| "ok".to_owned());
@@ -146,14 +146,14 @@ fn concurrent_same_context_registration_constructs_options_once() {
 
     let first = workers[0].spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let _ = builtins.io().context::<TestContext<ConcurrentSameContext>>(&scenario);
+        async move |cx| {
+            let _ = cx.io().context::<TestContext<ConcurrentSameContext>>(&scenario);
         }
     });
     scenario.wait_until_driver_blocked();
 
-    let second = workers[1].spawn(async move |builtins| {
-        let _ = builtins
+    let second = workers[1].spawn(async move |cx| {
+        let _ = cx
             .io()
             .context::<TestContext<ConcurrentSameContext>>(&Scenario::options(RolePlan::PreferPrimary));
         second_done_tx.send(()).unwrap();
@@ -181,9 +181,9 @@ fn nested_context_retrieval_panics_and_stops_the_runtime() {
         .scheduler()
         .block_on({
             let scenario = scenario.clone();
-            async move |builtins| {
-                scenario.register_self_from_context(builtins.io().clone());
-                let _ = builtins.io().context::<TestContext<RecursiveContext>>(&scenario);
+            async move |cx| {
+                scenario.register_self_from_context(cx.io().clone());
+                let _ = cx.io().context::<TestContext<RecursiveContext>>(&scenario);
             }
         })
         .unwrap_err();
@@ -213,8 +213,8 @@ fn inconsistent_primary_role_on_another_worker_is_rejected() {
     workers[0]
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<InconsistentPrimary>>(&scenario);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<InconsistentPrimary>>(&scenario);
             }
         })
         .join()
@@ -222,9 +222,8 @@ fn inconsistent_primary_role_on_another_worker_is_rejected() {
     let error = workers[1]
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
-                builtins
-                    .io()
+            async move |cx| {
+                cx.io()
                     .try_context::<TestContext<InconsistentPrimary>>(&scenario)
                     .unwrap_err()
                     .to_string()
@@ -267,10 +266,10 @@ fn additional_drivers_are_secondary_on_every_worker() {
             let primary = primary.clone();
             let first_additional = first_additional.clone();
             let second_additional = second_additional.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<CacheContext>>(&primary);
-                let _ = builtins.io().context::<TestContext<AdditionalSecondaryA>>(&first_additional);
-                let _ = builtins.io().context::<TestContext<AdditionalSecondaryB>>(&second_additional);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<CacheContext>>(&primary);
+                let _ = cx.io().context::<TestContext<AdditionalSecondaryA>>(&first_additional);
+                let _ = cx.io().context::<TestContext<AdditionalSecondaryB>>(&second_additional);
             }
         })
         .join()
@@ -279,14 +278,14 @@ fn additional_drivers_are_secondary_on_every_worker() {
 
     for worker in &workers {
         worker
-            .spawn(async |builtins| {
-                let _ = builtins
+            .spawn(async |cx| {
+                let _ = cx
                     .io()
                     .context::<TestContext<CacheContext>>(&Scenario::options(RolePlan::PreferPrimary));
-                let _ = builtins
+                let _ = cx
                     .io()
                     .context::<TestContext<AdditionalSecondaryA>>(&Scenario::options(RolePlan::PreferPrimary));
-                let _ = builtins
+                let _ = cx
                     .io()
                     .context::<TestContext<AdditionalSecondaryB>>(&Scenario::options(RolePlan::PreferPrimary));
             })
@@ -312,9 +311,8 @@ fn driver_can_reject_the_assigned_primary_role() {
         .scheduler()
         .block_on({
             let scenario = scenario.clone();
-            async move |builtins| {
-                builtins
-                    .io()
+            async move |cx| {
+                cx.io()
                     .try_context::<TestContext<ReservedSecondary>>(&scenario)
                     .unwrap_err()
                     .to_string()
@@ -343,17 +341,17 @@ fn race_primary_registration_once() {
     let first_registration = workers[0].spawn({
         let first = first.clone();
         let barrier = Arc::clone(&barrier);
-        async move |builtins| {
+        async move |cx| {
             barrier.wait();
-            let _ = builtins.io().context::<TestContext<RacePrimaryA>>(&first);
+            let _ = cx.io().context::<TestContext<RacePrimaryA>>(&first);
         }
     });
     let second_registration = workers[1].spawn({
         let second = second.clone();
         let barrier = Arc::clone(&barrier);
-        async move |builtins| {
+        async move |cx| {
             barrier.wait();
-            let _ = builtins.io().context::<TestContext<RacePrimaryB>>(&second);
+            let _ = cx.io().context::<TestContext<RacePrimaryB>>(&second);
         }
     });
     first_registration.join().unwrap();
@@ -362,11 +360,11 @@ fn race_primary_registration_once() {
 
     for worker in &workers {
         worker
-            .spawn(async |builtins| {
-                let _ = builtins
+            .spawn(async |cx| {
+                let _ = cx
                     .io()
                     .context::<TestContext<RacePrimaryA>>(&Scenario::options(RolePlan::PreferPrimary));
-                let _ = builtins
+                let _ = cx
                     .io()
                     .context::<TestContext<RacePrimaryB>>(&Scenario::options(RolePlan::PreferPrimary));
             })

@@ -3,7 +3,7 @@
 Arty can run I/O drivers supplied by other crates. It does not include a
 built-in network or file I/O implementation.
 
-Use `Builtins::io()` to obtain the worker's `arty::io::Io` handle, then call
+Use `Context::io()` to obtain the worker's `arty::io::Io` handle, then call
 `Io::context` with the context type provided by the I/O library.
 
 Arty creates each context type once per runtime. Each worker creates its own
@@ -14,7 +14,7 @@ The first context type registered with the runtime is the primary driver.
 Later context types are secondary drivers. A worker runs its secondary drivers
 before its primary driver.
 
-A cloned `Builtins` or `Io` remains associated with its original worker. It can
+A cloned `Context` or `Io` remains associated with its original worker. It can
 be used from an ordinary thread or from another runtime such as Tokio; Arty
 dispatches the request back to the associated worker. Calls from any other Arty
 worker are rejected, whether that worker belongs to the same runtime or a

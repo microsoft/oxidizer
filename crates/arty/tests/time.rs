@@ -7,30 +7,30 @@
 
 use std::pin::Pin;
 use std::sync::{Arc, mpsc};
-use std::task::{Context, Poll, Wake, Waker};
+use std::task::{Context as PollContext, Poll, Wake, Waker};
 use std::thread;
 use std::time::Duration;
 
 use arty::runtime::{Runtime, WorkersPolicy};
-use arty::task::Builtins;
+use arty::task::Context;
 use tick::{ClockControl, FutureExt};
 
 const TIMER_COUNT: usize = 8;
 const CONTROLLED_TIMER_STEP: Duration = Duration::from_secs(1);
 
 #[arty::test]
-async fn many_timers_with_relocation_ensure_advanced(builtins: Builtins) {
-    let scheduler = builtins.scheduler();
+async fn many_timers_with_relocation_ensure_advanced(cx: Context) {
+    let scheduler = cx.scheduler();
     // Ensure each relocated task keeps access to the runtime clock.
     let handles: Vec<_> = (0..TIMER_COUNT)
         .map(|_| {
-            scheduler.spawn_anywhere(builtins.clone(), move |builtins| async move {
-                println!("delay(pending) - clock: {:?}, thread: {:?}", builtins.clock(), builtins.thread());
+            scheduler.spawn_anywhere(cx.clone(), move |cx| async move {
+                println!("delay(pending) - clock: {:?}, thread: {:?}", cx.clock(), cx.thread());
 
-                let watch = builtins.clock().stopwatch();
-                builtins.clock().delay(Duration::from_millis(50)).await;
+                let watch = cx.clock().stopwatch();
+                cx.clock().delay(Duration::from_millis(50)).await;
 
-                println!("delay(done) - clock: {:?}, thread: {:?}", builtins.clock(), builtins.thread());
+                println!("delay(done) - clock: {:?}, thread: {:?}", cx.clock(), cx.thread());
 
                 assert!(watch.elapsed().as_millis() >= 50);
             })
@@ -38,17 +38,16 @@ async fn many_timers_with_relocation_ensure_advanced(builtins: Builtins) {
         .collect();
 
     for handle in handles {
-        handle.timeout(builtins.clock(), Duration::from_secs(10)).await.unwrap().unwrap();
+        handle.timeout(cx.clock(), Duration::from_secs(10)).await.unwrap().unwrap();
     }
 }
 
 #[arty::test]
-async fn many_timers_ensure_advanced(builtins: Builtins) {
+async fn many_timers_ensure_advanced(cx: Context) {
     let handles: Vec<_> = (0..TIMER_COUNT)
         .map(|_| {
-            builtins
-                .scheduler()
-                .spawn_anywhere(builtins.clone(), |builtins| builtins.clock().delay(Duration::from_millis(1)))
+            cx.scheduler()
+                .spawn_anywhere(cx.clone(), |cx| cx.clock().delay(Duration::from_millis(1)))
         })
         .collect();
 
@@ -58,10 +57,9 @@ async fn many_timers_ensure_advanced(builtins: Builtins) {
 }
 
 #[arty::test]
-async fn timer_with_relocated_builtins(builtins: Builtins) {
-    builtins
-        .scheduler()
-        .spawn_anywhere(builtins.clone(), |builtins| builtins.clock().delay(Duration::from_millis(10)))
+async fn timer_with_relocated_context(cx: Context) {
+    cx.scheduler()
+        .spawn_anywhere(cx.clone(), |cx| cx.clock().delay(Duration::from_millis(10)))
         .await
         .unwrap();
 }
@@ -95,12 +93,14 @@ fn timer_callback_direct_submission_wakes_waiting_same_worker() {
     impl Future for TimerWakeHarness {
         type Output = ();
 
-        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        fn poll(self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<Self::Output> {
             let this = self.get_mut();
             if let Some(registration) = this.registration.take() {
                 assert_eq!(this.setup_delay.as_mut().poll(cx), Poll::Pending);
                 assert_eq!(
-                    this.callback_delay.as_mut().poll(&mut Context::from_waker(&this.callback_waker)),
+                    this.callback_delay
+                        .as_mut()
+                        .poll(&mut PollContext::from_waker(&this.callback_waker)),
                     Poll::Pending
                 );
                 registration.send(thread::current().id()).unwrap();

@@ -13,11 +13,11 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
-use std::task::{Context, Poll, Waker};
+use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
-use arty::task::{Builtins, Scheduler};
+use arty::task::{Context, Scheduler};
 use arty::time::Clock;
 #[cfg(feature = "macros")]
 use futures::future::join_all;
@@ -265,15 +265,15 @@ fn blocking_callbacks_can_run_borrowing_tasks_on_an_async_worker() {
 }
 
 #[test]
-fn builtins_publish_the_same_services_on_every_worker() {
+fn context_publish_the_same_services_on_every_worker() {
     let runtime = runtime(2);
-    let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
-    let tasks: Vec<_> = builtins
+    let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
+    let tasks: Vec<_> = cx
         .control()
         .workers()
         .into_iter()
         .map(|worker| {
-            builtins.scheduler().spawn_at(worker, builtins.clone(), |cx: Builtins| async move {
+            cx.scheduler().spawn_at(worker, cx.clone(), |cx: Context| async move {
                 let scheduler: &Scheduler = cx.as_ref();
                 let clock: &Clock = cx.as_ref();
                 let sink: &Sink = cx.as_ref();
@@ -295,11 +295,11 @@ fn builtins_publish_the_same_services_on_every_worker() {
 
 #[cfg(all(feature = "macros", not(miri)))]
 #[arty::test(workers = 2)]
-async fn worker_services_are_ready_before_spawning(cx: Builtins) {
+async fn worker_services_are_ready_before_spawning(cx: Context) {
     let scheduler = cx.scheduler();
     let tasks: Vec<_> = (0..2)
         .map(|_| {
-            scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move {
+            scheduler.spawn_anywhere(cx.clone(), |worker: Context| async move {
                 worker.thread().id() == thread::current().id()
             })
         })
@@ -312,13 +312,13 @@ async fn worker_services_are_ready_before_spawning(cx: Builtins) {
 
 #[cfg(all(feature = "macros", not(miri)))]
 #[arty::test]
-async fn emitter_is_available_by_default(cx: Builtins) {
+async fn emitter_is_available_by_default(cx: Context) {
     assert!(cx.sink().is_noop());
 }
 
 #[cfg(not(miri))]
 #[test]
-fn configured_emitter_is_available_from_builtins() {
+fn configured_emitter_is_available_from_context() {
     use observed::metadata::EventDescription;
     use observed::processing::{EventProcessor, EventView};
 
@@ -344,7 +344,7 @@ fn configured_emitter_is_available_from_builtins() {
 
     runtime
         .scheduler()
-        .block_on(async move |cx: Builtins| {
+        .block_on(async move |cx: Context| {
             assert!(!cx.sink().is_noop());
             cx.sink().flush().unwrap();
         })
@@ -431,7 +431,7 @@ fn dropping_another_runtime_from_a_worker_does_not_wait_for_its_blocking_callbac
 
 #[cfg(feature = "macros")]
 #[arty::test]
-async fn application_errors_remain_results_for_async_and_blocking_tasks(cx: Builtins) {
+async fn application_errors_remain_results_for_async_and_blocking_tasks(cx: Context) {
     assert_eq!(
         cx.scheduler().spawn(async |_| Err::<(), _>("application")).await.unwrap(),
         Err("application")
@@ -455,11 +455,11 @@ fn remote_join_accepts_a_send_only_result_and_rejects_repolling() {
     observed.recv_timeout(TEST_TIMEOUT).unwrap();
     // This factory cannot run on the same worker until the signalled poll returns.
     scheduler.spawn(async |_| ()).join().unwrap();
-    let Poll::Ready(Ok(value)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
+    let Poll::Ready(Ok(value)) = task.as_mut().poll(&mut PollContext::from_waker(Waker::noop())) else {
         panic!("an already-completed task must be immediately ready");
     };
     assert_eq!(value.get(), 42);
-    catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut Context::from_waker(Waker::noop())))).unwrap_err();
+    catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut PollContext::from_waker(Waker::noop())))).unwrap_err();
     assert_eq!(
         runtime.scheduler().spawn_anywhere((), |_, ()| async { 123u32 }).join().unwrap(),
         123
@@ -472,21 +472,21 @@ fn rejected_remote_joins_report_shutdown_then_reject_repolling() {
     let runtime = runtime(1);
     support::runtime_control(&runtime).request_stop();
     let mut task = Box::pin(runtime.scheduler().spawn_anywhere((), |_, ()| async {}));
-    let Poll::Ready(Err(error)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
+    let Poll::Ready(Err(error)) = task.as_mut().poll(&mut PollContext::from_waker(Waker::noop())) else {
         panic!("a rejected submission must be immediately ready");
     };
     assert!(error.is_shutdown());
     assert!(!error.is_panic());
-    catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut Context::from_waker(Waker::noop())))).unwrap_err();
+    catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut PollContext::from_waker(Waker::noop())))).unwrap_err();
     runtime.stop().unwrap();
 }
 
 #[cfg(feature = "macros")]
 mod entry_points {
-    use arty::task::Builtins;
+    use arty::task::Context;
 
     #[arty::main(workers = 1)]
-    async fn application_error(_cx: Builtins) -> Result<(), &'static str> {
+    async fn application_error(_cx: Context) -> Result<(), &'static str> {
         Err("application")
     }
 

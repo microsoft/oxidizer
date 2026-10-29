@@ -70,7 +70,7 @@ impl JoinError {
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main(panic = ignore)]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// let result: Result<(), arty::task::JoinError> =
     ///     cx.scheduler().spawn(async |_| panic!("task failed")).await;
     /// let error = result.expect_err("the task deliberately panics");
