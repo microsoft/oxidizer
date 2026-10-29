@@ -1,29 +1,33 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Infrastructure for integrating time primitives into async runtimes.
+//! Components that connect time operations to async runtimes.
 //!
-//! This module provides the necessary components to bridge time-based operations
-//! with async runtime execution. The primary workflow involves:
+//! Use this workflow:
 //!
-//! 1. Start with an [`InactiveClock`] that can be safely moved across threads
-//! 2. Activate it with the runtime's driver waker to get a [`Clock`] and [`ClockDriver`]
-//! 3. Advance the [`ClockDriver`] and park until its next deadline or driver notification
-//! 4. Use the [`Clock`] for time operations like creating timers and measuring time
+//! 1. Create an [`InactiveClock`]. You can move it across threads.
+//! 2. Activate it with the runtime driver waker. Activation returns a [`Clock`]
+//!    and [`ClockDriver`].
+//! 3. Advance the driver. Park until its next deadline or notification.
+//! 4. Use the clock to create timers and measure time.
 //!
-//! # Integration with Runtimes
+//! # Runtime integration
 //!
 //! Different runtime architectures can integrate this module as follows:
 //!
 //! ## Thread-aware isolated runtimes
 //!
-//! In runtimes that keep work on stable worker threads, each worker should own an
-//! isolated clock with its own timer storage. This eliminates cross-thread lock
-//! contention.
+//! If a runtime keeps work on stable worker threads, give each worker an
+//! isolated clock. Each clock then has separate timer storage. This removes
+//! timer-lock contention between workers.
 //!
-//! The pattern is to create the root [`InactiveClock`] on its source thread, then
-//! move each clone to a worker, build the destination coordinate on that live
-//! worker, relocate from the source coordinate, and activate:
+//! Create the root [`InactiveClock`] on its source thread. Then complete these
+//! steps for each clone:
+//!
+//! 1. Move the clone to a worker.
+//! 2. Build the destination coordinate on that worker.
+//! 3. Relocate the clone from the source coordinate.
+//! 4. Activate the clone.
 //!
 //! ```rust
 //! # use thread_aware::{ThreadAware, ThreadBuilder};
@@ -37,7 +41,7 @@
 //! # }
 //! let builder = ThreadBuilder::default();
 //! let source = builder.build(std::thread::current().id());
-//! let root = InactiveClock::default();
+//! let root = InactiveClock::new_isolated();
 //!
 //! let ready = Arc::new(Barrier::new(3));
 //! let first = {
@@ -76,18 +80,18 @@
 //! second.join().unwrap();
 //! ```
 //!
-//! Because the coordinates above come from clones of one `ThreadBuilder`, they
-//! share a runtime owner. Each thread's clock and driver therefore operate on an
-//! independent set of timers. Timers registered on one clock are visible only
-//! to its driver, and each driver must be advanced independently by its owning
-//! thread. A cross-owner relocation instead keeps the existing timer storage:
-//! it remains usable, but does not become local to the destination runtime.
+//! The coordinates come from clones of one `ThreadBuilder`, so they share one
+//! runtime owner. Each thread therefore has an independent timer set. A timer
+//! is visible only to the driver on its thread. Each thread must advance its
+//! own driver.
+//!
+//! A relocation to another owner keeps the existing timer storage. The clock
+//! still works, but its storage does not become local to the destination.
 //!
 //! ## Work-stealing runtimes
 //!
-//! In multi-threaded runtimes where tasks may run on any thread, activate once and share the
-//! clock across threads. The driver should be kept on a dedicated thread or task for timer
-//! advancement:
+//! If tasks can run on any thread, activate the clock once and share it. Keep
+//! the driver on one dedicated thread or task.
 //!
 //! ```rust
 //! # use std::sync::Arc;
@@ -99,7 +103,7 @@
 //! #     fn wake_by_ref(self: &Arc<Self>) { self.0.unpark(); }
 //! # }
 //! let driver_waker = Waker::from(Arc::new(DriverWake(std::thread::current())));
-//! let (clock, driver) = InactiveClock::default().activate(driver_waker);
+//! let (clock, driver) = InactiveClock::new_isolated().activate(driver_waker);
 //!
 //! // Share `clock` across threads (it is Clone + Send + Sync)
 //! // Keep `driver` on a single thread to advance timers
@@ -107,10 +111,11 @@
 //!
 //! ## Controlled clocks
 //!
-//! Controlled clocks advance externally. Their owner is responsible for advancing controlled time
-//! and waking timers; the supplied activation waker is ignored and the runtime driver has no
-//! system parking deadline. External lifecycle state must wake, exit, and drop every controlled
-//! driver loop during shutdown rather than waiting solely for [`ClockGone`].
+//! The owner of a controlled clock advances time and wakes timers. The clock
+//! ignores the activation waker. Its driver has no system parking deadline.
+//!
+//! During shutdown, external lifecycle state must wake, stop, and drop each
+//! controlled driver loop. The loop must not wait only for [`ClockGone`].
 //!
 //! [`Clock`]: crate::Clock
 //! [`InactiveClock::activate`]: InactiveClock::activate

@@ -248,7 +248,7 @@ impl RuntimeBuilder {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
-            clock: InactiveClock::default(),
+            clock: InactiveClock::new_isolated(),
             processor_config: RuntimeConfig::default(),
             sink: Sink::noop(),
         }

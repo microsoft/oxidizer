@@ -12,6 +12,8 @@ use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
 use jiff::Timestamp;
+#[cfg(feature = "test-util")]
+use tick::Clock;
 use tick::SystemTimeExt;
 use tick::fmt::{EcmaScript, Iso8601, Rfc2822, UnixSeconds};
 
@@ -21,6 +23,18 @@ fn format_types_expose_their_documented_value_traits() {
     static_assertions::assert_impl_all!(Iso8601: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, FromStr);
     static_assertions::assert_impl_all!(Rfc2822: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, FromStr);
     static_assertions::assert_impl_all!(UnixSeconds: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, FromStr);
+}
+
+#[cfg(feature = "test-util")]
+#[test]
+fn system_time_as_supports_every_tick_format_for_normalized_clock_data() {
+    let time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_722_980_600);
+    let clock = Clock::new_frozen_at(time);
+
+    assert_eq!(SystemTime::from(clock.system_time_as::<Iso8601>()), time);
+    assert_eq!(SystemTime::from(clock.system_time_as::<EcmaScript>()), time);
+    assert_eq!(SystemTime::from(clock.system_time_as::<Rfc2822>()), time);
+    assert_eq!(SystemTime::from(clock.system_time_as::<UnixSeconds>()), time);
 }
 
 #[test]
@@ -108,8 +122,19 @@ fn ecmascript_parse_normalizes_to_utc_and_fixed_precision() {
 
 #[test]
 fn ecmascript_parse_rejects_invalid_and_overflow_values() {
-    "date".parse::<EcmaScript>().unwrap_err();
-    "10000-12-30T22:00:00.999999999Z".parse::<EcmaScript>().unwrap_err();
+    assert!(!"date".parse::<EcmaScript>().unwrap_err().is_out_of_range());
+    assert!(
+        !"10000-12-30T22:00:00.999999999Z"
+            .parse::<EcmaScript>()
+            .unwrap_err()
+            .is_out_of_range()
+    );
+    assert!(
+        "+010000-12-30T22:00:00.999999999Z"
+            .parse::<EcmaScript>()
+            .unwrap_err()
+            .is_out_of_range()
+    );
 }
 
 #[test]
@@ -124,7 +149,7 @@ fn ecmascript_max_truncates_to_milliseconds() {
 fn ecmascript_rejects_system_time_above_its_range() {
     let overflow = SystemTime::from(Timestamp::MAX) + Duration::from_hours(24);
 
-    EcmaScript::try_from(overflow).unwrap_err();
+    assert!(EcmaScript::try_from(overflow).unwrap_err().is_out_of_range());
 }
 
 #[cfg(not(windows))]
@@ -184,7 +209,10 @@ fn iso8601_parses_displays_and_converts_public_values() {
 
 #[test]
 fn iso8601_rejects_year_overflow() {
-    "10000-12-30T22:00:00.999999999Z".parse::<Iso8601>().unwrap_err();
+    let error = "+010000-12-30T22:00:00.999999999Z".parse::<Iso8601>().unwrap_err();
+
+    assert!(error.is_out_of_range());
+    assert!(error.source().unwrap().downcast_ref::<jiff::Error>().is_some());
 }
 
 #[test]
@@ -193,6 +221,15 @@ fn iso8601_round_trips_system_time() {
     let iso = Iso8601::try_from(at).unwrap();
 
     assert_eq!(SystemTime::from(iso), at);
+}
+
+#[test]
+fn iso8601_classifies_system_time_above_its_range() {
+    let overflow = SystemTime::from(Timestamp::MAX) + Duration::from_hours(24);
+    let error = Iso8601::try_from(overflow).unwrap_err();
+
+    assert!(error.is_out_of_range());
+    assert!(error.source().unwrap().downcast_ref::<jiff::Error>().is_some());
 }
 
 #[test]
@@ -323,13 +360,19 @@ fn rfc2822_rejects_unencodable_negative_years_when_system_time_can_express_them(
     let before_year_zero = SystemTime::UNIX_EPOCH.checked_sub(Duration::from_secs(62_167_219_201));
 
     if let Some(before_year_zero) = before_year_zero {
-        assert_eq!(
-            Rfc2822::try_from(before_year_zero).unwrap_err().to_string(),
-            "the instant is before year 0 and cannot be encoded as an RFC 2822 four-digit year"
-        );
+        let error = Rfc2822::try_from(before_year_zero).unwrap_err();
+        assert!(error.is_out_of_range());
+        assert!(error.source().is_none());
     }
 
     assert_eq!(Rfc2822::try_from(SystemTime::UNIX_EPOCH).unwrap(), Rfc2822::UNIX_EPOCH);
+}
+
+#[test]
+fn rfc2822_classifies_system_time_above_its_range() {
+    let overflow = SystemTime::from(Timestamp::MAX) + Duration::from_hours(24);
+
+    assert!(Rfc2822::try_from(overflow).unwrap_err().is_out_of_range());
 }
 
 #[test]
@@ -359,7 +402,11 @@ fn unix_seconds_epoch_and_max_have_their_documented_values() {
 
 #[test]
 fn unix_seconds_rejects_pre_epoch_system_time() {
-    UnixSeconds::try_from(SystemTime::UNIX_EPOCH - Duration::from_secs(1)).unwrap_err();
+    assert!(
+        UnixSeconds::try_from(SystemTime::UNIX_EPOCH - Duration::from_secs(1))
+            .unwrap_err()
+            .is_out_of_range()
+    );
     assert_eq!(UnixSeconds::try_from(SystemTime::UNIX_EPOCH).unwrap(), UnixSeconds::UNIX_EPOCH);
     assert_eq!(
         UnixSeconds::try_from(SystemTime::UNIX_EPOCH + Duration::from_secs(1))
@@ -372,14 +419,12 @@ fn unix_seconds_rejects_pre_epoch_system_time() {
 #[test]
 fn unix_seconds_constructors_validate_the_public_range() {
     assert_eq!(UnixSeconds::from_secs(10).unwrap().to_secs(), 10);
-    assert_eq!(
-        UnixSeconds::try_from(Duration::MAX).unwrap_err().to_string(),
-        "the `duration` is greater than the maximum value that can be represented by `UnixSeconds`"
-    );
-    assert_eq!(
-        UnixSeconds::from_secs(u64::MAX).unwrap_err().to_string(),
-        "the `seconds` is greater than the maximum value that can be represented by `UnixSeconds`"
-    );
+    let duration_error = UnixSeconds::try_from(Duration::MAX).unwrap_err();
+    assert!(duration_error.is_out_of_range());
+    assert!(duration_error.source().is_none());
+    let seconds_error = UnixSeconds::from_secs(u64::MAX).unwrap_err();
+    assert!(seconds_error.is_out_of_range());
+    assert!(seconds_error.source().is_none());
 }
 
 #[test]
@@ -395,8 +440,8 @@ fn unix_seconds_parses_displays_and_converts() {
 
 #[test]
 fn unix_seconds_rejects_invalid_and_overflow_values() {
-    "date".parse::<UnixSeconds>().unwrap_err();
-    "99999999999999999999999".parse::<UnixSeconds>().unwrap_err();
+    assert!(!"date".parse::<UnixSeconds>().unwrap_err().is_out_of_range());
+    assert!("99999999999999999999999".parse::<UnixSeconds>().unwrap_err().is_out_of_range());
 }
 
 #[test]

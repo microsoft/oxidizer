@@ -385,7 +385,7 @@ mod tests {
             command_tx,
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             signal,
             MonitorPolicy::disabled().into(),
         );
@@ -437,7 +437,7 @@ mod tests {
                 command_tx.clone(),
                 command_rx,
                 test_blocking_worker(),
-                InactiveClock::default(),
+                InactiveClock::new_isolated(),
                 Arc::clone(&signal),
             );
             let clock = worker.builtins.as_ref().unwrap().clock().clone();
@@ -486,7 +486,7 @@ mod tests {
                 command_tx.clone(),
                 command_rx,
                 test_blocking_worker(),
-                InactiveClock::default(),
+                InactiveClock::new_isolated(),
                 signal,
             );
             let clock = worker.builtins.as_ref().unwrap().clock().clone();
@@ -955,7 +955,7 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::clone(&signal),
         );
         WorkerSignal::waker(&signal).wake_by_ref();
@@ -986,7 +986,7 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::clone(&signal),
         );
         let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1026,7 +1026,7 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
         let clock = worker.builtins.as_ref().unwrap().clock().clone();
@@ -1058,7 +1058,7 @@ mod tests {
                     worker_command_tx,
                     command_rx,
                     (Arc::clone(&blocking_worker.0), blocking_worker.1.clone()),
-                    InactiveClock::default(),
+                    InactiveClock::new_isolated(),
                     worker_signal,
                 );
                 worker.run();
@@ -1116,7 +1116,7 @@ mod tests {
                     worker_command_tx,
                     command_rx,
                     test_blocking_worker(),
-                    InactiveClock::default(),
+                    InactiveClock::new_isolated(),
                     worker_signal,
                 );
                 drop(worker.tasks.add_test(async move { initial_completed_tx.send(()) }));
@@ -1167,7 +1167,7 @@ mod tests {
                 worker_command_tx,
                 command_rx,
                 test_blocking_worker(),
-                InactiveClock::default(),
+                InactiveClock::new_isolated(),
                 worker_signal,
             );
             worker.run();
@@ -1204,7 +1204,7 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
 
@@ -1229,7 +1229,7 @@ mod tests {
             command_tx,
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
 
@@ -1252,7 +1252,7 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
         let invoked = Arc::new(AtomicBool::new(false));
@@ -1285,7 +1285,7 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
         let shutdown = worker.shutdown.clone();
@@ -1318,7 +1318,7 @@ mod tests {
             commands,
             receiver,
             (Arc::clone(&blocking_worker.0), blocking_worker.1.clone()),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
 
@@ -1336,7 +1336,7 @@ mod tests {
             commands.clone(),
             receiver,
             (Arc::clone(&blocking_worker.0), blocking_worker.1.clone()),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::clone(&signal),
         );
         WorkerSignal::waker(&signal).wake_by_ref();
