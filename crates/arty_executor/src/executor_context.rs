@@ -118,13 +118,16 @@ impl Drop for CycleGuard {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use plurality::MultiPool;
+
     use super::*;
 
     #[test]
     fn foreign_owner_operations_leave_local_wakes_unchanged() {
         std::thread::spawn(|| {
+            let pool = MultiPool::new();
             let foreign_owner = std::thread::spawn(|| std::thread::current().id()).join().unwrap();
-            let task_handle = crate::testing::new_test_task_handle();
+            let task_handle = crate::allocate_test_task_in(&pool);
             let pointer = task_handle.as_ptr();
             let returned = enqueue(foreign_owner, task_handle).unwrap_err();
             let mut target = VecDeque::new();
@@ -135,6 +138,7 @@ mod tests {
 
             assert!(target.is_empty());
             drop(returned);
+            assert!(pool.is_empty());
         })
         .join()
         .unwrap();
@@ -143,6 +147,7 @@ mod tests {
     #[test]
     fn cycle_state_and_queued_wakes_follow_owner_transitions() {
         std::thread::spawn(|| {
+            let pool = MultiPool::new();
             let owner = std::thread::current().id();
             register(owner);
             assert!(!is_executing(owner));
@@ -153,12 +158,13 @@ mod tests {
             }
             assert!(!is_executing(owner));
 
-            enqueue(owner, crate::testing::new_test_task_handle()).unwrap();
+            enqueue(owner, crate::allocate_test_task_in(&pool)).unwrap();
             assert!(has_wakes(owner));
             clear_wakes(owner);
             assert!(!has_wakes(owner));
 
             unregister(owner);
+            assert!(pool.is_empty());
         })
         .join()
         .unwrap();

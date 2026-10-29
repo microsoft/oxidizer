@@ -14,7 +14,7 @@ use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::{Error, Workers};
 use crate::task::Builtins;
-use crate::task::join::JoinHandle;
+use crate::task::handle::JoinHandle;
 
 /// Cheap shared access to one runtime's routing and shutdown state.
 #[derive(Clone)]
@@ -25,30 +25,6 @@ pub(crate) struct DispatcherClient {
 impl DispatcherClient {
     pub(crate) const fn new(core: Arc<DispatcherCore>) -> Self {
         Self { core }
-    }
-
-    #[cfg(test)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
-    pub(crate) fn for_test(thread: &thread_aware::Thread) -> Self {
-        let (command_tx, _command_rx) = performables::sync::channel::unbounded();
-        let shutdown = Shutdown::default();
-        let endpoint = crate::runtime::dispatch::WorkerEndpoint {
-            command_tx,
-            waker: std::task::Waker::noop().clone(),
-            thread: thread.clone(),
-            blocking_worker: BlockingWorker::new(
-                crate::runtime::blocking_worker::BlockingPool::new(None),
-                observed::Sink::noop(),
-                shutdown.clone(),
-            ),
-        };
-        Self::new(Arc::new(DispatcherCore::new(
-            crate::runtime::thread::waiter::ThreadWaiter::new(Vec::new()),
-            nonempty::NonEmpty::new(endpoint),
-            observed::Sink::noop(),
-            shutdown,
-        )))
     }
 
     pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
@@ -121,17 +97,13 @@ impl DispatcherClient {
         self.core.spawn_at_worker_relocating(worker_index, future_factory)
     }
 
-    pub(crate) fn stop_with_error(&self, error: Error) -> ShutdownCause {
-        self.core.stop_with_error(error)
-    }
-
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
         self.core.access_io(worker_index, access)
     }
 
     #[cfg_attr(test, mutants::skip)] // Will cause tests to hang due to runtime never stopping.
-    pub(crate) fn stop(&self) -> ShutdownCause {
-        self.core.stop()
+    pub(crate) fn stop(&self, cause: impl Into<ShutdownCause>) -> ShutdownCause {
+        self.core.stop_inner(cause.into())
     }
 
     // Impractical to test real waiting at this API layer. We test the real waiter implementation
@@ -161,7 +133,7 @@ mod tests {
     use thread_aware::Thread;
 
     use super::*;
-    use crate::runtime::blocking_worker::BlockingPool;
+    use crate::runtime::blocking_worker::{BlockingPanicPolicy, BlockingPool};
     use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
     use crate::runtime::thread::waiter::ThreadWaiter;
     use crate::task::scheduler::Scheduler;
@@ -173,19 +145,23 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: test_threads(1).pop().unwrap(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default()),
+            blocking_worker: BlockingWorker::new(
+                BlockingPool::new(None),
+                Sink::noop(),
+                Shutdown::default(),
+                BlockingPanicPolicy::Ignore,
+            ),
         };
-        let client = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let client = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
             Shutdown::default(),
-        )));
+        ));
         let clone = client.clone();
         assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Running);
         assert_eq!(clone.shutdown().state(), crate::runtime::ShutdownState::Running);
-
-        client.stop();
+        client.stop(ShutdownCause::default());
         assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Started);
         assert_eq!(clone.shutdown().state(), crate::runtime::ShutdownState::Started);
     }
@@ -197,9 +173,14 @@ mod tests {
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let wfs = ThreadWaiter::new(vec![]);
         let threads = test_threads(2);
-        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default());
+        let blocking_worker = BlockingWorker::new(
+            BlockingPool::new(None),
+            Sink::noop(),
+            Shutdown::default(),
+            BlockingPanicPolicy::Ignore,
+        );
 
-        let dispatcher = Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherCore::new(
             wfs,
             nonempty::NonEmpty::from_vec(vec![
                 WorkerEndpoint {
@@ -218,7 +199,7 @@ mod tests {
             .unwrap(),
             Sink::noop(),
             Shutdown::default(),
-        ));
+        );
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
 
@@ -241,12 +222,22 @@ mod tests {
     fn relocate_switches_blocking_worker() {
         let threads = test_threads(2);
 
-        let source_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default());
+        let source_worker = BlockingWorker::new(
+            BlockingPool::new(None),
+            Sink::noop(),
+            Shutdown::default(),
+            BlockingPanicPolicy::Ignore,
+        );
         let destination_shutdown = Shutdown::default();
-        let destination_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), destination_shutdown.clone());
+        let destination_worker = BlockingWorker::new(
+            BlockingPool::new(None),
+            Sink::noop(),
+            destination_shutdown.clone(),
+            BlockingPanicPolicy::Ignore,
+        );
         destination_shutdown.begin(ShutdownCause::default());
 
-        let dispatcher = Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherCore::new(
             ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::from_vec(vec![
                 WorkerEndpoint {
@@ -265,7 +256,7 @@ mod tests {
             .unwrap(),
             Sink::noop(),
             Shutdown::default(),
-        ));
+        );
 
         let mut scheduler = Scheduler::new(DispatcherClient::new(dispatcher), threads[0].clone());
 
@@ -328,14 +319,19 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: threads[0].clone(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), Shutdown::default()),
+            blocking_worker: BlockingWorker::new(
+                BlockingPool::new(None),
+                Sink::noop(),
+                Shutdown::default(),
+                BlockingPanicPolicy::Ignore,
+            ),
         };
-        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
             Shutdown::default(),
-        )));
+        ));
         let thread = if registered { threads[0].clone() } else { threads[1].clone() };
         crate::io::Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher, thread)
     }

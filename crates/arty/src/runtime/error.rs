@@ -4,7 +4,7 @@
 use std::error::Error as StdError;
 use std::fmt::{self, Display};
 
-use arty_executor::ShutdownError;
+use arty_executor::{ShutdownCause, ShutdownError};
 use arty_io_core::DriverError;
 use performables::arc::Arc;
 
@@ -82,6 +82,10 @@ impl Error {
     #[cfg(any(test, feature = "macros"))]
     pub(crate) fn into_source(self) -> Box<dyn StdError + Send + Sync> {
         self.source
+    }
+
+    pub(crate) fn into_shutdown_cause(self) -> ShutdownCause {
+        ShutdownError::new(self).into()
     }
 }
 

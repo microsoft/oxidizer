@@ -12,7 +12,7 @@ use std::future::{pending, poll_fn};
 use std::sync::mpsc;
 use std::task::Poll;
 
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::{PanicPolicy, Runtime, WorkersPolicy};
 use arty::task::Builtins;
 use observed::enrichment::EnrichFutureExt;
 use observed::{Enrichment, Sink, emit, event};
@@ -230,7 +230,11 @@ fn nested_spawn_preserves_enrichment_chain() {
 fn task_outcomes_keep_the_submission_context() {
     for panics in [false, true] {
         let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
-        let runtime = runtime_with_emitter(&sink);
+        let runtime = Runtime::builder()
+            .sink(sink.clone())
+            .panic(PanicPolicy::ignore())
+            .build()
+            .expect("Failed to create runtime");
         let outcome = runtime
             .scheduler()
             .spawn_anywhere(Unaware((sink.clone(), panics)), |cx, Unaware((sink, panics))| async move {

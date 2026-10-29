@@ -9,7 +9,7 @@ use arty_executor::{ShutdownCause, ShutdownError};
 #[derive(Clone, Default, derive_more::Debug)]
 pub(crate) struct Shutdown {
     #[debug(ignore)]
-    cause: Arc<OnceLock<ShutdownCause>>,
+    inner: Arc<OnceLock<ShutdownCause>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,12 +24,12 @@ impl Shutdown {
     /// The first published cause is authoritative. Later requests do not
     /// replace it, including a default cause without an error.
     pub(crate) fn begin(&self, cause: ShutdownCause) -> bool {
-        self.cause.set(cause).is_ok()
+        self.inner.set(cause).is_ok()
     }
 
     #[must_use]
     pub(crate) fn state(&self) -> ShutdownState {
-        if self.cause.get().is_some() {
+        if self.inner.get().is_some() {
             ShutdownState::Started
         } else {
             ShutdownState::Running
@@ -38,7 +38,7 @@ impl Shutdown {
 
     #[must_use]
     pub(crate) fn cause(&self) -> Option<ShutdownCause> {
-        self.cause.get().cloned()
+        self.inner.get().cloned()
     }
 
     #[must_use]
