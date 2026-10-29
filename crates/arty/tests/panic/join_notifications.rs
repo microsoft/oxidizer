@@ -53,9 +53,7 @@ fn assert_remote_notification_preserves_outcome(panics: bool) {
         .scheduler()
         .spawn_anywhere(Unaware((gate, panics)), |_, Unaware((gate, panics))| async move {
             gate.await.unwrap();
-            if panics {
-                panic!("remote task panic");
-            }
+            assert!(!panics, "remote task panic");
             42
         });
     let mut join = pin!(join);
