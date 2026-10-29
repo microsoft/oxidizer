@@ -5,7 +5,11 @@
 //! This example uses timeout middleware.
 //!
 //! It cancels operations that take too long.
+//! When `ANVIL_EXAMPLE` is set, the example advances its clock without real waits.
 
+use std::future::poll_fn;
+use std::pin::pin;
+use std::task::Poll;
 use std::time::Duration;
 
 use layered::{Execute, Service, Stack};
@@ -14,7 +18,7 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
 use seatbelt::ResilienceContext;
 use seatbelt::timeout::Timeout;
-use tick::Clock;
+use tick::{Clock, ClockControl};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -25,7 +29,8 @@ const PROCESSING_DELAY: Duration = Duration::from_millis(500);
 async fn main() -> Result<(), AppError> {
     let meter_provider = configure_telemetry();
 
-    let clock = Clock::new_tokio();
+    let clock_control = std::env::var_os("ANVIL_EXAMPLE").is_some().then(ClockControl::new);
+    let clock = clock_control.as_ref().map_or_else(Clock::new_tokio, ClockControl::to_clock);
 
     // Create shared configuration.
     let context = ResilienceContext::new(&clock).use_metrics(&meter_provider);
@@ -53,8 +58,19 @@ async fn main() -> Result<(), AppError> {
     let service = stack.into_service();
 
     for i in 0..10 {
+        let mut response = pin!(service.execute(i.to_string()));
+        if let Some(control) = &clock_control {
+            // Register both delays before advancing only to the timeout deadline.
+            poll_fn(|cx| {
+                assert!(response.as_mut().poll(cx).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+            control.advance(TIMEOUT_DURATION);
+        }
+
         // Execute the service. The call returns a timeout error.
-        let timeout_error = service.execute(i.to_string()).await.unwrap_err();
+        let timeout_error = response.await.unwrap_err();
         println!("{i} attempt, error: {timeout_error}");
     }
 
