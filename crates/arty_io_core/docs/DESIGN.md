@@ -104,6 +104,10 @@ operations still in flight. Cleanup must make progress independently and use a
 finite limit. The runtime reports returned errors and attempts to shut down the
 remaining drivers.
 
+Contexts and their clones can outlive their driver and its host. They must
+reject new operations after the driver closes them. Keeping these contexts
+alive must not prevent runtime shutdown.
+
 ## Scope
 
 This crate defines the types shared by runtimes and I/O libraries. It does not
