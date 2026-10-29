@@ -22,6 +22,7 @@ mod factory_disposal;
 mod join_notifications;
 mod owner_drop;
 mod payload_chain;
+mod policy;
 mod rejected_borrowing;
 mod relocation;
 mod scoped;

@@ -5,8 +5,10 @@
 //!
 //! Task execution owns the result transport; join handles await its outcome.
 
+mod channel;
 mod error;
-mod remote;
+mod join_handle;
 
+pub(crate) use channel::{JoinHandlePool, Sender};
 pub use error::JoinError;
-pub use remote::JoinHandle;
+pub use join_handle::JoinHandle;

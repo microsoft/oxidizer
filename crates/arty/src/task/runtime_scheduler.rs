@@ -198,7 +198,8 @@ impl RuntimeScheduler {
     ///
     /// Uses a pool chosen by the runtime for synchronous I/O or other work
     /// that would stall an async worker.
-    /// The callback's panic is reported through its join.
+    /// A callback panic fails its join handle and follows the configured
+    /// [`PanicPolicy`](crate::runtime::PanicPolicy).
     ///
     /// Shutdown rejects new callbacks and cancels queued callbacks before they
     /// start. Already-running callbacks are allowed to finish.
@@ -410,6 +411,7 @@ mod tests {
     fn check_borrowed_future_completion(panics: bool) {
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .panic(crate::runtime::PanicPolicy::ignore())
             .build()
             .unwrap();
         let worker = runtime.scheduler().block_on(async |_| thread::current().id()).unwrap();

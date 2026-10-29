@@ -5,7 +5,7 @@
 ///
 /// This may have an impact on how the executor's owner should proceed with further processing
 /// cycles or whether that is even possible.
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Debug)]
 pub enum CycleOutcome {
     /// The processing cycle was completed and the async task executor is requesting a new
     /// processing cycle as soon as possible because it believes it already has more work to do.
@@ -32,6 +32,6 @@ pub enum CycleOutcome {
     /// The executor has completed graceful shutdown and owns no tasks.
     ///
     /// Additional processing cycles are unnecessary but harmless and continue returning
-    /// `Shutdown`. Join handles that outlive the executor may report task cancellation.
-    Shutdown,
+    /// `Shutdown` with the authoritative cause.
+    Shutdown(crate::ShutdownCause),
 }

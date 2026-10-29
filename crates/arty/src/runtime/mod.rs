@@ -19,9 +19,11 @@
 //! pending tasks and waits for blocking callbacks that have already started;
 //! keeping a scheduler does not keep the runtime running.
 //!
-//! [`PanicPolicy`] selects the intended response to a contained task panic.
-//! This release stores the policy in runtime configuration but does not yet
-//! change panic behavior. A follow-up change will enforce the selected policy.
+//! By default, the first contained panic from a user task or blocking callback
+//! starts coordinated runtime shutdown. Use [`PanicPolicy::ignore`] to keep the
+//! runtime running. The failed join still reports the panic. Arty applies this
+//! policy only while it creates or polls a task, or runs a blocking callback.
+//! It does not guarantee recovery from other panic sources.
 //!
 //! # Examples
 //!
@@ -64,7 +66,7 @@ pub use control::RuntimeControl;
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
-pub(crate) use shutdown::{Shutdown, ShutdownState};
+pub(crate) use shutdown::{Shutdown, ShutdownStart, ShutdownState};
 #[doc(inline)]
 pub use workers::Workers;
 

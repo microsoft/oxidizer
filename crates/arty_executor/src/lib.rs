@@ -23,9 +23,8 @@
 //!
 //! The executor is single-threaded. If you want to execute tasks on multiple threads, you need to
 //! run one executor on each thread. At most one executor may be alive on a thread; a replacement
-//! may be created after the previous executor is dropped. The [`remote`] module provides pooled
-//! channels for the common runtime-integration scenario of returning task results to a different
-//! thread.
+//! may be created after the previous executor is dropped. Runtime integrations provide a
+//! [`TaskCompletion`] target when they register a task.
 //!
 //! Tasks cannot be taken out of the executor - the only way for them to end is to either end
 //! naturally (with the future returning `Poll::Ready`) or for the executor to be shut down. Not
@@ -38,19 +37,16 @@
 //! Cloned task wakers may outlive their tasks. After completion or cancellation, an escaped waker
 //! remains callable but becomes an inert no-op and cannot delay executor shutdown.
 //!
-//! Join handles may outlive the executor and report shutdown cancellation through [`JoinError`].
-//! A panic in a directly registered executor task remains fail-fast.
+//! Task panics are contained. [`ExecutorBuilder::panic_policy`](crate::ExecutorBuilder::panic_policy)
+//! selects whether they start executor shutdown.
 
 mod builder;
-#[cfg(all(debug_assertions, test))]
-mod constants;
 mod cycle_outcome;
 mod executor;
 mod executor_context;
 mod executor_shared;
-mod join_handle;
 mod panic;
-pub mod remote;
+mod panic_policy;
 mod shutdown;
 mod task;
 mod task_handle;
@@ -61,26 +57,16 @@ mod telemetry;
 mod wake;
 
 pub use builder::*;
-#[cfg(all(debug_assertions, test))]
-pub(crate) use constants::*;
 pub use cycle_outcome::*;
 pub use executor::*;
 pub(crate) use executor_shared::*;
-pub use join_handle::*;
 pub use panic::*;
+pub use panic_policy::*;
 pub use shutdown::*;
+pub use task::TaskCompletion;
 pub(crate) use task::*;
 pub(crate) use task_handle::*;
 pub(crate) use task_list::*;
 pub use task_options::*;
 pub use task_set::*;
 pub(crate) use wake::*;
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod testing;
-
-#[cfg(all(debug_assertions, test))]
-mod wake_diagnostic;
-#[cfg(all(debug_assertions, test))]
-pub(crate) use wake_diagnostic::*;

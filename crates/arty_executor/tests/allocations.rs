@@ -8,38 +8,39 @@
 #![allow(clippy::unwrap_used, reason = "test code")]
 
 use std::alloc::System;
-use std::pin::{Pin, pin};
-use std::task::{Context, Poll, Waker};
+use std::cell::Cell;
+use std::rc::Rc;
 
 use alloc_tracker::{Allocator, Session};
-use arty_executor::remote::Pool as RemotePool;
-use arty_executor::{CycleOutcome, Executor, JoinError, TaskOptions, TaskSet};
+use arty_executor::{
+    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskSet, discard_task_panic_payload,
+};
 
 #[global_allocator]
 static ALLOCATOR: Allocator<System> = Allocator::system();
 
 const WARM_UP_OPERATIONS: usize = 2;
 const MEASURED_OPERATIONS: usize = 1_000;
-#[cfg(debug_assertions)]
-const EXPECTED_ALLOCATIONS_PER_OPERATION: u64 = 1;
-#[cfg(not(debug_assertions))]
 const EXPECTED_ALLOCATIONS_PER_OPERATION: u64 = 0;
-#[cfg(debug_assertions)]
-const EXPECTED_REMOTE_ALLOCATIONS_PER_OPERATION: u64 = 1;
-#[cfg(not(debug_assertions))]
-const EXPECTED_REMOTE_ALLOCATIONS_PER_OPERATION: u64 = 0;
 
-fn spawn_complete_once(executor: &mut Executor, tasks: &TaskSet) -> Poll<Result<(), JoinError>> {
-    let mut handle = pin!(tasks.add(async {}, TaskOptions::default()));
-    let _ = executor.execute_cycle();
-    handle.as_mut().poll(&mut Context::from_waker(Waker::noop()))
+#[derive(Debug)]
+struct CountCompletion(Rc<Cell<usize>>);
+
+impl TaskCompletion<()> for CountCompletion {
+    fn completed(self, _result: ()) {
+        self.0.set(self.0.get().wrapping_add(1));
+    }
+
+    fn panicked(self, panic: TaskPanicPayload, _cause: Option<ShutdownCause>) {
+        discard_task_panic_payload(panic);
+    }
+
+    fn cancelled(self, _cause: ShutdownCause) {}
 }
 
-fn spawn_remote_complete_once(executor: &mut Executor, tasks: &TaskSet, result_pool: &RemotePool) -> Poll<Result<(), JoinError>> {
-    let (result_tx, mut handle) = result_pool.channel();
-    tasks.add_with_remote_result(async {}, TaskOptions::default(), result_tx);
+fn spawn_complete_once(executor: &mut Executor, tasks: &TaskSet, completed: &Rc<Cell<usize>>) {
+    tasks.add(async {}, TaskOptions::default(), CountCompletion(Rc::clone(completed)));
     let _ = executor.execute_cycle();
-    Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop()))
 }
 
 fn allocation_totals(session: &Session, operation_name: &str) -> (u64, u64) {
@@ -53,21 +54,23 @@ fn allocation_totals(session: &Session, operation_name: &str) -> (u64, u64) {
 }
 
 #[test]
-fn spawn_and_complete_one_only_allocates_debug_bookkeeping() {
+fn spawn_and_complete_one_reuses_all_storage() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
+    let completed = Rc::new(Cell::new(0));
 
     for _ in 0..WARM_UP_OPERATIONS {
-        assert_eq!(spawn_complete_once(&mut executor, &tasks), Poll::Ready(Ok(())));
+        spawn_complete_once(&mut executor, &tasks, &completed);
     }
-    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+    completed.set(0);
 
     let session = Session::new().no_stdout().no_file();
     let operation = session.operation("spawn_and_complete_one");
     {
         let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
         for _ in 0..MEASURED_OPERATIONS {
-            assert_eq!(spawn_complete_once(&mut executor, &tasks), Poll::Ready(Ok(())));
+            spawn_complete_once(&mut executor, &tasks, &completed);
         }
     }
 
@@ -75,52 +78,15 @@ fn spawn_and_complete_one_only_allocates_debug_bookkeeping() {
     assert_eq!(
         allocations,
         EXPECTED_ALLOCATIONS_PER_OPERATION * MEASURED_OPERATIONS as u64,
-        "warmed spawn-and-complete operations must allocate only one debug bookkeeping object and nothing in release builds"
+        "warmed spawn-and-complete operations must not allocate"
     );
-    #[cfg(not(debug_assertions))]
     assert_eq!(
         bytes, 0,
         "warmed task registration, polling, result consumption, and reclamation must reuse existing storage"
     );
-    #[cfg(debug_assertions)]
-    assert_ne!(bytes, 0, "debug bookkeeping must be visible to the allocation tracker");
 
-    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-    executor.begin_shutdown(arty_executor::ShutdownCause::default());
-    assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
-}
-
-#[test]
-fn remote_spawn_reuses_cross_thread_result_channel_storage() {
-    let mut executor = Executor::builder().build();
-    let tasks = executor.tasks();
-    let result_pool = RemotePool::new();
-
-    for _ in 0..WARM_UP_OPERATIONS {
-        assert_eq!(spawn_remote_complete_once(&mut executor, &tasks, &result_pool), Poll::Ready(Ok(())));
-    }
-    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
-
-    let session = Session::new().no_stdout().no_file();
-    let operation = session.operation("spawn_remote_complete_one");
-    {
-        let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
-        for _ in 0..MEASURED_OPERATIONS {
-            assert_eq!(spawn_remote_complete_once(&mut executor, &tasks, &result_pool), Poll::Ready(Ok(())));
-        }
-    }
-
-    let (allocations, bytes) = allocation_totals(&session, "spawn_remote_complete_one");
-    assert_eq!(
-        allocations,
-        EXPECTED_REMOTE_ALLOCATIONS_PER_OPERATION * MEASURED_OPERATIONS as u64,
-        "warmed remote registration must allocate only debug bookkeeping and nothing in release builds"
-    );
-    #[cfg(not(debug_assertions))]
-    assert_eq!(bytes, 0, "warmed remote result channels must reuse pooled storage");
-    #[cfg(debug_assertions)]
-    assert_ne!(bytes, 0, "debug bookkeeping must be visible to the allocation tracker");
-
-    executor.begin_shutdown(arty_executor::ShutdownCause::default());
-    assert_eq!(executor.execute_cycle(), CycleOutcome::Shutdown);
+    assert_eq!(completed.get(), MEASURED_OPERATIONS);
+    assert!(!executor.has_tasks());
+    executor.shutdown().trigger(arty_executor::ShutdownCause::default());
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)));
 }

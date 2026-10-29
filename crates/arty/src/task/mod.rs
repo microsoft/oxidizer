@@ -39,15 +39,15 @@
 //! and [thread awareness](crate::documentation::thread_awareness) for examples.
 
 pub(crate) mod builtins;
-pub(crate) mod execution;
-pub(crate) mod join;
+pub(crate) mod handle;
+pub(crate) mod preparation;
 mod runtime_scheduler;
 pub(crate) mod scheduler;
 
 #[doc(inline)]
 pub use builtins::Builtins;
 #[doc(inline)]
-pub use join::{JoinError, JoinHandle};
+pub use handle::{JoinError, JoinHandle};
 #[doc(inline)]
 pub use runtime_scheduler::RuntimeScheduler;
 #[doc(inline)]

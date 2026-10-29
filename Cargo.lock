@@ -293,8 +293,6 @@ dependencies = [
  "criterion",
  "data_privacy",
  "derive_more",
- "events_once",
- "foldhash 0.2.0",
  "gungraun",
  "metabench",
  "mutants",
@@ -305,9 +303,7 @@ dependencies = [
  "performables",
  "pin-project",
  "plurality",
- "scopeguard",
  "static_assertions",
- "testing_aids",
  "thread_aware_core",
  "tick",
 ]

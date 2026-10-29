@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::task::{self, Poll};
 
 use arty_executor::ShutdownCause;
-use arty_executor::remote::JoinHandle as RemoteJoinHandle;
+use events_once::PooledReceiver;
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
@@ -75,7 +75,10 @@ enum State<R>
 where
     R: Send + 'static,
 {
-    Pending(RemoteJoinHandle<R>),
+    Pending {
+        rx: PooledReceiver<Result<R, JoinError>>,
+        shutdown: Shutdown,
+    },
     Error(Option<ImmediateError>),
     Completed,
 }
@@ -98,9 +101,9 @@ impl<R> JoinHandle<R>
 where
     R: Send + 'static,
 {
-    pub(crate) fn new(inner: RemoteJoinHandle<R>) -> Self {
+    pub(super) fn new(rx: PooledReceiver<Result<R, JoinError>>, shutdown: Shutdown) -> Self {
         Self {
-            state: State::Pending(inner),
+            state: State::Pending { rx, shutdown },
             blocking_pool: None,
             relocation: None,
         }
@@ -166,17 +169,18 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         assert_not_current_blocking_pool(this.blocking_pool.as_ref());
+
         let mut result = match &mut this.state {
-            State::Pending(inner) => match Pin::new(inner).poll(cx) {
-                Poll::Ready(result) => Poll::Ready(result.map_err(JoinError::from_executor)),
-                Poll::Pending => Poll::Pending,
-            },
+            State::Pending { rx, shutdown } => Pin::new(rx)
+                .poll(cx)
+                .map(|result| result.unwrap_or_else(|_| Err(JoinError::shutdown(shutdown.error())))),
             State::Error(error) => Poll::Ready(Err(error
                 .take()
                 .expect("an immediate join error is returned exactly once")
                 .into_join_error())),
             State::Completed => unreachable!("JoinHandle polled after completion"),
         };
+
         if let Poll::Ready(Ok(value)) = &mut result
             && let Some(relocation) = this.relocation.as_ref()
             && let Some(destination) = Scheduler::current_thread()
