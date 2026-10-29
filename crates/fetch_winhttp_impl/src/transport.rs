@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::OpaqueMemory;
 use fetch::options::TransportOptions;
 use fetch::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RecoveryInfo};
 use layered::Service;
@@ -41,7 +41,7 @@ impl WinHttpTransport {
                 session: Arc::new(session),
                 body_builder: inputs.body_builder,
                 clock: inputs.clock,
-                global_pool: inputs.global_pool,
+                memory: inputs.memory,
                 contexts: Mutex::new(plurality::Pool::new()),
                 options: inputs.options,
                 tls: inputs.tls,
@@ -68,9 +68,9 @@ impl Service<HttpRequest> for WinHttpTransport {
             TransportState::Ready(ready) => match RequestDriver::new(
                 &mut input,
                 Arc::clone(&ready.session),
-                ready.body_builder.clone(),
+                &ready.body_builder,
                 &ready.clock,
-                ready.global_pool.clone(),
+                ready.memory.clone(),
                 &ready.contexts,
                 &ready.options,
                 &ready.tls,
@@ -121,13 +121,14 @@ enum TransportState {
 ///
 /// These resources belong to one materialized thread and pool slot: the session
 /// and its native connection pool, response-body services, read-buffer pool,
-/// request-context pool, and finalized options. A [`RequestDriver`] clones or
-/// rents what one request needs and owns its per-request handles and lifecycle.
+/// request-context pool, and finalized options. A [`RequestDriver`] borrows its
+/// body builder and owns its per-request handles and lifecycle. The response
+/// reader receives an owned provider because it can outlive the transport call.
 struct ReadyTransport {
     session: Arc<WinHttpSession>,
     body_builder: HttpBodyBuilder,
     clock: Clock,
-    global_pool: GlobalPool,
+    memory: OpaqueMemory,
     contexts: ContextPool,
     options: TransportOptions,
     tls: WinHttpTlsConfig,
@@ -152,7 +153,7 @@ struct FailedTransport {
 pub(crate) struct TransportInputs {
     pub(crate) body_builder: HttpBodyBuilder,
     pub(crate) clock: Clock,
-    pub(crate) global_pool: GlobalPool,
+    pub(crate) memory: OpaqueMemory,
     pub(crate) sink: Sink,
     pub(crate) options: TransportOptions,
     pub(crate) tls: WinHttpTlsConfig,
@@ -168,7 +169,7 @@ mod tests {
     use std::time::Duration;
 
     use bytesbuf::BytesView;
-    use bytesbuf::mem::GlobalPool;
+    use bytesbuf::mem::{GlobalPool, OpaqueMemory};
     use fetch::options::TransportOptions;
     use fetch::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, Recovery, RecoveryInfo};
     use http_extensions::HttpBodyOptions;
@@ -333,7 +334,7 @@ mod tests {
         let closes = Arc::new(AtomicUsize::new(0));
         let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Body, 0);
         let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
-        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock());
+        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock());
         let body_error = HttpError::unavailable("upload stream failed").with_request(request("https://unrelated.example/attached-by-body"));
         let body = body_builder.stream(
             futures::stream::iter([Err::<BytesView, _>(body_error)]),
@@ -373,7 +374,7 @@ mod tests {
         let closes = Arc::new(AtomicUsize::new(0));
         let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Send, 0);
         let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
-        let memory = GlobalPool::new();
+        let memory = OpaqueMemory::new(GlobalPool::new());
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock());
         let body = body_builder.stream(
             futures::stream::iter([Ok(BytesView::copied_from_slice(b"streaming", &memory))]),
@@ -422,7 +423,7 @@ mod tests {
         let closes = Arc::new(AtomicUsize::new(0));
         let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Write, 10);
         let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
-        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock());
+        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock());
         let mut input = http::Request::builder()
             .method(http::Method::POST)
             .uri("https://example.com/upload")
@@ -572,12 +573,12 @@ mod tests {
     }
 
     fn inputs_with_clock(sink: Sink, clock: Clock) -> TransportInputs {
-        let global_pool = GlobalPool::new();
+        let memory = OpaqueMemory::new(GlobalPool::new());
 
         TransportInputs {
-            body_builder: HttpBodyBuilder::new(global_pool.clone(), &clock),
+            body_builder: HttpBodyBuilder::new(memory.clone(), &clock),
             clock,
-            global_pool,
+            memory,
             sink,
             options: TransportOptions::default(),
             tls: WinHttpTlsConfig::default(),
@@ -585,7 +586,7 @@ mod tests {
     }
 
     fn request(uri: &str) -> HttpRequest {
-        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock());
+        let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock());
         HttpRequestBuilder::new(&body_builder).get(uri).build().unwrap()
     }
 

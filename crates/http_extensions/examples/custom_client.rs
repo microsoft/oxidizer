@@ -5,7 +5,7 @@
 //!
 //! The client returns the data that it receives.
 
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use http_extensions::{HttpBodyBuilder, HttpRequest, HttpRequestBuilderExt, HttpResponse, HttpResponseBuilder, StatusExt};
 use layered::Service;
 use tick::Clock;
@@ -44,7 +44,7 @@ impl AsRef<HttpBodyBuilder> for CustomClient {
 impl Default for CustomClient {
     fn default() -> Self {
         Self {
-            builder: HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_tokio()),
+            builder: HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &Clock::new_tokio()),
         }
     }
 }
