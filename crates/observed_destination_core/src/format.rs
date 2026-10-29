@@ -341,9 +341,13 @@ fn write_interpolated(w: &mut (impl Write + ?Sized), template: &str, record: &Sd
         }
 
         let Some((placeholder, remainder)) = remaining[1..].split_once('}') else {
-            w.write_all(b"{")?;
-            remaining = &remaining[1..];
-            continue;
+            // No closing braces remain; only escaped opening braces need decoding.
+            while let Some((literal, remainder)) = remaining.split_once("{{") {
+                w.write_all(literal.as_bytes())?;
+                w.write_all(b"{")?;
+                remaining = remainder;
+            }
+            return w.write_all(remaining.as_bytes());
         };
 
         if let Some((_, value)) = record
