@@ -910,6 +910,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "bon"
+version = "3.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a05442cd7005532d0cfedec676b5b9333d2b4c7c3afabe2b1a9ce2742fbe2ee6"
+dependencies = [
+ "bon-macros",
+]
+
+[[package]]
+name = "bon-macros"
+version = "3.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93833e97ac7c46ba97045afcf247238c27057538fcf2f06344662ddd5f567be6"
+dependencies = [
+ "darling",
+ "ident_case",
+ "prettyplease 0.3.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
+]
+
+[[package]]
 name = "brotli"
 version = "9.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3920,6 +3943,19 @@ dependencies = [
  "opentelemetry_sdk",
  "performables",
  "static_assertions",
+]
+
+[[package]]
+name = "observed_destination_stdout"
+version = "0.1.0"
+dependencies = [
+ "bon",
+ "log",
+ "observed_destination_core",
+ "opentelemetry",
+ "opentelemetry-stdout",
+ "opentelemetry_sdk",
+ "performables",
 ]
 
 [[package]]
