@@ -10,9 +10,9 @@ static CALIBRATION: std::sync::OnceLock<Calibration> = std::sync::OnceLock::new(
 
 /// Maps coarse platform timestamps into one process-wide [`Instant`] comparison domain.
 ///
-/// The platform clocks are non-decreasing, so translating every sample from the same calibration
-/// pair preserves ordering and keeps values comparable when clocks or stopwatches move between
-/// threads. Equal platform samples produce equal instants.
+/// Platform clocks do not decrease. One calibration pair maps all samples, so
+/// values stay ordered and comparable across threads. Equal samples produce
+/// equal instants.
 #[cfg(all(any(target_os = "linux", windows), not(miri)))]
 #[derive(Clone, Copy, Debug)]
 struct Calibration {

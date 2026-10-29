@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to integrate `SystemTime` with serializable data
-//! structures for storage and retrieval.
+//! This example stores `SystemTime` in a serializable data structure.
 
 use std::time::{Duration, SystemTime};
 
@@ -39,10 +38,9 @@ async fn main() -> Result<(), ohno::AppError> {
     Ok(())
 }
 
-/// A data structure that caches information with timestamp tracking.
+/// Cached data with a last-access timestamp.
 ///
-/// This struct demonstrates how to work with serializable `SystemTime` values
-/// using the formatting types provided by the `tick` crate.
+/// The `UnixSeconds` format stores the timestamp in serialized data.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct CachedData {
     id: u32,
@@ -55,7 +53,7 @@ pub struct CachedData {
 impl CachedData {
     const EXPIRATION: Duration = Duration::from_hours(1);
 
-    /// Creates a new cached data instance with the current timestamp.
+    /// Creates cached data with the current clock time.
     #[must_use]
     pub fn new(id: u32, data: String, clock: &Clock) -> Self {
         Self {
@@ -65,19 +63,19 @@ impl CachedData {
         }
     }
 
-    /// Returns the timestamp when this data was last accessed.
+    /// Returns the last-access time.
     #[must_use]
     pub fn last_access(&self) -> SystemTime {
         self.last_access.into()
     }
 
-    /// Updates the data and sets the last access time to the current timestamp.
+    /// Updates the data and records the current clock time.
     pub fn update(&mut self, data: String, clock: &Clock) {
         self.data = data;
         self.last_access = clock.system_time_as::<UnixSeconds>();
     }
 
-    /// Checks if the cached data has expired based on the expiration duration.
+    /// Returns whether the cached data expired.
     #[must_use]
     pub fn is_expired(&self, clock: &Clock) -> bool {
         let diff = clock

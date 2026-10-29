@@ -120,7 +120,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use bytesbuf::mem::{CallbackMemory, GlobalPool};
-    use thread_aware::{Thread, ThreadAware};
+    use thread_aware::unaware;
 
     use super::*;
 
@@ -133,35 +133,16 @@ mod tests {
         }
     }
 
-    /// Records reservations made by the unit-test memory provider.
-    #[derive(Clone, Debug)]
-    struct CountingMemoryData {
-        inner: GlobalPool,
-        reservations: Arc<AtomicUsize>,
-    }
-
-    impl ThreadAware for CountingMemoryData {
-        fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-            self.inner.relocate(source, destination);
-        }
-    }
-
-    /// Counts a reservation and forwards it to the provider that supplies test memory.
-    fn count_reserve(data: &CountingMemoryData, min_bytes: usize) -> BytesBuf {
-        // The counter and its loads use SeqCst so reservation observations share one
-        // global order across test threads. The total is the only state under observation.
-        data.reservations.fetch_add(1, Ordering::SeqCst);
-        data.inner.reserve(min_bytes)
-    }
-
     /// Creates an observable memory provider for encoding unit tests.
     fn counting_memory() -> (OpaqueMemory, Arc<AtomicUsize>) {
         let reservations = Arc::new(AtomicUsize::new(0));
-        let data = CountingMemoryData {
-            inner: GlobalPool::new(),
-            reservations: Arc::clone(&reservations),
-        };
-        (OpaqueMemory::new(CallbackMemory::new(data, count_reserve)), reservations)
+        // The shared atomic counter has no thread-local state to relocate.
+        let provider = CallbackMemory::new(unaware(Arc::clone(&reservations)), |counter, min_bytes| {
+            // Match the assertion loads so reservation observations share one global order.
+            counter.fetch_add(1, Ordering::SeqCst);
+            GlobalPool::new().reserve(min_bytes)
+        });
+        (OpaqueMemory::new(provider), reservations)
     }
 
     #[test]

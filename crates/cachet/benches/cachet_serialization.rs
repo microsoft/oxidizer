@@ -8,7 +8,7 @@
 use std::hint::black_box;
 
 use alloc_tracker::{Allocator, Session};
-use benchmarking::time_sample;
+use benchmarking::{time_sample, time_sample_with_inputs};
 use bytesbuf::BytesView;
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use cachet::{Cache, CacheEntry, CacheTier, Error, InsertOutcome};
@@ -60,10 +60,13 @@ fn serialization(c: &mut Criterion) {
         let allocations = session.operation(format!("insert/{size}"));
         group.bench_with_input(BenchmarkId::new("insert", size), &size, |b, _| {
             b.iter_custom(|iters| {
-                let _measurement = allocations.measure_thread().iterations(iters);
-                time_sample(iters, || {
-                    block_on(cache.insert(black_box(key.clone()), black_box(payload.clone()))).unwrap()
-                })
+                // Input copies are setup, not serialization work (docs/benchmarks.md).
+                let inputs = (0..iters).map(|_| (key.clone(), payload.clone())).collect();
+                time_sample_with_inputs(
+                    inputs,
+                    |sample_iters| allocations.measure_thread().iterations(sample_iters),
+                    |(key, payload)| block_on(cache.insert(black_box(std::mem::take(key)), black_box(std::mem::take(payload)))).unwrap(),
+                )
             });
         });
         let allocations = session.operation(format!("get/{size}"));

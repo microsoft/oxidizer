@@ -3,7 +3,8 @@
 
 //! Public custom-runtime driver behavior.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::future::Future as _;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::task::{Context, RawWaker, RawWakerVTable, Wake, Waker};
 use std::thread;
@@ -11,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::{ThreadAware, ThreadBuilder};
-use tick::Clock;
 use tick::runtime::InactiveClock;
+use tick::{Clock, Timer};
 
 #[derive(Debug)]
 struct CountingWake(AtomicUsize);
@@ -33,6 +34,19 @@ struct SharedCountingWake(Arc<AtomicUsize>);
 impl Wake for SharedCountingWake {
     fn wake(self: Arc<Self>) {
         self.0.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[derive(Debug)]
+struct DropWake(Arc<AtomicBool>);
+
+impl Wake for DropWake {
+    fn wake(self: Arc<Self>) {}
+}
+
+impl Drop for DropWake {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
     }
 }
 
@@ -94,10 +108,84 @@ impl Drop for ClockOwningWake {
 }
 
 #[test]
+fn delay_completes_when_the_driver_consumes_its_timer_during_waker_replacement() {
+    let (clock, mut driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+    let mut delay = std::pin::pin!(clock.delay(Duration::from_mins(1)));
+    let first_waker = Waker::noop().clone();
+    let mut first_context = Context::from_waker(&first_waker);
+    let before_registration = Instant::now();
+    assert!(delay.as_mut().poll(&mut first_context).is_pending());
+    let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
+    let replacement_waker = clone_hook_waker(move || {
+        assert_eq!(driver.advance_timers(deadline).unwrap(), None);
+    });
+    let mut replacement_context = Context::from_waker(&replacement_waker);
+
+    assert!(delay.as_mut().poll(&mut replacement_context).is_ready());
+}
+
+#[test]
+fn periodic_timer_yields_when_the_driver_consumes_its_timer_during_waker_replacement() {
+    let (clock, mut driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+    let mut timer = Timer::new(&clock, Duration::from_mins(1));
+    let mut next = std::pin::pin!(timer.next());
+    let first_waker = Waker::noop().clone();
+    let mut first_context = Context::from_waker(&first_waker);
+    let before_registration = Instant::now();
+    assert!(next.as_mut().poll(&mut first_context).is_pending());
+    let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
+    let replacement_waker = clone_hook_waker(move || {
+        assert_eq!(driver.advance_timers(deadline).unwrap(), None);
+    });
+    let mut replacement_context = Context::from_waker(&replacement_waker);
+
+    assert!(next.as_mut().poll(&mut replacement_context).is_ready());
+}
+
+#[test]
+fn driver_consumption_releases_a_cancelled_delay_waker() {
+    let (clock, mut driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+    let dropped = Arc::new(AtomicBool::new(false));
+    let before_registration = Instant::now();
+    let mut delay = clock.delay(Duration::from_mins(1));
+    {
+        let waker = Waker::from(Arc::new(DropWake(Arc::clone(&dropped))));
+        let mut context = Context::from_waker(&waker);
+        assert!(std::pin::Pin::new(&mut delay).poll(&mut context).is_pending());
+    }
+    let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
+
+    assert_eq!(driver.advance_timers(deadline).unwrap(), None);
+
+    assert!(dropped.load(Ordering::Relaxed));
+    drop(delay);
+}
+
+#[test]
+fn driver_consumption_releases_a_cancelled_timer_waker() {
+    let (clock, mut driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+    let dropped = Arc::new(AtomicBool::new(false));
+    let before_registration = Instant::now();
+    let mut timer = Timer::new(&clock, Duration::from_mins(1));
+    {
+        let waker = Waker::from(Arc::new(DropWake(Arc::clone(&dropped))));
+        let mut context = Context::from_waker(&waker);
+        let mut next = std::pin::pin!(timer.next());
+        assert!(next.as_mut().poll(&mut context).is_pending());
+    }
+    let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
+
+    assert_eq!(driver.advance_timers(deadline).unwrap(), None);
+
+    assert!(dropped.load(Ordering::Relaxed));
+    drop(timer);
+}
+
+#[test]
 fn dropping_the_final_clock_owner_wakes_the_driver() {
     let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
     let driver_waker = Waker::from(Arc::clone(&wake_count));
-    let (clock, _driver) = InactiveClock::default().activate(driver_waker);
+    let (clock, _driver) = InactiveClock::new_isolated().activate(driver_waker);
 
     drop(clock);
 
@@ -109,7 +197,7 @@ fn concurrent_final_owner_drops_wake_the_driver_once() {
     const OWNER_COUNT: usize = 8;
     let wake_count = Arc::new(CountingWake(AtomicUsize::new(0)));
     let driver_waker = Waker::from(Arc::clone(&wake_count));
-    let (clock, _driver) = InactiveClock::default().activate(driver_waker);
+    let (clock, _driver) = InactiveClock::new_isolated().activate(driver_waker);
     let release = Arc::new(Barrier::new(OWNER_COUNT + 1));
     let owners: [_; OWNER_COUNT] = std::array::from_fn(|_| clock.clone());
     drop(clock);
@@ -134,7 +222,7 @@ fn concurrent_final_owner_drops_wake_the_driver_once() {
 
 #[test]
 fn driver_reports_clock_gone_only_after_the_final_clone_is_dropped() {
-    let (clock, mut driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let (clock, mut driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
     let final_clone = clock.clone();
     drop(clock);
 
@@ -146,7 +234,7 @@ fn driver_reports_clock_gone_only_after_the_final_clone_is_dropped() {
 
 #[test]
 fn relocating_the_only_clock_owner_finishes_its_previous_driver() {
-    let (mut clock, mut previous_driver) = InactiveClock::default().activate(Waker::noop().clone());
+    let (mut clock, mut previous_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
     let builder = ThreadBuilder::default();
     let source = builder.build(thread::current().id());
     let destination_id = thread::spawn(|| thread::current().id()).join().unwrap();
@@ -162,7 +250,7 @@ fn relocating_the_only_clock_owner_finishes_its_previous_driver() {
 fn dropping_a_newer_driver_restores_notifications_to_the_surviving_driver() {
     let first_wakes = Arc::new(AtomicUsize::new(0));
     let second_wakes = Arc::new(AtomicUsize::new(0));
-    let root = InactiveClock::default();
+    let root = InactiveClock::new_isolated();
     let (first_clock, first_driver) = root
         .clone()
         .activate(Waker::from(Arc::new(SharedCountingWake(Arc::clone(&first_wakes)))));
@@ -183,7 +271,7 @@ fn dropping_a_newer_driver_restores_notifications_to_the_surviving_driver() {
 fn all_live_drivers_receive_first_timer_and_final_owner_notifications() {
     let first_wakes = Arc::new(AtomicUsize::new(0));
     let second_wakes = Arc::new(AtomicUsize::new(0));
-    let root = InactiveClock::default();
+    let root = InactiveClock::new_isolated();
     let (first_clock, first_driver) = root
         .clone()
         .activate(Waker::from(Arc::new(SharedCountingWake(Arc::clone(&first_wakes)))));
@@ -205,7 +293,7 @@ fn all_live_drivers_receive_first_timer_and_final_owner_notifications() {
 
 #[test]
 fn unregistering_a_driver_drops_its_clock_owning_waker_outside_the_registry_lock() {
-    let root = InactiveClock::default();
+    let root = InactiveClock::new_isolated();
     let (owned_clock, first_driver) = root.clone().activate(Waker::noop().clone());
     let clock_owning_waker = Waker::from(Arc::new(ClockOwningWake {
         clock: Mutex::new(Some(owned_clock)),
@@ -227,7 +315,7 @@ fn unregistering_a_driver_drops_its_clock_owning_waker_outside_the_registry_lock
 
 #[test]
 fn notifying_drivers_does_not_clone_custom_wakers_under_the_registry_lock() {
-    let root = InactiveClock::default();
+    let root = InactiveClock::new_isolated();
     let (first_clock, first_driver) = root.clone().activate(Waker::noop().clone());
     let first_driver = Arc::new(Mutex::new(Some(first_driver)));
     let first_driver_for_hook = Arc::clone(&first_driver);
