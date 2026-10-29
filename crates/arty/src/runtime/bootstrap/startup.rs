@@ -640,7 +640,7 @@ mod tests {
                 monitor_options,
                 panic_policy: crate::runtime::PanicPolicy::default(),
             },
-            &InactiveClock::default(),
+            &InactiveClock::new_isolated(),
             sink,
             &ThreadBuilder::default(),
             processors,
