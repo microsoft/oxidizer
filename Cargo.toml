@@ -181,6 +181,7 @@ jiff = { version = "0.2.21", default-features = false }
 lasso = { version = "0.7.3", default-features = false }
 layered = { path = "crates/layered", default-features = false, version = "0.3.9" }
 libc = { version = "0.2.178", default-features = false }
+log = { version = "0.4.34", default-features = false }
 loom = { version = "0.7.2", default-features = false }
 many_cpus = { version = "2.1.0", default-features = false }
 matchit = { version = "0.9.2", default-features = false }

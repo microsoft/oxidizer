@@ -5,8 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 use std::thread::ThreadId;
 
-use arty_executor::remote::Pool as RemotePool;
-use arty_executor::{ShutdownCause, ShutdownError, TaskPlacement};
+use arty_executor::{ShutdownCause, TaskPlacement};
 use foldhash::HashMap;
 use nonempty::NonEmpty;
 use observed::emit;
@@ -21,8 +20,8 @@ use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
 use crate::runtime::{Error, Workers};
 use crate::task::Builtins;
-use crate::task::execution::prepare_remote;
-use crate::task::join::JoinHandle;
+use crate::task::handle::{JoinHandle, JoinHandlePool};
+use crate::task::preparation::prepare_remote;
 
 #[derive(Debug)]
 pub(crate) struct WorkerEndpoint {
@@ -57,7 +56,9 @@ impl From<WorkerIndex> for usize {
 pub(crate) struct DispatcherCore {
     wait_for_shutdown: ThreadWaiter,
 
-    shutdown: Shutdown,
+    // Completion senders can publish the cause before dispatcher coordination.
+    // This separate flag elects the one worker broadcaster.
+    shutdown_signaled: AtomicBool,
     stopped_reported: AtomicBool,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
@@ -74,7 +75,7 @@ pub(crate) struct DispatcherCore {
     /// restored on every poll of spawned futures.
     sink: observed::Sink,
 
-    remote_results: RemotePool,
+    remote_results: JoinHandlePool,
 }
 
 impl DispatcherCore {
@@ -83,7 +84,7 @@ impl DispatcherCore {
         worker_endpoints: NonEmpty<WorkerEndpoint>,
         sink: observed::Sink,
         shutdown: Shutdown,
-    ) -> Self {
+    ) -> Arc<Self> {
         let owner = worker_endpoints.first().thread.owner();
         assert!(
             worker_endpoints.iter().all(|endpoint| endpoint.thread.owner() == owner),
@@ -106,37 +107,26 @@ impl DispatcherCore {
             worker_endpoints.len(),
             "each runtime worker must have a distinct thread ID"
         );
-        Self {
+        Arc::new(Self {
             wait_for_shutdown,
-            shutdown,
+            shutdown_signaled: AtomicBool::new(false),
             stopped_reported: AtomicBool::new(false),
             worker_endpoints,
             workers,
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
             sink,
-            remote_results: RemotePool::new(),
-        }
-    }
-
-    /// Stops the runtime. Safe to call multiple times.
-    #[cfg_attr(test, mutants::skip)] // Removing the public stop boundary strands runtime workers before tests can assert.
-    pub(crate) fn stop(&self) -> ShutdownCause {
-        self.stop_inner(ShutdownCause::default())
-    }
-
-    pub(crate) fn stop_with_error(&self, error: Error) -> ShutdownCause {
-        self.stop_inner(ShutdownError::new(error).into())
+            remote_results: JoinHandlePool::new(shutdown),
+        })
     }
 
     #[cfg_attr(test, mutants::skip)] // Tests hang if mutation removes the shutdown signal or worker notifications.
-    fn stop_inner(&self, cause: ShutdownCause) -> ShutdownCause {
-        let started = self.shutdown.begin(cause);
-        let cause = self
-            .shutdown
-            .cause()
-            .expect("stop_inner begins shutdown before reading the authoritative cause");
-        if !started {
+    pub(crate) fn stop_inner(&self, cause: ShutdownCause) -> ShutdownCause {
+        self.shutdown().begin(cause);
+        let cause = self.shutdown().cause().unwrap_or_default();
+        // Shutdown stores the cause independently. This atomic only elects the
+        // broadcaster. Observing `true` does not mean notification is complete.
+        if self.shutdown_signaled.swap(true, Ordering::AcqRel) {
             return cause;
         }
 
@@ -217,7 +207,7 @@ impl DispatcherCore {
     }
 
     pub(crate) const fn shutdown(&self) -> &Shutdown {
-        &self.shutdown
+        self.remote_results.shutdown()
     }
 
     #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
@@ -285,13 +275,7 @@ impl DispatcherCore {
             .expect("worker index must identify a registered runtime worker");
         // Capture enrichment context on the calling thread before sending to the worker.
         let parent_task_enrichment = self.sink.transfer_context();
-        let (future_factory, join_handle) = prepare_remote(
-            &self.remote_results,
-            future_factory,
-            parent_task_enrichment,
-            placement,
-            self.shutdown.clone(),
-        );
+        let (future_factory, join_handle) = prepare_remote(&self.remote_results, future_factory, parent_task_enrichment, placement);
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
@@ -324,10 +308,11 @@ mod tests {
     use std::task;
     use std::task::Poll;
 
+    use arty_executor::ShutdownError;
     use testing_aids::TEST_TIMEOUT;
 
     use super::*;
-    use crate::runtime::blocking_worker::BlockingPool;
+    use crate::runtime::blocking_worker::{BlockingPanicPolicy, BlockingPool};
     use crate::runtime::dispatch::{DispatcherClient, test_threads};
 
     #[cfg_attr(test, mutants::skip)]
@@ -336,7 +321,12 @@ mod tests {
             command_tx: tx,
             waker: Waker::noop().clone(),
             thread: thread.clone(),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), observed::Sink::noop(), Shutdown::default()),
+            blocking_worker: BlockingWorker::new(
+                BlockingPool::new(None),
+                observed::Sink::noop(),
+                Shutdown::default(),
+                BlockingPanicPolicy::Ignore,
+            ),
         }
     }
 
@@ -464,16 +454,16 @@ mod tests {
     fn shutdown_state_is_shared_with_dispatcher_client() {
         let (tx, _rx) = channel::unbounded();
         let threads = test_threads(1);
-        let core = Arc::new(DispatcherCore::new(
+        let core = DispatcherCore::new(
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
             Shutdown::default(),
-        ));
+        );
         let client = DispatcherClient::new(Arc::clone(&core));
         let shutdown = client.shutdown();
 
-        core.stop();
+        core.stop_inner(ShutdownCause::default());
 
         assert_eq!(shutdown.state(), ShutdownState::Started);
     }
@@ -488,7 +478,7 @@ mod tests {
             observed::Sink::noop(),
             Shutdown::default(),
         );
-        dispatcher.stop();
+        dispatcher.stop_inner(ShutdownCause::default());
         let invoked = Arc::new(AtomicBool::new(false));
 
         assert!(
@@ -518,7 +508,7 @@ mod tests {
             observed::Sink::noop(),
             Shutdown::default(),
         );
-        dispatcher.stop_with_error(Error::worker_panicked());
+        dispatcher.stop_inner(ShutdownError::new(Error::worker_panicked()).into());
 
         let mut join = pin!(dispatcher.spawn(|_| async {}));
         let Poll::Ready(Err(error)) = join.as_mut().poll(&mut task::Context::from_waker(Waker::noop())) else {
@@ -550,13 +540,13 @@ mod tests {
         assert_eq!(drain_rx(&worker1_rx).len(), 0);
         assert_eq!(drain_rx(&worker2_rx).len(), 0);
 
-        dispatcher.stop();
+        dispatcher.stop_inner(ShutdownCause::default());
 
         assert_eq!(drain_rx(&worker1_rx).len(), 1);
         assert_eq!(drain_rx(&worker2_rx).len(), 1);
 
         // Call for a stop twice - we expect no further stop commands to be sent.
-        dispatcher.stop();
+        dispatcher.stop_inner(ShutdownCause::default());
 
         assert_eq!(drain_rx(&worker1_rx).len(), 0);
         assert_eq!(drain_rx(&worker2_rx).len(), 0);
@@ -578,7 +568,7 @@ mod tests {
             Shutdown::default(),
         );
 
-        dispatcher.stop();
+        dispatcher.stop_inner(ShutdownCause::default());
 
         // Drain the shutdown command.
         _ = worker_rx.recv_timeout(TEST_TIMEOUT).unwrap();
@@ -594,6 +584,43 @@ mod tests {
             panic!("a disconnected join must report shutdown");
         };
         assert!(error.is_shutdown());
+    }
+
+    fn shutdown_dispatcher() -> (Arc<DispatcherCore>, DispatcherClient, Shutdown) {
+        let (tx, _rx) = channel::unbounded();
+        let thread = test_threads(1).remove(0);
+        let shutdown = Shutdown::default();
+        let core = DispatcherCore::new(
+            ThreadWaiter::new(Vec::new()),
+            NonEmpty::new(endpoint(tx, &thread)),
+            observed::Sink::noop(),
+            shutdown.clone(),
+        );
+        let client = DispatcherClient::new(Arc::clone(&core));
+        (core, client, shutdown)
+    }
+
+    #[test]
+    fn published_shutdown_cause_is_shared_with_dispatcher_and_client() {
+        let (core, client, shutdown) = shutdown_dispatcher();
+        let cause = ShutdownCause::panic();
+        let expected = cause.as_error().unwrap().clone();
+
+        shutdown.begin(cause);
+
+        for state in [core.shutdown(), client.shutdown(), &shutdown] {
+            assert_eq!(state.state(), ShutdownState::Started);
+            assert!(std::ptr::addr_eq(state.error().unwrap().inner(), expected.inner()));
+        }
+    }
+
+    #[test]
+    fn direct_shutdown_publication_starts_shutdown() {
+        let (core, _client, shutdown) = shutdown_dispatcher();
+
+        core.shutdown().begin(ShutdownCause::default());
+
+        assert_eq!(shutdown.state(), ShutdownState::Started);
     }
 
     #[cfg_attr(test, mutants::skip)]

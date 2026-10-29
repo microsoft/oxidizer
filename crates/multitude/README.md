@@ -476,7 +476,7 @@ including a custom DST with a trait-object tail.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/multitude">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbsPDWt438bisbkMh3Rx2B2aMbx5_CJ_u4DrMbgrz6oBHPzfdhZIaCaGJ5dGVtdWNrZjEuMjUuMoJlYnl0ZXNmMS4xMi4xgmhieXRlc2J1ZmYwLjEzLjCCaW11bHRpdHVkZWYwLjEzLjCCZXNlcmRlZzEuMC4yMjmCaHplcm9jb3B5ZjAuOC41Nw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbsPDWt438bisbkMh3Rx2B2aMbx5_CJ_u4DrMbgrz6oBHPzfdhZIaCaGJ5dGVtdWNrZjEuMjUuMoJlYnl0ZXNmMS4xMi4xgmhieXRlc2J1ZmYwLjEzLjCCaW11bHRpdHVkZWYwLjEzLjCCZXNlcmRlZzEuMC4yMjmCaHplcm9jb3B5ZjAuOC42Mw
  [__link0]: https://docs.rs/multitude/0.13.0/multitude/?search=Alloc
  [__link1]: https://docs.rs/multitude/0.13.0/multitude/?search=Arc
  [__link10]: https://docs.rs/multitude/0.13.0/multitude/?search=vec::Vec
@@ -587,7 +587,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link93]: https://docs.rs/multitude/0.13.0/multitude/?search=strings::format_utf16
  [__link94]: https://crates.io/crates/widestring
  [__link95]: https://docs.rs/multitude/0.13.0/multitude/?search=zerocopy::ZerocopyView
- [__link96]: https://docs.rs/zerocopy/0.8.57/zerocopy/?search=FromZeros
+ [__link96]: https://docs.rs/zerocopy/0.8.63/zerocopy/?search=FromZeros
  [__link97]: https://docs.rs/multitude/0.13.0/multitude/?search=Arena::zerocopy
  [__link98]: https://docs.rs/multitude/0.13.0/multitude/?search=bytemuck::BytemuckView
  [__link99]: https://docs.rs/bytemuck/1.25.2/bytemuck/?search=Zeroable

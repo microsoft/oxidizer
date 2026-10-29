@@ -17,7 +17,7 @@ mod support;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
 use many_cpus::SystemHardware;
 use observed::Value;
 use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
@@ -351,6 +351,7 @@ fn panicking_task_emits_panicked_event() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(PROCESSORS))
         .sink(sink)
+        .panic(PanicPolicy::ignore())
         .build()
         .unwrap();
 
@@ -400,7 +401,12 @@ fn successful_multi_poll_task_reports_aggregate_poll_count() {
 #[test]
 fn panicking_multi_poll_task_reports_aggregate_poll_count() {
     let (sink, processor) = test_emitter(TEST_ID);
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .sink(sink)
+        .panic(PanicPolicy::ignore())
+        .build()
+        .unwrap();
 
     let error = runtime
         .scheduler()

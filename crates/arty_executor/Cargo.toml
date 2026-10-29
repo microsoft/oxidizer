@@ -28,7 +28,7 @@ allowed_external_types = [
 
 [dependencies]
 data_privacy = { workspace = true }
-events_once = { workspace = true }
+derive_more = { workspace = true, features = ["debug"] }
 nm = { workspace = true }
 observed = { workspace = true }
 ohno = { workspace = true }
@@ -41,15 +41,11 @@ tick = { workspace = true, features = ["fast-instant"] }
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
-derive_more = { workspace = true, features = ["debug"] }
-foldhash = { workspace = true, features = ["std"] }
 gungraun = { workspace = true, features = ["default"] }
 metabench = { path = "../metabench", default-features = false }
 mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }
-scopeguard = { workspace = true }
 static_assertions = { workspace = true }
-testing_aids = { path = "../testing_aids" }
 
 # >>> anvil-managed: anvil-lints
 [lints]

@@ -175,7 +175,7 @@ impl Runtime {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn stop(mut self) -> Result<(), Error> {
-        _ = self.scheduler.dispatcher.stop();
+        _ = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
         self.shutdown_on_drop = false;
         self.wait()
     }
@@ -208,7 +208,7 @@ impl Drop for Runtime {
             return;
         }
 
-        _ = self.scheduler.dispatcher.stop();
+        _ = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
         // `wait` rejects self-waits from async workers and blocking callbacks;
         // worker entry wrappers report any resulting failure.
         let _ = self.wait();
@@ -226,13 +226,12 @@ mod tests {
     use std::thread;
 
     use observed::Sink;
-    use performables::arc::Arc;
     use performables::sync::channel;
     use testing_aids::TEST_TIMEOUT;
     use thread_aware::{ThreadBuilder, Unaware};
 
     use super::*;
-    use crate::runtime::blocking_worker::{BlockingPool, BlockingWorker};
+    use crate::runtime::blocking_worker::{BlockingPanicPolicy, BlockingPool, BlockingWorker};
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::thread::waiter::ThreadWaiter;
 
@@ -243,14 +242,19 @@ mod tests {
             command_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::shutdown::Shutdown::default()),
+            blocking_worker: BlockingWorker::new(
+                BlockingPool::new(None),
+                Sink::noop(),
+                crate::runtime::shutdown::Shutdown::default(),
+                BlockingPanicPolicy::Ignore,
+            ),
         };
-        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(vec![worker]),
             nonempty::NonEmpty::new(endpoint),
             Sink::noop(),
             crate::runtime::shutdown::Shutdown::default(),
-        )));
+        ));
         let runtime = Runtime::with_dispatcher(dispatcher);
         assert!(runtime.stop().unwrap_err().to_string().contains("panicked"));
     }
@@ -262,16 +266,21 @@ mod tests {
             command_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
-            blocking_worker: BlockingWorker::new(BlockingPool::new(None), Sink::noop(), crate::runtime::shutdown::Shutdown::default()),
+            blocking_worker: BlockingWorker::new(
+                BlockingPool::new(None),
+                Sink::noop(),
+                crate::runtime::shutdown::Shutdown::default(),
+                BlockingPanicPolicy::Ignore,
+            ),
         };
-        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(vec![worker]),
             nonempty::NonEmpty::new(endpoint),
             Sink::noop(),
             crate::runtime::shutdown::Shutdown::default(),
-        )));
+        ));
         let runtime = Runtime::with_dispatcher(dispatcher.clone());
-        dispatcher.stop_with_error(Error::new(std::io::Error::other("first runtime failure")));
+        dispatcher.stop(Error::new(std::io::Error::other("first runtime failure")).into_shutdown_cause());
 
         assert_eq!(runtime.stop().unwrap_err().to_string(), "first runtime failure");
     }
