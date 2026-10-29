@@ -12,6 +12,10 @@
 
   - add Arty runtime support ([#863](https://github.com/microsoft/oxidizer/pull/863))
 
+- ♻️ Code Refactoring
+
+  - unify task completion and shutdown ([#899](https://github.com/microsoft/oxidizer/pull/899))
+
 ## [0.9.2] - 2026-10-20
 
 - Published local dependency requirement(s) will move: performables, thread_aware.

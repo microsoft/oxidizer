@@ -293,8 +293,6 @@ dependencies = [
  "criterion",
  "data_privacy",
  "derive_more",
- "events_once",
- "foldhash 0.2.0",
  "gungraun",
  "metabench",
  "mutants",
@@ -305,9 +303,7 @@ dependencies = [
  "performables",
  "pin-project",
  "plurality",
- "scopeguard",
  "static_assertions",
- "testing_aids",
  "thread_aware_core",
  "tick",
 ]
@@ -3907,6 +3903,19 @@ dependencies = [
  "thread_local",
  "tick",
  "tokio",
+]
+
+[[package]]
+name = "observed_destination_core"
+version = "0.29.1"
+dependencies = [
+ "jiff",
+ "log",
+ "observed_utils",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "performables",
+ "static_assertions",
 ]
 
 [[package]]

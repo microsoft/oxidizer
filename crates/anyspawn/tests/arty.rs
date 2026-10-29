@@ -12,7 +12,7 @@ use std::thread::{self, ThreadId};
 use std::time::Duration;
 
 use anyspawn::Spawner;
-use arty::runtime::{Runtime, WorkersPolicy};
+use arty::runtime::{PanicPolicy, Runtime, WorkersPolicy};
 use futures::future::join_all;
 use thread_aware::{Thread, ThreadAware};
 
@@ -141,7 +141,13 @@ fn arty_spawn_blocking_returns_output() {
 
 #[test]
 fn arty_task_panic_panics_when_joined() {
-    let (runtime, spawner) = runtime_and_spawner();
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .panic(PanicPolicy::ignore())
+        .build()
+        .unwrap();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let spawner = Spawner::new_arty(scheduler);
     let (started, task_ran) = std::sync::mpsc::channel();
     let handle = spawner.spawn(async move {
         started.send(()).unwrap();

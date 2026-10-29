@@ -18,7 +18,7 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
 #[cfg(all(feature = "macros", feature = "test-util"))]
 use arty::task::Builtins;
 use arty::task::JoinError;
@@ -319,7 +319,12 @@ fn factory_and_poll_panics_return_errors_and_preserve_runtime_usability() {
     fn panic_factory(_: arty::task::Builtins) -> std::future::Ready<()> {
         panic_any(Payload(1))
     }
-    let runtime = runtime(1);
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(1))
+        .panic(PanicPolicy::ignore())
+        .build()
+        .unwrap();
     let factory = runtime.scheduler().spawn_anywhere((), |cx, ()| panic_factory(cx));
     let polling = runtime.scheduler().spawn_anywhere((), |_, ()| async { panic_any(Payload(2)) });
     for task in [factory, polling] {

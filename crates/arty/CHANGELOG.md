@@ -42,6 +42,10 @@
 
   - upgrade the Gungraun toolchain to 0.20.0 ([#793](https://github.com/microsoft/oxidizer/pull/793))
 
+- ♻️ Code Refactoring
+
+  - unify task completion and shutdown ([#899](https://github.com/microsoft/oxidizer/pull/899))
+
 ## [0.5.0] - 2026-10-20
 
 - Adopt the breaking `tick` 0.8 timer contract and harden runtime task, shutdown, panic, and worker lifecycle behavior.

@@ -95,11 +95,6 @@ mod tests {
     use static_assertions::assert_not_impl_any;
 
     use super::*;
-    use crate::allocate_test_task_in;
-
-    fn task(pool: &MultiPool) -> TaskHandle {
-        allocate_test_task_in(pool)
-    }
 
     #[test]
     fn task_list_is_thread_affine() {
@@ -107,40 +102,24 @@ mod tests {
     }
 
     #[test]
-    fn insertion_removal_and_drain_preserve_ownership_order() {
+    fn insertion_removal_and_drop_preserve_ownership() {
         let pool = MultiPool::new();
-        let first = task(&pool);
+        let first = crate::allocate_test_task_in(&pool);
         let first_pointer = first.as_ptr();
-        let second = task(&pool);
+        let second = crate::allocate_test_task_in(&pool);
         let second_pointer = second.as_ptr();
         let mut list = TaskList::default();
 
         assert_eq!(list.insert(first), first_pointer);
         assert_eq!(list.insert(second), second_pointer);
-        assert!(!list.is_empty());
         assert_eq!(format!("{list:?}"), "TaskList { .. }");
-
         // SAFETY: `first_pointer` is live and belongs to `list`.
-        let removed = unsafe { list.remove(first_pointer) }.unwrap();
-        assert_eq!(removed.as_ptr(), first_pointer);
-        drop(removed);
-
-        let remaining = list.pop_front().unwrap();
-        assert_eq!(remaining.as_ptr(), second_pointer);
-        drop(remaining);
+        drop(unsafe { list.remove(first_pointer) }.unwrap());
+        assert_eq!(list.pop_front().unwrap().as_ptr(), second_pointer);
         assert!(list.is_empty());
-        assert!(pool.is_empty());
-    }
 
-    #[test]
-    fn dropping_the_list_releases_its_owned_tasks() {
-        let pool = MultiPool::new();
-        {
-            let mut list = TaskList::default();
-            _ = list.insert(task(&pool));
-            _ = list.insert(task(&pool));
-        }
-
+        _ = list.insert(crate::allocate_test_task_in(&pool));
+        drop(list);
         assert!(pool.is_empty());
     }
 }

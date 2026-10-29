@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example implements the `Recovery` trait for an error from the `ohno` crate.
+//! Implement `Recovery` for an error from the `ohno` crate.
 
 use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 
@@ -11,7 +11,7 @@ fn main() {
     handle_network_error(&NetworkError::service_unavailable());
 }
 
-/// A transparent network error with different recovery actions.
+/// Defines a transparent network error with different recovery classifications.
 #[ohno::error]
 struct NetworkError {
     recovery_info: RecoveryInfo,
@@ -37,7 +37,7 @@ impl Recovery for NetworkError {
     }
 }
 
-/// Handles a network error according to its recovery information.
+/// Handles a network error based on its recovery information.
 fn handle_network_error(error: &NetworkError) {
     let recovery = error.recovery();
 

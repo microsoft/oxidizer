@@ -16,6 +16,10 @@
   - default to one worker and relocate spawn results ([#875](https://github.com/microsoft/oxidizer/pull/875))
   - honor exact worker counts ([#873](https://github.com/microsoft/oxidizer/pull/873))
 
+- ♻️ Code Refactoring
+
+  - unify task completion and shutdown ([#899](https://github.com/microsoft/oxidizer/pull/899))
+
 ## [0.5.0] - 2026-10-20
 
 - Align the procedural macro package with the Arty 0.5 release.

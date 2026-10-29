@@ -169,8 +169,7 @@ use arty_io_core as _;
 /// - `monitor = enabled` or `monitor = disabled` selects the runtime monitoring
 ///   policy. The default is `enabled`.
 /// - `panic = shutdown` or `panic = ignore` selects the runtime panic policy.
-///   The default is `shutdown`. This release stores the selected value but does
-///   not yet change panic behavior.
+///   The default is `shutdown`.
 ///
 /// The worker setting does not limit blocking-pool threads. Without a setting, the
 /// runtime uses [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
@@ -219,12 +218,22 @@ use arty_io_core as _;
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
-/// Select the ignore panic policy:
+/// Keep the runtime available after a contained panic:
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::main(panic = ignore)]
-/// async fn main(_cx: arty::task::Builtins) {}
+/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+///     assert!(
+///         cx.scheduler()
+///             .spawn(async |_| panic!("contained"))
+///             .await
+///             .unwrap_err()
+///             .is_panic()
+///     );
+///     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+///     Ok(())
+/// }
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
@@ -256,10 +265,10 @@ pub use arty_macros::main;
 /// the test harness runs it.
 ///
 /// Enable `macros` to use this attribute. The [`main`] attribute's `workers`,
-/// `monitor`, and `panic` options also apply. By default, a test uses one
-/// worker, selects the disabled monitoring policy, and selects the shutdown
-/// panic policy. This keeps future monitor activation out of ordinary tests.
-/// A test that exercises monitoring must opt in with `monitor = enabled`.
+/// `monitor`, and `panic` options also apply. By default, a test uses one worker,
+/// selects the disabled monitoring policy, and uses the shutdown panic policy.
+/// This keeps future monitor activation out of ordinary tests. A test that
+/// exercises monitoring must opt in with `monitor = enabled`.
 ///
 /// # Simulated time
 ///
@@ -315,12 +324,15 @@ pub use arty_macros::main;
 /// async fn monitored(_cx: arty::task::Builtins) {}
 /// ```
 ///
-/// Select the ignore panic policy:
+/// Keep the test runtime available after a contained child-task panic:
 ///
 /// ```test_harness
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::test(panic = ignore)]
-/// async fn configured(_cx: arty::task::Builtins) {}
+/// async fn contained_panic(cx: arty::task::Builtins) {
+///     assert!(cx.scheduler().spawn(async |_| panic!("contained")).await.unwrap_err().is_panic());
+///     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+/// }
 /// ```
 ///
 /// Test a sequential delay without waiting for real time:

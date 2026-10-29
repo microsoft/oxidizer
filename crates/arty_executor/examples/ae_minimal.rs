@@ -7,7 +7,24 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::thread;
 
-use arty_executor::{CycleOutcome, Executor, TaskOptions};
+use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, discard_task_panic_payload};
+
+/// Supplies completion callbacks without a result receiver.
+///
+/// Successful results and cancellation need no action. Panic payloads still
+/// require explicit disposal.
+#[derive(Debug)]
+struct DiscardCompletion;
+
+impl TaskCompletion<()> for DiscardCompletion {
+    fn completed(self, _result: ()) {}
+
+    fn panicked(self, panic: TaskPanicPayload, _cause: Option<ShutdownCause>) {
+        discard_task_panic_payload(panic);
+    }
+
+    fn cancelled(self, _cause: ShutdownCause) {}
+}
 
 fn main() {
     let mut executor = Executor::builder().build();
@@ -28,15 +45,16 @@ fn main() {
             }
         },
         TaskOptions::default(),
+        DiscardCompletion,
     );
 
     let mut shutdown_started = false;
 
-    while executor.execute_cycle() != CycleOutcome::Shutdown {
+    while !matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)) {
         if !shutdown_started && shutdown_signal.get() {
             shutdown_started = true;
 
-            executor.begin_shutdown(arty_executor::ShutdownCause::default());
+            executor.shutdown().trigger(arty_executor::ShutdownCause::default());
 
             // No need to yield - we can immediately process the shutdown.
             continue;

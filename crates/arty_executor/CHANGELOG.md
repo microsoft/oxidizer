@@ -23,6 +23,10 @@
 
   - upgrade the Gungraun toolchain to 0.20.0 ([#793](https://github.com/microsoft/oxidizer/pull/793))
 
+- ♻️ Code Refactoring
+
+  - unify task completion and shutdown ([#899](https://github.com/microsoft/oxidizer/pull/899))
+
 ## [0.5.0] - 2026-10-20
 
 - Harden executor lifecycle, make construction and retained wakers safe, and update exposed `tick` identities through the Arty version group.
