@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - Now requires `0.14.0` of `http_extensions`
+  - Now requires `0.12.0` of `seatbelt`
+  - Now requires `0.9.0` of `tick`
+
 ## [0.11.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.

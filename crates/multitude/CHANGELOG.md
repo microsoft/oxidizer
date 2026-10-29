@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.13.0` of `multitude_macros`
+
+- ✔️ Tasks
+
+  - upgrade the Gungraun toolchain to 0.20.0 ([#793](https://github.com/microsoft/oxidizer/pull/793))
+
 ## [0.12.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.

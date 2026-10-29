@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - accept caller-selected memory providers ([#895](https://github.com/microsoft/oxidizer/pull/895))
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.12.2` of `thread_aware`
+  - Now requires `0.9.0` of `tick`
+
+- 📚 Documentation
+
+  - simplify crate documentation ([#872](https://github.com/microsoft/oxidizer/pull/872))
+
 ## [0.13.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.

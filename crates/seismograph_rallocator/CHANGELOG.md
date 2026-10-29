@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - Now requires `0.4.0` of `seismograph`
+
 ## [0.3.0] - 2026-10-20
 
 - Replace legacy allocator diagnostics with schema 3 native-v4 snapshots and topology.

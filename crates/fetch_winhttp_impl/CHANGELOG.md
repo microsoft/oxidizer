@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - accept caller-selected memory providers ([#895](https://github.com/microsoft/oxidizer/pull/895))
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.13.0` of `bytesbuf_io`
+  - Now requires `0.20.0` of `fetch`
+  - Now requires `0.14.0` of `http_extensions`
+  - Now requires `0.30.0` of `observed`
+  - Now requires `0.12.2` of `thread_aware`
+  - Now requires `0.9.0` of `tick`
+
+- 🐛 Bug Fixes
+
+  - preserve pointer provenance in seismograph and WinHTTP
+
 ## [0.4.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.

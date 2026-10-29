@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - replace TCP monitoring with native IPC ([#847](https://github.com/microsoft/oxidizer/pull/847))
+  - Now requires `0.3.0` of `seismograph_protocol`
+
+- 🐛 Bug Fixes
+
+  - preserve pointer provenance in seismograph and WinHTTP
+
+- ⚡ Performance
+
+  - optimize synchronization and consolidate ready paths ([#854](https://github.com/microsoft/oxidizer/pull/854))
+
 ## [0.3.0] - 2026-10-20
 
 - Consolidate monitor startup errors at the crate root and migrate allocator diagnostics to the native-v4 model.

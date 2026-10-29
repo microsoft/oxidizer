@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - accept caller-selected memory providers ([#895](https://github.com/microsoft/oxidizer/pull/895))
+  - Now requires `0.10.0` of `anyspawn`
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.9.1` of `cachet_memory`
+  - Now requires `0.4.0` of `seismograph`
+  - Now requires `0.9.0` of `tick`
+  - Now requires `0.8.1` of `uniflight`
+
 ## [0.16.0] - 2026-10-20
 
 - Update exposed Bytesbuf, Recoverable, Seismograph, and Tick identities to their breaking releases.

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - Now requires `0.12.2` of `thread_aware`
+  - Now requires `0.9.0` of `tick`
+
+- 📚 Documentation
+
+  - simplify public documentation ([#867](https://github.com/microsoft/oxidizer/pull/867))
+
 ## [0.11.0] - 2026-10-20
 
 - The public API exposes types from `recoverable`; upgrading to its incompatible release changes those public type identities.

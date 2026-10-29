@@ -226,6 +226,10 @@ published content lags the source), and it means an aborted release that
 bumped a crate to `4.0.0` without publishing is still the baseline the
 next change is measured against.
 
+Generated changelog entries use the same source-level baseline. Missing or
+outdated publication tags do not cause changes from earlier releases to appear
+again in the new release section.
+
 `cargo semver-checks` is combined with an exposed-dependency cascade.
 Rustdoc comparison cannot detect that an otherwise-unchanged signature
 now names a type from an incompatible version of an external crate. The

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - propagate shutdown causes ([#880](https://github.com/microsoft/oxidizer/pull/880))
+  - target tasks by worker coordinate ([#866](https://github.com/microsoft/oxidizer/pull/866))
+  - Now requires `0.30.0` of `observed`
+  - Now requires `0.3.1` of `performables`
+  - Now requires `0.1.3` of `thread_aware_core`
+  - Now requires `0.9.0` of `tick`
+
+- 🐛 Bug Fixes
+
+  - update zstd crates to patched releases ([#888](https://github.com/microsoft/oxidizer/pull/888))
+
+- ⚡ Performance
+
+  - reduce scheduler contention ([#855](https://github.com/microsoft/oxidizer/pull/855))
+
+- ✔️ Tasks
+
+  - upgrade the Gungraun toolchain to 0.20.0 ([#793](https://github.com/microsoft/oxidizer/pull/793))
+
 ## [0.5.0] - 2026-10-20
 
 - Harden executor lifecycle, make construction and retained wakers safe, and update exposed `tick` identities through the Arty version group.

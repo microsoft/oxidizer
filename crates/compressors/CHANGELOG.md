@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - soft-stabilize public APIs ([#632](https://github.com/microsoft/oxidizer/pull/632))
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.3.1` of `performables`
+  - Now requires `0.12.2` of `thread_aware`
+
+- ✔️ Tasks
+
+  - upgrade the Gungraun toolchain to 0.20.0 ([#793](https://github.com/microsoft/oxidizer/pull/793))
+
 ## [0.3.0] - 2026-10-20
 
 - Update exposed Bytesbuf identities for Bytesbuf 0.12; runtime codec behavior remains unchanged.

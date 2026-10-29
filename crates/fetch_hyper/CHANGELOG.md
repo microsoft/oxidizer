@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.11.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - accept caller-selected memory providers ([#895](https://github.com/microsoft/oxidizer/pull/895))
+  - Now requires `0.10.0` of `anyspawn`
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.14.0` of `http_extensions`
+  - Now requires `0.12.0` of `seatbelt`
+  - Now requires `0.9.0` of `tick`
+
 ## [0.10.0] - 2026-10-20
 
 - Route native-TLS clients through the override-capable connector and migrate exposed Fetch TLS and Tick identities.

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - Now requires `0.30.0` of `observed`
+
 ## [0.5.0] - 2026-10-20
 
 - The public API exposes types from `observed`; upgrading to its incompatible release changes those public type identities.

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - accept caller-selected memory providers ([#895](https://github.com/microsoft/oxidizer/pull/895))
+  - Now requires `0.5.0` of `fetch_winhttp_impl`
+
 ## [0.4.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.

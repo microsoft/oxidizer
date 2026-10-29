@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - Now requires `0.3.1` of `performables`
+  - Now requires `0.4.0` of `seismograph_io`
+  - Now requires `0.12.2` of `thread_aware`
+
 ## [0.12.0] - 2026-10-20
 
 - The public API exposes types from `seismograph`; upgrading to its incompatible release changes those public type identities.

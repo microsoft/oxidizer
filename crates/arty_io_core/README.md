@@ -115,20 +115,20 @@ runtime from attempting to shut down the remaining drivers.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbiH3-MZq7tAIbXrw40SxM9_Ubos3NchztrvsbxRLND6Vfa8RhZIKCbGFydHlfaW9fY29yZWUwLjMuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjI
- [__link0]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=IoContext
- [__link1]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=Driver
- [__link10]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverOptions
- [__link11]: https://docs.rs/thread_aware_core/0.1.2/thread_aware_core/?search=ThreadAware
- [__link12]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverOptions
- [__link13]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=Driver::waker
- [__link14]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=Driver::shutdown
- [__link15]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverError
- [__link2]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=Driver::execute_cycle
- [__link3]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverRole::Primary
- [__link4]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverOptions
- [__link5]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=Cycle::max_wait
- [__link6]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverRole::Secondary
- [__link7]: https://docs.rs/thread_aware_core/0.1.2/thread_aware_core/?search=ThreadAware::relocate
- [__link8]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=IoContext::driver
- [__link9]: https://docs.rs/arty_io_core/0.3.0/arty_io_core/?search=DriverOptions::thread
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbiH3-MZq7tAIbXrw40SxM9_Ubos3NchztrvsbxRLND6Vfa8RhZIKCbGFydHlfaW9fY29yZWUwLjQuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjM
+ [__link0]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=IoContext
+ [__link1]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=Driver
+ [__link10]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverOptions
+ [__link11]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
+ [__link12]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverOptions
+ [__link13]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=Driver::waker
+ [__link14]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=Driver::shutdown
+ [__link15]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverError
+ [__link2]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=Driver::execute_cycle
+ [__link3]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverRole::Primary
+ [__link4]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverOptions
+ [__link5]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=Cycle::max_wait
+ [__link6]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverRole::Secondary
+ [__link7]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware::relocate
+ [__link8]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=IoContext::driver
+ [__link9]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverOptions::thread

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - replace TCP monitoring with native IPC ([#847](https://github.com/microsoft/oxidizer/pull/847))
+
 ## [0.2.0] - 2026-10-05
 
 - 🐛 Bug Fixes

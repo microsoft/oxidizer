@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.30.0] - 2026-10-29
+
+- 🔧 Maintenance
+
+  - Now requires `0.30.0` of `observed_macros_impl`
+
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

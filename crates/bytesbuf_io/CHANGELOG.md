@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.13.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - Now requires `0.13.0` of `bytesbuf`
+
 ## [0.12.0] - 2026-10-20
 
 - Update exposed Bytesbuf identities for Bytesbuf 0.12 and use the published future polling assertion helper in test utilities.

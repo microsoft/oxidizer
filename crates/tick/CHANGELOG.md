@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - soft-stabilize public APIs ([#632](https://github.com/microsoft/oxidizer/pull/632))
+  - Now requires `0.3.1` of `performables`
+  - Now requires `0.12.2` of `thread_aware`
+
+- ✨ Features
+
+  - add Arty runtime support ([#863](https://github.com/microsoft/oxidizer/pull/863))
+
+- 🐛 Bug Fixes
+
+  - adapt benchmarks to Gungraun 0.20 ([#914](https://github.com/microsoft/oxidizer/pull/914))
+
 ## [0.8.0] - 2026-10-20
 
 - Make timer drivers deadline-driven and require an owner `Waker` when activating an inactive clock.

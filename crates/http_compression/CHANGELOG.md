@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0] - 2026-10-29
+
+- ⚠️ Breaking
+
+  - Now requires `0.13.0` of `bytesbuf`
+  - Now requires `0.4.0` of `compressors`
+  - Now requires `0.14.0` of `http_extensions`
+  - Now requires `0.12.0` of `seatbelt`
+
 ## [0.3.0] - 2026-10-20
 
 - Bound decompressed HTTP bodies to 64 MiB and 1,024 streams by default, with explicit finite overrides and unbounded opt-outs.
