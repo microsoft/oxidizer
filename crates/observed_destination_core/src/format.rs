@@ -341,7 +341,9 @@ fn write_interpolated(w: &mut (impl Write + ?Sized), template: &str, record: &Sd
         }
 
         let Some((placeholder, remainder)) = remaining[1..].split_once('}') else {
-            break;
+            w.write_all(b"{")?;
+            remaining = &remaining[1..];
+            continue;
         };
 
         if let Some((_, value)) = record

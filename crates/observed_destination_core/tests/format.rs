@@ -171,6 +171,17 @@ fn interpolation_keeps_unmatched_braces_literal() {
 }
 
 #[test]
+fn interpolation_decodes_escaped_braces_after_unmatched_opening_brace() {
+    let (record, scope) = create_record_and_scope(|r| {
+        r.set_body("prefix { literal {{".into());
+    });
+
+    let output = format(&record, &scope, LogFormatConfig::minimal());
+
+    assert_eq!(output, "prefix { literal {\n");
+}
+
+#[test]
 fn interpolation_ends_placeholder_at_first_closing_brace() {
     let (record, scope) = create_record_and_scope(|r| {
         r.set_body(AnyValue::String("{a} {b}".into()));
