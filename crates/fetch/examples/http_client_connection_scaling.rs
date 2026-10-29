@@ -12,6 +12,8 @@ use fetch::tokio::TokioDeps;
 use tokio::spawn;
 use tracing::info;
 
+#[path = "util/endpoint.rs"]
+mod endpoint;
 #[path = "util/utils.rs"]
 mod utils;
 
@@ -21,11 +23,13 @@ const URL: &str = "https://example.com";
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
+    let endpoint = endpoint::Endpoint::new(URL).await?;
 
     let deps = TokioDeps::default();
     let clock = deps.clock.clone();
 
     let client = HttpClient::builder_tokio(deps)
+        .tls_options(endpoint.rustls_options()?)
         .connection_pool_options(ConnectionPoolOptions::default().connection_idle_timeout(Duration::from_secs(5)))
         .build();
 
@@ -34,7 +38,8 @@ async fn main() -> Result<(), ohno::AppError> {
     // This request burst can create more connections, depending on protocol and server limits.
     for _ in 0..CONCURRENT_REQUESTS {
         let client_clone = client.clone();
-        let handle = spawn(async move { client_clone.get(URL).fetch_text().await });
+        let url = endpoint.url.clone();
+        let handle = spawn(async move { client_clone.get(url.as_str()).fetch_text().await });
 
         handles.push(handle);
     }
@@ -52,5 +57,6 @@ async fn main() -> Result<(), ohno::AppError> {
 
     clock.delay(Duration::from_secs(10)).await;
 
+    endpoint.finish(CONCURRENT_REQUESTS).await?;
     Ok(())
 }

@@ -12,13 +12,18 @@
 
 use std::collections::HashMap;
 use std::hint::black_box;
+use std::path::Path;
 use std::sync::Arc;
 
 use seismograph::recorder::Configuration;
 
 rallocator::rallocator!();
 
-fn main() {
+fn main() -> std::io::Result<()> {
+    let temporary_output = std::env::var_os("ANVIL_EXAMPLE").is_some().then(tempfile::tempdir).transpose()?;
+    let output = temporary_output
+        .as_ref()
+        .map_or_else(|| Path::new("."), |directory| directory.path());
     seismograph::recorder(Configuration {
         allocations: seismograph::recorder::RecordingPolicy {
             enabled: true,
@@ -38,13 +43,14 @@ fn main() {
 
     let scoped = vec![1, 2, 3];
     let live = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
-    live.write_file("snapshot-live.seismograph").unwrap();
+    live.write_file(output.join("snapshot-live.seismograph")).unwrap();
 
     drop((scoped, retained));
     seismograph::recorder(Configuration::default());
 
     let after_drop = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
-    after_drop.write_file("snapshot-after-drop.seismograph").unwrap();
+    after_drop.write_file(output.join("snapshot-after-drop.seismograph")).unwrap();
+    Ok(())
 }
 
 #[inline(never)]

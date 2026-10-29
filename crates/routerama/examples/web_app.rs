@@ -104,7 +104,7 @@ fn list_books(books: &[(u32, &'static str)], query: &str) -> (StatusCode, String
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let resolver = Route::resolver();
 
     let state = Arc::new(AppState {
@@ -116,14 +116,20 @@ async fn main() {
         ],
     });
 
-    let listener = TcpListener::bind("127.0.0.1:8080").await.expect("failed to bind 127.0.0.1:8080");
+    let address = if std::env::var_os("ANVIL_EXAMPLE").is_some() {
+        "127.0.0.1:0"
+    } else {
+        "127.0.0.1:8080"
+    };
+    let listener = TcpListener::bind(address).await?;
 
     let app = Router::new().fallback(dispatch).with_state(state);
     let server = axum::serve(listener, app);
 
     if std::env::var_os("ANVIL_EXAMPLE").is_some() {
-        server.with_graceful_shutdown(async {}).await.expect("server error");
+        server.with_graceful_shutdown(async {}).await?;
     } else {
-        server.await.expect("server error");
+        server.await?;
     }
+    Ok(())
 }

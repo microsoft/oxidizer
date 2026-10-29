@@ -76,7 +76,12 @@ fn map_incoming_to_http_body(incoming: Incoming, body_builder: &HttpBodyBuilder)
 
 async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder: HttpBodyBuilder) -> Result<(), ohno::AppError> {
     let service = Arc::new(service);
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    let address = if std::env::var_os("ANVIL_EXAMPLE").is_some() {
+        "127.0.0.1:0"
+    } else {
+        "127.0.0.1:8080"
+    };
+    let listener = TcpListener::bind(address).await?;
 
     println!("Listening on: {}", listener.local_addr()?);
 

@@ -1949,8 +1949,10 @@ dependencies = [
  "fundle",
  "futures",
  "http",
+ "http-body-util",
  "http_compression",
  "http_extensions",
+ "hyper",
  "hyper-util",
  "insta",
  "layered",
@@ -1962,6 +1964,7 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "performables",
+ "rcgen",
  "rustls",
  "rustls-platform-verifier",
  "seatbelt",
@@ -1970,11 +1973,13 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
+ "tempfile",
  "templated_uri",
  "testing_aids",
  "thread_aware",
  "tick",
  "tokio",
+ "tokio-rustls",
  "tower-service",
  "tracing",
  "tracing-appender",
@@ -4767,6 +4772,7 @@ dependencies = [
  "libc",
  "seismograph",
  "seismograph_rallocator",
+ "tempfile",
 ]
 
 [[package]]
@@ -5453,6 +5459,7 @@ name = "seismograph_rallocator"
 version = "0.3.0"
 dependencies = [
  "seismograph",
+ "tempfile",
 ]
 
 [[package]]

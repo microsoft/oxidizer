@@ -38,13 +38,12 @@ targets = [
 # Mutation testing is excluded by the workspace mutation configurations.
 exclude = true
 
-[package.metadata.anvil.examples]
-# This example writes snapshots to fixed paths in the working directory.
-no-run = ["allocation_tracking"]
-
 [dependencies]
 seismograph.workspace = true
 seismograph_rallocator.workspace = true
+
+[dev-dependencies]
+tempfile = { workspace = true, features = ["getrandom"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]

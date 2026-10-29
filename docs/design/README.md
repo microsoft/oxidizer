@@ -17,11 +17,12 @@ If macros make source ownership uncertain, the filter keeps ambiguous counters.
 Keep explicit exclusions for exceptional production paths and helpers that the
 filter cannot classify.
 
-Anvil builds examples that need credentials, external services, fixed ports, or
-fixed output paths without running them. Each package lists these examples in
-`[package.metadata.anvil.examples].no-run`. Other examples still run by default.
-Run the listed examples explicitly only when their required services and output
-paths are safe.
+Anvil runs examples by default. Automated network examples use a local HTTPS
+origin with a generated certificate and real TLS clients. Servers use OS-assigned
+ports, and file-writing examples use temporary output directories.
+Manual runs keep their normal endpoints, ports, and output paths.
+Examples that need developer credentials, manual arguments, or separately installed
+profiling tools remain build-only in `[package.metadata.anvil.examples].no-run`.
 
 The handwritten `repository-checks.yml` also verifies the
 `http_headers_simd` `no_std` contract with package-isolated unit and integration
