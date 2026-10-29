@@ -20,6 +20,10 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seismograph
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["seismograph::*"]
 
+[package.metadata.anvil.examples]
+# This example writes a snapshot to a fixed path in the working directory.
+no-run = ["native_snapshot"]
+
 [dependencies]
 seismograph.workspace = true
 

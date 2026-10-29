@@ -24,6 +24,10 @@ allowed_external_types = [
     "routerama_macros::resolver",
 ]
 
+[package.metadata.anvil.examples]
+# This interactive HTTP server binds a fixed port.
+no-run = ["web_app"]
+
 [features]
 default = ["query"]
 query = ["dep:itoa"]

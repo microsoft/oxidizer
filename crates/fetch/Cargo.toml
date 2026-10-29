@@ -50,6 +50,19 @@ all-features = true
 [package.metadata.cargo-machete]
 ignored = ["ctor"]
 
+[package.metadata.anvil.examples]
+# These examples need network access or client certificates. Streaming also writes output.txt.
+no-run = [
+    "http_client_app",
+    "http_client_connection_scaling",
+    "http_client_minimal_pipeline",
+    "http_client_mtls",
+    "http_client_native_tls",
+    "http_client_native_tls_mtls",
+    "http_client_streaming",
+    "http_client_tokio",
+]
+
 [features]
 default = []
 tls = ["rustls"]

@@ -56,6 +56,10 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
+[package.metadata.anvil.examples]
+# This HTTP server binds a fixed port.
+no-run = ["custom_server"]
+
 [features]
 default = []
 json = ["dep:serde_core", "dep:serde_json"]
