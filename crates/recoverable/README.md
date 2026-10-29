@@ -21,9 +21,9 @@ Use [`RecoveryInfo::never`][__link0] for successful operations and permanent fai
 
 ## Core types
 
-* [`RecoveryInfo`][__link1] contains a recovery kind and an optional delay.
+* [`RecoveryInfo`][__link1] contains a recovery classification and an optional delay.
 * [`Recovery`][__link2] lets a type provide its recovery information.
-* [`RecoveryKind`][__link3] identifies the available recovery action.
+* [`RecoveryKind`][__link3] identifies the recovery classification.
 
 ## Examples
 
@@ -83,7 +83,7 @@ assert_eq!(immediate.get_delay(), Some(Duration::ZERO));
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/recoverable">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbFfusAnUguqAbg9Xa1nlv2rEbzRFetduUG_kbpjhP8zOme8FhZIGCa3JlY292ZXJhYmxlZTAuMy4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbY0hfIDkWC34bkouStVmTC7sb-9MluT5VeHsbHYU6y2PQAQhhZIGCa3JlY292ZXJhYmxlZTAuMy4w
  [__link0]: https://docs.rs/recoverable/0.3.0/recoverable/?search=RecoveryInfo::never
  [__link1]: https://docs.rs/recoverable/0.3.0/recoverable/struct.RecoveryInfo.html
  [__link2]: https://docs.rs/recoverable/0.3.0/recoverable/trait.Recovery.html

@@ -3,7 +3,7 @@
 
 //! Use `Recovery` with a custom error type.
 //!
-//! `RecoveryInfo` assigns a recovery action to each error.
+//! `RecoveryInfo` assigns a recovery classification to each error.
 
 use std::error::Error;
 use std::fmt::Display;
@@ -17,7 +17,7 @@ fn main() {
     handle_network_error(&NetworkError::ServiceUnavailable { retry_after: None });
 }
 
-/// A network error that supports different recovery actions.
+/// Defines a network error with different recovery classifications.
 #[derive(Debug)]
 enum NetworkError {
     /// DNS resolution failed. The condition can be transient.

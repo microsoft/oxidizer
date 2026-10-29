@@ -67,8 +67,8 @@
 //! If a permanent error has no inner cause, use [`RecoveryInfo::never()`].
 //!
 //! If every variant is permanently non-recoverable, the error does not need
-//! [`Recovery`]. Implement the trait when at least one variant can recover or
-//! when a future version can change the classification.
+//! [`Recovery`]. If at least one variant can recover, implement the trait.
+//! Also implement it if a future version can change the classification.
 //!
 //! ```rust
 //! use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
@@ -168,8 +168,8 @@
 //! ```
 //!
 //! The `From<ErrorKind> for RecoveryInfo` conversion defines defaults for common
-//! I/O errors. Its API documentation lists every classification. Implement your
-//! own mapping when a default does not match your use case.
+//! I/O errors. Its API documentation lists every classification. If a default
+//! does not match your use case, implement your own mapping.
 
 #[expect(unused_imports, reason = "keeps documentation examples concise")]
 use crate::*;

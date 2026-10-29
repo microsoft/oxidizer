@@ -11,7 +11,7 @@ fn main() {
     handle_network_error(&NetworkError::service_unavailable());
 }
 
-/// A transparent network error that supports different recovery actions.
+/// Defines a transparent network error with different recovery classifications.
 #[ohno::error]
 struct NetworkError {
     recovery_info: RecoveryInfo,

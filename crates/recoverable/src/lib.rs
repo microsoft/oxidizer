@@ -14,9 +14,9 @@
 //!
 //! # Core types
 //!
-//! - [`RecoveryInfo`] contains a recovery kind and an optional delay.
+//! - [`RecoveryInfo`] contains a recovery classification and an optional delay.
 //! - [`Recovery`] lets a type provide its recovery information.
-//! - [`RecoveryKind`] identifies the available recovery action.
+//! - [`RecoveryKind`] identifies the recovery classification.
 //!
 //! # Examples
 //!
@@ -84,7 +84,7 @@ pub mod documentation;
 // as `get_delay()`. Callers use setters more often, and the prefix distinguishes
 // each getter from its setter.
 
-/// The recovery action and optional delay for an operation or condition.
+/// Contains the recovery classification and optional delay for an operation or condition.
 ///
 /// Create a value with [`unknown`](Self::unknown), [`never`](Self::never),
 /// [`retry`](Self::retry), or [`unavailable`](Self::unavailable).
@@ -104,15 +104,15 @@ pub struct RecoveryInfo {
     delay: Option<Duration>,
 }
 
-/// A recovery action for an operation.
+/// Classifies recovery for an operation or condition.
 ///
 /// Use [`RecoveryInfo::kind`] to get this value from [`RecoveryInfo`].
 ///
 /// # Handle unknown variants
 ///
 /// This enum is `#[non_exhaustive]`.
-/// A future version can add variants without a major version change. Include a
-/// wildcard arm when you match on `RecoveryKind`.
+/// A future version can add variants without a major version change. When you
+/// match on `RecoveryKind`, include a wildcard arm.
 /// Treat unrecognized variants in the same way as [`RecoveryKind::Unknown`].
 ///
 /// ```rust
@@ -140,36 +140,33 @@ pub struct RecoveryInfo {
 #[derive(Debug, PartialEq, Clone, Eq, Copy, Hash)]
 #[non_exhaustive]
 pub enum RecoveryKind {
-    /// No recovery classification is known.
+    /// The application has no known recovery classification.
     ///
-    /// Choose an action that meets the risk requirements of your application.
-    /// For example, the application can retry an unclassified network error.
+    /// Risk requirements determine how the application interprets this classification.
     Unknown,
 
     /// A recovery attempt can resolve this transient condition.
     ///
-    /// Retry the operation with backoff.
-    /// Use the delay from [`RecoveryInfo::get_delay`] when it is present.
+    /// Repeated attempts can resolve the condition.
+    /// A value from [`RecoveryInfo::get_delay`] specifies the wait before an attempt.
     Retry,
 
-    /// A recovery attempt cannot resolve this permanent condition.
+    /// The outcome needs no recovery attempt, or no attempt can change it.
     ///
-    /// Do not retry the operation.
-    /// Return the error as a terminal failure.
+    /// This classification covers successful operations and permanent failures.
     Never,
 
-    /// A service is unavailable or significantly degraded.
+    /// The condition is unlikely to recover soon, or its recovery time is uncertain.
     ///
-    /// A retry is unlikely to succeed.
-    /// The caller can use a circuit breaker, fail fast, or use cached data.
+    /// Several recovery attempts can fail before the condition changes.
     Unavailable,
 }
 
 impl RecoveryInfo {
     /// Creates recovery information for an unknown condition.
     ///
-    /// Use this value when the correct recovery action is not known.
-    /// Choose a conservative action when the application requires it.
+    /// If the correct recovery classification is not known, use this value.
+    /// If the application requires a conservative policy, choose one.
     ///
     /// # Examples
     ///
@@ -247,12 +244,12 @@ impl RecoveryInfo {
         }
     }
 
-    /// Creates recovery information for a service-wide outage or degradation.
+    /// Creates recovery information for a condition with slow or uncertain recovery.
     ///
-    /// Use this value for a failure that affects many users and can take minutes
-    /// or hours to resolve.
-    /// [`RecoveryInfo::retry`] indicates that the condition will usually resolve quickly.
-    /// This value indicates an uncertain recovery time, so several attempts can fail.
+    /// If several recovery attempts can fail before the condition changes, use
+    /// this value. Examples include service-wide outages and local resource
+    /// failures. [`RecoveryInfo::retry`] indicates that the condition will
+    /// usually resolve quickly.
     ///
     /// # Examples
     ///
@@ -311,7 +308,7 @@ impl RecoveryInfo {
 
     /// Returns the recovery kind.
     ///
-    /// Use this value to choose a recovery action.
+    /// Use this classification to choose a recovery policy.
     ///
     /// # Examples
     ///
@@ -356,7 +353,7 @@ impl RecoveryInfo {
     ///     unavailable_with_time.get_delay(),
     ///     Some(Duration::from_secs(300))
     /// );
-    /// // No delay is set.
+    /// // The value has no delay.
     /// let no_delay = RecoveryInfo::retry();
     /// assert_eq!(no_delay.get_delay(), None);
     /// ```
@@ -371,7 +368,7 @@ impl RecoveryInfo {
 ///
 /// Implement this trait for an error or another type that can classify its
 /// state. Resilience middleware can then handle different types in the same way.
-/// An error usually implements this trait when its variants need different actions.
+/// An error usually implements this trait when its variants have different classifications.
 ///
 /// # Examples
 ///

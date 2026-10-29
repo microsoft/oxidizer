@@ -53,7 +53,7 @@ impl From<ErrorKind> for RecoveryInfo {
     /// Many of these errors are permanent, such as missing files, denied
     /// permissions, or invalid data. This group also includes ambiguous variants
     /// such as [`ErrorKind::Other`], which can contain transient errors.
-    /// Implement a conversion for your error type when it uses these variants.
+    /// If your error type uses these variants, implement a conversion for it.
     fn from(kind: ErrorKind) -> Self {
         match kind {
             ErrorKind::WouldBlock
