@@ -250,7 +250,7 @@ mod tests {
     use seismograph::recorder::event::{Event, EventClock, EventKind, EventPayload, EventSequence, EventTimestamp, Events, ObjectId};
     use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
     use seismograph::recorder::thread::{ThreadId, ThreadLog};
-    use seismograph::recorder::{RecordingPolicies, RecordingPolicy};
+    use seismograph::recorder::{Policies, Policy};
 
     use super::*;
 
@@ -311,10 +311,10 @@ mod tests {
         let events = Events {
             clock: EventClock::ProcessMonotonic,
             total_events: 3,
-            recording: RecordingPolicies {
-                runtime_tasks: RecordingPolicy::all(true),
-                general_events: RecordingPolicy::all(true),
-                ..RecordingPolicies::default()
+            recording: Policies {
+                runtime_tasks: Policy::all(true),
+                general_events: Policy::all(true),
+                ..Policies::default()
             },
             threads: vec![ThreadLog {
                 thread_id: ThreadId::new(1),

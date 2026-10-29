@@ -177,7 +177,7 @@ pub enum BacktraceCapture {
 }
 
 /// Kind of operation represented by a runtime event.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum EventKind {
     /// A shared-pointer allocation was created.
@@ -363,9 +363,8 @@ pub enum EventKind {
 }
 
 impl EventKind {
-    #[doc(hidden)]
     #[must_use]
-    pub const fn wire_value(self) -> u8 {
+    pub(crate) const fn wire_value(self) -> u8 {
         match self {
             Self::ArcDeref => 1,
             Self::ArcClone => 2,
@@ -737,7 +736,7 @@ pub struct Events {
     /// Events overwritten across all thread logs.
     pub lost_events: u64,
     /// Per-class policies used while recording these events.
-    pub recording: super::RecordingPolicies,
+    pub recording: super::Policies,
     /// Per-thread bounded-log summaries.
     pub threads: Vec<ThreadLog>,
     /// Events retained at snapshot time.
@@ -750,7 +749,7 @@ impl Default for Events {
             clock: EventClock::Unspecified,
             total_events: 0,
             lost_events: 0,
-            recording: super::RecordingPolicies::default(),
+            recording: super::Policies::default(),
             threads: Vec::new(),
             events: Vec::new(),
         }
@@ -804,7 +803,10 @@ impl Record {
         Self::allocation_lifecycle(EventKind::Deallocation, allocation)
     }
 
-    #[doc(hidden)]
+    /// Creates a runtime lifecycle or scheduling event.
+    ///
+    /// Use a runtime event `kind` and a timestamp from [`EventTimestamp`].
+    /// `backtrace` controls stack capture when the recorder accepts this event.
     #[must_use]
     pub const fn runtime(timestamp: EventTimestamp, kind: EventKind, runtime: RuntimeEvent, backtrace: BacktraceCapture) -> Self {
         Self {

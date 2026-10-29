@@ -11,7 +11,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp};
 use seismograph::recorder::runtime::WorkerId;
-use seismograph::recorder::{RecordingObservation, RecordingSession, active_recording_session};
+use seismograph::recorder::{Generation, generation, is_enabled};
+use seismograph::snapshot::Observation;
 
 use crate::snapshot::{TaskActivity, TaskActivityState};
 use crate::{TaskControl, runtime_record};
@@ -29,7 +30,7 @@ pub(crate) struct Activity {
 
 #[derive(Debug)]
 struct Data {
-    session: Option<RecordingSession>,
+    session: Option<Generation>,
     revision: u64,
     updated_at: EventTimestamp,
     value: TaskActivity,
@@ -47,7 +48,7 @@ pub(crate) fn unknown(observed_at: EventTimestamp) -> TaskActivity {
 }
 
 impl Activity {
-    pub(crate) fn new(session: Option<RecordingSession>, at: EventTimestamp) -> Self {
+    pub(crate) fn new(session: Option<Generation>, at: EventTimestamp) -> Self {
         let mut value = unknown(at);
         if session.is_some() {
             value.state = TaskActivityState::Waiting;
@@ -63,7 +64,7 @@ impl Activity {
             terminal: AtomicBool::new(false),
         }
     }
-    fn begin(&self, session: Option<RecordingSession>) -> Option<MutexGuard<'_, Data>> {
+    fn begin(&self, session: Option<Generation>) -> Option<MutexGuard<'_, Data>> {
         let session = session?;
         if self.terminal.load(Ordering::Acquire) {
             return None;
@@ -78,7 +79,7 @@ impl Activity {
             data.revision = revision;
             data.value = unknown(data.updated_at);
         }
-        if active_recording_session() != Some(session) || !seismograph::recorder::recording_enabled_for(EventClass::RuntimeTask) {
+        if !is_enabled(EventClass::RuntimeTask) || generation() != Some(session) {
             self.missed.fetch_add(1, Ordering::AcqRel);
             return None;
         }
@@ -86,8 +87,8 @@ impl Activity {
     }
 
     fn validate(&self, data: &Data) -> bool {
-        if active_recording_session() == data.session
-            && seismograph::recorder::recording_enabled_for(EventClass::RuntimeTask)
+        if is_enabled(EventClass::RuntimeTask)
+            && data.session.is_some_and(|session| generation() == Some(session))
             && !self.terminal.load(Ordering::Acquire)
         {
             true
@@ -99,7 +100,7 @@ impl Activity {
 
     #[cold]
     pub(crate) fn woken(&self, task: &TaskControl) {
-        let session = active_recording_session();
+        let session = generation().filter(|_| is_enabled(EventClass::RuntimeTask));
         let mut data = self.begin(session);
         // Serialize the existing clock/CAS with recorded poll starts. With
         // recording disabled those operations run without this synchronization.
@@ -124,10 +125,10 @@ impl Activity {
             false
         };
         drop(data);
-        if emit && let Some(session) = session {
+        if emit {
             // A notifier is not a worker. The runtime ID avoids both an Arc
             // cycle and per-wake registry lookups.
-            seismograph::record_in_session(session, EventClass::RuntimeTask, || {
+            seismograph::record(EventClass::RuntimeTask, || {
                 Some(runtime_record(
                     at,
                     task.runtime_id,
@@ -148,8 +149,8 @@ impl Activity {
         &self,
         worker_id: WorkerId,
         timestamps: impl FnOnce() -> (EventTimestamp, u64),
-    ) -> (EventTimestamp, u64, Option<EventTimestamp>, Option<RecordingSession>) {
-        let session = active_recording_session();
+    ) -> (EventTimestamp, u64, Option<EventTimestamp>, Option<Generation>) {
+        let session = generation().filter(|_| is_enabled(EventClass::RuntimeTask));
         let mut data = self.begin(session);
         let (at, ready) = timestamps();
         if data.is_none() && session.is_some() {
@@ -180,7 +181,7 @@ impl Activity {
     #[cold]
     pub(crate) fn poll_finished(
         &self,
-        session: Option<RecordingSession>,
+        session: Option<Generation>,
         started_at: EventTimestamp,
         finish: impl FnOnce() -> EventTimestamp,
     ) -> EventTimestamp {
@@ -209,7 +210,7 @@ impl Activity {
         finished_at
     }
 
-    pub(crate) fn snapshot(&self, observation: Option<RecordingObservation>) -> TaskActivity {
+    pub(crate) fn snapshot(&self, observation: Option<Observation>) -> TaskActivity {
         let Some(observation) = observation else {
             return unknown(EventTimestamp::now());
         };
@@ -217,7 +218,7 @@ impl Activity {
         let Ok(data) = self.data.try_lock() else {
             return fallback;
         };
-        if data.session != Some(observation.session) {
+        if data.session != Some(observation.generation) {
             return fallback;
         }
         if data.revision != self.missed.load(Ordering::Acquire) {
@@ -244,7 +245,7 @@ mod tests {
     use std::sync::Arc;
 
     use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
-    use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+    use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
     use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
 
     use super::*;
@@ -254,11 +255,11 @@ mod tests {
 
     fn configure(enabled: bool) {
         seismograph::recorder(Configuration {
-            runtime_tasks: RecordingPolicy {
+            runtime_tasks: Policy {
                 enabled,
                 ..Default::default()
             },
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Default::default()
         });
     }
@@ -302,8 +303,9 @@ mod tests {
     fn stale_sessions_invalidate_begin_and_validation() {
         let _test = crate::tests::test_lock();
         configure(true);
-        let current = active_recording_session().unwrap();
-        let stale = RecordingSession::from_raw(current.get().wrapping_add(1).max(1)).unwrap();
+        let stale = generation().unwrap();
+        configure(false);
+        configure(true);
         let activity = Activity::new(Some(stale), EventTimestamp::from_ticks(1));
 
         assert!(activity.begin(Some(stale)).is_none());
@@ -415,7 +417,7 @@ mod tests {
     fn disabled_hooks_leave_recording_state_and_event_buffers_untouched() {
         let _test = crate::tests::test_lock();
         configure(false);
-        seismograph::recorder::clear_event_buffers().unwrap();
+        seismograph::recorder::clear_buffers().unwrap();
         let runtime = register_runtime(RuntimeMetadata::new("off", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
         let task = runtime.handle().register_task(TypeDescriptorId::from_raw(1).unwrap(), None);
@@ -590,9 +592,9 @@ mod tests {
         task.poll_finished(&worker.handle(), poll);
         task.woken();
         assert_eq!(state(&task).state, TaskActivityState::Ready);
-        let old_session = active_recording_session();
-        seismograph::recorder::clear_event_buffers().unwrap();
-        assert_ne!(old_session, active_recording_session());
+        let old_session = generation();
+        seismograph::recorder::clear_buffers().unwrap();
+        assert_ne!(old_session, generation());
         assert_eq!(state(&task).state, TaskActivityState::Unknown);
         let poll = task.poll_started(&worker.handle());
         task.poll_finished(&worker.handle(), poll);
@@ -614,7 +616,7 @@ mod tests {
         task.poll_finished(&worker.handle(), poll);
         assert_eq!(state(&task), frozen);
         assert_eq!(frozen, stopped_activity);
-        seismograph::recorder::clear_event_buffers().unwrap();
+        seismograph::recorder::clear_buffers().unwrap();
         assert_eq!(state(&task).state, TaskActivityState::Unknown);
         configure(true);
         assert_eq!(state(&task).state, TaskActivityState::Unknown);
@@ -661,7 +663,7 @@ mod tests {
                 .unwrap()
         });
 
-        assert_eq!((queued_since, session), (None, active_recording_session()));
+        assert_eq!((queued_since, session), (None, generation()));
         assert_eq!(task.task.activity.missed.load(Ordering::Acquire), 2);
         drop(guard);
         assert_eq!(state(&task).state, TaskActivityState::Unknown);
@@ -869,11 +871,16 @@ mod tests {
 
     #[test]
     fn outstanding_ten_minute_ready_and_long_poll_use_observation_clock() {
-        let session = RecordingSession::from_raw(123).unwrap();
+        let _test = crate::tests::test_lock();
+        configure(true);
+        let session = generation().unwrap();
         let start = EventTimestamp::from_ticks(10);
         let observed_at = EventTimestamp::from_ticks(600_000_000_010);
         let activity = Activity::new(Some(session), start);
-        let observation = Some(RecordingObservation { session, observed_at });
+        let observation = Some(Observation {
+            generation: session,
+            observed_at,
+        });
         for state in [TaskActivityState::Ready, TaskActivityState::Running] {
             {
                 let mut data = activity.data.lock().unwrap();
@@ -886,39 +893,56 @@ mod tests {
             let since = snapshot.queued_since.or(snapshot.poll_started_at).unwrap();
             assert_eq!(snapshot.observed_at.duration_since(since), std::time::Duration::from_mins(10));
         }
+        configure(false);
     }
 
     #[test]
     fn snapshot_accepts_an_observation_at_the_exact_update_boundary() {
-        let session = RecordingSession::from_raw(123).unwrap();
+        let _test = crate::tests::test_lock();
+        configure(true);
+        let session = generation().unwrap();
         let at = EventTimestamp::from_ticks(10);
         let activity = Activity::new(Some(session), at);
         assert_eq!(
-            activity.snapshot(Some(RecordingObservation { session, observed_at: at })).state,
+            activity
+                .snapshot(Some(Observation {
+                    generation: session,
+                    observed_at: at,
+                }))
+                .state,
             TaskActivityState::Waiting
         );
         assert_eq!(
             activity
-                .snapshot(Some(RecordingObservation {
-                    session,
+                .snapshot(Some(Observation {
+                    generation: session,
                     observed_at: EventTimestamp::from_ticks(9),
                 }))
                 .state,
             TaskActivityState::Unknown
         );
+        configure(false);
     }
 
     #[test]
     fn terminal_activity_snapshot_is_unknown() {
-        let session = RecordingSession::from_raw(123).unwrap();
+        let _test = crate::tests::test_lock();
+        configure(true);
+        let session = generation().unwrap();
         let observed_at = EventTimestamp::from_ticks(10);
         let activity = Activity::new(Some(session), observed_at);
         activity.terminal.store(true, Ordering::Release);
 
         assert_eq!(
-            activity.snapshot(Some(RecordingObservation { session, observed_at })).state,
+            activity
+                .snapshot(Some(Observation {
+                    generation: session,
+                    observed_at,
+                }))
+                .state,
             TaskActivityState::Unknown
         );
+        configure(false);
     }
 
     #[test]

@@ -21,7 +21,7 @@ use crate::recorder::event::{
 use crate::recorder::io::{BufferId, IoEvent, IoOperationId, IoOutcome, IoResourceId, IoResourceKind};
 use crate::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
 use crate::recorder::thread::{ThreadId, ThreadLog};
-use crate::recorder::{self, EventSampling, MAX_STACK_FRAMES, RecordingPolicies, RecordingPolicy, SuppressionGuard};
+use crate::recorder::{self, EventSampling, MAX_STACK_FRAMES, Policies, Policy, SuppressionGuard};
 use crate::system::SystemSlice;
 
 const MAGIC: [u8; 8] = *b"SEISMOG\0";
@@ -103,13 +103,13 @@ pub struct Source {
     id: SourceId,
     name: &'static str,
     schema_version: u16,
-    capture: Capture,
+    capture: CaptureFn,
     registered: AtomicBool,
     next: AtomicPtr<Self>,
 }
 
 /// Callback that contributes one source payload to a snapshot.
-pub type Capture = for<'a> fn(SnapshotContext<'a>) -> Result<SourceData, Error>;
+pub type CaptureFn = for<'a> fn(SnapshotContext<'a>) -> Result<SourceData, Error>;
 
 impl Source {
     /// Creates a source descriptor suitable for static storage.
@@ -118,7 +118,7 @@ impl Source {
     ///
     /// Panics when `name` is empty or `schema_version` is zero.
     #[must_use]
-    pub const fn new(id: SourceId, name: &'static str, schema_version: u16, capture: Capture) -> Self {
+    pub const fn new(id: SourceId, name: &'static str, schema_version: u16, capture: CaptureFn) -> Self {
         assert!(!name.is_empty(), "a seismograph source name must not be empty");
         assert!(schema_version != 0, "a seismograph source schema version must be nonzero");
         Self {
@@ -132,11 +132,23 @@ impl Source {
     }
 }
 
+/// Recording generation and clock boundary for source state.
+///
+/// Snapshot capture creates this value and passes it to sources through
+/// [`SnapshotContext::recording_observation`].
+#[derive(Clone, Copy, Debug)]
+pub struct Observation {
+    /// Retained recording generation, including a just-stopped generation.
+    pub generation: recorder::Generation,
+    /// Latest time at which the recording's source state can be interpreted.
+    pub observed_at: EventTimestamp,
+}
+
 /// Recorder data available while a registered source contributes its payload.
 #[derive(Clone, Copy, Debug)]
 pub struct SnapshotContext<'a> {
     events: &'a Events,
-    observation: Option<recorder::RecordingObservation>,
+    observation: Option<Observation>,
 }
 
 impl<'a> SnapshotContext<'a> {
@@ -151,7 +163,7 @@ impl<'a> SnapshotContext<'a> {
     /// Destructive captures retain the pre-reset generation. A stopped capture
     /// retains its stop-time boundary rather than advancing frozen task ages.
     #[must_use]
-    pub const fn recording_observation(self) -> Option<recorder::RecordingObservation> {
+    pub const fn recording_observation(self) -> Option<Observation> {
         self.observation
     }
 }
@@ -454,23 +466,23 @@ fn decode_sampling(reader: &mut Reader<'_>, format_version: u16) -> Result<u64, 
     validated_sampling(u64::from(sampling)).map(u64::from)
 }
 
-fn decode_recording_policies(reader: &mut Reader<'_>, format_version: u16) -> Result<RecordingPolicies, Error> {
+fn decode_recording_policies(reader: &mut Reader<'_>, format_version: u16) -> Result<Policies, Error> {
     if format_version < 5 {
         let sampling =
             EventSampling::one_in(usize::try_from(decode_sampling(reader, format_version)?).map_err(|_error| Error::invalid_format())?)
                 .ok_or_else(Error::invalid_format)?;
-        let policy = RecordingPolicy {
+        let policy = Policy {
             enabled: true,
             capture_backtraces: false,
             event_sampling: sampling,
         };
-        return Ok(RecordingPolicies {
+        return Ok(Policies {
             allocations: policy,
             general_events: policy,
             arc_dereferences: policy,
             runtime_tasks: policy,
-            io: RecordingPolicy::default(),
-            cache: RecordingPolicy::default(),
+            io: Policy::default(),
+            cache: Policy::default(),
         });
     }
     let allocations = decode_recording_policy(reader)?;
@@ -484,14 +496,14 @@ fn decode_recording_policies(reader: &mut Reader<'_>, format_version: u16) -> Re
     let io = if format_version >= 7 {
         decode_recording_policy(reader)?
     } else {
-        RecordingPolicy::default()
+        Policy::default()
     };
     let cache = if format_version >= 8 {
         decode_recording_policy(reader)?
     } else {
-        RecordingPolicy::default()
+        Policy::default()
     };
-    Ok(RecordingPolicies {
+    Ok(Policies {
         allocations,
         general_events,
         arc_dereferences,
@@ -501,7 +513,7 @@ fn decode_recording_policies(reader: &mut Reader<'_>, format_version: u16) -> Re
     })
 }
 
-fn decode_recording_policy(reader: &mut Reader<'_>) -> Result<RecordingPolicy, Error> {
+fn decode_recording_policy(reader: &mut Reader<'_>) -> Result<Policy, Error> {
     let enabled = reader.u8()?;
     let capture_backtraces = reader.u8()?;
     if enabled > 1 || capture_backtraces > 1 || reader.u16()? != 0 {
@@ -510,7 +522,7 @@ fn decode_recording_policy(reader: &mut Reader<'_>) -> Result<RecordingPolicy, E
     let sampling = reader.u32()?;
     let event_sampling =
         EventSampling::one_in(usize::try_from(sampling).map_err(|_error| Error::invalid_format())?).ok_or_else(Error::invalid_format)?;
-    Ok(RecordingPolicy {
+    Ok(Policy {
         enabled: enabled != 0,
         capture_backtraces: capture_backtraces != 0,
         event_sampling,
@@ -794,7 +806,7 @@ fn encode_snapshot(snapshot: &DecodedSnapshot) -> Result<Snapshot, Error> {
     Ok(encoded)
 }
 
-fn encode_recording_policy(writer: &mut Writer<'_>, policy: RecordingPolicy) -> Result<(), Error> {
+fn encode_recording_policy(writer: &mut Writer<'_>, policy: Policy) -> Result<(), Error> {
     writer.u8(u8::from(policy.enabled))?;
     writer.u8(u8::from(policy.capture_backtraces))?;
     writer.u16(0)?;
@@ -1025,13 +1037,13 @@ mod tests {
         register_source(&TEST_SOURCE);
         register_source(&TEST_SOURCE);
         recorder::configure(recorder::Configuration {
-            arc_dereferences: recorder::RecordingPolicy {
+            arc_dereferences: recorder::Policy {
                 enabled: true,
                 ..Default::default()
             },
             ..recorder::test_configuration()
         });
-        recorder::record(recorder::event::EventClass::ArcDereference, || {
+        crate::record(recorder::event::EventClass::ArcDereference, || {
             Some(recorder::event::Record::object(EventKind::ArcDeref, ObjectId::new(42)))
         });
 
@@ -1054,33 +1066,33 @@ mod tests {
 
     #[test]
     fn snapshot_round_trips_independent_recording_policies() {
-        let recording = recorder::RecordingPolicies {
-            allocations: recorder::RecordingPolicy {
+        let recording = recorder::Policies {
+            allocations: recorder::Policy {
                 enabled: true,
                 capture_backtraces: true,
                 event_sampling: recorder::EventSampling::one_in(16).expect("valid test sampling"),
             },
-            general_events: recorder::RecordingPolicy {
+            general_events: recorder::Policy {
                 enabled: false,
                 capture_backtraces: true,
                 event_sampling: recorder::EventSampling::one_in(4).expect("valid test sampling"),
             },
-            arc_dereferences: recorder::RecordingPolicy {
+            arc_dereferences: recorder::Policy {
                 enabled: true,
                 capture_backtraces: false,
                 event_sampling: recorder::EventSampling::one_in(100).expect("valid test sampling"),
             },
-            runtime_tasks: recorder::RecordingPolicy {
+            runtime_tasks: recorder::Policy {
                 enabled: true,
                 capture_backtraces: true,
                 event_sampling: recorder::EventSampling::one_in(8).expect("valid test sampling"),
             },
-            io: recorder::RecordingPolicy {
+            io: recorder::Policy {
                 enabled: true,
                 capture_backtraces: false,
                 event_sampling: recorder::EventSampling::one_in(2).expect("valid test sampling"),
             },
-            cache: recorder::RecordingPolicy {
+            cache: recorder::Policy {
                 enabled: true,
                 capture_backtraces: false,
                 event_sampling: recorder::EventSampling::one_in(32).expect("valid test sampling"),
@@ -1137,7 +1149,7 @@ mod tests {
                 clock: EventClock::CURRENT,
                 total_events: 2,
                 lost_events: 0,
-                recording: RecordingPolicies::default(),
+                recording: Policies::default(),
                 threads: vec![ThreadLog {
                     thread_id: ThreadId::new(7),
                     total_events: 2,
@@ -1173,7 +1185,7 @@ mod tests {
             events: Events {
                 clock: EventClock::CURRENT,
                 total_events: events.len() as u64,
-                recording: RecordingPolicies::default(),
+                recording: Policies::default(),
                 events: events.clone(),
                 ..Events::default()
             },
@@ -1756,17 +1768,17 @@ mod tests {
     #[test]
     fn version_five_policies_and_legacy_thread_names_are_compatible() {
         let policies = [
-            RecordingPolicy {
+            Policy {
                 enabled: true,
                 capture_backtraces: false,
                 event_sampling: EventSampling::one_in(3).unwrap(),
             },
-            RecordingPolicy {
+            Policy {
                 enabled: false,
                 capture_backtraces: true,
                 event_sampling: EventSampling::one_in(5).unwrap(),
             },
-            RecordingPolicy {
+            Policy {
                 enabled: true,
                 capture_backtraces: true,
                 event_sampling: EventSampling::one_in(7).unwrap(),
@@ -1782,13 +1794,13 @@ mod tests {
         let decoded = decode_recording_policies(&mut Reader::new(&bytes), 5).unwrap();
         assert_eq!(
             decoded,
-            RecordingPolicies {
+            Policies {
                 allocations: policies[0],
                 general_events: policies[1],
                 arc_dereferences: policies[2],
                 runtime_tasks: policies[1],
-                io: RecordingPolicy::default(),
-                cache: RecordingPolicy::default(),
+                io: Policy::default(),
+                cache: Policy::default(),
             }
         );
 
@@ -1801,7 +1813,7 @@ mod tests {
 
     #[test]
     fn version_seven_policies_default_cache_recording_to_disabled() {
-        let policy = RecordingPolicy {
+        let policy = Policy {
             enabled: true,
             capture_backtraces: true,
             event_sampling: EventSampling::one_in(7).unwrap(),
@@ -1816,7 +1828,7 @@ mod tests {
 
         let decoded = decode_recording_policies(&mut Reader::new(&bytes), 7).unwrap();
 
-        assert_eq!(decoded.cache, RecordingPolicy::default());
+        assert_eq!(decoded.cache, Policy::default());
     }
 
     #[test]
@@ -1847,7 +1859,7 @@ mod tests {
     fn source_payload_retains_the_capture_observation() {
         fn capture(context: SnapshotContext<'_>) -> Result<SourceData, Error> {
             let observation = context.recording_observation().unwrap();
-            let mut payload = observation.session.get().to_le_bytes().to_vec();
+            let mut payload = observation.generation.get().to_le_bytes().to_vec();
             payload.extend_from_slice(&observation.observed_at.ticks().to_le_bytes());
             SourceData::copy_from(&payload)
         }
@@ -1857,8 +1869,8 @@ mod tests {
             ptr::from_ref(&source).cast_mut(),
             SnapshotContext {
                 events: &Events::default(),
-                observation: Some(recorder::RecordingObservation {
-                    session: recorder::RecordingSession::from_raw(17).unwrap(),
+                observation: Some(Observation {
+                    generation: recorder::Generation::from_raw(17).unwrap(),
                     observed_at: EventTimestamp::from_ticks(23),
                 }),
             },

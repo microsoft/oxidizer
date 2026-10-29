@@ -1576,7 +1576,7 @@ mod tests {
     #[test]
     fn seismograph_io_recording_is_gated_and_captures_buffer_state_delta() {
         use seismograph::recorder::event::EventKind;
-        use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+        use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
         use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
         use seismograph_io::{Buffer, IoOutcome, IoResourceKind, Operation, Resource};
 
@@ -1606,8 +1606,8 @@ mod tests {
         );
 
         seismograph::recorder(Configuration {
-            io: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            io: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Configuration::default()
         });
         let initial_state = buffer.recording_state();

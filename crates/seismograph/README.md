@@ -30,14 +30,19 @@ Enable the event categories you need, run your workload, then capture a
 snapshot. For ownership and synchronization events:
 
 ```rust
-use seismograph::recorder::{Configuration, RecordingPolicy};
+use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
+use seismograph::recorder::{Configuration, Policy};
 
 seismograph::recorder(Configuration {
-    general_events: RecordingPolicy::all(false),
+    general_events: Policy::all(false),
     ..Default::default()
 });
 
 // Run application code that uses instrumented libraries.
+// To emit an event directly:
+seismograph::record(EventClass::General, || {
+    Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+});
 let snapshot = seismograph::snapshot(Default::default())?;
 ```
 

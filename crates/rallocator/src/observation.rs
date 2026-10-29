@@ -12,7 +12,8 @@ use std::sync::Mutex;
 use std::sync::TryLockError;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
-use seismograph::recorder::{RecordingSession, SuppressionGuard};
+use seismograph::recorder::event::EventClass;
+use seismograph::recorder::{Generation, generation, is_enabled, without_recording};
 use seismograph_rallocator::native::{Observation, ObservationSource};
 
 #[cfg(test)]
@@ -213,8 +214,8 @@ struct Slot {
 }
 
 /// Called only after an event was accepted and the native operation ended.
-pub(crate) fn publish(session: RecordingSession) {
-    if !seismograph_rallocator::native::publication_enabled() || seismograph::recorder::active_recording_session() != Some(session) {
+pub(crate) fn publish(session: Generation) {
+    if !seismograph_rallocator::native::publication_enabled() || !is_enabled(EventClass::Allocation) || generation() != Some(session) {
         return;
     }
     let round = seismograph_rallocator::native::observation_round();
@@ -230,30 +231,31 @@ pub(crate) fn publish(session: RecordingSession) {
         {
             return;
         }
-        let _suppression = SuppressionGuard::enter();
-        // The accepted event already initialized recorder TLS. Native actions
-        // do not run user destructors; temporary late-TLS leases are skipped by observe_current.
-        let thread_id = seismograph::recorder::current_thread_id().get();
-        let captured_nanos = seismograph_rallocator::native::captured_nanos();
-        let mut budget = WALK_BUDGET;
-        // SAFETY: The current thread holds the sole core lease; copying ends
-        // before publishing, locking, serializing, or invoking any callback.
-        let mut observation = unsafe { (&*owner.core_ptr()).observe(&mut budget) };
-        observation.generation = generation;
-        observation.session_id = session.get();
-        observation.round = round;
-        observation.thread_id = thread_id;
-        observation.captured_nanos = captured_nanos;
-        match slot.value.try_lock() {
-            Ok(mut value) => {
-                *value = Some(observation);
-                slot.generation.store(generation, Ordering::Relaxed);
-                slot.session.store(session.get(), Ordering::Relaxed);
-                slot.round.store(round, Ordering::Relaxed);
+        without_recording(|| {
+            // The accepted event already initialized recorder TLS. Native actions
+            // do not run user destructors; temporary late-TLS leases are skipped by observe_current.
+            let thread_id = seismograph::recorder::thread_id().get();
+            let captured_nanos = seismograph_rallocator::native::captured_nanos();
+            let mut budget = WALK_BUDGET;
+            // SAFETY: The current thread holds the sole core lease; copying ends
+            // before publishing, locking, serializing, or invoking any callback.
+            let mut observation = unsafe { (&*owner.core_ptr()).observe(&mut budget) };
+            observation.generation = generation;
+            observation.session_id = session.get();
+            observation.round = round;
+            observation.thread_id = thread_id;
+            observation.captured_nanos = captured_nanos;
+            match slot.value.try_lock() {
+                Ok(mut value) => {
+                    *value = Some(observation);
+                    slot.generation.store(generation, Ordering::Relaxed);
+                    slot.session.store(session.get(), Ordering::Relaxed);
+                    slot.round.store(round, Ordering::Relaxed);
+                }
+                Err(TryLockError::WouldBlock) => {}
+                Err(TryLockError::Poisoned(_)) => crate::abort::abort(),
             }
-            Err(TryLockError::WouldBlock) => {}
-            Err(TryLockError::Poisoned(_)) => crate::abort::abort(),
-        }
+        });
     });
 }
 
@@ -299,13 +301,13 @@ mod tests {
         }
         seismograph_rallocator::native::set_publication_enabled(true);
         seismograph::recorder(seismograph::recorder::Configuration {
-            allocations: seismograph::recorder::RecordingPolicy::all(true),
+            allocations: seismograph::recorder::Policy::all(true),
             ..Default::default()
         });
         let layout = Layout::from_size_align(32, 16).unwrap();
         let pointer = crate::recording::allocate(layout, false);
         assert!(!pointer.is_null());
-        let session = seismograph::recorder::active_recording_session().unwrap();
+        let session = generation().unwrap();
         let mut observed = false;
         crate::thread::observe_current(|owner| {
             observed = true;
@@ -376,7 +378,7 @@ mod tests {
             || {
                 seismograph_rallocator::native::set_publication_enabled(true);
                 seismograph::recorder(seismograph::recorder::Configuration {
-                    allocations: seismograph::recorder::RecordingPolicy::all(true),
+                    allocations: seismograph::recorder::Policy::all(true),
                     ..Default::default()
                 });
                 let pointer = crate::recording::allocate(Layout::from_size_align(32, 16).unwrap(), false);
@@ -387,7 +389,7 @@ mod tests {
                     poison_slot(slot);
                 });
                 seismograph_rallocator::native::request_observation();
-                publish(seismograph::recorder::active_recording_session().unwrap());
+                publish(generation().unwrap());
             },
         );
     }

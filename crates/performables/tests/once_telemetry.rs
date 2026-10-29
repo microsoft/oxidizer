@@ -7,7 +7,7 @@
 
 use performables::sync::once::OnceLock;
 use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
-use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
 use seismograph::snapshot::{SnapshotOptions, decode};
 
 struct RecordOnDrop(ObjectId);
@@ -24,8 +24,8 @@ fn initialized_access_drops_the_unused_initializer_before_recording_access() {
     let id = ObjectId::from_ptr(std::ptr::from_ref(&*once).cast::<()>());
     let captured = RecordOnDrop(id);
     seismograph::recorder(Configuration {
-        general_events: RecordingPolicy::all(false),
-        event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+        general_events: Policy::all(false),
+        event_capacity_per_thread: EventBufferCapacity::new(64),
         ..Default::default()
     });
     let value = *once.get_or_init(move || {

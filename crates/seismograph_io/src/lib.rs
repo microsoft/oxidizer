@@ -8,10 +8,10 @@
 //! [`Resource`] lazily acquires its identity when an enabled I/O event is first
 //! recorded. [`Operation`] pairs start and finish events without reading a
 //! clock or allocating any identity outside [`seismograph::record`].
+//! Completion can appear without a retained start event after recording restarts.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use seismograph::recorder::RecordingSession;
 use seismograph::recorder::event::{EventClass, EventKind, Record};
 pub use seismograph::recorder::io::{BufferId, IoOutcome, IoResourceKind};
 use seismograph::recorder::io::{IoEvent, IoOperationId, IoResourceId};
@@ -130,7 +130,6 @@ pub struct Operation {
 
 #[derive(Clone, Copy, Debug)]
 struct RecordedOperation {
-    session: RecordingSession,
     operation_id: IoOperationId,
     resource_id: IoResourceId,
     buffer_id: Option<BufferId>,
@@ -195,11 +194,20 @@ impl Operation {
         finish_kind: EventKind,
     ) -> Self {
         let mut started = None;
-        let session = seismograph::record_session(EventClass::Io, || {
+        seismograph::record(EventClass::Io, || {
             let operation_id = IoOperationId::allocate();
             let resource_id = resource.id();
             let buffer = buffer();
-            started = Some((operation_id, resource_id, buffer.id, buffer.len, buffer.span_count));
+            started = Some(RecordedOperation {
+                operation_id,
+                resource_id,
+                buffer_id: buffer.id,
+                requested_bytes,
+                buffer_len: buffer.len,
+                buffer_span_count: buffer.span_count,
+                resource_kind: resource.kind,
+                finish_kind,
+            });
             Some(Record::io(
                 start_kind,
                 IoEvent {
@@ -215,22 +223,7 @@ impl Operation {
                 },
             ))
         });
-        let recorded = session
-            .zip(started)
-            .map(
-                |(session, (operation_id, resource_id, buffer_id, buffer_len, buffer_span_count))| RecordedOperation {
-                    session,
-                    operation_id,
-                    resource_id,
-                    buffer_id,
-                    requested_bytes,
-                    buffer_len,
-                    buffer_span_count,
-                    resource_kind: resource.kind,
-                    finish_kind,
-                },
-            );
-        Self { recorded }
+        Self { recorded: started }
     }
 }
 
@@ -244,7 +237,7 @@ impl Drop for Operation {
 }
 
 fn record_finish(recorded: RecordedOperation, completed_bytes: u64, outcome: IoOutcome, buffer: Option<impl FnOnce() -> BufferState>) {
-    seismograph::record_in_session(recorded.session, EventClass::Io, || {
+    seismograph::record(EventClass::Io, || {
         let buffer = buffer.map_or(
             BufferState {
                 id: recorded.buffer_id,
@@ -275,7 +268,7 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::AtomicUsize;
 
-    use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+    use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
     use seismograph::snapshot::SnapshotOptions;
 
     use super::*;
@@ -318,8 +311,8 @@ mod tests {
         );
 
         seismograph::recorder(Configuration {
-            io: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            io: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Configuration::default()
         });
         let resource = Resource::new(IoResourceKind::TcpStream);
@@ -352,54 +345,10 @@ mod tests {
         assert!(events[1].timestamp.ticks() >= events[0].timestamp.ticks());
 
         seismograph::recorder(Configuration {
-            io: RecordingPolicy::default(),
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            io: Policy::default(),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Configuration::default()
         });
-    }
-
-    #[test]
-    #[cfg_attr(coverage_nightly, coverage(off))] // The stale-session closure is deliberately asserted not to execute.
-    fn operation_finish_does_not_cross_recording_sessions() {
-        let _test = TEST_LOCK.lock().unwrap();
-        let capacity = EventBufferCapacity::new(64).unwrap();
-        seismograph::recorder(Configuration {
-            io: RecordingPolicy::all(false),
-            event_capacity_per_thread: capacity,
-            ..Configuration::default()
-        });
-        let resource = Resource::new(IoResourceKind::File);
-        let operation = Operation::read_started(&resource, 64, BufferState::none);
-        assert!(operation.was_recorded());
-
-        seismograph::recorder(Configuration {
-            io: RecordingPolicy::all(true),
-            event_capacity_per_thread: capacity,
-            ..Configuration::default()
-        });
-        let finish_metadata_calls = AtomicUsize::new(0);
-        operation.finish(64, IoOutcome::Success, || {
-            finish_metadata_calls.fetch_add(1, Ordering::Relaxed);
-            BufferState::none()
-        });
-        assert_eq!(finish_metadata_calls.load(Ordering::Relaxed), 0);
-
-        let current = Operation::read_started(&resource, 8, BufferState::none);
-        current.finish_without_buffer(8, IoOutcome::Success);
-        let snapshot = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
-        assert_eq!(decoded.events.events.len(), 2);
-        assert_eq!(decoded.events.events[0].kind, EventKind::IoReadStarted);
-        assert_eq!(decoded.events.events[1].kind, EventKind::IoReadFinished);
-        assert_eq!(
-            (
-                decoded.events.events[1].io().unwrap().completed_bytes,
-                decoded.events.events[1].io().unwrap().outcome,
-            ),
-            (8, IoOutcome::Success)
-        );
-
-        seismograph::recorder(Configuration::default());
     }
 
     #[test]
@@ -439,8 +388,8 @@ mod tests {
     fn dropping_recorded_operation_emits_cancellation() {
         let _test = TEST_LOCK.lock().unwrap();
         seismograph::recorder(Configuration {
-            io: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            io: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Configuration::default()
         });
         let resource = Resource::new(IoResourceKind::TcpListener);

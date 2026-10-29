@@ -84,16 +84,13 @@
 //! worker.attach_current_thread();
 //! ```
 
-use std::collections::HashMap;
-#[cfg(not(miri))]
-use std::ffi::c_void;
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use seismograph::recorder::SuppressionGuard;
-use seismograph::recorder::event::{Address, BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
+use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, Record};
 use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TransferId, TypeDescriptorId, WorkerId};
+use seismograph::recorder::{Generation, generation, is_enabled, without_recording};
 
 pub mod snapshot;
 pub mod task;
@@ -108,7 +105,6 @@ static NEXT_WORKER_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
 static REGISTRY: OnceLock<Registry> = OnceLock::new();
-static ADDRESS_LOOKUPS: OnceLock<Mutex<HashMap<u64, snapshot::AddressLookup>>> = OnceLock::new();
 static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
     snapshot::source::ID,
     snapshot::source::NAME,
@@ -219,23 +215,24 @@ impl RuntimeHandle {
     /// Registers a worker and emits [`EventKind::WorkerStarted`].
     #[must_use]
     pub fn register_worker(&self, metadata: worker::WorkerMetadata) -> worker::WorkerRegistration {
-        let suppression = SuppressionGuard::enter();
-        let id = next_worker_id();
-        let worker = Arc::new(WorkerControl {
-            id,
-            role: metadata.role,
-            processor_index: metadata.processor_index,
-            state: AtomicU8::new(WorkerState::Running.wire_value()),
-            thread_id: AtomicU64::new(0),
-            current_task: AtomicU64::new(0),
+        let worker = without_recording(|| {
+            let id = next_worker_id();
+            let worker = Arc::new(WorkerControl {
+                id,
+                role: metadata.role,
+                processor_index: metadata.processor_index,
+                state: AtomicU8::new(WorkerState::Running.wire_value()),
+                thread_id: AtomicU64::new(0),
+                current_task: AtomicU64::new(0),
+            });
+            lock(&self.control.workers).push(Arc::clone(&worker));
+            worker
         });
-        lock(&self.control.workers).push(Arc::clone(&worker));
-        drop(suppression);
         record_now(
             &self.control,
-            Some(id),
+            Some(worker.id),
             EventKind::WorkerStarted,
-            id.get(),
+            worker.id.get(),
             0,
             u64::from(metadata.role.wire_value()),
             u64::from(metadata.processor_index.unwrap_or(u32::MAX)),
@@ -346,9 +343,7 @@ impl RuntimeHandle {
         parent: Option<TaskId>,
         encoded_size: Option<NonZeroU64>,
     ) -> task::TaskHandle {
-        let session = seismograph::recorder::recording_enabled_for(EventClass::RuntimeTask)
-            .then(seismograph::recorder::active_recording_session)
-            .flatten();
+        let session = generation().filter(|_| is_enabled(EventClass::RuntimeTask));
         self.register_task_with_session(type_descriptor, parent, encoded_size, session)
     }
 
@@ -357,38 +352,37 @@ impl RuntimeHandle {
         type_descriptor: TypeDescriptorId,
         parent: Option<TaskId>,
         encoded_size: Option<NonZeroU64>,
-        session: Option<seismograph::recorder::RecordingSession>,
+        session: Option<Generation>,
     ) -> task::TaskHandle {
         let task_id = next_task_id();
         self.control.counters.spawned_tasks.fetch_add(1, Ordering::Relaxed);
         self.control.counters.live_tasks.fetch_add(1, Ordering::Relaxed);
-        let spawn_backtrace = seismograph::recorder::capture_backtrace(self.control.lifecycle_backtraces);
-        let suppression = SuppressionGuard::enter();
-        let spawned_at = EventTimestamp::now();
-        let task = Arc::new(TaskControl {
-            id: task_id,
-            runtime_id: self.id(),
-            activity: activity::Activity::new(session, spawned_at),
-            parent,
-            type_descriptor,
-            encoded_size,
-            spawned_at,
-            spawn_backtrace,
-            ready_since: AtomicU64::new(0),
-            last_worker_id: AtomicU64::new(0),
-            last_poll_finished_at: AtomicU64::new(0),
-            poll_count: AtomicU64::new(0),
-            poll_duration_nanos: AtomicU64::new(0),
-            max_poll_duration_nanos: AtomicU64::new(0),
-            resume_count: AtomicU64::new(0),
-            resume_duration_nanos: AtomicU64::new(0),
-            max_resume_duration_nanos: AtomicU64::new(0),
-            ready_wait_count: AtomicU64::new(0),
-            ready_wait_duration_nanos: AtomicU64::new(0),
-            max_ready_wait_duration_nanos: AtomicU64::new(0),
+        let task = without_recording(|| {
+            let spawned_at = EventTimestamp::now();
+            let task = Arc::new(TaskControl {
+                id: task_id,
+                runtime_id: self.id(),
+                activity: activity::Activity::new(session, spawned_at),
+                parent,
+                type_descriptor,
+                encoded_size,
+                spawned_at,
+                ready_since: AtomicU64::new(0),
+                last_worker_id: AtomicU64::new(0),
+                last_poll_finished_at: AtomicU64::new(0),
+                poll_count: AtomicU64::new(0),
+                poll_duration_nanos: AtomicU64::new(0),
+                max_poll_duration_nanos: AtomicU64::new(0),
+                resume_count: AtomicU64::new(0),
+                resume_duration_nanos: AtomicU64::new(0),
+                max_resume_duration_nanos: AtomicU64::new(0),
+                ready_wait_count: AtomicU64::new(0),
+                ready_wait_duration_nanos: AtomicU64::new(0),
+                max_ready_wait_duration_nanos: AtomicU64::new(0),
+            });
+            lock(&self.control.tasks).insert(task_id.get(), Arc::clone(&task));
+            task
         });
-        lock(&self.control.tasks).insert(task_id.get(), Arc::clone(&task));
-        drop(suppression);
         record_now(
             &self.control,
             None,
@@ -495,27 +489,28 @@ impl RuntimeCounters {
 /// suppression. The returned RAII registration owns logical retirement.
 #[must_use]
 pub fn register_runtime(metadata: RuntimeMetadata<'_>) -> RuntimeRegistration {
-    let suppression = SuppressionGuard::enter();
-    seismograph::snapshot::register_source(&SOURCE);
-    let id = next_runtime_id();
-    let created_at = EventTimestamp::now();
-    let control = Arc::new(RuntimeControl {
-        id,
-        name: metadata.name.to_owned(),
-        configured_workers: metadata.configured_workers,
-        lifecycle_backtraces: metadata.lifecycle_backtraces,
-        created_at,
-        retired_at: AtomicU64::new(0),
-        state: AtomicU8::new(RuntimeState::Running.wire_value()),
-        counters: CounterBlock::default(),
-        workers: Mutex::new(Vec::new()),
-        tasks: Mutex::new(HashMap::new()),
+    let control = without_recording(|| {
+        seismograph::snapshot::register_source(&SOURCE);
+        let id = next_runtime_id();
+        let created_at = EventTimestamp::now();
+        let control = Arc::new(RuntimeControl {
+            id,
+            name: metadata.name.to_owned(),
+            configured_workers: metadata.configured_workers,
+            lifecycle_backtraces: metadata.lifecycle_backtraces,
+            created_at,
+            retired_at: AtomicU64::new(0),
+            state: AtomicU8::new(RuntimeState::Running.wire_value()),
+            counters: CounterBlock::default(),
+            workers: Mutex::new(Vec::new()),
+            tasks: Mutex::new(HashMap::new()),
+        });
+        lock(&registry().runtimes).push(Arc::clone(&control));
+        control
     });
-    lock(&registry().runtimes).push(Arc::clone(&control));
-    drop(suppression);
     record_at(
         &control,
-        created_at,
+        control.created_at,
         None,
         EventKind::RuntimeCreated,
         0,
@@ -568,7 +563,6 @@ pub(crate) struct TaskControl {
     type_descriptor: TypeDescriptorId,
     encoded_size: Option<NonZeroU64>,
     spawned_at: EventTimestamp,
-    spawn_backtrace: Vec<Address>,
     pub(crate) ready_since: AtomicU64,
     pub(crate) last_worker_id: AtomicU64,
     pub(crate) last_poll_finished_at: AtomicU64,
@@ -622,57 +616,17 @@ fn capture_source(context: seismograph::snapshot::SnapshotContext<'_>) -> Result
     Ok(data)
 }
 
-fn capture_registry(observation: Option<seismograph::recorder::RecordingObservation>) -> Snapshot {
+fn capture_registry(observation: Option<seismograph::snapshot::Observation>) -> Snapshot {
     let runtimes = lock(&registry().runtimes);
     let runtimes = runtimes.iter().map(|runtime| runtime.snapshot(observation)).collect::<Vec<_>>();
-    let addresses = resolve_runtime_addresses(&runtimes);
-    Snapshot { runtimes, addresses }
-}
-
-fn resolve_runtime_addresses(runtimes: &[Runtime]) -> Vec<snapshot::AddressLookup> {
-    let mut addresses = runtimes
-        .iter()
-        .flat_map(|runtime| &runtime.tasks)
-        .flat_map(|task| &task.spawn_backtrace)
-        .map(|address| address.get())
-        .filter(|address| *address != 0)
-        .collect::<Vec<_>>();
-    addresses.sort_unstable();
-    addresses.dedup();
-    let _suppression = SuppressionGuard::enter();
-    {
-        let mut cache = lock(ADDRESS_LOOKUPS.get_or_init(|| Mutex::new(HashMap::new())));
-        for &address in &addresses {
-            if cache.contains_key(&address) {
-                continue;
-            }
-            #[cfg_attr(miri, expect(unused_mut, reason = "Miri cannot resolve native symbols"))]
-            let mut lookup = snapshot::AddressLookup {
-                address,
-                ..snapshot::AddressLookup::default()
-            };
-            #[cfg(not(miri))]
-            backtrace::resolve(
-                seismograph::recorder::symbol_lookup_address(Address::new(address)).get() as *mut c_void,
-                |symbol| {
-                    lookup.symbol = lookup.symbol.take().or_else(|| symbol.name().map(|name| name.to_string()));
-                    lookup.filename = lookup
-                        .filename
-                        .take()
-                        .or_else(|| symbol.filename().map(|path| path.to_string_lossy().into_owned()));
-                    lookup.line = lookup.line.or_else(|| symbol.lineno());
-                    lookup.column = lookup.column.or_else(|| symbol.colno());
-                },
-            );
-            cache.insert(address, lookup);
-        }
+    Snapshot {
+        runtimes,
+        addresses: Vec::new(),
     }
-    let cache = lock(ADDRESS_LOOKUPS.get_or_init(|| Mutex::new(HashMap::new())));
-    addresses.into_iter().map(|address| cache[&address].clone()).collect()
 }
 
 impl RuntimeControl {
-    fn snapshot(&self, observation: Option<seismograph::recorder::RecordingObservation>) -> Runtime {
+    fn snapshot(&self, observation: Option<seismograph::snapshot::Observation>) -> Runtime {
         let state = runtime_state(self.state.load(Ordering::Acquire));
         let retired_at = match state {
             RuntimeState::Stopped => Some(EventTimestamp::from_ticks(self.retired_at.load(Ordering::Acquire))),
@@ -697,7 +651,7 @@ impl RuntimeControl {
 }
 
 impl TaskControl {
-    fn snapshot(&self, observation: Option<seismograph::recorder::RecordingObservation>) -> Task {
+    fn snapshot(&self, observation: Option<seismograph::snapshot::Observation>) -> Task {
         Task {
             id: self.id,
             parent: self.parent,
@@ -717,7 +671,6 @@ impl TaskControl {
                 max_ready_wait_duration_nanos: self.max_ready_wait_duration_nanos.load(Ordering::Relaxed),
             },
             activity: Some(self.activity.snapshot(observation)),
-            spawn_backtrace: self.spawn_backtrace.clone(),
         }
     }
 }
@@ -749,8 +702,7 @@ fn complete_task(
     terminal_counter: &AtomicU64,
     backtrace: BacktraceCapture,
 ) {
-    let suppression = SuppressionGuard::enter();
-    let removed = {
+    let removed = without_recording(|| {
         let mut tasks = lock(&control.tasks);
         if let Some(task) = tasks.remove(&task_id.get()) {
             // Lifetime state, not a recording observation: a retained waker
@@ -760,8 +712,7 @@ fn complete_task(
         } else {
             false
         }
-    };
-    drop(suppression);
+    });
     if !removed {
         return;
     }
@@ -1060,7 +1011,7 @@ mod tests {
     fn completed_tasks_retain_future_sizes_in_spawn_events() {
         let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
-            runtime_tasks: seismograph::recorder::RecordingPolicy::all(false),
+            runtime_tasks: seismograph::recorder::Policy::all(false),
             ..Default::default()
         });
         let runtime = register_runtime(RuntimeMetadata::new("completed-future-sizes", 1));
@@ -1118,7 +1069,7 @@ mod tests {
     fn duplicate_terminal_callback_is_ignored() {
         let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
-            runtime_tasks: seismograph::recorder::RecordingPolicy {
+            runtime_tasks: seismograph::recorder::Policy {
                 enabled: true,
                 ..Default::default()
             },
@@ -1157,7 +1108,7 @@ mod tests {
     fn unknown_terminal_callback_is_ignored() {
         let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
-            runtime_tasks: seismograph::recorder::RecordingPolicy {
+            runtime_tasks: seismograph::recorder::Policy {
                 enabled: true,
                 ..Default::default()
             },
@@ -1207,7 +1158,7 @@ mod tests {
     fn task_readiness_retains_first_wake_until_poll() {
         let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
-            runtime_tasks: seismograph::recorder::RecordingPolicy {
+            runtime_tasks: seismograph::recorder::Policy {
                 enabled: true,
                 ..Default::default()
             },
@@ -1270,12 +1221,11 @@ mod tests {
         seismograph::recorder(seismograph::recorder::Configuration::default());
     }
 
-    #[cfg(not(miri))]
     #[test]
-    fn live_task_snapshot_retains_spawn_backtrace() {
+    fn cleared_spawn_events_are_not_recreated_from_live_task_metadata() {
         let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
-            runtime_tasks: seismograph::recorder::RecordingPolicy {
+            runtime_tasks: seismograph::recorder::Policy {
                 enabled: true,
                 capture_backtraces: true,
                 ..Default::default()
@@ -1285,29 +1235,22 @@ mod tests {
         let runtime = register_runtime(RuntimeMetadata::new("spawn-backtrace", 1));
         let type_descriptor = type_descriptor_id(1);
         let task_id = runtime.handle().task_spawned(type_descriptor, None);
-
-        let first_snapshot = source_snapshot();
-        let task = first_snapshot
+        seismograph::recorder::clear_buffers().unwrap();
+        let encoded = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
+        let source = decoded.sources.iter().find(|source| source.id == snapshot::source::ID).unwrap();
+        let source = snapshot::decode(&source.data).unwrap();
+        let task = source
             .runtimes
             .iter()
             .find(|candidate| candidate.id == runtime.id())
             .and_then(|runtime| runtime.tasks.iter().find(|task| task.id == task_id))
             .unwrap();
 
-        assert_eq!((task.type_descriptor, task.spawn_backtrace.is_empty()), (type_descriptor, false));
-        assert!(
-            task.spawn_backtrace
-                .iter()
-                .all(|frame| first_snapshot.addresses.iter().any(|lookup| lookup.address == frame.get()))
+        assert_eq!(
+            (task.type_descriptor, decoded.events.events.len(), source.addresses.len()),
+            (type_descriptor, 0, 0)
         );
-        assert!(
-            first_snapshot
-                .addresses
-                .iter()
-                .any(|lookup| lookup.symbol.is_some() || lookup.filename.is_some())
-        );
-        let second_snapshot = source_snapshot();
-        assert_eq!(second_snapshot.addresses, first_snapshot.addresses);
         seismograph::recorder(seismograph::recorder::Configuration::default());
     }
 
@@ -1330,7 +1273,7 @@ mod tests {
 
         for capture_backtraces in [false, true] {
             seismograph::recorder(seismograph::recorder::Configuration {
-                runtime_tasks: seismograph::recorder::RecordingPolicy::all(capture_backtraces),
+                runtime_tasks: seismograph::recorder::Policy::all(capture_backtraces),
                 ..Default::default()
             });
             task.woken();
@@ -1364,7 +1307,7 @@ mod tests {
     fn typed_api_records_fixed_runtime_payloads() {
         let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
-            runtime_tasks: seismograph::recorder::RecordingPolicy {
+            runtime_tasks: seismograph::recorder::Policy {
                 enabled: true,
                 capture_backtraces: true,
                 ..Default::default()
@@ -1423,7 +1366,7 @@ mod tests {
     fn lifecycle_transfer_and_terminal_paths_are_visible() {
         let _test = test_lock();
         seismograph::recorder(seismograph::recorder::Configuration {
-            runtime_tasks: seismograph::recorder::RecordingPolicy {
+            runtime_tasks: seismograph::recorder::Policy {
                 enabled: true,
                 ..Default::default()
             },

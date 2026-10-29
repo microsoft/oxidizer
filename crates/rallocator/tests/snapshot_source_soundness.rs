@@ -38,7 +38,7 @@ fn allocator_backed_capture_recovers_after_source_error_and_panic() {
     let retained = vec![0xa5; 32_768];
     seismograph::snapshot::register_source(&SOURCE);
     seismograph::recorder(seismograph::recorder::Configuration {
-        allocations: seismograph::recorder::RecordingPolicy::all(false),
+        allocations: seismograph::recorder::Policy::all(false),
         ..Default::default()
     });
     for (mode, message) in [(0, "injected source failure"), (1, "source panicked")] {

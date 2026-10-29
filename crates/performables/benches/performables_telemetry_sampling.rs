@@ -125,7 +125,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 
 fn recording_configuration(sampling_one_in: usize, capture_backtraces: bool) -> Configuration {
     Configuration {
-        arc_dereferences: seismograph::recorder::RecordingPolicy {
+        arc_dereferences: seismograph::recorder::Policy {
             enabled: true,
             capture_backtraces,
             event_sampling: EventSampling::one_in(sampling_one_in)

@@ -1072,17 +1072,17 @@ fn lazy_lock_supports_debug_default_and_poisoning() {
 #[expect(clippy::too_many_lines, reason = "one scenario verifies all telemetry-enabled primitives")]
 fn ownership_and_lock_operations_emit_runtime_telemetry() {
     seismograph::recorder(Configuration {
-        general_events: seismograph::recorder::RecordingPolicy {
+        general_events: seismograph::recorder::Policy {
             enabled: true,
             capture_backtraces: true,
             ..Default::default()
         },
-        arc_dereferences: seismograph::recorder::RecordingPolicy {
+        arc_dereferences: seismograph::recorder::Policy {
             enabled: true,
             capture_backtraces: true,
             ..Default::default()
         },
-        event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(4_096).unwrap(),
+        event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(4_096),
         ..Default::default()
     });
 

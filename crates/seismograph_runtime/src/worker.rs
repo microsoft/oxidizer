@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use seismograph::recorder::Generation;
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp};
 use seismograph::recorder::runtime::{TaskId, TransferId, WorkerId};
 
@@ -127,7 +128,7 @@ impl WorkerHandle {
 
     /// Associates the current Seismograph recorder thread with this worker.
     pub fn attach_current_thread(&self) {
-        let thread_id = seismograph::recorder::current_thread_id();
+        let thread_id = seismograph::recorder::thread_id();
         self.worker.thread_id.store(thread_id.get(), Ordering::Release);
     }
 
@@ -182,11 +183,11 @@ impl WorkerHandle {
         task_id: TaskId,
         started_at: EventTimestamp,
         queued_since: Option<EventTimestamp>,
-        session: Option<seismograph::recorder::RecordingSession>,
+        session: Option<Generation>,
     ) -> TaskPoll {
         self.worker.current_task.store(task_id.get(), Ordering::Release);
-        if let Some(session) = session {
-            seismograph::record_in_session(session, EventClass::RuntimeTask, || {
+        if session.is_some() {
+            seismograph::record(EventClass::RuntimeTask, || {
                 Some(crate::runtime_record(
                     started_at,
                     self.runtime.id(),

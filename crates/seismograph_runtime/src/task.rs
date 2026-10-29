@@ -6,9 +6,9 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use seismograph::recorder::RecordingSession;
 use seismograph::recorder::event::{EventClass, EventTimestamp};
 use seismograph::recorder::runtime::TaskId;
+use seismograph::recorder::{Generation, is_enabled};
 
 use crate::worker::WorkerHandle;
 use crate::{TaskControl, duration_nanos};
@@ -33,7 +33,7 @@ impl TaskHandle {
     /// Marks the task ready to run, retaining only the first wake before its next poll.
     #[inline]
     pub fn woken(&self) {
-        if seismograph::recorder::recording_enabled_for(EventClass::RuntimeTask) {
+        if is_enabled(EventClass::RuntimeTask) {
             self.task.activity.woken(&self.task);
         } else {
             self.task.wake_timestamp();
@@ -43,7 +43,7 @@ impl TaskHandle {
     /// Starts a poll and records how long the task waited after becoming ready.
     #[inline]
     pub fn poll_started(&self, worker: &WorkerHandle) -> TaskPoll {
-        if seismograph::recorder::recording_enabled_for(EventClass::RuntimeTask) {
+        if is_enabled(EventClass::RuntimeTask) {
             return self.poll_started_recorded(worker);
         }
         let (started_at, ready_since) = self.task.poll_timestamps();
@@ -118,6 +118,6 @@ impl TaskControl {
 pub struct TaskPoll {
     pub(crate) task_id: TaskId,
     pub(crate) started_at: EventTimestamp,
-    pub(crate) session: Option<RecordingSession>,
+    pub(crate) session: Option<Generation>,
     pub(crate) task: Option<Arc<TaskControl>>,
 }

@@ -8,7 +8,7 @@
 
 //! Runtime-source snapshot model and wire encoding.
 
-use seismograph::recorder::event::{Address, BacktraceCapture, EventTimestamp};
+use seismograph::recorder::event::{BacktraceCapture, EventTimestamp};
 use seismograph::recorder::runtime::{RuntimeId, TaskId, TypeDescriptorId, WorkerId};
 use seismograph::recorder::thread::ThreadId;
 
@@ -161,8 +161,6 @@ pub struct Task {
     pub metrics: TaskMetrics,
     /// Coherent recording-only activity; absent in source schemas before version 4.
     pub activity: Option<TaskActivity>,
-    /// Call stack captured where the task was spawned.
-    pub spawn_backtrace: Vec<Address>,
 }
 
 /// Coherent activity observed within one recording generation.
@@ -266,14 +264,16 @@ pub struct Runtime {
 pub struct Snapshot {
     /// Active and retained retired logical runtimes.
     pub runtimes: Vec<Runtime>,
-    /// Symbols for addresses referenced only by runtime-source metadata.
+    /// Symbol metadata read from older runtime-source captures.
+    ///
+    /// New captures keep backtraces in event records and leave this collection empty.
     pub addresses: Vec<AddressLookup>,
 }
 
 /// Symbol information associated with a captured runtime address.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AddressLookup {
-    /// Original captured address used by task spawn stacks.
+    /// Original captured address.
     pub address: u64,
     /// Resolved symbol name, when available.
     pub symbol: Option<String>,
@@ -378,11 +378,7 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
 pub(crate) fn encoded_len(snapshot: &Snapshot) -> Option<usize> {
     let runtimes_len = snapshot.runtimes.iter().try_fold(HEADER_LEN, |total, runtime| {
         let workers = runtime.workers.len().checked_mul(WORKER_FIXED_LEN)?;
-        let tasks = runtime.tasks.iter().try_fold(0_usize, |total, task| {
-            total
-                .checked_add(TASK_FIXED_LEN)?
-                .checked_add(task.spawn_backtrace.len().checked_mul(std::mem::size_of::<u64>())?)
-        })?;
+        let tasks = runtime.tasks.len().checked_mul(TASK_FIXED_LEN)?;
         total
             .checked_add(RUNTIME_FIXED_LEN)?
             .checked_add(runtime.name.len())?
@@ -533,7 +529,8 @@ fn write_task(writer: &mut Writer<'_>, task: &Task) -> Result<(), ()> {
     writer.u64(task.id.get())?;
     writer.u64(task.parent.map_or(0, TaskId::get))?;
     writer.u64(task.type_descriptor.get())?;
-    writer.u32(u32::try_from(task.spawn_backtrace.len()).map_err(|_| ())?)?;
+    // Retain schema compatibility without a second copy of each spawn stack.
+    writer.u32(0)?;
     writer.u32(0)?;
     writer.u64(task.spawned_at.ticks())?;
     writer.u64(task.last_worker_id.map_or(0, WorkerId::get))?;
@@ -553,9 +550,6 @@ fn write_task(writer: &mut Writer<'_>, task: &Task) -> Result<(), ()> {
         Some(size) => size.checked_add(1).ok_or(())?,
     };
     writer.u64(encoded_size)?;
-    for address in &task.spawn_backtrace {
-        writer.u64(address.get())?;
-    }
     Ok(())
 }
 
@@ -603,9 +597,8 @@ fn read_task(reader: &mut Reader<'_>, schema_version: u16) -> Result<Task, Error
     if !count_fits(frame_count, std::mem::size_of::<u64>(), reader.remaining().len()) {
         return Err(malformed());
     }
-    let spawn_backtrace = (0..frame_count)
-        .map(|_| reader.u64().map(Address::new))
-        .collect::<Result<Vec<_>, _>>()?;
+    // Historical payloads carry a task-stack copy that is no longer retained.
+    reader.read(frame_count * std::mem::size_of::<u64>())?;
     Ok(Task {
         id,
         parent,
@@ -615,7 +608,6 @@ fn read_task(reader: &mut Reader<'_>, schema_version: u16) -> Result<Task, Error
         last_worker_id,
         metrics,
         activity,
-        spawn_backtrace,
     })
 }
 
@@ -940,7 +932,6 @@ mod tests {
                         ready_wait_duration_nanos: 19,
                         max_ready_wait_duration_nanos: 20,
                     },
-                    spawn_backtrace: vec![Address::new(0x1234), Address::new(0x5678)],
                 }],
             }],
             addresses: vec![AddressLookup {
@@ -959,7 +950,23 @@ mod tests {
         let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
         encode(&snapshot, &mut bytes).unwrap();
 
-        assert_eq!(bytes.len(), 427);
+        assert_eq!(bytes.len(), 411);
+        assert_eq!(decode(&bytes).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn historical_task_stack_copies_are_skipped_without_losing_symbol_metadata() {
+        let snapshot = fixture();
+        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+        encode(&snapshot, &mut bytes).unwrap();
+        let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len() + WORKER_FIXED_LEN;
+        bytes[task_start + 24..task_start + 28].copy_from_slice(&2_u32.to_le_bytes());
+        let stack_start = task_start + TASK_FIXED_LEN;
+        bytes.splice(
+            stack_start..stack_start,
+            0x1234_u64.to_le_bytes().into_iter().chain(0x5678_u64.to_le_bytes()),
+        );
+
         assert_eq!(decode(&bytes).unwrap(), snapshot);
     }
 
@@ -1231,7 +1238,7 @@ mod tests {
             bytes
         }
 
-        for offset in [52, 387, 391] {
+        for offset in [52, 371, 375] {
             let mut bytes = encoded_fixture();
             bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
             assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
@@ -1242,7 +1249,7 @@ mod tests {
         assert_eq!(decode(&invalid_runtime_name).unwrap_err().kind(), ErrorKind::Malformed);
 
         let mut invalid_symbol = encoded_fixture();
-        invalid_symbol[403] = 0xff;
+        invalid_symbol[387] = 0xff;
         assert_eq!(decode(&invalid_symbol).unwrap_err().kind(), ErrorKind::Malformed);
     }
 

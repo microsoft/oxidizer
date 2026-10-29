@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
+use seismograph::recorder::event::{Event, EventKind};
+
 pub(super) use super::runtime::{RuntimeMonitorSnapshot, RuntimeTaskSort, RuntimeTaskSummary, RuntimeWorkerSummary, runtime_task_id};
 
 pub(super) struct CapturedSnapshot {
@@ -101,7 +103,6 @@ impl IoMonitorSnapshot {
         reason = "I/O start and finish events are paired in one ordered pass so partial retained operations remain explicit"
     )]
     fn from_events(events: &seismograph::recorder::event::Events) -> Self {
-        use seismograph::recorder::event::EventKind;
         use seismograph::recorder::io::IoOutcome;
 
         #[derive(Default)]
@@ -298,7 +299,6 @@ impl IoOperationKind {
 }
 
 const CACHE_EVENT_KINDS: [seismograph::recorder::event::EventKind; 22] = {
-    use seismograph::recorder::event::EventKind;
     [
         EventKind::CacheHit,
         EventKind::CacheMiss,
@@ -335,8 +335,6 @@ pub(super) struct CacheMonitorSnapshot {
 
 impl CacheMonitorSnapshot {
     fn from_events(events: &seismograph::recorder::event::Events) -> Self {
-        use seismograph::recorder::event::EventKind;
-
         #[derive(Default)]
         struct TierBuilder {
             counts: [u64; CACHE_EVENT_KINDS.len()],
@@ -420,7 +418,6 @@ pub(super) struct CacheOperationSummary {
 }
 
 pub(super) const fn cache_event_label(kind: seismograph::recorder::event::EventKind) -> &'static str {
-    use seismograph::recorder::event::EventKind;
     match kind {
         EventKind::CacheHit => "Hit",
         EventKind::CacheMiss => "Miss",
@@ -563,17 +560,15 @@ impl PrimitiveSnapshot {
         addresses: &[seismograph_rallocator::callers::AddressLookup],
     ) -> Self {
         let lookups = addresses.iter().map(|lookup| (lookup.address, lookup)).collect::<HashMap<_, _>>();
-        let mut selected = [false; 256];
+        let mut events_by_kind = HashMap::<EventKind, Vec<&Event>>::new();
         for kind in PrimitiveKind::ALL {
             for operation in kind.operations() {
-                selected[usize::from(operation.event_kind().wire_value())] = true;
+                events_by_kind.entry(operation.event_kind()).or_default();
             }
         }
-        let mut events_by_kind: [Vec<&seismograph::recorder::event::Event>; 256] = std::array::from_fn(|_| Vec::new());
         for event in events {
-            let kind = usize::from(event.kind.wire_value());
-            if selected[kind] {
-                events_by_kind[kind].push(event);
+            if let Some(selected) = events_by_kind.get_mut(&event.kind) {
+                selected.push(event);
             }
         }
         let groups = PrimitiveKind::ALL
@@ -600,28 +595,21 @@ pub(super) struct PrimitiveGroup {
 impl PrimitiveGroup {
     fn from_events(
         kind: PrimitiveKind,
-        events_by_kind: &[Vec<&seismograph::recorder::event::Event>; 256],
+        events_by_kind: &HashMap<EventKind, Vec<&Event>>,
         lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
     ) -> Self {
         let object_ids = kind
             .operations()
             .iter()
             .filter(|operation| !operation.is_lock_poison())
-            .flat_map(|operation| &events_by_kind[usize::from(operation.event_kind().wire_value())])
+            .flat_map(|operation| &events_by_kind[&operation.event_kind()])
             .filter_map(|event| event.object_id().map(seismograph::recorder::event::ObjectId::get))
             .collect::<HashSet<_>>();
         let operations = kind
             .operations()
             .iter()
             .copied()
-            .map(|operation| {
-                PrimitiveOperation::from_events(
-                    operation,
-                    &events_by_kind[usize::from(operation.event_kind().wire_value())],
-                    lookups,
-                    &object_ids,
-                )
-            })
+            .map(|operation| PrimitiveOperation::from_events(operation, &events_by_kind[&operation.event_kind()], lookups, &object_ids))
             .collect::<Vec<_>>();
         Self {
             kind,
@@ -782,7 +770,7 @@ impl PrimitiveKind {
         self.operations()
             .iter()
             .filter(|operation| !operation.is_lock_poison())
-            .any(|operation| operation.event_kind().wire_value() == kind.wire_value())
+            .any(|operation| operation.event_kind() == kind)
     }
 }
 
@@ -895,7 +883,6 @@ impl PrimitiveOperationKind {
     }
 
     const fn event_kind(self) -> seismograph::recorder::event::EventKind {
-        use seismograph::recorder::event::EventKind;
         match self {
             Self::ArcCreate => EventKind::ArcCreate,
             Self::ArcClone => EventKind::ArcClone,
@@ -989,10 +976,11 @@ pub(super) struct ThreadSnapshot {
 
 impl ThreadSnapshot {
     fn from_events(decoded: &seismograph::recorder::event::Events, addresses: &[seismograph_rallocator::callers::AddressLookup]) -> Self {
-        let mut operations_by_kind = [None; 256];
-        for (index, kind) in ThreadOperationKind::ALL.into_iter().enumerate() {
-            operations_by_kind[usize::from(kind.event_kind().wire_value())] = Some(index);
-        }
+        let operations_by_kind = ThreadOperationKind::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| (kind.event_kind(), index))
+            .collect::<HashMap<_, _>>();
         let mut threads = decoded
             .threads
             .iter()
@@ -1009,7 +997,7 @@ impl ThreadSnapshot {
             let id = event.thread_id.get();
             let thread = threads.entry(id).or_insert_with(|| empty_thread_summary(id));
             thread.retained_events += 1;
-            if let Some(operation) = operations_by_kind[usize::from(event.kind.wire_value())] {
+            if let Some(&operation) = operations_by_kind.get(&event.kind) {
                 thread.operations[operation].events += 1;
                 if let Some(object) = event.object_id() {
                     objects.push(ThreadObjectEvent {
@@ -1025,7 +1013,7 @@ impl ThreadSnapshot {
             left.object_id
                 .cmp(&right.object_id)
                 .then_with(|| left.event.thread_id.get().cmp(&right.event.thread_id.get()))
-                .then_with(|| left.event.kind.wire_value().cmp(&right.event.kind.wire_value()))
+                .then_with(|| operations_by_kind[&left.event.kind].cmp(&operations_by_kind[&right.event.kind]))
         });
         let mut stacks = ThreadStacks::new(addresses);
         let relations = accumulate_thread_objects(&objects, &mut threads, &operations_by_kind, &mut stacks);
@@ -1144,7 +1132,7 @@ struct ThreadObjectEvent<'a> {
 fn accumulate_thread_objects<'a>(
     objects: &[ThreadObjectEvent<'a>],
     threads: &mut HashMap<u64, ThreadSummary>,
-    operations_by_kind: &[Option<usize>; 256],
+    operations_by_kind: &HashMap<EventKind, usize>,
     stacks: &mut ThreadStacks<'a>,
 ) -> HashMap<(u64, usize, u64), ThreadParticipant> {
     let mut relations = HashMap::<(u64, usize, u64), ThreadParticipant>::new();
@@ -1153,8 +1141,9 @@ fn accumulate_thread_objects<'a>(
         {
             let first = &selected[0];
             let thread_id = first.event.thread_id.get();
-            let operation =
-                operations_by_kind[usize::from(first.event.kind.wire_value())].expect("the index contains only supported operation kinds");
+            let operation = *operations_by_kind
+                .get(&first.event.kind)
+                .expect("the index includes every operation used to collect objects");
             let kind = ThreadOperationKind::ALL[operation];
             threads
                 .get_mut(&thread_id)
@@ -1643,7 +1632,6 @@ impl ThreadOperationKind {
     }
 
     pub(super) const fn event_kind(self) -> seismograph::recorder::event::EventKind {
-        use seismograph::recorder::event::EventKind;
         match self {
             Self::Allocation => EventKind::Allocation,
             Self::Deallocation => EventKind::Deallocation,
@@ -1686,7 +1674,6 @@ impl ThreadOperationKind {
     }
 
     const fn is_related(self, kind: seismograph::recorder::event::EventKind) -> bool {
-        use seismograph::recorder::event::EventKind;
         match self {
             Self::Allocation => matches!(kind, EventKind::Deallocation),
             Self::Deallocation => matches!(kind, EventKind::Allocation),
@@ -2482,7 +2469,7 @@ fn format_hotspot_frame(address: u64, lookup: Option<&seismograph_rallocator::ca
 
 #[cfg(test)]
 mod tests {
-    use seismograph::recorder::RecordingPolicies;
+    use seismograph::recorder::Policies;
     use seismograph::recorder::event::{
         Address as RuntimeAddress, Event as RuntimeEvent, EventClock, EventKind as RuntimeEventKind, EventPayload, EventSequence,
         EventTimestamp, Events, NumericEvent, ObjectId,
@@ -3478,7 +3465,7 @@ mod tests {
                 clock: EventClock::Unspecified,
                 total_events: 13,
                 lost_events: 0,
-                recording: RecordingPolicies::default(),
+                recording: Policies::default(),
                 threads: Vec::new(),
                 events,
             },
@@ -3777,6 +3764,7 @@ mod tests {
         let primitive_symbols = [
             "performables::operation",
             "seismograph::record",
+            "seismograph::recorder::try_record",
             "std::thread::spawn",
             "alloc::vec::Vec",
             "core::option::Option",
@@ -3792,6 +3780,7 @@ mod tests {
         let allocation_symbols = [
             "rallocator::allocate",
             "seismograph::record",
+            "seismograph::recorder::try_record",
             "seismograph_rallocator::capture",
             "std::alloc::alloc",
             "alloc::alloc::alloc",
@@ -3815,7 +3804,7 @@ mod tests {
                 is_internal_primitive_frame(Some(&lookup(Some("app::run"), Some("/repo/app.rs")))),
                 is_internal_allocation_frame(Some(&lookup(Some("app::run"), Some("/repo/app.rs")))),
             ),
-            ([true; 6], [true; 5], [true; 6], [true; 6], false, false)
+            ([true; 7], [true; 5], [true; 7], [true; 6], false, false)
         );
     }
 
@@ -4223,7 +4212,7 @@ mod tests {
                 clock: EventClock::ProcessMonotonic,
                 total_events: 1,
                 lost_events: 0,
-                recording: RecordingPolicies::default(),
+                recording: Policies::default(),
                 threads: vec![ThreadLog {
                     thread_id: ThreadId::new(1),
                     total_events: 1,
@@ -4296,7 +4285,7 @@ mod tests {
             clock: EventClock::ProcessMonotonic,
             total_events: 10,
             lost_events: 1,
-            recording: RecordingPolicies::default(),
+            recording: Policies::default(),
             threads: Vec::new(),
             events: vec![
                 event(1, 10, RuntimeEventKind::IoReadStarted, io(1, 1, 100, 0, IoOutcome::Pending)),
@@ -4398,7 +4387,7 @@ mod tests {
                 clock: EventClock::Unspecified,
                 total_events: 6,
                 lost_events: 0,
-                recording: RecordingPolicies::default(),
+                recording: Policies::default(),
                 threads: Vec::new(),
                 events,
             },
@@ -4487,7 +4476,7 @@ mod tests {
                 clock: EventClock::Unspecified,
                 total_events: 14,
                 lost_events: 0,
-                recording: RecordingPolicies::default(),
+                recording: Policies::default(),
                 threads: Vec::new(),
                 events,
             },
@@ -4545,7 +4534,7 @@ mod tests {
                 clock: EventClock::Unspecified,
                 total_events: 5,
                 lost_events: 0,
-                recording: RecordingPolicies::default(),
+                recording: Policies::default(),
                 threads: Vec::new(),
                 events,
             },
@@ -4685,7 +4674,7 @@ mod tests {
             clock: EventClock::Unspecified,
             total_events: 1_000,
             lost_events: 998,
-            recording: RecordingPolicies::default(),
+            recording: Policies::default(),
             threads: Vec::new(),
             events: vec![
                 RuntimeEvent {
@@ -4843,7 +4832,6 @@ mod tests {
                             ready_wait_duration_nanos: 9_000,
                             max_ready_wait_duration_nanos: 200,
                         },
-                        spawn_backtrace: Vec::new(),
                     },
                     Task {
                         id: seismograph::recorder::runtime::TaskId::from_raw(11).unwrap(),
@@ -4854,7 +4842,6 @@ mod tests {
                         last_worker_id: None,
                         activity: None,
                         metrics: TaskMetrics::default(),
-                        spawn_backtrace: Vec::new(),
                     },
                 ],
             }],
@@ -4963,7 +4950,6 @@ mod tests {
                     last_worker_id: None,
                     metrics: TaskMetrics::default(),
                     activity: None,
-                    spawn_backtrace: Vec::new(),
                 }],
             }],
             addresses: Vec::new(),
@@ -5034,7 +5020,7 @@ mod tests {
                 clock: EventClock::ProcessMonotonic,
                 total_events: 8,
                 lost_events: 0,
-                recording: RecordingPolicies::default(),
+                recording: Policies::default(),
                 threads: vec![
                     ThreadLog {
                         thread_id: ThreadId::new(1),

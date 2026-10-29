@@ -17,7 +17,7 @@
 mod attribution;
 mod stacks;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use seismograph::recorder::event::{Event, EventKind, EventPayload, Events};
@@ -190,13 +190,13 @@ impl TaskEventsSnapshot {
     pub(super) fn from_events(events: &Events, addresses: &[AddressLookup], source: Option<&Snapshot>) -> Self {
         let evidence = attribution::infer(events, source);
         let mut stacks = stacks::Cache::new(addresses);
-        let mut operations = [None; 256];
-        for kind in ThreadOperationKind::ALL {
-            operations[usize::from(kind.event_kind().wire_value())] = Some(kind);
-        }
+        let operations = ThreadOperationKind::ALL
+            .into_iter()
+            .map(|kind| (kind.event_kind(), kind))
+            .collect::<HashMap<_, _>>();
         let mut objects = BTreeMap::<ObjectKey, Vec<TaskEvent>>::new();
         for (index, event) in events.events.iter().enumerate() {
-            let Some(operation) = operations[usize::from(event.kind.wire_value())] else {
+            let Some(&operation) = operations.get(&event.kind) else {
                 continue;
             };
             let Some(id) = event.object_id() else {

@@ -204,7 +204,7 @@ impl RuntimeMonitorSnapshot {
         let lookups = addresses.iter().map(|lookup| (lookup.address, lookup)).collect::<HashMap<_, _>>();
         let mut workers = Workers::new();
         let mut tasks = BTreeMap::<(u64, u64), TaskBuilder>::new();
-        import_source(source, &lookups, &mut workers, &mut tasks);
+        import_source(source, &mut workers, &mut tasks);
         for event in &events.events {
             let Some(runtime) = event.runtime() else { continue };
             let runtime_id = runtime.runtime_id.get();
@@ -349,12 +349,7 @@ fn worker_row(runtime_id: u64, worker_id: Option<u64>) -> RuntimeWorkerSummary {
     }
 }
 
-fn import_source(
-    source: Option<&Snapshot>,
-    lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
-    workers: &mut Workers,
-    tasks: &mut BTreeMap<(u64, u64), TaskBuilder>,
-) {
+fn import_source(source: Option<&Snapshot>, workers: &mut Workers, tasks: &mut BTreeMap<(u64, u64), TaskBuilder>) {
     let Some(source) = source else { return };
     for runtime in &source.runtimes {
         let runtime_id = runtime.id.get();
@@ -374,14 +369,12 @@ fn import_source(
         }
         for source_task in &runtime.tasks {
             let task = tasks.entry((runtime_id, source_task.id.get())).or_default();
-            let stack = source_task.spawn_backtrace.iter().map(|address| address.get()).collect::<Vec<_>>();
             task.row = RuntimeTaskSummary {
                 runtime_id,
                 task_id: source_task.id.get(),
                 parent_id: source_task.parent.map(seismograph::recorder::runtime::TaskId::get),
                 type_descriptor_id: Some(source_task.type_descriptor.get()),
                 future_size_bytes: source_task.future_size_bytes,
-                spawn_stack: primitive_stack(&stack, lookups, AllocationStackFilter::All),
                 ..RuntimeTaskSummary::default()
             };
             if let Some(worker) = source_task.last_worker_id {
@@ -624,7 +617,6 @@ mod tests {
                         ..TaskMetrics::default()
                     },
                     activity,
-                    spawn_backtrace: Vec::new(),
                 }],
             }],
             addresses: Vec::new(),
@@ -1013,7 +1005,6 @@ mod tests {
         source.runtimes[0].tasks[0].parent = TaskId::from_raw(7);
         source.runtimes[0].tasks[0].type_descriptor = TypeDescriptorId::from_raw(9).unwrap();
         source.runtimes[0].tasks[0].last_worker_id = None;
-        source.runtimes[0].tasks[0].spawn_backtrace = vec![Address::new(0x1234)];
         let snapshot = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&source), &[]);
         let worker = &snapshot.workers[0];
         let task = &worker.tasks[0];
@@ -1027,7 +1018,40 @@ mod tests {
                 task.type_descriptor_id,
                 task.spawn_stack.len(),
             ),
-            (1, "named-runtime", 1, 1, Some(7), Some(9), 1)
+            (1, "named-runtime", 1, 1, Some(7), Some(9), 0)
+        );
+    }
+
+    #[test]
+    fn creation_location_requires_a_retained_spawn_event_with_frames() {
+        let source = source(None);
+        let addresses = [seismograph_rallocator::callers::AddressLookup::from_fields(
+            seismograph_rallocator::callers::AddressLookupFields {
+                address: 0x1234,
+                symbol: Some("app::spawn".into()),
+                filename: Some("server.rs".into()),
+                line: Some(120),
+                column: None,
+            },
+        )];
+        let stacks = [None, Some(Vec::new()), Some(vec![Address::new(0x1234)])].map(|frames| {
+            let events = Events {
+                events: frames
+                    .map(|call_stack| Event {
+                        call_stack,
+                        ..event(EventKind::TaskSpawned, None, 2, 1, 0)
+                    })
+                    .into_iter()
+                    .collect(),
+                ..Events::default()
+            };
+            let snapshot = RuntimeMonitorSnapshot::from_events(&events, Some(&source), &addresses);
+            snapshot.workers[0].tasks[0].spawn_stack.clone()
+        });
+
+        assert_eq!(
+            stacks,
+            [Vec::<String>::new(), Vec::new(), vec!["app::spawn (server.rs:120)".into()]]
         );
     }
 

@@ -21,14 +21,19 @@
 //! snapshot. For ownership and synchronization events:
 //!
 //! ```rust
-//! use seismograph::recorder::{Configuration, RecordingPolicy};
+//! use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
+//! use seismograph::recorder::{Configuration, Policy};
 //!
 //! seismograph::recorder(Configuration {
-//!     general_events: RecordingPolicy::all(false),
+//!     general_events: Policy::all(false),
 //!     ..Default::default()
 //! });
 //!
 //! // Run application code that uses instrumented libraries.
+//! // To emit an event directly:
+//! seismograph::record(EventClass::General, || {
+//!     Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+//! });
 //! let snapshot = seismograph::snapshot(Default::default())?;
 //! # let _decoded = seismograph::snapshot::decode(snapshot.as_bytes())?;
 //! # seismograph::recorder(Configuration::default());
@@ -56,13 +61,12 @@ use std::path::PathBuf;
 #[cfg(feature = "monitor")]
 #[cfg_attr(docsrs, doc(cfg(feature = "monitor")))]
 pub mod monitor;
-/// Event types.
 pub mod recorder;
 /// Snapshot types.
 pub mod snapshot;
 mod system;
 
-/// Opaque error reported by snapshot operations or monitor startup.
+/// Opaque error reported by Seismograph operations.
 ///
 /// [`std::error::Error::source`] exposes the underlying cause when available.
 pub struct Error {
@@ -86,7 +90,7 @@ enum ErrorKind {
 }
 
 impl Error {
-    /// Creates an error for a snapshot source failure.
+    /// Creates an error with a static message.
     #[must_use]
     pub const fn new(message: &'static str) -> Self {
         Self {
@@ -176,36 +180,20 @@ pub fn recorder(configuration: recorder::Configuration) {
     recorder::configure(configuration);
 }
 
-/// Lazily constructs and records an event in an independently configured class.
+/// Builds and records an event when its category is enabled.
 ///
-/// The closure runs only while recording for this class is active and not
-/// suppressed. Return `None` to skip the event conditionally. Object sampling
-/// is checked after the closure constructs a record.
-pub fn record(class: recorder::event::EventClass, event: impl FnOnce() -> Option<recorder::event::Record>) {
-    recorder::record(class, event);
-}
-
-/// Lazily constructs an event and returns the session that accepted it.
+/// `build` runs only when `class` is enabled and this thread is not suppressed.
+/// Return `None` from `build` to skip the event. The recorder applies sampling
+/// and captures a backtrace according to the category and event policies.
+/// Events from a different category or a concurrent configuration change are dropped.
 ///
-/// Returns `None` when the closure skips the event or no event is accepted.
-#[doc(hidden)]
-pub fn record_session(
-    class: recorder::event::EventClass,
-    event: impl FnOnce() -> Option<recorder::event::Record>,
-) -> Option<recorder::RecordingSession> {
-    recorder::record_session(class, event)
-}
-
-/// Records an event in `class` only while its originating session remains active.
+/// Use [`recorder::try_record`] only when source state depends on event acceptance.
 ///
-/// Returns `false` when the closure skips the event or no event is accepted.
-#[doc(hidden)]
-pub fn record_in_session(
-    session: recorder::RecordingSession,
-    class: recorder::event::EventClass,
-    event: impl FnOnce() -> Option<recorder::event::Record>,
-) -> bool {
-    recorder::record_in_session(session, class, event)
+/// # Panics
+///
+/// Propagates a panic from `build`.
+pub fn record(class: recorder::event::EventClass, build: impl FnOnce() -> Option<recorder::event::Record>) {
+    let _ = recorder::try_record(class, build);
 }
 
 /// Captures runtime events and all registered sources using `options`.
@@ -219,10 +207,7 @@ pub fn snapshot(options: snapshot::SnapshotOptions) -> Result<snapshot::Snapshot
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
     use super::*;
-    use crate::recorder::event::{EventKind, ObjectId, Record};
 
     #[test]
     fn errors_report_context_and_sources() {
@@ -261,65 +246,5 @@ mod tests {
             assert_eq!(format!("{error:?}"), format!("Error({expected})"));
             assert_eq!(std::error::Error::source(&error).is_some(), has_source);
         }
-    }
-
-    #[test]
-    #[cfg_attr(coverage_nightly, coverage(off))] // Disabled sessions deliberately must not construct records.
-    fn session_wrappers_record_only_in_the_selected_class() {
-        let _test = recorder::TEST_LOCK.lock().unwrap();
-        recorder(recorder::Configuration {
-            general_events: recorder::RecordingPolicy::all(false),
-            runtime_tasks: recorder::RecordingPolicy::all(false),
-            ..recorder::test_configuration()
-        });
-        let object_id = ObjectId::new(41);
-        let general = record_session(recorder::event::EventClass::General, || {
-            Some(Record::object(EventKind::MutexAccess, object_id))
-        })
-        .unwrap();
-        let runtime = recorder::active_recording_session().unwrap();
-
-        assert!(record_in_session(general, recorder::event::EventClass::General, || {
-            Some(Record::object(EventKind::MutexAccess, object_id))
-        }));
-        assert!(record_in_session(runtime, recorder::event::EventClass::RuntimeTask, || Some(
-            Record::runtime(
-                recorder::event::EventTimestamp::now(),
-                EventKind::RuntimeCreated,
-                recorder::runtime::RuntimeEvent {
-                    runtime_id: recorder::runtime::RuntimeId::from_raw(1).unwrap(),
-                    worker_id: None,
-                    subject_id: 0,
-                    related_id: 0,
-                    value_0: 0,
-                    value_1: 0,
-                },
-                recorder::event::BacktraceCapture::Never,
-            )
-        )));
-        recorder(recorder::Configuration::default());
-
-        let constructed = AtomicUsize::new(0);
-        assert!(!record_in_session(general, recorder::event::EventClass::General, || {
-            constructed.fetch_add(1, Ordering::Relaxed);
-            Some(Record::object(EventKind::MutexAccess, object_id))
-        }));
-        assert!(!record_in_session(runtime, recorder::event::EventClass::RuntimeTask, || {
-            constructed.fetch_add(1, Ordering::Relaxed);
-            Some(Record::runtime(
-                recorder::event::EventTimestamp::now(),
-                EventKind::RuntimeCreated,
-                recorder::runtime::RuntimeEvent {
-                    runtime_id: recorder::runtime::RuntimeId::from_raw(1).unwrap(),
-                    worker_id: None,
-                    subject_id: 0,
-                    related_id: 0,
-                    value_0: 0,
-                    value_1: 0,
-                },
-                recorder::event::BacktraceCapture::Never,
-            ))
-        }));
-        assert_eq!(constructed.load(Ordering::Relaxed), 0);
     }
 }
