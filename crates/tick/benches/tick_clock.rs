@@ -3,6 +3,7 @@
 
 //! Measures clock timer registration and advancement.
 
+use std::borrow::BorrowMut;
 use std::hint::black_box;
 use std::pin::Pin;
 use std::task::{Context, Waker};
@@ -58,8 +59,9 @@ fn advance_state(timer_count: usize, ready: bool) -> AdvanceState {
 }
 
 #[metabench::benchmark(CLOCK_OPERATIONS, CLOCK, "clock_operations")]
-#[bench::run(&mut clock_state())]
-fn clock_operations(state: &mut ClockState) {
+#[bench::run(Box::new(clock_state()))]
+fn clock_operations<S: BorrowMut<ClockState>>(mut input: S) -> S {
+    let state = input.borrow_mut();
     let mut context = Context::from_waker(Waker::noop());
     let now = Instant::now();
     let mut delays = [
@@ -83,23 +85,29 @@ fn clock_operations(state: &mut ClockState) {
     for delay in &mut delays[2..] {
         _ = Pin::new(delay).poll(&mut context);
     }
+
+    input
 }
 
 #[metabench::benchmark(ADVANCE_TIMERS, ADVANCE, "advance")]
-#[bench::idle(&mut advance_state(0, false))]
-#[bench::pending_5(&mut advance_state(5, false))]
-#[bench::ready_5(&mut advance_state(5, true))]
-#[bench::ready_10(&mut advance_state(10, true))]
-fn advance_timers(state: &mut AdvanceState) -> Result<Option<Instant>, ClockGone> {
+#[bench::idle(Box::new(advance_state(0, false)))]
+#[bench::pending_5(Box::new(advance_state(5, false)))]
+#[bench::ready_5(Box::new(advance_state(5, true)))]
+#[bench::ready_10(Box::new(advance_state(10, true)))]
+fn advance_timers<S: BorrowMut<AdvanceState>>(mut input: S) -> (Result<Option<Instant>, ClockGone>, S) {
+    let state = input.borrow_mut();
     let at = state.now + Duration::from_secs(2);
-    state.driver.advance_timers(black_box(at))
+    let result = state.driver.advance_timers(black_box(at));
+    (result, input)
 }
 
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut clock = criterion.benchmark_group(CLOCK);
     let mut state = clock_state();
     clock.bench_function(BenchmarkId::new(CLOCK_OPERATIONS.benchmark_name(), "run"), |bencher| {
-        bencher.iter(|| clock_operations(black_box(&mut state)));
+        bencher.iter(|| {
+            clock_operations(black_box(&mut state));
+        });
     });
     clock.finish();
 
@@ -113,7 +121,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         advance.bench_function(BenchmarkId::new(ADVANCE_TIMERS.benchmark_name(), name), |bencher| {
             bencher.iter_batched_ref(
                 || advance_state(timer_count, ready),
-                |state| black_box(advance_timers(black_box(state))),
+                |state| black_box(advance_timers(black_box(state)).0),
                 BatchSize::SmallInput,
             );
         });
