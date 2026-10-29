@@ -1,16 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Patterns for passing recovery information between error types.
+//! Pass recovery information between error types.
 //!
 //! These examples show how to implement [`Recovery`].
 //! They use [`ohno`](https://docs.rs/ohno) to define errors.
 //!
 //! # Pass information from an inner error
 //!
-//! An outer error can wrap an inner error that implements [`Recovery`].
-//! Use the `#[from]` attribute to copy its recovery information.
-//! This keeps the classification from the layer that found the root cause.
+//! An outer error can wrap an inner error that implements [`Recovery`]. Use the
+//! `#[from]` attribute to copy its recovery information. This preserves the
+//! classification from the layer that found the root cause.
 //!
 //! ```rust
 //! use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
@@ -26,7 +26,7 @@
 //!     }
 //! }
 //!
-//! /// The `#[from]` attribute gets recovery information from `DatabaseError`.
+//! /// The `#[from]` attribute copies recovery information from `DatabaseError`.
 //! /// The conversion calls `error.recovery()`.
 //! #[ohno::error]
 //! #[from(DatabaseError(recovery: error.recovery()))]
@@ -59,16 +59,16 @@
 //! ```
 //!
 //! Override the inner classification only when the outer context changes it.
-//! For example, an outer layer can exhaust its retry limit.
-//! It can then classify a transient inner error as non-recoverable.
+//! For example, an outer layer can exhaust its retry limit and classify a
+//! transient inner error as non-recoverable.
 //!
 //! # Non-recoverable errors
 //!
 //! If a permanent error has no inner cause, use [`RecoveryInfo::never()`].
 //!
-//! If all variants are permanently non-recoverable, the error does not need [`Recovery`].
-//! Implement the trait when at least one variant can recover.
-//! You can also implement it when the classification can change in a future version.
+//! If every variant is permanently non-recoverable, the error does not need
+//! [`Recovery`]. If at least one variant can recover, implement the trait.
+//! Also implement it if a future version can change the classification.
 //!
 //! ```rust
 //! use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
@@ -93,10 +93,10 @@
 //!
 //! # Heuristic recovery
 //!
-//! An inner error does not always implement [`Recovery`].
-//! You can use a known property of the error to classify it.
-//! For example, find a [`std::io::Error`] at the root of the error chain.
-//! Then use [`RecoveryInfo::from`] to convert its [`ErrorKind`](std::io::ErrorKind).
+//! An inner error does not always implement [`Recovery`]. You can classify it
+//! from a known property. For example, find a [`std::io::Error`] at the root of
+//! the error chain. Then convert its [`ErrorKind`](std::io::ErrorKind) with
+//! [`RecoveryInfo::from`].
 //!
 //! Use the `#[from]` attribute to classify the error during conversion.
 //!
@@ -167,9 +167,9 @@
 //! }
 //! ```
 //!
-//! The `From<ErrorKind> for RecoveryInfo` conversion provides defaults for common I/O errors.
-//! Its API documentation lists all classifications.
-//! If a default does not match your use case, implement your own mapping.
+//! The `From<ErrorKind> for RecoveryInfo` conversion defines defaults for common
+//! I/O errors. Its API documentation lists every classification. If a default
+//! does not match your use case, implement your own mapping.
 
-#[expect(unused_imports, reason = "simplifies the docs")]
+#[expect(unused_imports, reason = "keeps documentation examples concise")]
 use crate::*;
