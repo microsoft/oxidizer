@@ -192,19 +192,19 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbaPmyh-jBm90b5H9mU2JRAzgbIS0gQQzjBCMbyrHPi_M1NtBhZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4zgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbaPmyh-jBm90b5H9mU2JRAzgbIS0gQQzjBCMbyrHPi_M1NtBhZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjKCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4zgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMg
  [__link0]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Classified
  [__link1]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Redactor
- [__link10]: https://docs.rs/data_privacy_macros/0.13.1/data_privacy_macros/?search=classified
- [__link11]: https://docs.rs/data_privacy_macros/0.13.1/data_privacy_macros/?search=taxonomy
- [__link12]: https://docs.rs/data_privacy_macros/0.13.1/data_privacy_macros/?search=classified
- [__link13]: https://docs.rs/data_privacy/0.13.1/data_privacy/?search=RedactionEngine
- [__link14]: https://docs.rs/data_privacy/0.13.1/data_privacy/?search=RedactionEngine::builder
- [__link2]: https://docs.rs/data_privacy/0.13.1/data_privacy/?search=RedactionEngine
+ [__link10]: https://docs.rs/data_privacy_macros/0.13.2/data_privacy_macros/?search=classified
+ [__link11]: https://docs.rs/data_privacy_macros/0.13.2/data_privacy_macros/?search=taxonomy
+ [__link12]: https://docs.rs/data_privacy_macros/0.13.2/data_privacy_macros/?search=classified
+ [__link13]: https://docs.rs/data_privacy/0.13.2/data_privacy/?search=RedactionEngine
+ [__link14]: https://docs.rs/data_privacy/0.13.2/data_privacy/?search=RedactionEngine::builder
+ [__link2]: https://docs.rs/data_privacy/0.13.2/data_privacy/?search=RedactionEngine
  [__link3]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Classified
- [__link4]: https://docs.rs/data_privacy_macros/0.13.1/data_privacy_macros/?search=RedactedDebug
- [__link5]: https://docs.rs/data_privacy_macros/0.13.1/data_privacy_macros/?search=RedactedDisplay
+ [__link4]: https://docs.rs/data_privacy_macros/0.13.2/data_privacy_macros/?search=RedactedDebug
+ [__link5]: https://docs.rs/data_privacy_macros/0.13.2/data_privacy_macros/?search=RedactedDisplay
  [__link6]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=RedactedToString
- [__link7]: https://docs.rs/data_privacy_macros/0.13.1/data_privacy_macros/?search=taxonomy
+ [__link7]: https://docs.rs/data_privacy_macros/0.13.2/data_privacy_macros/?search=taxonomy
  [__link8]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=DataClass
  [__link9]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Classified

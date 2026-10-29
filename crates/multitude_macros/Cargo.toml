@@ -4,7 +4,7 @@
 [package]
 name = "multitude_macros"
 description = "Macros for the multitude crate."
-version = "0.12.0"
+version = "0.13.0"
 readme = "README.md"
 keywords = ["oxidizer", "arena", "allocator", "macro", "derive"]
 categories = ["data-structures"]
