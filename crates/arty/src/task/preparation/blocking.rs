@@ -5,6 +5,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::{ShutdownCause, TaskCompletion};
 
+use crate::runtime::ShutdownStart;
 use crate::runtime::blocking_worker::BlockingPanicPolicy;
 use crate::task::handle::{JoinHandle, JoinHandlePool, Sender};
 use crate::task::preparation::discard_panicking_drop;
@@ -44,7 +45,7 @@ where
             }
             Err(panic) => {
                 if let BlockingPanicPolicy::Shutdown(waker) = &self.panic_policy
-                    && result_tx.shutdown().begin(ShutdownCause::panic())
+                    && result_tx.shutdown().begin(ShutdownCause::panic()) == ShutdownStart::Started
                 {
                     waker.wake_by_ref();
                 }
