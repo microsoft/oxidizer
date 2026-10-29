@@ -14,7 +14,7 @@ use crate::TypeErasedTask;
 
 /// Stores an immutable, uncounted handle template inside its pinned task.
 ///
-/// Counted handles and owned raw pointers keep the task alive; the template is never dropped.
+/// Counted handles and owned raw pointers keep the task alive. The template is never dropped.
 /// This keeps raw ownership private without a detached allocation or new plurality APIs.
 pub(crate) type TaskHandleSlot = OnceLock<ManuallyDrop<TaskHandleTemplate>>;
 
@@ -32,7 +32,7 @@ impl std::fmt::Debug for TaskHandleTemplate {
 ///
 /// Clones retain the pinned pooled task allocation. Task methods remain owner-thread-only even
 /// when a waker or remote notification carries a strong reference across threads.
-/// Each handle directly owns a pinned pooled Arc; raw owners use the embedded handle template.
+/// Each handle directly owns a pinned pooled Arc. Raw owners use the embedded handle template.
 #[derive(Clone)]
 pub(crate) struct TaskHandle {
     inner: Pin<PoolArc<dyn TypeErasedTask>>,
@@ -46,7 +46,7 @@ impl TaskHandle {
             _owner_thread: PhantomData,
         };
         // SAFETY: This uncounted copy is immutable and never dropped. Only raw ownership
-        // transitions may copy it into an owner, transferring an already counted reference.
+        // transitions can copy it into an owner and transfer an already counted reference.
         // The handle contains only a pinned Global-allocator pooled Arc, not per-handle resources.
         let template = ManuallyDrop::new(TaskHandleTemplate {
             // SAFETY: The immutable template is never dropped and represents no additional owner.
@@ -89,7 +89,7 @@ impl TaskHandle {
 /// Non-owning identity for a task's immutable handle template.
 ///
 /// Copying a pointer never acquires ownership. A counted strong reference must protect every
-/// dereference; raw wakers and the intrusive list separately account for their owned references.
+/// dereference. Raw wakers and the intrusive list separately account for their owned references.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TaskPtr {
     template: NonNull<TaskHandleTemplate>,
@@ -191,7 +191,7 @@ impl RemoteTaskHandle {
     }
 }
 
-// SAFETY: Remote threads may read the immutable template for reference-count operations while
+// SAFETY: Remote threads can read the immutable template for reference-count operations while
 // a counted owner keeps it live. Task payload and link access remains an unsafe owner-thread operation.
 unsafe impl Send for TaskPtr {}
 // SAFETY: Same invariant as `Send`.

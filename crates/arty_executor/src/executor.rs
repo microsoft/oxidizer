@@ -13,59 +13,56 @@ use tick::SimpleClock;
 
 use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskSet, executor_context};
 
-/// The async task executor for a single thread.
+/// An async task executor that runs on one thread.
 ///
-/// Its purpose is to continuously poll tasks to ensure the tasks make progress, as well as to
-/// provide highly efficient task wake-up services for when tasks are unblocked by the asynchronous
-/// operations they are waiting on.
+/// The executor polls tasks and processes wake notifications so that ready tasks
+/// can make progress.
 ///
-/// The executor is single-threaded and does not own or manage threads - it is up to the caller to
-/// decide what thread to run it on and what else to do on that thread. This caller is intended to
-/// be the Arty Runtime, which combines async task execution, I/O and other fundamental
-/// capabilities into a single package of features offered to each thread in an Arty-based
-/// application.
+/// The executor does not create or manage threads. The caller selects the owner
+/// thread and decides what other work runs on that thread. The Arty Runtime uses
+/// this executor with I/O and other per-thread services.
 ///
-/// At most one executor may be alive on a thread. Dropping it releases that thread registration,
-/// after which a replacement executor may be created.
+/// Only one executor can be alive on a thread. Dropping it releases the thread
+/// registration, so the caller can create a replacement.
 ///
 /// # Reentrancy and mutability
 ///
-/// Owner operations take exclusive access to the executor. Futures may still submit tasks through
-/// a [`TaskSet`], whose narrowly scoped internal mutability is released around external callbacks.
+/// Owner operations need exclusive access to the executor. A future can submit
+/// tasks through a [`TaskSet`]. The task set does not hold an internal mutable
+/// borrow while it calls external code.
 ///
-/// Not every method can be called in a reentrant manner - see API documentation of individual
-/// methods for details.
+/// Some methods do not support reentrant calls. Each method documents its
+/// reentrancy requirements.
 ///
 /// # Integration
 ///
-/// The executor is designed to be exclusively owned and operated by the runtime that it services.
-/// Instances of [`TaskSet`] obtained from [`tasks()`][Self::tasks] may be shared to user code
-/// to facilitate registering additional tasks with the executor. This may be done even from
-/// within the futures of existing tasks running on the same executor.
+/// The runtime owns and operates the executor. It can give a [`TaskSet`] from
+/// [`tasks()`][Self::tasks] to user code. User code can then register tasks,
+/// including from a future that runs on the same executor.
 ///
-/// The runtime that owns the executor is expected to call [`execute_cycle()`][Self::execute_cycle]
-/// as part of its main event loop. When exactly the next call should take place is determined by
-/// the [`CycleOutcome`] returned from each call.
+/// The runtime calls [`execute_cycle()`][Self::execute_cycle] from its main event
+/// loop. The returned [`CycleOutcome`] indicates when another cycle is useful.
 ///
-/// The owner may, at any point (regardless of what any registered tasks are doing), initiate the
-/// shutdown process. Any active tasks are aborted and their futures dropped when shutdown starts.
-/// Submissions through remaining [`TaskSet`]s notify their completion target with shutdown.
+/// The owner can start shutdown at any time. Shutdown cancels active tasks and
+/// drops their futures. A later submission through a remaining [`TaskSet`]
+/// reports cancellation to its completion target.
 ///
 /// # Shutdown process
 ///
-/// Graceful shutdown lets the owner observe when cancellation is complete:
+/// Use this sequence for graceful shutdown:
 ///
 /// 1. Call [`shutdown()`][Self::shutdown] and trigger the returned handle.
 /// 2. Keep calling [`execute_cycle()`][Self::execute_cycle] until it returns [`CycleOutcome::Shutdown`].
 /// 3. Drop the executor when convenient.
 ///
-/// Dropping the executor without this sequence is also safe and synchronously cancels remaining
-/// tasks. Retained task wakers keep emptied task allocations alive and become inert.
+/// You can also drop the executor without this sequence. The drop operation
+/// cancels remaining tasks before it returns. Retained task wakers keep empty
+/// task allocations alive, but the wakers do nothing.
 ///
 /// # Process termination
 ///
-/// Task panics are contained. [`ExecutorBuilder::panic_policy`] selects
-/// whether a task panic starts executor shutdown.
+/// The executor contains task panics. [`ExecutorBuilder::panic_policy`] selects
+/// whether a task panic starts shutdown.
 #[derive(Debug)]
 pub struct Executor {
     shared: ExecutorShared,
@@ -86,7 +83,7 @@ impl Executor {
     pub(crate) fn new(owner_waker: task::Waker, sink: Sink, thread_id: ThreadId, panic_policy: crate::PanicPolicy) -> Self {
         let shared = ExecutorShared::new(owner_waker, sink, thread_id, panic_policy);
         let clock = SimpleClock::new_system().with_fast_instant(true);
-        // Register before creating an executor whose Drop would unregister this thread.
+        // Register before creating an executor because its Drop unregisters this thread.
         executor_context::register(thread_id);
         Self {
             shared,
@@ -97,8 +94,7 @@ impl Executor {
         }
     }
 
-    /// Creates a new handle to the set of tasks registered with the executor. You can use
-    /// this to register additional tasks.
+    /// Returns a handle that can register tasks with this executor.
     #[must_use]
     pub fn tasks(&self) -> TaskSet {
         TaskSet::new(&self.shared)
@@ -113,7 +109,7 @@ impl Executor {
     /// Returns whether the executor still owns any registered tasks.
     ///
     /// Completed tasks stop counting during the cycle that observes their completion. Retained
-    /// wakers do not count as tasks and may remain alive after this returns `false`.
+    /// wakers do not count as tasks and can remain alive after this returns `false`.
     #[must_use]
     pub fn has_tasks(&self) -> bool {
         self.shared.has_tasks()
@@ -121,20 +117,19 @@ impl Executor {
 
     /// Executes one processing cycle to progress registered tasks.
     ///
-    /// More work may remain after a cycle completes. The return value will indicate whether the
-    /// executor believes it has more work to do, in which case it should be called again as soon as
-    /// possible.
+    /// More work can remain after the cycle. The return value indicates whether
+    /// the executor can do more work now.
     ///
-    /// This function is not safe to call in a reentrant manner - only the owner may
-    /// call it in an exclusive context.
+    /// Only the owner can call this method with exclusive access. Do not call it
+    /// reentrantly.
     ///
     /// # Panics
     ///
-    /// Panics if called in a reentrant manner (e.g. from external code called
-    /// from within `execute_cycle()`).
+    /// Panics if called reentrantly, such as from external code that
+    /// `execute_cycle()` calls.
     ///
-    /// Panics from cleanup and notification hooks may also propagate. Continued operation
-    /// after such a panic is not guaranteed.
+    /// A panic from a cleanup or notification hook can also propagate. Do not
+    /// continue to use the executor after such a panic.
     #[must_use]
     pub fn execute_cycle(&mut self) -> CycleOutcome {
         let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
@@ -211,9 +206,9 @@ impl Executor {
         let mut pending_count: usize = 0;
 
         // Keep the scheduling owner queued until polling and context restoration both return.
-        // Otherwise an unwind could leave a remote waker owning a live non-Send payload.
+        // Otherwise an unwind can leave a remote waker that owns a live non-Send payload.
         while let Some(task_handle) = self.active.front() {
-            // SAFETY: The runnable owner keeps the pinned task alive; only this executor polls
+            // SAFETY: The runnable owner keeps the pinned task alive. Only this executor polls
             // and retires its payload on the task's owner thread.
             let task = unsafe { task_handle.as_task() };
             let pointer = task_handle.as_ptr();
@@ -222,7 +217,7 @@ impl Executor {
             if self.shared.shutdown().is_triggered() {
                 task.abort(self.shared.shutdown().cause());
                 self.shared.decrement_task_count(1);
-                // SAFETY: The active owner keeps `pointer` live; a linked active task belongs to
+                // SAFETY: The active owner keeps `pointer` live. A linked active task belongs to
                 // this executor's pending list, and this code runs on the task owner thread.
                 drop(unsafe { self.pending.remove(pointer) });
                 completed_count = completed_count.saturating_add(1);
@@ -256,7 +251,7 @@ impl Executor {
         record_poll_metrics(pending_count, completed_count);
     }
 
-    /// Whether an immediately performed cycle would do useful work.
+    /// Returns whether an immediate cycle can do useful work.
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // Mutation can make the executor spin without useful work.
     fn has_work_to_do(&self) -> bool {
@@ -268,7 +263,7 @@ impl Executor {
         self.shared.close_remote_wakes();
         executor_context::clear_wakes(self.shared.wake().thread_id());
         for task_handle in &self.active {
-            // SAFETY: Each active owner keeps its task live; any linked task belongs to this
+            // SAFETY: Each active owner keeps its task live. Any linked task belongs to this
             // executor's pending list, and shutdown preparation runs on the owner thread.
             drop(unsafe { self.pending.remove(task_handle.as_ptr()) });
         }
@@ -281,7 +276,7 @@ impl Executor {
         match EXECUTOR_PUSHER.try_with(|_pusher| TASKS_ABORTED_ON_SHUTDOWN.try_with(|event| event.batch(aborted_count).observe_once())) {
             Ok(Ok(())) => {}
             Ok(Err(_access_error)) | Err(_access_error) => {
-                // Metrics TLS may already be destroyed when an executor itself lives in TLS.
+                // Metrics TLS can already be destroyed when an executor itself lives in TLS.
             }
         }
 
@@ -334,7 +329,7 @@ impl Drop for Executor {
         let aborted_count = guard.0.prepare_task_abort();
         guard.0.abort_prepared_tasks(aborted_count, false, &cause);
         if EXECUTOR_PUSHER.try_with(MetricsPusher::push).is_err() {
-            // Executor cleanup must remain safe after metrics TLS has been destroyed.
+            // Executor cleanup must remain safe after destruction of metrics TLS.
         }
         debug_assert!(guard.0.shared.shutdown_complete());
     }

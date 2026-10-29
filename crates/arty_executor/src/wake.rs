@@ -194,7 +194,7 @@ impl WakeSignal {
     }
 
     fn add_owned_waker(&self) {
-        // SAFETY: The borrowed signal is embedded in a live task; the increment transfers
+        // SAFETY: The borrowed signal is embedded in a live task. The increment transfers
         // independent ownership to the cloned waker.
         unsafe { self.task_ptr.increment_strong() };
     }
@@ -279,7 +279,7 @@ fn waker_drop(ptr: *const ()) {
 
 fn signal_from_raw(ptr: *const ()) -> &'static WakeSignal {
     // SAFETY: Raw waker functions are called only with the pinned signal pointer used to create
-    // the waker. Borrowed calls are scoped to task polling; owned calls retain the enclosing task.
+    // the waker. Borrowed calls are scoped to task polling. Owned calls retain the enclosing task.
     unsafe { ptr.cast::<WakeSignal>().as_ref().expect("raw waker signal pointer is never null") }
 }
 
