@@ -19,7 +19,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winht
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "bytesbuf::mem::global::GlobalPool",
+    "bytesbuf::mem::opaque_memory::OpaqueMemory",
     "fetch::client_builder::HttpClientBuilder",
     # The transport itself lives in the implementation crate and is re-exported
     # from here; this crate is the supported surface for all of it.

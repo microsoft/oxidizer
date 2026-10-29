@@ -19,7 +19,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "bytesbuf::mem::global::GlobalPool",
+    "bytesbuf::mem::opaque_memory::OpaqueMemory",
     "bytesbuf::mem::has_memory::HasMemory",
     "bytesbuf::mem::memory::Memory",
     "data_privacy::redaction_engine::RedactionEngine",
@@ -202,6 +202,7 @@ tokio = { workspace = true, features = [
     "rt",
     "net",
 ] }
+tower-service = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
@@ -295,6 +296,11 @@ required-features = ["test-util"]
 harness = false
 name = "http_crate"
 required-features = ["test-util"]
+
+[[bench]]
+harness = false
+name = "fetch_memory"
+required-features = ["test-util", "json"]
 
 [[test]]
 name = "requests"
