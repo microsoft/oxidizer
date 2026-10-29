@@ -49,10 +49,12 @@ ignored = ["ctor"]
 [features]
 rustls = ["dep:rustls", "dep:hyper-rustls", "fetch_tls/rustls"]
 native-tls = ["dep:native-tls", "dep:tokio-native-tls", "fetch_tls/native-tls"]
+test-util = ["dep:bytes", "dep:rcgen", "dep:rustls", "rustls/aws-lc-rs"]
 
 [dependencies]
 # internal
 anyspawn = { workspace = true }
+bytes = { workspace = true, optional = true }
 bytesbuf = { workspace = true, features = ["std"] }
 fetch_options = { workspace = true }
 fetch_tls = { workspace = true }
@@ -75,6 +77,7 @@ opentelemetry-semantic-conventions = { workspace = true, features = [
     "semconv_experimental",
 ] }
 pin-project = { workspace = true }
+rcgen = { workspace = true, features = ["aws_lc_rs"], optional = true }
 rustls = { workspace = true, features = ["tls12", "std"], default-features = false, optional = true }
 seatbelt = { workspace = true }
 templated_uri = { workspace = true }

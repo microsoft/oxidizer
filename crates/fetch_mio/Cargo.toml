@@ -1,0 +1,101 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fetch_mio"
+description = "Arty Mio connector for the fetch Hyper transport."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "fetch", "arty", "mio", "hyper"]
+categories = ["network-programming", "asynchronous"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_mio"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "arty::task::scheduler::Scheduler",
+    "arty_mio::context::MioContext",
+    "fetch_options::socket::SocketOptions",
+    "http_extensions::error::HttpError",
+    "layered::service::Service",
+    "templated_uri::base_uri::BaseUri",
+    "tick::clock::Clock",
+]
+
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
+[features]
+default = []
+benchmark = ["tick/test-util"]
+
+[dependencies]
+# internal
+anyspawn = { workspace = true, features = ["arty"] }
+arty = { workspace = true }
+arty_mio = { workspace = true }
+fetch_hyper = { workspace = true }
+fetch_options = { workspace = true }
+http_extensions = { workspace = true }
+layered = { workspace = true }
+libc = { workspace = true }
+ohno = { workspace = true }
+seatbelt = { workspace = true }
+templated_uri = { workspace = true }
+tick = { workspace = true }
+
+# external
+futures = { workspace = true, features = ["async-await", "std"] }
+http = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true, features = ["client-legacy"] }
+mio = { workspace = true, features = ["net", "os-poll"] }
+socket2 = { workspace = true }
+
+[dev-dependencies]
+arty = { path = "../arty", features = ["macros", "rt", "test-util"] }
+ctor = { workspace = true, features = ["proc_macro"] }
+criterion = { workspace = true }
+fetch_hyper = { path = "../fetch_hyper", features = ["native-tls", "rustls"] }
+fetch_tls = { path = "../fetch_tls", features = ["native-tls", "rustls"] }
+future_assert = { path = "../future_assert" }
+http_extensions = { path = "../http_extensions", features = ["test-util"] }
+native-tls = { workspace = true, features = ["alpn"] }
+rcgen = { workspace = true, features = ["aws_lc_rs"] }
+rustls = { workspace = true, features = ["aws-lc-rs", "std", "tls12"] }
+static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
+thread_aware = { path = "../thread_aware", features = ["std", "test-utils"] }
+tick = { path = "../tick", features = ["test-util"] }
+metabench = { path = "../metabench", default-features = false }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
+
+[[bench]]
+name = "read_path"
+harness = false
+
+[[bench]]
+name = "fetch_mio_readiness"
+harness = false
+
+[[bench]]
+name = "fetch_mio_flush"
+harness = false
+
+[[bench]]
+name = "connector_path"
+harness = false
+required-features = ["benchmark"]

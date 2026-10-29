@@ -12,8 +12,7 @@
 use anyspawn::Spawner;
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch_hyper::HyperTransportBuilder;
-use fetch_options::{SocketOptions, TransportOptions};
-use fetch_tls::{TlsBackend, TlsBackendBuilder};
+use fetch_options::SocketOptions;
 use http::uri::Scheme;
 use http_extensions::{HttpError, Result};
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -27,7 +26,6 @@ use tower_service::Service as _;
 use crate::custom::{CustomContext, CustomDeps, Isolation};
 use crate::error_labels::LABEL_SCHEME_NOT_ALLOWED;
 use crate::handlers::TransportHandler;
-use crate::tls::TlsOptions;
 use crate::{HttpClient, HttpClientBuilder};
 
 /// Dependencies for HTTP operations on Tokio.
@@ -284,7 +282,7 @@ fn io_error_kind(mut error: &(dyn std::error::Error + 'static)) -> std::io::Erro
 }
 
 fn build_tokio_handler(cx: CustomContext<TokioDeps>, options: &TokioTransportOptions) -> fetch_hyper::HyperTransport {
-    let tls_backend = build_tls_backend(&cx.options, cx.tls);
+    let tls_backend = crate::tls::build_tls_backend(&cx.options, cx.tls);
     let connector = TokioConnector::new(options.socket);
 
     HyperTransportBuilder::new(connector, Spawner::new_tokio(), cx.clock, cx.options)
@@ -292,40 +290,6 @@ fn build_tokio_handler(cx: CustomContext<TokioDeps>, options: &TokioTransportOpt
         .pool_index(cx.pool_index)
         .meter(cx.meter)
         .build(tls_backend)
-}
-
-/// Builds a [`TlsBackend`] from the client [`TlsOptions`].
-///
-/// With `rustls`, the backend uses aws-lc-rs and the platform trust store. rustls is the default.
-/// If only `native-tls` is enabled, native TLS is the default.
-fn build_tls_backend(options: &TransportOptions, tls: TlsOptions) -> TlsBackend {
-    let mut builder = TlsBackendBuilder::new();
-    if !options.supported_http_versions.is_empty() {
-        builder = builder.supported_http_versions(&options.supported_http_versions);
-    }
-
-    #[cfg(any(feature = "rustls", test))]
-    {
-        // rustls uses aws-lc-rs by default.
-        let provider = std::sync::Arc::new(::rustls::crypto::aws_lc_rs::default_provider());
-        let verifier = std::sync::Arc::new(
-            rustls_platform_verifier::Verifier::new(std::sync::Arc::clone(&provider))
-                .expect("the platform certificate verifier must initialize with the aws-lc-rs crypto provider"),
-        );
-        // configure_rustls makes rustls the default backend.
-        builder = builder.configure_rustls(provider, verifier);
-    }
-
-    #[cfg(all(feature = "native-tls", not(any(feature = "rustls", test))))]
-    {
-        builder = builder.defaults_to_native_tls();
-    }
-
-    // Transport build is infallible, so invalid TlsOptions are a programming error reported
-    // during client construction.
-    builder
-        .build_backend(tls)
-        .expect("TLS backend construction must succeed for the configured TlsOptions")
 }
 
 #[cfg(test)]
@@ -474,7 +438,7 @@ mod tests {
         options.supported_http_versions = Vec::new();
 
         // Skip the empty list.
-        let _backend = super::build_tls_backend(&options, TlsOptions::default());
+        let _backend = crate::tls::build_tls_backend(&options, TlsOptions::default());
     }
 
     /// Dials `127.0.0.1:port` over `http` through a [`TokioConnector`] configured with `options`.

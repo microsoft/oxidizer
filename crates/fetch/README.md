@@ -76,8 +76,8 @@ custom runtimes and transports. A custom transport can use `reqwest` while the r
 
 ## Getting Started
 
-The bundled transport runs on Tokio. Use a custom transport for another runtime. See the
-[`custom`][__link7] module.
+This client has bundled integrations for Tokio and Arty. Other runtimes can
+use a custom transport through the [`custom`][__link7] module.
 
 ```rust
 use fetch::{HttpClient, HttpError};
@@ -99,6 +99,21 @@ async fn main() -> Result<(), HttpError> {
  > 
  > **Note**: Use [`HttpClient::builder_tokio`][__link8] to add handlers or change timeouts and other
  > configuration.
+
+Arty applications can create a client from the task’s built-in services:
+
+```rust
+use arty::task::Builtins;
+use fetch::{HttpClient, HttpError};
+
+#[arty::main]
+async fn main(cx: Builtins) -> Result<(), HttpError> {
+    let client = HttpClient::new_arty(&cx);
+    let response = client.get("https://example.com").fetch().await?;
+    println!("status: {}", response.status());
+    Ok(())
+}
+```
 
 ## Making Requests
 
@@ -665,6 +680,10 @@ fetch = { version = "*", features = ["json", "tokio", "tls", "compression-gzip"]
   `HttpClient::builder_tokio_with_options`, and related APIs. The bundled transport requires a
   TLS feature even when the client permits HTTP.
 
+* `arty` enables integration with the Arty runtime and Mio I/O. It provides
+  `HttpClient::builder_arty` and `HttpClient::new_arty`.
+  Enable `rustls` or `native-tls` with it.
+
 * `json` enables JSON serialization and deserialization. It provides methods such as
   `HttpRequestBuilder::json` and `HttpRequestBuilder::fetch_json`.
 
@@ -713,7 +732,7 @@ selects it and the client applies the options with
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0ln95Baxpa0b38KaVl3eFr0bei6yo0MfQlMbmdeNHfsx5EJhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmVmZXRjaGYwLjE5LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjEzLjCCZ2xheWVyZWRlMC4zLjiCaHNlYXRiZWx0ZjAuMTEuMIJtdGVtcGxhdGVkX3VyaWUwLjcuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbn1nXKhc4upUbHxPdCFp52AIbMoylVrzY_yIbYglYbDnGzjNhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmVmZXRjaGYwLjE5LjCCb2h0dHBfZXh0ZW5zaW9uc2YwLjEzLjCCZ2xheWVyZWRlMC4zLjiCaHNlYXRiZWx0ZjAuMTEuMIJtdGVtcGxhdGVkX3VyaWUwLjcuMA
  [__link0]: https://docs.rs/fetch/0.19.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.19.0/fetch/?search=HttpClient::post

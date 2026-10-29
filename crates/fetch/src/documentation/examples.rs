@@ -18,6 +18,7 @@
 //!
 //! | Example | Description |
 //! |---------|-------------|
+//! | [`http_client_arty`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_arty.rs) | Sends a GET request on Arty through Mio. |
 //! | [`http_client_tokio`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_tokio.rs) | Sends GET requests on Tokio, including one from a spawned task. |
 //! | [`http_client_decompression`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_decompression.rs) | Enables gzip response decompression with a fake transport. |
 //! | [`http_client_json`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_json.rs) | Deserializes a JSON response into a borrowed struct with [`fetch_json_ref`](crate::HttpRequestBuilder::fetch_json_ref) against a fake handler. |

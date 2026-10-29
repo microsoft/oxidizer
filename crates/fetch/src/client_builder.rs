@@ -34,8 +34,8 @@ use crate::{BaseUri, RequestHandler};
 ///
 /// # Construction
 ///
-/// Use `HttpClient::builder_tokio` for the bundled transport. Use
-/// [`custom::create_builder`][crate::custom::create_builder] for a custom transport.
+/// Use `HttpClient::builder_tokio` or `HttpClient::builder_arty` for a bundled transport.
+/// Use [`custom::create_builder`][crate::custom::create_builder] for a custom transport.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct HttpClientBuilder {

@@ -57,6 +57,16 @@ impl TaskSet {
         self.shared.request_shutdown(cause);
     }
 
+    /// Returns whether the executor owner is currently processing a cycle.
+    ///
+    /// Runtime integrations can use this to avoid interrupting an owner that
+    /// will observe newly registered tasks before it can suspend.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn owner_is_executing(&self) -> bool {
+        crate::executor_context::is_executing(self.shared.wake().thread_id())
+    }
+
     #[cfg(test)]
     pub(crate) fn task_storage_is_empty(&self) -> bool {
         self.shared.task_storage_is_empty()
@@ -72,5 +82,23 @@ mod tests {
     #[test]
     fn thread_safety() {
         assert_not_impl_any!(TaskSet: Send, Sync);
+    }
+
+    #[test]
+    fn owner_execution_state_tracks_task_polling() {
+        let mut executor = crate::Executor::builder().build();
+        let tasks = executor.tasks();
+        assert!(!tasks.owner_is_executing());
+
+        let observed = tasks.clone();
+        let _task = tasks.add(
+            async move {
+                assert!(observed.owner_is_executing());
+            },
+            TaskOptions::default(),
+        );
+
+        assert_eq!(executor.execute_cycle(), crate::CycleOutcome::Suspend);
+        assert!(!tasks.owner_is_executing());
     }
 }

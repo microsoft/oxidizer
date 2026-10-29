@@ -40,6 +40,10 @@ mod tls;
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub mod testing;
 
+#[cfg(feature = "test-util")]
+/// In-process connector and stream fakes for downstream tests.
+pub mod test_util;
+
 pub use builder::{HyperTransport, HyperTransportBuilder};
 pub use connection::{Connect, HyperIo};
 

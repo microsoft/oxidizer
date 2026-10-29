@@ -75,8 +75,8 @@
 //!
 //! # Getting Started
 //!
-//! The bundled transport runs on Tokio. Use a custom transport for another runtime. See the
-//! [`custom`] module.
+//! This client has bundled integrations for Tokio and Arty. Other runtimes can
+//! use a custom transport through the [`custom`] module.
 //!
 //! ```rust,no_run
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
@@ -100,6 +100,24 @@
 //!
 //! > **Note**: Use [`HttpClient::builder_tokio`] to add handlers or change timeouts and other
 //! > configuration.
+//!
+//! Arty applications can create a client from the task's built-in services:
+//!
+//! ```rust,no_run
+//! # #[cfg(all(feature = "arty", any(feature = "rustls", feature = "native-tls")))]
+//! # {
+//! use arty::task::Builtins;
+//! use fetch::{HttpClient, HttpError};
+//!
+//! #[arty::main]
+//! async fn main(cx: Builtins) -> Result<(), HttpError> {
+//!     let client = HttpClient::new_arty(&cx);
+//!     let response = client.get("https://example.com").fetch().await?;
+//!     println!("status: {}", response.status());
+//!     Ok(())
+//! }
+//! # }
+//! ```
 //!
 //! # Making Requests
 //!
@@ -771,6 +789,10 @@
 //!   `HttpClient::builder_tokio_with_options`, and related APIs. The bundled transport requires a
 //!   TLS feature even when the client permits HTTP.
 //!
+//! - `arty` enables integration with the Arty runtime and Mio I/O. It provides
+//!   `HttpClient::builder_arty` and `HttpClient::new_arty`.
+//!   Enable `rustls` or `native-tls` with it.
+//!
 //! - `json` enables JSON serialization and deserialization. It provides methods such as
 //!   `HttpRequestBuilder::json` and `HttpRequestBuilder::fetch_json`.
 //!
@@ -848,6 +870,10 @@ pub mod fake;
 
 /// Custom runtime and transport integration.
 pub mod custom;
+
+#[cfg(all(feature = "arty", any(feature = "rustls", feature = "native-tls")))]
+/// Arty runtime and Mio transport integration.
+pub mod arty;
 
 #[cfg(any(test, all(feature = "tokio", any(feature = "rustls", feature = "native-tls"))))]
 /// Tokio transport integration.

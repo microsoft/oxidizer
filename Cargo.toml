@@ -79,6 +79,7 @@ arty = { path = "crates/arty", default-features = false, version = "0.5.0" }
 arty_executor = { path = "crates/arty_executor", default-features = false, version = "=0.5.0" }
 arty_io_core = { path = "crates/arty_io_core", default-features = false, version = "0.3.0" }
 arty_io_host = { path = "crates/arty_io_host", default-features = false, version = "=0.2.0" }
+arty_mio = { path = "crates/arty_mio", default-features = false, version = "0.1.0" }
 arty_macros = { path = "crates/arty_macros", default-features = false, version = "=0.5.0" }
 arty_macros_impl = { path = "crates/arty_macros_impl", default-features = false, version = "=0.5.0" }
 async-once-cell = { version = "0.5.0", default-features = false }
@@ -133,6 +134,7 @@ fastrand = { version = "2.3.0", default-features = false, features = ["std"] }
 fetch = { path = "crates/fetch", default-features = false, version = "0.19.0" }
 fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.9.0" }
 fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.10.0" }
+fetch_mio = { path = "crates/fetch_mio", default-features = false, version = "0.1.0" }
 fetch_options = { path = "crates/fetch_options", default-features = false, version = "0.2.5" }
 fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.5.0" }
 fetch_winhttp = { path = "crates/fetch_winhttp", default-features = false, version = "0.4.0" }
@@ -189,6 +191,7 @@ metabench_macros = { path = "crates/metabench_macros", default-features = false,
 metabench_macros_impl = { path = "crates/metabench_macros_impl", default-features = false, version = "=0.2.1" }
 mimalloc = { version = "0.1.52", default-features = false }
 mime = { version = "0.3.17", default-features = false }
+mio = { version = "1.2.3", default-features = false }
 mockall = { version = "0.14.0", default-features = false }
 moka = { version = "0.12.14", default-features = false }
 msvc_spectre_libs_build = { path = "crates/msvc_spectre_libs_build", default-features = false, version = "0.1.2" }
@@ -275,6 +278,7 @@ slab = { version = "0.4.12", default-features = false }
 slotmap = { version = "1.1.1", default-features = false }
 smallvec = { version = "1.15.1", default-features = false }
 smol = { version = "2.0.0", default-features = false }
+socket2 = { version = "0.6.5", default-features = false, features = ["all"] }
 static_assertions = { version = "1.1.0", default-features = false }
 string-interner = { version = "0.20.0", default-features = false }
 string_cache = { version = "0.11.0", default-features = false }

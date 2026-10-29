@@ -1,0 +1,70 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "arty_mio"
+description = "Mio I/O integration for the Arty runtime."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["arty", "async", "runtime", "mio"]
+categories = ["asynchronous"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_mio"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "arty_io_core::*",
+    "mio::event::Source",
+    "mio::interest::Interest",
+    "mio::token::Token",
+    "observed::sink::core::Sink",
+    "thread_aware_core::thread::Thread",
+    "thread_aware_core::thread_aware::ThreadAware",
+]
+
+[features]
+default = []
+
+[dependencies]
+arty_io_core = { workspace = true }
+data_privacy = { workspace = true }
+mio = { workspace = true, features = ["os-poll"] }
+observed = { workspace = true }
+performables = { workspace = true }
+thread_aware_core = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+arty = { path = "../arty" }
+ctor = { workspace = true, features = ["proc_macro"] }
+criterion = { workspace = true }
+metabench = { path = "../metabench", default-features = false }
+mio = { workspace = true, features = ["net", "os-poll"] }
+observed_testing = { path = "../observed_testing" }
+static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
+thread_aware = { path = "../thread_aware", features = ["std", "test-utils"] }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
+
+[[bench]]
+name = "registration"
+harness = false
+
+[[bench]]
+name = "event_dispatch"
+harness = false
+
+[[bench]]
+name = "source_access"
+harness = false

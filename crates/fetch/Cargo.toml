@@ -3,7 +3,7 @@
 
 [package]
 name = "fetch"
-description = "HTTP client with resilience, observability, and Tokio runtime support."
+description = "HTTP client with resilience, observability, and multiple runtime integrations."
 version = "0.19.0"
 readme = "README.md"
 keywords = ["http", "client", "async", "resilience", "observability"]
@@ -23,6 +23,9 @@ allowed_external_types = [
     "bytesbuf::mem::has_memory::HasMemory",
     "bytesbuf::mem::memory::Memory",
     "data_privacy::redaction_engine::RedactionEngine",
+    "arty::io::handle::Io",
+    "arty::task::builtins::Builtins",
+    "arty::task::scheduler::Scheduler",
     "fetch_options::*",
     "fetch_tls::*",
     "http::*",
@@ -52,6 +55,17 @@ ignored = ["ctor"]
 
 [features]
 default = []
+arty = [
+    "dep:anyspawn",
+    "anyspawn/arty",
+    "dep:arty",
+    "dep:arty_mio",
+    "dep:fetch_hyper",
+    "dep:fetch_mio",
+    # The aws-lc-rs crypto provider is used by the bundled Arty transport when
+    # both `arty` and `rustls` are enabled.
+    "rustls?/aws-lc-rs",
+]
 tls = ["rustls"]
 rustls = [
     "dep:rustls",
@@ -90,15 +104,16 @@ tokio = [
     "hyper-util/http1",
     "hyper-util/http2",
     "tick/tokio",
-    # The aws-lc-rs crypto provider is only pulled in when both `tokio` and
-    # `rustls` are enabled, because it is exclusively used by the Tokio
-    # transport's rustls backend (`tokio::build_tls_backend`).
+    # The aws-lc-rs crypto provider is pulled in when both `tokio` and
+    # `rustls` are enabled for the bundled Tokio transport.
     "rustls?/aws-lc-rs",
 ]
 
 [dependencies]
 # internal
 anyspawn = { workspace = true, optional = true }
+arty = { workspace = true, features = ["rt"], optional = true }
+arty_mio = { workspace = true, optional = true }
 compressors = { workspace = true, optional = true }
 http_compression = { workspace = true, optional = true }
 
@@ -107,6 +122,7 @@ bytes = { workspace = true }
 bytesbuf = { workspace = true, features = ["std"] }
 data_privacy = { workspace = true }
 fetch_hyper = { workspace = true, optional = true }
+fetch_mio = { workspace = true, optional = true }
 fetch_options = { workspace = true }
 fetch_tls = { workspace = true }
 fundle = { workspace = true }
@@ -152,6 +168,7 @@ alloc_tracker = { workspace = true }
 # internal
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
 argh = { workspace = true }
+arty = { path = "../arty", features = ["macros", "rt", "test-util"] }
 benchmarking = { path = "../benchmarking" }
 compressors = { path = "../compressors", features = [
     "brotli",
@@ -223,6 +240,10 @@ required-features = ["test-util"]
 [[example]]
 name = "http_client_tokio"
 required-features = ["tokio", "rustls"]
+
+[[example]]
+name = "http_client_arty"
+required-features = ["arty", "rustls"]
 
 [[example]]
 name = "http_client_native_tls"
@@ -305,6 +326,14 @@ required-features = ["test-util", "json"]
 [[test]]
 name = "requests"
 required-features = ["tokio", "rustls", "test-util"]
+
+[[test]]
+name = "arty"
+required-features = ["arty", "rustls"]
+
+[[test]]
+name = "arty_native_tls"
+required-features = ["arty", "native-tls"]
 
 [[test]]
 name = "telemetry_scope"
