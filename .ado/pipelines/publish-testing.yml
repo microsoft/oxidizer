@@ -1,6 +1,9 @@
 trigger:
 - main
 
+variables:
+  system.debug: 'true'
+
 parameters:
 - name: validationOsList
   type: object
