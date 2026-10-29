@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use std::{fmt, mem};
 
 use bytesbuf::BytesBuf;
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::OpaqueMemory;
 use fetch::HttpError;
 use http::HeaderMap;
 use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, TRANSFER_ENCODING};
@@ -26,7 +26,7 @@ use crate::response_headers::parse_response_trailers;
 // across related projects when no better figure is known. It is an upper bound
 // on the reservation only; what a single call submits is separately bounded by
 // the buffer's first contiguous unfilled region, so this value takes no
-// dependency on how `GlobalPool` sizes the blocks it hands out. Revisit it if
+// dependency on how the memory provider sizes its blocks. Revisit it if
 // the measured throughput-to-memory trade-off changes.
 const DESIRED_READ_SIZE: usize = 256 * 1024;
 
@@ -49,14 +49,14 @@ const DESIRED_READ_SIZE: usize = 256 * 1024;
 pub(crate) struct WinHttpBodyReader {
     guard: Option<RequestGuard>,
     bindings: BindingsFacade,
-    memory: GlobalPool,
+    memory: OpaqueMemory,
     trailers: Option<HeaderMap>,
     eof: bool,
     remaining: Option<u64>,
 }
 
 impl WinHttpBodyReader {
-    pub(crate) const fn new(guard: RequestGuard, bindings: BindingsFacade, memory: GlobalPool, declared_length: Option<u64>) -> Self {
+    pub(crate) const fn new(guard: RequestGuard, bindings: BindingsFacade, memory: OpaqueMemory, declared_length: Option<u64>) -> Self {
         Self {
             guard: Some(guard),
             bindings,
@@ -458,12 +458,13 @@ mod tests {
     use std::task::{Context, Waker};
 
     use bytesbuf::BytesBuf;
-    use bytesbuf::mem::GlobalPool;
+    use bytesbuf::mem::{CallbackMemory, GlobalPool, OpaqueMemory};
     use http::{HeaderMap, HeaderValue};
     use http_body::Body as _;
     use ohno::Labeled as _;
     use plurality::Pool;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
+    use thread_aware::unaware;
     use windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
     use windows::Win32::Networking::WinHttp::{ERROR_WINHTTP_HEADER_NOT_FOUND, WINHTTP_CALLBACK_STATUS_READ_COMPLETE};
 
@@ -559,7 +560,7 @@ mod tests {
 
     struct ReaderHarness {
         reader: WinHttpBodyReader,
-        memory: GlobalPool,
+        memory: OpaqueMemory,
         context: *mut RequestContext,
         record: Arc<Record>,
     }
@@ -711,6 +712,41 @@ mod tests {
         let contiguous = probe.first_unfilled_slice().len().min(DESIRED_READ_SIZE);
         assert_eq!(harness.record.requested.lock().unwrap()[0], u32::try_from(contiguous).unwrap());
         assert!(data.capacity() >= DESIRED_READ_SIZE);
+        harness.finish();
+    }
+
+    /// Exercises partial contiguous capacity and reuse through the selected provider.
+    #[test]
+    fn a_custom_provider_can_supply_a_short_first_region_and_keep_spare_capacity() {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let mut harness = reader(
+            [ReadBehavior::data(b"abc".to_vec()), ReadBehavior::data(b"def".to_vec())],
+            TrailerBehavior::None,
+        );
+        harness.reader.memory = OpaqueMemory::new(CallbackMemory::new(unaware(Arc::clone(&requests)), |requests, min_bytes| {
+            requests.lock().unwrap().push(min_bytes);
+            let pool = GlobalPool::new();
+            let mut buffer = pool.reserve(min_bytes);
+            // Leave a prefix-sized first region while preserving the requested total capacity.
+            let prefix = buffer.first_unfilled_slice().len() - b"abc".len();
+            buffer.put_byte_repeated(0, prefix);
+            drop(buffer.consume_all());
+            buffer.reserve(min_bytes, &pool);
+            buffer
+        }));
+
+        let (read, into) = drive(harness.reader.read_into(BytesBuf::new())).unwrap();
+        assert_eq!(read, 3);
+        assert_eq!(into.peek(), b"abc");
+        let (read, mut into) = drive(harness.reader.read_into(into)).unwrap();
+        assert_eq!(read, 3);
+        assert_eq!(into.consume_all(), b"abcdef");
+        assert_eq!(*requests.lock().unwrap(), [DESIRED_READ_SIZE]);
+        let requested = harness.record.requested.lock().unwrap();
+        assert_eq!(requested[0], 3);
+        assert!(requested[1] > requested[0]);
+        assert!(requested.iter().all(|&len| len as usize <= DESIRED_READ_SIZE));
+        drop(requested);
         harness.finish();
     }
 
@@ -1323,7 +1359,7 @@ mod tests {
         .unwrap();
         let context = installed_context(&guard);
         drop((session, contexts));
-        let memory = GlobalPool::new();
+        let memory = OpaqueMemory::new(GlobalPool::new());
 
         ReaderHarness {
             reader: WinHttpBodyReader::new(guard, facade, memory.clone(), declared_length),

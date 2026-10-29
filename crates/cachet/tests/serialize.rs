@@ -5,20 +5,77 @@
 
 #![cfg(feature = "serialize")]
 
-use bytesbuf::BytesView;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use bytesbuf::mem::{CallbackMemory, GlobalPool, OpaqueMemory};
+use bytesbuf::{BytesBuf, BytesView};
 use cachet::{Cache, CacheOp, CacheTier, MockCache};
+use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
+
+/// Test data that records reservations and forwards them to a real memory provider.
+#[derive(Debug)]
+struct CountingMemoryData {
+    inner: GlobalPool,
+    reservations: Arc<AtomicUsize>,
+    clones: Arc<AtomicUsize>,
+}
+
+impl Clone for CountingMemoryData {
+    fn clone(&self) -> Self {
+        // SeqCst keeps clone observations ordered with the assertion loads.
+        self.clones.fetch_add(1, Ordering::SeqCst);
+        Self {
+            inner: self.inner.clone(),
+            reservations: Arc::clone(&self.reservations),
+            clones: Arc::clone(&self.clones),
+        }
+    }
+}
+
+impl ThreadAware for CountingMemoryData {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        self.inner.relocate(source, destination);
+    }
+}
+
+/// Increments the reservation counter before the provider reserves the requested memory.
+fn count_reserve(data: &CountingMemoryData, min_bytes: usize) -> BytesBuf {
+    // SeqCst makes every increment and assertion load share one global order.
+    // The test only needs the final observed total, but this ordering is conservative
+    // and keeps that total independent of scheduling order.
+    data.reservations.fetch_add(1, Ordering::SeqCst);
+    data.inner.reserve(min_bytes)
+}
+
+/// Creates an opaque provider with an observable reservation count for public API tests.
+fn counting_memory() -> (OpaqueMemory, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+    let reservations = Arc::new(AtomicUsize::new(0));
+    let clones = Arc::new(AtomicUsize::new(0));
+    let provider = CallbackMemory::new(
+        CountingMemoryData {
+            inner: GlobalPool::new(),
+            reservations: Arc::clone(&reservations),
+            clones: Arc::clone(&clones),
+        },
+        count_reserve,
+    );
+    (OpaqueMemory::new(provider), reservations, clones)
+}
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn serialize_encode_decode_returns_correct_output() {
+    let (memory, reservations, clones) = counting_memory();
     let mock_cache_before = MockCache::<String, String>::new();
     let mock_cache_after = MockCache::<BytesView, BytesView>::new();
     let cache = Cache::builder(Clock::new_frozen())
         .storage(mock_cache_before.clone())
-        .serialize()
+        .serialize(memory)
         .fallback(Cache::builder(Clock::new_frozen()).storage(mock_cache_after.clone()))
         .build();
+    let initial_clones = clones.load(Ordering::SeqCst);
     let expected_key = "greeting".to_string();
     let expected_value = "Hello, world!".to_string();
     cache
@@ -56,11 +113,19 @@ async fn serialize_encode_decode_returns_correct_output() {
 
     // Verify the round-trip: value was serialized, stored, fetched, and deserialized correctly.
     assert_eq!(*actual_value.value(), expected_value);
+    assert_eq!(clones.load(Ordering::SeqCst), initial_clones);
+    // Separate codec checks prove key and value provider forwarding.
+    // This pipeline check only observes aggregate reservation activity.
+    assert!(
+        reservations.load(Ordering::SeqCst) >= 2,
+        "serialization pipeline should reserve memory from the caller provider"
+    );
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn serialize_on_fallback_builder() {
+    let (memory, reservations, clones) = counting_memory();
     // Test .serialize() on a FallbackBuilder (not just CacheBuilder).
     let l1 = MockCache::<String, String>::new();
     let l2 = MockCache::<String, String>::new();
@@ -69,9 +134,10 @@ async fn serialize_on_fallback_builder() {
     let cache = Cache::builder(Clock::new_frozen())
         .storage(l1)
         .fallback(Cache::builder(Clock::new_frozen()).storage(l2))
-        .serialize()
+        .serialize(memory)
         .fallback(Cache::builder(Clock::new_frozen()).storage(l3.clone()))
         .build();
+    let initial_clones = clones.load(Ordering::SeqCst);
 
     cache.insert("key".to_string(), "value".to_string()).await.expect("Insert failed");
 
@@ -79,18 +145,21 @@ async fn serialize_on_fallback_builder() {
     let l3_ops = l3.operations();
     assert_eq!(l3_ops.len(), 1);
     assert!(matches!(&l3_ops[0], CacheOp::Insert { .. }));
+    assert_eq!(clones.load(Ordering::SeqCst), initial_clones);
+    assert!(
+        reservations.load(Ordering::SeqCst) >= 2,
+        "fallback serialization should use caller memory for key and value allocations"
+    );
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_serialize_from_multiple_tasks() {
-    use std::sync::Arc;
-
     let mock_after = MockCache::<BytesView, BytesView>::new();
     let cache = Arc::new(
         Cache::builder(Clock::new_frozen())
             .storage(MockCache::<String, String>::new())
-            .serialize()
+            .serialize(OpaqueMemory::new(GlobalPool::new()))
             .fallback(Cache::builder(Clock::new_frozen()).storage(mock_after.clone()))
             .build(),
     );
@@ -136,13 +205,11 @@ async fn concurrent_serialize_from_multiple_tasks() {
 #[cfg_attr(miri, ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serialize_on_one_thread_deserialize_on_another() {
-    use std::sync::Arc;
-
     let mock_before = MockCache::<String, String>::new();
     let cache = Arc::new(
         Cache::builder(Clock::new_frozen())
             .storage(mock_before.clone())
-            .serialize()
+            .serialize(OpaqueMemory::new(GlobalPool::new()))
             .fallback(Cache::builder(Clock::new_frozen()).storage(MockCache::<BytesView, BytesView>::new()))
             .build(),
     );
