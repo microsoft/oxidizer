@@ -41,7 +41,9 @@ impl Wake for SharedCountingWake {
 struct DropWake(Arc<AtomicBool>);
 
 impl Wake for DropWake {
-    fn wake(self: Arc<Self>) {}
+    fn wake(self: Arc<Self>) {
+        drop(self);
+    }
 }
 
 impl Drop for DropWake {
