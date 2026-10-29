@@ -3,6 +3,9 @@
 
 #![allow(dead_code, reason = "shared integration-test support is used by different test binaries")]
 
+//! Adapters that turn consuming executor completion callbacks into outcomes
+//! that integration tests can poll.
+
 use std::cell::RefCell;
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -18,11 +21,13 @@ pub(crate) enum TaskOutcome<R> {
     Cancelled(ShutdownCause),
 }
 
+/// Shared state that joins one completion target to one awaitable handle.
 struct CompletionState<R> {
     outcome: Option<TaskOutcome<R>>,
     waker: Option<Waker>,
 }
 
+/// Publishes one executor outcome and contains notification or disposal panics.
 pub(crate) struct CompletionTarget<R> {
     state: Rc<RefCell<CompletionState<R>>>,
 }
@@ -67,6 +72,7 @@ impl<R: 'static> TaskCompletion<R> for CompletionTarget<R> {
     }
 }
 
+/// Receives the terminal outcome published by its paired completion target.
 pub(crate) struct CompletionHandle<R> {
     state: Rc<RefCell<CompletionState<R>>>,
 }
@@ -85,6 +91,7 @@ impl<R> Future for CompletionHandle<R> {
     }
 }
 
+/// Creates paired completion targets and handles for integration tests.
 pub(crate) trait TaskSetExt {
     fn add_test<F, R>(&self, future: F, options: TaskOptions) -> CompletionHandle<R>
     where

@@ -18,6 +18,8 @@ pub struct Shutdown {
     inner: Rc<ShutdownInner>,
 }
 
+// Shutdown records a complete, write-once cause before it invokes the owner
+// waker. A panicking waker cannot expose a partial cause through another clone.
 impl std::panic::UnwindSafe for Shutdown {}
 impl std::panic::RefUnwindSafe for Shutdown {}
 
@@ -61,6 +63,11 @@ impl Shutdown {
         self.inner.cause.get().cloned().unwrap_or_default()
     }
 
+    /// Records the first shutdown cause without waking the executor owner.
+    ///
+    /// Returns `true` only for the caller that records the cause. The executor
+    /// uses this while it is already running a cycle and during synchronous
+    /// cleanup, when another owner notification is not needed.
     pub(crate) fn publish(&self, cause: ShutdownCause) -> bool {
         self.inner.cause.set(cause).is_ok()
     }
@@ -211,13 +218,15 @@ mod tests {
 
     impl std::task::Wake for WakeCount {
         fn wake(self: Arc<Self>) {
+            // Trigger calls the waker synchronously, and the test reads the
+            // counter after both calls. No data is published through it.
             self.0.fetch_add(1, Ordering::Relaxed);
         }
     }
 
     #[test]
     fn shutdown_handle_is_cloneable_and_send_only() {
-        assert_impl_all!(Shutdown: Clone, Debug);
+        assert_impl_all!(Shutdown: Clone, Debug, UnwindSafe, RefUnwindSafe);
         assert_not_impl_any!(Shutdown: Send, Sync);
     }
 
@@ -235,6 +244,7 @@ mod tests {
             actual.inner().downcast_ref::<SourceError>().unwrap(),
             expected.inner().downcast_ref::<SourceError>().unwrap()
         ));
+        // The synchronous trigger calls complete before this load.
         assert_eq!(wake_count.0.load(Ordering::Relaxed), 1);
     }
 

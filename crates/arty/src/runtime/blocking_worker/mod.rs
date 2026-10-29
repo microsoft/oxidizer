@@ -161,13 +161,20 @@ impl fmt::Debug for JoinableThreadPool {
     }
 }
 
-/// Worker for blocking tasks. Meant to be created for each async worker thread to allow for scheduling of blocking tasks.
+/// Selects how a contained blocking-callback panic affects the runtime.
+///
+/// The shutdown variant wakes the associated async worker so it can coordinate
+/// shutdown with the other workers.
 #[derive(Clone, Debug)]
 pub(crate) enum BlockingPanicPolicy {
     Ignore,
     Shutdown(Waker),
 }
 
+/// Worker for blocking tasks.
+///
+/// Each async worker thread has one blocking worker for scheduling blocking
+/// tasks.
 #[derive(Debug)]
 pub(crate) struct BlockingWorker {
     pool: BlockingPool,

@@ -7,9 +7,9 @@ use arty_executor::{TaskOptions, TaskPlacement, TaskSet};
 use observed::context::Transfer;
 use plurality::{Box as PoolBox, MultiPool, coerce};
 
-use super::{DeferredTask, discard_panicking_drop};
 use crate::task::Builtins;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
+use crate::task::preparation::{DeferredTask, discard_panicking_drop};
 
 thread_local! {
     static FUTURE_FACTORIES: MultiPool = MultiPool::new();

@@ -16,9 +16,10 @@ use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
 use crate::io::{Io, RuntimeDriverHost};
+use crate::runtime::PanicPolicy;
 use crate::runtime::blocking_worker::{BlockingPanicPolicy, BlockingWorker};
 use crate::runtime::bootstrap::pools::BlockingPools;
-use crate::runtime::config::{MonitorOptions, PanicPolicy, RuntimeConfig};
+use crate::runtime::config::{MonitorOptions, RuntimeConfig};
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;

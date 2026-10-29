@@ -110,7 +110,6 @@ mod tests {
     use thread_aware::{ThreadAware, ThreadBuilder};
 
     use super::*;
-    use crate::runtime::{Runtime, WorkersPolicy};
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct TestContext {
@@ -157,9 +156,7 @@ mod tests {
         }
     }
 
-    struct InstalledHost {
-        _runtime: Runtime,
-    }
+    struct InstalledHost;
 
     impl Drop for InstalledHost {
         fn drop(&mut self) {
@@ -170,10 +167,9 @@ mod tests {
     fn host() -> (IoRuntime, Thread, InstalledHost) {
         let thread = ThreadBuilder::default().build(std::thread::current().id());
         let runtime = IoRuntime::new(observed::Sink::noop());
-        let owner = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-        let dispatcher = owner.scheduler().dispatcher.clone();
+        let dispatcher = DispatcherClient::for_test(&thread);
         let _ = RuntimeDriverHost::install(&runtime, dispatcher, &thread, Waker::noop().clone());
-        (runtime, thread, InstalledHost { _runtime: owner })
+        (runtime, thread, InstalledHost)
     }
 
     #[test]

@@ -10,19 +10,20 @@ use std::future::{Ready, pending};
 use std::pin::Pin;
 use std::sync::{Arc, Barrier, mpsc};
 use std::task::{Context, Wake, Waker};
-use std::time::Instant;
 
 use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, RuntimeControl, WorkersPolicy};
 use arty::task::Builtins;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
-use super::support;
-use super::support::JoinHandleExt as _;
+use crate::support;
+use crate::support::JoinHandleExt as _;
 
 fn runtime_builder(workers: usize, policy: PanicPolicy) -> RuntimeBuilder {
     Runtime::builder()
         .workers(WorkersPolicy::exactly(workers))
+        // Two threads keep blocking-panic scenarios bounded without serializing
+        // the callback whose completion or cancellation the test observes.
         .blocking_pool(BlockingPoolPolicy::shared().max(2))
         .panic(policy)
 }
@@ -53,7 +54,7 @@ async fn return_value(_: Builtins, Unaware(value): Unaware<u32>) -> u32 {
     value
 }
 
-async fn concurrent_panic(_: Builtins, Unaware(barrier): Unaware<Arc<Barrier>>) {
+async fn concurrent_panic(Unaware(barrier): Unaware<Arc<Barrier>>) {
     barrier.wait();
     std::panic::panic_any("concurrent panic");
 }
@@ -277,11 +278,21 @@ fn ignore_policy_remains_operational_across_workers_and_cloned_schedulers() {
 #[test]
 fn concurrent_panics_start_one_coordinated_shutdown() {
     let runtime = runtime_builder(2, PanicPolicy::shutdown()).build().unwrap();
+    let control = support::runtime_control(&runtime);
+    let scheduler = runtime
+        .scheduler()
+        .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
+        .join()
+        .unwrap();
     let barrier = Arc::new(Barrier::new(3));
-    let tasks = [(), ()].map(|()| {
-        let barrier = Arc::clone(&barrier);
-        runtime.scheduler().spawn_anywhere(Unaware(barrier), concurrent_panic)
-    });
+    let tasks: Vec<_> = control
+        .workers()
+        .into_iter()
+        .map(|worker| {
+            let barrier = Arc::clone(&barrier);
+            scheduler.spawn_at(worker, Unaware(barrier), concurrent_panic)
+        })
+        .collect();
 
     barrier.wait();
 
@@ -321,14 +332,7 @@ fn a_dropped_join_does_not_suppress_default_shutdown() {
     drop(runtime.scheduler().spawn_anywhere(Unaware(panicking_tx), detached_panic));
     panicking_rx.recv().unwrap();
 
-    let deadline = Instant::now() + TEST_TIMEOUT;
-    let rejected = loop {
-        match runtime.scheduler().spawn_anywhere(Unaware(42), return_value).join() {
-            Ok(_) => std::thread::yield_now(),
-            Err(error) => break error,
-        }
-        assert!(Instant::now() < deadline, "panic policy did not start shutdown");
-    };
+    let rejected = runtime.scheduler().spawn_anywhere(Unaware(42), return_value).join().unwrap_err();
 
     assert!(rejected.is_shutdown());
     assert_eq!(

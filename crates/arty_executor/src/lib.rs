@@ -37,8 +37,8 @@
 //! Cloned task wakers may outlive their tasks. After completion or cancellation, an escaped waker
 //! remains callable but becomes an inert no-op and cannot delay executor shutdown.
 //!
-//! Task panics are contained. [`ExecutorBuilder::panic_policy`] selects
-//! whether they start executor shutdown.
+//! Task panics are contained. [`ExecutorBuilder::panic_policy`](crate::ExecutorBuilder::panic_policy)
+//! selects whether they start executor shutdown.
 
 mod builder;
 mod cycle_outcome;

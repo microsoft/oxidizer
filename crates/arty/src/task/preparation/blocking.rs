@@ -5,9 +5,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::{ShutdownCause, TaskCompletion};
 
-use super::discard_panicking_drop;
 use crate::runtime::blocking_worker::BlockingPanicPolicy;
 use crate::task::handle::{JoinHandle, JoinHandlePool, Sender};
+use crate::task::preparation::discard_panicking_drop;
 
 pub(crate) fn prepare_blocking<F, R>(
     result_pool: &JoinHandlePool,

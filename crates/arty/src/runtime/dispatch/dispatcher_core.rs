@@ -56,6 +56,8 @@ impl From<WorkerIndex> for usize {
 pub(crate) struct DispatcherCore {
     wait_for_shutdown: ThreadWaiter,
 
+    // Completion senders can publish the cause before dispatcher coordination.
+    // This separate flag elects the one worker broadcaster.
     shutdown_signaled: AtomicBool,
     stopped_reported: AtomicBool,
 
@@ -125,6 +127,8 @@ impl DispatcherCore {
             .shutdown()
             .cause()
             .expect("stop_inner begins shutdown before reading the authoritative cause");
+        // Shutdown stores the cause independently. This atomic only elects the
+        // broadcaster. Observing `true` does not mean notification is complete.
         if self.shutdown_signaled.swap(true, Ordering::AcqRel) {
             return cause;
         }

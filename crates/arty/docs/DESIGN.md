@@ -112,8 +112,9 @@ the runtime's shutdown contract.
 
 ## Failure handling
 
-Application errors remain task results. A caught panic becomes `JoinError`;
-that alone does not stop the runtime or repair shared state. Worker isolation
+Application errors remain task results. A caught panic becomes `JoinError`.
+By default, it also starts coordinated runtime shutdown. `PanicPolicy::ignore()`
+keeps the runtime running, but it does not repair shared state. Worker isolation
 does not make every panic recoverable: some failures must stop the process.
 Failure to initialize or execute an I/O driver stops the runtime.
 

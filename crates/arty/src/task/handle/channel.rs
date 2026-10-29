@@ -6,9 +6,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use arty_executor::{ShutdownCause, TaskCompletion, TaskPanicPayload, discard_task_panic_payload};
 use events_once::{EventLake, PooledSender};
 
-use super::{JoinError, JoinHandle};
 use crate::runtime::Shutdown;
+use crate::task::{JoinError, JoinHandle};
 
+/// Creates result-channel endpoints that share one runtime shutdown state.
 #[derive(Clone, Debug)]
 pub(crate) struct JoinHandlePool {
     events: EventLake,
@@ -39,6 +40,10 @@ impl JoinHandlePool {
     }
 }
 
+/// Adapts executor completion into Arty's result channel.
+///
+/// It publishes an executor shutdown cause before it notifies the joiner and
+/// contains failures from result notification or sender disposal.
 #[derive(derive_more::Debug)]
 pub(crate) struct Sender<R: Send + 'static> {
     #[debug(ignore)]

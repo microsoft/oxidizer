@@ -33,6 +33,10 @@ const TASK: &str = "ae_basic_operations/task";
 const WAKER: &str = "ae_basic_operations/waker";
 const SELF_WAKING_POLL_COUNT: usize = 4;
 
+/// Keeps result transport outside the measured operation.
+///
+/// Successful results and cancellation need no action. Panic payloads still
+/// require explicit disposal.
 #[derive(Debug)]
 struct DiscardCompletion;
 

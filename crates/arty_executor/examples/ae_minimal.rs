@@ -9,6 +9,10 @@ use std::thread;
 
 use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, discard_task_panic_payload};
 
+/// Supplies completion callbacks without a result receiver.
+///
+/// Successful results and cancellation need no action. Panic payloads still
+/// require explicit disposal.
 #[derive(Debug)]
 struct DiscardCompletion;
 
