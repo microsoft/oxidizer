@@ -46,13 +46,15 @@ impl Shutdown {
         }
     }
 
-    #[doc(hidden)]
+    /// Returns whether executor shutdown has started.
     #[must_use]
     pub fn is_triggered(&self) -> bool {
         self.inner.cause.get().is_some()
     }
 
-    #[doc(hidden)]
+    /// Returns the first shutdown cause.
+    ///
+    /// Returns the default cause if shutdown has not started.
     #[must_use]
     pub fn cause(&self) -> ShutdownCause {
         self.inner.cause.get().cloned().unwrap_or_default()

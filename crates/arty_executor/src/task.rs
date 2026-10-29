@@ -359,7 +359,6 @@ enum TerminalOutcome<R> {
 }
 
 /// Inline result delivery owned by a task. Publishing consumes the target.
-#[doc(hidden)]
 pub trait TaskCompletion<R>: Debug + 'static {
     /// Implementations must not panic.
     /// Publishes a successful task result.
