@@ -123,10 +123,7 @@ impl DispatcherCore {
     #[cfg_attr(test, mutants::skip)] // Tests hang if mutation removes the shutdown signal or worker notifications.
     pub(crate) fn stop_inner(&self, cause: ShutdownCause) -> ShutdownCause {
         self.shutdown().begin(cause);
-        let cause = self
-            .shutdown()
-            .cause()
-            .expect("stop_inner begins shutdown before reading the authoritative cause");
+        let cause = self.shutdown().cause().unwrap_or_default();
         // Shutdown stores the cause independently. This atomic only elects the
         // broadcaster. Observing `true` does not mean notification is complete.
         if self.shutdown_signaled.swap(true, Ordering::AcqRel) {
