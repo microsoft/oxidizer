@@ -3,8 +3,6 @@
 
 //! Public task-completion and executor-lifecycle contracts.
 
-mod support;
-
 use std::cell::{Cell, RefCell};
 use std::error::Error as _;
 use std::fmt;
@@ -25,7 +23,8 @@ use observed::enrichment::{Enrichment, EnrichmentEntry};
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
 use observed_testing::{TEST_ID, test_emitter};
-use support::{CompletionHandle, TaskOutcome, TaskSetExt as _};
+
+use crate::support::{CompletionHandle, TaskOutcome, TaskSetExt as _};
 
 thread_local! {
     static THREAD_LOCAL_EXECUTOR: RefCell<Option<Executor>> = const { RefCell::new(None) };
@@ -386,11 +385,11 @@ fn tasks_submitted_during_poll_wait_for_the_next_cycle_in_registration_order() {
                         }
                     },
                     TaskOptions::default(),
-                    support::DiscardCompletion,
+                    crate::support::DiscardCompletion,
                 );
             },
             TaskOptions::default(),
-            support::DiscardCompletion,
+            crate::support::DiscardCompletion,
         );
     }
 
@@ -423,7 +422,7 @@ fn newly_submitted_tasks_run_before_awakened_tasks() {
             }
         }),
         TaskOptions::default(),
-        support::DiscardCompletion,
+        crate::support::DiscardCompletion,
     );
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     polls.borrow_mut().clear();
@@ -438,7 +437,7 @@ fn newly_submitted_tasks_run_before_awakened_tasks() {
                 }
             },
             TaskOptions::default(),
-            support::DiscardCompletion,
+            crate::support::DiscardCompletion,
         );
     }
 

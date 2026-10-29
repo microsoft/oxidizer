@@ -3,8 +3,6 @@
 
 //! Public executor contracts for retained and panicking task wakers.
 
-mod support;
-
 use std::cell::{Cell, RefCell};
 use std::future::poll_fn;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -17,7 +15,8 @@ use std::task::{Context, Poll, Wake, Waker};
 use arty_executor::{CycleOutcome, Executor, TaskOptions, TaskPlacement};
 use observed::Sink;
 use observed::enrichment::{Enrichment, EnrichmentEntry};
-use support::{TaskOutcome, TaskSetExt as _};
+
+use crate::support::{TaskOutcome, TaskSetExt as _};
 
 struct CountingWake(AtomicUsize);
 

@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(dead_code, reason = "shared integration-test support is used by different test binaries")]
-
 //! Adapters that turn consuming executor completion callbacks into outcomes
 //! that integration tests can poll.
 

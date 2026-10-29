@@ -8,7 +8,6 @@ use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::Waker;
 use std::thread::ThreadId;
 use std::{fmt, thread};
 
@@ -22,6 +21,10 @@ use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::telemetry::events::{BlockingWorkerPoolMode, BlockingWorkerPoolSaturated, SystemMetricCount};
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::prepare_blocking;
+
+mod panic_policy;
+
+pub(crate) use panic_policy::BlockingPanicPolicy;
 
 const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
 
@@ -159,16 +162,6 @@ impl fmt::Debug for JoinableThreadPool {
             .field("max_count", &self.max_count())
             .finish()
     }
-}
-
-/// Selects how a contained blocking-callback panic affects the runtime.
-///
-/// The shutdown variant wakes the associated async worker so it can coordinate
-/// shutdown with the other workers.
-#[derive(Clone, Debug)]
-pub(crate) enum BlockingPanicPolicy {
-    Ignore,
-    Shutdown(Waker),
 }
 
 /// Worker for blocking tasks.

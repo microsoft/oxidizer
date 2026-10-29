@@ -23,11 +23,6 @@ pub struct Shutdown {
 impl std::panic::UnwindSafe for Shutdown {}
 impl std::panic::RefUnwindSafe for Shutdown {}
 
-struct ShutdownInner {
-    cause: OnceCell<ShutdownCause>,
-    owner_waker: Waker,
-}
-
 impl Shutdown {
     pub(crate) fn new(owner_waker: Waker) -> Self {
         Self {
@@ -71,6 +66,11 @@ impl Shutdown {
     pub(crate) fn publish(&self, cause: ShutdownCause) -> bool {
         self.inner.cause.set(cause).is_ok()
     }
+}
+
+struct ShutdownInner {
+    cause: OnceCell<ShutdownCause>,
+    owner_waker: Waker,
 }
 
 /// A cloneable error that caused executor shutdown.
@@ -145,10 +145,6 @@ pub struct ShutdownCause {
     error: Option<ShutdownError>,
 }
 
-#[ohno::error]
-#[display("a contained runtime operation panicked")]
-struct ContainedRuntimePanic;
-
 impl ShutdownCause {
     /// Creates a shutdown cause for a contained runtime panic.
     #[must_use]
@@ -174,6 +170,10 @@ impl ShutdownCause {
         self.error
     }
 }
+
+#[ohno::error]
+#[display("a contained runtime operation panicked")]
+struct ContainedRuntimePanic;
 
 impl From<ShutdownError> for ShutdownCause {
     fn from(error: ShutdownError) -> Self {

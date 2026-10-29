@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use std::error::Error as _;
-use std::panic::panic_any;
+use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
 use std::pin::pin;
 use std::rc::Rc;
 use std::sync::Arc;
