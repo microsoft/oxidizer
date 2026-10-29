@@ -495,9 +495,8 @@ threads), with no per-built-client scope - so it is noted as `fetch` API
 feedback (../../fetch/docs/stabilization.md, connection-management item). Each
 instance's session is immutable after setup, so a plain `Arc` cloned into that
 instance's in-flight requests suffices. The instance-local context pool is the
-only mutable shared state (`Mutex`-guarded, §5), while the read-buffer
-`GlobalPool` is already thread-safe. All are normally uncontended under
-thread-isolated use.
+only mutable shared state owned by the transport (`Mutex`-guarded, §5).
+The read-buffer provider satisfies `MemoryShared`, which requires thread-safe access.
 
 **Contrast with `fetch_hyper`.** `fetch_hyper` uses `Isolation::Shared`: one
 hyper client, already fully thread-safe, shared across threads, so its pool is
@@ -568,7 +567,7 @@ driver consumes the completion payload. On `READ_COMPLETE` the driver needs the
 buffer back, because it holds the bytes just received. On write and error
 completions the buffer carries nothing the driver needs; it is retained purely so
 that the trampoline does not run `BytesView`/`BytesBuf` destructors, and with them
-a `GlobalPool` block release, on a WinHTTP callback thread. Deallocation happens on
+a memory-provider block release, on a WinHTTP callback thread. Deallocation happens on
 the driver's own thread instead.
 
 `events_once` is the right primitive because each step is a single, non-blocking,
@@ -917,19 +916,24 @@ has been destroyed.
   `HANDLE_CLOSING` reconstructs it with `plurality::Box::from_raw` and drops it, and that
   `Drop` returns the slot to the pool on its own.
 
-Read buffers come from the separate shared memory pool. `WinHttpDeps` retains a clone
-of its mandatory `bytesbuf::mem::GlobalPool` in the transport extras while also
-supplying that pool to `fetch::custom::CustomDeps` for the response
-`HttpBodyBuilder`. Each materialized
-transport receives the retained clone through `CustomContext::extras`; the body reader
-clones it and rents buffers with no lock.
+Read buffers come from the caller's memory provider.
+`WinHttpDeps` retains its mandatory `bytesbuf::mem::OpaqueMemory` in the transport extras.
+It also supplies a clone to `fetch::custom::CustomDeps` for the response `HttpBodyBuilder`.
+Each materialized transport receives the retained provider through `CustomContext::extras`.
+The transport carries it through `TransportInputs`, `ReadyTransport`, and `RequestDriver` to the body reader and writer.
+This keeps allocations under caller control without adding a provider type parameter to the transport.
+Provider clones and relocation follow `OpaqueMemory` forwarding semantics rather than assuming shared pool state.
+The request driver borrows the transport's body builder.
+Its upload writer borrows the driver's memory provider.
+Neither operation needs another owned provider.
+The response reader owns its provider because a lazy response body can outlive the transport call.
 
 ## 6. Request/response body streaming
 
 Bodies are modeled as `bytesbuf_io` streams, then bridged to `fetch`'s
 `http_body::Body` model. Response (read) buffers are drawn from the client's
-`bytesbuf::mem::GlobalPool`. Request (write) buffers are whatever `BytesView` the
-caller supplies in the outgoing `HttpBody`; they need not come from that pool.
+`bytesbuf::mem::OpaqueMemory`. Request (write) buffers are whatever `BytesView` the
+caller supplies in the outgoing `HttpBody`; they need not come from that provider.
 Either way WinHTTP is agnostic to where the memory came from: it borrows the
 pointer for the duration of one async operation (§4) and never allocates or
 accounts for it, so the transport imposes no allocation-source requirement on
@@ -1137,7 +1141,7 @@ segmented across several pooled blocks, so each call is given
 `BytesBuf::first_unfilled_slice()` and a length bounded by that region and by
 `u32::MAX`. The reader never pairs a logical buffer length with a pointer into only
 its first block. Nothing here assumes a particular block size: the bound is read from
-the buffer at runtime, so `GlobalPool` remains free to change its size classes.
+the buffer at runtime, so providers can supply different block sizes.
 
 **Large reads are preferred.** `DESIRED_READ_SIZE` is 256 KiB, matching the
 default I/O size used across related projects. It caps every reservation, and it
@@ -1150,7 +1154,7 @@ contiguous region leaves the remaining blocks in the `BytesBuf`, and subsequent 
 take their region from that reserve. A flagged read tops the buffer back up to the
 desired size, because a read that waits for a full region should be given a region
 worth waiting for. An unflagged read does not: it takes whatever spare capacity is
-there and reaches `GlobalPool` again only once the buffer has none left. Topping up
+there and reaches the memory provider again only once the buffer has none left. Topping up
 an unflagged read would rent memory on every delivery to replace bytes the response
 may never send.
 
@@ -1436,9 +1440,9 @@ connect deadline and response/body timeout behavior are covered with controlled 
 `HttpClientWinHttpExt::builder_winhttp` (design.md §1.1) does not reimplement any
 pipeline wiring; it delegates to `fetch`'s custom-transport entry point, calling
 `fetch::custom::create_builder("winhttp", "winhttp", factory, Isolation::Isolated, deps)`.
-There is no `new_winhttp`: the timer-capable `Clock`, `GlobalPool`, and `Sink` are
+There is no `new_winhttp`: the timer-capable `Clock`, `OpaqueMemory`, and `Sink` are
 mandatory environment dependencies and have no runtime-neutral defaults. They are passed
-to `WinHttpDeps::builder(clock, global_pool, sink)`. TLS and WinHTTP-specific user
+to `WinHttpDeps::builder(clock, memory, sink)`. TLS and WinHTTP-specific user
 configuration default when omitted. The `create_builder` signature this targets is:
 
 ```rust,ignore
@@ -1479,8 +1483,8 @@ inside the factory when
 captured in the clone-shared builder closure. The session is deliberately not a
 `WinHttpDeps` field either - `WinHttpDeps` stays plain, relocatable configuration. The
 clock comes from `CustomContext`. Because `CustomContext` exposes only the derived
-`HttpBodyBuilder`, not the underlying `GlobalPool`, `WinHttpDeps` also retains a pool
-clone in `Extras` for WinHTTP read buffers. The `observed::Sink` rides in the same extras
+`HttpBodyBuilder`, not the underlying `OpaqueMemory`, `WinHttpDeps` also retains a provider
+clone in `Extras` for WinHTTP read buffers and writer reservations. The `observed::Sink` rides in the same extras
 and relocates per thread with the rest of the config; the transport emits its telemetry
 through it (§13). There is no
 `anyspawn::Spawner`: no WinHTTP call the transport makes can block (§2.1).

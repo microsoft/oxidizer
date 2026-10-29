@@ -105,7 +105,7 @@ rust_nightly_external_types := "nightly-2026-03-20"
 # Cargo subcommands
 # ============================================================================
 
-cargo_aprz_version := "1.1.0"
+cargo_aprz_version := "1.2.1"
 cargo_audit_version := "0.22.2"
 cargo_bolero_version := "0.13.4"
 cargo_careful_version := "0.4.10"

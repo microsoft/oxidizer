@@ -7,7 +7,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use arty_executor::discard_task_panic_payload;
 
 use crate::task::Builtins;
-use crate::task::execution::RemoteFutureFactory;
+use crate::task::preparation::RemoteFutureFactory;
 
 pub(crate) type IoAccess = Box<dyn FnOnce(&Builtins) + Send>;
 
@@ -94,7 +94,7 @@ mod tests {
     use observed::Sink;
 
     use super::*;
-    use crate::task::execution::prepare_remote;
+    use crate::task::preparation::prepare_remote;
 
     struct PanicWake(AtomicBool);
 
@@ -137,14 +137,8 @@ mod tests {
     #[test]
     fn queued_factory_disposal_contains_join_notification_panic() {
         let sink = Sink::noop();
-        let result_pool = arty_executor::remote::Pool::new();
-        let (factory, join) = prepare_remote(
-            &result_pool,
-            |_| async { 42 },
-            sink.transfer_context(),
-            TaskPlacement::Any,
-            crate::runtime::shutdown::Shutdown::default(),
-        );
+        let result_pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
+        let (factory, join) = prepare_remote(&result_pool, |_| async { 42 }, sink.transfer_context(), TaskPlacement::Any);
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
         let waker = Waker::from(Arc::clone(&wake));

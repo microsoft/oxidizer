@@ -9,7 +9,7 @@ use arty_executor::{ShutdownCause, ShutdownError};
 #[derive(Clone, Default, derive_more::Debug)]
 pub(crate) struct Shutdown {
     #[debug(ignore)]
-    cause: Arc<OnceLock<ShutdownCause>>,
+    inner: Arc<OnceLock<ShutdownCause>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -18,18 +18,27 @@ pub(crate) enum ShutdownState {
     Started,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ShutdownStart {
+    Started,
+    AlreadyStarted,
+}
+
 impl Shutdown {
-    /// Starts shutdown and returns whether this call started it.
+    /// Starts shutdown and reports whether this call started it.
     ///
     /// The first published cause is authoritative. Later requests do not
     /// replace it, including a default cause without an error.
-    pub(crate) fn begin(&self, cause: ShutdownCause) -> bool {
-        self.cause.set(cause).is_ok()
+    pub(crate) fn begin(&self, cause: ShutdownCause) -> ShutdownStart {
+        match self.inner.set(cause) {
+            Ok(()) => ShutdownStart::Started,
+            Err(_) => ShutdownStart::AlreadyStarted,
+        }
     }
 
     #[must_use]
     pub(crate) fn state(&self) -> ShutdownState {
-        if self.cause.get().is_some() {
+        if self.inner.get().is_some() {
             ShutdownState::Started
         } else {
             ShutdownState::Running
@@ -38,7 +47,7 @@ impl Shutdown {
 
     #[must_use]
     pub(crate) fn cause(&self) -> Option<ShutdownCause> {
-        self.cause.get().cloned()
+        self.inner.get().cloned()
     }
 
     #[must_use]
@@ -80,8 +89,8 @@ mod tests {
 
         let shutdown = Shutdown::default();
 
-        assert!(shutdown.begin(ShutdownCause::default()));
-        assert!(!shutdown.begin(cause("later")));
+        assert_eq!(shutdown.begin(ShutdownCause::default()), ShutdownStart::Started);
+        assert_eq!(shutdown.begin(cause("later")), ShutdownStart::AlreadyStarted);
 
         assert_eq!(shutdown.state(), ShutdownState::Started);
         assert!(shutdown.error().is_none());
@@ -91,8 +100,8 @@ mod tests {
     fn error_cause_remains_authoritative() {
         let shutdown = Shutdown::default();
 
-        assert!(shutdown.begin(cause("first")));
-        assert!(!shutdown.begin(cause("later")));
+        assert_eq!(shutdown.begin(cause("first")), ShutdownStart::Started);
+        assert_eq!(shutdown.begin(cause("later")), ShutdownStart::AlreadyStarted);
 
         assert_eq!(shutdown.error().unwrap().inner().to_string(), "first");
     }
@@ -113,7 +122,7 @@ mod tests {
         barrier.wait();
         let started = workers.map(|worker| worker.join().unwrap());
 
-        assert_eq!(started.into_iter().filter(|started| *started).count(), 1);
+        assert_eq!(started.into_iter().filter(|started| *started == ShutdownStart::Started).count(), 1);
         let observed = shutdown.error().unwrap().inner().to_string();
         assert!(matches!(observed.as_str(), "first" | "second"));
         assert_eq!(shutdown.error().unwrap().inner().to_string(), observed);

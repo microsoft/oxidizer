@@ -56,6 +56,25 @@ basename prefixes Criterion group names, Callgrind files require a paired
 Criterion file, and Callgrind identifiers mirror Criterion ones with `/`
 substituted by `_`.
 
+## Owned native inputs
+
+Gungraun 0.20 generates batched execution paths that require owned inputs.
+Do not pass a reference to a temporary, such as `#[bench::case(&prepare())]`.
+For workloads that retain prepared state, allocate a `Box` during native setup
+and accept `Borrow<State>` or `BorrowMut<State>` in the workload. Return the
+input owner alongside the result so its destruction remains outside measurement.
+The box keeps large fixture payloads from being moved through the measured call.
+Criterion can pass its existing borrowed state and select the result from the
+returned tuple, without changing its setup, reuse, or teardown policy.
+
+For a polymorphic cloning workload, use a `Deref<Target = T>` input with
+`T: Clone`: a native `Box<T>` and Criterion's `&T` both clone the underlying
+value rather than a reference. See
+[`ae_basic_operations.rs`](../crates/arty_executor/benches/ae_basic_operations.rs)
+and [`performables_arc_clone.rs`](../crates/performables/benches/performables_arc_clone.rs).
+Regenerate native instruction-count baselines after changing input representation;
+ownership plumbing can affect counts even when setup and teardown stay excluded.
+
 ## Stack pin vs. `Box::pin` on the measured path
 
 Do not use `Box::pin(value)` on the measured path. It allocates a `Box` on the

@@ -8,6 +8,7 @@
 //!
 //! This module re-exports [`FakeHandler`] for canned responses.
 
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 #[doc(no_inline)]
 pub use http_extensions::FakeHandler;
 use thread_aware::ThreadAware;
@@ -78,7 +79,7 @@ impl HttpClient {
             Isolation::Shared,
             CustomDeps {
                 clock: deps.clock,
-                global_pool: bytesbuf::mem::GlobalPool::new(),
+                memory: OpaqueMemory::new(GlobalPool::new()),
                 extras: handler,
             },
         )

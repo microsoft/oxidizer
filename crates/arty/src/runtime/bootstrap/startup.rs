@@ -16,7 +16,8 @@ use thread_aware::{Thread, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
 use crate::io::{Io, RuntimeDriverHost};
-use crate::runtime::blocking_worker::BlockingWorker;
+use crate::runtime::PanicPolicy;
+use crate::runtime::blocking_worker::{BlockingPanicPolicy, BlockingWorker};
 use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::config::{MonitorOptions, RuntimeConfig};
 use crate::runtime::dispatch::{DispatcherClient, DispatcherCore, WorkerEndpoint};
@@ -73,6 +74,7 @@ fn build_with_processors(
         .get()
         .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
     let monitor_options = processor_config.monitor_options;
+    let panic_policy = processor_config.panic_policy;
 
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(sink.clone());
@@ -109,6 +111,7 @@ fn build_with_processors(
                 io_runtime: io_runtime.clone(),
                 sink: sink.clone(),
                 monitor_options: monitor_options.for_worker(),
+                panic_policy: panic_policy.clone(),
             }
             .start(),
         );
@@ -126,13 +129,13 @@ fn build_with_processors(
     }
 
     let runtime_sink = sink.clone();
-    let dispatcher = Arc::new(DispatcherCore::new(
+    let dispatcher = DispatcherCore::new(
         ThreadWaiter::new(async_worker_join_handles),
         NonEmpty::from_vec(async_worker_command_txs)
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         sink,
         shutdown,
-    ));
+    );
 
     let dispatcher_client = DispatcherClient::new(dispatcher);
 
@@ -179,6 +182,7 @@ struct AsyncWorkerStartInfo {
     io_runtime: IoRuntime,
     sink: Sink,
     monitor_options: MonitorOptions,
+    panic_policy: PanicPolicy,
 }
 
 impl AsyncWorkerStartInfo {
@@ -209,6 +213,7 @@ impl AsyncWorkerStartInfo {
             io_runtime,
             sink,
             monitor_options,
+            panic_policy,
         } = self;
 
         let worker_sink = sink.clone();
@@ -221,11 +226,13 @@ impl AsyncWorkerStartInfo {
         let mut clock = inactive_clock;
         clock.relocate(None, &current);
 
-        // Use shared blocking worker pool if shared, otherwise use a new one
-        let blocking_worker = BlockingWorker::new(blocking_pools.build_worker(), worker_sink.clone(), shutdown);
-
         let signal = Arc::new(WorkerSignal::default());
         let worker_waker = WorkerSignal::waker(&signal);
+        let blocking_panic_policy = match panic_policy.clone().into_executor_policy() {
+            arty_executor::PanicPolicy::Ignore => BlockingPanicPolicy::Ignore,
+            arty_executor::PanicPolicy::Shutdown => BlockingPanicPolicy::Shutdown(worker_waker.clone()),
+        };
+        let blocking_worker = BlockingWorker::new(blocking_pools.build_worker(), worker_sink.clone(), shutdown, blocking_panic_policy);
 
         worker_endpoint_tx
             .send((worker_waker, current.clone(), Arc::clone(&blocking_worker)))
@@ -252,6 +259,7 @@ impl AsyncWorkerStartInfo {
             clock,
             signal,
             monitor_options,
+            panic_policy,
         );
 
         emit!(
@@ -289,7 +297,7 @@ impl AsyncWorkerStartInfo {
 
 fn report_worker_failure(outcome: &std::thread::Result<()>, dispatcher: &DispatcherClient) {
     if outcome.is_err() {
-        _ = dispatcher.stop_with_error(Error::worker_panicked());
+        _ = dispatcher.stop(Error::worker_panicked().into_shutdown_cause());
     }
 }
 
@@ -384,19 +392,19 @@ mod tests {
         let (command_tx, _command_rx) = channel::unbounded();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), shutdown.clone());
+        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), shutdown.clone(), BlockingPanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
             command_tx,
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,
         };
-        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint),
             Sink::noop(),
             shutdown.clone(),
-        )));
+        ));
 
         report_worker_failure(&Err(Box::new("worker panic")), &dispatcher);
 
@@ -408,19 +416,19 @@ mod tests {
         let (command_tx, _command_rx) = channel::unbounded();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), shutdown.clone());
+        let blocking_worker = BlockingWorker::new(BlockingPool::new(None), Sink::noop(), shutdown.clone(), BlockingPanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
             command_tx,
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,
         };
-        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint),
             Sink::noop(),
             shutdown.clone(),
-        )));
+        ));
 
         report_worker_failure(&Ok(()), &dispatcher);
 
@@ -637,8 +645,9 @@ mod tests {
                 stack_size: NonZero::new(2 * 1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(),
                 monitor_options,
+                panic_policy: PanicPolicy::default(),
             },
-            &InactiveClock::default(),
+            &InactiveClock::new_isolated(),
             sink,
             &ThreadBuilder::default(),
             processors,

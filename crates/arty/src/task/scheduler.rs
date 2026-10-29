@@ -3,16 +3,15 @@
 
 use std::cell::{Cell, RefCell};
 
-use arty_executor::remote::Pool as RemotePool;
-use arty_executor::{ShutdownCause, TaskOptions, TaskPlacement, TaskSet};
+use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskOptions, TaskPlacement, TaskSet};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::task::Builtins;
-use crate::task::execution::DeferredTask;
-use crate::task::join::JoinHandle;
+use crate::task::handle::{JoinHandle, JoinHandlePool};
+use crate::task::preparation::DeferredTask;
 
 thread_local! {
     // Set by worker bootstrap before user thread-local values can be initialized.
@@ -34,8 +33,9 @@ struct CurrentWorker {
     thread: Thread,
     builtins: Builtins,
     tasks: TaskSet,
+    executor_shutdown: ExecutorShutdown,
     // Child submissions must not contend with every other worker's result-channel rentals.
-    results: RemotePool,
+    results: JoinHandlePool,
 }
 
 /// A worker-bound handle for submitting async and blocking tasks.
@@ -97,15 +97,17 @@ impl Scheduler {
         CURRENT_WORKER.with_borrow(|current| current.as_ref().map(|current| current.thread.clone()))
     }
 
-    pub(crate) fn register_current(builtins: Builtins, tasks: TaskSet) {
+    pub(crate) fn register_current(builtins: Builtins, tasks: TaskSet, executor_shutdown: ExecutorShutdown) {
         assert!(!ACTIVE_WORKER.replace(true), "a worker is already active on this thread");
         CURRENT_WORKER.with_borrow_mut(|current| {
             assert!(current.is_none(), "a worker already owns this scheduler context");
+            let results = JoinHandlePool::new(builtins.dispatcher().shutdown().clone());
             *current = Some(CurrentWorker {
                 thread: builtins.thread().clone(),
                 builtins,
                 tasks,
-                results: RemotePool::new(),
+                executor_shutdown,
+                results,
             });
         });
     }
@@ -126,7 +128,7 @@ impl Scheduler {
                 return;
             };
             if dispatcher.owns(&current.thread) {
-                current.tasks.begin_shutdown(cause);
+                current.executor_shutdown.trigger(cause);
             }
         });
     }
@@ -232,12 +234,12 @@ impl Scheduler {
             let sink = current.builtins.sink();
             let parent_task_enrichment = sink.transfer_context();
             let builtins = current.builtins.clone();
-            let (result_tx, result_rx) = current.results.channel();
+            let (handle, result_tx) = current.results.handle();
             let inner = DeferredTask::new(future_factory, builtins);
             let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
-            current.tasks.add_with_remote_result(inner, options, result_tx);
+            current.tasks.add(inner, options, result_tx);
             self.dispatcher.wake_worker(self.binding.worker_index);
-            Ok(JoinHandle::new(result_rx))
+            Ok(handle)
         })
     }
 
@@ -385,7 +387,8 @@ impl Scheduler {
     ///
     /// Use this for synchronous I/O or library calls that would otherwise prevent
     /// an async worker from polling tasks and advancing timers. The callback
-    /// runs on a separate pool thread; its panic is reported through the join.
+    /// runs on a separate pool thread. A callback panic fails its join handle
+    /// and follows the configured [`PanicPolicy`](crate::runtime::PanicPolicy).
     ///
     /// Uses the associated worker's pool. Configure sharing and limits with
     /// [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).

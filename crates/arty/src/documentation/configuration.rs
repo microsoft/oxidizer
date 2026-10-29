@@ -15,6 +15,13 @@
 //! `performables` and runtime monitoring. This stage only provides configuration
 //! plumbing. It does not start a monitor, instrument tasks, or emit new telemetry.
 //!
+//! The panic policy starts coordinated shutdown by default when Arty contains a
+//! task factory, async task, or blocking callback panic. Use
+//! [`RuntimeBuilder::panic`](crate::runtime::RuntimeBuilder::panic)
+//! with [`PanicPolicy::ignore`](crate::runtime::PanicPolicy::ignore) to keep the
+//! runtime available. The failed join still reports a panic. See the
+//! [`runtime`](crate::runtime) module for the exact boundaries.
+//!
 //! # Async workers
 //!
 //! [`WorkersPolicy`](crate::runtime::WorkersPolicy) selects the worker count

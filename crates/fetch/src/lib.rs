@@ -849,7 +849,7 @@ pub mod fake;
 /// Custom runtime and transport integration.
 pub mod custom;
 
-#[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
+#[cfg(any(test, all(feature = "tokio", any(feature = "rustls", feature = "native-tls"))))]
 /// Tokio transport integration.
 pub mod tokio;
 

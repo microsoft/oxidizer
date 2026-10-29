@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::OpaqueMemory;
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
 use fetch::{HttpClient, HttpClientBuilder};
 use observed::Sink;
@@ -14,7 +14,7 @@ use crate::transport::{TransportInputs, WinHttpTransport};
 
 /// Supplies the environment and transport extras needed by WinHTTP.
 ///
-/// The clock, global memory pool, and telemetry sink are mandatory application
+/// The clock, memory provider, and telemetry sink are mandatory application
 /// services that the transport cannot create for itself. TLS and
 /// WinHTTP-specific options are transport extras and use strict or unlimited
 /// defaults when omitted.
@@ -27,25 +27,28 @@ use crate::transport::{TransportInputs, WinHttpTransport};
 #[non_exhaustive]
 pub struct WinHttpDeps {
     clock: Clock,
-    global_pool: GlobalPool,
+    memory: OpaqueMemory,
     sink: Sink,
     tls: WinHttpTlsConfig,
 }
 
 impl WinHttpDeps {
     /// Starts building dependencies for the WinHTTP transport.
+    ///
+    /// The memory provider serves request-body and response-body allocations.
+    /// Cloning dependencies clones the provider, and relocation reaches the provider.
     #[must_use]
-    pub fn builder(clock: Clock, global_pool: GlobalPool, sink: Sink) -> WinHttpDepsBuilder {
+    pub fn builder(clock: Clock, memory: OpaqueMemory, sink: Sink) -> WinHttpDepsBuilder {
         WinHttpDepsBuilder {
             clock,
-            global_pool,
+            memory,
             sink,
             tls: WinHttpTlsConfig::default(),
         }
     }
 
-    pub(crate) fn global_pool(&self) -> &GlobalPool {
-        &self.global_pool
+    pub(crate) fn memory(&self) -> &OpaqueMemory {
+        &self.memory
     }
 
     pub(crate) fn sink(&self) -> &Sink {
@@ -66,7 +69,7 @@ impl WinHttpDeps {
 #[non_exhaustive]
 pub struct WinHttpDepsBuilder {
     clock: Clock,
-    global_pool: GlobalPool,
+    memory: OpaqueMemory,
     sink: Sink,
     tls: WinHttpTlsConfig,
 }
@@ -84,7 +87,7 @@ impl WinHttpDepsBuilder {
     pub fn build(self) -> WinHttpDeps {
         WinHttpDeps {
             clock: self.clock,
-            global_pool: self.global_pool,
+            memory: self.memory,
             sink: self.sink,
             tls: self.tls,
         }
@@ -140,7 +143,7 @@ fn create_handler(context: CustomContext<WinHttpDeps>, bindings: BindingsFacade)
     let inputs = TransportInputs {
         body_builder: context.body_builder,
         clock: context.clock,
-        global_pool: context.extras.global_pool().clone(),
+        memory: context.extras.memory().clone(),
         sink: context.extras.sink().clone(),
         options: context.options,
         tls: context.extras.tls().clone(),
@@ -153,7 +156,7 @@ fn create_handler(context: CustomContext<WinHttpDeps>, bindings: BindingsFacade)
 fn into_custom_deps(deps: WinHttpDeps) -> CustomDeps<WinHttpDeps> {
     CustomDeps {
         clock: deps.clock.clone(),
-        global_pool: deps.global_pool.clone(),
+        memory: deps.memory.clone(),
         extras: deps,
     }
 }
@@ -164,17 +167,17 @@ mod tests {
     use std::ffi::c_void;
     use std::fmt::Debug;
     use std::panic::{RefUnwindSafe, UnwindSafe};
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use bytesbuf::mem::GlobalPool;
+    use bytesbuf::mem::{CallbackMemory, GlobalPool, HasMemory as _, Memory as _, OpaqueMemory};
     use fetch::options::{ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolSelection};
     use fetch::tls::TlsOptions;
     use fetch::{Recovery, RecoveryInfo};
     use observed::Sink;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
-    use thread_aware::{Relocator, ThreadAware};
+    use thread_aware::{Relocator, ThreadAware, unaware};
     use tick::{Clock, ClockControl};
 
     use super::{WinHttpDeps, WinHttpDepsBuilder, create_builder_with_bindings, into_custom_deps};
@@ -210,8 +213,40 @@ mod tests {
         assert_eq!(custom_deps.extras.sink().id(), Sink::noop().id());
         assert!(custom_deps.extras.tls().accepts_invalid_certs());
 
-        let _body_pool_buffer = custom_deps.global_pool.reserve(1);
-        let _transport_pool_buffer = custom_deps.extras.global_pool().reserve(1);
+        let _body_pool_buffer = custom_deps.memory.reserve(1);
+        let _transport_pool_buffer = custom_deps.extras.memory().reserve(1);
+    }
+
+    /// Observes provider forwarding and cloning without calling the Windows API.
+    #[test]
+    fn client_and_clone_use_the_supplied_provider() {
+        let reservations = Arc::new(Mutex::new(Vec::new()));
+        let memory = OpaqueMemory::new(CallbackMemory::new(
+            unaware(Arc::clone(&reservations)),
+            |reservations, min_bytes| {
+                reservations.lock().unwrap().push(min_bytes);
+                GlobalPool::new().reserve(min_bytes)
+            },
+        ));
+        let deps = WinHttpDeps::builder(clock(), memory, Sink::noop()).build();
+        let custom_deps = into_custom_deps(deps.clone());
+        // The transport reads its provider from extras, while fetch uses the common dependency.
+        assert!(custom_deps.memory.reserve(17).capacity() >= 17);
+        assert!(custom_deps.extras.memory().reserve(19).capacity() >= 19);
+
+        let (facade, opens, closes) = successful_bindings_facade(1);
+        let client = create_builder_with_bindings(deps, facade).minimal_pipeline().build();
+        let cloned = client.clone();
+
+        // Different ordinary requests identify each access path, not pool boundaries.
+        assert!(client.reserve(29).capacity() >= 29);
+        assert!(client.memory().reserve(31).capacity() >= 31);
+        assert!(cloned.reserve(37).capacity() >= 37);
+        assert_eq!(*reservations.lock().unwrap(), [17, 19, 29, 31, 37]);
+        assert_eq!(opens.load(Ordering::SeqCst), 1);
+        drop(cloned);
+        drop(client);
+        assert_eq!(closes.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -312,7 +347,7 @@ mod tests {
     }
 
     fn complete_builder() -> WinHttpDepsBuilder {
-        WinHttpDeps::builder(clock(), GlobalPool::new(), Sink::noop())
+        WinHttpDeps::builder(clock(), OpaqueMemory::new(GlobalPool::new()), Sink::noop())
     }
 
     fn clock() -> Clock {

@@ -29,7 +29,7 @@ fn suspend_wait(deadline: Instant, now: Instant) -> Duration {
     deadline.saturating_duration_since(now)
 }
 
-fn can_suspend(cycle_outcome: CycleOutcome, batch_exhausted: bool) -> bool {
+fn can_suspend(cycle_outcome: &CycleOutcome, batch_exhausted: bool) -> bool {
     matches!(cycle_outcome, CycleOutcome::Suspend) && !batch_exhausted
 }
 
@@ -113,6 +113,7 @@ impl AsyncWorker {
         clock: InactiveClock,
         signal: Arc<WorkerSignal>,
         monitor_options: MonitorOptions,
+        panic_policy: crate::runtime::PanicPolicy,
     ) -> Self {
         let worker_waker = WorkerSignal::waker(&signal);
         let shutdown = dispatcher.shutdown().clone();
@@ -123,11 +124,13 @@ impl AsyncWorker {
             .owner_waker(worker_waker)
             .sink(blocking_worker.sink().clone())
             .thread(thread.clone())
+            .panic_policy(panic_policy.into_executor_policy())
             .build();
         let tasks = executor.tasks();
+        let executor_shutdown = executor.shutdown();
 
         let builtins = Builtins::new(dispatcher, clock, io, thread, sink);
-        Scheduler::register_current(builtins.clone(), tasks.clone());
+        Scheduler::register_current(builtins.clone(), tasks.clone(), executor_shutdown);
 
         Self {
             command_rx: Some(command_rx),
@@ -163,10 +166,7 @@ impl AsyncWorker {
         let batch_exhausted = self.process_commands();
 
         if matches!(self.shutdown.state(), ShutdownState::Started) {
-            self.begin_shutdown();
-            let now = self.timer_now();
-            _ = self.clock_driver.advance_timers(now);
-            return ControlFlow::Break(());
+            return self.finish_shutdown();
         }
 
         let executor = self
@@ -176,24 +176,17 @@ impl AsyncWorker {
 
         let cycle_outcome = executor.execute_cycle();
 
-        if matches!(cycle_outcome, CycleOutcome::Shutdown) {
-            // An alternate low-level owner initiated executor shutdown. Complete the surrounding
-            // worker shutdown before final timer callbacks run.
-            self.begin_shutdown();
-            let now = self.timer_now();
-            _ = self.clock_driver.advance_timers(now);
-            return ControlFlow::Break(());
+        if let CycleOutcome::Shutdown(cause) = cycle_outcome {
+            self.shutdown.begin(cause);
+            return self.finish_shutdown();
         }
 
         let advance_now = self.timer_now();
         let next_timer = self.clock_driver.advance_timers(advance_now).ok().flatten();
         if matches!(self.shutdown.state(), ShutdownState::Started) {
-            self.begin_shutdown();
-            let now = self.timer_now();
-            _ = self.clock_driver.advance_timers(now);
-            return ControlFlow::Break(());
+            return self.finish_shutdown();
         }
-        let should_suspend = can_suspend(cycle_outcome, batch_exhausted);
+        let should_suspend = can_suspend(&cycle_outcome, batch_exhausted);
         let has_primary = RuntimeDriverHost::has_primary_current();
         let max_wait = if should_suspend {
             if has_primary {
@@ -209,10 +202,7 @@ impl AsyncWorker {
             Duration::ZERO
         };
         if RuntimeDriverHost::execute_cycle_current(max_wait).is_err() {
-            self.begin_shutdown();
-            let now = self.timer_now();
-            _ = self.clock_driver.advance_timers(now);
-            return ControlFlow::Break(());
+            return self.finish_shutdown();
         }
 
         if should_suspend && !has_primary {
@@ -223,6 +213,13 @@ impl AsyncWorker {
         }
 
         ControlFlow::Continue(())
+    }
+
+    fn finish_shutdown(&mut self) -> ControlFlow<()> {
+        self.begin_shutdown();
+        let now = self.timer_now();
+        _ = self.clock_driver.advance_timers(now);
+        ControlFlow::Break(())
     }
 
     fn timer_now(&self) -> Instant {
@@ -277,9 +274,16 @@ impl AsyncWorker {
 
     #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
     fn begin_shutdown(&mut self) {
-        if self.executor.is_none() {
+        let Some(executor) = self.executor.take() else {
             return;
-        }
+        };
+
+        let cause = self
+            .builtins
+            .as_ref()
+            .expect("a running worker retains its builtins until shutdown")
+            .dispatcher()
+            .stop(self.shutdown.cause().unwrap_or_default());
 
         Scheduler::clear_current();
         // Drop worker-local services, as they may hold references to resources that
@@ -289,14 +293,9 @@ impl AsyncWorker {
         // The command channel is henceforth closed. We will not receive any more commands.
         self.command_rx = None;
 
-        let cause = self.shutdown.cause().unwrap_or_default();
-        self.shutdown.begin(cause.clone());
-
         // Safe executor shutdown synchronously cancels and releases all remaining task storage.
-        if let Some(mut executor) = self.executor.take() {
-            executor.begin_shutdown(cause);
-            drop(executor);
-        }
+        executor.shutdown().trigger(cause);
+        drop(executor);
         let driver_host = RuntimeDriverHost::uninstall();
         drop(driver_host);
     }
@@ -314,6 +313,7 @@ impl Drop for AsyncWorker {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     #[cfg(not(miri))]
     use std::pin::Pin;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -323,7 +323,7 @@ mod tests {
     use std::task::Waker;
     use std::thread;
 
-    use arty_executor::{JoinHandle as ExecutorJoinHandle, ShutdownCause, TaskOptions};
+    use arty_executor::{ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, discard_task_panic_payload};
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     #[cfg(not(miri))]
     use events_once::BoxedSender;
@@ -334,29 +334,29 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::runtime::blocking_worker::BlockingPool;
     use crate::runtime::blocking_worker::blocking_worker_tests::is_blocking_worker_shutting_down;
+    use crate::runtime::blocking_worker::{BlockingPanicPolicy, BlockingPool};
     use crate::runtime::config::MonitorPolicy;
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::thread::waiter::ThreadWaiter;
-    use crate::task::execution::RemoteFutureFactory;
+    use crate::task::preparation::RemoteFutureFactory;
 
     fn test_blocking_worker() -> (Arc<BlockingWorker>, Shutdown) {
         let shutdown = Shutdown::default();
         (
-            BlockingWorker::new(BlockingPool::new(None), Sink::noop(), shutdown.clone()),
+            BlockingWorker::new(BlockingPool::new(None), Sink::noop(), shutdown.clone(), BlockingPanicPolicy::Ignore),
             shutdown,
         )
     }
 
     #[test]
     fn suspend_budget_requires_suspend_outcome_and_non_exhausted_batch() {
-        assert!(can_suspend(CycleOutcome::Suspend, false));
-        assert!(!can_suspend(CycleOutcome::Suspend, true));
-        assert!(!can_suspend(CycleOutcome::Continue, false));
-        assert!(!can_suspend(CycleOutcome::Continue, true));
-        assert!(!can_suspend(CycleOutcome::Shutdown, false));
-        assert!(!can_suspend(CycleOutcome::Shutdown, true));
+        assert!(can_suspend(&CycleOutcome::Suspend, false));
+        assert!(!can_suspend(&CycleOutcome::Suspend, true));
+        assert!(!can_suspend(&CycleOutcome::Continue, false));
+        assert!(!can_suspend(&CycleOutcome::Continue, true));
+        assert!(!can_suspend(&CycleOutcome::Shutdown(ShutdownCause::default()), false));
+        assert!(!can_suspend(&CycleOutcome::Shutdown(ShutdownCause::default()), true));
     }
 
     #[test]
@@ -385,7 +385,7 @@ mod tests {
             command_tx,
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             signal,
             MonitorPolicy::disabled().into(),
         );
@@ -437,7 +437,7 @@ mod tests {
                 command_tx.clone(),
                 command_rx,
                 test_blocking_worker(),
-                InactiveClock::default(),
+                InactiveClock::new_isolated(),
                 Arc::clone(&signal),
             );
             let clock = worker.builtins.as_ref().unwrap().clock().clone();
@@ -486,7 +486,7 @@ mod tests {
                 command_tx.clone(),
                 command_rx,
                 test_blocking_worker(),
-                InactiveClock::default(),
+                InactiveClock::new_isolated(),
                 signal,
             );
             let clock = worker.builtins.as_ref().unwrap().clock().clone();
@@ -522,7 +522,7 @@ mod tests {
                 let task_ran = Arc::clone(&self.task_ran);
                 drop(self.scheduler.spawn(move |builtins| async move {
                     task_ran.store(true, Ordering::Relaxed);
-                    builtins.scheduler().dispatcher.stop();
+                    builtins.scheduler().dispatcher.stop(ShutdownCause::default());
                 }));
             }
         }
@@ -580,20 +580,37 @@ mod tests {
     }
 
     trait TestTaskSetExt {
-        fn add_test<F, R>(&self, future: F) -> ExecutorJoinHandle<R>
+        fn add_test<F, R>(&self, future: F)
         where
             F: IntoFuture<Output = R> + 'static,
             R: 'static;
     }
 
     impl TestTaskSetExt for TaskSet {
-        fn add_test<F, R>(&self, future: F) -> ExecutorJoinHandle<R>
+        fn add_test<F, R>(&self, future: F)
         where
             F: IntoFuture<Output = R> + 'static,
             R: 'static,
         {
-            self.add(future, TaskOptions::default())
+            self.add(future, TaskOptions::default(), DiscardCompletion);
         }
+    }
+
+    #[derive(Debug)]
+    struct DiscardCompletion;
+
+    impl<R: 'static> TaskCompletion<R> for DiscardCompletion {
+        fn completed(self, result: R) {
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(result))) {
+                discard_task_panic_payload(panic);
+            }
+        }
+
+        fn panicked(self, panic: TaskPanicPayload, _cause: Option<ShutdownCause>) {
+            discard_task_panic_payload(panic);
+        }
+
+        fn cancelled(self, _cause: ShutdownCause) {}
     }
 
     fn enqueue(factory: RemoteFutureFactory) -> AsyncWorkerCommand {
@@ -666,12 +683,12 @@ mod tests {
             thread: thread.clone(),
             blocking_worker: Arc::clone(&blocking_worker),
         };
-        let dispatcher = DispatcherClient::new(Arc::new(DispatcherCore::new(
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(
             ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint),
             sink.clone(),
             shutdown,
-        )));
+        ));
         let io_runtime = arty_io_host::IoRuntime::new(sink.clone());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
         let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, WorkerSignal::waker(&signal));
@@ -687,6 +704,7 @@ mod tests {
             clock,
             signal,
             monitor_options,
+            crate::runtime::PanicPolicy::default(),
         )
     }
 
@@ -740,15 +758,15 @@ mod tests {
                 control.clone().into(),
                 Arc::clone(&signal),
             );
-            drop(worker.tasks.add_test(async move {
+            worker.tasks.add_test(async move {
                 task_ready.await.unwrap();
                 task_observer.store(true, Ordering::Relaxed);
-            }));
+            });
             let clock = worker.builtins.as_ref().unwrap().clock().clone();
-            drop(worker.tasks.add_test(async move {
+            worker.tasks.add_test(async move {
                 clock.delay(Duration::from_secs(1)).await;
                 timer_observer.store(true, Ordering::Relaxed);
-            }));
+            });
             let mut scenario = Self {
                 command_tx,
                 ready_task: Some(ready_task),
@@ -920,16 +938,16 @@ mod tests {
             control.clone().into(),
             Arc::new(WorkerSignal::default()),
         );
-        drop(worker.tasks.add_test(async move {
+        worker.tasks.add_test(async move {
             progress.await.unwrap();
             task_observer.store(true, Ordering::Relaxed);
-        }));
+        });
         let clock = worker.builtins.as_ref().unwrap().clock().clone();
-        drop(worker.tasks.add_test(async move {
+        worker.tasks.add_test(async move {
             clock.delay(Duration::from_secs(1)).await;
             timer_observer.store(true, Ordering::Relaxed);
             shutdown.send(AsyncWorkerCommand::Shutdown).unwrap();
-        }));
+        });
         _ = worker.executor.as_mut().unwrap().execute_cycle();
         assert!(!task_done.load(Ordering::Relaxed));
         assert!(!timer_done.load(Ordering::Relaxed));
@@ -955,7 +973,7 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::clone(&signal),
         );
         WorkerSignal::waker(&signal).wake_by_ref();
@@ -986,7 +1004,7 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::clone(&signal),
         );
         let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1026,7 +1044,7 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
         let clock = worker.builtins.as_ref().unwrap().clock().clone();
@@ -1058,7 +1076,7 @@ mod tests {
                     worker_command_tx,
                     command_rx,
                     (Arc::clone(&blocking_worker.0), blocking_worker.1.clone()),
-                    InactiveClock::default(),
+                    InactiveClock::new_isolated(),
                     worker_signal,
                 );
                 worker.run();
@@ -1075,13 +1093,13 @@ mod tests {
             command_tx
                 .send(enqueue(RemoteFutureFactory::new({
                     move |_: Builtins, tasks: &TaskSet| {
-                        drop(tasks.add_test(async move {
+                        tasks.add_test(async move {
                             inner_completed_tx.send(());
-                        }));
-                        drop(tasks.add_test(async move {
+                        });
+                        tasks.add_test(async move {
                             inner_completed_rx.await.unwrap();
                             outer_completed_tx.send(());
-                        }));
+                        });
                     }
                 })))
                 .unwrap();
@@ -1116,10 +1134,10 @@ mod tests {
                     worker_command_tx,
                     command_rx,
                     test_blocking_worker(),
-                    InactiveClock::default(),
+                    InactiveClock::new_isolated(),
                     worker_signal,
                 );
-                drop(worker.tasks.add_test(async move { initial_completed_tx.send(()) }));
+                worker.tasks.add_test(async move { initial_completed_tx.send(()) });
 
                 worker.run();
             });
@@ -1127,9 +1145,9 @@ mod tests {
             command_tx
                 .send(enqueue(RemoteFutureFactory::new({
                     move |_: Builtins, tasks: &TaskSet| {
-                        drop(tasks.add_test(async move {
+                        tasks.add_test(async move {
                             spawned_completed_tx.send(());
-                        }));
+                        });
                     }
                 })))
                 .unwrap();
@@ -1167,7 +1185,7 @@ mod tests {
                 worker_command_tx,
                 command_rx,
                 test_blocking_worker(),
-                InactiveClock::default(),
+                InactiveClock::new_isolated(),
                 worker_signal,
             );
             worker.run();
@@ -1181,9 +1199,9 @@ mod tests {
         // We ignore the result because the worker is shutting down and the channel might be closed already.
         let _ = command_tx.send(enqueue(RemoteFutureFactory::new({
             move |_: Builtins, tasks: &TaskSet| {
-                drop(tasks.add_test(async move {
+                tasks.add_test(async move {
                     completed_tx.send(14);
-                }));
+                });
             }
         })));
 
@@ -1204,15 +1222,15 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
 
         command_tx
             .send(enqueue(RemoteFutureFactory::new(move |_, tasks| {
-                drop(tasks.add_test(async move {
+                tasks.add_test(async move {
                     invoked_by_task.store(true, Ordering::Relaxed);
-                }));
+                });
             })))
             .unwrap();
         command_tx.send(AsyncWorkerCommand::Shutdown).unwrap();
@@ -1229,7 +1247,7 @@ mod tests {
             command_tx,
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
 
@@ -1252,7 +1270,7 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
         let invoked = Arc::new(AtomicBool::new(false));
@@ -1285,7 +1303,7 @@ mod tests {
             command_tx.clone(),
             command_rx,
             test_blocking_worker(),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
         let shutdown = worker.shutdown.clone();
@@ -1298,9 +1316,9 @@ mod tests {
                     if index + 1 == COMMANDS_PER_CYCLE {
                         shutdown.begin(ShutdownCause::default());
                     }
-                    drop(tasks.add_test(async move {
+                    tasks.add_test(async move {
                         invoked.fetch_add(1, Ordering::Relaxed);
-                    }));
+                    });
                 })))
                 .unwrap();
         }
@@ -1318,7 +1336,7 @@ mod tests {
             commands,
             receiver,
             (Arc::clone(&blocking_worker.0), blocking_worker.1.clone()),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::new(WorkerSignal::default()),
         );
 
@@ -1336,12 +1354,12 @@ mod tests {
             commands.clone(),
             receiver,
             (Arc::clone(&blocking_worker.0), blocking_worker.1.clone()),
-            InactiveClock::default(),
+            InactiveClock::new_isolated(),
             Arc::clone(&signal),
         );
         WorkerSignal::waker(&signal).wake_by_ref();
         assert!(worker.execute_step().is_continue());
-        worker.executor.as_mut().unwrap().begin_shutdown(ShutdownCause::default());
+        worker.executor.as_ref().unwrap().shutdown().trigger(ShutdownCause::default());
 
         let outcome = worker.execute_step();
 

@@ -48,48 +48,76 @@ fn arc_new_performables() -> Arc<u64> {
 }
 
 #[metabench::benchmark(ARC_DEREF_STD, ARC_DEREF, "std")]
-#[bench::value(&std::sync::Arc::new(7_u64))]
-fn arc_deref_std(value: &std::sync::Arc<u64>) -> u64 {
-    black_box(**value)
+#[bench::value(Box::new(std::sync::Arc::new(7_u64)))]
+fn arc_deref_std<S: std::borrow::Borrow<std::sync::Arc<u64>>>(owned_input: S) -> (u64, S) {
+    let result = {
+        let value = owned_input.borrow();
+        black_box(**value)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(ARC_DEREF_PERFORMABLES, ARC_DEREF, "performables")]
-#[bench::value(&Arc::new(7_u64))]
-fn arc_deref_performables(value: &Arc<u64>) -> u64 {
-    black_box(**value)
+#[bench::value(Box::new(Arc::new(7_u64)))]
+fn arc_deref_performables<S: std::borrow::Borrow<Arc<u64>>>(owned_input: S) -> (u64, S) {
+    let result = {
+        let value = owned_input.borrow();
+        black_box(**value)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(ARC_CLONE_STD, ARC_CLONE_DROP, "std")]
-#[bench::value(&std::sync::Arc::new(7_u64))]
-fn arc_clone_std(value: &std::sync::Arc<u64>) -> std::sync::Arc<u64> {
-    black_box(std::sync::Arc::clone(value))
+#[bench::value(Box::new(std::sync::Arc::new(7_u64)))]
+fn arc_clone_std<S: std::borrow::Borrow<std::sync::Arc<u64>>>(owned_input: S) -> (std::sync::Arc<u64>, S) {
+    let result = {
+        let value = owned_input.borrow();
+        black_box(std::sync::Arc::clone(value))
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(ARC_CLONE_PERFORMABLES, ARC_CLONE_DROP, "performables")]
-#[bench::value(&Arc::new(7_u64))]
-fn arc_clone_performables(value: &Arc<u64>) -> Arc<u64> {
-    black_box(Arc::clone(value))
+#[bench::value(Box::new(Arc::new(7_u64)))]
+fn arc_clone_performables<S: std::borrow::Borrow<Arc<u64>>>(owned_input: S) -> (Arc<u64>, S) {
+    let result = {
+        let value = owned_input.borrow();
+        black_box(Arc::clone(value))
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(MUTEX_LOCK_STD, MUTEX_LOCK, "std")]
-#[bench::lock(&std::sync::Mutex::new(7_u64))]
-fn mutex_lock_std(lock: &std::sync::Mutex<u64>) -> u64 {
-    let guard = black_box(lock).lock().expect("the benchmark has no panicking lock holder");
-    black_box(*guard)
+#[bench::lock(Box::new(std::sync::Mutex::new(7_u64)))]
+fn mutex_lock_std<S: std::borrow::Borrow<std::sync::Mutex<u64>>>(owned_input: S) -> (u64, S) {
+    let result = {
+        let lock = owned_input.borrow();
+        let guard = black_box(lock).lock().expect("the benchmark has no panicking lock holder");
+        black_box(*guard)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(MUTEX_LOCK_PERFORMABLES_SYNC, MUTEX_LOCK, "performables_sync")]
-#[bench::lock(&Mutex::<u64>::new(7))]
-fn mutex_lock_performables_sync(lock: &Mutex<u64>) -> u64 {
-    let guard = black_box(lock).lock();
-    black_box(*guard)
+#[bench::lock(Box::new(Mutex::<u64>::new(7)))]
+fn mutex_lock_performables_sync<S: std::borrow::Borrow<Mutex<u64>>>(owned_input: S) -> (u64, S) {
+    let result = {
+        let lock = owned_input.borrow();
+        let guard = black_box(lock).lock();
+        black_box(*guard)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(MUTEX_LOCK_PERFORMABLES_ASYNC_BLOCKING, MUTEX_LOCK, "performables_async_blocking")]
-#[bench::lock(&Mutex::<u64, sync::Async>::new(7))]
-fn mutex_lock_performables_async_blocking(lock: &Mutex<u64, sync::Async>) -> u64 {
-    let guard = black_box(lock).lock();
-    black_box(*guard)
+#[bench::lock(Box::new(Mutex::<u64, sync::Async>::new(7)))]
+fn mutex_lock_performables_async_blocking<S: std::borrow::Borrow<Mutex<u64, sync::Async>>>(owned_input: S) -> (u64, S) {
+    let result = {
+        let lock = owned_input.borrow();
+        let guard = black_box(lock).lock();
+        black_box(*guard)
+    };
+    (result, owned_input)
 }
 
 struct AsyncMutexInput {
@@ -105,24 +133,32 @@ fn async_mutex_input() -> AsyncMutexInput {
 }
 
 #[metabench::benchmark(MUTEX_LOCK_PERFORMABLES_ASYNC, MUTEX_LOCK, "performables_async")]
-#[bench::lock(&mut async_mutex_input())]
-fn mutex_lock_performables_async(input: &mut AsyncMutexInput) -> u64 {
-    let mut lock = pin!(input.lock.lock_async());
-    let Poll::Ready(guard) = lock.as_mut().poll(&mut input.context) else {
-        unreachable!("the benchmark has no competing lock holder");
+#[bench::lock(Box::new(async_mutex_input()))]
+fn mutex_lock_performables_async<S: std::borrow::BorrowMut<AsyncMutexInput>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        let mut lock = pin!(input.lock.lock_async());
+        let Poll::Ready(guard) = lock.as_mut().poll(&mut input.context) else {
+            unreachable!("the benchmark has no competing lock holder");
+        };
+        black_box(*guard)
     };
-    black_box(*guard)
+    (result, owned_input)
 }
 
 #[metabench::benchmark(MUTEX_LOCK_TOKIO, MUTEX_LOCK, "tokio")]
-#[bench::lock(&mut tokio_mutex_input())]
-fn mutex_lock_tokio(input: &mut TokioMutexInput) -> u64 {
-    // Stack-pin to avoid allocator noise on the measured path.
-    let mut future = pin!(input.lock.lock());
-    let Poll::Ready(guard) = future.as_mut().poll(&mut input.context) else {
-        unreachable!("the benchmark has no competing lock holder");
+#[bench::lock(Box::new(tokio_mutex_input()))]
+fn mutex_lock_tokio<S: std::borrow::BorrowMut<TokioMutexInput>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        // Stack-pin to avoid allocator noise on the measured path.
+        let mut future = pin!(input.lock.lock());
+        let Poll::Ready(guard) = future.as_mut().poll(&mut input.context) else {
+            unreachable!("the benchmark has no competing lock holder");
+        };
+        black_box(*guard)
     };
-    black_box(*guard)
+    (result, owned_input)
 }
 
 struct TokioMutexInput {
@@ -138,26 +174,38 @@ fn tokio_mutex_input() -> TokioMutexInput {
 }
 
 #[metabench::benchmark(RW_LOCK_READ_STD, RW_LOCK_READ, "std")]
-#[bench::lock(&std::sync::RwLock::new(7_u64))]
-fn rw_lock_read_std(lock: &std::sync::RwLock<u64>) -> u64 {
-    let guard = black_box(lock).read().expect("the benchmark has no panicking lock holder");
-    black_box(*guard)
+#[bench::lock(Box::new(std::sync::RwLock::new(7_u64)))]
+fn rw_lock_read_std<S: std::borrow::Borrow<std::sync::RwLock<u64>>>(owned_input: S) -> (u64, S) {
+    let result = {
+        let lock = owned_input.borrow();
+        let guard = black_box(lock).read().expect("the benchmark has no panicking lock holder");
+        black_box(*guard)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(RW_LOCK_READ_PERFORMABLES_TRY, RW_LOCK_READ, "performables_try")]
-#[bench::lock(&RwLock::<u64, sync::Async>::new(7))]
-fn rw_lock_read_performables_try(lock: &RwLock<u64, sync::Async>) -> u64 {
-    let guard = black_box(lock)
-        .try_read()
-        .unwrap_or_else(|| unreachable!("the benchmark has no competing lock holder"));
-    black_box(*guard)
+#[bench::lock(Box::new(RwLock::<u64, sync::Async>::new(7)))]
+fn rw_lock_read_performables_try<S: std::borrow::Borrow<RwLock<u64, sync::Async>>>(owned_input: S) -> (u64, S) {
+    let result = {
+        let lock = owned_input.borrow();
+        let guard = black_box(lock)
+            .try_read()
+            .unwrap_or_else(|| unreachable!("the benchmark has no competing lock holder"));
+        black_box(*guard)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(RW_LOCK_READ_PERFORMABLES_SYNC, RW_LOCK_READ, "performables_sync")]
-#[bench::lock(&RwLock::<u64>::new(7))]
-fn rw_lock_read_performables_sync(lock: &RwLock<u64>) -> u64 {
-    let guard = black_box(lock).read();
-    black_box(*guard)
+#[bench::lock(Box::new(RwLock::<u64>::new(7)))]
+fn rw_lock_read_performables_sync<S: std::borrow::Borrow<RwLock<u64>>>(owned_input: S) -> (u64, S) {
+    let result = {
+        let lock = owned_input.borrow();
+        let guard = black_box(lock).read();
+        black_box(*guard)
+    };
+    (result, owned_input)
 }
 
 struct AsyncRwLockInput {
@@ -173,24 +221,32 @@ fn async_rw_lock_input() -> AsyncRwLockInput {
 }
 
 #[metabench::benchmark(RW_LOCK_READ_PERFORMABLES_ASYNC, RW_LOCK_READ, "performables_async")]
-#[bench::lock(&mut async_rw_lock_input())]
-fn rw_lock_read_performables_async(input: &mut AsyncRwLockInput) -> u64 {
-    let mut lock = pin!(input.lock.read_async());
-    let Poll::Ready(guard) = lock.as_mut().poll(&mut input.context) else {
-        unreachable!("the benchmark has no competing lock holder");
+#[bench::lock(Box::new(async_rw_lock_input()))]
+fn rw_lock_read_performables_async<S: std::borrow::BorrowMut<AsyncRwLockInput>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        let mut lock = pin!(input.lock.read_async());
+        let Poll::Ready(guard) = lock.as_mut().poll(&mut input.context) else {
+            unreachable!("the benchmark has no competing lock holder");
+        };
+        black_box(*guard)
     };
-    black_box(*guard)
+    (result, owned_input)
 }
 
 #[metabench::benchmark(RW_LOCK_READ_TOKIO, RW_LOCK_READ, "tokio")]
-#[bench::lock(&mut tokio_rwlock_input())]
-fn rw_lock_read_tokio(input: &mut TokioRwLockInput) -> u64 {
-    // Stack-pin to avoid allocator noise on the measured path.
-    let mut future = pin!(input.lock.read());
-    let Poll::Ready(guard) = future.as_mut().poll(&mut input.context) else {
-        unreachable!("the benchmark has no competing lock holder");
+#[bench::lock(Box::new(tokio_rwlock_input()))]
+fn rw_lock_read_tokio<S: std::borrow::BorrowMut<TokioRwLockInput>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        // Stack-pin to avoid allocator noise on the measured path.
+        let mut future = pin!(input.lock.read());
+        let Poll::Ready(guard) = future.as_mut().poll(&mut input.context) else {
+            unreachable!("the benchmark has no competing lock holder");
+        };
+        black_box(*guard)
     };
-    black_box(*guard)
+    (result, owned_input)
 }
 
 struct TokioRwLockInput {
@@ -206,42 +262,58 @@ fn tokio_rwlock_input() -> TokioRwLockInput {
 }
 
 #[metabench::benchmark(RW_LOCK_WRITE_STD, RW_LOCK_WRITE, "std")]
-#[bench::lock(&std::sync::RwLock::new(7_u64))]
-fn rw_lock_write_std(lock: &std::sync::RwLock<u64>) -> u64 {
-    let mut guard = black_box(lock).write().expect("the benchmark has no panicking lock holder");
-    *guard = black_box(*guard);
-    black_box(*guard)
+#[bench::lock(Box::new(std::sync::RwLock::new(7_u64)))]
+fn rw_lock_write_std<S: std::borrow::Borrow<std::sync::RwLock<u64>>>(owned_input: S) -> (u64, S) {
+    let result = {
+        let lock = owned_input.borrow();
+        let mut guard = black_box(lock).write().expect("the benchmark has no panicking lock holder");
+        *guard = black_box(*guard);
+        black_box(*guard)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(RW_LOCK_WRITE_PERFORMABLES_SYNC, RW_LOCK_WRITE, "performables_sync")]
-#[bench::lock(&RwLock::<u64>::new(7))]
-fn rw_lock_write_performables_sync(lock: &RwLock<u64>) -> u64 {
-    let mut guard = black_box(lock).write();
-    *guard = black_box(*guard);
-    black_box(*guard)
+#[bench::lock(Box::new(RwLock::<u64>::new(7)))]
+fn rw_lock_write_performables_sync<S: std::borrow::Borrow<RwLock<u64>>>(owned_input: S) -> (u64, S) {
+    let result = {
+        let lock = owned_input.borrow();
+        let mut guard = black_box(lock).write();
+        *guard = black_box(*guard);
+        black_box(*guard)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(RW_LOCK_WRITE_PERFORMABLES_ASYNC, RW_LOCK_WRITE, "performables_async")]
-#[bench::lock(&mut async_rw_lock_input())]
-fn rw_lock_write_performables_async(input: &mut AsyncRwLockInput) -> u64 {
-    let mut lock = pin!(input.lock.write_async());
-    let Poll::Ready(mut guard) = lock.as_mut().poll(&mut input.context) else {
-        unreachable!("the benchmark has no competing lock holder");
+#[bench::lock(Box::new(async_rw_lock_input()))]
+fn rw_lock_write_performables_async<S: std::borrow::BorrowMut<AsyncRwLockInput>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        let mut lock = pin!(input.lock.write_async());
+        let Poll::Ready(mut guard) = lock.as_mut().poll(&mut input.context) else {
+            unreachable!("the benchmark has no competing lock holder");
+        };
+        *guard = black_box(*guard);
+        black_box(*guard)
     };
-    *guard = black_box(*guard);
-    black_box(*guard)
+    (result, owned_input)
 }
 
 #[metabench::benchmark(RW_LOCK_WRITE_TOKIO, RW_LOCK_WRITE, "tokio")]
-#[bench::lock(&mut tokio_rwlock_input())]
-fn rw_lock_write_tokio(input: &mut TokioRwLockInput) -> u64 {
-    // Stack-pin to avoid allocator noise on the measured path.
-    let mut future = pin!(input.lock.write());
-    let Poll::Ready(mut guard) = future.as_mut().poll(&mut input.context) else {
-        unreachable!("the benchmark has no competing lock holder");
+#[bench::lock(Box::new(tokio_rwlock_input()))]
+fn rw_lock_write_tokio<S: std::borrow::BorrowMut<TokioRwLockInput>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        // Stack-pin to avoid allocator noise on the measured path.
+        let mut future = pin!(input.lock.write());
+        let Poll::Ready(mut guard) = future.as_mut().poll(&mut input.context) else {
+            unreachable!("the benchmark has no competing lock holder");
+        };
+        *guard = black_box(*guard);
+        black_box(*guard)
     };
-    *guard = black_box(*guard);
-    black_box(*guard)
+    (result, owned_input)
 }
 
 fn criterion_benchmarks(criterion: &mut Criterion) {
@@ -261,10 +333,10 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     let performable = Arc::new(7_u64);
 
     group.bench_function(ARC_DEREF_STD.benchmark_name(), |bencher| {
-        bencher.iter(|| arc_deref_std(&standard));
+        bencher.iter(|| arc_deref_std(&standard).0);
     });
     group.bench_function(ARC_DEREF_PERFORMABLES.benchmark_name(), |bencher| {
-        bencher.iter(|| arc_deref_performables(&performable));
+        bencher.iter(|| arc_deref_performables(&performable).0);
     });
     group.finish();
 
@@ -273,10 +345,10 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     let performable = Arc::new(7_u64);
 
     group.bench_function(ARC_CLONE_STD.benchmark_name(), |bencher| {
-        bencher.iter(|| arc_clone_std(&standard));
+        bencher.iter(|| arc_clone_std(&standard).0);
     });
     group.bench_function(ARC_CLONE_PERFORMABLES.benchmark_name(), |bencher| {
-        bencher.iter(|| arc_clone_performables(&performable));
+        bencher.iter(|| arc_clone_performables(&performable).0);
     });
     group.finish();
 
@@ -287,20 +359,20 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut asynchronous = async_mutex_input();
 
     group.bench_function(MUTEX_LOCK_STD.benchmark_name(), |bencher| {
-        bencher.iter(|| mutex_lock_std(&standard));
+        bencher.iter(|| mutex_lock_std(&standard).0);
     });
     group.bench_function(MUTEX_LOCK_PERFORMABLES_SYNC.benchmark_name(), |bencher| {
-        bencher.iter(|| mutex_lock_performables_sync(&synchronous));
+        bencher.iter(|| mutex_lock_performables_sync(&synchronous).0);
     });
     group.bench_function(MUTEX_LOCK_PERFORMABLES_ASYNC_BLOCKING.benchmark_name(), |bencher| {
-        bencher.iter(|| mutex_lock_performables_async_blocking(&performable));
+        bencher.iter(|| mutex_lock_performables_async_blocking(&performable).0);
     });
     group.bench_function(MUTEX_LOCK_PERFORMABLES_ASYNC.benchmark_name(), |bencher| {
-        bencher.iter(|| mutex_lock_performables_async(&mut asynchronous));
+        bencher.iter(|| mutex_lock_performables_async(&mut asynchronous).0);
     });
     let mut tokio = tokio_mutex_input();
     group.bench_function(MUTEX_LOCK_TOKIO.benchmark_name(), |bencher| {
-        bencher.iter(|| mutex_lock_tokio(&mut tokio));
+        bencher.iter(|| mutex_lock_tokio(&mut tokio).0);
     });
     group.finish();
 
@@ -311,35 +383,35 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut asynchronous = async_rw_lock_input();
 
     read_group.bench_function(RW_LOCK_READ_STD.benchmark_name(), |bencher| {
-        bencher.iter(|| rw_lock_read_std(&standard));
+        bencher.iter(|| rw_lock_read_std(&standard).0);
     });
     read_group.bench_function(RW_LOCK_READ_PERFORMABLES_TRY.benchmark_name(), |bencher| {
-        bencher.iter(|| rw_lock_read_performables_try(&performable));
+        bencher.iter(|| rw_lock_read_performables_try(&performable).0);
     });
     read_group.bench_function(RW_LOCK_READ_PERFORMABLES_SYNC.benchmark_name(), |bencher| {
-        bencher.iter(|| rw_lock_read_performables_sync(&synchronous));
+        bencher.iter(|| rw_lock_read_performables_sync(&synchronous).0);
     });
     read_group.bench_function(RW_LOCK_READ_PERFORMABLES_ASYNC.benchmark_name(), |bencher| {
-        bencher.iter(|| rw_lock_read_performables_async(&mut asynchronous));
+        bencher.iter(|| rw_lock_read_performables_async(&mut asynchronous).0);
     });
     let mut tokio = tokio_rwlock_input();
     read_group.bench_function(RW_LOCK_READ_TOKIO.benchmark_name(), |bencher| {
-        bencher.iter(|| rw_lock_read_tokio(&mut tokio));
+        bencher.iter(|| rw_lock_read_tokio(&mut tokio).0);
     });
     read_group.finish();
 
     let mut write_group = criterion.benchmark_group(RW_LOCK_WRITE);
     write_group.bench_function(RW_LOCK_WRITE_STD.benchmark_name(), |bencher| {
-        bencher.iter(|| rw_lock_write_std(&standard));
+        bencher.iter(|| rw_lock_write_std(&standard).0);
     });
     write_group.bench_function(RW_LOCK_WRITE_PERFORMABLES_SYNC.benchmark_name(), |bencher| {
-        bencher.iter(|| rw_lock_write_performables_sync(&synchronous));
+        bencher.iter(|| rw_lock_write_performables_sync(&synchronous).0);
     });
     write_group.bench_function(RW_LOCK_WRITE_PERFORMABLES_ASYNC.benchmark_name(), |bencher| {
-        bencher.iter(|| rw_lock_write_performables_async(&mut asynchronous));
+        bencher.iter(|| rw_lock_write_performables_async(&mut asynchronous).0);
     });
     write_group.bench_function(RW_LOCK_WRITE_TOKIO.benchmark_name(), |bencher| {
-        bencher.iter(|| rw_lock_write_tokio(&mut tokio));
+        bencher.iter(|| rw_lock_write_tokio(&mut tokio).0);
     });
     write_group.finish();
 }

@@ -165,6 +165,7 @@ OOM
 Ok
 OpenSource
 OpenTelemetry
+OpenTelemetry's
 PID
 PII
 POV
@@ -187,6 +188,7 @@ Reusability
 Rustdoc
 SCCACHE
 SDK
+SDK's
 SDKs
 SLAs
 SROA
@@ -256,6 +258,7 @@ OWS
 SSE4
 SSSE3
 codings
+cryptographic
 cryptographically
 formatters
 indexable

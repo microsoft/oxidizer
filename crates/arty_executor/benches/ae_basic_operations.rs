@@ -14,6 +14,7 @@
     reason = "Triggered by Gungraun macro expansion on every platform."
 )]
 
+use std::borrow;
 use std::cell::RefCell;
 use std::future::{pending, poll_fn};
 use std::hint::black_box;
@@ -21,7 +22,9 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use arty_executor::{CycleOutcome, Executor, JoinHandle, TaskOptions, TaskSet};
+use arty_executor::{
+    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskSet, discard_task_panic_payload,
+};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
 
@@ -29,6 +32,23 @@ const CYCLE: &str = "ae_basic_operations/execute_cycle";
 const TASK: &str = "ae_basic_operations/task";
 const WAKER: &str = "ae_basic_operations/waker";
 const SELF_WAKING_POLL_COUNT: usize = 4;
+
+/// Keeps result transport outside the measured operation.
+///
+/// Successful results and cancellation need no action. Panic payloads still
+/// require explicit disposal.
+#[derive(Debug)]
+struct DiscardCompletion;
+
+impl TaskCompletion<()> for DiscardCompletion {
+    fn completed(self, _result: ()) {}
+
+    fn panicked(self, panic: TaskPanicPayload, _cause: Option<ShutdownCause>) {
+        discard_task_panic_payload(panic);
+    }
+
+    fn cancelled(self, _cause: ShutdownCause) {}
+}
 
 struct ExecutorState {
     tasks: TaskSet,
@@ -45,19 +65,19 @@ fn executor_state() -> ExecutorState {
 }
 
 struct CycleState {
-    _handle: Option<JoinHandle<()>>,
     executor: Executor,
 }
 
 fn cycle_state(pending_task: bool) -> CycleState {
     let executor = Executor::builder().build();
-    let handle = pending_task.then(|| executor.tasks().add(pending::<()>(), TaskOptions::default()));
-    CycleState { _handle: handle, executor }
+    if pending_task {
+        executor.tasks().add(pending::<()>(), TaskOptions::default(), DiscardCompletion);
+    }
+    CycleState { executor }
 }
 
 struct CloneWakerState {
     _captured: Rc<RefCell<Option<Waker>>>,
-    _handle: JoinHandle<()>,
     executor: Executor,
 }
 
@@ -85,26 +105,26 @@ impl Future for SelfWakingFuture {
 }
 
 struct SelfWakingState {
-    _handle: JoinHandle<()>,
     executor: Executor,
 }
 
 fn self_waking_state(clone_waker: bool) -> SelfWakingState {
     let executor = Executor::builder().build();
-    let handle = executor.tasks().add(
+    executor.tasks().add(
         SelfWakingFuture {
             remaining_polls: SELF_WAKING_POLL_COUNT,
             clone_waker,
         },
         TaskOptions::default(),
+        DiscardCompletion,
     );
-    SelfWakingState { _handle: handle, executor }
+    SelfWakingState { executor }
 }
 
 fn clone_waker_state() -> CloneWakerState {
     let executor = Executor::builder().build();
     let captured = Rc::new(RefCell::new(None));
-    let handle = executor.tasks().add(
+    executor.tasks().add(
         {
             let captured = Rc::clone(&captured);
             poll_fn(move |cx| {
@@ -113,10 +133,10 @@ fn clone_waker_state() -> CloneWakerState {
             })
         },
         TaskOptions::default(),
+        DiscardCompletion,
     );
     CloneWakerState {
         _captured: captured,
-        _handle: handle,
         executor,
     }
 }
@@ -125,7 +145,7 @@ fn retained_waker_after_executor_drop() -> Waker {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     let captured = Rc::new(RefCell::new(None));
-    let handle = tasks.add(
+    tasks.add(
         {
             let captured = Rc::clone(&captured);
             poll_fn(move |cx| {
@@ -134,50 +154,54 @@ fn retained_waker_after_executor_drop() -> Waker {
             })
         },
         TaskOptions::default(),
+        DiscardCompletion,
     );
 
-    assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     let retained = captured.borrow_mut().take().expect("the task captured its waker");
     drop(executor);
-    drop(handle);
     drop(tasks);
     retained
 }
 
 #[metabench::benchmark(EXECUTE_CYCLE, CYCLE, "execute_cycle")]
-#[bench::idle(&mut cycle_state(false))]
-#[bench::pending_task(&mut cycle_state(true))]
-fn execute_cycle(state: &mut CycleState) -> CycleOutcome {
-    state.executor.execute_cycle()
+#[bench::idle(Box::new(cycle_state(false)))]
+#[bench::pending_task(Box::new(cycle_state(true)))]
+fn execute_cycle<S: borrow::BorrowMut<CycleState>>(mut state: S) -> (CycleOutcome, S) {
+    let outcome = state.borrow_mut().executor.execute_cycle();
+    (outcome, state)
 }
 
 #[metabench::benchmark(ADD_TASK, TASK, "add_task")]
-#[bench::ready(&executor_state())]
-fn add_task(state: &ExecutorState) -> JoinHandle<()> {
-    black_box(&state.tasks).add(async {}, TaskOptions::default())
+#[bench::ready(Box::new(executor_state()))]
+fn add_task<S: borrow::Borrow<ExecutorState>>(state: S) -> S {
+    black_box(&state.borrow().tasks).add(async {}, TaskOptions::default(), DiscardCompletion);
+    state
 }
 
 #[metabench::benchmark(SELF_WAKING_TASK, TASK, "self_waking_task")]
-#[bench::borrowed_waker_polls_4(&mut self_waking_state(false))]
-#[bench::cloned_waker_polls_4(&mut self_waking_state(true))]
-fn self_waking_task(state: &mut SelfWakingState) -> CycleOutcome {
+#[bench::borrowed_waker_polls_4(Box::new(self_waking_state(false)))]
+#[bench::cloned_waker_polls_4(Box::new(self_waking_state(true)))]
+fn self_waking_task<S: borrow::BorrowMut<SelfWakingState>>(mut state: S) -> (CycleOutcome, S) {
     let mut outcome = CycleOutcome::Suspend;
     for _ in 0..SELF_WAKING_POLL_COUNT {
-        outcome = state.executor.execute_cycle();
+        outcome = state.borrow_mut().executor.execute_cycle();
     }
-    outcome
+    (outcome, state)
 }
 
 #[metabench::benchmark(CLONE_WAKER_DURING_CYCLE, WAKER, "clone_during_cycle")]
-#[bench::pending_task(&mut clone_waker_state())]
-fn clone_waker_during_cycle(state: &mut CloneWakerState) -> CycleOutcome {
-    state.executor.execute_cycle()
+#[bench::pending_task(Box::new(clone_waker_state()))]
+fn clone_waker_during_cycle<S: borrow::BorrowMut<CloneWakerState>>(mut state: S) -> (CycleOutcome, S) {
+    let outcome = state.borrow_mut().executor.execute_cycle();
+    (outcome, state)
 }
 
 #[metabench::benchmark(RETAINED_WAKER_AFTER_DROP, WAKER, "retained_after_executor_drop")]
-#[bench::wake_by_ref(&retained_waker_after_executor_drop())]
-fn retained_waker_after_drop(waker: &Waker) {
-    black_box(waker).wake_by_ref();
+#[bench::wake_by_ref(Box::new(retained_waker_after_executor_drop()))]
+fn retained_waker_after_drop<W: borrow::Borrow<Waker>>(waker: W) -> W {
+    black_box(waker.borrow()).wake_by_ref();
+    waker
 }
 
 fn criterion_benchmarks(criterion: &mut Criterion) {
@@ -185,27 +209,33 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     cycle.bench_function(BenchmarkId::new(EXECUTE_CYCLE.benchmark_name(), "pending_task"), |bencher| {
         bencher.iter_batched_ref(
             || cycle_state(true),
-            |state| execute_cycle(black_box(state)),
+            |state| execute_cycle(black_box(state)).0,
             BatchSize::PerIteration,
         );
     });
     {
         let mut idle = cycle_state(false);
         cycle.bench_function(BenchmarkId::new(EXECUTE_CYCLE.benchmark_name(), "idle"), |bencher| {
-            bencher.iter(|| execute_cycle(black_box(&mut idle)));
+            bencher.iter(|| execute_cycle(black_box(&mut idle)).0);
         });
     }
     cycle.finish();
 
     let mut task = criterion.benchmark_group(TASK);
     task.bench_function(BenchmarkId::new(ADD_TASK.benchmark_name(), "ready"), |bencher| {
-        bencher.iter_batched_ref(executor_state, |state| add_task(black_box(state)), BatchSize::PerIteration);
+        bencher.iter_batched_ref(
+            executor_state,
+            |state| {
+                _ = add_task(black_box(&*state));
+            },
+            BatchSize::PerIteration,
+        );
     });
     for (case, clone_waker) in [("borrowed_waker_polls_4", false), ("cloned_waker_polls_4", true)] {
         task.bench_function(BenchmarkId::new(SELF_WAKING_TASK.benchmark_name(), case), |bencher| {
             bencher.iter_batched_ref(
                 || self_waking_state(clone_waker),
-                |state| self_waking_task(black_box(state)),
+                |state| self_waking_task(black_box(state)).0,
                 BatchSize::PerIteration,
             );
         });
@@ -218,7 +248,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         |bencher| {
             bencher.iter_batched_ref(
                 clone_waker_state,
-                |state| clone_waker_during_cycle(black_box(state)),
+                |state| clone_waker_during_cycle(black_box(state)).0,
                 BatchSize::PerIteration,
             );
         },

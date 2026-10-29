@@ -6,12 +6,16 @@ When unwinding is enabled, Arty catches panics raised while it:
 - polls an async task;
 - runs a blocking callback.
 
-Arty reports these panics through `JoinError` when possible. Receiving that
-error does not by itself shut down the runtime.
+Arty reports these panics through `JoinError` when possible. By default, the
+first contained async task or blocking callback panic shuts down the runtime.
+`PanicPolicy::ignore()` keeps the runtime running.
 
 Arty does not guarantee recovery from panics raised by destructors, custom
 wakers, join notifications, telemetry processors, or other cleanup and
-notification hooks. Arty may catch some of these panics to maintain memory
-safety, but callers cannot rely on continued operation or complete cleanup. The
-process may abort, resources may leak, or affected tasks and runtime operations
-may stop making progress. Arty remains memory-safe under all panic conditions.
+notification hooks. Arty also does not recover poisoned state, failed
+invariants, or unsafe-contract violations.
+
+Arty may catch some of these panics to maintain memory safety, but callers
+cannot rely on continued operation or complete cleanup. The process may abort,
+resources may leak, or affected tasks and runtime operations may stop making
+progress. Arty remains memory-safe under all panic conditions.

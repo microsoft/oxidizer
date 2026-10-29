@@ -5,6 +5,7 @@
 
 #![cfg(feature = "rt")]
 #![cfg(feature = "macros")]
+#![expect(clippy::panic, reason = "these tests inject task panics to verify macro panic-policy wiring")]
 
 use arty::task::Builtins;
 use arty::test;
@@ -19,6 +20,27 @@ pub async fn main_with_monitoring_enabled(cx: Builtins) -> Result<(), arty::task
 /// Compile-pass fixture for the disabled main policy with another option.
 #[arty::main(workers = 1, monitor = disabled)]
 pub async fn main_with_monitoring_disabled(cx: Builtins) -> Result<(), arty::task::JoinError> {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+    Ok(())
+}
+
+/// Compile-pass fixture for the explicit shutdown panic policy.
+#[arty::main(panic = shutdown)]
+pub async fn main_with_panic_shutdown(cx: Builtins) -> Result<(), arty::task::JoinError> {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+    Ok(())
+}
+
+/// Compile-pass fixture for the ignore panic policy with other options.
+#[arty::main(monitor = disabled, panic = ignore, workers = 1)]
+pub async fn main_with_panic_ignore(cx: Builtins) -> Result<(), arty::task::JoinError> {
+    assert!(
+        cx.scheduler()
+            .spawn(async |_| std::panic::panic_any("contained"))
+            .await
+            .unwrap_err()
+            .is_panic()
+    );
     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
     Ok(())
 }
@@ -44,6 +66,21 @@ async fn simple_main_returning(cx: Builtins) -> Result<(), Box<dyn std::error::E
         .await
         .unwrap();
     Ok(())
+}
+
+#[test(panic = shutdown)]
+async fn explicit_shutdown_policy_compiles(_cx: Builtins) {}
+
+#[test(panic = ignore)]
+async fn ignore_policy_keeps_the_test_runtime_operational(cx: Builtins) {
+    assert!(
+        cx.scheduler()
+            .spawn(async |_| std::panic::panic_any("contained"))
+            .await
+            .unwrap_err()
+            .is_panic()
+    );
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 }
 
 #[test]

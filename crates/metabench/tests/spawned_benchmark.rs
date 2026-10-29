@@ -15,6 +15,7 @@ use std::process::{Command, Output};
 use std::sync::{Mutex, OnceLock};
 
 static CARGO_SUBPROCESS: Mutex<()> = Mutex::new(());
+const EXPECTED_GUNGRAUN_RUNNER_VERSION: &str = "gungraun-runner 0.20.0";
 
 // The lock serializes Cargo, not mutable state; release it before resuming a test failure.
 fn with_cargo_lock<T>(body: impl FnOnce() -> T) -> T {
@@ -113,10 +114,14 @@ fn run_target(target: &str, arguments: &[&std::ffi::OsStr]) -> Output {
 }
 
 fn run_target_unlocked(target: &str, arguments: &[&std::ffi::OsStr]) -> Output {
+    benchmark_command(target, arguments).output().unwrap()
+}
+
+fn benchmark_command(target: &str, arguments: &[&std::ffi::OsStr]) -> Command {
     let mut command = cargo();
     command.args(["run", "--quiet", "-p", "metabench", "--profile", "bench", "--example", target, "--"]);
     command.args(arguments);
-    command.output().unwrap()
+    command
 }
 
 fn successful_stdout(arguments: &[&str]) -> String {
@@ -133,23 +138,49 @@ fn successful_stdout(arguments: &[&str]) -> String {
 fn gungraun_runner_available() -> bool {
     let runner = std::env::var_os("GUNGRAUN_RUNNER").unwrap_or_else(|| "gungraun-runner".into());
     let version = Command::new(runner).arg("--version").output();
-    let available = version.as_ref().is_ok_and(|output| output.status.success());
+    let available = version
+        .as_ref()
+        .is_ok_and(|output| output.status.success() && gungraun_runner_version_matches(&output.stdout));
     if std::env::var_os("METABENCH_REQUIRE_NATIVE_CONTRACTS").is_some() {
-        assert!(available, "required native contracts need the matching gungraun-runner on PATH");
-        assert_eq!(
-            String::from_utf8_lossy(&version.unwrap().stdout).trim(),
-            "gungraun-runner 0.19.4",
-            "required native contracts must match the workspace Gungraun version"
-        );
         assert!(
-            Command::new("valgrind")
-                .arg("--version")
-                .output()
-                .is_ok_and(|output| output.status.success()),
-            "required native contracts need Valgrind on PATH"
+            available,
+            "required native contracts need {EXPECTED_GUNGRAUN_RUNNER_VERSION}; version command returned {version:?}"
         );
+        assert!(valgrind_available(), "required native contracts need Valgrind on PATH");
     }
     available
+}
+
+fn gungraun_runner_version_matches(output: &[u8]) -> bool {
+    std::str::from_utf8(output).is_ok_and(|version| version.trim() == EXPECTED_GUNGRAUN_RUNNER_VERSION)
+}
+
+#[test]
+fn native_contracts_require_the_matching_runner_version() {
+    for output in [
+        b"gungraun-runner 0.20.0".as_slice(),
+        b"gungraun-runner 0.20.0\n",
+        b"gungraun-runner 0.20.0\r\n",
+    ] {
+        assert!(gungraun_runner_version_matches(output));
+    }
+    for output in [
+        b"".as_slice(),
+        b"gungraun-runner 0.19.4",
+        b"gungraun-runner 0.20.1",
+        b"gungraun-runner 0.20.0-beta",
+        b"gungraun-runner 0.20.0\nunexpected output",
+        b"gungraun-runner \xff",
+    ] {
+        assert!(!gungraun_runner_version_matches(output));
+    }
+}
+
+fn valgrind_available() -> bool {
+    Command::new("valgrind")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
 }
 
 #[test]
@@ -172,7 +203,7 @@ edition = "2024"
 [dependencies]
 metabench = {{ path = {dependency} }}
 criterion = {{ version = "0.8.2", default-features = false }}
-gungraun = "=0.19.4"
+gungraun = "=0.20.0"
 "#
             ),
         )
@@ -616,7 +647,7 @@ fn criterion_native_listing_is_forwarded() {
 #[test]
 fn gungraun_listing_is_forwarded() {
     if !gungraun_runner_available() {
-        eprintln!("skipping Gungraun listing because gungraun-runner is unavailable");
+        eprintln!("skipping Gungraun listing because the matching gungraun-runner is unavailable");
         return;
     }
 
@@ -628,6 +659,56 @@ fn gungraun_listing_is_forwarded() {
             .any(|line| { line.contains("_checksums") && line.contains("_rolling") })
     );
     assert!(!stdout.contains("Running gungraun benchmarks"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn gungraun_measurements_write_report() {
+    if !gungraun_runner_available() || !valgrind_available() {
+        eprintln!("skipping Gungraun measurements because the matching gungraun-runner or Valgrind is unavailable");
+        return;
+    }
+
+    for (environment_engine, test_option) in [(false, None), (false, Some("--gungraun-arg=--test=false")), (true, None)] {
+        let directory = tempfile::tempdir().unwrap();
+        let json = directory.path().join("report.json");
+        let markdown = directory.path().join("report.md");
+        let mut arguments: Vec<&std::ffi::OsStr> = vec![
+            "--show-engine-output".as_ref(),
+            "--no-baseline".as_ref(),
+            "--export-json".as_ref(),
+            json.as_os_str(),
+            "--export-md".as_ref(),
+            markdown.as_os_str(),
+        ];
+        if !environment_engine {
+            arguments.push("--gungraun".as_ref());
+        }
+        if let Some(option) = test_option {
+            arguments.push(option.as_ref());
+        }
+        let output = with_cargo_lock(|| {
+            let mut command = benchmark_command("metabench_basic", &arguments);
+            if environment_engine {
+                command.env("BENCH_ENGINE", "gungraun");
+            }
+            command.output().unwrap()
+        });
+        assert!(
+            output.status.success(),
+            "environment selection: {environment_engine}, test option: {test_option:?}\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&std::fs::read(&json).unwrap()).unwrap();
+        let entries = report["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["identity"], "basic/checksum/rolling");
+        let result = &entries[0]["results"]["gungraun.callgrind"];
+        assert!(result["metrics"]["Ir"]["value"].as_u64().is_some_and(|value| value > 0));
+        assert!(!result["raw_artifacts"].as_array().unwrap().is_empty());
+        assert!(std::fs::read_to_string(&markdown).unwrap().contains("basic/checksum/rolling"));
+    }
 }
 
 #[test]
@@ -678,6 +759,19 @@ fn criterion_worker_bypasses_allocation_tracking() {
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         assert!(String::from_utf8_lossy(&output.stdout).contains("boundaries/allocate/small"));
     });
+}
+
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn shared_case_registration_keeps_gungraun_unavailable_on_unsupported_hosts() {
+    let output = run_target("native_probe_contracts", &["--gungraun".as_ref(), "--test".as_ref()]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Gungraun is supported only on Linux"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("native suite setup"));
 }
 
 #[test]
@@ -1339,18 +1433,24 @@ impl Drop for ReportSnapshot {
 #[test]
 fn default_engine_smoke_checks_do_not_publish_measurements() {
     if !gungraun_runner_available() {
+        eprintln!("skipping Gungraun smoke contracts because the matching gungraun-runner is unavailable");
         return;
     }
-    let directory = tempfile::tempdir().unwrap();
-    let json = directory.path().join("report.json");
-    std::fs::write(&json, b"existing baseline").unwrap();
-    let output = run_target(
-        "measurement_boundaries",
-        &["--test".as_ref(), "--export-json".as_ref(), json.as_os_str()],
-    );
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(std::fs::read(&json).unwrap(), b"existing baseline");
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("Warming up"));
+    for options in [
+        &["--test"][..],
+        &["--gungraun", "--gungraun-arg=--test=true"][..],
+        &["--gungraun", "--test", "--gungraun-arg=--test=false"][..],
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let json = directory.path().join("report.json");
+        std::fs::write(&json, b"existing baseline").unwrap();
+        let mut arguments: Vec<&std::ffi::OsStr> = options.iter().map(std::ffi::OsStr::new).collect();
+        arguments.extend(["--export-json".as_ref(), json.as_os_str()]);
+        let output = run_target("measurement_boundaries", &arguments);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(std::fs::read(&json).unwrap(), b"existing baseline");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("Warming up"));
+    }
     with_cargo_lock(|| {
         let root = cargo_target().join("metabench/measurement_boundaries");
         let reports = ["report.json", "report.md"].map(|name| ReportSnapshot::new(root.join(name)));
