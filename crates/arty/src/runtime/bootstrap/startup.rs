@@ -72,6 +72,9 @@ fn build_with_processors(
         .get()
         .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
     let monitor_options = processor_config.monitor_options;
+    // Keep the selected policy at the bootstrap boundary until panic handling
+    // consumes it in the follow-up implementation.
+    let _panic_starts_shutdown = processor_config.panic_policy.starts_shutdown();
 
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(sink.clone());
@@ -635,8 +638,9 @@ mod tests {
                 stack_size: NonZero::new(2 * 1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(),
                 monitor_options,
+                panic_policy: crate::runtime::PanicPolicy::default(),
             },
-            &InactiveClock::default(),
+            &InactiveClock::new_isolated(),
             sink,
             &ThreadBuilder::default(),
             processors,

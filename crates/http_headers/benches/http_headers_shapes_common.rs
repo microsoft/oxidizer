@@ -214,20 +214,21 @@ macro_rules! define_shapes {
                 }
             )+
 
+            // Gungraun needs the outer argument expression in this macro's hygiene context.
             #[metabench::benchmark(HTTP_OWNED, $group, "http_owned")]
-            $(#[bench::$id(setup = [<$id _http_owned>])])+
+            $(#[bench::$id(std::hint::black_box([<$id _http_owned>]()))])+
             fn http_owned(case: $crate::shapes::Case) { case.run(); }
 
             #[metabench::benchmark(HTTP_BORROWED, $group, "http_borrowed")]
-            $(#[bench::$id(setup = [<$id _http_borrowed>])])+
+            $(#[bench::$id(std::hint::black_box([<$id _http_borrowed>]()))])+
             fn http_borrowed(case: $crate::shapes::Case) { case.run(); }
 
             #[metabench::benchmark(RAW_OWNED, $group, "raw_owned")]
-            $(#[bench::$id(setup = [<$id _raw_owned>])])+
+            $(#[bench::$id(std::hint::black_box([<$id _raw_owned>]()))])+
             fn raw_owned(case: $crate::shapes::Case) { case.run(); }
 
             #[metabench::benchmark(RAW_BORROWED, $group, "raw_borrowed")]
-            $(#[bench::$id(setup = [<$id _raw_borrowed>])])+
+            $(#[bench::$id(std::hint::black_box([<$id _raw_borrowed>]()))])+
             fn raw_borrowed(case: $crate::shapes::Case) { case.run(); }
 
             fn criterion_benchmarks(criterion: &mut criterion::Criterion) {

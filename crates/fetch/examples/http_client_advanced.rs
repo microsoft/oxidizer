@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates advanced HTTP client configuration options including:
+//! Configures these HTTP client options:
 //! - Connection keep-alive strategies
-//! - Connection pooling configuration
+//! - Connection pooling
 //! - HTTP/2-specific settings
 //! - A custom rustls server certificate verifier
-//! - Resilience pipeline configuration
+//! - Resilience pipeline
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,10 +24,9 @@ mod utils;
 
 /// Builds a custom rustls server certificate verifier.
 ///
-/// This example simply delegates to the platform trust store via
-/// [`rustls_platform_verifier::Verifier`], but the same hook can plug in any
-/// custom [`ServerCertVerifier`] implementation (for example, certificate
-/// pinning or a private root of trust).
+/// This implementation delegates to the platform trust store through
+/// [`rustls_platform_verifier::Verifier`]. The hook also accepts another
+/// [`ServerCertVerifier`], such as certificate pinning or a private root of trust.
 fn custom_verifier(provider: Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> {
     Arc::new(
         rustls_platform_verifier::Verifier::new(provider)
@@ -39,41 +38,40 @@ fn custom_verifier(provider: Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier>
 async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
-    // Create an HTTP client with extensive configuration.
+    // Create a client with custom transport and resilience options.
     let client = HttpClient::builder_tokio(fetch::tokio::TokioDeps::default())
-        // Customize the certificate validation with a custom rustls verifier.
+        // Use a custom rustls certificate verifier.
         .tls_options(TlsOptions::builder_rustls().server_certificate_verifier(custom_verifier).build())
-        // Configure connection keep-alive to maintain connections for better performance.
-        // This keeps both active and idle connections alive with periodic probes.
+        // Keep active and idle connections alive with periodic probes.
         .connection_keep_alive(ConnectionKeepAlive::active_and_idle_connections(
             Duration::from_secs(30), // Keep-alive probe interval
             Duration::from_secs(5),  // Keep-alive probe timeout
         ))
-        // Configure connection pooling for optimal connection reuse.
+        // Configure connection pooling.
         .connection_pool_options(
             ConnectionPoolOptions::default()
-                // Limit to 10 connections per host to control resource usage.
+                // Keep at most 10 idle connections for each host.
                 .max_connections(10)
-                // Keep idle connections for 5 seconds before closing them.
+                // Close an idle connection after 5 seconds.
                 .connection_idle_timeout(Duration::from_secs(5))
-                // Limit max connection lifetime to 60 seconds.
+                // Limit a connection lifetime to 60 seconds.
                 .connection_lifetime(ConnectionLifetime::fixed(Duration::from_mins(1))),
         )
-        // Configure HTTP/2-specific options:
-        // Allow up to 100 concurrent streams per HTTP/2 connection.
+        // Configure HTTP/2.
+        // Start with a cap of 100 streams. The peer settings can change this value.
         .http2_options(Http2Options::default().initial_max_send_streams(100))
-        // Support both HTTP/1.1 and HTTP/2 (this is the default, shown for clarity).
+        // Support HTTP/1.1 and HTTP/2. This is the default.
         .supported_http_versions(&[Version::HTTP_11, Version::HTTP_2])
-        // Configure the standard pipeline with custom resilience settings.
+        // Change resilience in the standard pipeline.
         .standard_pipeline(|pipeline, _context| {
-            // Change the default attempt timeout to 3 seconds.
+            // Set the attempt timeout to 3 seconds.
             pipeline.attempt_timeout(|timeout| timeout.timeout(Duration::from_secs(3)))
         })
         .build();
 
-    info!("Advanced HTTP client created successfully");
+    info!("Created the configured HTTP client");
 
-    // No requests are made in this example; the focus is on configuration.
+    // This example creates the client but does not send a request.
     drop(client);
 
     Ok(())

@@ -8,7 +8,7 @@ use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
 use crate::runtime::bootstrap;
-use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, RuntimeConfig, WorkersPolicy};
+use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, RuntimeConfig, WorkersPolicy};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
 
@@ -20,7 +20,8 @@ use crate::runtime::handle::Runtime;
 ///
 /// The defaults are [`WorkersPolicy::default`], 2 MiB async-worker stacks,
 /// a shared blocking pool, a real-time clock, a no-op telemetry sink, and
-/// [`MonitorPolicy::enabled`].
+/// [`MonitorPolicy::enabled`]. The default panic policy is
+/// [`PanicPolicy::shutdown`].
 ///
 /// # Examples
 ///
@@ -42,6 +43,25 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
+    /// Sets the panic policy for this runtime.
+    ///
+    /// The default is [`PanicPolicy::shutdown`]. This release stores the
+    /// policy in the runtime configuration. It does not yet change panic
+    /// behavior. A follow-up change will enforce the selected policy.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::{PanicPolicy, Runtime};
+    ///
+    /// let builder = Runtime::builder().panic(PanicPolicy::ignore());
+    /// ```
+    #[must_use]
+    pub const fn panic(mut self, policy: PanicPolicy) -> Self {
+        self.processor_config.panic_policy = policy;
+        self
+    }
+
     /// Sets whether this runtime is prepared for monitoring.
     ///
     /// The default is [`MonitorPolicy::enabled`]. The `monitor` Cargo feature
@@ -228,7 +248,7 @@ impl RuntimeBuilder {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
-            clock: InactiveClock::default(),
+            clock: InactiveClock::new_isolated(),
             processor_config: RuntimeConfig::default(),
             sink: Sink::noop(),
         }
@@ -267,6 +287,7 @@ mod tests {
         assert_eq!(builder.processor_config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
         assert_eq!(builder.processor_config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
         assert!(builder.processor_config.monitor_options.policy().is_enabled());
+        assert!(builder.processor_config.panic_policy.starts_shutdown());
     }
 
     #[test]
@@ -320,6 +341,13 @@ mod tests {
         let builder = Runtime::builder().monitor(MonitorPolicy::disabled());
 
         assert!(!builder.processor_config.monitor_options.policy().is_enabled());
+    }
+
+    #[test]
+    fn panic_policy_replaces_the_default() {
+        let builder = Runtime::builder().panic(PanicPolicy::ignore());
+
+        assert!(!builder.processor_config.panic_policy.starts_shutdown());
     }
 
     #[test]

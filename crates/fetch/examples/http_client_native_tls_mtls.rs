@@ -1,12 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates mutual TLS (`mTLS`) authentication with the fetch HTTP client
-//! using the platform native TLS backend (`SChannel` on Windows, Security Framework on macOS,
-//! `OpenSSL` on Linux).
+//! Uses mutual TLS (`mTLS`) with the platform native TLS backend. The backend is `SChannel` on
+//! Windows, Security Framework on macOS, and `OpenSSL` on Linux.
 //!
-//! It loads a client certificate and `PKCS#8` private key from `PEM` files, configures the HTTP
-//! client with a client identity, and performs a GET request to a user-specified URL.
+//! The example loads a client certificate and `PKCS#8` private key from `PEM` files. It sends a GET
+//! request to the specified URL with that client identity.
 //!
 //! # Usage
 //!
@@ -14,7 +13,7 @@
 //! cargo run -p fetch --example http_client_native_tls_mtls --features fetch/native-tls,fetch/tokio -- --cert client.pem --key client-key.pem --url https://example.com/api
 //! ```
 //!
-//! You can generate a self-signed client certificate (`PEM` + `PKCS#8` key) for testing with:
+//! For testing, generate a self-signed certificate and `PKCS#8` key:
 //! ```sh
 //! openssl req -x509 -newkey rsa:2048 -keyout client-key.pem -out client.pem -days 365 -nodes -subj "/CN=test"
 //! ```
@@ -31,8 +30,7 @@ use tracing::info;
 #[path = "util/utils.rs"]
 mod utils;
 
-/// Demonstrates mutual TLS (`mTLS`) authentication with the fetch HTTP client
-/// using the platform native TLS backend.
+/// Command-line arguments for the native TLS `mTLS` example.
 #[derive(FromArgs)]
 struct Args {
     /// path to the client certificate `PEM` file
@@ -52,11 +50,9 @@ struct Args {
 async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
-    // When run without any arguments (e.g. by the workspace example runner in CI),
-    // there is no certificate/key/URL to exercise, so exit successfully instead of
-    // letting `argh` fail with a missing-argument error (exit code 1).
+    // The CI example runner supplies no arguments. Exit before argh reports missing arguments.
     if std::env::args_os().nth(1).is_none() {
-        info!("No arguments provided; nothing to do. See the module docs for usage.");
+        info!("No arguments were provided. See the module documentation for usage.");
         return Ok(());
     }
 
@@ -77,14 +73,14 @@ async fn main() -> Result<(), ohno::AppError> {
         ClientIdentity::from_pem(&cert_pem, &key_pem).expect("failed to parse PKCS#8 PEM identity")
     };
 
-    info!("Client identity loaded successfully");
+    info!("Loaded the client identity");
 
-    // Build the HTTP client with the native TLS backend and the client identity.
+    // Build a native TLS client with the client identity.
     let client = HttpClient::builder_tokio(TokioDeps::default())
         .tls_options(TlsOptions::builder().client_identity(identity).build())
         .build();
 
-    info!("Sending GET request to {} ...", args.url);
+    info!("Sending a GET request to {}", args.url);
 
     let response = client.get(args.url.as_str()).fetch().await?;
     info!("Response status: {}", response.status());

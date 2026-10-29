@@ -351,6 +351,7 @@ fn expand_benchmark(arguments: BenchmarkArguments, mut function: ItemFn, metaben
             );
 
         #(#conditional_attributes)*
+        #[cfg(target_os = "linux")]
             #[expect(
                 clippy::allow_attributes,
                 clippy::allow_attributes_without_reason,
@@ -663,6 +664,7 @@ mod tests {
             let expected_conditions: ItemFn = syn::parse_quote! {
                 #[cfg(feature = "enabled")]
                 #[cfg_attr(unix, cfg_attr(feature = "nested", cfg(all())))]
+                #[cfg(target_os = "linux")]
                 fn expected() {}
             };
             assert_eq!(ordinary.attrs.len(), expected_conditions.attrs.len() + 1);

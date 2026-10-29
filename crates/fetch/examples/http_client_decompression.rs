@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates automatic response decompression with a fully mocked transport.
+//! Enables automatic response decompression with a fake transport.
 
 use bytesbuf::BytesView;
 use compressors::Resources;

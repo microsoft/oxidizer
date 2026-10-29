@@ -453,7 +453,7 @@ mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::pin::Pin;
     use std::ptr::NonNull;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Waker};
 
@@ -548,16 +548,9 @@ mod tests {
         trailer_queries: AtomicUsize,
         requested: Mutex<Vec<u32>>,
         fill_flags: Mutex<Vec<bool>>,
-        /// Addresses of the regions the reader lent to each read, recorded with
-        /// their provenance exposed.
-        ///
-        /// One test rebuilds a pointer from an entry to write the byte a real
-        /// WinHTTP would have delivered, and `with_exposed_provenance_mut` can
-        /// only carry provenance that something exposed. `addr()` is the strict
-        /// accessor and deliberately exposes nothing, so recording through it
-        /// would leave that reconstruction with no provenance for the region it
-        /// addresses. The remaining tests only compare entries, which is
-        /// unaffected by how the address was taken.
+        /// Retains the latest lent pointer so a deferred read can fill it.
+        lent_buffer: AtomicPtr<u8>,
+        /// Addresses used only to assert buffer reuse across reads.
         lent_addresses: Mutex<Vec<usize>>,
         session_closes: AtomicUsize,
         connect_closes: AtomicUsize,
@@ -1008,12 +1001,10 @@ mod tests {
         assert!(!body.is_end_stream());
         assert_eq!(record.read_calls.load(Ordering::SeqCst), 1);
 
-        let lent = record.lent_addresses.lock().unwrap()[0];
-        let lent = std::ptr::with_exposed_provenance_mut::<u8>(lent);
-        // SAFETY: the mock recorded this address with its provenance exposed, so
-        // the reconstruction above carries provenance for the lent region rather
-        // than none at all. That region belongs to the buffer the outstanding
-        // read operation owns, so it stays allocated and unaliased until that
+        let lent = record.lent_buffer.load(Ordering::SeqCst);
+        // SAFETY: the mock retained the pointer lent to the outstanding read,
+        // preserving its provenance. That region belongs to the buffer the
+        // outstanding read operation owns, so it stays allocated and unaliased until that
         // read completes, which is what this write and the completion below do.
         unsafe {
             lent.write(b'q');
@@ -1179,7 +1170,8 @@ mod tests {
             read_record.read_calls.fetch_add(1, Ordering::SeqCst);
             read_record.requested.lock().unwrap().push(len);
             read_record.fill_flags.lock().unwrap().push(fill_buffer);
-            read_record.lent_addresses.lock().unwrap().push(buffer.as_ptr().expose_provenance());
+            read_record.lent_buffer.store(buffer.as_ptr(), Ordering::SeqCst);
+            read_record.lent_addresses.lock().unwrap().push(buffer.as_ptr().addr());
             let step = read_steps.lock().unwrap().pop_front().unwrap();
             let context = recorded_context(&read_record);
 

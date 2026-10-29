@@ -37,7 +37,11 @@ fn input(size: usize) -> Input {
     }
 }
 
-fn prepare(size: usize) -> Input {
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "the fixture verifies that boxed input setup and destruction stay outside measurement"
+)]
+fn prepare(size: usize) -> Box<Input> {
     if std::env::var_os("METABENCH_TEST_TIMEOUT").is_some() {
         eprintln!("selected workload is waiting");
         std::thread::sleep(std::time::Duration::from_mins(1));
@@ -46,14 +50,14 @@ fn prepare(size: usize) -> Input {
     drop(other());
     drop(allocate(input(5)));
     drop(allocate(input(size)));
-    input(size)
+    Box::new(input(size))
 }
 
 #[metabench::benchmark(ALLOCATE, "boundaries", "allocate", gungraun_setup = prepare)]
 #[bench::small(32)]
 #[bench::large(128)]
-fn allocate(input: Input) -> (Input, Output) {
-    let output = Output(black_box(vec![42; black_box(input.size)]));
+fn allocate<S: std::borrow::BorrowMut<Input>>(mut input: S) -> (S, Output) {
+    let output = Output(black_box(vec![42; black_box(input.borrow_mut().size)]));
     (input, output)
 }
 
@@ -88,7 +92,7 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group(ALLOCATE.group_name());
     for (case, size) in [("small", 32), ("large", 128)] {
         group.bench_function(BenchmarkId::new(ALLOCATE.benchmark_name(), case), |bencher| {
-            bencher.iter_batched(|| prepare(size), allocate, BatchSize::SmallInput);
+            bencher.iter_batched_ref(|| prepare(size), |input| allocate(input.as_mut()).1, BatchSize::SmallInput);
         });
     }
     group.bench_function(CONST.benchmark_name(), |bencher| bencher.iter(constant));

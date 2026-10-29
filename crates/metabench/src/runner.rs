@@ -63,6 +63,9 @@ Metabench options:
 
 Arguments after -- are forwarded when exactly one engine is selected.
 No arguments also selects smoke mode (Cargo's harness-free test invocation).
+Forwarded Gungraun --test=true selects smoke mode.
+Forwarded Gungraun --test=false selects measurements unless a smoke request is present.
+Top-level --test takes priority.
 BENCH_ENGINE may select criterion, gungraun, perf, vtune, or allocations when no selector is present.
 CRITERION_HOME and GUNGRAUN_HOME retain the 20 most recent metabench runs
 under each home's .metabench-runs directory.

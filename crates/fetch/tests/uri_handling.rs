@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests for URI handling and normalization in the HTTP client.
+//! Integration tests for HTTP client URI handling and normalization.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
@@ -32,41 +32,41 @@ async fn fetch_text(client: &HttpClient, uri: Uri) -> String {
 async fn fetch_method() {
     let client = prepare_client_with_base_uri(BaseUri::from_static("https://default.example.com"));
 
-    // Make sure that missing request endpoint is substituted by the client endpoint
+    // Replace a missing request endpoint with the client endpoint.
     let uri_without_endpoint: Uri = Uri::default().with_path_and_query(PathAndQuery::from_static("/foo"));
     let response_endpoint_none = fetch_text(&client, uri_without_endpoint).await;
     assert_eq!(
         response_endpoint_none, "requested URI: https://default.example.com/foo",
-        "Request endpoint should use the client endpoint"
+        "the request must use the client endpoint"
     );
 
-    // Test with empty path and query
+    // Use an empty path and query.
     let uri_without_endpoint: Uri = Uri::default().with_path_and_query(PathAndQuery::from_static("/"));
     let response_endpoint_none = fetch_text(&client, uri_without_endpoint).await;
     assert_eq!(
         response_endpoint_none, "requested URI: https://default.example.com/",
-        "Request endpoint should use the client endpoint"
+        "the request must use the client endpoint"
     );
 
-    // And with default Uri
+    // Use the default Uri.
     let response_endpoint_none = fetch_text(&client, Uri::default()).await;
     assert_eq!(
         response_endpoint_none, "requested URI: https://default.example.com/",
-        "Request endpoint should use the client endpoint"
+        "the request must use the client endpoint"
     );
 
-    // Test request endpoint replacement
+    // Replace the request endpoint.
     let response_endpoint_set = fetch_text(&client, Uri::try_from("https://example.com/bar").unwrap()).await;
     assert_eq!(
         response_endpoint_set, "requested URI: https://default.example.com/bar",
-        "Request endpoint should be overridden by the client endpoint"
+        "the client endpoint must replace the request endpoint"
     );
 
-    // Test with a different host to guarantee that the whole endpoint is replaced
+    // Use another host so the client must replace the full endpoint.
     let response_endpoint_different_host = fetch_text(&client, Uri::try_from("https://192.0.2.42/bar").unwrap()).await;
     assert_eq!(
         response_endpoint_different_host, "requested URI: https://default.example.com/bar",
-        "Request endpoint should be overridden by the client endpoint"
+        "the client endpoint must replace the request endpoint"
     );
 }
 
@@ -80,21 +80,21 @@ async fn fetch_with_base_uri_with_path() {
 
     assert_eq!(
         full_uri, "requested URI: https://default.example.com/base/foo",
-        "Base URI path should be prepended to the request path"
+        "the base URI path must precede the request path"
     );
 
     let uri: Uri = Uri::default().with_path_and_query(PathAndQuery::from_static("/"));
     let full_uri = fetch_text(&client, uri).await;
     assert_eq!(
         full_uri, "requested URI: https://default.example.com/base/",
-        "Base URI path should be prepended to the request path"
+        "the base URI path must precede the request path"
     );
 
     let uri: Uri = Uri::default();
     let full_uri = fetch_text(&client, uri).await;
     assert_eq!(
         full_uri, "requested URI: https://default.example.com/base/",
-        "Base URI path should be prepended to the request path"
+        "the base URI path must precede the request path"
     );
 }
 
@@ -110,14 +110,14 @@ async fn change_client_base_uri() {
 
     assert_eq!(
         full_uri, "requested URI: https://default.example.com/foo/api",
-        "Former client should keep the old base URI"
+        "the original client must keep its base URI"
     );
 
     let full_uri = fetch_text(&client_2, uri).await;
 
     assert_eq!(
         full_uri, "requested URI: https://default.example.com/bar/api",
-        "Derived client should use the new base URI"
+        "the derived client must use the new base URI"
     );
 }
 
@@ -133,7 +133,7 @@ async fn send_request() {
     let response = response.into_body().into_text().await.unwrap();
     assert_eq!(
         response, "requested URI: https://default.example.com/send_request",
-        "Request endpoint should use the client endpoint"
+        "the request must use the client endpoint"
     );
 }
 

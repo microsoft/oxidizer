@@ -1,14 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! # HTTP Client Pooling Example
+//! # HTTP client pooling
 //!
-//! By default, the HTTP client only supports a single HTTP/2 connection per host.
-//! This can become a bottleneck when making many concurrent requests to the same endpoint.
-//!
-//! This example demonstrates how to work around this limitation by using multiple connection
-//! pools. Each pool maintains its own HTTP/2 connection, allowing for better parallelism
-//! and throughput when making concurrent requests.
+//! Creates 10 fake transport slots and selects them in round-robin order. The example sends 1,000
+//! sequential requests. It exercises pool-slot selection without network I/O.
 
 use fetch::HttpClient;
 use fetch::fake::FakeDeps;
@@ -29,7 +25,7 @@ async fn main() -> Result<(), ohno::AppError> {
         _ = client.get("https://example.com").fetch().await?;
     }
 
-    println!("example finished");
+    println!("Example is complete.");
 
     Ok(())
 }

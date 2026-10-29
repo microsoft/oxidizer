@@ -23,7 +23,7 @@ transferred between different components of a large complex system. This crate p
 mechanisms to reduce the risk of unintentionally exposing sensitive data.
 
 This crate’s approach uses wrapping to isolate sensitive data and avoid accidental exposure.
-Mechanisms are provided to automatically process sensitive data to make it safe to use in telemetry.
+Mechanisms are provided to control how sensitive data appears in telemetry.
 
 ## Concepts
 
@@ -40,13 +40,13 @@ Before continuing, it’s important to understand a few concepts:
 
 * **Redaction**: The process of removing or obscuring sensitive information from data.
   Redaction is often done by using consistent hashing, replacing the sensitive data with a hash
-  value that is not reversible. This allows the data to be used for analysis or processing
-  without exposing the sensitive information.
+  value. This allows the data to be used for analysis or processing
+  without including the original value directly. The guarantees depend on the selected redactor.
 
 It’s important to note that redaction is different from deletion. Redaction typically replaces sensitive data
 with something else, while deletion removes the data entirely. Redaction allows for correlation since a given piece
 of sensitive data will always produce the same redacted value. This makes it possible to look at many different
-log records and correlate them to a specific user or entity without exposing the sensitive data itself. It’s possible
+log records and correlate them to a specific user or entity without logging the original value directly. It’s possible
 to tell over time that an operation is attributed to the same piece of state without knowing what the state is.
 
 ## Traits
@@ -192,7 +192,7 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbfPAU5OoNavUbRy0yQBG8se0b5QdS3UiPpR4bCQr6vjqou8phZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4zgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbaPmyh-jBm90b5H9mU2JRAzgbIS0gQQzjBCMbyrHPi_M1NtBhZIOCbGRhdGFfcHJpdmFjeWYwLjEzLjGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4zgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTMuMQ
  [__link0]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Classified
  [__link1]: https://docs.rs/data_privacy_core/0.1.3/data_privacy_core/?search=Redactor
  [__link10]: https://docs.rs/data_privacy_macros/0.13.1/data_privacy_macros/?search=classified

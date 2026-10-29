@@ -1,9 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to create a simple HTTP client that sends multiple
-//! concurrent requests to example.com and how the underlying connection pool dynamically
-//! creates new connections to handle the burst of requests.
+//! Sends concurrent requests to example.com. The pool can add connections based on the negotiated
+//! HTTP version and the server limits.
 
 use std::time::Duration;
 
@@ -32,7 +31,7 @@ async fn main() -> Result<(), ohno::AppError> {
 
     let mut handles = vec![];
 
-    // This burst of requests creates additional connections.
+    // This request burst can create more connections, depending on protocol and server limits.
     for _ in 0..CONCURRENT_REQUESTS {
         let client_clone = client.clone();
         let handle = spawn(async move { client_clone.get(URL).fetch_text().await });
@@ -40,14 +39,14 @@ async fn main() -> Result<(), ohno::AppError> {
         handles.push(handle);
     }
 
-    // Wait for all requests to complete.
+    // Wait for every request.
     for handle in handles {
         handle.await??;
     }
 
     info!(
-        "sent {} concurrent requests, the application will automatically stop after 10 seconds. \
-    In the logs you should see connections automatically closing after not being used anymore.",
+        "Sent {} concurrent requests. The application stops after 10 seconds. \
+    Inspect the logs for idle connection closures.",
         CONCURRENT_REQUESTS
     );
 

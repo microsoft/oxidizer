@@ -14,29 +14,21 @@ use crate::handlers::TransportHandler;
 use crate::options::{PoolIndex, PoolSelection, RequestFilter};
 use crate::{HttpError, HttpRequest, HttpResponse, Result};
 
-/// The final handler responsible for sending HTTP requests to the network.
+/// Sends HTTP requests through the configured transport.
 ///
-/// `Dispatch` sits at the end of the handler chain and performs:
-/// - Final validation of request endpoints
-/// - Security filtering based on URL schemes (HTTP vs HTTPS)
-/// - Actual network dispatch via the underlying transport
+/// `Dispatch` is the final handler. It:
 ///
-/// Think of it as the gateway between your application and the network - all requests
-/// must pass through here before hitting the wire.
+/// - Validates request endpoints.
+/// - Applies the HTTP and HTTPS scheme policy.
+/// - Passes the request to the transport.
 ///
 /// # Construction
 ///
-/// `Dispatch` is an internal implementation detail and cannot be created manually.
-/// It's instantiated and managed by the `HttpClient` which configures it with the
-/// appropriate transport and security settings. Users should interact with the `HttpClient`
-/// rather than trying to use this handler directly.
+/// `HttpClient` creates and configures `Dispatch`. Callers cannot create it directly.
 ///
 /// # Testing
 ///
-/// When the `HttpClient` is created by calling the `HttpClient::new_fake` method, the `Dispatch` doesn't actually send
-/// requests to the network. Instead, it delegates the response handling to the `FakeHandler`,
-/// which allows for deterministic testing without real network calls. This makes it easy
-/// to write tests that verify your code's behavior without relying on external services.
+/// A client from `HttpClient::new_fake` sends requests to `FakeHandler` instead of the network.
 #[derive(Debug)]
 pub struct Dispatch {
     pub(crate) mode: DispatchMode,
@@ -65,9 +57,8 @@ impl Dispatch {
 
 /// Boxed pool-selection strategy.
 ///
-/// Built from [`PoolSelection::into_selector`]; given the pool of transports it
-/// returns the transport to use and its [`PoolIndex`]. The closure owns its
-/// selection state (e.g. a round-robin counter), so it is `Send + Sync`.
+/// Built from [`PoolSelection::into_selector`]. It selects a transport and returns its
+/// [`PoolIndex`]. The closure owns state such as a round-robin counter, so it is `Send + Sync`.
 type PoolSelector = dyn for<'a> Fn(&'a [TransportHandler]) -> (&'a TransportHandler, PoolIndex) + Send + Sync;
 
 pub(crate) enum DispatchMode {
@@ -104,29 +95,22 @@ impl Service<HttpRequest> for Dispatch {
     type Out = Result<HttpResponse>;
 
     fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
-        // Preserve the attempt information from the request so it can be
-        // forwarded to the response after dispatch.
+        // Copy attempt information from the request to the response.
         let attempt = input.extensions().get::<Attempt>().copied();
 
         if let Err(err) = validate(&self.request_filter, &input) {
             return Either::Right(ready(Err(err)));
         }
 
-        // Select the transport synchronously *before* entering the async block.
-        // Performing the mode/pool dispatch out here keeps the resulting future
-        // small: it only has to carry a single `&TransportHandler`, the inner
-        // future, and a couple of `Copy` extension values - instead of the
-        // whole `&Dispatch` plus the state of both match arms.
+        // Select the transport before the async block. The future then stores one transport, the
+        // inner future, and two Copy extension values instead of Dispatch and both match arms.
         let transport = match &self.mode {
             DispatchMode::Single(transport) => transport,
             DispatchMode::Pooled { transports, selector } => {
-                // If the request carries a `PoolIndex` extension (set by the
-                // retry/pooling layer), use it to pin the request to a
-                // specific transport in the pool. Otherwise, fall back to the
-                // configured selection strategy (e.g. round-robin).
+                // A PoolIndex from retry or pooling selects one transport. Without it, use the
+                // configured strategy, such as round-robin.
                 //
-                // The pool index of the actually-selected pool is exposed to
-                // callers on the response via
+                // Expose the selected pool index through
                 // [`ConnectionInfo::pool_index`](crate::telemetry::ConnectionInfo::pool_index).
                 input
                     .extensions()
@@ -139,10 +123,7 @@ impl Service<HttpRequest> for Dispatch {
         Either::Left(transport.execute(input).map(move |result| {
             let mut res = result?;
 
-            // Forward the attempt information to the response if present. This
-            // allows inspecting the attempt used to get this response. In
-            // healthy scenarios this is always the first attempt, but in
-            // degraded scenarios it may be higher.
+            // Copy the attempt number to the response. A retry or hedge can increase it.
             if let Some(attempt) = attempt {
                 res.extensions_mut().insert(attempt);
             }
@@ -154,7 +135,7 @@ impl Service<HttpRequest> for Dispatch {
 
 #[cfg_attr(test, mutants::skip)] // causes test timeouts
 fn validate(filter: &RequestFilter, input: &HttpRequest) -> crate::Result<()> {
-    // Ensure the request has a scheme and authority set
+    // Require a scheme and authority.
     let (Some(scheme), Some(authority)) = (input.uri().scheme(), input.uri().authority()) else {
         return Err(HttpError::other(
             "request must have scheme and authority set",
@@ -165,9 +146,7 @@ fn validate(filter: &RequestFilter, input: &HttpRequest) -> crate::Result<()> {
 
     if !is_allowed(filter, scheme) {
         return Err(HttpError::other(
-            format!(
-                "unable to communicate with '{scheme}://{authority}', because the '{scheme}' scheme is not allowed by this HTTP client"
-            ),
+            format!("cannot send a request to '{scheme}://{authority}' because this HTTP client does not allow the '{scheme}' scheme"),
             seatbelt::RecoveryInfo::never(),
             crate::error_labels::LABEL_SCHEME_NOT_ALLOWED,
         ));
@@ -231,7 +210,7 @@ mod tests {
         assert_eq!(collect_error_labels(&error), "scheme_not_allowed");
         assert_eq!(
             error.message(),
-            "unable to communicate with 'http://dummy.org', because the 'http' scheme is not allowed by this HTTP client"
+            "cannot send a request to 'http://dummy.org' because this HTTP client does not allow the 'http' scheme"
         );
     }
 
