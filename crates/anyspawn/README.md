@@ -68,12 +68,12 @@ integrations to adapt task dispatch after relocation.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbw6WnZACa5M0bDba-jT02mz0bvAMR8fjk4OsbKTx8-83BMw1hZIKCaGFueXNwYXduZjAuMTAuMIJsdGhyZWFkX2F3YXJlZjAuMTIuMg
- [__link0]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=Spawner
- [__link1]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=SpawnCustom
- [__link2]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=CustomSpawnerBuilder
- [__link3]: https://docs.rs/thread_aware/0.12.2/thread_aware/?search=ThreadAware
- [__link4]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=SpawnCustom
- [__link5]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=Spawner::new_arty
- [__link6]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=Spawner::new_tokio
- [__link7]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=Spawner::new_tokio_with_handle
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbw6WnZACa5M0bDba-jT02mz0bvAMR8fjk4OsbKTx8-83BMw1hZIKCaGFueXNwYXduZTAuOS4ygmx0aHJlYWRfYXdhcmVmMC4xMi4x
+ [__link0]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=Spawner
+ [__link1]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=SpawnCustom
+ [__link2]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=CustomSpawnerBuilder
+ [__link3]: https://docs.rs/thread_aware/0.12.1/thread_aware/?search=ThreadAware
+ [__link4]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=SpawnCustom
+ [__link5]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=Spawner::new_arty
+ [__link6]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=Spawner::new_tokio
+ [__link7]: https://docs.rs/anyspawn/0.9.2/anyspawn/?search=Spawner::new_tokio_with_handle
