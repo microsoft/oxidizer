@@ -96,7 +96,12 @@ This crate does not support:
 * Tokio cooperative scheduling or Tokio task-local context when Arty polls
   a Tokio future directly. If a library needs them, run its root future
   with [`tokio::spawn`][__link14];
-* Tokio context during final Arty timer or worker teardown callbacks.
+* Tokio context while Arty cancels tasks or runs their destructors during
+  shutdown, including final timer and worker teardown callbacks.
+
+If cleanup needs a Tokio runtime context, run that work in a Tokio task.
+Await its completion before the Arty runtime stops. Do not rely on an Arty
+task destructor to submit Tokio cleanup work during shutdown.
 
 The `tokio_drivers` example uses a timer and a loopback TCP connection:
 `cargo run -p arty_tokio --example tokio_drivers`.
@@ -113,7 +118,7 @@ The application remains responsible for Tokio shutdown.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbjEbl0-RDlQIbIAsS9-1eAgAbjm7OOazGXwQb_93FbUsOw4JhZIOCZGFydHllMC41LjCCamFydHlfdG9raW9lMC4xLjCCZXRva2lvZjEuNTMuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVhRsh_JLDPgbxeNRSAgHeSUbieJVmgbJflEbDsoEpEP5R7VhZIOCZGFydHllMC41LjCCamFydHlfdG9raW9lMC4xLjCCZXRva2lvZjEuNTMuMw
  [__link0]: https://crates.io/crates/arty/0.5.0
  [__link1]: https://docs.rs/arty_tokio/0.1.0/arty_tokio/fn.init.html
  [__link10]: https://docs.rs/arty/0.5.0/arty/?search=task::Context

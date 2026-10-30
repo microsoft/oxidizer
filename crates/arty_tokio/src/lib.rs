@@ -95,7 +95,12 @@
 //! - Tokio cooperative scheduling or Tokio task-local context when Arty polls
 //!   a Tokio future directly. If a library needs them, run its root future
 //!   with [`tokio::spawn`];
-//! - Tokio context during final Arty timer or worker teardown callbacks.
+//! - Tokio context while Arty cancels tasks or runs their destructors during
+//!   shutdown, including final timer and worker teardown callbacks.
+//!
+//! If cleanup needs a Tokio runtime context, run that work in a Tokio task.
+//! Await its completion before the Arty runtime stops. Do not rely on an Arty
+//! task destructor to submit Tokio cleanup work during shutdown.
 //!
 //! The `tokio_drivers` example uses a timer and a loopback TCP connection:
 //! `cargo run -p arty_tokio --example tokio_drivers`.
