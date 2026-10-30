@@ -209,82 +209,82 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock = { workspace = true }
 
 [[example]]
-name = "http_client_fake"
+name = "fetch_fake"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_breaker"
+name = "fetch_breaker"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_resilience"
+name = "fetch_resilience"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_tokio"
+name = "fetch_tokio"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_native_tls"
+name = "fetch_native_tls"
 required-features = ["native-tls", "tokio"]
 
 [[example]]
-name = "http_client_custom"
+name = "fetch_custom"
 
 [[example]]
-name = "http_client_custom_pipeline"
+name = "fetch_custom_pipeline"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_telemetry"
+name = "fetch_telemetry"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_customization"
+name = "fetch_customization"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_native_tls_mtls"
+name = "fetch_native_tls_mtls"
 required-features = ["native-tls", "tokio"]
 
 [[example]]
-name = "http_client_advanced"
+name = "fetch_advanced"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_api_with_templated_uri"
+name = "fetch_api_with_templated_uri"
 required-features = ["test-util", "json"]
 
 [[example]]
-name = "http_client_app"
+name = "fetch_app"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_connection_scaling"
+name = "fetch_connection_scaling"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_decompression"
+name = "fetch_decompression"
 required-features = ["compression-gzip", "test-util"]
 
 [[example]]
-name = "http_client_json"
+name = "fetch_json"
 required-features = ["test-util", "json"]
 
 [[example]]
-name = "http_client_minimal_pipeline"
+name = "fetch_minimal_pipeline"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_mtls"
+name = "fetch_mtls"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_pooling"
+name = "fetch_pooling"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_streaming"
+name = "fetch_streaming"
 required-features = ["tokio", "rustls"]
 
 [[bench]]

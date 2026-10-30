@@ -10,7 +10,7 @@
 //! # Usage
 //!
 //! ```sh
-//! cargo run -p fetch --example http_client_native_tls_mtls --features fetch/native-tls,fetch/tokio -- --cert client.pem --key client-key.pem --url https://example.com/api
+//! cargo run -p fetch --example fetch_native_tls_mtls --features fetch/native-tls,fetch/tokio -- --cert client.pem --key client-key.pem --url https://example.com/api
 //! ```
 //!
 //! For testing, generate a self-signed certificate and `PKCS#8` key:

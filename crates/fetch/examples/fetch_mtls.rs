@@ -12,7 +12,7 @@
 //! # Usage
 //!
 //! ```sh
-//! cargo run -p fetch --example http_client_mtls --features fetch/tokio,fetch/rustls -- --cert client.pem --key client-key.pem --url https://example.com/api
+//! cargo run -p fetch --example fetch_mtls --features fetch/tokio,fetch/rustls -- --cert client.pem --key client-key.pem --url https://example.com/api
 //! ```
 //!
 //! For testing, generate a self-signed client certificate:
