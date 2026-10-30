@@ -247,7 +247,7 @@ impl Pool {
     #[cfg_attr(test, mutants::skip)] // Impractical to test without overly-expensive timeout logic.
     fn join(&self) {
         // Do not keep the pool alive through retained scheduler handles, and do not
-        // hold its submission lock while waiting for user work to finish.
+        // hold its submission lock while waiting for blocking functions to finish.
         let pool = self.inner.lock_result().expect(ERR_POISONED_LOCK).take();
         if let Some(pool) = pool {
             pool.join();

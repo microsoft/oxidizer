@@ -53,16 +53,16 @@ impl<F: Future> Future for ScopedStorage<F> {
     }
 }
 
-/// Submits work across an Arty runtime's workers.
+/// Submits tasks across an Arty runtime's workers.
 ///
 /// Borrow this scheduler through
 /// [`Runtime::scheduler`](crate::runtime::Runtime::scheduler).
-/// It cannot be cloned or retained independently of the runtime owner.
-/// For worker-affine child tasks, use [`Context::scheduler`] instead.
+/// You cannot clone it or keep it after the `Runtime` value is dropped.
+/// To keep child tasks on their parent's worker, use [`Context::scheduler`] instead.
 ///
-/// The runtime chooses where new work starts. Submission order does not imply
-/// execution or completion order.
-/// Complete required joins before stopping the runtime.
+/// The runtime chooses where new tasks start.
+/// Tasks do not necessarily start or finish in the order you submit them.
+/// Await required task results before stopping the runtime.
 #[derive(Debug)]
 pub struct RuntimeScheduler {
     pub(crate) dispatcher: DispatcherClient,
@@ -73,25 +73,28 @@ impl RuntimeScheduler {
         Self { dispatcher }
     }
 
-    /// Runs a task that borrows caller-owned data and waits for it to finish.
+    /// Runs a task that borrows the caller's data and waits for it to finish.
     ///
+    /// A task factory is a function that creates a future.
     /// The factory runs on a worker, not on the calling thread. Both the
-    /// factory and future are destroyed before this method returns, even if
+    /// factory and future are dropped before this method returns, even if
     /// the task fails or is cancelled.
     ///
-    /// The factory must implement `Send`. The future can borrow caller-owned
+    /// The factory must implement `Send`. The future can borrow the caller's
     /// data and does not need to implement `Send`. The result must implement
     /// `Send + 'static`.
     ///
     /// Return owned data or modify borrowed data in place. Results cannot borrow
-    /// the caller's stack. Arty does not automatically relocate captures or results.
-    /// The runtime remains available for further work until stopped or dropped.
+    /// the caller's stack. Arty does not automatically update captured values
+    /// or results for a different worker.
+    /// The runtime can run more tasks until it is stopped or dropped.
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`] with a [`JoinError`](crate::task::JoinError) source
-    /// if the factory or future panics, or if shutdown cancels or rejects the task.
-    /// Rejection does not invoke the factory.
+    /// Returns an [`Error`] if the factory or future panics, or if shutdown
+    /// cancels or rejects the task.
+    /// Its underlying error is a [`JoinError`](crate::task::JoinError).
+    /// If Arty rejects the task, it does not call the factory.
     ///
     /// Calling this from any Arty worker returns an error. This includes task
     /// workers, blocking workers, and workers that belong to another runtime.
@@ -136,20 +139,21 @@ impl RuntimeScheduler {
         futures::executor::block_on(self.dispatcher.spawn(factory)).map_err(Error::new)
     }
 
-    /// Lets the runtime place an async task and relocates its payload.
+    /// Lets the runtime choose a worker for an async task and relocates its data.
     ///
+    /// Relocation updates a value's state for a selected worker.
     /// Before starting the task, Arty relocates `data` to the chosen worker.
     /// The source worker is unknown because this scheduler can be used from
     /// outside the runtime. The function pointer receives [`Context`] and
     /// the relocated data. Its future need not be [`Send`], but its result must
     /// be `Send`. The result is not relocated and need not implement `ThreadAware`.
-    /// The payload, future, and result must be `'static`.
+    /// The data, future, and result must be `'static`.
     ///
-    /// Use `()` for work without a payload. For payloads that do not implement
+    /// Use `()` for tasks without input data. For data that does not implement
     /// `ThreadAware`, see [`Unaware`](thread_aware::Unaware) and its guidance
-    /// before wrapping them.
+    /// before wrapping it.
     ///
-    /// Shutdown rejects submissions without relocating data or invoking the factory.
+    /// Shutdown rejects tasks without relocating data or calling the factory.
     /// Factory and future panics are reported through the returned [`JoinHandle`].
     ///
     /// # Examples
@@ -194,20 +198,20 @@ impl RuntimeScheduler {
         })
     }
 
-    /// Submits a synchronous callback to a blocking-task pool.
+    /// Runs a function on a thread from a blocking pool.
     ///
-    /// Uses a pool chosen by the runtime for synchronous I/O or other work
-    /// that can stall an async worker.
-    /// A callback panic fails its join handle and follows the configured
-    /// [`PanicPolicy`](crate::runtime::PanicPolicy).
-    /// The callback and its result must implement `Send + 'static`.
+    /// Uses a pool chosen by the runtime for synchronous I/O or other calls
+    /// that can stop an async worker from running other tasks.
+    /// A panic in this function returns an error through [`JoinHandle`] and
+    /// follows the configured [`PanicPolicy`](crate::runtime::PanicPolicy).
+    /// The function and its result must implement `Send + 'static`.
     ///
-    /// Shutdown rejects new callbacks and cancels queued callbacks before they
-    /// start. Already-running callbacks are allowed to finish.
+    /// Shutdown rejects new blocking functions and cancels queued ones before they start.
+    /// Functions that already run can finish.
     ///
-    /// Do not synchronously poll a handle for work submitted to the same pool.
+    /// Do not synchronously poll a [`JoinHandle`] for another task submitted to the same pool.
     /// Direct attempts panic. [`block_on`](Self::block_on) also rejects calls
-    /// from blocking callbacks before task submission.
+    /// from blocking functions before starting any task.
     ///
     /// # Examples
     ///

@@ -1,21 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Matched Arty/Tokio scheduling workloads, measured with metabench.
+//! Equivalent task-scheduling workloads for Arty and Tokio, measured with metabench.
 //!
 //! For allocation data, use `--criterion --allocations`. Threaded workloads do
 //! not measure isolated instruction costs. Each case creates its runtime,
 //! reusable vectors, and external waking thread before measurement. It reuses
 //! this input for every measured iteration.
 //!
-//! Both runtimes use the same external join driver. Wall-clock samples for
-//! from-task workloads start inside the async entry. Allocation measurement
-//! also includes that entry and its setup.
+//! Both runtimes use the same code outside the runtime to wait for task results.
+//! For from-task workloads, timing starts inside the initial async task.
+//! Allocation measurements also include that task and its setup.
 //!
-//! The `timeout` workload runs one concurrent task per worker. Each task arms
+//! The `timeout` workload runs as many concurrent tasks as there are workers.
+//! Each task starts
 //! and cancels `count` request timeouts per iteration. This models deadlines
-//! that almost never expire. It measures timer registration when all workers
-//! use timers at the same time. Tokio selects task placement, so it does not
+//! that almost never expire. It measures the cost of registering timers when all
+//! workers use them at the same time. Tokio chooses each task's worker, so it does not
 //! guarantee one task per worker.
 
 use std::future::poll_fn;

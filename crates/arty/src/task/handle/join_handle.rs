@@ -13,33 +13,34 @@ use crate::runtime::Shutdown;
 use crate::runtime::worker::asynchronous::LocalWorker as AsyncLocalWorker;
 use crate::runtime::worker::blocking::{LocalWorker as BlockingLocalWorker, PoolIdentity};
 
-/// A handle for receiving an async or blocking task's result.
+/// A future that returns an async or blocking task's result.
 ///
-/// Await the handle inside async code. Completion produces `Ok(result)`. A task
-/// panic or shutdown cancellation produces [`JoinError`] without unwinding the
-/// joining task.
+/// Await this value inside async code. Successful completion produces `Ok(result)`.
+/// A task panic or shutdown cancellation returns [`JoinError`] instead of causing
+/// a panic in the task that awaits it.
 ///
-/// Dropping the handle does not cancel its task or rethrow a task panic.
-/// The runtime must remain running for pending async work to complete.
-/// If the task returns its own `Result<T, E>`, joining it produces
+/// Dropping this value does not cancel its task or rethrow a task panic.
+/// The runtime must remain running for pending async tasks to complete.
+/// If the task returns its own `Result<T, E>`, awaiting it produces
 /// `Result<Result<T, E>, JoinError>`.
 ///
+/// Relocation updates a value's state for a selected worker.
 /// [`Scheduler::spawn_anywhere`](crate::task::Scheduler::spawn_anywhere) and
 /// [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at) relocate a result
-/// to the joining Arty worker before returning it. A join outside Arty leaves
-/// the result association unchanged. Other submission methods do not relocate
-/// results.
+/// to the Arty async worker that awaits it before returning it.
+/// Awaiting outside an Arty async worker does not relocate the result.
+/// Other methods that start tasks do not relocate results.
 ///
-/// The result type must implement `Send + 'static` because it crosses the task
-/// boundary.
+/// The result type must implement `Send + 'static` because another task receives it.
 ///
 /// # Panics
 ///
-/// Panics if polled again after it receives its result. A blocking
-/// handle also panics if it is polled directly from a callback running in the
-/// same blocking pool.
-/// Result relocation also propagates a panic if its `ThreadAware`
-/// implementation violates the trait's non-panicking contract.
+/// Polling asks a future to make progress.
+/// Panics if polled again after it returns its result.
+/// A `JoinHandle` for a blocking task also panics if polled directly from a
+/// function running in the same blocking pool.
+/// Relocating the result also panics if its `ThreadAware` implementation panics.
+/// The trait requires implementations not to panic.
 ///
 /// # Examples
 ///
@@ -68,7 +69,7 @@ where
 /// Optional metadata for relocating a successful result.
 ///
 /// `source` is the worker that executed the task. The function pointer keeps
-/// the [`ThreadAware`] bound on registration instead of every join handle.
+/// the [`ThreadAware`] bound on registration instead of every `JoinHandle`.
 struct ResultRelocation<R> {
     source: Thread,
     relocate: fn(&mut R, Option<&Thread>, &Thread),

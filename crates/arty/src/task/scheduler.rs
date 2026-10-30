@@ -12,24 +12,29 @@ use crate::task::Context;
 use crate::task::handle::JoinHandle;
 use crate::task::preparation::DeferredTask;
 
-/// A worker-bound handle for submitting async and blocking tasks.
+/// Submits async tasks and blocking functions for one worker.
 ///
 /// Get it from [`Context::scheduler`] to keep child tasks on the same worker.
-/// Clones keep that association but do not keep the runtime running. Use
-/// [`RuntimeScheduler`](crate::task::RuntimeScheduler) to submit work from
+/// Clones use the same worker but do not keep the runtime running. Use
+/// [`RuntimeScheduler`](crate::task::RuntimeScheduler) to submit tasks from
 /// synchronous code.
 ///
 /// [`spawn`](Self::spawn) creates its future on the worker, so the future can
-/// keep non-[`Send`] state across awaits. Factory captures and results must
-/// still be `Send`, even when called on the same worker.
+/// keep non-[`Send`] state across awaits.
+/// A task factory is a function that creates a future.
+/// The factory's captured values and the task's result must still be `Send`,
+/// even on the same worker.
 ///
-/// [`spawn_anywhere`](Self::spawn_anywhere) lets the runtime place new work and
-/// relocates a [`ThreadAware`] value there. If this scheduler is itself
-/// relocated, it rebinds only to a ready worker of its own runtime.
+/// Relocation updates a value's state for a selected worker.
+/// [`spawn_anywhere`](Self::spawn_anywhere) lets the runtime choose a worker and
+/// relocates a [`ThreadAware`] value there.
+/// Relocating this scheduler changes its worker only to a ready worker in the same runtime.
 ///
-/// Once shutdown starts, submissions return an immediately ready
-/// [`JoinError`](crate::task::JoinError) without invoking the factory. Await
-/// required results before shutdown. Dropping a join does not cancel its task.
+/// Once shutdown starts, awaiting a new task returns
+/// [`JoinError`](crate::task::JoinError) immediately.
+/// Arty does not call the task factory.
+/// Await required results before shutdown.
+/// Dropping a [`JoinHandle`] does not cancel its task.
 ///
 /// # Examples
 ///
@@ -94,10 +99,10 @@ impl Scheduler {
     /// so the future need not be [`Send`]. Pass a factory, not an already-created
     /// future.
     ///
-    /// Factory captures and results must implement `Send + 'static`. The future
-    /// must be `'static`. Captured values and returned results are not
+    /// The factory and the task's result must implement `Send + 'static`.
+    /// The future must be `'static`. Captured values and returned results are not
     /// automatically relocated.
-    /// Use [`spawn_anywhere`](Self::spawn_anywhere) to relocate an explicit payload.
+    /// Use [`spawn_anywhere`](Self::spawn_anywhere) to relocate data you pass to a task.
     /// Factory and future panics are reported through the [`JoinHandle`].
     ///
     /// Tasks must not block their async worker. Use
@@ -105,7 +110,7 @@ impl Scheduler {
     ///
     /// # Examples
     ///
-    /// Create non-`Send` state on the worker and retain it across a delay:
+    /// Create non-`Send` state on the worker and keep it across a delay:
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
@@ -168,23 +173,22 @@ impl Scheduler {
         })
     }
 
-    /// Submits a task to a worker chosen by the runtime and relocates its payload.
+    /// Submits a task to a worker chosen by the runtime and relocates its data.
     ///
-    /// On the chosen worker, relocates `data` from this scheduler's worker
-    /// before calling `f`. The runtime can choose the same worker.
+    /// Arty relocates `data` from this scheduler's worker before calling `f` on
+    /// the chosen worker. The runtime can choose the same worker.
     ///
     /// `f` is a function pointer: pass values as `data` instead of capturing
-    /// them. The payload and result must implement [`ThreadAware`] and `'static`.
-    /// The future must be `'static` and does not need to implement `Send`. When
-    /// its join completes on an Arty worker, the result is relocated from the
-    /// task's worker to the joining worker before being returned. Normally this
-    /// is the source worker. Moving the join to another worker changes the
-    /// return destination.
-    /// Joining outside an Arty worker does not relocate the result.
+    /// them. The data and result must implement [`ThreadAware`] and `'static`.
+    /// The future must be `'static` and does not need to implement `Send`.
+    /// If you await the result on an Arty async worker, Arty relocates it to that
+    /// worker before returning it. This is normally the worker that submitted the task.
+    /// Awaiting the result on a different worker changes where Arty relocates it.
+    /// Awaiting outside an Arty async worker does not relocate the result.
     ///
     /// # Examples
     ///
-    /// Relocate an existing set of capabilities to the selected worker:
+    /// Relocate a context to the selected worker:
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
@@ -227,20 +231,21 @@ impl Scheduler {
         })
     }
 
-    /// Submits a task to `destination` and relocates its payload there.
+    /// Submits a task to `destination` and relocates its data there.
     ///
-    /// The destination must be a worker coordinate returned by this runtime's
+    /// The destination must be a worker returned by this runtime's
     /// [`RuntimeControl::workers`](crate::runtime::RuntimeControl::workers).
     /// Before calling `f`, Arty relocates `data` from this scheduler's worker to
     /// the destination.
     ///
-    /// The payload and result must implement [`ThreadAware`] and `'static`. The
-    /// future must be `'static` and does not need to implement `Send`. When the
-    /// join completes on an Arty worker, the result is relocated from
-    /// `destination` to the joining worker, normally this scheduler's worker.
-    /// Joining outside Arty does not relocate the result. Shutdown or an
-    /// unsupported destination rejects the submission without relocating
-    /// `data` or invoking `f`.
+    /// The data and result must implement [`ThreadAware`] and `'static`.
+    /// The future must be `'static` and does not need to implement `Send`.
+    /// If you await the result on an Arty async worker, Arty relocates it from
+    /// `destination` to that worker before returning it.
+    /// This is normally this scheduler's worker.
+    /// Awaiting outside an Arty async worker does not relocate the result.
+    /// During shutdown, or if the destination is invalid, Arty rejects the task
+    /// without relocating `data` or calling `f`.
     ///
     /// # Examples
     ///
@@ -311,25 +316,26 @@ impl Scheduler {
         })
     }
 
-    /// Submits a synchronous callback to a blocking-task pool.
+    /// Runs a function on a thread from a blocking pool.
     ///
-    /// Use this for synchronous I/O or library calls that can prevent an async
-    /// worker from polling tasks and advancing timers. The callback
-    /// runs on a separate pool thread. A callback panic fails its join handle
-    /// and follows the configured [`PanicPolicy`](crate::runtime::PanicPolicy).
-    /// The callback and its result must implement `Send + 'static`.
+    /// Use this for synchronous I/O or blocking library calls.
+    /// These calls can prevent an async worker from running other tasks and
+    /// processing timers. The function runs on a separate pool thread.
+    /// A panic in this function returns an error through [`JoinHandle`] and
+    /// follows the configured [`PanicPolicy`](crate::runtime::PanicPolicy).
+    /// The function and its result must implement `Send + 'static`.
     ///
-    /// Uses the associated worker's pool. Configure sharing and limits with
+    /// Uses this scheduler's worker pool. Configure sharing and limits with
     /// [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
     ///
-    /// Shutdown rejects new callbacks and cancels queued ones before invocation.
-    /// Already-running callbacks cannot be interrupted and are allowed to finish.
-    /// Pool sizing targets blocking calls, not sustained CPU-parallel workloads.
+    /// Shutdown rejects new blocking functions and cancels queued ones before they start.
+    /// Functions that already run cannot be interrupted and can finish.
+    /// Pool limits are intended for blocking calls, not long-running computations on multiple processors.
     ///
-    /// A callback must not synchronously poll another blocking handle from its
+    /// A blocking function must not synchronously poll a [`JoinHandle`] for another task in its
     /// own pool. Direct attempts panic.
     /// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
-    /// also rejects calls from blocking callbacks before task submission.
+    /// also rejects calls from blocking functions before starting any task.
     ///
     /// # Examples
     ///

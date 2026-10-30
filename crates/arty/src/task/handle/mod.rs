@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Public handles consuming values or panics from task execution.
+//! Receiving task results through `JoinHandle`.
 //!
-//! Task execution owns the result transport. Join handles await its outcome.
+//! Await a task's [`JoinHandle`] to receive its result or a [`JoinError`].
 
 mod channel;
 mod error;

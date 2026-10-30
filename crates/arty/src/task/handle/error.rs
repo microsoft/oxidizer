@@ -10,26 +10,28 @@ use performables::sync::mutex::Mutex;
 
 /// A task failed to return its result.
 ///
-/// Returned by [`JoinHandle`](super::JoinHandle) and as the source of a
-/// scheduler's `block_on` error. [`is_panic`](Self::is_panic) identifies a task
-/// panic. [`is_shutdown`](Self::is_shutdown) identifies cancellation or
-/// shutdown rejection. [`is_invalid_destination`](Self::is_invalid_destination)
-/// identifies a worker that the runtime does not support.
+/// Returned by [`JoinHandle`](super::JoinHandle) and as the underlying error of
+/// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on).
+/// [`is_panic`](Self::is_panic) identifies a task panic.
+/// [`is_shutdown`](Self::is_shutdown) identifies cancellation or
+/// a task rejected during shutdown.
+/// [`is_invalid_destination`](Self::is_invalid_destination)
+/// identifies a requested worker that does not belong to this runtime.
 ///
-/// This is separate from an error returned by the task's own code. Joining a
+/// This is separate from an error returned by the task's own code. Awaiting a
 /// task that returns `Result<T, E>` produces `Result<Result<T, E>, JoinError>`.
-/// Receiving a panic error does not resume unwinding or repair application state.
-/// By default, a contained panic also starts coordinated runtime shutdown.
+/// Receiving a panic error does not restart the panic or repair application data.
+/// By default, a task panic that Arty catches also starts runtime shutdown.
 /// [`PanicPolicy::ignore`](crate::runtime::PanicPolicy::ignore) keeps the
-/// runtime available while preserving this panic classification.
-/// With `panic = "abort"`, a task panic aborts the process instead.
+/// runtime running while `JoinHandle` still reports the panic.
+/// With `panic = "abort"`, a task panic terminates the process instead.
 ///
 /// If a runtime failure caused shutdown, [`Error::source`] returns that
-/// failure. Shutdown requested without an error has no source.
+/// failure. If shutdown was requested without an error, `source()` returns `None`.
 ///
 /// # Examples
 ///
-/// A submission after shutdown reports a task error without invoking its factory:
+/// Starting a task after shutdown returns a task error without calling its factory:
 ///
 /// ```
 /// use arty::runtime::Runtime;
@@ -52,7 +54,7 @@ pub struct JoinError {
 }
 
 enum Kind {
-    // The payload can be Send without being Sync. It is only consumed, never borrowed.
+    // The panic value can be Send without being Sync. It is consumed, never borrowed.
     Panic(Mutex<Box<dyn Any + Send + 'static>>),
     Shutdown(Option<ShutdownError>),
     InvalidDestination,
@@ -61,8 +63,9 @@ enum Kind {
 impl JoinError {
     /// Returns `true` if the task panicked.
     ///
-    /// This includes panics in a factory, an async future, or a blocking
-    /// callback when unwinding is enabled.
+    /// With `panic = "unwind"`, Arty can catch panics instead of terminating
+    /// the process. This includes panics in a task factory, an async future,
+    /// or a blocking function.
     ///
     /// # Examples
     ///
@@ -83,7 +86,7 @@ impl JoinError {
         matches!(&self.kind, Kind::Panic(_))
     }
 
-    /// Returns `true` if shutdown cancelled the task or rejected its submission.
+    /// Returns `true` if shutdown cancelled the task or prevented it from starting.
     ///
     /// # Examples
     ///
@@ -131,7 +134,7 @@ impl JoinError {
         }
     }
 
-    /// Returns the captured panic payload, or `None` for other failure kinds.
+    /// Returns the value carried by the panic, or `None` for other failures.
     #[must_use]
     pub fn into_panic(self) -> Option<Box<dyn Any + Send + 'static>> {
         match self.kind {

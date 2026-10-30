@@ -1,20 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Selects how an Arty runtime responds to a contained task or callback panic.
+/// Selects how an Arty runtime responds to a panic that it catches in a user task.
 ///
 /// Pass a policy to
 /// [`RuntimeBuilder::panic`](crate::runtime::RuntimeBuilder::panic).
 /// The shutdown policy is the default.
 ///
 /// Arty applies this policy when it catches a panic while it creates or polls
-/// an async task, or runs a blocking callback. See the
+/// an async task, or runs a blocking function. See the
 /// [panic handling guide](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/PANICS.md)
-/// for the exact boundaries and limitations.
+/// for the operations this covers and the limits on recovery.
 ///
 /// # Examples
 ///
-/// Keep the runtime available after a contained task panic:
+/// Keep the runtime running after Arty catches a task panic:
 ///
 /// ```
 /// use arty::runtime::{PanicPolicy, Runtime};
@@ -30,8 +30,7 @@ pub struct PanicPolicy {
 }
 
 impl PanicPolicy {
-    /// Creates a policy that starts coordinated runtime shutdown after a
-    /// contained task or callback panic.
+    /// Creates a policy that stops the runtime after Arty catches a panic in a user task.
     #[must_use]
     pub const fn shutdown() -> Self {
         Self {
@@ -39,12 +38,12 @@ impl PanicPolicy {
         }
     }
 
-    /// Creates a policy that contains the panic and keeps the runtime running.
+    /// Creates a policy that keeps the runtime running after a caught task panic.
     ///
-    /// The panicking task or callback still fails through its join handle.
-    /// Arty isolates most task panics from runtime internals, but it
-    /// cannot repair user state. If user code is not panic-safe, this policy
-    /// can leave shared user state corrupted.
+    /// The task's or blocking function's [`JoinHandle`](crate::task::JoinHandle)
+    /// still returns an error when awaited.
+    /// Arty cannot repair application data. If a panic leaves that data in an
+    /// invalid state, this policy can keep the application running with corrupted shared data.
     #[must_use]
     pub const fn ignore() -> Self {
         Self {

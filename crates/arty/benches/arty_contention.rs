@@ -3,32 +3,33 @@
 
 //! Arty and Tokio contention benchmarks for common nested-task patterns.
 //!
-//! Each case submits one outer task and fans out ten inner operations. The
-//! relocated-cache workload black-boxes each cache touch so it measures the
-//! scheduling work around an observable operation rather than an optimized-away
-//! future.
+//! Each case submits one outer task that starts ten inner operations.
+//! The relocated-cache case uses `black_box` on each cache access.
+//! This prevents the compiler from removing the operation that the benchmark measures.
 //!
 //! Each benchmark case creates one runtime before measurement and reuses it for
 //! every measured iteration. The relocated-cache cases also create and reuse
 //! one cache.
 //!
 //! The cache is a mutex behind a per-thread `performables::arc::Arc`. Arty
-//! relocates that payload before the outer task starts; Tokio uses the same
-//! cache type without an equivalent relocation hook.
+//! updates that value's state for the worker before the outer task starts.
+//! Tokio uses the same cache type without that update.
 //!
-//! On its first poll, each nested retained-waker future clones and retains its
-//! task waker, transitions to pending, wakes through the retained clone, and
-//! returns `Pending`. Its next poll returns `Ready`.
+//! A waker tells a worker that a task is ready to run again.
+//! On its first poll, each nested retained-waker future saves a clone of its
+//! task waker. It uses that clone to request another poll and returns `Pending`.
+//! Its next poll returns `Ready`.
 //!
 //! Arty keeps each inner task on its outer task's worker. This worker also owns
 //! the relocated cache for that workload. Tokio can move child tasks between
-//! workers. The cases use the same child lifecycle, cache work, and task count
-//! at one and eight workers. These coordination workloads do not represent
+//! workers. The cases start and finish child tasks the same way.
+//! They do the same cache work and use the same task count at one and eight workers.
+//! These workloads do not represent
 //! general runtime performance.
 //!
-//! Gungraun results are available as a coarse instruction-path diagnostic, but
-//! Callgrind cannot model the scheduling and cross-worker contention these
-//! workloads are intended to expose. Use Criterion for runtime comparisons.
+//! Gungraun results give a rough view of which instructions run.
+//! Callgrind cannot model how tasks share workers or compete across workers.
+//! Use Criterion to compare runtime performance for these workloads.
 
 use std::hint::black_box;
 use std::pin::Pin;

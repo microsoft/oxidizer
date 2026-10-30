@@ -1,15 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Selects whether an Arty runtime is prepared for monitoring.
+/// Selects the runtime's monitoring configuration.
 ///
 /// Pass a policy to
 /// [`RuntimeBuilder::monitor`](crate::runtime::RuntimeBuilder::monitor).
 /// The enabled policy is the default.
 ///
 /// The `monitor` Cargo feature enables the Seismograph dependencies that
-/// monitoring needs. This stage only stores and propagates the policy. It does
-/// not start a monitor, instrument tasks, or change runtime scheduling.
+/// monitoring needs. This choice does not start a monitor, add task measurements,
+/// or change which tasks run.
 ///
 /// # Examples
 ///
@@ -29,13 +29,13 @@ pub struct MonitorPolicy {
 }
 
 impl MonitorPolicy {
-    /// Creates a policy that enables monitoring configuration.
+    /// Creates a policy with monitoring enabled in the runtime configuration.
     #[must_use]
     pub const fn enabled() -> Self {
         Self { enabled: true }
     }
 
-    /// Creates a policy that disables monitoring.
+    /// Creates a policy with monitoring disabled in the runtime configuration.
     #[must_use]
     pub const fn disabled() -> Self {
         Self { enabled: false }

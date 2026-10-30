@@ -6,17 +6,17 @@ use std::num::NonZeroUsize;
 use crate::runtime::error::Error;
 use crate::runtime::worker::blocking::Pools;
 
-/// A sharing policy for blocking-task thread pools.
+/// Controls whether async workers share the threads that run blocking functions.
 ///
 /// Pass a policy to
 /// [`RuntimeBuilder::blocking_pool`](crate::runtime::RuntimeBuilder::blocking_pool).
 /// These pools run [`spawn_blocking`](crate::task::Scheduler::spawn_blocking)
-/// callbacks separately from async workers.
+/// functions separately from async workers.
 ///
 /// # Choosing between per-worker and shared
 ///
 /// [`per_worker`](Self::per_worker) gives each async worker its own pool. This
-/// separates blocking work between workers, but can use more threads as
+/// separates blocking functions between workers, but can use more threads as
 /// the number of workers grows.
 ///
 /// [`shared`](Self::shared), the default, gives all workers one pool with a
@@ -24,11 +24,12 @@ use crate::runtime::worker::blocking::Pools;
 /// the shared pool or each per-worker pool.
 ///
 /// Choose based on your workload. Neither policy is faster in every case.
-/// Pool sizing must also account for dependency cycles. A blocking callback
-/// that waits for async work which in turn waits for the same saturated pool
-/// can deadlock. Shared pools make the dependency runtime-wide. Per-worker
-/// pools confine it to one async worker pool. Arty does not track transitive
-/// task dependencies to detect such cycles.
+/// If all pool threads wait for tasks that need the same pool, none can finish.
+/// This is called a deadlock. It can happen when a blocking function waits
+/// for an async task that submits another blocking function to the full pool.
+/// With a shared pool, this can affect blocking functions from any worker.
+/// With separate pools, it affects blocking functions sent to the same worker's pool.
+/// Arty does not track chains of waiting tasks to detect these cycles.
 ///
 /// # Examples
 ///
@@ -52,8 +53,8 @@ enum Mode {
 impl BlockingPoolPolicy {
     /// Creates a policy with one pool per async worker.
     ///
-    /// Each pool uses the runtime's default blocking-thread limit. The total
-    /// blocking-thread resources therefore grow with the async worker count.
+    /// Each pool uses the runtime's default blocking-thread limit. More async
+    /// workers therefore allow more blocking threads in total.
     ///
     /// # Examples
     ///
@@ -90,8 +91,8 @@ impl BlockingPoolPolicy {
     /// Sets the maximum number of threads in the shared pool or in each
     /// per-worker pool.
     ///
-    /// A zero count is retained in the policy and rejected by
-    /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build).
+    /// This method accepts zero, but
+    /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) rejects it.
     #[must_use]
     pub const fn max(mut self, max_workers: usize) -> Self {
         self.max_workers = Some(max_workers);

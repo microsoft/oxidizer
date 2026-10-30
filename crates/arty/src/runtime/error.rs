@@ -10,20 +10,19 @@ use performables::arc::Arc;
 
 use crate::runtime::shutdown::Shutdown;
 
-/// An error constructing or operating a runtime.
+/// An error while creating, running, or stopping a runtime.
 ///
 /// This error can report invalid runtime configuration, a rejected `block_on`
 /// call, or a worker or I/O driver failure. I/O driver failures come from
-/// initialization or cycle execution. Driver shutdown failures are not
-/// returned.
+/// startup or normal operation. Driver shutdown failures are not returned.
 ///
 /// When [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
 /// fails because a task panicked or was cancelled, its source is a
 /// [`JoinError`](crate::task::JoinError).
 ///
 /// Format the error with [`Display`] and inspect [`StdError::source`] for
-/// diagnostics. Do not depend on specific messages or source types to classify
-/// construction failures. Task joins report `JoinError` directly.
+/// details. Do not depend on specific messages or source types to identify
+/// failures while creating a runtime. Awaiting a task reports `JoinError` directly.
 #[derive(Debug)]
 pub struct Error {
     source: Box<dyn StdError + Send + Sync>,

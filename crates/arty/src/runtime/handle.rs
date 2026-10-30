@@ -9,37 +9,38 @@ use crate::task::RuntimeScheduler;
 
 /// Owns an Arty runtime's workers and their shutdown.
 ///
-/// Use this type to run async work from synchronous code. Construction
-/// assigns each async worker to an available processor. Exact worker policies
+/// Use this type to run async tasks from synchronous code.
+/// Arty assigns each async worker to an available processor. A fixed worker count
 /// can assign multiple workers to one processor. A task stays on its worker
 /// until it finishes or is cancelled.
 ///
 /// Borrow its [`RuntimeScheduler`] through
-/// [`scheduler`](Self::scheduler) to submit work or block on
-/// tasks that borrow caller-owned data. Consume the owner with [`stop`](Self::stop)
-/// when the required work has finished.
+/// [`scheduler`](Self::scheduler) to submit tasks or block on
+/// tasks that borrow the caller's data.
+/// When the required tasks finish, call [`stop`](Self::stop) to stop the runtime.
 ///
 /// # Drop
 ///
-/// Dropping the owner requests shutdown and normally waits for workers to stop.
-/// Arty cancels pending async tasks and queued blocking callbacks. Blocking
-/// callbacks that already run can finish. A callback that never returns can
+/// Dropping this value requests shutdown and normally waits for workers to stop.
+/// Arty cancels pending async tasks and queued blocking functions. Blocking
+/// functions that already started can finish. A function that never returns can
 /// prevent shutdown from completing.
 ///
-/// Implicit cleanup cannot return shutdown errors. Call [`stop`](Self::stop)
+/// Dropping the runtime cannot return shutdown errors. Call [`stop`](Self::stop)
 /// to receive errors for worker panics or I/O driver failures during
-/// initialization or cycle execution. I/O driver shutdown failures are not returned.
+/// startup or normal operation. I/O driver shutdown failures are not returned.
 ///
-/// Dropping the owner on a task or blocking worker panics. Keep the owner on an
-/// external thread, and use [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop)
-/// from worker code.
+/// Dropping this value in an Arty task or on a blocking worker panics.
+/// Keep it on a thread that is not an Arty worker.
+/// From worker code, use
+/// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop).
 ///
-/// Worker-bound schedulers and [`Context`](crate::task::Context) do not keep
-/// the runtime running after its owner is dropped.
+/// Schedulers and [`Context`](crate::task::Context) values do not keep
+/// the runtime running after this value is dropped.
 ///
 /// # Examples
 ///
-/// Submit work from synchronous code and stop after receiving its result:
+/// Submit a task from synchronous code and stop after receiving its result:
 ///
 /// ```
 /// use arty::runtime::Runtime;
@@ -66,7 +67,8 @@ impl Runtime {
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`] if the processor selection cannot be satisfied.
+    /// See [`RuntimeBuilder::build`] for configuration errors.
+    /// The default configuration uses a valid worker count and blocking-pool limit.
     ///
     /// # Panics
     ///
@@ -87,7 +89,7 @@ impl Runtime {
 
     /// Returns a builder for configuring a runtime before starting its workers.
     ///
-    /// See [`RuntimeBuilder`] for the defaults and available settings.
+    /// See [`RuntimeBuilder`] for the defaults and available configuration.
     ///
     /// # Examples
     ///
@@ -101,15 +103,15 @@ impl Runtime {
         RuntimeBuilder::new()
     }
 
-    /// Borrows the runtime's scheduler for runtime-wide submissions.
+    /// Borrows the scheduler that lets the runtime choose a worker for new tasks.
     ///
-    /// Use it to submit work from outside the runtime and let the runtime
+    /// Use it to submit tasks from outside the runtime and let the runtime
     /// choose a worker. In contrast,
     /// [`Context::scheduler`](crate::task::Context::scheduler) keeps child
     /// tasks on their parent's worker.
     ///
-    /// The scheduler cannot be cloned or retained independently of this runtime.
-    /// Selection does not imply execution or completion order.
+    /// You cannot clone the scheduler or keep it after this runtime is dropped.
+    /// Tasks do not necessarily start or finish in the order you submit them.
     ///
     /// # Examples
     ///
@@ -132,22 +134,22 @@ impl Runtime {
         &self.scheduler
     }
 
-    /// Consumes this runtime, requests shutdown, and waits for its workers to stop.
+    /// Takes ownership of this runtime, requests shutdown, and waits for its workers to stop.
     ///
-    /// Cancels pending async tasks and prevents queued blocking callbacks from
-    /// starting. Already-running blocking callbacks are allowed to finish.
-    /// `Ok(())` means shutdown has completed.
+    /// Cancels pending async tasks and prevents queued blocking functions from
+    /// starting. Blocking functions that already started can finish.
+    /// `Ok(())` means shutdown is complete.
     ///
     /// Use [`Context::control`](crate::task::Context::control) to obtain
-    /// runtime control and request shutdown without consuming the owner or
+    /// runtime control and request shutdown without taking ownership of the runtime or
     /// blocking the caller.
     ///
     /// # Errors
     ///
     /// Returns an error if a worker panicked or an I/O driver failed during
-    /// initialization or cycle execution. It does not return I/O driver shutdown
-    /// failures. It joins all workers before it reports a failure. Task failures
-    /// must be observed through their own join handles.
+    /// startup or normal operation. It does not return I/O driver shutdown
+    /// failures. It waits for all workers to stop before it reports a failure.
+    /// To receive a task failure, await its [`JoinHandle`](crate::task::JoinHandle).
     ///
     /// # Panics
     ///

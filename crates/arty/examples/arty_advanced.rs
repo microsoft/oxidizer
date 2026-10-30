@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Explicit runtime ownership, worker limits, and worker-affine child tasks.
+//! Creating a runtime, limiting workers, and keeping child tasks on their parent's worker.
 
 use std::time::Duration;
 

@@ -5,11 +5,11 @@ use std::slice;
 
 use thread_aware::Thread;
 
-/// A runtime's worker coordinates.
+/// A list of a runtime's workers and their details.
 ///
-/// Obtain this view from
+/// Obtain this list from
 /// [`RuntimeControl::workers`](crate::runtime::RuntimeControl::workers).
-/// The runtime owns the view. Each item is a reference into it. Pass an item
+/// The runtime owns the list. Each item refers to one worker. Pass an item
 /// directly to [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at).
 #[derive(Debug)]
 pub struct Workers {
