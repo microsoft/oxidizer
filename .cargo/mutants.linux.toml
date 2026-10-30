@@ -37,6 +37,9 @@ exclude_globs = [
     "crates/rallocator/src/hal/win64/**",
     "crates/fetch_winhttp/**",
     "crates/fetch_winhttp_impl/**",
+    # Perflib code is not compiled on Linux; Windows retains its full mutation suite.
+    "crates/observed_perf_counters/src/native.rs",
+    "crates/observed_perf_counters/src/native/**",
 ]
 all_features = true
 cap_lints = true
@@ -63,6 +66,8 @@ additional_cargo_test_args = [
 ]
 
 exclude_re = [
+    # This constructor delegates to Default; replacing it with Default is identical.
+    'crates/observed_perf_counters/src/processor.rs:\d+:\d+: replace PerfCounterProcessor::builder -> PerfCounterProcessorBuilder with Default::default\(\)$',
     # Linux accepts a pathname sockaddr both with and without its terminating null byte.
     'crates/seismograph_protocol/src/platform/unix.rs:\d+:108: replace \+ with \* in connect_timeout_with$',
     # These Unix open flags occupy disjoint bits; XOR is equivalent to OR at these call sites.

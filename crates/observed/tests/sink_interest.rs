@@ -20,6 +20,9 @@ use tick::{ClockControl, SimpleClock};
 #[event("interest.accepted")]
 struct AcceptedEvent;
 
+#[event("interest.rejected")]
+struct RejectedEvent;
+
 /// Selects an event by name and one-time initialization while recording delivery.
 struct ProbeProcessor {
     initial_interest: bool,
@@ -111,7 +114,7 @@ fn leaf_interest_accepts_any_processor_and_preserves_metadata() {
             .build();
 
         assert_eq!(sink.is_interested(&AcceptedEvent::DESCRIPTION), expected);
-        assert!(!sink.is_interested(&EventDescription::new("interest.rejected", None, None, None, false, false)));
+        assert!(!sink.is_interested(&RejectedEvent::DESCRIPTION));
         first.assert_untouched();
         second.assert_untouched();
     }
@@ -126,7 +129,7 @@ fn composite_interest_accepts_any_child() {
         let sink = Sink::composite([leaf(&first), Sink::composite([Sink::noop(), leaf(&second)])]);
 
         assert_eq!(sink.is_interested(&AcceptedEvent::DESCRIPTION), expected);
-        assert!(!sink.is_interested(&EventDescription::new("interest.rejected", None, None, None, false, false)));
+        assert!(!sink.is_interested(&RejectedEvent::DESCRIPTION));
         first.assert_untouched();
         second.assert_untouched();
     }

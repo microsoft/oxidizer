@@ -1,0 +1,75 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"pointer.metrics\"\"#,\nr\"\n        #[counter(bytes)]\n        #[updown_counter(delta)]\n        struct PointerMetrics {\n            #[unredacted]\n            bytes: usize,\n            #[unredacted]\n            delta: isize,\n        }\n        \",)"
+---
+struct PointerMetrics {
+    bytes: usize,
+    delta: isize,
+}
+const _: () = {
+    impl ::observed::Event for PointerMetrics {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "pointer.metrics",
+            ::core::option::Option::Some(::core::any::TypeId::of::<PointerMetrics>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "bytes",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::__private::metric_field(
+                            "bytes",
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
+                                    "pointer.metrics",
+                                    ::observed::metadata::InstrumentKind::Counter,
+                                    "",
+                                    "",
+                                    ::observed::metadata::MetricValueKind::U64,
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                ::observed::__private::field_descriptor(
+                    "delta",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::__private::metric_field(
+                            "delta",
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
+                                    "pointer.metrics",
+                                    ::observed::metadata::InstrumentKind::UpDownCounter,
+                                    "",
+                                    "",
+                                    ::observed::metadata::MetricValueKind::I64,
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ]),
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.bytes.clone()),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
+                    &|_| ::observed::Value::from(self.delta.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

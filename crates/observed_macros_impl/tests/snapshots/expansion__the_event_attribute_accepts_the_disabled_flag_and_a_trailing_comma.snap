@@ -12,13 +12,13 @@ struct Subject {
 }
 const _: () = {
     impl ::observed::Event for Subject {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "e",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::None,
             ::core::option::Option::None,
             false,
-            false,
+            &::observed::__private::event_fields([]),
         );
         fn visit_fields(
             &self,
@@ -39,13 +39,13 @@ struct Subject {
 }
 const _: () = {
     impl ::observed::Event for Subject {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "e",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::None,
             ::core::option::Option::None,
             false,
-            false,
+            &::observed::__private::event_fields([]),
         );
         fn visit_fields(
             &self,
@@ -66,13 +66,13 @@ struct Subject {
 }
 const _: () = {
     impl ::observed::Event for Subject {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "e",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::None,
             ::core::option::Option::None,
-            false,
             true,
+            &::observed::__private::event_fields([]),
         );
         fn visit_fields(
             &self,
@@ -93,13 +93,13 @@ struct Subject {
 }
 const _: () = {
     impl ::observed::Event for Subject {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "e",
             ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
             ::core::option::Option::None,
             ::core::option::Option::None,
-            false,
             true,
+            &::observed::__private::event_fields([]),
         );
         fn visit_fields(
             &self,

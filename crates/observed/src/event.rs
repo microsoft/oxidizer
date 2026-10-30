@@ -52,5 +52,10 @@ pub trait Event: Send + Sync {
     /// - **Default**: the type must implement [`data_privacy::RedactedDisplay`].
     /// - **`data_class = <expr>`**: wraps the value in [`data_privacy::Sensitive`] before redaction.
     /// - **`unredacted`**: bypasses redaction; the type must implement `Into<Value>`.
+    ///
+    /// Typed metric bindings use the static field inventory in [`DESCRIPTION`](Self::DESCRIPTION).
+    /// Visit its descriptors in declaration order, keeping their indices unchanged
+    /// when optional fields are omitted. Instrument-bearing fields must supply
+    /// unredacted numeric values with the declared representation.
     fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()>;
 }

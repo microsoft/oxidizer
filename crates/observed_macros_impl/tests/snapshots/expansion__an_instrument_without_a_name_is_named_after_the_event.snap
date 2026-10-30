@@ -7,42 +7,50 @@ struct Heartbeat {
 }
 const _: () = {
     impl ::observed::Event for Heartbeat {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "heartbeat",
             ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
             ::core::option::Option::None,
             ::core::option::Option::Some(
-                ::observed::metadata::MetricDescription::new(
+                ::observed::__private::metric_description(
                     "heartbeat",
                     ::observed::metadata::InstrumentKind::Counter,
                     "",
                     "",
+                    ::observed::metadata::MetricValueKind::U64,
                 ),
             ),
-            true,
             false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "level",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::__private::metric_field(
+                            "level",
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
+                                    "heartbeat",
+                                    ::observed::metadata::InstrumentKind::Gauge,
+                                    "",
+                                    "",
+                                    ::observed::metadata::MetricValueKind::F64,
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ]),
         );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "level",
-                    ::core::option::Option::None,
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
-                            "level",
-                            ::observed::metadata::MetricDescription::new(
-                                "heartbeat",
-                                ::observed::metadata::InstrumentKind::Gauge,
-                                "",
-                                "",
-                            ),
-                        ),
-                    ),
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.level.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.level.clone()),
+                )?;
             }
             ::core::ops::ControlFlow::Continue(())
         }
