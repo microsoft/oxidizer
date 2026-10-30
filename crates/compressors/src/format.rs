@@ -685,9 +685,9 @@ mod tests {
 
     #[test]
     fn the_compressor_builder_applies_its_level() {
-        // Inequality of the bytes is the load-bearing assertion. A size comparison alone is
-        // satisfied by equality, so a backend that dropped the level and always compressed at its
-        // A passing default can hide a `Level` setting that has no effect.
+        // Inequality of the bytes is the load-bearing assertion. A size comparison also passes
+        // when both levels produce equal lengths. A backend that ignores `Level` and always uses
+        // its default can therefore pass a size check.
         let varied = varied_payload();
         for &format in Format::ALL {
             let fast = compressed_bytes(CompressorBuilder::new().level(Level::FAST), format, &varied);
