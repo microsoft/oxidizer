@@ -22,9 +22,9 @@
 //! services. Workers use thread-local bookkeeping rather than a global
 //! runtime singleton.
 //!
-//! Arty provides task scheduling, clocks, telemetry, external I/O driver
-//! hosting, and pools for offloading blocking callbacks. It does not provide
-//! an async I/O implementation or move running tasks between workers.
+//! Arty provides task scheduling, clocks, external I/O driver hosting, and
+//! pools for offloading blocking callbacks. It does not provide an async I/O
+//! implementation or move running tasks between workers.
 //!
 //! # Quickstart
 //!
@@ -115,15 +115,13 @@
 //! - [Scheduling](crate::documentation::scheduling) explains where tasks run,
 //!   local non-`Send` work, and blocking pools.
 //! - [Configuration](crate::documentation::configuration) explains worker counts,
-//!   blocking-pool policies, clocks, and telemetry sinks.
+//!   blocking-pool policies, and clocks.
 //! - [Shutdown](crate::documentation::shutdown) explains runtime ownership,
 //!   task cancellation, and what stopping the workers waits for.
 //! - [Thread awareness](crate::documentation::thread_awareness) explains
 //!   stable task placement and explicit relocation of values.
 //! - [Time](crate::documentation::time) explains system timers, timeouts, and
 //!   externally controlled time in tests.
-//! - [Telemetry](crate::documentation::telemetry) explains runtime events
-//!   and links to [`observed`] for further details.
 //!
 //! The `documentation` module is included only for docs.rs builds and
 //! doc-test collection with all documentation features, including `test-util`;
@@ -137,7 +135,7 @@
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
 //! - **`monitor`** - Enables the Seismograph monitor dependency. It forwards
 //!   `performables` telemetry support when `performables` is enabled. It does
-//!   not start monitoring or emit new telemetry.
+//!   not start monitoring.
 //! - **`time`** - Enables clocks, timers, and timeouts.
 //! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
 //!   Enable it in dev-dependencies, not production dependencies.
@@ -178,7 +176,7 @@ use arty_io_core as _;
 /// Large counts can exceed operating-system thread or memory limits.
 ///
 /// Use explicit [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) construction
-/// instead of the attribute when clocks, telemetry, blocking pools, stack size,
+/// instead of the attribute when clocks, blocking pools, stack size,
 /// or an at-most worker policy must be configured.
 ///
 /// # Panics

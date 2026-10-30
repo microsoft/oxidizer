@@ -15,7 +15,7 @@
 [script("pwsh", "-NoProfile")]
 anvil-cargo-hack: anvil-cargo-hack-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    $include = (& "{{ just_executable() }}" _anvil-impact-include required)
+    $include = (& "{{ just_executable() }}" _anvil-impact-exclude required)
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
     if ($include -eq '--skip') { Write-Host 'anvil-cargo-hack: no affected packages; skipping'; exit 0 }

@@ -18,13 +18,13 @@ impl Pools {
     }
 
     pub(crate) fn shared(max_workers: Option<NonZeroUsize>) -> Self {
-        Self::Shared(Pool::new_with_mode(max_workers, "shared"))
+        Self::Shared(Pool::new(max_workers))
     }
 
     pub(crate) fn pool_for_worker(&self) -> Pool {
         match self {
             Self::Shared(pool) => pool.clone(),
-            Self::PerWorker(max_workers) => Pool::new_with_mode(*max_workers, "per_worker"),
+            Self::PerWorker(max_workers) => Pool::new(*max_workers),
         }
     }
 }

@@ -5,8 +5,8 @@
 //!
 //! Use [`Runtime`] to run async work from synchronous code and control
 //! when workers stop. [`Runtime::new`] starts the default configuration;
-//! [`Runtime::builder`] lets you choose workers, blocking pools, clocks, and
-//! a telemetry sink before they start.
+//! [`Runtime::builder`] lets you choose workers, blocking pools, and clocks
+//! before they start.
 //!
 //! Each task receives [`Context`](crate::task::Context) with its worker's
 //! scheduler and clock. [`Runtime::scheduler`] lets the runtime place new
@@ -50,7 +50,6 @@ pub(crate) mod dispatch;
 mod error;
 mod handle;
 mod shutdown;
-pub(crate) mod telemetry;
 pub(crate) mod worker;
 mod workers;
 

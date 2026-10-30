@@ -23,6 +23,7 @@ use observed::enrichment::{Enrichment, EnrichmentEntry};
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
 use observed_testing::{TEST_ID, test_emitter};
+use thread_aware::ThreadBuilder;
 
 use crate::support::{CompletionHandle, TaskOutcome, TaskSetExt as _};
 
@@ -201,6 +202,17 @@ fn failed_construction_preserves_existing_executor_notifications() {
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     assert_eq!(poll_completed(&mut handle), 42);
+}
+
+#[test]
+fn configured_current_thread_executes_tasks() {
+    let thread = ThreadBuilder::default().build(std::thread::current().id());
+    let mut executor = Executor::builder().thread(thread).build();
+    let mut handle = executor.tasks().add_test(async { 42 }, TaskOptions::default());
+
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+    assert_eq!(poll_completed(&mut handle), 42);
+    assert!(!executor.has_tasks());
 }
 
 #[test]

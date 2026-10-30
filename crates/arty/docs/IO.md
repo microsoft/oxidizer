@@ -28,9 +28,8 @@ The [primary driver example](../examples/arty_io.rs) uses
 type on every worker and perform work through each worker-local driver.
 
 During shutdown Arty cancels worker tasks before shutting down their drivers.
-It attempts every initialized driver even if one shutdown fails. Driver
-shutdown errors are reported through telemetry and are not returned from
-`Runtime::stop`.
+It attempts every initialized driver even if one shutdown fails. `Runtime::stop`
+does not return driver shutdown errors.
 
 For synchronous I/O without an Arty driver, use `Scheduler::spawn_blocking`.
 The callback runs in a blocking pool without blocking an async worker.

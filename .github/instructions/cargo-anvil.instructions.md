@@ -28,3 +28,7 @@ as the source of truth for local verification.
 - Regenerate crate README files with `just anvil-readme --fix`; do not edit
   generated crate README files manually.
 - Format source with `just anvil-fmt --fix`.
+- Generated GitHub Actions dependency pins are maintained by cargo-anvil.
+  Upgrade Anvil and regenerate rather than editing generated workflows.
+  Anvil excludes these files from existing Dependabot version-update jobs;
+  security updates are not suppressed.

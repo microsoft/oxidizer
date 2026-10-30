@@ -101,6 +101,7 @@ impl WorkersPolicy {
                 let workers = processors.iter().cycle().take(count).cloned().collect();
                 Ok(WorkerPlacements {
                     workers,
+                    #[cfg(test)]
                     processors_used: count.min(processors.len()),
                 })
             }
@@ -135,6 +136,7 @@ fn sorted_singletons(processors: &ProcessorSet) -> Vec<ProcessorSet> {
 #[derive(Debug)]
 pub(crate) struct WorkerPlacements {
     workers: Vec<ProcessorSet>,
+    #[cfg(test)]
     processors_used: usize,
 }
 
@@ -142,6 +144,7 @@ impl WorkerPlacements {
     fn from_selected(processors: &ProcessorSet) -> Self {
         Self {
             workers: sorted_singletons(processors),
+            #[cfg(test)]
             processors_used: processors.len(),
         }
     }
@@ -150,6 +153,7 @@ impl WorkerPlacements {
         self.workers.len()
     }
 
+    #[cfg(test)]
     pub(crate) const fn processors_used(&self) -> usize {
         self.processors_used
     }

@@ -98,14 +98,6 @@ impl BlockingPoolPolicy {
         self
     }
 
-    /// Telemetry label identifying the pool mode (`per_worker` / `shared`).
-    pub(crate) const fn mode_label(&self) -> &'static str {
-        match self.mode {
-            Mode::PerWorker => "per_worker",
-            Mode::Shared => "shared",
-        }
-    }
-
     /// Resolves this configuration into the concrete pool resources used by
     /// workers at runtime.
     pub(crate) fn into_pools(self) -> Result<Pools, Error> {

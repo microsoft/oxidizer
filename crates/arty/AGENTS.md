@@ -19,8 +19,8 @@
 - Add cleanup containment only when needed for memory safety or exact-once
   release of runtime-owned task storage. Keep the catch as narrow as possible.
 - Do not add recovery guarantees for panicking destructors, custom wakers,
-  notification hooks, telemetry processors, poisoned state, or failed runtime
-  invariants merely to make a test pass.
+  notification hooks, poisoned state, or failed runtime invariants merely to
+  make a test pass.
 - Unsupported panics may abort, leak, or stop progress, but must not cause
   undefined behavior.
 - Do not add dedicated recovery for failed runtime invariants, poisoned state,

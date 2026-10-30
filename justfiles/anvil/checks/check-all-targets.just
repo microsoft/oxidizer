@@ -28,7 +28,7 @@ anvil-check-all-targets: anvil-check-all-targets-validate-prereqs anvil-impact
     foreach ($cfg in $configs) {
         Write-Host "anvil-check-all-targets: checking $($cfg.name) features"
         $featureArgs = $cfg.flags
-        & cargo {{_anvil_stable_toolchain_args}} each @pkg --keep-going '--' cargo {{_anvil_stable_toolchain_args}} check --package '{spec}' --all-targets @featureArgs --locked
+        & cargo {{_anvil_stable_toolchain_args}} each @pkg --keep-going '--' cargo {{_anvil_stable_toolchain_args}} check --package '{cargo-spec}' --all-targets @featureArgs --locked
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
