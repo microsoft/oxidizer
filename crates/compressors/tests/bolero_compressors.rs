@@ -18,7 +18,7 @@
 //! # What is asserted
 //!
 //! The property is safe decompression, not successful decompression. Malformed input can fail. The
-//! must never happen is a panic, a non-terminating run, or a bound that quietly stops applying.
+//! operation must never panic, run without terminating, or silently stop applying a bound.
 
 #![expect(
     clippy::expect_used,
