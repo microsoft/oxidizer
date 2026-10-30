@@ -41,7 +41,9 @@ impl Wake for SharedCountingWake {
 struct DropWake(Arc<AtomicBool>);
 
 impl Wake for DropWake {
-    fn wake(self: Arc<Self>) {}
+    fn wake(self: Arc<Self>) {
+        drop(self);
+    }
 }
 
 impl Drop for DropWake {
@@ -154,6 +156,7 @@ fn driver_consumption_releases_a_cancelled_delay_waker() {
         assert!(std::pin::Pin::new(&mut delay).poll(&mut context).is_pending());
     }
     let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
+    assert!(!dropped.load(Ordering::Relaxed));
 
     assert_eq!(driver.advance_timers(deadline).unwrap(), None);
 
@@ -174,6 +177,7 @@ fn driver_consumption_releases_a_cancelled_timer_waker() {
         assert!(next.as_mut().poll(&mut context).is_pending());
     }
     let deadline = driver.advance_timers(before_registration).unwrap().unwrap();
+    assert!(!dropped.load(Ordering::Relaxed));
 
     assert_eq!(driver.advance_timers(deadline).unwrap(), None);
 
