@@ -3,7 +3,7 @@
 
 //! One contract, applied to every format.
 //!
-//! These tests exist to keep the abstraction honest. Every format goes through the same scenarios,
+//! These tests exist to keep the abstraction honest. Every format goes through the same scenarios.
 //! A format that differs from its siblings fails here. An abstraction that fits only the deflate
 //! family also fails here.
 
