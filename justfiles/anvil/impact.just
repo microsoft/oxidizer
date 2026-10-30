@@ -42,13 +42,13 @@
 # Private. Produces the two cargo-delta snapshots under
 # target/anvil/impact/snapshots/ with two independent cache keys:
 #   * baseline.json  -- snapshot of the base ref. EXPENSIVE (needs a throwaway
-#     git worktree). Keyed on the composite of the base commit sha and the
-#     effective .delta.toml identity (baseline.key stores "<base-sha>
-#     <config-hash>"), so the worktree is recreated when the base moves OR the
-#     cargo-delta config changes.
+#     git worktree). Keyed on the base commit sha, effective .delta.toml
+#     identity, and pinned cargo-delta version (baseline.key stores
+#     "<base-sha> <config-hash> <cargo-delta-version>").
 #   * current.json   -- snapshot of the working tree. Cheap. Keyed on
-#     <HEAD sha> (current.key); the dirty-tree guard means a clean tree
-#     corresponds exactly to HEAD.
+#     "<HEAD sha> <cargo-delta-version>" (current.key); the dirty-tree guard
+#     means a clean tree corresponds exactly to HEAD. Tool upgrades invalidate
+#     both snapshots so incompatible formats are never reused.
 
 # Snapshot the base ref and working tree for impact analysis.
 [script("pwsh", "-NoProfile")]
@@ -112,7 +112,8 @@ _anvil-impact-snapshot:
     # committed config edit moved HEAD -- is captured under the new config, and
     # `cargo delta impact` would then diff two snapshots taken under different
     # rules and silently mis-scope. So hash the resolved config (or mark its
-    # absence) and fold it into the composite baseline key `$baseSha $configId`
+    # absence) and fold it into the composite baseline key alongside the base
+    # sha and pinned cargo-delta version
     # below (which also flows into anvil-impact's projection cache via
     # baseline.key). Absent a config file, `$deltaArgs` stays empty and the id
     # is `<none>`, so adopters without a `.delta.toml` are unaffected.
@@ -143,17 +144,11 @@ _anvil-impact-snapshot:
         [Console]::Error.WriteLine("anvil-impact: warning: no .delta.toml found at the repo root; cargo-delta will run under its defaults (trip_wire_patterns and file_exclude_patterns inactive), which can under-scope the impact set. Restore the anvil-managed .delta.toml to get conservative scoping.")
     }
 
-    # Working-tree state key -- git only, no cargo-delta, no base ref. The
-    # dirty-tree guard above already exited on any non-target/ change, so by
-    # this point the tree is clean and the snapshot corresponds exactly to
-    # HEAD; the key is therefore just the HEAD sha. (An earlier version also
-    # appended a hash of `git diff HEAD` + porcelain status, but past the guard
-    # both are empty for every tracked change. Their only remaining input was
-    # tracked target/ content -- which `git diff HEAD` reports even though the
-    # guard's status probe excludes target/ -- so it could only cause spurious
-    # current-snapshot invalidation, never add signal. target/ must not perturb
-    # the key, so keying on HEAD alone is both simpler and more correct.)
-    $currentState = (git rev-parse HEAD).Trim()
+    # The dirty-tree guard leaves a clean tree corresponding exactly to HEAD.
+    # Include the pinned cargo-delta version without invoking the tool, so an
+    # upgrade invalidates old snapshot formats even when HEAD is unchanged.
+    # target/ changes must not perturb this key.
+    $currentState = "$((git rev-parse HEAD).Trim()) {{ cargo_delta_version }}"
 
     # Consumer fast path: reuse an already-present, matching snapshot set
     # WITHOUT cargo-delta or a fetched base ref -- this short-circuits a local
@@ -174,11 +169,9 @@ _anvil-impact-snapshot:
         git rev-parse --verify "$base^{commit}" 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) { $baseSha = (git rev-parse $base).Trim() }
     }
-    # Baseline freshness is keyed on the COMPOSITE `$baseSha $deltaConfigId`
-    # (see the config-identity note above): a moved base ref OR a changed
-    # cargo-delta config both invalidate it, so the baseline is never diffed
-    # against a current snapshot captured under different rules.
-    $baselineKey = "$baseSha $deltaConfigId"
+    # A moved base ref, changed config, or tool upgrade invalidates the
+    # baseline, so it is never reused across incompatible rules or formats.
+    $baselineKey = "$baseSha $deltaConfigId {{ cargo_delta_version }}"
     $baselineFresh = (Test-Path $baselineKeyFile) -and `
         ((Test-Path $baselineJson) -or (Test-Path $noWorkspaceMarker)) -and `
         ("$(Get-Content -Raw $baselineKeyFile)".Trim() -eq $baselineKey)
@@ -225,10 +218,10 @@ _anvil-impact-snapshot:
         exit 1
     }
 
-    # --- Baseline snapshot: only when the base sha OR the config changed. ---
+    # --- Baseline snapshot: only when the base sha, config, or tool changed. ---
     # Re-derive the composite key now that `$baseSha` is authoritatively
     # resolved (the fast-path value above may have been $null on a cache miss).
-    $baselineKey = "$baseSha $deltaConfigId"
+    $baselineKey = "$baseSha $deltaConfigId {{ cargo_delta_version }}"
     $haveBaseline = (Test-Path $baselineKeyFile) -and `
         ("$(Get-Content -Raw $baselineKeyFile)".Trim() -eq $baselineKey) -and `
         ((Test-Path $baselineJson) -or (Test-Path $noWorkspaceMarker))
@@ -486,9 +479,8 @@ anvil-impact: _anvil-impact-snapshot
     Set-Content -LiteralPath $impactJson -Value $impactOut.Trim() -Encoding UTF8
 
     # Project each tier into its `--package name@version ...` / `--skip`
-    # string via the shared formatter (version-qualified specs + lib-name ->
-    # package-name translation live there, used identically by the cloud
-    # impact steps).
+    # string via the shared formatter (version-qualified workspace-member
+    # specs live there, used identically by the cloud impact steps).
     foreach ($tier in @('modified', 'affected', 'required')) {
         $value = (& "{{ just_executable() }}" _anvil-impact-format $tier $impactJson)
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -516,7 +508,7 @@ anvil-impact: _anvil-impact-snapshot
 #     transitive dependency pulled in at a different version, which a
 #     bare `-p name` cannot do ("multiple packages named name").
 #   * "--skip" when the tier is empty (recipes treat this as a no-op).
-# Metadata failures and unknown/ambiguous package names are written to
+# Metadata failures and unknown package names are written to
 # STDERR and fail the recipe, so callers never continue with an incomplete
 # package set (which would silently under-scope and skip a check).
 #
@@ -544,19 +536,9 @@ _anvil-impact-format tier impactJson:
             exit 1
         }
     }
-    # Build three lookups from workspace members:
-    #   * $byName:    exact cargo package name (may contain hyphens) -> pkgs
-    #   * $byLib:     library / proc-macro target name (snake_case) -> pkgs
-    #   * $byDirLeaf: manifest directory leaf -> pkgs
-    # cargo-delta reports *library* names (snake_case), but for crates
-    # whose package name differs from the lib name (e.g. `cargo-anvil`
-    # vs `cargo_anvil`) we must translate back to the package name cargo
-    # accepts. Proc-macro crates carry the same name/target skew, so their
-    # target is indexed too. Bin-only crates have no lib target; cargo-delta
-    # reports those by their package name, caught by $byName. In deeply
-    # nested workspaces cargo-delta can instead emit a manifest directory
-    # leaf; accept any reported identifier only when every matching namespace
-    # resolves to the *same* workspace package.
+    # cargo-delta JSON reports Cargo package names. Library target names and
+    # manifest directory leaves are not aliases: they can name a different
+    # workspace package.
     $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --locked --no-deps --format-version 1
     $metadataExit = $LASTEXITCODE
     if ($metadataExit -ne 0) {
@@ -569,17 +551,9 @@ _anvil-impact-format tier impactJson:
         Write-Error "anvil-impact: could not parse cargo metadata output: $_"
         exit 1
     }
-    # These identifiers (package name, lib/proc-macro target name, manifest
-    # directory leaf) are case-sensitive: both `cargo metadata` and cargo-delta
-    # derive them from the same on-disk workspace, so their casing agrees
-    # exactly. Use Ordinal dictionaries rather than PowerShell's default
-    # case-insensitive hashtables so that case-distinct identifiers on a
-    # case-sensitive checkout (`Foo` vs `foo`) stay separate instead of
-    # collapsing into one key and triggering a spurious ambiguous-identifier
-    # error.
+    # Preserve exact package-name casing instead of using PowerShell's default
+    # case-insensitive hashtables.
     $byName = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
-    $byLib = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
-    $byDirLeaf = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
     $workspaceIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     foreach ($id in $meta.workspace_members) { [void]$workspaceIds.Add("$id") }
     $workspacePackages = @($meta.packages | Where-Object { $workspaceIds.Contains("$($_.id)") })
@@ -594,62 +568,18 @@ _anvil-impact-format tier impactJson:
         Set-Content -LiteralPath $doctestFile -Value ($doctestSpecs -join "`n") -Encoding UTF8 -NoNewline
     }
     foreach ($p in $workspacePackages) {
-        if (-not $byName.ContainsKey($p.name)) {
-            $byName[$p.name] = [System.Collections.Generic.List[object]]::new()
-        }
-        $byName[$p.name].Add($p)
-        foreach ($t in $p.targets) {
-            if (($t.kind -contains 'lib') -or ($t.kind -contains 'proc-macro')) {
-                if (-not $byLib.ContainsKey($t.name)) {
-                    $byLib[$t.name] = [System.Collections.Generic.List[object]]::new()
-                }
-                $byLib[$t.name].Add($p)
-            }
-        }
-        $dirLeaf = Split-Path (Split-Path $p.manifest_path -Parent) -Leaf
-        if (-not $byDirLeaf.ContainsKey($dirLeaf)) {
-            $byDirLeaf[$dirLeaf] = [System.Collections.Generic.List[object]]::new()
-        }
-        $byDirLeaf[$dirLeaf].Add($p)
+        $byName[$p.name] = $p
     }
     $impact = Get-Content -LiteralPath $impactJson -Raw | ConvertFrom-Json
     $names = @($impact.$tierKey)
     $specs = [System.Collections.Generic.List[string]]::new()
     foreach ($name in $names) {
         if ([string]::IsNullOrWhiteSpace($name)) { continue }
-        # Union candidates from every namespace, de-duplicated by package id
-        # (case-sensitive, so Ordinal) so that a name matching the same package
-        # as both a cargo name and a directory leaf collapses to one candidate.
-        $matches = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
-        if ($byName.ContainsKey($name)) {
-            foreach ($candidate in $byName[$name]) { $matches[$candidate.id] = $candidate }
-        }
-        if ($byLib.ContainsKey($name)) {
-            foreach ($candidate in $byLib[$name]) { $matches[$candidate.id] = $candidate }
-        }
-        if ($byDirLeaf.ContainsKey($name)) {
-            foreach ($candidate in $byDirLeaf[$name]) { $matches[$candidate.id] = $candidate }
-        }
-        $candidates = @($matches.Values)
-        if ($candidates.Count -eq 0) {
-            # A name cargo-delta reported that doesn't resolve to any workspace
-            # package -- a gap in our reverse-mapping of the (non-unique) library
-            # identifier cargo-delta emits. Fail hard so the mapping gap is
-            # surfaced and fixed rather than silently under-scoping the tier.
+        if (-not $byName.ContainsKey($name)) {
             Write-Error "anvil-impact: cargo-delta returned unknown package '$name' in the $tier set. Re-run with ANVIL_IMPACT=off to proceed unscoped, and report the unmapped identifier."
             exit 1
         }
-        if ($candidates.Count -ne 1) {
-            # The identifier is genuinely ambiguous -- it names two or more
-            # distinct workspace packages across the name / lib / directory-leaf
-            # namespaces (e.g. `ffi` / `ffi_build` collisions in deeply nested
-            # workspaces). We cannot know which cargo-delta meant, so fail hard
-            # rather than guess and risk under-scoping the tier.
-            $candidateNames = ($candidates | ForEach-Object { $_.name } | Sort-Object) -join ', '
-            Write-Error "anvil-impact: cargo-delta returned ambiguous package identifier '$name' in the $tier set (matches: $candidateNames). Re-run with ANVIL_IMPACT=off to proceed unscoped, and report the identifier."
-            exit 1
-        }
-        $p = $candidates[0]
+        $p = $byName[$name]
         $specs.Add("--package $($p.name)@$($p.version)")
     }
     if ($specs.Count -eq 0) {
