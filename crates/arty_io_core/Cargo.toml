@@ -3,7 +3,7 @@
 
 [package]
 name = "arty_io_core"
-description = "Stable contracts for integrating external I/O drivers with thread-aware runtimes."
+description = "Contracts between I/O drivers and thread-aware runtimes."
 version = "0.3.0"
 readme = "README.md"
 keywords = ["arty", "async", "runtime"]

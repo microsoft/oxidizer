@@ -1,52 +1,50 @@
 # Driver contract follow-ups
 
-These items should be resolved before the contract is stabilized. They do not
+Resolve these items before the contract is stable. They do not
 block evaluation of the current API.
 
 ## Separate context from driver creation
 
-`IoContext` is both the application-facing I/O handle and the factory for
-worker-local drivers. Consider moving driver creation to a `DriverProvider` so
-endpoint authors do not need to implement runtime lifecycle methods.
+`IoContext` is the application I/O handle and the factory for worker-local
+drivers. Consider moving driver creation to a `DriverProvider`. This change
+keeps runtime lifecycle methods out of endpoint implementations.
 
 The intended split is:
 
-- `IoContext` is the application-facing I/O handle;
-- `DriverProvider` creates worker-local drivers for the runtime;
-- the context identifies or creates its provider;
-- the runtime clones and relocates the provider to each worker.
+- `IoContext` is the application I/O handle.
+- `DriverProvider` creates worker-local drivers for the runtime.
+- The context identifies or creates its provider.
+- The runtime clones and relocates the provider to each worker.
 
-Provider-specific inputs, such as a GPU handle, should use a strongly typed
-provider option rather than a shared empty options type.
+For provider-specific inputs, such as a GPU handle, a strongly typed provider
+option is preferable to a shared empty option type.
 
 Before changing the API, settle:
 
-- how callers construct the context and provider;
-- whether the provider is cloned per worker or relocated between workers;
-- which `Clone`, `Send`, and `ThreadAware` bounds each type needs;
-- when the runtime publishes the context relative to driver initialization.
+- How callers construct the context and provider.
+- Whether the provider is cloned for each worker or relocated between workers.
+- Which `Clone`, `Send`, and `ThreadAware` bounds each type needs.
+- When the runtime publishes the context relative to driver initialization.
 
 ## Stabilize `thread_aware_core`
 
-`Thread` and `ThreadAware` are part of this crate's public API. Stabilize those
-types and their relocation contract before stabilizing `arty_io_core`.
+`Thread` and `ThreadAware` are part of this crate's public API. Make those types
+and their relocation contract stable before you stabilize `arty_io_core`.
 
 ## Review unwind-safety contracts
 
-Decide which public value types should promise `UnwindSafe` and
-`RefUnwindSafe` before stabilization. Add contract assertions for the intended
-markers.
+Decide which public value types will implement `UnwindSafe` and `RefUnwindSafe`.
+Add contract assertions for those markers before stabilization.
 
-`DriverError` currently accepts any `Error + Send + Sync` source, so it does not
-promise unwind-safety markers. Keep broad source acceptance unless there is a
-concrete need to narrow it.
+`DriverError` accepts any `Error + Send + Sync` source. It therefore does not
+promise unwind-safety markers. Keep this broad source support unless a specific
+requirement needs narrower bounds.
 
 ## Move shutdown to `Drop`
 
-Consider removing `Driver::shutdown` and requiring each driver to drain its
-resources from `Drop`. An infallible shutdown method would otherwise duplicate
-`Drop`.
+Consider removing `Driver::shutdown`. Each driver then drains its resources from
+`Drop`. An infallible shutdown method duplicates `Drop`.
 
-This removes the runtime's ability to emit one uniform event when a driver
-cannot finish draining. Each driver would need to report that condition itself.
-Resolve that telemetry tradeoff before removing the current fallible method.
+This change stops the runtime from emitting one uniform event when a driver
+cannot finish draining. Each driver then reports that condition. Resolve this
+telemetry tradeoff before you remove the current fallible method.
