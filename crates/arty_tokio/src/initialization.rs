@@ -189,14 +189,17 @@ pub(crate) async fn initialize_all_workers(cx: &Builtins, tokio: TokioHandle) ->
     }
 
     transaction.abort();
-    for installer in &mut installers {
-        installer
-            .finish()
-            .await
-            .expect("an installer that reported startup exits normally after transaction abort");
-    }
+    finish_installers(&mut installers, &mut failure).await;
     abort_on_drop.disarm();
     Err(failure.unwrap_or_else(initialization_aborted))
+}
+
+async fn finish_installers(installers: &mut [Installer], failure: &mut Option<InitError>) {
+    for installer in installers {
+        if let Err(error) = installer.finish().await {
+            failure.get_or_insert(error);
+        }
+    }
 }
 
 fn startup_succeeded(failure: Option<&InitError>, ready: usize, expected: usize) -> bool {
@@ -253,13 +256,14 @@ async fn install_worker(data: InstallerData) {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::future::pending;
     use std::sync::Arc;
 
     use arty::runtime::{Runtime as ArtyRuntime, WorkersPolicy};
     use performables::sync::channel::oneshot;
     use tokio::runtime::{Builder, Runtime};
 
-    use super::{AbortOnDrop, Installer, Phase, StartupResult, Transaction, commit_if_started, startup_succeeded};
+    use super::{AbortOnDrop, Installer, Phase, StartupResult, Transaction, commit_if_started, finish_installers, startup_succeeded};
 
     fn transaction() -> (Arc<Transaction>, Runtime) {
         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
@@ -347,6 +351,38 @@ mod tests {
         runtime.stop().unwrap_err();
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn rollback_collects_join_failures_and_finishes_every_installer() {
+        let runtime = ArtyRuntime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+        let (failed, canceled) = runtime
+            .scheduler()
+            .block_on(async |cx| {
+                let failed = cx.scheduler().spawn(async |_| panic!("expected installer task failure"));
+                let canceled = cx.scheduler().spawn(async |_| pending::<()>().await);
+                (failed, canceled)
+            })
+            .unwrap();
+        let (_first_startup, first_startup_result) = oneshot();
+        let (_second_startup, second_startup_result) = oneshot();
+        let mut installers = [
+            Installer {
+                startup: first_startup_result,
+                join: Some(failed),
+            },
+            Installer {
+                startup: second_startup_result,
+                join: Some(canceled),
+            },
+        ];
+        let mut failure = None;
+
+        futures::executor::block_on(finish_installers(&mut installers, &mut failure));
+
+        assert!(failure.is_some());
+        assert!(installers.iter().all(|installer| installer.join.is_none()));
+        runtime.stop().unwrap_err();
     }
 
     #[test]
