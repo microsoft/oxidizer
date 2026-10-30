@@ -357,6 +357,25 @@ mod tests {
     }
 
     #[test]
+    fn overloaded_pool_grows_only_to_configured_thread_limit() {
+        let pool = Pool::new(Some(limit(2)));
+        let queued_task_count = Pool::MAX_TASKS_PER_THREAD * 2 + 1;
+        pool.inner
+            .lock_result()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .queued_count
+            .store(queued_task_count, Ordering::SeqCst);
+
+        pool.grow_if_overloaded();
+        assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
+
+        pool.grow_if_overloaded();
+        assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
+    }
+
+    #[test]
     fn blocking_pool_reports_configured_max_thread_count() {
         // A configured value distinct from both 1 and the initial thread count keeps
         // this assertion honest: the getter must return the exact maximum it was
