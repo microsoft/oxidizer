@@ -176,9 +176,7 @@ impl Worker {
             }
         };
 
-        if matches!(self.remote_results.shutdown().state(), ShutdownState::Running)
-            && self.pool.execute(task)
-        {
+        if matches!(self.remote_results.shutdown().state(), ShutdownState::Running) && self.pool.execute(task) {
             self.pool.grow_if_overloaded();
         }
 
@@ -692,11 +690,7 @@ mod tests {
     #[test]
     fn runtime_shutdown_cancels_queued_work_before_worker_shutdown() {
         let runtime_shutdown = Shutdown::default();
-        let worker = Worker::new(
-            Pool::new(Some(limit(1))),
-            runtime_shutdown.clone(),
-            PanicPolicy::Ignore,
-        );
+        let worker = Worker::new(Pool::new(Some(limit(1))), runtime_shutdown.clone(), PanicPolicy::Ignore);
         let (started_tx, started_rx) = channel();
         let (release_tx, release_rx) = Event::<()>::boxed();
 

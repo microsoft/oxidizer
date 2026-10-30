@@ -241,11 +241,7 @@ mod tests {
         const PROCESSORS: usize = 4;
 
         let hardware = fake_hardware(PROCESSORS);
-        let runtime = runtime_with_processors(
-            WorkersPolicy::at_most(16),
-            MonitorPolicy::disabled().into(),
-            &hardware.processors(),
-        );
+        let runtime = runtime_with_processors(WorkersPolicy::at_most(16), MonitorPolicy::disabled().into(), &hardware.processors());
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let workers: HashSet<_> = cx
             .control()
@@ -266,11 +262,7 @@ mod tests {
         const PROCESSORS: usize = 4;
 
         let hardware = fake_hardware(PROCESSORS);
-        let runtime = runtime_with_processors(
-            WorkersPolicy::all(),
-            MonitorPolicy::disabled().into(),
-            &hardware.processors(),
-        );
+        let runtime = runtime_with_processors(WorkersPolicy::all(), MonitorPolicy::disabled().into(), &hardware.processors());
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let workers: HashSet<_> = cx
             .control()

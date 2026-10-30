@@ -147,11 +147,7 @@ impl ThreadEntry {
             arty_executor::PanicPolicy::Ignore => blocking::PanicPolicy::Ignore,
             arty_executor::PanicPolicy::Shutdown => blocking::PanicPolicy::Shutdown(worker_waker.clone()),
         };
-        let blocking_worker = blocking::Worker::new(
-            blocking_pools.pool_for_worker(),
-            shutdown,
-            blocking_panic_policy,
-        );
+        let blocking_worker = blocking::Worker::new(blocking_pools.pool_for_worker(), shutdown, blocking_panic_policy);
 
         endpoint_tx
             .send(Endpoint {
@@ -292,11 +288,7 @@ mod tests {
         let (command_tx, _command_rx) = channel::unbounded();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(
-            blocking::Pool::new(None),
-            shutdown.clone(),
-            blocking::PanicPolicy::Ignore,
-        );
+        let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
             command_tx,
             waker: Waker::noop().clone(),
@@ -315,11 +307,7 @@ mod tests {
         let (command_tx, _command_rx) = channel::unbounded();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(
-            blocking::Pool::new(None),
-            shutdown.clone(),
-            blocking::PanicPolicy::Ignore,
-        );
+        let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
             command_tx,
             waker: Waker::noop().clone(),

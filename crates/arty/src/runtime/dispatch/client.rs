@@ -45,10 +45,7 @@ impl DispatcherClient {
                 crate::runtime::worker::blocking::PanicPolicy::Ignore,
             ),
         };
-        Self::new(DispatcherCore::new(
-            nonempty::NonEmpty::new(endpoint),
-            shutdown,
-        ))
+        Self::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown))
     }
 
     pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
@@ -125,7 +122,6 @@ impl DispatcherClient {
     pub(crate) fn stop(&self, cause: impl Into<ShutdownCause>) -> ShutdownCause {
         self.core.stop_inner(cause.into())
     }
-
 }
 
 impl Debug for DispatcherClient {
@@ -160,10 +156,7 @@ mod tests {
             thread: test_threads(1).pop().unwrap(),
             blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),
         };
-        let client = DispatcherClient::new(DispatcherCore::new(
-            nonempty::NonEmpty::new(worker),
-            Shutdown::default(),
-        ));
+        let client = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(worker), Shutdown::default()));
         let clone = client.clone();
         assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Running);
         assert_eq!(clone.shutdown().state(), crate::runtime::ShutdownState::Running);
@@ -307,10 +300,7 @@ mod tests {
             thread: threads[0].clone(),
             blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),
         };
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(
-            nonempty::NonEmpty::new(worker),
-            Shutdown::default(),
-        ));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(worker), Shutdown::default()));
         let thread = if registered { threads[0].clone() } else { threads[1].clone() };
         crate::io::Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher, thread)
     }

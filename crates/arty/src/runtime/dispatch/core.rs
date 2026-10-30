@@ -261,7 +261,6 @@ impl DispatcherCore {
 
         join_handle
     }
-
 }
 
 #[cfg(test)]
@@ -386,10 +385,7 @@ mod tests {
     fn unregistered_thread_has_no_worker_index() {
         let threads = test_threads(2);
         let (tx, _rx) = channel::unbounded();
-        let dispatcher = DispatcherCore::new(
-            NonEmpty::new(endpoint(tx, &threads[0])),
-            Shutdown::default(),
-        );
+        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint(tx, &threads[0])), Shutdown::default());
 
         assert!(dispatcher.worker_index(threads[1].id()).is_none());
     }
@@ -398,10 +394,7 @@ mod tests {
     fn shutdown_state_is_shared_with_dispatcher_client() {
         let (tx, _rx) = channel::unbounded();
         let threads = test_threads(1);
-        let core = DispatcherCore::new(
-            NonEmpty::new(endpoint(tx, &threads[0])),
-            Shutdown::default(),
-        );
+        let core = DispatcherCore::new(NonEmpty::new(endpoint(tx, &threads[0])), Shutdown::default());
         let client = DispatcherClient::new(Arc::clone(&core));
         let shutdown = client.shutdown();
 
@@ -414,10 +407,7 @@ mod tests {
     fn io_access_after_shutdown_is_rejected() {
         let (tx, rx) = channel::unbounded();
         let threads = test_threads(1);
-        let dispatcher = DispatcherCore::new(
-            NonEmpty::new(endpoint(tx, &threads[0])),
-            Shutdown::default(),
-        );
+        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint(tx, &threads[0])), Shutdown::default());
         dispatcher.stop_inner(ShutdownCause::default());
         let invoked = Arc::new(AtomicBool::new(false));
 
@@ -442,10 +432,7 @@ mod tests {
     fn worker_failure_is_attached_to_rejected_task_joins() {
         let (tx, _rx) = channel::unbounded();
         let threads = test_threads(1);
-        let dispatcher = DispatcherCore::new(
-            NonEmpty::new(endpoint(tx, &threads[0])),
-            Shutdown::default(),
-        );
+        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint(tx, &threads[0])), Shutdown::default());
         dispatcher.stop_inner(ShutdownError::new(Error::worker_panicked()).into());
 
         let mut join = pin!(dispatcher.spawn(|_| async {}));

@@ -354,11 +354,7 @@ mod tests {
     fn test_blocking_worker() -> (Arc<blocking::Worker>, Shutdown) {
         let shutdown = Shutdown::default();
         (
-            blocking::Worker::new(
-                blocking::Pool::new(None),
-                shutdown.clone(),
-                blocking::PanicPolicy::Ignore,
-            ),
+            blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore),
             shutdown,
         )
     }
