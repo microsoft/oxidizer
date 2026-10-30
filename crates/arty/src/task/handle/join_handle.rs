@@ -24,15 +24,18 @@ use crate::runtime::worker::blocking::{LocalWorker as BlockingLocalWorker, PoolI
 /// If the task returns its own `Result<T, E>`, joining it produces
 /// `Result<Result<T, E>, JoinError>`.
 ///
-/// A result from [`Scheduler::spawn_anywhere`](crate::task::Scheduler::spawn_anywhere)
-/// or [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at) is
-/// relocated to the joining Arty worker before it is returned. Joining from
-/// outside an Arty worker leaves its association unchanged. Other submission
-/// methods do not relocate their results.
+/// [`Scheduler::spawn_anywhere`](crate::task::Scheduler::spawn_anywhere) and
+/// [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at) relocate a result
+/// to the joining Arty worker before returning it. A join outside Arty leaves
+/// the result association unchanged. Other submission methods do not relocate
+/// results.
+///
+/// The result type must implement `Send + 'static` because it crosses the task
+/// boundary.
 ///
 /// # Panics
 ///
-/// Panics if polled again after its result has been received. A blocking
+/// Panics if polled again after it receives its result. A blocking
 /// handle also panics if it is polled directly from a callback running in the
 /// same blocking pool.
 /// Result relocation also propagates a panic if its `ThreadAware`

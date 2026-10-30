@@ -15,12 +15,10 @@ use crate::runtime::handle::Runtime;
 ///
 /// Obtain a builder from [`Runtime::builder`], change the settings you need,
 /// then call [`build`](Self::build) to start the workers. Setters replace earlier
-/// values for the same setting; configuring a builder does not start threads.
+/// values for the same setting. Configuring a builder does not start threads.
 ///
-/// The defaults are [`WorkersPolicy::default`], 2 MiB async-worker stacks,
-/// a shared blocking pool, a real-time clock, and [`MonitorPolicy::enabled`].
-/// A contained async task panic starts
-/// coordinated shutdown by default.
+/// See the [runtime defaults](crate::runtime#defaults) for the initial
+/// configuration.
 ///
 /// # Examples
 ///
@@ -65,7 +63,7 @@ impl RuntimeBuilder {
     ///
     /// The default is [`MonitorPolicy::enabled`]. The `monitor` Cargo feature
     /// enables the Seismograph dependencies that monitoring needs. This stage
-    /// only stores and propagates the policy; it does not start a monitor,
+    /// only stores and propagates the policy. It does not start a monitor,
     /// instrument tasks, or change runtime scheduling.
     ///
     /// # Examples
@@ -86,7 +84,7 @@ impl RuntimeBuilder {
     /// The runtime assigns each async worker to one available processor.
     /// Exact policies can assign multiple worker threads to one processor.
     /// The default is [`WorkersPolicy::default`]. This does not set blocking-pool
-    /// limits; use [`blocking_pool`](Self::blocking_pool) for those.
+    /// limits. Use [`blocking_pool`](Self::blocking_pool) for those limits.
     /// A zero count is rejected by [`build`](Self::build), not by this setter.
     ///
     /// # Examples
@@ -180,7 +178,7 @@ impl RuntimeBuilder {
     ///
     /// Automatic timer advancement occurs eagerly on timer registration or
     /// explicit controlled-time reads. Use manual advancement when concurrent
-    /// timers' relative order matters; see the [time guide](crate::documentation::time).
+    /// timers' relative order matters. See the [`time`](crate::time) module.
     #[must_use]
     pub fn clock(mut self, clock: impl Into<InactiveClock>) -> Self {
         self.clock = clock.into();

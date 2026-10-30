@@ -23,12 +23,12 @@ use crate::runtime::worker::blocking::Pools;
 /// common thread limit. Chain [`max`](Self::max) to cap the threads in either
 /// the shared pool or each per-worker pool.
 ///
-/// Choose based on your workload; neither policy is faster in every case.
+/// Choose based on your workload. Neither policy is faster in every case.
 /// Pool sizing must also account for dependency cycles. A blocking callback
 /// that waits for async work which in turn waits for the same saturated pool
-/// can deadlock. Shared pools make the dependency runtime-wide; per-worker pools
-/// confine it to one async worker's pool. Arty does not track transitive task
-/// dependencies to detect such cycles.
+/// can deadlock. Shared pools make the dependency runtime-wide. Per-worker
+/// pools confine it to one async worker pool. Arty does not track transitive
+/// task dependencies to detect such cycles.
 ///
 /// # Examples
 ///

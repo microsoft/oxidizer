@@ -79,8 +79,12 @@ impl RuntimeScheduler {
     /// factory and future are destroyed before this method returns, even if
     /// the task fails or is cancelled.
     ///
-    /// Return owned data or modify borrowed data in place; results cannot borrow
-    /// the caller's stack. Captures and results are not automatically relocated.
+    /// The factory must implement `Send`. The future can borrow caller-owned
+    /// data and does not need to implement `Send`. The result must implement
+    /// `Send + 'static`.
+    ///
+    /// Return owned data or modify borrowed data in place. Results cannot borrow
+    /// the caller's stack. Arty does not automatically relocate captures or results.
     /// The runtime remains available for further work until stopped or dropped.
     ///
     /// # Errors
@@ -139,6 +143,7 @@ impl RuntimeScheduler {
     /// outside the runtime. The function pointer receives [`Context`] and
     /// the relocated data. Its future need not be [`Send`], but its result must
     /// be `Send`. The result is not relocated and need not implement `ThreadAware`.
+    /// The payload, future, and result must be `'static`.
     ///
     /// Use `()` for work without a payload. For payloads that do not implement
     /// `ThreadAware`, see [`Unaware`](thread_aware::Unaware) and its guidance
@@ -192,15 +197,16 @@ impl RuntimeScheduler {
     /// Submits a synchronous callback to a blocking-task pool.
     ///
     /// Uses a pool chosen by the runtime for synchronous I/O or other work
-    /// that would stall an async worker.
+    /// that can stall an async worker.
     /// A callback panic fails its join handle and follows the configured
     /// [`PanicPolicy`](crate::runtime::PanicPolicy).
+    /// The callback and its result must implement `Send + 'static`.
     ///
     /// Shutdown rejects new callbacks and cancels queued callbacks before they
     /// start. Already-running callbacks are allowed to finish.
     ///
-    /// Do not synchronously poll a handle for work submitted to the same pool;
-    /// direct attempts panic. [`block_on`](Self::block_on) also rejects calls
+    /// Do not synchronously poll a handle for work submitted to the same pool.
+    /// Direct attempts panic. [`block_on`](Self::block_on) also rejects calls
     /// from blocking callbacks before task submission.
     ///
     /// # Examples

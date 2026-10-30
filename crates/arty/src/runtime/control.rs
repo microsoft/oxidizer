@@ -57,7 +57,7 @@ impl RuntimeControl {
 
     /// Requests shutdown without blocking the calling thread.
     ///
-    /// May be called repeatedly from any thread. Pending tasks are cancelled,
+    /// You can call this method repeatedly from any thread. Pending tasks are cancelled,
     /// and new submissions receive [`JoinError`](crate::task::JoinError).
     /// Running blocking callbacks are allowed to finish. The owner remains
     /// responsible for waiting for shutdown when it is stopped or dropped.

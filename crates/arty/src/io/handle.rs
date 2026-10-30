@@ -20,14 +20,14 @@ use crate::task::Context;
 ///
 /// Obtain this handle from [`Context::io`](crate::task::Context::io). Clones
 /// remain associated with the same worker until their runtime relocates them.
-/// They can be used from ordinary threads; such access synchronously dispatches
-/// to the associated worker and is slower than worker-local access.
+/// Ordinary threads can use a clone. This access synchronously dispatches to
+/// the associated worker and is slower than worker-local access.
 ///
 /// A context type is registered once per runtime. The first request creates,
 /// stores a thread-neutral context, then clones and relocates it to initialize
 /// the requesting worker's driver. Other workers initialize their own driver
 /// when they first request that context. The first context type requested from
-/// a runtime is assigned the primary driver role; later context types are
+/// a runtime is assigned the primary driver role. Later context types are
 /// assigned the secondary role.
 #[derive(Clone)]
 pub struct Io {
@@ -47,12 +47,13 @@ impl Io {
 
     /// Returns the runtime's context of type `C`, registering it if necessary.
     ///
-    /// `options` must be initialized before this call. Arty may clone it while
+    /// `options` must be initialized before this call. Arty can clone it while
     /// routing the request and accessing the worker-local host. Keep context
-    /// options inexpensive to clone.
+    /// options inexpensive to clone. The options type must implement `Clone`,
+    /// `Send`, and `'static`.
     ///
     /// Each concrete context type is initialized once per runtime. The first
-    /// successful call fixes the context created from `options`; later calls
+    /// successful call fixes the context created from `options`. Later calls
     /// return clones of that context and ignore any different options supplied.
     ///
     /// # Panics
@@ -74,24 +75,29 @@ impl Io {
 
     /// Returns the runtime's context of type `C`, registering it if necessary.
     ///
-    /// `options` must be initialized before this call. Arty may clone it while
+    /// `options` must be initialized before this call. Arty can clone it while
     /// routing the request and accessing the worker-local host. Keep context
-    /// options inexpensive to clone.
+    /// options inexpensive to clone. The options type must implement `Clone`,
+    /// `Send`, and `'static`.
     ///
     /// Each concrete context type is initialized once per runtime. The first
-    /// successful call fixes the context created from `options`; later calls
+    /// successful call fixes the context created from `options`. Later calls
     /// return clones of that context and ignore any different options supplied.
     /// The requesting worker's driver is initialized before this method
     /// returns. Other workers initialize their driver on first retrieval.
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`] if the worker-local driver cannot be initialized,
-    /// the runtime is shutting down, the handle is no longer bound to an active
-    /// worker, the caller is an Arty worker other than the handle's associated
-    /// worker (from the same runtime or a different runtime), or context
-    /// retrieval is nested inside another context's initialization. Driver
-    /// initialization failure also requests runtime shutdown.
+    /// Returns an [`Error`] in these cases:
+    ///
+    /// - The worker-local driver cannot initialize.
+    /// - The runtime is shutting down.
+    /// - The handle is not bound to an active worker.
+    /// - Another Arty worker calls the handle. The worker can belong to the same
+    ///   runtime or a different runtime.
+    /// - Context retrieval occurs inside another context initialization.
+    ///
+    /// A driver initialization failure also requests runtime shutdown.
     pub(crate) fn try_context<C>(&self, options: &C::ContextOptions) -> Result<C, Error>
     where
         C: IoContext,

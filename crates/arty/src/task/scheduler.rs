@@ -29,7 +29,7 @@ use crate::task::preparation::DeferredTask;
 ///
 /// Once shutdown starts, submissions return an immediately ready
 /// [`JoinError`](crate::task::JoinError) without invoking the factory. Await
-/// required results before shutdown; dropping a join does not cancel its task.
+/// required results before shutdown. Dropping a join does not cancel its task.
 ///
 /// # Examples
 ///
@@ -94,7 +94,9 @@ impl Scheduler {
     /// so the future need not be [`Send`]. Pass a factory, not an already-created
     /// future.
     ///
-    /// Captured values and returned results are not automatically relocated.
+    /// Factory captures and results must implement `Send + 'static`. The future
+    /// must be `'static`. Captured values and returned results are not
+    /// automatically relocated.
     /// Use [`spawn_anywhere`](Self::spawn_anywhere) to relocate an explicit payload.
     /// Factory and future panics are reported through the [`JoinHandle`].
     ///
@@ -169,13 +171,15 @@ impl Scheduler {
     /// Submits a task to a worker chosen by the runtime and relocates its payload.
     ///
     /// On the chosen worker, relocates `data` from this scheduler's worker
-    /// before calling `f`. The runtime may choose the same worker.
+    /// before calling `f`. The runtime can choose the same worker.
     ///
     /// `f` is a function pointer: pass values as `data` instead of capturing
-    /// them. The result must implement [`ThreadAware`]. When its join completes
-    /// on an Arty worker, the result is relocated from the task's worker to the
-    /// joining worker before being returned. Normally this is the source worker;
-    /// moving the join to another worker changes the return destination.
+    /// them. The payload and result must implement [`ThreadAware`] and `'static`.
+    /// The future must be `'static` and does not need to implement `Send`. When
+    /// its join completes on an Arty worker, the result is relocated from the
+    /// task's worker to the joining worker before being returned. Normally this
+    /// is the source worker. Moving the join to another worker changes the
+    /// return destination.
     /// Joining outside an Arty worker does not relocate the result.
     ///
     /// # Examples
@@ -230,8 +234,9 @@ impl Scheduler {
     /// Before calling `f`, Arty relocates `data` from this scheduler's worker to
     /// the destination.
     ///
-    /// Futures need not be [`Send`]. Results must implement [`ThreadAware`].
-    /// When the join completes on an Arty worker, the result is relocated from
+    /// The payload and result must implement [`ThreadAware`] and `'static`. The
+    /// future must be `'static` and does not need to implement `Send`. When the
+    /// join completes on an Arty worker, the result is relocated from
     /// `destination` to the joining worker, normally this scheduler's worker.
     /// Joining outside Arty does not relocate the result. Shutdown or an
     /// unsupported destination rejects the submission without relocating
@@ -308,10 +313,11 @@ impl Scheduler {
 
     /// Submits a synchronous callback to a blocking-task pool.
     ///
-    /// Use this for synchronous I/O or library calls that would otherwise prevent
-    /// an async worker from polling tasks and advancing timers. The callback
+    /// Use this for synchronous I/O or library calls that can prevent an async
+    /// worker from polling tasks and advancing timers. The callback
     /// runs on a separate pool thread. A callback panic fails its join handle
     /// and follows the configured [`PanicPolicy`](crate::runtime::PanicPolicy).
+    /// The callback and its result must implement `Send + 'static`.
     ///
     /// Uses the associated worker's pool. Configure sharing and limits with
     /// [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
@@ -321,7 +327,7 @@ impl Scheduler {
     /// Pool sizing targets blocking calls, not sustained CPU-parallel workloads.
     ///
     /// A callback must not synchronously poll another blocking handle from its
-    /// own pool; direct attempts panic.
+    /// own pool. Direct attempts panic.
     /// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
     /// also rejects calls from blocking callbacks before task submission.
     ///
@@ -332,7 +338,9 @@ impl Scheduler {
     /// ```no_run
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Context) -> Result<(), ohno::AppError> {
+    /// # async fn main(
+    /// #     cx: arty::task::Context,
+    /// # ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     /// let contents = cx
     ///     .scheduler()
     ///     .spawn_blocking(|| std::fs::read_to_string("settings.toml"))
@@ -343,7 +351,7 @@ impl Scheduler {
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
     /// ```
     ///
-    /// The first `?` handles task failure; the second handles the file's I/O error.
+    /// The first `?` handles task failure. The second handles the file I/O error.
     pub fn spawn_blocking<B, R>(&self, body: B) -> JoinHandle<R>
     where
         B: FnOnce() -> R + Send + 'static,

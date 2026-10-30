@@ -5,33 +5,34 @@
 
 #![cfg(feature = "rt")]
 #![cfg(feature = "macros")]
-#![expect(clippy::panic, reason = "these tests inject task panics to verify macro panic-policy wiring")]
+#![expect(clippy::panic, reason = "these tests inject task panics to test macro panic-policy wiring")]
 
 use arty::task::Context;
 use arty::test;
 
-/// Compile-pass fixture for the enabled main policy.
+/// This compile-pass fixture selects the enabled monitoring policy.
 #[arty::main(monitor = enabled)]
 pub async fn main_with_monitoring_enabled(cx: Context) -> Result<(), arty::task::JoinError> {
     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
     Ok(())
 }
 
-/// Compile-pass fixture for the disabled main policy with another option.
+/// This compile-pass fixture selects the disabled monitoring policy and sets
+/// the worker count.
 #[arty::main(workers = 1, monitor = disabled)]
 pub async fn main_with_monitoring_disabled(cx: Context) -> Result<(), arty::task::JoinError> {
     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
     Ok(())
 }
 
-/// Compile-pass fixture for the explicit shutdown panic policy.
+/// This compile-pass fixture sets the shutdown panic policy.
 #[arty::main(panic = shutdown)]
 pub async fn main_with_panic_shutdown(cx: Context) -> Result<(), arty::task::JoinError> {
     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
     Ok(())
 }
 
-/// Compile-pass fixture for the ignore panic policy with other options.
+/// This compile-pass fixture sets the ignore panic policy and other options.
 #[arty::main(monitor = disabled, panic = ignore, workers = 1)]
 pub async fn main_with_panic_ignore(cx: Context) -> Result<(), arty::task::JoinError> {
     assert!(

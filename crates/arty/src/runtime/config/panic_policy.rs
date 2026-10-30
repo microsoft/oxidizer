@@ -8,8 +8,9 @@
 /// The shutdown policy is the default.
 ///
 /// Arty applies this policy when it catches a panic while it creates or polls
-/// an async task, or runs a blocking callback. See
-/// [the panic guide](crate::documentation::panics) for the exact boundaries and limitations.
+/// an async task, or runs a blocking callback. See the
+/// [panic handling guide](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/PANICS.md)
+/// for the exact boundaries and limitations.
 ///
 /// # Examples
 ///
