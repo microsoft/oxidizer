@@ -3,11 +3,12 @@
 
 //! Clocks, delays, and tests that do not have to wait for real time.
 //!
-//! Arty re-exports [`Clock`](crate::time::Clock) and, with `test-util`,
+//! Arty always re-exports [`Clock`](crate::time::Clock) and, with `test-util`,
 //! [`ClockControl`](crate::time::ClockControl) through `arty::time`. Use
 //! [`tick`] directly for delay and timeout futures, extension traits,
-//! stopwatches, and periodic timers. The `time` feature works without an Arty
-//! runtime; `rt` also enables time and drives system timers for its workers.
+//! stopwatches, and periodic timers. An Arty runtime drives system timers for
+//! its workers. `Clock` is available without a runtime, but delays need a
+//! driver or controlled time.
 //! A [`ClockControl`](crate::time::ClockControl) owner advances controlled time.
 //!
 //! # Use the task's clock
@@ -83,7 +84,7 @@
 //!
 //! # Without an Arty runtime
 //!
-//! Enabling `time` alone does not start a timer driver.
-//! The underlying `tick::SimpleClock` reads time without a driver, but delays
-//! on [`Clock`](crate::time::Clock) need a driver or controlled time. See
-//! [`tick`] for using these clocks outside Arty.
+//! `Clock` is available without an Arty runtime, but it does not start a timer
+//! driver. The underlying `tick::SimpleClock` reads time without a driver.
+//! Delays on [`Clock`](crate::time::Clock) need a driver or controlled time.
+//! See [`tick`] to use these clocks outside Arty.
