@@ -65,7 +65,7 @@ with a bulk `fill` rather than per element.
 
 `Pump::pull` enforces the contract for every engine. Before it advances state,
 it rejects a step that reports `consumed > supplied` or
-`produced > provided_output`. The pump then enters the failed state. This test
+`produced > provided_output`. The pump then enters the failed state. This check
 prevents an engine from marking uninitialized output as initialized.
 `WriteBuf::filled_until` has a different purpose. It records how much of the
 buffer zstd can read back.
