@@ -938,7 +938,7 @@ mod tests {
             let compressed = crate::format::compress(format, view(&payload), &Resources::default()).unwrap();
             let joined = BytesView::from_views([compressed.clone(), compressed]);
 
-            // `Ignore` isolates the multi-stream default under test from the trailing-data policy,
+            // `Ignore` isolates the multi-stream default under test from the trailing-data policy.
             // Without `Ignore`, the trailing-data policy rejects the second member for formats that
             // do not join streams.
             let len = decompressed_len(
