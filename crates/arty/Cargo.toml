@@ -94,6 +94,7 @@ many_cpus = { workspace = true, features = ["test-util"] }
 metabench = { path = "../metabench" }
 mutants = { workspace = true }
 nonempty = { workspace = true }
+observed = { path = "../observed" }
 ohno = { path = "../ohno", features = ["app-err"] }
 performables = { path = "../performables", features = ["seismograph"] }
 pin-project = { workspace = true }

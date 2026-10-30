@@ -9,11 +9,13 @@
 mod support;
 
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
+use std::time::Duration;
 
 use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
 use arty::task::{Context, Scheduler};
@@ -64,9 +66,103 @@ fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
     }
 }
 
+struct BlockingGate {
+    released: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl BlockingGate {
+    fn wait(&self) {
+        let mut released = self.released.lock().unwrap();
+        while !*released {
+            released = self.changed.wait(released).unwrap();
+        }
+    }
+
+    fn release(&self) {
+        *self.released.lock().unwrap() = true;
+        self.changed.notify_all();
+    }
+}
+
+struct ReleaseBlockingGate(Arc<BlockingGate>);
+
+impl Drop for ReleaseBlockingGate {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
+fn assert_blocking_pool_limit(max_threads: usize, expect_growth: bool) {
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(max_threads))
+        .build()
+        .unwrap();
+    let gate = Arc::new(BlockingGate {
+        released: Mutex::new(false),
+        changed: Condvar::new(),
+    });
+    let _release_gate = ReleaseBlockingGate(Arc::clone(&gate));
+    let scheduler = runtime.scheduler().clone();
+    let (blocker_started_tx, blocker_started_rx) = mpsc::channel();
+    let blocker = scheduler.spawn_blocking({
+        let gate = Arc::clone(&gate);
+        move || {
+            let worker = thread::current().id();
+            blocker_started_tx.send(worker).unwrap();
+            gate.wait();
+            worker
+        }
+    });
+    let blocker_worker = blocker_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    let (queued_started_tx, queued_started_rx) = mpsc::channel();
+    // Six queued tasks exceed the pool's five-task-per-thread growth threshold.
+    let queued = (0..6)
+        .map(|_| {
+            let gate = Arc::clone(&gate);
+            let queued_started_tx = queued_started_tx.clone();
+            scheduler.spawn_blocking(move || {
+                let worker = thread::current().id();
+                queued_started_tx.send(worker).unwrap();
+                gate.wait();
+                worker
+            })
+        })
+        .collect::<Vec<_>>();
+    drop(queued_started_tx);
+
+    if expect_growth {
+        let growth_worker = queued_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+        assert_ne!(growth_worker, blocker_worker);
+        assert!(queued_started_rx.recv_timeout(Duration::from_millis(100)).is_err());
+    } else {
+        assert!(queued_started_rx.recv_timeout(Duration::from_millis(100)).is_err());
+    }
+
+    gate.release();
+    let worker_ids = std::iter::once(blocker.join().unwrap())
+        .chain(queued.into_iter().map(|task| task.join().unwrap()))
+        .collect::<HashSet<_>>();
+    runtime.stop().unwrap();
+
+    assert_eq!(worker_ids.len(), max_threads);
+}
+
 #[test]
 fn public_policy_defaults_are_automatic_and_shared() {
     assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::shared());
+}
+
+#[test]
+fn blocking_pool_grows_when_overloaded_below_its_limit() {
+    assert_blocking_pool_limit(2, true);
+}
+
+#[test]
+fn blocking_pool_growth_respects_its_configured_limit() {
+    assert_blocking_pool_limit(1, false);
 }
 
 #[test]
