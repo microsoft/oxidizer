@@ -3,29 +3,22 @@
 
 /// A portable compression-effort level from [`Level::MIN`] to [`Level::MAX`].
 ///
-/// This is a newtype rather than a re-export of the underlying compression engine's level type.
-/// Exposing the engine's type would make the engine part of this crate's semver surface, so
-/// swapping or upgrading it would become a breaking change for every consumer.
+/// This newtype does not expose the compression engine level type. Therefore, an engine replacement
+/// or upgrade does not change this public type.
 ///
 /// The scale orders settings from lower effort and latency to higher effort and usually better
 /// compression. It does not promise that zero disables compression or that nine is the strongest
-/// setting a format supports; use a format-specific level type when exact native control matters.
+/// setting that a format supports. Use a format-specific level type for exact native control.
 ///
 /// # How the scale is calibrated
 ///
 /// The `0..=9` range and the position of [`DEFAULT`][Self::DEFAULT] come from the deflate family,
-/// whose native scale this is; every other format is mapped onto it rather than the other way
-/// round. The anchor is meaning rather than arithmetic: each format's mapping is chosen so that
-/// [`DEFAULT`][Self::DEFAULT] lands on that format's own balanced setting -- zstd's native 3, for
-/// instance -- rather than on the midpoint of its native range. Where a format's own range climbs
-/// steeply at the top, the mapping stops short of it instead of stretching to reach it, which is
-/// why the top of this scale is not necessarily the top of a format's.
+/// whose native scale this is. Each other format maps onto this range. The mapping places
+/// [`DEFAULT`][Self::DEFAULT] on the balanced setting for the format. For example, it maps to zstd
+/// level 3. A mapping can stop below the highest native level when its cost rises steeply.
 ///
-/// The scale is portable but its *cost* is not, and how much a step costs differs by format and by
-/// payload -- in time, and for some backends in working memory too. The mapping is chosen so that
-/// moving up the scale never lowers effort, and nothing stronger than that ordering is promised.
-/// Treat [`Level::HIGH`] as a deliberate choice to be measured on real payloads, not as a free
-/// improvement.
+/// Cost differs by format and payload. Some backends also use more working memory at higher levels.
+/// Moving up this scale does not lower effort. Measure [`Level::HIGH`] with representative payloads.
 ///
 /// # Examples
 ///
@@ -54,7 +47,7 @@ impl Level {
 
     /// A high-compression setting at a correspondingly high cost.
     ///
-    /// See the note on [`Level`] before reaching for this.
+    /// Measure this setting with representative payloads.
     pub const HIGH: Self = Self(9);
 
     /// The top of the portable scale, the same as [`Level::HIGH`].
@@ -64,10 +57,8 @@ impl Level {
 
     /// Creates a level, or returns `None` if `level` exceeds [`Level::MAX`].
     ///
-    /// This returns an `Option` rather than panicking because levels routinely arrive from
-    /// configuration files and command-line arguments, where an out-of-range value is a user
-    /// mistake to be reported rather than a bug to crash on. Use [`TryFrom`] when you want that
-    /// mistake as an [`Error`][crate::Error] to propagate with `?`.
+    /// This returns an `Option` because levels can come from configuration files or command-line
+    /// arguments. Use [`TryFrom`] to return an [`Error`][crate::Error] for an invalid value.
     #[must_use]
     pub const fn new(level: u8) -> Option<Self> {
         if level > Self::MAX.0 { None } else { Some(Self(level)) }

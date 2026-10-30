@@ -3,11 +3,9 @@
 
 //! Choosing a compression format at runtime.
 //!
-//! [`Format`] is the entry point, and this module carries the same shape every format module does
-//! -- a [`Compressor`], a [`Decompressor`], and the [`compress`], [`decompress`] and
-//! [`decompress_with_limits`] conveniences -- with the format threaded through at runtime rather
-//! than fixed at compile time. The `build_format` methods on the shared builders live here too,
-//! because this is the only place that has to know every format by name.
+//! [`Format`] is the entry point. This module provides a [`Compressor`], a [`Decompressor`], and the
+//! [`compress`], [`decompress`], and [`decompress_with_limits`] functions. It selects the format at
+//! run time. The shared builders also define their `build_format` methods here.
 
 use bytesbuf::BytesView;
 
@@ -117,7 +115,7 @@ impl Format {
     /// Parses a single HTTP `Content-Encoding` token.
     ///
     /// Matching is case-insensitive, as HTTP requires. `deflate` maps to `Format::Zlib`, which is
-    /// what the token actually denotes; `x-gzip` is accepted as a legacy alias for `gzip`. Tokens
+    /// what the token actually denotes. `x-gzip` is accepted as a legacy alias for `gzip`. Tokens
     /// for formats this build does not support return `None`.
     ///
     /// This takes one bare token rather than parsing a complete HTTP header.
@@ -155,7 +153,7 @@ impl Format {
 /// Dispatches one method to whichever format's engine a runtime-format compressor or decompressor is holding.
 ///
 /// With no format feature enabled the enum has no variants, so this expands to a match on an
-/// uninhabited value -- which is exactly right: there is then no way to construct one.
+/// uninhabited value. No caller can construct one.
 macro_rules! dispatch {
     ($kind:ident, $value:expr, $codec:ident => $call:expr) => {
         match $value {
@@ -229,10 +227,10 @@ enum DecompressorKind {
 
 /// Compresses a stream of byte sequences into a format chosen at runtime.
 ///
-/// The runtime-format counterpart of each format module's `Compressor`, and driven exactly the same
-/// way -- through [`Compression`]. The chosen format is held internally,
-/// so this is a concrete type rather than a trait object: it can be stored in a struct, returned
-/// from a function and handed to [`compress`][crate::compress] like any other compressor.
+/// This is the runtime-format counterpart of each format module's `Compressor`. Callers drive it
+/// through [`Compression`] in the same way. It stores the selected format internally, so it is a
+/// concrete type instead of a trait object. Callers can store it in a struct, return it from a
+/// function, or pass it to [`compress`][crate::compress].
 ///
 /// Reach it through [`CompressorBuilder::build_format`], or [`compress`] for a complete buffer.
 #[derive(Debug)]
@@ -365,9 +363,9 @@ impl CompressionInternal for Decompressor {
 
 /// Compresses a complete byte sequence into `format`.
 ///
-/// Uses `Level::DEFAULT`; for anything else, configure a
+/// Uses `Level::DEFAULT`. For another level, configure a
 /// [`CompressorBuilder`] and finish it with [`build_format`][CompressorBuilder::build_format].
-/// Prefer [`Compressor`] for data that arrives incrementally; this convenience buffers the entire
+/// Use [`Compressor`] for data that arrives incrementally. This function buffers the complete
 /// result before returning.
 ///
 /// # Errors
@@ -418,10 +416,10 @@ impl CompressorBuilder<()> {
     ///
     /// The result is this module's [`Compressor`], a concrete type like every other format's, so it
     /// fits anywhere one of those does. The chosen format is an implementation detail of the value
-    /// rather than something the caller has to name.
+    /// rather than something the caller must name.
     ///
     /// Everything this builder carries means the same thing in every format. A setting only one
-    /// format has -- brotli's quality, say -- needs that format's own builder.
+    /// format has, such as brotli quality, requires that format's builder.
     ///
     /// # Errors
     ///
@@ -523,8 +521,8 @@ mod tests {
     /// Caps every drain loop in this module.
     ///
     /// A conforming engine always terminates, so exceeding this means the code under test is
-    /// spinning. A hanging test reports nothing at all, so the cap turns a hang into a failure --
-    /// which also lets mutation testing reach a verdict instead of timing out.
+    /// spinning. A hanging test reports nothing, so the cap turns a hang into a failure. This also
+    /// lets mutation testing reach a verdict instead of timing out.
     ///
     /// The cap has to stay tight enough for that verdict to arrive inside the mutation harness's
     /// per-mutant timeout. No test here needs more than a few hundred steps, so this leaves well
@@ -689,7 +687,7 @@ mod tests {
     fn the_compressor_builder_applies_its_level() {
         // Inequality of the bytes is the load-bearing assertion. A size comparison alone is
         // satisfied by equality, so a backend that dropped the level and always compressed at its
-        // default would pass it while the `Level` knob silently did nothing.
+        // A passing default can hide a `Level` setting that has no effect.
         let varied = varied_payload();
         for &format in Format::ALL {
             let fast = compressed_bytes(CompressorBuilder::new().level(Level::FAST), format, &varied);
@@ -701,7 +699,7 @@ mod tests {
         // The size property, kept as a secondary check and on its own payload. It needs one where a
         // stronger level can actually pay off: on the high-entropy payload above, zstd's top level
         // legitimately emits *more* bytes than its fast one, so this is not a property of the
-        // portable scale in general. Only `<=` even here -- strict monotonicity is not promised
+        // portable scale in general. Use only `<=` here because strict monotonicity is not promised
         // across backends and payloads.
         let repetitive = b"the quick brown fox jumps over the lazy dog ".repeat(400);
         for &format in Format::ALL {
@@ -710,7 +708,7 @@ mod tests {
 
             assert!(
                 best.len() <= fast.len(),
-                "{format:?}: best={} should not exceed fast={}",
+                "{format:?}: best={} must not exceed fast={}",
                 best.len(),
                 fast.len()
             );
@@ -768,10 +766,7 @@ mod tests {
                 guard.step();
                 match decompressor.pull(Destination::Stream) {
                     Ok(output) => {
-                        assert!(
-                            !output.is_done() && !output.is_need_input(),
-                            "{format:?}: the cap should have fired"
-                        );
+                        assert!(!output.is_done() && !output.is_need_input(), "{format:?}: the cap must fire");
                     }
                     Err(error) => break error,
                 }
@@ -916,7 +911,7 @@ mod tests {
                 decompressor_for(DecompressorBuilder::new().multi_stream(true), format),
                 joined.clone(),
             );
-            assert_eq!(joined_len, payload.len() * 2, "{format:?} should join with multi_stream(true)");
+            assert_eq!(joined_len, payload.len() * 2, "{format:?} must join with multi_stream(true)");
 
             let single_len = decompressed_len(
                 decompressor_for(
@@ -925,15 +920,15 @@ mod tests {
                 ),
                 joined,
             );
-            assert_eq!(single_len, payload.len(), "{format:?} should stop with multi_stream(false)");
+            assert_eq!(single_len, payload.len(), "{format:?} must stop with multi_stream(false)");
         }
     }
 
     #[test]
     fn each_format_keeps_its_own_multi_stream_default() {
         // The format-specific half: the runtime builder must preserve each format's own default
-        // rather than flattening every format to one behaviour. Gzip and zstd join, matching
-        // `gzip(1)` and the `zstd` tool; the rest stop at the first stream.
+        // rather than giving every format one behavior. Gzip and zstd join to match `gzip(1)` and
+        // the `zstd` tool. The other formats stop at the first stream.
         let payload = b"member ".repeat(50);
 
         for &format in Format::ALL {
@@ -944,7 +939,8 @@ mod tests {
             let joined = BytesView::from_views([compressed.clone(), compressed]);
 
             // `Ignore` isolates the multi-stream default under test from the trailing-data policy,
-            // which would otherwise reject the second member for the formats that do not join.
+            // Without `Ignore`, the trailing-data policy rejects the second member for formats that
+            // do not join streams.
             let len = decompressed_len(
                 decompressor_for(DecompressorBuilder::new().trailing_data(TrailingData::Ignore), format),
                 joined,
@@ -966,15 +962,15 @@ mod tests {
     #[test]
     fn no_format_bounds_output_or_stream_count_by_default() {
         // A decompressor hands each chunk straight back and keeps nothing, so bounding its total
-        // output or member count would cut off long streams that never buffer more than one chunk.
+        // Output or member-count bounds can stop long streams that never retain more than one chunk.
         // Cumulative bounds belong to the conveniences that accumulate, applied by
         // `DecompressorLimits::for_buffered_output` and asserted in `limits`.
         fn assert_uncapped(name: &str, limits: FormatLimits) {
             const HUGE: u64 = 64 * 1024 * 1024 * 1024;
 
             // Input matches output so the ratio guard, which differs per format, never fires here.
-            assert!(limits.check(HUGE, HUGE, 1).is_ok(), "{name} should not cap total output");
-            assert!(limits.check(1, 0, HUGE).is_ok(), "{name} should not cap stream count");
+            assert!(limits.check(HUGE, HUGE, 1).is_ok(), "{name} must not cap total output");
+            assert!(limits.check(1, 0, HUGE).is_ok(), "{name} must not cap stream count");
         }
 
         #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]

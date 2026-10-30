@@ -8,7 +8,7 @@
 //! which direction an implementation runs in.
 //!
 //! One trait covers both directions. [`Compress`] and [`Decompress`] are what an API names when it
-//! needs one of them -- `Compression<Mode = Compress>` accepts any compressor and no decompressor.
+//! needs one direction. `Compression<Mode = Compress>` accepts any compressor and no decompressor.
 //!
 //! What one step of that contract reports is a crate-private detail, as are the methods that drive
 //! it: this module publishes the names an API is written against, and nothing else.
@@ -35,7 +35,7 @@ pub(crate) mod internal {
     ///
     /// This is deliberately kept off [`Compression`][super::Compression], and this module is
     /// `pub(crate)`, so none of it reaches the public API. What that trait is for is *naming* an
-    /// engine; these methods are how this crate drives one.
+    /// engine. These methods let this crate drive an engine.
     ///
     /// Being unnameable outside the crate is also what seals [`Compression`][super::Compression]:
     /// a downstream crate cannot implement a supertrait it cannot refer to, so formats and methods
@@ -45,7 +45,7 @@ pub(crate) mod internal {
         ///
         /// # Errors
         ///
-        /// Returns an error if input is still pending or end of input has been signaled.
+        /// Returns an error if input is still pending or the caller signaled the end of input.
         fn push(&mut self, input: BytesView) -> Result<()>;
 
         /// Signals that no further input will be supplied.
@@ -56,13 +56,13 @@ pub(crate) mod internal {
         /// `into` says what the caller will do with it, and the engine bounds its own output
         /// accordingly: a decompressor left unbounded applies the shared 64 MiB ceiling for
         /// [`Destination::Buffer`], because that is the case where its cumulative output is what
-        /// the caller retains. Compressors ignore it -- compressed output tracks input the caller
+        /// the caller retains. Compressors ignore it because compressed output tracks input the caller
         /// already holds.
         ///
         /// # Errors
         ///
         /// Returns an error if the underlying engine fails, the input is invalid, or a bound that
-        /// applies to this destination has been reached.
+        /// applies to this destination is reached.
         fn pull(&mut self, into: Destination) -> Result<Output>;
 
         /// The number of bytes consumed from the input so far.
@@ -77,8 +77,8 @@ pub(crate) mod internal {
         /// pushing more input. Flushing ends a compressed block early, which can cost compression
         /// ratio, so use it only when the bytes have to reach the far end before the stream does.
         ///
-        /// Decompression has nothing to flush -- output is already produced as soon as the input
-        /// allows -- so this does nothing there, which is what the default implementation is.
+        /// Decompression has nothing to flush. It produces output as soon as input permits.
+        /// Therefore, the default implementation does nothing.
         ///
         /// # Errors
         ///
@@ -108,9 +108,9 @@ pub struct Decompress;
 /// A streaming compression or decompression engine.
 ///
 /// Every format's compressor and decompressor implements this contract. The `Mode` associated type
-/// records which direction an implementation compresses in without changing how callers drive it. This
-/// allows shared processing code to accept any `Compression`, while APIs that require one direction
-/// can use `Compression<Mode = Compress>` or `Compression<Mode = Decompress>`.
+/// records whether an implementation compresses or decompresses. This does not change how callers
+/// drive the engine. Shared processing code can accept any `Compression`. An API that requires one
+/// direction can use `Compression<Mode = Compress>` or `Compression<Mode = Decompress>`.
 ///
 /// The trait is sealed so formats and methods can be added without breaking downstream code, and
 /// it is `Sized` so no `dyn Compression` object can be formed. Every implementation is
@@ -119,13 +119,13 @@ pub struct Decompress;
 /// # The mechanics are an internal detail
 ///
 /// What this trait is *for* is naming an engine: `impl Compression<Mode = Compress>` accepts any
-/// compressor and no decompressor. How this crate actually drives one -- pushing input, pulling
-/// output, ending input -- lives on a crate-private supertrait that no downstream crate can name,
+/// compressor and no decompressor. A crate-private supertrait contains the methods that push input,
+/// pull output, and end input. A downstream crate cannot name this supertrait,
 /// let alone implement. Those mechanics are therefore not public API and can change freely.
 ///
 /// The `Sized` bound is what makes that true rather than merely intended. A trait object resolves
 /// supertrait methods as inherent candidates, with no need for the supertrait to be nameable or in
-/// scope, so a `dyn Compression` vtable would hand every downstream crate the push/pull mechanics
+/// scope, so a `dyn Compression` vtable exposes the push/pull mechanics to every downstream crate
 /// and values of the crate-private step type. Boxing a concrete compressor stays available and is
 /// how to hold one without naming its type.
 ///
@@ -228,7 +228,7 @@ mod tests {
                 self.done = true;
                 Ok(Output::Progress)
             }
-            // No caller on the path under test asks for the byte counters; they exist only because
+            // No caller on the tested path asks for the byte counters. They exist only because
             // the trait requires them.
             #[cfg_attr(coverage_nightly, coverage(off))]
             #[cfg_attr(test, mutants::skip)]
@@ -266,7 +266,7 @@ mod tests {
             fn pull(&mut self, _into: Destination) -> Result<Output> {
                 Ok(Output::NeedInput)
             }
-            // No caller on the path under test asks for the byte counters; they exist only because
+            // No caller on the tested path asks for the byte counters. They exist only because
             // the trait requires them.
             #[cfg_attr(coverage_nightly, coverage(off))]
             #[cfg_attr(test, mutants::skip)]

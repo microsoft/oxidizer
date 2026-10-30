@@ -3,8 +3,7 @@
 
 //! Zlib (RFC 1950): a deflate payload with a two byte header and an Adler-32 trailer.
 //!
-//! This is the format behind HTTP `Content-Encoding: deflate`, which despite its name carries a
-//! zlib stream rather than raw deflate.
+//! HTTP `Content-Encoding: deflate` uses this format, not raw deflate.
 //!
 //! # Examples
 //!
@@ -24,11 +23,11 @@ use crate::flate::Wrapper;
 use crate::flate::codec::{FlateCompress, FlateDecompress};
 use crate::macros::define_format;
 
-/// Selects zlib as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder].
+/// Selects zlib for a [`CompressorBuilder`][crate::CompressorBuilder] or
+/// [`DecompressorBuilder`][crate::DecompressorBuilder].
 ///
-/// Zlib has no settings beyond the ones every format shares, so this type carries none. It exists
-/// to name the format in the builder's type parameter, which is what gives that builder a `build`
-/// method producing this module's [`Compressor`] and [`Decompressor`].
+/// Zlib has no format-specific settings. This marker adds a `build` method that creates this
+/// module's [`Compressor`] or [`Decompressor`].
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Zlib;

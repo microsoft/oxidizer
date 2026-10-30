@@ -1,12 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! What an engine draws on, rather than what it is configured to do.
+//! Memory and reusable state for compression engines.
 //!
-//! Compression needs two things from its caller that have nothing to do with the format: somewhere
-//! to allocate output buffers, and somewhere to keep engine state between messages. Both are
-//! shared, both are cloneable handles, and both belong to the calling application rather than to
-//! any one message -- so they travel together, as [`Resources`].
+//! Compression needs a memory provider for output and a pool for reusable engine state.
+//! [`Resources`] stores shared handles to both.
 
 use std::sync::OnceLock;
 
@@ -17,31 +15,23 @@ use crate::pool::Pool;
 
 /// The memory and engine state a compressor or decompressor draws on.
 ///
-/// Everything a builder carries describes what to do; this describes what to do it with. Hold one
-/// per application -- or per subsystem that wants its own memory accounting -- and hand it to every
-/// compressor and decompressor. Cloning is cheap, and every clone draws on the same memory and the same engines.
+/// A builder describes engine behavior. `Resources` supplies memory and reusable engine state.
+/// Keep one value per application or per subsystem with separate memory accounting. Clones share
+/// the same memory provider and engine pool.
 ///
 /// # Recycling
 ///
-/// Building a compressor allocates and initializes a substantial amount of state: on a small
-/// message, as much work as the compression itself. These resources recycle that state between
-/// messages, so a service that compresses many small bodies spends its budget compressing rather
-/// than getting ready to compress. It is on by default, and
-/// [`with_pool_capacity(0)`][Resources::with_pool_capacity] turns it off for the rare caller that
-/// wants to measure what it is worth, or that compresses one message and exits.
+/// Building a compressor allocates and initializes engine state. For a small message, this setup
+/// costs about as much as compression. Recycling keeps this state between messages. Recycling is
+/// enabled by default. [`with_pool_capacity(0)`][Resources::with_pool_capacity] disables it.
 ///
-/// Recycling is transparent: it applies to the engines that benefit and quietly skips the rest, so
-/// calling code never has to know which is which, and which engines those are can change without
-/// any change to calling code.
+/// The public contract does not specify which engines are recycled.
 ///
 /// # Relocation
 ///
-/// [`ThreadAware`] is implemented, so a runtime that moves work between threads can tell these
-/// resources where they now run. The two halves are treated differently on purpose: the memory
-/// provider is relocated, since a NUMA-aware or per-thread provider will want to allocate from the
-/// destination's memory, while the engine pool is left untouched. Every clone shares one pool, an
-/// idle engine is plain memory with no affinity to where it was built, and discarding it on a move
-/// would throw away exactly what this type exists to retain.
+/// [`ThreadAware`] lets a runtime report movement between threads. `Resources` relocates the memory
+/// provider. A NUMA-aware or per-thread provider can then use memory near the destination thread.
+/// The engine pool stays shared because idle engine state has no thread affinity.
 ///
 /// # Examples
 ///
@@ -50,7 +40,7 @@ use crate::pool::Pool;
 /// # {
 /// use compressors::{Resources, gzip};
 ///
-/// // One shared instance: the process-wide memory provider and process-wide engine recycling.
+/// // Use the process-wide memory provider and engine pool.
 /// let resources = Resources::global();
 ///
 /// let compressed = gzip::compress(b"hello", resources)?;
@@ -70,9 +60,9 @@ pub struct Resources {
 impl Resources {
     /// Draws output buffers from `memory`, recycling engine state between messages.
     ///
-    /// The engines belong to the returned value, so every clone of it shares them, and separately
-    /// constructed resources have independent engine pools. Whether they also share memory is a
-    /// property of the [`MemoryShared`] provider handed in, not of this type.
+    /// Clones of the returned value share its engine pool. Separately constructed values have
+    /// separate engine pools. The [`MemoryShared`] implementation determines whether they share
+    /// memory.
     #[must_use]
     pub fn new(memory: impl MemoryShared) -> Self {
         Self {
@@ -84,18 +74,16 @@ impl Resources {
     /// Sets how many idle engines are kept per interchangeable group, where zero stops recycling.
     ///
     /// What counts as a group depends on the engine. The deflate family's compressors are keyed by
-    /// container and level, because a reset preserves both; zstd contexts are keyed by nothing at
-    /// all, because a reset lets any idle context serve any level. So the ceiling on retained
+    /// container and level because a reset preserves both. Zstd contexts have no key because any
+    /// idle context can serve any level after reset. Therefore, the ceiling on retained
     /// engines is this capacity times the number of groups a workload actually reaches, not this
     /// capacity alone.
     ///
-    /// Recycling is already on after [`new`][Resources::new] at a capacity that suits ordinary
-    /// request traffic. Set this to the number of messages expected to be in flight at once, or to
-    /// zero when compression is rare enough that retaining engine state costs more than rebuilding
-    /// it.
+    /// [`new`][Resources::new] enables recycling. Set the capacity to the expected number of
+    /// concurrent messages. Set it to zero to disable recycling.
     ///
-    /// The capacity bounds what is kept, not what can be used: a burst beyond it still compresses,
-    /// building engines it then drops instead of storing.
+    /// The capacity bounds retained idle engines, not active engines. A larger burst builds
+    /// additional engines and drops them after use.
     #[must_use]
     pub fn with_pool_capacity(mut self, capacity: usize) -> Self {
         self.pool = match capacity {
@@ -107,8 +95,7 @@ impl Resources {
 
     /// The shared resources of the process: one memory provider, one set of recycled engines.
     ///
-    /// This is the right answer for an application that has no reason to account for memory per
-    /// subsystem, and it is what makes recycling the easy path rather than the deliberate one.
+    /// Use this value when the application does not need separate memory accounting.
     #[must_use]
     pub fn global() -> &'static Self {
         static GLOBAL: OnceLock<Resources> = OnceLock::new();
@@ -142,21 +129,14 @@ impl Default for Resources {
     }
 }
 
-/// Written out rather than derived, because the two halves want opposite treatment and the
-/// difference is the interesting part.
+/// Relocates the memory provider but keeps the shared engine pool.
 impl ThreadAware for Resources {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        // The memory provider is the half that can act on a move: a NUMA-aware or per-thread
-        // provider wants to allocate from the destination's memory from here on. Forwarding is all
-        // this type has to do -- what that means is the provider's decision, not ours.
+        // A NUMA-aware or per-thread provider can use memory near the destination thread.
         self.memory.relocate(source, destination);
 
-        // The pool deliberately does nothing. Every clone of these resources shares one pool, by
-        // design, so a pool is not owned by the thread that happens to be moving and has no
-        // per-thread state to migrate. An idle engine is a window and a set of hash tables -- plain
-        // memory, reachable from anywhere, with no affinity to where it was built. Draining or
-        // re-homing it on relocation would discard exactly the state this type exists to retain,
-        // and would do so on every move.
+        // Every clone shares one pool. Idle engine state has no thread affinity, so relocation does
+        // not move or drain the pool.
     }
 }
 
@@ -176,12 +156,12 @@ mod tests {
     #[test]
     fn recycling_is_on_by_default_and_its_capacity_is_adjustable() {
         let recycling = Resources::new(GlobalPool::new());
-        assert!(recycling.pool().capacity() > 0, "recycling should be the default");
+        assert!(recycling.pool().capacity() > 0, "recycling must be the default");
 
         let plain = recycling.with_pool_capacity(0);
         assert_eq!(plain.pool().capacity(), 0, "a capacity of zero must stop recycling");
 
-        assert_eq!(plain.with_pool_capacity(4).pool().capacity(), 4, "the capacity must be honoured");
+        assert_eq!(plain.with_pool_capacity(4).pool().capacity(), 4, "the capacity must be honored");
     }
 
     #[test]

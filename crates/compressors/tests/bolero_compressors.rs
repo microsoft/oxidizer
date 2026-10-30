@@ -13,11 +13,11 @@
 //!
 //! Everything goes through the public API. The push/pull state machine is sealed, so this reaches
 //! it the way callers do. That is also the surface an attacker reaches: the operation ordering the
-//! sealed API would expose is chosen by trusted calling code, never by input bytes.
+//! sealed API can expose is selected by trusted calling code, never by input bytes.
 //!
 //! # What is asserted
 //!
-//! That decompression is *safe*, not that it succeeds. Malformed input is expected to fail; what
+//! The property is safe decompression, not successful decompression. Malformed input can fail. The
 //! must never happen is a panic, a non-terminating run, or a bound that quietly stops applying.
 
 #![expect(
@@ -40,7 +40,7 @@ const MAX_COPIES: usize = 4;
 
 /// A hard ceiling applied to every run regardless of what the scenario asked for.
 ///
-/// Without it a generated input that happens to be a small expansion bomb would spend the whole
+/// Without it, a generated input that is a small expansion bomb can use the complete
 /// campaign budget producing megabytes, and report nothing. The scenario's own bound is applied on
 /// top of this, never instead of it.
 const HARD_OUTPUT_CEILING: u64 = 1 << 20;
@@ -135,7 +135,7 @@ fn run(scenario: &Scenario) {
     let mutated = mutate(scenario.mutation, &encoded);
 
     // An unmutated valid stream is the only case with a knowable answer, and only when nothing
-    // bounds it below its own size. Everything else is allowed to fail; what is checked there is
+    // bounds it below its own size. Every other case can fail. The test determines
     // that it fails rather than panics or runs away.
     let pristine = scenario.valid && matches!(scenario.mutation, Mutation::None);
     let natural = payload.len() as u64;
@@ -156,7 +156,7 @@ fn run(scenario: &Scenario) {
         }
         _ => {
             // Malformed, mutated or degenerate: any outcome is legitimate, and reaching here at all
-            // is the property -- no panic, and no run that never returned.
+            // is the property. The call must not panic or run forever.
             drop(outcome);
         }
     }
@@ -220,7 +220,7 @@ fn fragmented(bytes: &[u8], fragments: u8, resources: &Resources) -> BytesView {
 
 /// Drives one decompression through the collecting convenience.
 fn decompress(scenario: &Scenario, format: Format, input: BytesView, natural: u64, resources: &Resources) -> compressors::Result<Vec<u8>> {
-    // The scenario's bound narrows the hard ceiling; it never widens it.
+    // The scenario bound narrows the hard ceiling. It never widens it.
     let ceiling = scenario
         .output_limit
         .resolve(natural)
@@ -242,7 +242,7 @@ fn decompress(scenario: &Scenario, format: Format, input: BytesView, natural: u6
         .trailing_data(trailing)
         .output_chunk_size(chunk)
         .build_format(format, resources)
-        .map_err(|error| compressors::Error::other("the decompressor could not be built", error))?;
+        .map_err(|error| compressors::Error::other("the decompressor build failed", error))?;
 
     compressors::decompress(input, decompressor).map(|view| view.to_vec())
 }

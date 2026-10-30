@@ -1,12 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! What the whole-buffer conveniences accept as input.
+//! Input types for whole-buffer functions.
 //!
-//! [`InputData`] is why `gzip::compress(b"hello", resources)` reads as well as
-//! `gzip::compress(view, resources)`: the conveniences already hold the [`Resources`] a
-//! [`BytesView`] needs to be built from, so a caller with a plain slice does not have to build one
-//! by hand first.
+//! [`InputData`] accepts an existing [`BytesView`] or a byte slice. Whole-buffer functions use their
+//! [`Resources`] to build a view for a slice.
 
 use bytesbuf::BytesView;
 
@@ -15,18 +13,17 @@ use crate::resources::Resources;
 pub(crate) mod sealed {
     /// Restricts [`InputData`][super::InputData] to the inputs this crate defines.
     ///
-    /// Living in a `pub(crate)` module makes it unnameable downstream, so the trait cannot be
-    /// implemented outside this crate even though its own method is public.
+    /// A downstream crate cannot name this `pub(crate)` module. Therefore, it cannot implement the
+    /// trait.
     pub trait Sealed {}
 }
 
 /// A byte sequence one of this crate's whole-buffer conveniences can compress or decompress.
 ///
-/// Implemented for [`BytesView`], which is passed through untouched, and for byte slices and
-/// arrays, which are copied into memory drawn from the [`Resources`] the convenience was given.
+/// Implemented for [`BytesView`], byte slices, and byte arrays. An existing view passes through
+/// unchanged. Slices and arrays are copied into memory from the supplied [`Resources`].
 ///
-/// The trait is sealed: it names the inputs this crate accepts rather than being an extension
-/// point, so implementations can be added without that being a breaking change.
+/// This trait is sealed. Only this crate can add implementations.
 ///
 /// # Examples
 ///
@@ -38,10 +35,10 @@ pub(crate) mod sealed {
 ///
 /// let resources = Resources::global();
 ///
-/// // A slice, copied into the resources' memory on the way in.
+/// // Copy a slice into memory from the resources.
 /// let from_slice = gzip::compress(b"hello", resources)?;
 ///
-/// // A view that already exists, used as it is.
+/// // Pass an existing view without a copy.
 /// let view = BytesView::copied_from_slice(b"hello", resources.memory());
 /// let from_view = gzip::compress(view, resources)?;
 ///
@@ -50,9 +47,9 @@ pub(crate) mod sealed {
 /// # Ok::<(), compressors::Error>(())
 /// ```
 pub trait InputData: sealed::Sealed {
-    /// Produces the [`BytesView`] the engine consumes, allocating from `resources` if it has to.
+    /// Produces the [`BytesView`] that the engine consumes.
     ///
-    /// Taking `self` by value is what lets an existing view be forwarded without a copy.
+    /// An existing view passes through without a copy. Other input uses `resources`.
     fn into_view(self, resources: &Resources) -> BytesView;
 }
 
@@ -72,9 +69,8 @@ impl InputData for &[u8] {
     }
 }
 
-// A byte-string literal is `&[u8; N]`, which does not coerce to `&[u8]` while matching a generic
-// parameter, so the array carries its own implementation rather than making every caller write
-// `b"..."` followed by `.as_slice()`.
+// A byte-string literal is `&[u8; N]`. Generic argument matching does not coerce it to `&[u8]`.
+// The array implementation lets callers pass `b"..."` without `.as_slice()`.
 impl<const N: usize> sealed::Sealed for &[u8; N] {}
 
 impl<const N: usize> InputData for &[u8; N] {
@@ -106,7 +102,7 @@ mod tests {
 
     #[test]
     fn an_array_reference_is_copied_like_a_slice() {
-        // `b"..."` is `&[u8; N]`, so this is the shape most call sites actually have.
+        // `b"..."` is `&[u8; N]`, which is the common call-site type.
         let resources = Resources::default();
 
         assert_eq!(b"a literal".into_view(&resources).to_vec(), b"a literal".to_vec());

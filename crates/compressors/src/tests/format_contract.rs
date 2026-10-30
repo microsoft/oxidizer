@@ -4,8 +4,8 @@
 //! One contract, applied to every format.
 //!
 //! These tests exist to keep the abstraction honest. Every format goes through the same scenarios,
-//! so a format that behaves differently from its siblings -- or an abstraction that quietly only
-//! fits the deflate family -- fails here rather than surprising a consumer.
+//! A format that differs from its siblings fails here. An abstraction that fits only the deflate
+//! family also fails here.
 
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::OnceLock;
@@ -20,8 +20,8 @@ use crate::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, R
 
 /// The resources every test here draws on: one memory provider, one set of recycled engines.
 ///
-/// Shared for the whole file on purpose. Recycling must be invisible, so tests that would fail if
-/// an engine came back dirty are exactly the tests that should be sharing one.
+/// Shared for the complete file. Recycling must be invisible. Tests that fail for dirty recycled
+/// state must share one pool.
 fn resources() -> &'static Resources {
     static RESOURCES: OnceLock<Resources> = OnceLock::new();
 
@@ -31,7 +31,7 @@ fn resources() -> &'static Resources {
 /// Erases the difference between a build that can fail and one that cannot.
 ///
 /// zstd's native library validates its configuration as it applies it, so its compressor build
-/// returns a [`Result`]; every other format's cannot fail and returns the compressor directly. The
+/// returns a [`Result`]. Every other format returns the compressor directly. The
 /// contract below is the same either way, so it goes through this to stay one test.
 trait Built {
     type Codec;
@@ -51,8 +51,8 @@ impl<T> Built for Result<T, crate::BuildError> {
 /// Caps every drain loop in this file.
 ///
 /// A conforming engine always terminates, so exceeding this means the code under test is
-/// spinning. A hanging test reports nothing at all, so the cap turns a hang into a failure --
-/// which also lets mutation testing reach a verdict instead of timing out.
+/// spinning. A hanging test reports nothing, so the cap turns a hang into a failure. This also
+/// lets mutation testing reach a verdict instead of timing out.
 ///
 /// The cap has to stay tight enough for that verdict to arrive inside the mutation harness's
 /// per-mutant timeout. No test here needs more than a few hundred steps, so this leaves well over
@@ -145,7 +145,10 @@ macro_rules! format_contract {
                 let data = payload();
 
                 let compressed = $module::compress(view(&data), resources()).unwrap();
-                assert!(compressed.len() < data.len(), "the payload should compress");
+                assert!(
+                    compressed.len() < data.len(),
+                    "the compressed payload must be smaller than the input"
+                );
 
                 let plain = $module::decompress(compressed, resources()).unwrap();
                 assert_eq!(plain.to_vec(), data);
@@ -391,7 +394,7 @@ macro_rules! format_contract {
                 assert!(error.is_limit_exceeded(), "got {error}");
                 assert!(
                     decompressor.total_out() < 256 * 1024,
-                    "the guard should fire before the full expansion"
+                    "the guard must fire before complete expansion"
                 );
             }
 
@@ -401,7 +404,7 @@ macro_rules! format_contract {
                 // structural ceiling around `1032x` while brotli legitimately reaches tens of thousands.
                 // A default calibrated for one therefore rejects ordinary repetitive input under
                 // another, which is why each format carries its own. These cases are what "ordinary"
-                // means -- repeated text and JSON, not contrived payloads.
+                // means. It uses repeated text and JSON, not contrived payloads.
 
                 let cases: [(&str, Vec<u8>); 3] = [
                     ("repeated short string", b"windowed ".repeat(20_000)),
@@ -446,7 +449,7 @@ macro_rules! format_contract {
                     guard.step();
                     match CompressionInternal::pull(&mut decompressor, Destination::Stream) {
                         Ok(Output::Data(_) | Output::Progress) => {}
-                        Ok(_) => panic!("the cap should have fired"),
+                        Ok(_) => panic!("the cap must fire"),
                         Err(error) => break error,
                     }
                 };
@@ -457,7 +460,7 @@ macro_rules! format_contract {
             #[test]
             fn known_good_data_can_opt_out_of_the_limits() {
                 // What justifies UNLIMITED is knowing the input's expansion, or bounding it
-                // elsewhere -- not knowing the caller. A trusted caller can still be relaying an
+                // elsewhere, not from knowing the caller. A trusted caller can still relay an
                 // attacker's bytes. Here the data is generated locally, which is the precondition
                 // the opt-out actually needs.
                 let data = vec![0_u8; 256 * 1024];
@@ -474,7 +477,7 @@ macro_rules! format_contract {
 
             #[test]
             fn corruption_is_detected_or_changes_the_output() {
-                // Formats with a checksum report corruption; raw deflate has none, so the honest
+                // Formats with a checksum report corruption. Raw deflate has none, so the correct
                 // universal guarantee is only that corrupt input does not silently reproduce the
                 // original bytes.
                 let data = payload();
@@ -498,7 +501,7 @@ macro_rules! format_contract {
             #[test]
             fn the_runtime_factory_matches_the_module() {
                 // `Format` must produce codecs equivalent to the concrete modules, or runtime
-                // selection would silently behave differently from compile-time selection.
+                // selection can behave differently from compile-time selection without an error.
                 let data = payload();
 
                 let via_module = $module::compress(view(&data), resources()).unwrap();
@@ -533,24 +536,24 @@ macro_rules! format_contract {
 
             #[test]
             fn pooling_does_not_change_the_output() {
-                // Reuse is an optimisation, so it must change nothing a caller can observe. That is
+                // Reuse is an optimization, so it must not change observable behavior. That is
                 // what this section asserts, and it is why it stays in the universal contract even
-                // though the formats differ in what they actually recycle -- brotli recycles nothing
+                // although formats differ in what they recycle. Brotli recycles nothing
                 // and a gzip decompressor is deliberately never recycled.
                 //
                 // Naming these for the observable property rather than for recycling is deliberate:
-                // a test that claimed to exercise a recycled engine would be a lie for brotli, and
-                // gating them on which formats currently pool would mean editing this suite every
+                // a test that claims to exercise a recycled engine is incorrect for brotli.
+                // Gating tests on current pool behavior requires editing this suite every
                 // time an engine gains or loses a reset. The property holds either way, so the tests
                 // keep passing unchanged when pooling arrives for a format that lacks it today.
                 //
-                // The exact pool mechanics -- retention, keying, capacity, poisoning -- are tested
+                // Separate tests cover pool retention, keying, capacity, and poisoning
                 // next to `Pool` itself. What lives here is the caller-visible contract.
                 //
                 // The baseline and the pooled runs share one input view on purpose: some engines
                 // legitimately vary with input segmentation (zstd records the content size in its
                 // frame header only when the whole input arrives in one call), so a fresh view per
-                // run would compare allocator behaviour rather than pooling.
+                // run compares allocator behavior instead of pooling.
                 let input = view(&payload());
                 let baseline = {
                     let mut compressor = $module::Compressor::builder()
@@ -936,7 +939,7 @@ macro_rules! format_contract {
                     compressor.flush().unwrap();
 
                     let mut compressed = BytesBuf::new();
-                    // One guard, not two: the shared `StepGuard` would have tripped first and
+                    // Use one guard, not two. The shared `StepGuard` can trip first and
                     // reported the generic message, leaving this bound unreachable. This one keeps
                     // the chunk size in the diagnostic, which is what the test is varying.
                     let mut pulls = 0;
@@ -1221,7 +1224,7 @@ macro_rules! format_contract {
                     guard.step();
                     match decompressor.pull(Destination::Stream) {
                         Ok(Output::Data(_) | Output::Progress) => {}
-                        Ok(_) => panic!("the second stream should exceed the limit"),
+                        Ok(_) => panic!("the second stream must exceed the limit"),
                         Err(error) => break error,
                     }
                 };
@@ -1362,9 +1365,9 @@ fn every_compiled_format_satisfies_the_contract() {
 #[test]
 fn one_formats_output_never_decodes_to_the_original_through_another() {
     // The guarantee this can enforce is weaker than "wrong format always errors", and deliberately
-    // so: a checksum-free or permissive decoder may accept unrelated bytes without that implying
+    // so. A checksum-free or permissive decoder can accept unrelated bytes without implying
     // the formats are compatible. What must never happen is a wrong-format decode reproducing the
-    // payload, which would mean the two formats are not distinct.
+    // payload. Such a result means that the two formats are not distinct.
     let data = b"cross format check ".repeat(200);
 
     for &produced_by in Format::ALL {
@@ -1417,7 +1420,7 @@ mod format_specific_settings {
     fn default_limits_accept_the_compressors_own_high_ratio_output() {
         // Half a megabyte of zeros clears the ratio guard's 32 KiB floor and still reaches an
         // expansion far past deflate's structural `1032x`, which is the ratio a portable default
-        // would have been calibrated on. Brotli's own default must accept it.
+        // used for calibration. Brotli's default must accept it.
         let data = vec![0_u8; 512 * 1024];
         let compressed = brotli::compress(view(&data), resources()).unwrap();
 
@@ -1523,8 +1526,8 @@ mod zstd_specific_settings {
     #[test]
     fn native_level_and_decompressor_window_limit_are_wired() {
         // Large enough that the frame has to declare a window well above the smallest zstd offers.
-        // A short payload would not: zstd sizes the window to the content, so the restricted
-        // decompressor below would accept it and prove nothing.
+        // A short payload is insufficient. Zstd sizes the window to the content, so the restricted
+        // decompressor below accepts it and proves nothing.
         let data = b"zstd format-specific settings ".repeat(200_000);
         let compressor = zstd::Compressor::builder()
             .compression_level(CompressionLevel::min())
@@ -1532,7 +1535,7 @@ mod zstd_specific_settings {
             .built();
         let compressed = crate::compress(view(&data), compressor).unwrap();
 
-        // The limit has to be observable, or this test would pass even if the setting were dropped
+        // The limit must be observable. Otherwise, this test passes if the setting is dropped
         // on the floor: the default decompressor accepts this frame either way.
         let restricted = zstd::Decompressor::builder()
             .max_window_log(WindowLog::MIN)
@@ -1577,8 +1580,8 @@ mod pooling {
     /// This is what makes a reuse sequence deterministic. Capacity one means the engine returned by
     /// a drop is the engine the next build receives, and a pool of its own means no concurrently
     /// running test can take it in between. Dirtying through one `Resources` and verifying through
-    /// another proves nothing at all -- each owns its own pool, so the engine under test would be a
-    /// fresh one and the assertion would pass however broken the reset was.
+    /// another proves nothing. Each value owns its pool, so the engine under test is fresh.
+    /// The assertion then passes even if reset is incorrect.
     fn solo_resources() -> Resources {
         Resources::new(GlobalPool::new()).with_pool_capacity(1)
     }
@@ -1624,7 +1627,7 @@ mod pooling {
     #[test]
     fn a_compressor_abandoned_mid_stream_does_not_poison_the_pool() {
         // A request cancelled part-way through returns a dirty engine. The next user must still
-        // get a clean stream -- and must actually receive *that* engine, which is what one private
+        // get a clean stream. It must receive that engine, which is what one private
         // capacity-one pool used for both halves guarantees.
         let solo = solo_resources();
 
@@ -1650,7 +1653,7 @@ mod pooling {
         // Reset preserves the level, so a level-9 request must never receive a level-1 engine. The
         // private capacity-one pool is what makes that a real test: with one slot, the level-9
         // request is offered the engine the level-1 run just returned, so a pool that ignored the
-        // level would hand it over here rather than merely being able to.
+        // level hands it over here rather than only being able to.
         let solo = solo_resources();
         let payload = b"the quick brown fox jumps over the lazy dog ".repeat(200);
 
@@ -1660,9 +1663,9 @@ mod pooling {
         assert_eq!(fast.to_vec(), compress_with(&unpooled_resources(), Level::FAST, &payload).to_vec());
         assert_eq!(best.to_vec(), compress_with(&unpooled_resources(), Level::HIGH, &payload).to_vec());
         // Inequality of the bytes is what proves the level reached the engine at all: the size
-        // comparison below is satisfied by equality, so a backend that dropped the level would
-        // pass it, and the `assert_eq!` pair above would still hold because pooled and fresh
-        // engines would agree on the same wrong output.
+        // comparison below accepts equality. A backend that drops the level passes it. The
+        // `assert_eq!` pair above also holds because pooled and fresh engines agree on the same
+        // incorrect output.
         assert_ne!(best.to_vec(), fast.to_vec(), "the level did not reach the engine");
         assert!(best.len() <= fast.len(), "Level::HIGH must still out-compress Level::FAST");
     }
@@ -1687,7 +1690,7 @@ mod pooling {
 
     #[test]
     fn a_pooled_decompressor_round_trips_every_format() {
-        // Whether or not a format's engine is actually recycled is an implementation detail; the
+        // Engine recycling for a format is an implementation detail. The
         // decompressed bytes must be identical either way.
         let payloads = [b"first response body".repeat(60), b"a different second body".repeat(90)];
 
@@ -1710,8 +1713,8 @@ mod pooling {
     fn a_decompressor_abandoned_mid_stream_does_not_poison_the_pool() {
         use crate::zlib;
 
-        // zlib rather than gzip, because gzip decompressors are deliberately not recycled -- there
-        // would be no dirty engine to hand back. One private capacity-one pool for both halves, so
+        // zlib rather than gzip because gzip decompressors are not recycled. Gzip has no dirty
+        // engine to return. One private capacity-one pool serves both halves, so
         // the engine cut short is provably the engine that then has to decode a whole stream.
         let solo = solo_resources();
         let payload = b"a stream that gets cut short ".repeat(200);
@@ -1733,8 +1736,8 @@ mod pooling {
     #[test]
     fn gzip_decompressors_are_not_recycled() {
         // `Decompress::reset` takes a boolean that cannot express gzip framing, so a recycled gzip
-        // decompressor would silently decompress as raw deflate. It must therefore never be pooled --
-        // and the caller must not be able to tell the difference.
+        // decompressor silently decompresses as raw deflate. It must never enter the pool, and the
+        // caller must not be able to tell the difference.
         let payload = b"gzip stays correct ".repeat(200);
         let compressed = gzip::compress(view(&payload), resources()).unwrap();
 
@@ -1758,8 +1761,8 @@ mod pooling {
 }
 
 /// The riskiest pooling bug: deflate, zlib and gzip share one engine type, so a mis-keyed pool
-/// would hand a zlib compressor to a gzip request and emit a well-formed stream in the wrong
-/// format. Nothing else in the suite would catch that.
+/// can hand a zlib compressor to a gzip request and emit a valid stream in the wrong format.
+/// No other test detects that case.
 #[test]
 fn formats_never_share_pooled_engines() {
     let data = b"interleaved through one pool ".repeat(200);
@@ -1812,7 +1815,7 @@ fn formats_never_share_pooled_engines() {
     }
 }
 
-/// One pool shared by many threads, the way a client would actually use it.
+/// One pool shared by many threads, as a client uses it.
 #[test]
 fn a_shared_pool_is_correct_under_concurrency() {
     let data = b"concurrent request body ".repeat(150);
@@ -1946,16 +1949,16 @@ mod trait_contract {
         let input = view(&data);
 
         let mut boxed = gzip::Compressor::new(resources());
-        assert_eq!(boxed.total_in(), 0, "nothing has been consumed yet");
-        assert_eq!(boxed.total_out(), 0, "nothing has been produced yet");
+        assert_eq!(boxed.total_in(), 0, "the engine must not consume input before push");
+        assert_eq!(boxed.total_out(), 0, "the engine must not produce output before push");
 
         let compressed = compress(&mut boxed, &input, usize::MAX).unwrap();
 
-        assert_eq!(boxed.total_in(), data.len() as u64, "every input byte should be accounted for");
+        assert_eq!(boxed.total_in(), data.len() as u64, "the count must include every input byte");
         assert_eq!(
             boxed.total_out(),
             compressed.len() as u64,
-            "every output byte should be accounted for"
+            "the count must include every output byte"
         );
     }
 
@@ -2028,7 +2031,7 @@ mod trait_contract {
 
         assert!(
             compressed.len() > before_flush,
-            "boxed flush should have released a sync-flush chunk beyond the header before end_input"
+            "boxed flush must release a sync-flush chunk beyond the header before end_input"
         );
 
         compressor.end_input();
