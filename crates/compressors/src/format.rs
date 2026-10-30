@@ -961,9 +961,9 @@ mod tests {
 
     #[test]
     fn no_format_bounds_output_or_stream_count_by_default() {
-        // A decompressor hands each chunk straight back and keeps nothing, so bounding its total
-        // Output or member-count bounds can stop long streams that never retain more than one chunk.
-        // Cumulative bounds belong to the conveniences that accumulate, applied by
+        // A decompressor returns each chunk and retains nothing. Total output or member-count
+        // bounds can stop long streams that never retain more than one chunk. Cumulative bounds
+        // belong to the conveniences that accumulate, applied by
         // `DecompressorLimits::for_buffered_output` and asserted in `limits`.
         fn assert_uncapped(name: &str, limits: FormatLimits) {
             const HUGE: u64 = 64 * 1024 * 1024 * 1024;
