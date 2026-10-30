@@ -17,12 +17,15 @@ If macros make source ownership uncertain, the filter keeps ambiguous counters.
 Keep explicit exclusions for exceptional production paths and helpers that the
 filter cannot classify.
 
-Anvil runs examples by default. Automated network examples use a local HTTPS
-origin with a generated certificate and real TLS clients. Servers use OS-assigned
-ports, and file-writing examples use temporary output directories.
-Manual runs keep their normal endpoints, ports, and output paths.
-Examples that need developer credentials, manual arguments, or separately installed
-profiling tools remain build-only in `[package.metadata.anvil.examples].no-run`.
+Anvil runs examples by default. Fetch examples that send real requests use
+public endpoints such as `https://example.com`. Automated runs require public
+network access and can fail if the endpoint or network is unavailable.
+Examples that need developer credentials, manual arguments, or separately
+installed profiling tools remain build-only in
+`[package.metadata.anvil.examples].no-run`.
+Automated server examples use OS-assigned ports. The snapshot example uses
+a temporary output directory. The Fetch streaming example writes and removes
+`output.txt` in the working directory.
 
 The handwritten `repository-checks.yml` also verifies the
 `http_headers_simd` `no_std` contract with package-isolated unit and integration

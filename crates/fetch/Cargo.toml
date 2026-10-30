@@ -171,11 +171,9 @@ fastrand.workspace = true
 fetch_hyper = { path = "../fetch_hyper", features = ["rustls", "native-tls"] }
 fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
 futures = { workspace = true, features = ["executor", "std"] }
-http-body-util = { workspace = true }
 http_compression = { path = "../http_compression", features = ["brotli", "deflate", "gzip", "zstd"] }
 http_extensions = { path = "../http_extensions", features = ["test-util", "json"] }
-hyper = { workspace = true, features = ["server", "http1", "http2"] }
-hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy", "server-auto"] }
+hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
 mutants = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
@@ -187,7 +185,6 @@ opentelemetry_sdk = { workspace = true, features = [
     "metrics",
     "testing",
 ], default-features = false }
-rcgen = { workspace = true, features = ["aws_lc_rs"] }
 rustls = { workspace = true, features = [
     "tls12",
     "std",
@@ -197,7 +194,6 @@ rustls-platform-verifier = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
-tempfile = { workspace = true, features = ["getrandom"] }
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { path = "../tick", features = [
@@ -209,9 +205,7 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
     "rt",
     "net",
-    "sync",
 ] }
-tokio-rustls = { workspace = true, features = ["aws_lc_rs", "tls12"] }
 tower-service = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
 tracing-appender = { workspace = true }
