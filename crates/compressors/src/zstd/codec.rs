@@ -29,8 +29,8 @@ use crate::zstd::{CompressionLevel, Zstd};
 fn compression_level(level: Level) -> i32 {
     // Two fixed points and an interpolation, rather than a measured curve. `Level::DEFAULT` must
     // land on zstd's own default of 3, and `Level::MAX` must stop short of the expensive top of the
-    // native range. The entries between them are chosen for a smooth, monotonic climb with the
-    // steps widen towards the top, where each additional level costs more. They are not
+    // native range. The entries between them form a smooth, monotonic climb. The steps widen
+    // towards the top, where each additional level costs more. They are not
     // individually derived from a benchmark, so retuning one is a policy change rather than a
     // regression against a recorded measurement.
     const MAPPING: [i32; 10] = [1, 1, 2, 2, 3, 3, 3, 6, 9, 12];
