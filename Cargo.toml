@@ -67,6 +67,7 @@ alloc_tracker = { version = "0.7.1", default-features = false }
 
 # local dependencies
 allocation_hints = { path = "crates/allocation_hints", default-features = false, version = "0.2.0" }
+observed_destination_stdout = { path = "crates/observed_destination_stdout", default-features = false, version = "0.1.0" }
 allocator-api2 = { version = "0.4.0", default-features = false }
 # hashbrown 0.17 uses this allocator trait version for system-backed tables.
 allocator-api2-02 = { package = "allocator-api2", version = "0.2.21", default-features = false, features = ["std"] }
@@ -91,6 +92,7 @@ azure_storage_blob = { version = "1.0.0", default-features = false }
 backtrace = { version = "0.3.76", default-features = false }
 base64 = { version = "0.23.0", default-features = false, features = ["alloc"] }
 bolero = { version = "0.13.4", default-features = false }
+bon = { version = "3.10.3", default-features = false }
 brotli = { version = "9.0.0", default-features = false }
 bumpalo = { version = "3.20.2", default-features = false }
 bytemuck = { version = "1.25.0", default-features = false }
