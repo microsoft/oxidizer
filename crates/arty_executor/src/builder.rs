@@ -19,7 +19,7 @@ pub struct ExecutorBuilder {
 }
 
 impl ExecutorBuilder {
-    /// Creates a new [`ExecutorBuilder`] with default settings.
+    /// Creates an [`ExecutorBuilder`] with default configuration.
     pub fn new() -> Self {
         Self {
             owner_waker: Waker::noop().clone(),
@@ -29,19 +29,20 @@ impl ExecutorBuilder {
         }
     }
 
-    /// The waker that will wake up the executor's owner.
+    /// Sets the waker that notifies the executor owner.
     ///
-    /// The `owner_waker` is used by the executor to wake up its owner when more work has
-    /// arrived for the executor and calling [`execute_cycle()`][Executor::execute_cycle]
-    /// is desirable.
+    /// The executor calls `owner_waker` for task wake notifications and
+    /// shutdown requests. Registering a task does not call this waker. The
+    /// caller must arrange an [`execute_cycle()`][Executor::execute_cycle]
+    /// after it registers a task.
     ///
-    /// The default is not to wake the owner even if there is more work the executor could do.
+    /// By default, the executor does not notify the owner.
     pub fn owner_waker(mut self, owner_waker: Waker) -> Self {
         self.owner_waker = owner_waker;
         self
     }
 
-    /// Configures the observed sink used for task lifecycle events.
+    /// Sets the observed sink for task lifecycle events.
     ///
     /// The default sink is a no-op.
     pub fn sink(mut self, sink: Sink) -> Self {
@@ -49,7 +50,7 @@ impl ExecutorBuilder {
         self
     }
 
-    /// Configures the thread coordinate owned by the executor.
+    /// Sets the thread coordinate that the executor owns.
     ///
     /// The coordinate must identify the current OS thread. If omitted, the
     /// executor uses the current OS thread directly.
@@ -58,13 +59,13 @@ impl ExecutorBuilder {
         self
     }
 
-    /// Configures how the executor responds to a contained task panic.
+    /// Sets how the executor responds to a contained task panic.
     pub fn panic_policy(mut self, policy: PanicPolicy) -> Self {
         self.panic_policy = policy;
         self
     }
 
-    /// Builds the executor with the configured settings.
+    /// Builds the executor with this configuration.
     ///
     /// # Panics
     ///

@@ -7,13 +7,12 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 /// A panic captured while executing or disposing an executor task.
 pub type TaskPanicPayload = Box<dyn Any + Send + 'static>;
 
-/// Disposes a captured task panic without allowing its destructor to start another unwind.
+/// Drops a captured task panic without allowing its destructor to unwind.
 ///
-/// Cancellation and result delivery sometimes need to discard a panic payload. Payload destructors
-/// are user code and may themselves panic, so disposal catches replacement payloads and aborts only
-/// if they keep panicking beyond a generous finite budget. Aborting avoids abandoning an opaque
-/// payload that may still own task resources while also preventing an endlessly replacing
-/// destructor chain from monopolizing executor cleanup.
+/// Cancellation and result delivery sometimes discard a panic payload. A payload
+/// destructor is user code and can panic. This function catches each replacement
+/// payload. It aborts the process after a limited number of consecutive destructor
+/// panics. The limit prevents an endless replacement chain during executor cleanup.
 #[cfg_attr(coverage_nightly, coverage(off))] // Terminal repeated-panic termination is child-process-only.
 pub fn discard_task_panic_payload(mut panic: TaskPanicPayload) {
     const MAX_DISPOSAL_ATTEMPTS: usize = 32;

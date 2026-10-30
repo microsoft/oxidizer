@@ -24,11 +24,11 @@ pub(crate) struct TaskLinks {
     pub(crate) linked: Cell<bool>,
 }
 
-/// A task registered with the async task executor, in its fully typed form.
+/// The typed form of a task that is registered with the executor.
 ///
-/// This facilitates the executor's internal bookkeeping and state management around a task.
-/// The executor itself typically handles the task in obscured form, as a [`TypeErasedTask`],
-/// as it does not care about the specific type information - only the task itself does.
+/// The task stores its future, completion target, wake state, and bookkeeping.
+/// The executor usually accesses it through [`TypeErasedTask`] because only the
+/// task needs its concrete types.
 #[derive(Debug)]
 struct Task<F, R, T>
 where
@@ -36,12 +36,11 @@ where
     R: 'static,
     T: TaskCompletion<R>,
 {
-    /// `None` if the task has either completed or has been abandoned by the executor (e.g. because
-    /// it is shutting down).
+    /// `None` after the task completes or the executor abandons it during shutdown.
     ///
     /// We use `UnsafeCell` to allow the `Task` to be accessed from multiple viewpoints, with the
     /// executor using both the payload and the wake signal, and the wakers emitted by the
-    /// wake signal using the wake signal. All access is via shared references to ensure no
+    /// wake signal using the wake signal. All access is through shared references, so there are no
     /// aliasing violations, with `UnsafeCell` used when mutation of the contents is needed.
     /// (Outer) mutation of the fields only occurs by the executor, ensuring thread-safety.
     payload: UnsafeCell<Option<Payload<F, R, T>>>,
@@ -65,7 +64,7 @@ where
     clippy::non_send_fields_in_send_ty,
     reason = "remote owners retain only the allocation; the executor retires non-Send payloads on their owner thread"
 )]
-// SAFETY: Task cells may be retained and reference-counted from remote threads, but task access is
+// SAFETY: Remote threads can retain and reference-count task cells, but task access is
 // private and owner-thread-only. Cross-thread wakers touch only separately synchronized wake
 // metadata. Completion and cancellation empty the non-Send payload before the owner releases its
 // final scheduling reference, so remote final reclamation cannot drop user state.
@@ -77,7 +76,7 @@ where
 {
 }
 
-// SAFETY: Same invariant as `Send`; shared remote access never reaches task payload fields.
+// SAFETY: This uses the same invariant as `Send`. Shared remote access never reaches task payload fields.
 unsafe impl<F, R, T> Sync for Task<F, R, T>
 where
     F: Future<Output = R> + 'static,
@@ -233,7 +232,7 @@ where
 
         let poll_result = {
             // SAFETY: The borrowed polling waker cannot escape this block. Clones retain the
-            // pinned pooled task allocation; owner retirement empties its payload before a remote
+            // pinned pooled task allocation. Owner retirement empties its payload before a remote
             // clone can release the final reference.
             let waker = unsafe { wake_signal.waker_ref() };
 
@@ -339,7 +338,7 @@ pub(crate) fn on_unhandled_task_panic(panic: TaskPanicPayload) -> ! {
     std::process::abort();
 }
 
-/// Deals with the payload elements of a task - the future and the result.
+/// Stores the future and completion target for a task.
 struct Payload<F, R, T>
 where
     F: Future<Output = R> + 'static,
@@ -358,10 +357,11 @@ enum TerminalOutcome<R> {
     Cancelled(ShutdownCause),
 }
 
-/// Inline result delivery owned by a task. Publishing consumes the target.
+/// Delivers a terminal task result. Each method consumes the target.
 pub trait TaskCompletion<R>: Debug + 'static {
-    /// Implementations must not panic.
     /// Publishes a successful task result.
+    ///
+    /// Implementations must not panic.
     fn completed(self, result: R);
 
     /// Publishes a captured task panic. Implementations must not panic.
@@ -371,7 +371,9 @@ pub trait TaskCompletion<R>: Debug + 'static {
     /// notification.
     fn panicked(self, panic: TaskPanicPayload, cause: Option<ShutdownCause>);
 
-    /// Publishes task cancellation caused by executor shutdown. Implementations must not panic.
+    /// Publishes task cancellation caused by executor shutdown.
+    ///
+    /// Implementations must not panic.
     fn cancelled(self, cause: ShutdownCause);
 }
 
@@ -427,13 +429,12 @@ impl<F> PinnedDrop for FutureStorage<F> {
 }
 
 pub(crate) trait TypeErasedTask: Send + Sync {
-    /// Polls the task's future, enabling it to make progress.
+    /// Polls the task future.
     ///
     /// The task delivers its result separately. Returns `Poll::Ready(())` when
     /// the task completes or panics, and `Poll::Pending` otherwise.
     ///
-    /// It is not valid to poll a task again once it has completed - the internal state is
-    /// dropped to a minimal set after completion and polling is no longer valid.
+    /// Do not poll a completed task. Completion drops the state that polling needs.
     ///
     /// # Panics
     ///
@@ -457,13 +458,12 @@ pub(crate) trait TypeErasedTask: Send + Sync {
     /// Promotes an active remote notification to local scheduling.
     fn promote_remote_notification(&self) -> bool;
 
-    /// Clears the inner state of the task, entering a form where no further polling is possible
-    /// and any future-specific state is dropped.
+    /// Drops the task payload and prevents more polling.
     ///
     /// Retained wakers keep the empty task allocation alive but become inert.
     fn abort(self: Pin<&Self>, cause: ShutdownCause);
 
-    /// Initializes the task, providing it the wake signal that it needs to enable polling
+    /// Initializes the task with its wake signal.
     ///
     /// # Panics
     ///
