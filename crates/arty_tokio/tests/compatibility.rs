@@ -207,6 +207,52 @@ fn shutdown_during_submission_is_a_typed_init_error() {
     drop(tokio);
 }
 
+#[test]
+fn shutdown_after_an_installer_is_ready_returns_a_typed_error() {
+    let tokio = Builder::new_multi_thread().build().unwrap();
+    let runtime = runtime(2);
+    let (builtins, scheduler, workers) = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let workers = cx.control().workers().into_iter().cloned().collect::<Vec<_>>();
+            (cx.clone(), cx.scheduler().clone(), workers)
+        })
+        .unwrap();
+    let ready_worker = workers[0].clone();
+    let blocked_worker = workers[1].clone();
+    let (blocker_started, blocker_ready) = mpsc::sync_channel(1);
+    let (blocker_release, blocker_gate) = mpsc::sync_channel(1);
+    let blocker = scheduler.spawn_at(
+        &blocked_worker,
+        WorkerBlocker {
+            started: blocker_started,
+            release: blocker_gate,
+        },
+        block_worker,
+    );
+    blocker_ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    let init_builtins = builtins.clone();
+    let init_handle = tokio.handle().clone();
+    let initialization = std::thread::spawn(move || futures::executor::block_on(arty_tokio::init(&init_builtins, init_handle)));
+    let deadline = Instant::now() + TEST_TIMEOUT;
+    while !worker_has_context(&scheduler, &ready_worker) {
+        assert!(Instant::now() < deadline, "installer did not enter the Tokio context");
+        std::thread::yield_now();
+    }
+
+    builtins.control().request_stop();
+    blocker_release.send(()).unwrap();
+    futures::executor::block_on(blocker).unwrap();
+    let error = initialization.join().unwrap().unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Arty shut down during Tokio compatibility initialization\ncaused by: runtime is shutting down"
+    );
+    stop_bounded(runtime);
+    drop(tokio);
+}
+
 struct ExistingContext {
     handle: Handle,
     ready: OneshotSender<()>,
