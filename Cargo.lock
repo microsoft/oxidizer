@@ -1970,6 +1970,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
+ "tempfile",
  "templated_uri",
  "testing_aids",
  "thread_aware",

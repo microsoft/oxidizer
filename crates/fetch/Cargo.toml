@@ -194,6 +194,7 @@ rustls-platform-verifier = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
+tempfile = { workspace = true, features = ["getrandom"] }
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { path = "../tick", features = [

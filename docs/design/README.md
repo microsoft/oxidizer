@@ -23,9 +23,9 @@ network access and can fail if the endpoint or network is unavailable.
 Examples that need developer credentials, manual arguments, or separately
 installed profiling tools remain build-only in
 `[package.metadata.anvil.examples].no-run`.
-Automated server examples use OS-assigned ports. The snapshot example uses
-a temporary output directory. The Fetch streaming example writes and removes
-`output.txt` in the working directory.
+Automated server examples use OS-assigned ports. The snapshot and Fetch
+streaming examples use temporary output directories during automated runs.
+Manual runs keep their normal output paths.
 
 The handwritten `repository-checks.yml` also verifies the
 `http_headers_simd` `no_std` contract with package-isolated unit and integration
