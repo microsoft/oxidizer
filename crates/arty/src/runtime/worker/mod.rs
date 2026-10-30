@@ -1,10 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Async worker execution, wake notification, and executor shutdown.
+//! Async and blocking worker execution.
+//!
+//! `Runtime` owns `WorkerJoiner`, which joins the asynchronous worker threads.
+//! Each asynchronous worker owns its executor, I/O drivers, and blocking
+//! worker. Each blocking worker owns its thread pools. `WorkerMarker` identifies
+//! both worker types without destructible thread-local state.
 
-mod async_worker;
-pub(super) mod protocol;
-pub(crate) mod signal;
+pub(crate) mod asynchronous;
+pub(crate) mod blocking;
 
-pub(super) use async_worker::AsyncWorker;
+mod joiner;
+mod worker_marker;
+
+pub(crate) use joiner::WorkerJoiner;
+pub(crate) use worker_marker::WorkerMarker;

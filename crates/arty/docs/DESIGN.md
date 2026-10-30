@@ -1,123 +1,148 @@
 # Design
 
-Arty runs async tasks on dedicated workers, with separate pools for blocking
-work. Tasks receive `Context` with their worker's scheduler, clock, I/O handle,
-and telemetry sink.
+Arty runs async tasks on dedicated worker threads. It uses separate thread pools
+for blocking work. Each task receives `Context` with its scheduler, clock, I/O
+handle, runtime control, and telemetry sink.
 
-This document describes the application-facing design. Maintainers should also
-read the [runtime implementation map](INTERNALS.md) for bootstrap, ownership,
-readiness, shutdown, and scoped-borrowing invariants.
+This document describes the application-facing design.
 
-## Workers and isolation
+## Runtime and workers
 
-Each runtime owns its workers and shutdown. There is no process-global runtime.
-Stopping one does not request shutdown of another, but application data can
-still be shared. This is scheduling isolation, not a security boundary.
+Each `Runtime` owns its workers and shutdown state. Arty has no process-global
+runtime. Stopping one runtime does not stop another runtime.
 
-Each worker owns a separate OS thread. An exact worker count can exceed the
-available processor count. In that case, multiple worker threads share each
-processor, and the operating system schedules their execution.
+Each async worker runs on its own operating-system thread. An exact worker count
+can exceed the available processor count. The operating system then schedules
+multiple worker threads on each processor.
 
-An async task stays on the worker that creates its future, including across
-awaits. Arty does not move running tasks to balance load. This lets futures
-keep thread-local and non-`Send` state.
+An async task stays on the worker that creates its future. Arty does not move a
+running task to balance load. The future can keep thread-local and non-`Send`
+state.
 
-Tasks on a worker take turns. Blocking that worker, or running without giving
-control back, holds up its other tasks and timers. Other workers can continue
-independently.
+Tasks on one worker take turns. A task that blocks the thread or does not yield
+also delays other tasks and timers on that worker. Other workers can continue.
 
-## Placing new work
+Worker isolation controls scheduling. It is not a security boundary, and
+workers can share application data.
 
-`Runtime::scheduler()` lets the runtime place new work.
-`Context::scheduler()` submits ordinary child tasks to its worker, even when
-cloned or used from another thread.
+## Scheduling work
 
-Ordinary task factories and results must be `Send`, but their futures need not
-be. Create worker-local, non-`Send` state inside the task future after it reaches
-the destination worker.
+`Runtime::scheduler()` returns a `RuntimeScheduler`. It lets the runtime choose
+where to place work.
 
-`spawn_anywhere` lets the runtime choose a worker.
-`Scheduler::spawn_at` targets a worker coordinate obtained from
-`Context::control().workers()`. Submission order does not guarantee
-completion order. See the
-[scheduling guide](../src/documentation/scheduling.rs) for examples.
+`Context::scheduler()` returns a worker-bound `Scheduler`. Its ordinary
+`spawn` method keeps child tasks on that worker. A cloned `Scheduler` still
+targets the same worker when another thread uses it.
+
+Task factories, captured values, and results cross thread boundaries and must
+implement `Send`. The future does not need to implement `Send`. Create
+worker-local and non-`Send` state inside the future.
+
+`RuntimeScheduler::spawn_anywhere` lets the runtime select a worker.
+`Scheduler::spawn_at` targets a worker coordinate from
+`Context::control().workers()`. Submission order does not set completion
+order.
+
+See the [scheduling guide](../src/documentation/scheduling.rs) for examples.
 
 ## Thread-aware values
 
-`ThreadAware` lets a value adapt its worker-bound state during relocation.
-It includes `Send`, so moving the value must be safe even without relocation.
-Moving or cloning alone does not change its worker association.
+`ThreadAware` extends `Send` with relocation for worker-bound state. Moving or
+cloning a value without relocation does not change its worker association.
 
-`spawn_anywhere` and `spawn_at` relocate their explicit input to the destination
-worker before starting the task. On a worker's `Scheduler`, their results must
-also be `ThreadAware`. Runtime-wide `spawn_anywhere` accepts any `Send` result.
-Joining a worker-bound `spawn_anywhere` or `spawn_at` on an Arty worker relocates
-the result to that worker. Joining outside Arty does not relocate the result.
-Runtime-wide `spawn_anywhere`, ordinary `spawn`, and `block_on` do not relocate
-results.
+`Scheduler::spawn_anywhere` and `Scheduler::spawn_at` relocate their explicit
+input before the task starts. Results from these methods must also implement
+`ThreadAware`.
 
-Relocation does not transfer Arty's worker-bound handles to another runtime.
-See the
+When an Arty worker joins one of these tasks, Arty relocates the result to that
+worker. Joining from an external thread does not relocate the result.
+`RuntimeScheduler::spawn_anywhere`, ordinary `spawn`, and `block_on` do not
+relocate results.
+
+Relocation does not transfer an Arty handle to another runtime. See the
 [thread-awareness guide](../src/documentation/thread_awareness.rs).
 
-## Blocking work and I/O
+## Blocking work
 
-`spawn_blocking` runs a synchronous callback away from async workers. Captures
-and results must be `Send`. Workers share one blocking pool by default; the
-per-worker policy separates their blocking workloads into one pool per worker,
-potentially using more threads.
+`spawn_blocking` runs a synchronous callback outside the async worker. Its
+captured values and result must implement `Send`.
 
-Arty provides timers and hosts drivers supplied by I/O libraries built on
-`arty_io_core`, but it does not include a built-in network or file I/O
-implementation. Access compatible contexts through `Context::io()`; see
-[I/O](IO.md). Use `spawn_blocking` for synchronous I/O.
+All workers share one blocking pool by default. The per-worker policy creates
+one pool for each async worker. This policy separates blocking workloads but
+can use more threads.
+
+Already-running blocking callbacks finish during shutdown. Queued callbacks do
+not have to start. A callback that never returns can prevent shutdown from
+finishing.
+
+## I/O
+
+Arty hosts drivers from I/O libraries that use `arty_io_core`. It does not
+include a network or file I/O implementation.
+
+Use `Context::io()` to access a compatible I/O context. Arty creates each
+context type once per runtime. Each worker creates its own driver when it first
+requests that context.
+
+The first registered context type provides the primary driver. Later context
+types provide secondary drivers. A worker runs secondary drivers before its
+primary driver.
+
+A cloned `Context` or I/O handle remains bound to its original worker. An
+ordinary thread can use it because Arty sends the request to that worker. Arty
+rejects access from another async worker to prevent synchronous dispatch cycles.
+
+Use `spawn_blocking` for synchronous I/O. See the [I/O guide](IO.md) for driver
+and shutdown behavior.
 
 ## Runtime lifetime and shutdown
 
-Schedulers, joins, and `Context` do not keep the runtime running. Dropping a
-join handle neither cancels its task nor waits for it.
+Schedulers, join handles, and `Context` do not keep the runtime running.
+Dropping a join handle does not cancel its task or wait for it.
 
-`Context::control()` is the only source of `RuntimeControl`.
+`Context::control()` provides `RuntimeControl`.
 `RuntimeControl::request_stop` requests shutdown without waiting.
-`Runtime::stop` consumes the owner, normally waits, and reports shutdown errors.
-Dropping the owner also requests shutdown and normally waits, but cannot return
-errors. Neither waits when called from an async Arty worker or the runtime's own
-blocking callback. `stop` returns an error in those contexts.
+`Runtime::stop` consumes the owner, waits for shutdown, and returns shutdown
+errors. Dropping the owner also requests shutdown and waits, but it cannot
+return an error.
 
-Shutdown rejects new submissions and cancels unfinished async tasks on their
-worker. Rejected factories and queued blocking callbacks do not run.
-Already-running callbacks finish before shutdown completes. One that never
-returns can prevent it.
+The runtime owner must stay on an external thread. `Runtime::stop` and
+`Runtime::drop` panic on async and blocking workers. Worker code must use
+`RuntimeControl::request_stop`.
 
-The first shutdown request sets the shutdown cause. Later requests cannot
+Shutdown rejects new submissions and cancels unfinished async tasks. It also
+discards rejected task factories and queued blocking callbacks.
+
+The first shutdown request sets the shutdown cause. Later requests do not
 replace it. If a runtime failure starts shutdown, cancelled task joins retain
-the failure in their error source chain.
+that failure in their error source chain.
 
-Await required work before requesting shutdown or returning from an
-`#[arty::main]` or `#[arty::test]` body. See the
-[shutdown guide](../src/documentation/shutdown.rs) and
-[critical-task guidance](CRITICAL_TASKS.md).
+Complete required work before requesting shutdown. With `#[arty::main]` or
+`#[arty::test]`, complete that work before the function returns. See the
+[shutdown guide](../src/documentation/shutdown.rs).
 
-### Cloned task wakers
+## Task wakers
 
-A task remains assigned to one worker. Calling a clone of its waker from another
-thread asks that worker to poll the task again; it never moves or polls the task
-on the calling thread.
+A task stays on one worker. A cloned task waker asks that worker to poll the task
+again. It does not move the task or poll it on the calling thread.
 
-A cloned waker may outlive both its task and the runtime. Completion and
-cancellation disconnect every clone from the task before the task's resources
-are reclaimed. Later calls are safe no-ops, and keeping a clone does not delay
-shutdown. This lifetime separation is both a memory-safety invariant and part of
-the runtime's shutdown contract.
+A cloned waker can outlive its task and runtime. Completion and cancellation
+disconnect each clone before Arty reclaims task resources. Later wake calls do
+nothing, and a retained clone does not delay shutdown.
 
-## Failure handling
+## Panics and telemetry
 
-Application errors remain task results. A caught panic becomes `JoinError`.
-By default, it also starts coordinated runtime shutdown. `PanicPolicy::ignore()`
-keeps the runtime running, but it does not repair shared state. Worker isolation
-does not make every panic recoverable: some failures must stop the process.
-Failure to initialize or execute an I/O driver stops the runtime.
+Application errors remain task results. Arty reports a caught task or blocking
+callback panic through `JoinError` when possible.
+
+By default, the first caught panic requests coordinated runtime shutdown.
+`PanicPolicy::ignore()` keeps the runtime running, but it cannot repair shared
+application state.
+
+Arty does not guarantee recovery from a panic in a destructor, custom waker,
+join notification, telemetry processor, or cleanup hook. Such a panic can abort
+the process or stop runtime progress. Failure to initialize or run an I/O driver
+stops the runtime.
 
 Runtime telemetry uses a no-op sink by default. Configured telemetry processors
-must not panic. See [panic handling](PANICS.md) for how task, shutdown, and
-telemetry failures are handled.
+must not panic. See [panic handling](PANICS.md) for the full policy.

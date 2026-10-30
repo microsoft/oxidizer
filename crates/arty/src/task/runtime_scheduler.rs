@@ -11,7 +11,7 @@ use pin_project::pin_project;
 use crate::core::ThreadAware;
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::task::{Context, JoinHandle, Scheduler};
+use crate::task::{Context, JoinHandle};
 
 type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Context) -> LocalBoxFuture<'a, R>) + 'a + Send>;
 
@@ -89,15 +89,10 @@ impl RuntimeScheduler {
     /// if the factory or future panics, or if shutdown cancels or rejects the task.
     /// Rejection does not invoke the factory.
     ///
-    /// Calling this from any async Arty worker returns an error, including
-    /// a worker belonging to another runtime. It also returns an error from
-    /// inside an already-running `futures` executor, before submitting the task.
-    ///
-    /// Calling this from a blocking callback is supported, but the submitted
-    /// work must not depend on another task queued to that callback's pool.
-    /// Such a dependency cannot run until the callback returns, while the
-    /// callback cannot return until `block_on` completes, causing a deadlock.
-    /// Arty does not track transitive task dependencies to detect this cycle.
+    /// Calling this from any Arty worker returns an error. This includes task
+    /// workers, blocking workers, and workers that belong to another runtime.
+    /// It also returns an error inside an active `futures` executor. The method
+    /// rejects these calls before it submits the task.
     ///
     /// # Examples
     ///
@@ -118,7 +113,7 @@ impl RuntimeScheduler {
         F: Future<Output = R> + 'a,
         R: Send + 'static,
     {
-        if Scheduler::is_current_worker_thread() {
+        if crate::runtime::worker::WorkerMarker::is_current() {
             return Err(Error::block_on_from_worker());
         }
         // Validate the ambient executor before any caller-borrowing work is submitted.
@@ -205,10 +200,8 @@ impl RuntimeScheduler {
     /// start. Already-running callbacks are allowed to finish.
     ///
     /// Do not synchronously poll a handle for work submitted to the same pool;
-    /// direct attempts panic. Also avoid indirect cycles where a blocking
-    /// callback calls [`block_on`](Self::block_on) and that async work awaits
-    /// blocking work from the callback's pool. Arty does not detect that
-    /// transitive dependency and the pool can deadlock.
+    /// direct attempts panic. [`block_on`](Self::block_on) also rejects calls
+    /// from blocking callbacks before task submission.
     ///
     /// # Examples
     ///

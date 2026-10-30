@@ -222,8 +222,6 @@ fn notification_during_first_driver_construction_prevents_primary_wait() {
 
 #[test]
 fn controlled_timer_fires_while_a_primary_driver_is_initialized() {
-    // `AsyncWorker::injected_time_advances_worker_timers_without_elapsed_wall_time`
-    // separately covers worker-driven ClockDriver advancement.
     let control = tick::ClockControl::new();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))

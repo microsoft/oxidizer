@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::cell::RefCell;
 use std::task::Waker;
 use std::time::Duration;
 
@@ -12,12 +11,9 @@ use thread_aware::Thread;
 use super::handle::{fail_runtime, runtime_error};
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
+use crate::runtime::worker::asynchronous::LocalWorker;
 
-thread_local! {
-    static CURRENT: RefCell<Option<RuntimeDriverHost>> = const { RefCell::new(None) };
-}
-
-/// Worker-local adapter between Arty's lifecycle and `arty_io_host`.
+/// Adapter between a task worker's lifecycle and `arty_io_host`.
 ///
 /// The adapter owns the host in worker TLS so lookup does not extend its
 /// lifetime beyond worker shutdown. It also binds lookups to one runtime and
@@ -43,27 +39,16 @@ impl RuntimeDriverHost {
             thread: thread.to_owned(),
             host: driver_host,
         };
-        CURRENT.with_borrow_mut(|current| {
-            assert!(current.is_none(), "an I/O driver host is already installed on this worker");
-            *current = Some(host);
-        });
+        LocalWorker::install_driver_host(host);
         waker
     }
 
     pub(crate) fn uninstall() -> Self {
-        CURRENT
-            .with_borrow_mut(Option::take)
-            .expect("the worker must uninstall the I/O driver host that it installed")
+        LocalWorker::uninstall_driver_host()
     }
 
     pub(crate) fn has_primary_current() -> bool {
-        CURRENT.with_borrow(|current| {
-            current
-                .as_ref()
-                .expect("the worker must install its I/O driver host before running")
-                .host
-                .has_primary()
-        })
+        LocalWorker::with_driver_host(|current| current.host.has_primary())
     }
 
     pub(crate) fn try_context_current<C>(runtime: &IoRuntime, thread: &Thread, options: &C::ContextOptions) -> Option<Result<C, Error>>
@@ -81,22 +66,16 @@ impl RuntimeDriverHost {
     }
 
     fn with_current<R>(runtime: &IoRuntime, thread: &Thread, f: impl FnOnce(&Self) -> R) -> Option<R> {
-        CURRENT.with_borrow(|current| {
-            current
-                .as_ref()
-                .filter(|host| host.runtime == *runtime && host.thread == *thread)
-                .map(f)
-        })
+        LocalWorker::try_with_driver_host(|current| (current.runtime == *runtime && current.thread == *thread).then(|| f(current)))
+            .flatten()
     }
 
     pub(crate) fn execute_cycle_current(max_wait: Duration) -> Result<(), Error> {
-        CURRENT.with_borrow(|current| {
-            let host = current
-                .as_ref()
-                .expect("the worker must install its I/O driver host before running");
-            host.host
+        LocalWorker::with_driver_host(|current| {
+            current
+                .host
                 .execute_cycle(max_wait)
-                .map_err(|error| fail_runtime(&host.dispatcher, error))
+                .map_err(|error| fail_runtime(&current.dispatcher, error))
         })
     }
 }
@@ -156,20 +135,25 @@ mod tests {
         }
     }
 
-    struct InstalledHost;
+    struct InstalledHost {
+        installed: bool,
+    }
 
     impl Drop for InstalledHost {
         fn drop(&mut self) {
-            drop(CURRENT.with_borrow_mut(Option::take));
+            if self.installed {
+                drop(RuntimeDriverHost::uninstall());
+            }
         }
     }
 
     fn host() -> (IoRuntime, Thread, InstalledHost) {
+        LocalWorker::attach();
         let thread = ThreadBuilder::default().build(std::thread::current().id());
         let runtime = IoRuntime::new(observed::Sink::noop());
         let dispatcher = DispatcherClient::for_test(&thread);
         let _ = RuntimeDriverHost::install(&runtime, dispatcher, &thread, Waker::noop().clone());
-        (runtime, thread, InstalledHost)
+        (runtime, thread, InstalledHost { installed: true })
     }
 
     #[test]
@@ -187,9 +171,10 @@ mod tests {
 
     #[test]
     fn uninstall_removes_current_host() {
-        let (runtime, thread, _host) = host();
+        let (runtime, thread, mut host) = host();
 
         let uninstalled = RuntimeDriverHost::uninstall();
+        host.installed = false;
 
         assert!(RuntimeDriverHost::with_current(&runtime, &thread, |_| ()).is_none());
         drop(uninstalled);

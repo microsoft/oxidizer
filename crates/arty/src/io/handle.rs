@@ -10,10 +10,11 @@ use performables::arc::Arc;
 use performables::sync::channel;
 use thread_aware::{Thread, ThreadAware};
 
-use super::current_host::RuntimeDriverHost;
+use super::driver_host::RuntimeDriverHost;
 use crate::runtime::Error;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
-use crate::task::{Context, Scheduler};
+use crate::runtime::worker::asynchronous::LocalWorker;
+use crate::task::Context;
 
 /// Access to I/O contexts hosted by an Arty runtime.
 ///
@@ -103,7 +104,7 @@ impl Io {
         if let Some(result) = RuntimeDriverHost::try_context_current(&self.runtime, &self.thread, options) {
             return result;
         }
-        if Scheduler::is_current_worker_thread() {
+        if LocalWorker::is_current() {
             return Err(Error::io_outside_worker());
         }
         let Some(worker_index) = self.dispatcher.worker_index(self.thread.id()) else {
@@ -155,7 +156,7 @@ pub(super) fn runtime_error(dispatcher: &DispatcherClient) -> Option<Error> {
 pub(super) fn fail_runtime(dispatcher: &DispatcherClient, error: DriverError) -> Error {
     let error = Arc::new(error);
     let cause = dispatcher.stop(Error::io_failure(Arc::clone(&error)).into_shutdown_cause());
-    Scheduler::begin_current_executor_shutdown(dispatcher, cause);
+    crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(dispatcher, cause);
     Error::io_failure(error)
 }
 
@@ -164,4 +165,91 @@ pub(super) fn fail_runtime(dispatcher: &DispatcherClient, error: DriverError) ->
 #[expect(clippy::panic, reason = "context intentionally converts returned runtime errors into panics")]
 fn panic_context(error: &Error) -> ! {
     panic!("failed to access Arty I/O context: {error}");
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::cell::RefCell;
+    use std::sync::mpsc;
+    use std::task::Waker;
+
+    use arty_io_core::{Cycle, Driver, DriverOptions};
+
+    use super::*;
+    use crate::runtime::worker::WorkerMarker;
+
+    thread_local! {
+        static IO_ON_DROP: RefCell<Option<IoOnDrop>> = const { RefCell::new(None) };
+    }
+
+    struct IoOnDrop {
+        io: Io,
+        completed: mpsc::Sender<()>,
+    }
+
+    impl Drop for IoOnDrop {
+        fn drop(&mut self) {
+            _ = self.io.context::<TestContext>(&());
+            self.completed.send(()).unwrap();
+        }
+    }
+
+    #[derive(Clone)]
+    struct TestContext;
+
+    impl ThreadAware for TestContext {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
+    impl IoContext for TestContext {
+        type ContextOptions = ();
+        type Driver = TestDriver;
+
+        fn context((): Self::ContextOptions) -> Self {
+            Self
+        }
+
+        fn driver(&mut self, _options: DriverOptions) -> Result<Self::Driver, DriverError> {
+            Ok(TestDriver)
+        }
+    }
+
+    struct TestDriver;
+
+    impl Driver for TestDriver {
+        fn waker(&self) -> Waker {
+            Waker::noop().clone()
+        }
+
+        fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+            Ok(())
+        }
+
+        fn shutdown(self) -> Result<(), DriverError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn blocking_marker_io_lookup_survives_scheduler_slot_teardown() {
+        let runtime = crate::runtime::Runtime::new().unwrap();
+        let context = runtime.scheduler().block_on(async |cx| cx).unwrap();
+        let scheduler = context.scheduler().clone();
+        let io = context.io().clone();
+        let (completed, observed) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            IO_ON_DROP.with(|owner| {
+                assert!(owner.replace(Some(IoOnDrop { io, completed })).is_none());
+            });
+            WorkerMarker::attach();
+            scheduler.spawn(async |_| {}).join().unwrap();
+        })
+        .join()
+        .unwrap();
+
+        observed.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+        runtime.stop().unwrap();
+    }
 }

@@ -10,13 +10,12 @@ mod support;
 
 use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
 use arty::task::{Context, Scheduler};
 use arty::time::Clock;
 #[cfg(feature = "macros")]
@@ -161,11 +160,7 @@ fn construction_and_shutdown_work_inside_a_futures_executor() {
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "self-stop intentionally returns before the worker can finish; native and careful suites retain the guard contract"
-)]
-fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
+fn explicit_stop_on_a_task_worker_panics() {
     completes_without_deadlock(|| {
         let runtime = runtime(1);
         let scheduler = worker_scheduler(&runtime);
@@ -175,21 +170,21 @@ fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
                 .join()
                 .unwrap()
         );
-        let outcome = scheduler.spawn(async move |_| runtime.stop()).join().unwrap();
-        assert!(outcome.unwrap_err().to_string().contains("async Arty worker"));
+        let error = scheduler.spawn(async move |_| runtime.stop()).join().unwrap_err();
+        assert!(error.is_panic());
     });
 }
 
 #[test]
-fn explicit_stop_in_its_blocking_callback_returns_an_error_without_self_joining() {
+fn explicit_stop_on_a_blocking_worker_panics() {
     let runtime = runtime(1);
     let scheduler = worker_scheduler(&runtime);
     assert_ne!(
         scheduler.spawn_blocking(|| thread::current().id()).join().unwrap(),
         scheduler.spawn(async |_| thread::current().id()).join().unwrap()
     );
-    let outcome = scheduler.spawn_blocking(move || runtime.stop()).join().unwrap();
-    assert!(outcome.unwrap_err().to_string().contains("blocking callback"));
+    let error = scheduler.spawn_blocking(move || runtime.stop()).join().unwrap_err();
+    assert!(error.is_panic());
 }
 
 #[test]
@@ -240,40 +235,38 @@ fn worker_context_belongs_to_one_runtime_and_rejects_nested_block_on() {
 }
 
 #[test]
-fn blocking_callbacks_can_run_borrowing_tasks_on_an_async_worker() {
+fn blocking_callbacks_reject_block_on_before_factory_submission() {
     let runtime = Arc::new(runtime(1));
     let captured = Arc::clone(&runtime);
-    let (on_worker, value) = runtime
+    let invoked = Arc::new(AtomicBool::new(false));
+    let invoked_by_factory = Arc::clone(&invoked);
+    let error = runtime
         .scheduler()
         .spawn_blocking(move || {
-            let mut value = 40;
-            let on_worker = captured
-                .scheduler()
-                .block_on(async |cx| {
-                    let child = cx.scheduler().spawn(async |_| 2).await.unwrap();
-                    let local = Rc::new(child);
-                    value += *local;
-                    cx.thread().id() == thread::current().id()
-                })
-                .unwrap();
-            (on_worker, value)
+            captured.scheduler().block_on(move |_| {
+                invoked_by_factory.store(true, Ordering::Relaxed);
+                async { 42 }
+            })
         })
         .join()
-        .unwrap();
-    assert_eq!((on_worker, value), (true, 42));
+        .unwrap()
+        .unwrap_err();
+
+    assert_eq!(error.to_string(), "block_on cannot be called from an Arty worker");
+    assert!(!invoked.load(Ordering::Relaxed));
     Arc::try_unwrap(runtime).unwrap().stop().unwrap();
 }
 
 #[test]
 fn context_publish_the_same_services_on_every_worker() {
     let runtime = runtime(2);
-    let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
-    let tasks: Vec<_> = cx
+    let context = runtime.scheduler().block_on(async |cx| cx).unwrap();
+    let tasks: Vec<_> = context
         .control()
         .workers()
         .into_iter()
         .map(|worker| {
-            cx.scheduler().spawn_at(worker, cx.clone(), |cx: Context| async move {
+            context.scheduler().spawn_at(worker, context.clone(), |cx: Context| async move {
                 let scheduler: &Scheduler = cx.as_ref();
                 let clock: &Clock = cx.as_ref();
                 let sink: &Sink = cx.as_ref();
@@ -406,9 +399,13 @@ fn stopping_one_runtime_does_not_stop_another() {
 }
 
 #[test]
-fn dropping_another_runtime_from_a_worker_does_not_wait_for_its_blocking_callback() {
+fn dropping_another_runtime_from_a_worker_panics() {
     let target = runtime(1);
-    let caller = runtime(1);
+    let caller = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .panic(PanicPolicy::ignore())
+        .build()
+        .unwrap();
     let retained = worker_scheduler(&target);
     let (started, ready) = mpsc::channel();
     let (release, gate) = mpsc::channel();
@@ -418,11 +415,12 @@ fn dropping_another_runtime_from_a_worker_does_not_wait_for_its_blocking_callbac
         42
     });
     ready.recv_timeout(TEST_TIMEOUT).unwrap();
-    caller
+    let error = caller
         .scheduler()
         .spawn_anywhere(Unaware(target), |_, Unaware(target)| async move { drop(target) })
         .join()
-        .unwrap();
+        .unwrap_err();
+    assert!(error.is_panic());
     assert!(retained.spawn(async |_| 42).join().unwrap_err().is_shutdown());
     release.send(()).unwrap();
     assert_eq!(callback.join().unwrap(), 42);

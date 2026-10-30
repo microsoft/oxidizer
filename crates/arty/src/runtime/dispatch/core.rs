@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Shared worker routing and shutdown state.
+
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 use std::thread::ThreadId;
@@ -13,22 +15,21 @@ use performables::arc::Arc;
 use performables::sync::channel;
 use thread_aware::{Thread, ThreadAware};
 
-use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
-use crate::runtime::thread::waiter::ThreadWaiter;
-use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
+use crate::runtime::worker::asynchronous::{Command, QueuedFactory, QueuedIoAccess};
+use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::prepare_remote;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct WorkerEndpoint {
-    pub(crate) command_tx: channel::Sender<AsyncWorkerCommand>,
+    pub(crate) command_tx: channel::Sender<Command>,
     pub(crate) waker: Waker,
     pub(crate) thread: Thread,
-    pub(crate) blocking_worker: Arc<BlockingWorker>,
+    pub(crate) blocking_worker: Arc<Worker>,
 }
 
 /// Index resolved against a dispatcher's registered workers, not a hardware processor ID.
@@ -54,12 +55,9 @@ impl From<WorkerIndex> for usize {
 /// Commands are received as function calls to the dispatcher and delivered via message channels.
 #[derive(Debug)]
 pub(crate) struct DispatcherCore {
-    wait_for_shutdown: ThreadWaiter,
-
     // Completion senders can publish the cause before dispatcher coordination.
     // This separate flag elects the one worker broadcaster.
     shutdown_signaled: AtomicBool,
-    stopped_reported: AtomicBool,
 
     worker_endpoints: NonEmpty<WorkerEndpoint>,
     workers: Workers,
@@ -79,12 +77,7 @@ pub(crate) struct DispatcherCore {
 }
 
 impl DispatcherCore {
-    pub(crate) fn new(
-        wait_for_shutdown: ThreadWaiter,
-        worker_endpoints: NonEmpty<WorkerEndpoint>,
-        sink: observed::Sink,
-        shutdown: Shutdown,
-    ) -> Arc<Self> {
+    pub(crate) fn new(worker_endpoints: NonEmpty<WorkerEndpoint>, sink: observed::Sink, shutdown: Shutdown) -> Arc<Self> {
         let owner = worker_endpoints.first().thread.owner();
         assert!(
             worker_endpoints.iter().all(|endpoint| endpoint.thread.owner() == owner),
@@ -108,9 +101,7 @@ impl DispatcherCore {
             "each runtime worker must have a distinct thread ID"
         );
         Arc::new(Self {
-            wait_for_shutdown,
             shutdown_signaled: AtomicBool::new(false),
-            stopped_reported: AtomicBool::new(false),
             worker_endpoints,
             workers,
             worker_indices,
@@ -135,7 +126,7 @@ impl DispatcherCore {
         for endpoint in &self.worker_endpoints {
             // We ignore the result here because we do not care if the channel is already closed for
             // whatever reason (after all, that is relatively compatible with the "shut down" idea).
-            _ = endpoint.command_tx.send(AsyncWorkerCommand::Shutdown);
+            _ = endpoint.command_tx.send(Command::Shutdown);
             endpoint.waker.wake_by_ref();
         }
         cause
@@ -195,7 +186,7 @@ impl DispatcherCore {
             .worker_endpoints
             .get(usize::from(worker_index))
             .expect("worker index must identify a registered runtime worker");
-        let send_result = endpoint.command_tx.send(AsyncWorkerCommand::AccessIo {
+        let send_result = endpoint.command_tx.send(Command::AccessIo {
             access: QueuedIoAccess::new(access),
         });
         endpoint.waker.wake_by_ref();
@@ -211,17 +202,11 @@ impl DispatcherCore {
     }
 
     #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
-    pub(crate) fn is_current_blocking_thread(&self) -> bool {
-        self.worker_endpoints
-            .iter()
-            .any(|endpoint| endpoint.blocking_worker.owns_current_thread())
-    }
-
-    pub(crate) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
+    pub(crate) fn next_blocking_worker(&self) -> Arc<Worker> {
         self.blocking_worker(self.next_worker_index())
     }
 
-    pub(crate) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<BlockingWorker> {
+    pub(crate) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<Worker> {
         Arc::clone(
             &self
                 .worker_endpoints
@@ -279,8 +264,8 @@ impl DispatcherCore {
 
         // There is nothing we can really do if the worker is already gone and closed the channel.
         // That may be the case when we landed here when the runtime was already shutting down.
-        _ = endpoint.command_tx.send(AsyncWorkerCommand::EnqueueTask {
-            future_factory: QueuedTaskFactory::new(future_factory),
+        _ = endpoint.command_tx.send(Command::EnqueueTask {
+            future_factory: QueuedFactory::new(future_factory),
         });
 
         endpoint.waker.wake_by_ref();
@@ -288,15 +273,8 @@ impl DispatcherCore {
         join_handle
     }
 
-    /// Waits for the runtime to shut down and all worker threads to exit.
-    ///
-    /// Safe to call multiple times.
-    pub(crate) fn join(&self) -> Result<(), Error> {
-        let outcome = self.wait_for_shutdown.wait();
-        if !self.stopped_reported.swap(true, Ordering::Relaxed) {
-            emit!(&self.sink, RuntimeStopped);
-        }
-        outcome
+    pub(crate) fn report_stopped(&self) {
+        emit!(&self.sink, RuntimeStopped);
     }
 }
 
@@ -312,21 +290,16 @@ mod tests {
     use testing_aids::TEST_TIMEOUT;
 
     use super::*;
-    use crate::runtime::blocking_worker::{BlockingPanicPolicy, BlockingPool};
     use crate::runtime::dispatch::{DispatcherClient, test_threads};
+    use crate::runtime::worker::blocking::{PanicPolicy, Pool};
 
     #[cfg_attr(test, mutants::skip)]
-    fn endpoint(tx: channel::Sender<AsyncWorkerCommand>, thread: &Thread) -> WorkerEndpoint {
+    fn endpoint(tx: channel::Sender<Command>, thread: &Thread) -> WorkerEndpoint {
         WorkerEndpoint {
             command_tx: tx,
             waker: Waker::noop().clone(),
             thread: thread.clone(),
-            blocking_worker: BlockingWorker::new(
-                BlockingPool::new(None),
-                observed::Sink::noop(),
-                Shutdown::default(),
-                BlockingPanicPolicy::Ignore,
-            ),
+            blocking_worker: Worker::new(Pool::new(None), observed::Sink::noop(), Shutdown::default(), PanicPolicy::Ignore),
         }
     }
 
@@ -339,7 +312,6 @@ mod tests {
         let (second_tx, _second_rx) = channel::unbounded();
 
         DispatcherCore::new(
-            ThreadWaiter::new(Vec::new()),
             NonEmpty::from_vec(vec![endpoint(first_tx, &first), endpoint(second_tx, &second)]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
@@ -351,11 +323,9 @@ mod tests {
         // We dispatch two tasks to the only worker.
 
         let (worker_tx, worker_rx) = channel::unbounded();
-        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(1);
 
         let dispatcher = DispatcherCore::new(
-            wfs,
             NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
@@ -378,11 +348,9 @@ mod tests {
 
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let (worker2_tx, worker2_rx) = channel::unbounded();
-        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(2);
 
         let dispatcher = DispatcherCore::new(
-            wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
@@ -400,11 +368,9 @@ mod tests {
     fn round_robin_repeats_without_resetting() {
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let (worker2_tx, worker2_rx) = channel::unbounded();
-        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(2);
 
         let dispatcher = DispatcherCore::new(
-            wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
@@ -424,7 +390,6 @@ mod tests {
         let (first_tx, first_rx) = channel::unbounded();
         let (second_tx, second_rx) = channel::unbounded();
         let dispatcher = DispatcherCore::new(
-            ThreadWaiter::new(Vec::new()),
             NonEmpty::from_vec(vec![endpoint(first_tx, &threads[0]), endpoint(second_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
@@ -441,7 +406,6 @@ mod tests {
         let threads = test_threads(2);
         let (tx, _rx) = channel::unbounded();
         let dispatcher = DispatcherCore::new(
-            ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
             Shutdown::default(),
@@ -455,7 +419,6 @@ mod tests {
         let (tx, _rx) = channel::unbounded();
         let threads = test_threads(1);
         let core = DispatcherCore::new(
-            ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
             Shutdown::default(),
@@ -473,7 +436,6 @@ mod tests {
         let (tx, rx) = channel::unbounded();
         let threads = test_threads(1);
         let dispatcher = DispatcherCore::new(
-            ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
             Shutdown::default(),
@@ -495,7 +457,7 @@ mod tests {
 
         // Rejection is synchronous and the callback publishes no other data.
         assert!(!invoked.load(Ordering::Relaxed));
-        assert!(matches!(drain_rx(&rx).as_slice(), [AsyncWorkerCommand::Shutdown]));
+        assert!(matches!(drain_rx(&rx).as_slice(), [Command::Shutdown]));
     }
 
     #[test]
@@ -503,7 +465,6 @@ mod tests {
         let (tx, _rx) = channel::unbounded();
         let threads = test_threads(1);
         let dispatcher = DispatcherCore::new(
-            ThreadWaiter::new(Vec::new()),
             NonEmpty::new(endpoint(tx, &threads[0])),
             observed::Sink::noop(),
             Shutdown::default(),
@@ -527,11 +488,9 @@ mod tests {
     fn dispatcher_stop_sends_one_stop_command_to_each_worker() {
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let (worker2_tx, worker2_rx) = channel::unbounded();
-        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(2);
 
         let dispatcher = DispatcherCore::new(
-            wfs,
             NonEmpty::from_vec(vec![endpoint(worker1_tx, &threads[0]), endpoint(worker2_tx, &threads[1])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
@@ -558,11 +517,9 @@ mod tests {
         // we ignore any further spawn requests (they simply return disconnected join handles).
 
         let (worker_tx, worker_rx) = channel::unbounded();
-        let wfs = ThreadWaiter::new(Vec::new());
         let threads = test_threads(1);
 
         let dispatcher = DispatcherCore::new(
-            wfs,
             NonEmpty::from_vec(vec![endpoint(worker_tx, &threads[0])]).unwrap(),
             observed::Sink::noop(),
             Shutdown::default(),
@@ -590,12 +547,7 @@ mod tests {
         let (tx, _rx) = channel::unbounded();
         let thread = test_threads(1).remove(0);
         let shutdown = Shutdown::default();
-        let core = DispatcherCore::new(
-            ThreadWaiter::new(Vec::new()),
-            NonEmpty::new(endpoint(tx, &thread)),
-            observed::Sink::noop(),
-            shutdown.clone(),
-        );
+        let core = DispatcherCore::new(NonEmpty::new(endpoint(tx, &thread)), observed::Sink::noop(), shutdown.clone());
         let client = DispatcherClient::new(Arc::clone(&core));
         (core, client, shutdown)
     }
@@ -624,7 +576,7 @@ mod tests {
     }
 
     #[cfg_attr(test, mutants::skip)]
-    fn drain_rx(worker_rx: &channel::Receiver<AsyncWorkerCommand>) -> Vec<AsyncWorkerCommand> {
+    fn drain_rx(worker_rx: &channel::Receiver<Command>) -> Vec<Command> {
         let mut commands = Vec::new();
 
         loop {
