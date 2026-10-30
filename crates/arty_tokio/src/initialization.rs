@@ -380,7 +380,7 @@ mod tests {
 
         futures::executor::block_on(finish_installers(&mut installers, &mut failure));
 
-        assert!(failure.is_some());
+        assert_eq!(failure.unwrap().to_string(), "a Tokio installer panicked\ncaused by: task panicked");
         assert!(installers.iter().all(|installer| installer.join.is_none()));
         runtime.stop().unwrap_err();
     }
