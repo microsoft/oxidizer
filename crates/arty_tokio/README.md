@@ -24,7 +24,7 @@ workers are ready.
 Create a multi-thread Tokio runtime and pass its handle to [`init`][__link2]:
 
 ```rust
-use arty::task::Builtins;
+use arty::task::Context;
 use tokio::runtime::Builder;
 
 let tokio = Builder::new_multi_thread().enable_all().build()?;
@@ -48,7 +48,7 @@ Tokio runtime context:
 ```rust
 use std::time::Duration;
 
-use arty::task::Builtins;
+use arty::task::Context;
 use tokio::runtime::Builder;
 
 async fn call_tokio_based_library() -> u64 {
@@ -82,7 +82,7 @@ After initialization, Arty tasks on every worker can use:
 * directly awaiting Tokio-based futures from Arty tasks.
 
 Tokio tasks run on Tokio workers and can move between them. They do not
-receive [`arty::task::Builtins`][__link10] or keep Arty thread-aware state. They are
+receive [`arty::task::Context`][__link10] or keep Arty thread-aware state. They are
 not tied to the Arty worker that submitted them. Tokio
 [`JoinHandle`][__link11] and
 [`JoinError`][__link12] keep their normal behavior.
@@ -113,10 +113,10 @@ The application remains responsible for Tokio shutdown.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbhg0rooVINi8bVf4irulv9SwbLlUOl8WNPn4b3Yi0GiXfyy9hZIOCZGFydHllMC41LjCCamFydHlfdG9raW9lMC4xLjCCZXRva2lvZjEuNTMuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbjEbl0-RDlQIbIAsS9-1eAgAbjm7OOazGXwQb_93FbUsOw4JhZIOCZGFydHllMC41LjCCamFydHlfdG9raW9lMC4xLjCCZXRva2lvZjEuNTMuMw
  [__link0]: https://crates.io/crates/arty/0.5.0
  [__link1]: https://docs.rs/arty_tokio/0.1.0/arty_tokio/fn.init.html
- [__link10]: https://docs.rs/arty/0.5.0/arty/?search=task::Builtins
+ [__link10]: https://docs.rs/arty/0.5.0/arty/?search=task::Context
  [__link11]: https://docs.rs/tokio/1.53.3/tokio/?search=task::JoinHandle
  [__link12]: https://docs.rs/tokio/1.53.3/tokio/?search=task::JoinError
  [__link13]: https://docs.rs/tokio/1.53.3/tokio/?search=task::block_in_place

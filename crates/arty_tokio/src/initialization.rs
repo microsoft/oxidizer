@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use arty::core::{Thread, ThreadAware};
-use arty::task::{Builtins, JoinHandle};
+use arty::task::{Context, JoinHandle};
 use performables::sync::channel::{OneshotReceiver, OneshotSender, WatchReceiver, WatchSender, oneshot, watch};
 use tokio::runtime::{Handle, RuntimeFlavor};
 
@@ -142,7 +142,7 @@ impl Installer {
     }
 }
 
-pub(crate) async fn initialize_all_workers(cx: &Builtins, tokio: TokioHandle) -> Result<(), InitError> {
+pub(crate) async fn initialize_all_workers(cx: &Context, tokio: TokioHandle) -> Result<(), InitError> {
     let handle = tokio.handle;
     if !matches!(handle.runtime_flavor(), RuntimeFlavor::MultiThread) {
         return Err(unsupported_runtime());

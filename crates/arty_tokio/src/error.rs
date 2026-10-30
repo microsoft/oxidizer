@@ -137,15 +137,14 @@ mod tests {
     #[test]
     fn join_failures_keep_private_source_types() {
         let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-        let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
+        let context = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let foreign_runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
         let foreign = foreign_runtime.scheduler().block_on(async |cx| cx.thread().clone()).unwrap();
 
-        let invalid = futures::executor::block_on(builtins.scheduler().spawn_at(&foreign, (), |()| async {})).unwrap_err();
-        let panic =
-            futures::executor::block_on(builtins.scheduler().spawn(async |_| panic!("installer panic classification"))).unwrap_err();
-        builtins.control().request_stop();
-        let shutdown = futures::executor::block_on(builtins.scheduler().spawn(async |_| ())).unwrap_err();
+        let invalid = futures::executor::block_on(context.scheduler().spawn_at(&foreign, (), |()| async {})).unwrap_err();
+        let panic = futures::executor::block_on(context.scheduler().spawn(async |_| panic!("installer panic classification"))).unwrap_err();
+        context.control().request_stop();
+        let shutdown = futures::executor::block_on(context.scheduler().spawn(async |_| ())).unwrap_err();
 
         assert!(has_source::<InvalidDestinationError>(&classify_join(invalid)));
         assert!(has_source::<InstallerPanicError>(&classify_join(panic)));

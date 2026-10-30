@@ -16,11 +16,11 @@
 //! Create a multi-thread Tokio runtime and pass its handle to [`init`]:
 //!
 //! ```
-//! use arty::task::Builtins;
+//! use arty::task::Context;
 //! use tokio::runtime::Builder;
 //!
 //! # #[arty::main]
-//! # async fn main(cx: Builtins) -> Result<(), ohno::AppError> {
+//! # async fn main(cx: Context) -> Result<(), ohno::AppError> {
 //! let tokio = Builder::new_multi_thread().enable_all().build()?;
 //! arty_tokio::init(&cx, tokio.handle()).await?;
 //! let value = tokio::spawn(async { 42 })
@@ -43,7 +43,7 @@
 //! ```no_run
 //! use std::time::Duration;
 //!
-//! use arty::task::Builtins;
+//! use arty::task::Context;
 //! use tokio::runtime::Builder;
 //!
 //! async fn call_tokio_based_library() -> u64 {
@@ -52,7 +52,7 @@
 //! }
 //!
 //! # #[arty::main]
-//! # async fn main(cx: Builtins) -> Result<(), ohno::AppError> {
+//! # async fn main(cx: Context) -> Result<(), ohno::AppError> {
 //! let tokio = Builder::new_multi_thread().enable_all().build()?;
 //! arty_tokio::init(&cx, tokio.handle()).await?;
 //! assert_eq!(call_tokio_based_library().await, 42);
@@ -81,7 +81,7 @@
 //! - directly awaiting Tokio-based futures from Arty tasks.
 //!
 //! Tokio tasks run on Tokio workers and can move between them. They do not
-//! receive [`arty::task::Builtins`] or keep Arty thread-aware state. They are
+//! receive [`arty::task::Context`] or keep Arty thread-aware state. They are
 //! not tied to the Arty worker that submitted them. Tokio
 //! [`JoinHandle`](tokio::task::JoinHandle) and
 //! [`JoinError`](tokio::task::JoinError) keep their normal behavior.
@@ -160,6 +160,6 @@ impl From<&Handle> for TokioHandle {
 /// returning an error, the function removes every context created by this
 /// attempt. Canceling the future starts the same cleanup without waiting for
 /// it to finish.
-pub async fn init(cx: &arty::task::Builtins, tokio: impl Into<TokioHandle>) -> Result<(), InitError> {
+pub async fn init(cx: &arty::task::Context, tokio: impl Into<TokioHandle>) -> Result<(), InitError> {
     initialization::initialize_all_workers(cx, tokio.into()).await
 }

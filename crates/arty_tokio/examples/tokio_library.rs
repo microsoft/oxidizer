@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use arty::task::Builtins;
+use arty::task::Context;
 use tokio::runtime::Builder;
 
 async fn call_tokio_based_library() -> u64 {
@@ -14,7 +14,7 @@ async fn call_tokio_based_library() -> u64 {
 }
 
 #[arty::main]
-async fn main(cx: Builtins) -> Result<(), ohno::AppError> {
+async fn main(cx: Context) -> Result<(), ohno::AppError> {
     let tokio = Builder::new_multi_thread().enable_all().build()?;
     arty_tokio::init(&cx, tokio.handle()).await?;
 

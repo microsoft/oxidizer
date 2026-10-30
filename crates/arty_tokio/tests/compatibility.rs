@@ -14,7 +14,7 @@ use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 use arty::core::{Thread, ThreadAware};
-use arty::task::{Builtins, Scheduler};
+use arty::task::{Context, Scheduler};
 use performables::sync::channel::{OneshotReceiver, OneshotSender, oneshot};
 use static_assertions::assert_impl_all;
 use support::{TEST_TIMEOUT, runtime, stop_bounded};
@@ -24,7 +24,7 @@ use tokio::runtime::{Builder, Handle};
 assert_impl_all!(arty_tokio::TokioHandle: Send, Sync);
 assert_impl_all!(arty_tokio::InitError: std::error::Error, Send, Sync);
 
-async fn worker_contexts(cx: &Builtins) -> Vec<bool> {
+async fn worker_contexts(cx: &Context) -> Vec<bool> {
     let tasks = cx
         .control()
         .workers()
@@ -211,7 +211,7 @@ fn shutdown_during_submission_is_a_typed_init_error() {
 fn shutdown_after_an_installer_is_ready_returns_a_typed_error() {
     let tokio = Builder::new_multi_thread().build().unwrap();
     let runtime = runtime(2);
-    let (builtins, scheduler, workers) = runtime
+    let (context, scheduler, workers) = runtime
         .scheduler()
         .block_on(async |cx| {
             let workers = cx.control().workers().into_iter().cloned().collect::<Vec<_>>();
@@ -231,16 +231,16 @@ fn shutdown_after_an_installer_is_ready_returns_a_typed_error() {
         block_worker,
     );
     blocker_ready.recv_timeout(TEST_TIMEOUT).unwrap();
-    let init_builtins = builtins.clone();
+    let init_context = context.clone();
     let init_handle = tokio.handle().clone();
-    let initialization = std::thread::spawn(move || futures::executor::block_on(arty_tokio::init(&init_builtins, init_handle)));
+    let initialization = std::thread::spawn(move || futures::executor::block_on(arty_tokio::init(&init_context, init_handle)));
     let deadline = Instant::now() + TEST_TIMEOUT;
     while !worker_has_context(&scheduler, &ready_worker) {
         assert!(Instant::now() < deadline, "installer did not enter the Tokio context");
         std::thread::yield_now();
     }
 
-    builtins.control().request_stop();
+    context.control().request_stop();
     blocker_release.send(()).unwrap();
     futures::executor::block_on(blocker).unwrap();
     let error = initialization.join().unwrap().unwrap_err();
@@ -303,13 +303,13 @@ impl ThreadAware for InitOutcome {
 }
 
 struct InitRequest {
-    builtins: Builtins,
+    context: Context,
     handle: Handle,
 }
 
 impl ThreadAware for InitRequest {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        self.builtins.relocate(source, destination);
+        self.context.relocate(source, destination);
     }
 }
 
@@ -317,7 +317,7 @@ impl ThreadAware for InitRequest {
 fn partial_conflict_rolls_back_and_allows_retry() {
     let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
     let runtime = runtime(2);
-    let (builtins, scheduler, workers) = runtime
+    let (context, scheduler, workers) = runtime
         .scheduler()
         .block_on(async |cx| {
             let workers = cx.control().workers().into_iter().cloned().collect::<Vec<_>>();
@@ -355,11 +355,11 @@ fn partial_conflict_rolls_back_and_allows_retry() {
     let initialization = scheduler.spawn_at(
         &clean_worker,
         InitRequest {
-            builtins: builtins.clone(),
+            context: context.clone(),
             handle: tokio.handle().clone(),
         },
         |request| async move {
-            match arty_tokio::init(&request.builtins, request.handle).await {
+            match arty_tokio::init(&request.context, request.handle).await {
                 Ok(()) => InitOutcome::Success,
                 Err(error) => {
                     assert_eq!(error.to_string(), "an Arty worker already has a Tokio runtime context");
@@ -386,10 +386,10 @@ fn partial_conflict_rolls_back_and_allows_retry() {
     let retry = scheduler.spawn_at(
         &clean_worker,
         InitRequest {
-            builtins,
+            context,
             handle: tokio.handle().clone(),
         },
-        |request| async move { arty_tokio::init(&request.builtins, request.handle).await.is_ok() },
+        |request| async move { arty_tokio::init(&request.context, request.handle).await.is_ok() },
     );
     assert!(futures::executor::block_on(retry).unwrap());
 
@@ -443,7 +443,7 @@ fn independent_arty_runtimes_can_use_independent_tokio_runtimes() {
         let completed = Arc::clone(&completed);
         runtime
             .scheduler()
-            .block_on(async |cx: Builtins| {
+            .block_on(async |cx: Context| {
                 arty_tokio::init(&cx, tokio.handle()).await.unwrap();
                 tokio::spawn(async move {
                     completed.fetch_add(1, Ordering::SeqCst);
