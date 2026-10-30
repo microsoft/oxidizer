@@ -11,8 +11,8 @@ pub type TaskPanicPayload = Box<dyn Any + Send + 'static>;
 ///
 /// Cancellation and result delivery sometimes discard a panic payload. A payload
 /// destructor is user code and can panic. This function catches each replacement
-/// payload. It aborts the process after 32 consecutive destructor panics. The
-/// limit prevents an endless replacement chain during executor cleanup.
+/// payload. It aborts the process after a limited number of consecutive destructor
+/// panics. The limit prevents an endless replacement chain during executor cleanup.
 #[cfg_attr(coverage_nightly, coverage(off))] // Terminal repeated-panic termination is child-process-only.
 pub fn discard_task_panic_payload(mut panic: TaskPanicPayload) {
     const MAX_DISPOSAL_ATTEMPTS: usize = 32;

@@ -28,7 +28,7 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCau
 /// # Reentrancy and mutability
 ///
 /// Owner operations need exclusive access to the executor. A future can submit
-/// tasks through a [`TaskSet`]. The task set does not hold an internal mutable
+/// tasks through a [`TaskSet`]. The task set does not hold an internal exclusive
 /// borrow while it calls external code.
 ///
 /// Some methods do not support reentrant calls. Each method documents its
