@@ -36,11 +36,11 @@
 //!
 //! ```rust
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! use arty::task::{Builtins, JoinError};
+//! use arty::task::{Context, JoinError};
 //!
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! #[arty::main]
-//! async fn main(cx: Builtins) -> Result<(), JoinError> {
+//! async fn main(cx: Context) -> Result<(), JoinError> {
 //!     let answer = cx.scheduler().spawn(async |_| 6 * 7).await?;
 //! #   assert_eq!(answer, 42);
 //!     println!("{answer}");
@@ -58,7 +58,7 @@
 //! - [`main`] and [`test`] manage a runtime for an
 //!   async entry point or test; [`Runtime`](crate::runtime::Runtime) gives you
 //!   direct control over its lifetime and settings.
-//! - [`Builtins`](crate::task::Builtins) gives each task its scheduler, clock,
+//! - [`Context`](crate::task::Context) gives each task its scheduler, clock,
 //!   and worker. [`RuntimeScheduler`](crate::task::RuntimeScheduler) lets the
 //!   runtime place new work.
 //! - [`Io`](crate::io::Io) registers external `arty_io_core` contexts and lazily
@@ -92,7 +92,7 @@
 //! ```no_run
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! #[arty::main]
-//! async fn main(cx: arty::task::Builtins) {
+//! async fn main(cx: arty::task::Context) {
 //!     let child = cx.scheduler().spawn(async |_| 42);
 //!     let _ = futures::executor::block_on(child);
 //! }
@@ -146,7 +146,7 @@ use arty_io_core as _;
 /// Runs an async entry point on an Arty runtime.
 ///
 /// Apply it to an `async fn` taking one owned
-/// [`Builtins`](crate::task::Builtins) argument. It generates a synchronous
+/// [`Context`](crate::task::Context) argument. It generates a synchronous
 /// entry point with no arguments and the same visibility and return type.
 /// The async body runs on an Arty worker, not on the calling thread. Name the
 /// argument `cx` or `_cx`, for example; `_` and destructuring patterns are not supported.
@@ -202,7 +202,7 @@ use arty_io_core as _;
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// # #[arty::main]
-/// # async fn main(cx: arty::task::Builtins) {
+/// # async fn main(cx: arty::task::Context) {
 /// cx.clock().delay(std::time::Duration::from_millis(1)).await;
 /// println!("Hello from Arty!");
 /// # }
@@ -214,7 +214,7 @@ use arty_io_core as _;
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::main(monitor = disabled)]
-/// async fn main(_cx: arty::task::Builtins) {}
+/// async fn main(_cx: arty::task::Context) {}
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
@@ -223,7 +223,7 @@ use arty_io_core as _;
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::main(panic = ignore)]
-/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 ///     assert!(
 ///         cx.scheduler()
 ///             .spawn(async |_| panic!("contained"))
@@ -242,7 +242,7 @@ use arty_io_core as _;
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::main(workers = 4)]
-/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 ///     let answer = cx.scheduler().spawn(async |_| 42).await?;
 ///     assert_eq!(answer, 42);
 ///     Ok(())
@@ -255,7 +255,7 @@ pub use arty_macros::main;
 /// Runs an async test on an Arty runtime.
 ///
 /// Apply it to an `async fn` taking one owned
-/// [`Builtins`](crate::task::Builtins) argument. It registers a synchronous
+/// [`Context`](crate::task::Context) argument. It registers a synchronous
 /// test that starts its own runtime, runs the body on a worker, and stops the
 /// runtime when the body returns.
 /// Name the argument `_cx` if it is unused.
@@ -310,7 +310,7 @@ pub use arty_macros::main;
 /// ```test_harness
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::test]
-/// async fn answer(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn answer(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 ///     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
 ///     Ok(())
 /// }
@@ -321,7 +321,7 @@ pub use arty_macros::main;
 /// ```test_harness
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::test(monitor = enabled)]
-/// async fn monitored(_cx: arty::task::Builtins) {}
+/// async fn monitored(_cx: arty::task::Context) {}
 /// ```
 ///
 /// Keep the test runtime available after a contained child-task panic:
@@ -329,7 +329,7 @@ pub use arty_macros::main;
 /// ```test_harness
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::test(panic = ignore)]
-/// async fn contained_panic(cx: arty::task::Builtins) {
+/// async fn contained_panic(cx: arty::task::Context) {
 ///     assert!(cx.scheduler().spawn(async |_| panic!("contained")).await.unwrap_err().is_panic());
 ///     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 /// }
@@ -340,7 +340,7 @@ pub use arty_macros::main;
 /// ```test_harness
 /// # #[cfg(all(feature = "macros", feature = "rt", feature = "test-util"))]
 /// #[arty::test]
-/// async fn simulated_delay(cx: arty::task::Builtins, control: arty::time::ClockControl) {
+/// async fn simulated_delay(cx: arty::task::Context, control: arty::time::ClockControl) {
 ///     use std::time::Duration;
 ///
 ///     let control = control.auto_advance_timers(true);
@@ -390,7 +390,7 @@ pub mod core {
 /// Runtime clocks and controlled test time.
 ///
 /// Enable `time` to use [`Clock`](crate::time::Clock) without starting an Arty
-/// runtime. A task's `Builtins::clock()` has timers driven by its worker.
+/// runtime. A task's `Context::clock()` has timers driven by its worker.
 /// Applications that need timer future types or extension traits should use
 /// the underlying [`tick`] API directly.
 ///
@@ -403,7 +403,7 @@ pub mod core {
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// # #[arty::main]
-/// # async fn main(cx: arty::task::Builtins) {
+/// # async fn main(cx: arty::task::Context) {
 /// let duration = std::time::Duration::from_millis(1);
 /// let watch = cx.clock().stopwatch();
 /// cx.clock().delay(duration).await;

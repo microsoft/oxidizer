@@ -507,30 +507,25 @@ mod tests {
             &hardware.processors(),
             sink,
         );
-        let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
-        let scheduler = builtins.scheduler().clone();
+        let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
+        let scheduler = cx.scheduler().clone();
         let counts = DriverCounts {
             initialized: StdArc::new(AtomicUsize::new(0)),
             stopped: StdArc::new(AtomicUsize::new(0)),
         };
         let per_thread = Arc::<AtomicUsize, PerThread>::new_with(AtomicUsize::default);
-        let tasks: Vec<_> = builtins
+        let tasks: Vec<_> = cx
             .control()
             .workers()
             .into_iter()
             .map(|worker| {
                 scheduler.spawn_at(
                     worker,
-                    (
-                        builtins.clone(),
-                        counts.clone(),
-                        per_thread.clone(),
-                        HardwareProbe(hardware.clone()),
-                    ),
-                    |(builtins, counts, value, hardware)| async move {
+                    (cx.clone(), counts.clone(), per_thread.clone(), HardwareProbe(hardware.clone())),
+                    |(cx, counts, value, hardware)| async move {
                         let thread = thread::current().id();
-                        assert_eq!(builtins.thread().id(), thread);
-                        let _context = builtins.io().context::<TestContext>(&counts);
+                        assert_eq!(cx.thread().id(), thread);
+                        let _context = cx.io().context::<TestContext>(&counts);
                         let local_calls = WORKER_LOCAL_CALLS.with(|calls| calls.fetch_add(1, Ordering::SeqCst));
                         let per_thread_calls = value.fetch_add(1, Ordering::SeqCst);
                         (thread, hardware.0.current_processor_id(), local_calls, per_thread_calls)
@@ -582,16 +577,12 @@ mod tests {
             &hardware.processors(),
             Sink::noop(),
         );
-        let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
-        let workers: HashSet<_> = builtins
+        let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
+        let workers: HashSet<_> = cx
             .control()
             .workers()
             .into_iter()
-            .map(|worker| {
-                builtins
-                    .scheduler()
-                    .spawn_at(worker, (), |()| async move { thread::current().id() })
-            })
+            .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async move { thread::current().id() }))
             .map(|task| task.join().unwrap())
             .collect();
 
@@ -612,16 +603,12 @@ mod tests {
             &hardware.processors(),
             Sink::noop(),
         );
-        let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
-        let workers: HashSet<_> = builtins
+        let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
+        let workers: HashSet<_> = cx
             .control()
             .workers()
             .into_iter()
-            .map(|worker| {
-                builtins
-                    .scheduler()
-                    .spawn_at(worker, (), |()| async move { thread::current().id() })
-            })
+            .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async move { thread::current().id() }))
             .map(|task| task.join().unwrap())
             .collect();
 

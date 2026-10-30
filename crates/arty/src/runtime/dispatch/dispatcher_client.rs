@@ -13,7 +13,7 @@ use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::{Error, Workers};
-use crate::task::Builtins;
+use crate::task::Context;
 use crate::task::handle::JoinHandle;
 
 /// Cheap shared access to one runtime's routing and shutdown state.
@@ -88,7 +88,7 @@ impl DispatcherClient {
     /// Submits to a previously resolved worker without discarding destination affinity.
     pub(crate) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
@@ -97,7 +97,7 @@ impl DispatcherClient {
 
     pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
@@ -106,7 +106,7 @@ impl DispatcherClient {
 
     pub(crate) fn spawn_relocating<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
@@ -115,14 +115,14 @@ impl DispatcherClient {
 
     pub(crate) fn spawn_at_worker_relocating<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
         self.core.spawn_at_worker_relocating(worker_index, future_factory)
     }
 
-    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
+    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Context) + Send>) -> Result<(), Error> {
         self.core.access_io(worker_index, access)
     }
 

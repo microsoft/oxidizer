@@ -9,10 +9,10 @@ use std::error::Error as _;
 use std::future::{Ready, pending};
 use std::pin::Pin;
 use std::sync::{Arc, Barrier, mpsc};
-use std::task::{Context, Wake, Waker};
+use std::task::{Context as PollContext, Wake, Waker};
 
 use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, RuntimeControl, WorkersPolicy};
-use arty::task::Builtins;
+use arty::task::Context;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
@@ -38,19 +38,19 @@ fn shutdown_cause(error: &arty::runtime::Error) -> &arty_executor::ShutdownError
         .unwrap()
 }
 
-async fn panic_async(_: Builtins, (): ()) {
+async fn panic_async(_: Context, (): ()) {
     std::panic::panic_any("async panic");
 }
 
-fn panic_factory(_: Builtins, (): ()) -> Ready<()> {
+fn panic_factory(_: Context, (): ()) -> Ready<()> {
     std::panic::panic_any("factory panic")
 }
 
-fn pending_forever(_: Builtins, (): ()) -> impl Future<Output = ()> {
+fn pending_forever(_: Context, (): ()) -> impl Future<Output = ()> {
     pending()
 }
 
-async fn return_value(_: Builtins, Unaware(value): Unaware<u32>) -> u32 {
+async fn return_value(_: Context, Unaware(value): Unaware<u32>) -> u32 {
     value
 }
 
@@ -59,7 +59,7 @@ async fn concurrent_panic(Unaware(barrier): Unaware<Arc<Barrier>>) {
     std::panic::panic_any("concurrent panic");
 }
 
-async fn detached_panic(_: Builtins, Unaware(panicking): Unaware<mpsc::Sender<()>>) {
+async fn detached_panic(_: Context, Unaware(panicking): Unaware<mpsc::Sender<()>>) {
     panicking.send(()).unwrap();
     std::panic::panic_any("detached panic");
 }
@@ -170,7 +170,7 @@ fn assert_panic_cause_precedes_join_notification(observe_panic: bool, blocking: 
     let mut observed = if observe_panic { panicking } else { pending };
     let (notified, notifications) = mpsc::channel();
     let waker = Waker::from(Arc::new(StopOnWake { control, notified }));
-    assert!(Pin::new(&mut observed).poll(&mut Context::from_waker(&waker)).is_pending());
+    assert!(Pin::new(&mut observed).poll(&mut PollContext::from_waker(&waker)).is_pending());
 
     release.send(());
     notifications.recv_timeout(TEST_TIMEOUT).unwrap();

@@ -19,12 +19,12 @@ use std::hint::black_box;
 use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
-use std::task::{Context, Poll, Waker};
+use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
-use arty::task::{Builtins, JoinHandle};
+use arty::task::{Context, JoinHandle};
 use criterion::{BenchmarkId, Criterion, Throughput};
 #[cfg(target_os = "linux")]
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
@@ -108,7 +108,7 @@ impl ArtyCase {
         case
     }
 
-    fn remote<F>(&mut self, iterations: u64, factory: fn(Builtins, ()) -> F) -> Duration
+    fn remote<F>(&mut self, iterations: u64, factory: fn(Context, ()) -> F) -> Duration
     where
         F: Future<Output = ()> + 'static,
     {
@@ -335,7 +335,7 @@ struct YieldOnce(bool);
 impl Future for YieldOnce {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<()> {
         if self.0 {
             Poll::Ready(())
         } else {
@@ -407,7 +407,7 @@ impl RemoteWake {
 impl Future for RemoteWake {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<()> {
         if self.ready.load(Ordering::Acquire) {
             Poll::Ready(())
         } else {

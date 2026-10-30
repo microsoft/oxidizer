@@ -8,11 +8,11 @@
 //! [`Runtime::builder`] lets you choose workers, blocking pools, clocks, and
 //! a telemetry sink before they start.
 //!
-//! Each task receives [`Builtins`](crate::task::Builtins) with its worker's
+//! Each task receives [`Context`](crate::task::Context) with its worker's
 //! scheduler and clock. [`Runtime::scheduler`] lets the runtime place new
-//! tasks, while [`Builtins::scheduler`](crate::task::Builtins::scheduler)
+//! tasks, while [`Context::scheduler`](crate::task::Context::scheduler)
 //! keeps children on their parent's worker.
-//! [`Builtins::control`](crate::task::Builtins::control) exposes worker
+//! [`Context::control`](crate::task::Context::control) exposes worker
 //! coordinates and can request shutdown without consuming the runtime owner.
 //!
 //! Keep the runtime owner alive until required work completes. Shutdown cancels
@@ -32,7 +32,7 @@
 //! ```
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! #[arty::main]
-//! async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+//! async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 //!     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
 //!     Ok(())
 //! }

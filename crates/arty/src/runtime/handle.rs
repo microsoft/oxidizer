@@ -35,7 +35,7 @@ use crate::task::{RuntimeScheduler, Scheduler};
 /// The workers complete their cleanup independently; destruction in those
 /// contexts is not a shutdown-completion barrier.
 ///
-/// Worker-bound schedulers and [`Builtins`](crate::task::Builtins) do not keep
+/// Worker-bound schedulers and [`Context`](crate::task::Context) do not keep
 /// the runtime running after its owner is dropped.
 ///
 /// # Examples
@@ -105,7 +105,7 @@ impl Runtime {
     ///
     /// Use it to submit work from outside the runtime and let the runtime
     /// choose a worker. In contrast,
-    /// [`Builtins::scheduler`](crate::task::Builtins::scheduler) keeps child
+    /// [`Context::scheduler`](crate::task::Context::scheduler) keeps child
     /// tasks on their parent's worker.
     ///
     /// The scheduler cannot be cloned or retained independently of this runtime.
@@ -140,7 +140,7 @@ impl Runtime {
     /// `Ok(())` means shutdown has completed. A calling-context error does not
     /// mean the workers have stopped.
     ///
-    /// Use [`Builtins::control`](crate::task::Builtins::control) to obtain
+    /// Use [`Context::control`](crate::task::Context::control) to obtain
     /// runtime control and request shutdown without consuming the owner or
     /// blocking the caller.
     ///

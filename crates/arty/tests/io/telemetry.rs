@@ -12,8 +12,8 @@ fn successful_initialization_reports_context_and_role_telemetry() {
     runtime
         .scheduler()
         .block_on({
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<CacheContext>>(&scenario);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<CacheContext>>(&scenario);
             }
         })
         .unwrap();
@@ -47,8 +47,8 @@ fn initialization_failure_reports_a_diagnostic_message() {
 
     worker
         .spawn({
-            async move |builtins| {
-                let _ = builtins.io().try_context::<TestContext<ConstructionFailure>>(&scenario);
+            async move |cx| {
+                let _ = cx.io().try_context::<TestContext<ConstructionFailure>>(&scenario);
             }
         })
         .join()

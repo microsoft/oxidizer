@@ -9,7 +9,7 @@ use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
-use crate::task::Builtins;
+use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::DeferredTask;
 
@@ -26,7 +26,7 @@ thread_local! {
 #[derive(Debug)]
 struct CurrentWorker {
     thread: Thread,
-    builtins: Builtins,
+    cx: Context,
     tasks: TaskSet,
     executor_shutdown: ExecutorShutdown,
     // Child submissions must not contend with every other worker's result-channel rentals.
@@ -35,7 +35,7 @@ struct CurrentWorker {
 
 /// A worker-bound handle for submitting async and blocking tasks.
 ///
-/// Get it from [`Builtins::scheduler`] to keep child tasks on the same worker.
+/// Get it from [`Context::scheduler`] to keep child tasks on the same worker.
 /// Clones keep that association but do not keep the runtime running. Use
 /// [`RuntimeScheduler`](crate::task::RuntimeScheduler) to submit work from
 /// synchronous code.
@@ -57,7 +57,7 @@ struct CurrentWorker {
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// # #[arty::main]
-/// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 /// let scheduler = cx.scheduler().clone();
 /// let task = scheduler.spawn(async |_| 42);
 /// assert_eq!(task.await?, 42);
@@ -87,14 +87,14 @@ impl Scheduler {
         CURRENT_WORKER.with_borrow(|current| current.as_ref().map(|current| current.thread.clone()))
     }
 
-    pub(crate) fn register_current(builtins: Builtins, tasks: TaskSet, executor_shutdown: ExecutorShutdown) {
+    pub(crate) fn register_current(cx: Context, tasks: TaskSet, executor_shutdown: ExecutorShutdown) {
         assert!(!ACTIVE_WORKER.replace(true), "a worker is already active on this thread");
         CURRENT_WORKER.with_borrow_mut(|current| {
             assert!(current.is_none(), "a worker already owns this scheduler context");
-            let results = JoinHandlePool::new(builtins.dispatcher().shutdown().clone());
+            let results = JoinHandlePool::new(cx.dispatcher().shutdown().clone());
             *current = Some(CurrentWorker {
-                thread: builtins.thread().clone(),
-                builtins,
+                thread: cx.thread().clone(),
+                cx,
                 tasks,
                 executor_shutdown,
                 results,
@@ -155,7 +155,7 @@ impl Scheduler {
 
     /// Submits an async task to this scheduler's worker.
     ///
-    /// The factory receives [`Builtins`] and creates the future on that worker,
+    /// The factory receives [`Context`] and creates the future on that worker,
     /// so the future need not be [`Send`]. Pass a factory, not an already-created
     /// future.
     ///
@@ -173,7 +173,7 @@ impl Scheduler {
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// use std::rc::Rc;
     /// use std::time::Duration;
     ///
@@ -194,7 +194,7 @@ impl Scheduler {
     /// ```
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
@@ -210,7 +210,7 @@ impl Scheduler {
 
     fn spawn_on_current_worker<FF, F, R>(&self, future_factory: FF) -> Result<JoinHandle<R>, FF>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
@@ -221,11 +221,11 @@ impl Scheduler {
             if current.thread != self.binding.thread {
                 return Err(future_factory);
             }
-            let sink = current.builtins.sink();
+            let sink = current.cx.sink();
             let parent_task_enrichment = sink.transfer_context();
-            let builtins = current.builtins.clone();
+            let cx = current.cx.clone();
             let (handle, result_tx) = current.results.handle();
-            let inner = DeferredTask::new(future_factory, builtins);
+            let inner = DeferredTask::new(future_factory, cx);
             let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
             current.tasks.add(inner, options, result_tx);
             self.dispatcher.wake_worker(self.binding.worker_index);
@@ -252,7 +252,7 @@ impl Scheduler {
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// let answer = cx
     ///     .scheduler()
     ///     .spawn_anywhere(cx.clone(), |moved| async move {
@@ -310,7 +310,7 @@ impl Scheduler {
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
     /// # async fn main(
-    /// #     cx: arty::task::Builtins,
+    /// #     cx: arty::task::Context,
     /// # ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     /// let destination = cx
     ///     .control()
@@ -401,7 +401,7 @@ impl Scheduler {
     /// ```no_run
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), ohno::AppError> {
+    /// # async fn main(cx: arty::task::Context) -> Result<(), ohno::AppError> {
     /// let contents = cx
     ///     .scheduler()
     ///     .spawn_blocking(|| std::fs::read_to_string("settings.toml"))
@@ -450,7 +450,7 @@ mod tests {
     use std::future::Future as _;
     use std::pin::pin;
     use std::sync::mpsc;
-    use std::task::{Context, Poll, Waker};
+    use std::task::{Context as PollContext, Poll, Waker};
     use std::time::Duration;
 
     use super::*;
@@ -486,7 +486,7 @@ mod tests {
                 let mut task = pin!(cx.scheduler().spawn(async |_| 42));
 
                 matches!(
-                    task.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+                    task.as_mut().poll(&mut PollContext::from_waker(Waker::noop())),
                     Poll::Ready(Err(error)) if error.is_shutdown()
                 )
             })

@@ -14,7 +14,7 @@ blocking worker. Bootstrap collects every endpoint before constructing the
 dispatcher, then distributes a `DispatcherClient` back to every worker through
 its start channel.
 
-Each worker constructs its `Builtins` after receiving the shared dispatcher.
+Each worker constructs its `Context` after receiving the shared dispatcher.
 Bootstrap waits for every worker's success signal before returning the
 `Runtime`, so public scheduling starts with endpoints and worker services ready.
 
@@ -30,7 +30,7 @@ owns the complete endpoint set and maps runtime thread IDs to worker indexes.
 it does not own a separate runtime or worker set.
 
 `Runtime` owns the dispatcher and the worker-shutdown waiter. Scheduler,
-`Builtins`, join, clock, and control handles can outlive individual tasks,
+`Context`, join, clock, and control handles can outlive individual tasks,
 but they do not keep the runtime running. `Runtime::stop` and `Runtime::drop`
 request shutdown through the dispatcher; the waiter joins async workers, and
 each worker closes its blocking queue and joins every owned blocking thread

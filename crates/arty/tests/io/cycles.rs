@@ -23,11 +23,11 @@ where
     worker
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
+            async move |cx| {
                 if matches!(role_plan, RolePlan::Secondary) {
-                    let _ = builtins.io().context::<TestContext<OrderedPrimary>>(&primary);
+                    let _ = cx.io().context::<TestContext<OrderedPrimary>>(&primary);
                 }
-                let _ = builtins.io().context::<TestContext<M>>(&scenario);
+                let _ = cx.io().context::<TestContext<M>>(&scenario);
             }
         })
         .join()
@@ -71,16 +71,16 @@ fn secondary_only_worker_is_woken_for_another_cycle() {
     let secondary = Scenario::options(RolePlan::Secondary);
 
     workers[0]
-        .spawn(async move |builtins| {
-            let _ = builtins.io().context::<TestContext<OrderedPrimary>>(&primary);
+        .spawn(async move |cx| {
+            let _ = cx.io().context::<TestContext<OrderedPrimary>>(&primary);
         })
         .join()
         .unwrap();
     workers[1]
         .spawn({
             let secondary = secondary.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<SecondaryCycleFailure>>(&secondary);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<SecondaryCycleFailure>>(&secondary);
             }
         })
         .join()
@@ -105,8 +105,8 @@ fn cycle_failure_remains_primary_when_driver_shutdown_also_fails() {
     worker
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<CycleAndShutdownFailure>>(&scenario);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<CycleAndShutdownFailure>>(&scenario);
             }
         })
         .join()
@@ -134,9 +134,9 @@ fn secondaries_execute_before_the_primary() {
 
     worker
         .spawn({
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<OrderedPrimary>>(&primary);
-                let _ = builtins.io().context::<TestContext<OrderedSecondary>>(&secondary);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<OrderedPrimary>>(&primary);
+                let _ = cx.io().context::<TestContext<OrderedSecondary>>(&secondary);
             }
         })
         .join()
@@ -167,8 +167,8 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
     worker
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<BlockingPrimary>>(&scenario);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<BlockingPrimary>>(&scenario);
             }
         })
         .join()
@@ -199,8 +199,8 @@ fn notification_during_first_driver_construction_prevents_primary_wait() {
     scenario.block_primary_until_woken.store(true, Ordering::SeqCst);
     let initialization = worker.spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let _ = builtins.io().context::<TestContext<BlockingPrimary>>(&scenario);
+        async move |cx| {
+            let _ = cx.io().context::<TestContext<BlockingPrimary>>(&scenario);
             std::future::pending::<()>().await;
         }
     });
@@ -235,9 +235,9 @@ fn controlled_timer_fires_while_a_primary_driver_is_initialized() {
     scenario.block_primary.store(true, Ordering::SeqCst);
     let (registered, registration) = mpsc::channel();
     let (completed, completion) = mpsc::channel();
-    let task = worker.spawn(async move |builtins| {
-        let _ = builtins.io().context::<TestContext<BlockingPrimary>>(&scenario);
-        let mut delay = Box::pin(builtins.clock().delay(Duration::from_secs(1)));
+    let task = worker.spawn(async move |cx| {
+        let _ = cx.io().context::<TestContext<BlockingPrimary>>(&scenario);
+        let mut delay = Box::pin(cx.clock().delay(Duration::from_secs(1)));
         let mut registered = Some(registered);
         std::future::poll_fn(move |cx| match delay.as_mut().poll(cx) {
             Poll::Pending => {
@@ -272,9 +272,9 @@ fn shutdown_failures_are_diagnostic_and_do_not_skip_other_drivers() {
         .spawn({
             let primary = primary.clone();
             let secondary = secondary.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<ShutdownPrimary>>(&primary);
-                let _ = builtins.io().context::<TestContext<ShutdownSecondary>>(&secondary);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<ShutdownPrimary>>(&primary);
+                let _ = cx.io().context::<TestContext<ShutdownSecondary>>(&secondary);
             }
         })
         .join()
@@ -309,8 +309,8 @@ fn task_cancellation_runs_before_driver_shutdown() {
     let (dropped_tx, dropped_rx) = mpsc::channel();
     let task = worker.spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let _ = builtins.io().context::<TestContext<ShutdownTaskCleanup>>(&scenario);
+        async move |cx| {
+            let _ = cx.io().context::<TestContext<ShutdownTaskCleanup>>(&scenario);
             let _observe = ObserveDriverOnDrop { scenario, dropped_tx };
             started_tx.send(()).unwrap();
             std::future::pending::<()>().await;

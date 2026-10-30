@@ -14,19 +14,22 @@ use crate::io::Io;
 use crate::runtime::RuntimeControl;
 use crate::runtime::dispatch::DispatcherClient;
 #[cfg(debug_assertions)]
-use crate::runtime::telemetry::events::{BacktraceText, BuiltinsThreadMismatch, ThreadName};
+use crate::runtime::telemetry::events::{BacktraceText, ContextThreadMismatch, ThreadName};
 use crate::task::scheduler::Scheduler;
 
 /// Services supplied to an async task on its worker.
+///
+/// This is Arty's task-execution context, not `std::task::Context` or a future's
+/// poll context.
 ///
 /// Use [`scheduler`](Self::scheduler) for child tasks and [`clock`](Self::clock)
 /// for delays and timeouts. Runtime task factories receive this value by
 /// ownership.
 ///
-/// New tasks receive their own `Builtins`. Cloning or moving an existing value
+/// New tasks receive their own `Context`. Cloning or moving an existing value
 /// does not change its worker or keep its runtime running.
 ///
-/// [`Scheduler::spawn_anywhere`] can relocate an existing `Builtins` to
+/// [`Scheduler::spawn_anywhere`] can relocate an existing `Context` to
 /// another ready worker of the same runtime. A worker from another runtime, or
 /// one that is not ready, leaves its association unchanged.
 ///
@@ -35,7 +38,7 @@ use crate::task::scheduler::Scheduler;
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// # #[arty::main]
-/// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 /// let answer = cx
 ///     .scheduler()
 ///     .spawn(async |child| {
@@ -52,12 +55,12 @@ use crate::task::scheduler::Scheduler;
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 #[derive(Debug, Clone)]
-pub struct Builtins {
-    inner: Arc<BuiltinsInner>,
+pub struct Context {
+    inner: Arc<ContextInner>,
 }
 
 #[derive(Debug, Clone)]
-struct BuiltinsInner {
+struct ContextInner {
     scheduler: Scheduler,
     control: RuntimeControl,
     thread: Thread,
@@ -66,7 +69,7 @@ struct BuiltinsInner {
     sink: Sink,
 }
 
-impl Builtins {
+impl Context {
     /// Returns a scheduler that creates tasks on the associated worker.
     ///
     /// A clone still targets the same worker, even if used from another
@@ -78,7 +81,7 @@ impl Builtins {
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// let parent_thread = cx.thread().id();
     /// let child_thread = cx
     ///     .scheduler()
@@ -113,7 +116,7 @@ impl Builtins {
     /// Returns the associated worker's coordinate, including its NUMA locality.
     ///
     /// This describes where the services belong, not necessarily the thread
-    /// executing the caller. Moving `Builtins` without relocation leaves this
+    /// executing the caller. Moving `Context` without relocation leaves this
     /// coordinate unchanged.
     ///
     /// # Examples
@@ -121,7 +124,7 @@ impl Builtins {
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) {
+    /// # async fn main(cx: arty::task::Context) {
     /// assert_eq!(cx.thread().id(), std::thread::current().id());
     /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
@@ -145,7 +148,7 @@ impl Builtins {
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) {
+    /// # async fn main(cx: arty::task::Context) {
     /// let duration = std::time::Duration::from_millis(1);
     /// let watch = cx.clock().stopwatch();
     /// cx.clock().delay(duration).await;
@@ -187,7 +190,7 @@ impl Builtins {
     ///
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) {
+    /// # async fn main(cx: arty::task::Context) {
     /// observed::emit!(cx.sink(), TaskStarted);
     /// # }
     /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
@@ -208,7 +211,7 @@ impl Builtins {
             let backtrace = std::backtrace::Backtrace::capture();
             emit!(
                 &self.inner.sink,
-                BuiltinsThreadMismatch {
+                ContextThreadMismatch {
                     name: ThreadName::new(thread.name().unwrap_or_default()),
                     id: thread.id().into(),
                     backtrace: BacktraceText(backtrace.to_string()),
@@ -226,7 +229,7 @@ impl Builtins {
     }
 }
 
-impl ThreadAware for Builtins {
+impl ThreadAware for Context {
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
         if self.inner.thread == *destination {
             return;
@@ -247,10 +250,10 @@ impl ThreadAware for Builtins {
     }
 }
 
-impl Builtins {
+impl Context {
     pub(crate) fn new(dispatcher: DispatcherClient, clock: Clock, io: Io, thread: Thread, sink: Sink) -> Self {
         Self {
-            inner: Arc::new(BuiltinsInner {
+            inner: Arc::new(ContextInner {
                 scheduler: Scheduler::new(dispatcher.clone(), thread.clone()),
                 control: RuntimeControl::new(dispatcher),
                 thread,
@@ -266,21 +269,21 @@ impl Builtins {
     }
 }
 
-impl AsRef<Scheduler> for Builtins {
+impl AsRef<Scheduler> for Context {
     #[inline]
     fn as_ref(&self) -> &Scheduler {
         self.scheduler()
     }
 }
 
-impl AsRef<Clock> for Builtins {
+impl AsRef<Clock> for Context {
     #[inline]
     fn as_ref(&self) -> &Clock {
         self.clock()
     }
 }
 
-impl AsRef<Sink> for Builtins {
+impl AsRef<Sink> for Context {
     #[inline]
     fn as_ref(&self) -> &Sink {
         self.sink()

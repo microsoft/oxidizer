@@ -13,12 +13,12 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
-use std::task::{Context, Poll, Waker};
+use std::task::{Context as PollContext, Poll, Waker};
 
 use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
 use arty::task::JoinError;
 #[cfg(feature = "macros")]
-use arty::task::{Builtins, JoinHandle};
+use arty::task::{Context, JoinHandle};
 use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
@@ -37,7 +37,7 @@ fn runtime() -> Runtime {
 
 #[cfg(feature = "macros")]
 #[arty::test(workers = 1, panic = ignore)]
-async fn async_and_blocking_panics_are_join_errors(cx: Builtins) {
+async fn async_and_blocking_panics_are_join_errors(cx: Context) {
     let scheduler = cx.scheduler();
     let handles: [JoinHandle<()>; 3] = [
         scheduler.spawn(|_| -> std::future::Ready<()> { panic!("factory panic") }),
@@ -285,7 +285,7 @@ fn stop_rejects_remote_and_blocking_factories_immediately() {
                     42
                 }
             });
-            let mut context = Context::from_waker(Waker::noop());
+            let mut context = PollContext::from_waker(Waker::noop());
             for outcome in [pin!(remote).poll(&mut context), pin!(blocking).poll(&mut context)] {
                 let Poll::Ready(Err(error)) = outcome else {
                     panic!("rejected submissions must be immediately ready with an error");
@@ -444,7 +444,7 @@ fn cancelling_the_root_returns_a_shutdown_error() {
 #[cfg(feature = "macros")]
 #[arty::test]
 #[should_panic(expected = "runtime is shutting down")]
-async fn macro_boundary_reports_root_cancellation(cx: arty::task::Builtins) {
+async fn macro_boundary_reports_root_cancellation(cx: arty::task::Context) {
     cx.control().request_stop();
     pending::<()>().await;
 }

@@ -13,11 +13,11 @@ use thread_aware::{Thread, ThreadAware};
 use super::current_host::RuntimeDriverHost;
 use crate::runtime::Error;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
-use crate::task::{Builtins, Scheduler};
+use crate::task::{Context, Scheduler};
 
 /// Access to I/O contexts hosted by an Arty runtime.
 ///
-/// Obtain this handle from [`Builtins::io`](crate::task::Builtins::io). Clones
+/// Obtain this handle from [`Context::io`](crate::task::Context::io). Clones
 /// remain associated with the same worker until their runtime relocates them.
 /// They can be used from ordinary threads; such access synchronously dispatches
 /// to the associated worker and is slower than worker-local access.
@@ -120,7 +120,7 @@ impl Io {
     {
         let (result_tx, result_rx) = channel::unbounded();
         let io = self.clone();
-        let access = Box::new(move |_: &Builtins| {
+        let access = Box::new(move |_: &Context| {
             let result = RuntimeDriverHost::try_context_current(&io.runtime, &io.thread, &options)
                 .unwrap_or_else(|| Err(Error::io_outside_worker()));
             _ = result_tx.send(result);

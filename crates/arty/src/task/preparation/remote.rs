@@ -7,7 +7,7 @@ use arty_executor::{TaskOptions, TaskPlacement, TaskSet};
 use observed::context::Transfer;
 use plurality::{Box as PoolBox, MultiPool, coerce};
 
-use crate::task::Builtins;
+use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::{DeferredTask, discard_panicking_drop};
 
@@ -52,7 +52,7 @@ impl<F> Drop for TaskFactory<F> {
 /// This keeps the concrete future type visible at the point of registration, so the executor can
 /// store the future inline in its task storage pool. Returning the future would require erasing its
 /// type behind a `Pin<Box<dyn Future>>`, adding a heap allocation to every remote spawn.
-type ErasedRemoteFutureFactory = dyn Fn(Builtins, &TaskSet) + Send;
+type ErasedRemoteFutureFactory = dyn Fn(Context, &TaskSet) + Send;
 
 pub(crate) struct RemoteFutureFactory {
     inner: PoolBox<ErasedRemoteFutureFactory>,
@@ -62,29 +62,29 @@ pub(crate) struct RemoteFutureFactory {
 pub(crate) struct RegisteredRemoteTask;
 
 impl RemoteFutureFactory {
-    pub(crate) fn new(factory: impl FnOnce(Builtins, &TaskSet) + Send + 'static) -> Self {
+    pub(crate) fn new(factory: impl FnOnce(Context, &TaskSet) + Send + 'static) -> Self {
         let factory = Cell::new(Some(factory));
         // A pooled box cannot move an erased FnOnce out of its slot. Take the concrete
         // closure through Cell instead, without requiring its captures to be Unpin.
-        let factory = move |builtins: Builtins, tasks: &TaskSet| {
-            factory.take().expect("a remote factory is registered exactly once")(builtins, tasks);
+        let factory = move |cx: Context, tasks: &TaskSet| {
+            factory.take().expect("a remote factory is registered exactly once")(cx, tasks);
         };
         let mut factory = Some(factory);
         let inner = FUTURE_FACTORIES
             .try_with(|pool| {
                 let factory = factory.take().expect("the pooled allocation consumes the factory once");
-                PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Builtins, &TaskSet) + Send))
+                PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Context, &TaskSet) + Send))
             })
             .unwrap_or_else(|_| {
                 let pool = MultiPool::new();
                 let factory = factory.take().expect("the fallback allocation consumes the factory once");
-                PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Builtins, &TaskSet) + Send))
+                PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Context, &TaskSet) + Send))
             });
         Self { inner }
     }
 
-    pub(crate) fn register(self, builtins: Builtins, tasks: &TaskSet) -> RegisteredRemoteTask {
-        (self.inner)(builtins, tasks);
+    pub(crate) fn register(self, cx: Context, tasks: &TaskSet) -> RegisteredRemoteTask {
+        (self.inner)(cx, tasks);
         RegisteredRemoteTask
     }
 }
@@ -96,7 +96,7 @@ pub(crate) fn prepare_remote<FF, F, R>(
     placement: TaskPlacement,
 ) -> (RemoteFutureFactory, JoinHandle<R>)
 where
-    FF: FnOnce(Builtins) -> F + Send + 'static,
+    FF: FnOnce(Context) -> F + Send + 'static,
     F: Future<Output = R> + 'static,
     R: Send + 'static,
 {
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn remote_factory_reuses_its_pool_slot() {
-        fn factory(_: Builtins, _: &TaskSet) {}
+        fn factory(_: Context, _: &TaskSet) {}
 
         let first = RemoteFutureFactory::new(factory);
         let address = std::ptr::from_ref(&*first.inner).cast::<()>();
