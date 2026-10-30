@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runs a single asynchronous task on the async task executor, as the minimal scenario.
+//! Runs one async task and then shuts down the executor.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -30,7 +30,7 @@ fn main() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
 
-    // When our single task is done, it will set this signal to indicate that the app can exit.
+    // The task sets this signal when the application can start shutdown.
     let shutdown_signal = Rc::new(Cell::new(false));
 
     tasks.add(
@@ -40,7 +40,6 @@ fn main() {
             async move {
                 println!("Hello from the async task!");
 
-                // Nothing more we need to do now.
                 shutdown_signal.set(true);
             }
         },
@@ -56,11 +55,11 @@ fn main() {
 
             executor.shutdown().trigger(arty_executor::ShutdownCause::default());
 
-            // No need to yield - we can immediately process the shutdown.
+            // Process shutdown immediately.
             continue;
         }
 
-        // A real app framework would do some useful work here, such as processing I/O and timers.
+        // An application can process I/O and timers here.
         thread::yield_now();
     }
 }

@@ -5,40 +5,34 @@
 #![deny(missing_docs)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-//! Async task executor for the Arty Runtime.
+//! Single-threaded async task executor for the Arty Runtime.
 //!
-//! `arty_executor` is an internal implementation detail of the [`arty`](https://docs.rs/arty)
-//! crate. It is responsible for every stage of task execution, including registration, polling,
-//! wake processing, cancellation, completion, telemetry, and panic handling. Applications should
-//! use `arty` instead of depending on this crate directly.
+//! `arty_executor` is an internal part of the [`arty`](https://docs.rs/arty) crate.
+//! It registers, polls, wakes, cancels, and completes tasks. It also reports telemetry
+//! and contains task panics. Applications use `arty` instead of this crate.
 //!
-//! The purpose of the executor is to ensure that async tasks registered with the executor make
-//! progress, quickly and efficiently reacting to `await` statements that complete.
+//! `arty` uses this crate to run async tasks. Application code uses the task and join
+//! APIs from `arty`.
 //!
-//! The executor is the internal building block through which `arty` implements task execution.
-//! Application code interacts with `arty`'s own task and join APIs and has no direct interaction
-//! with this crate.
+//! # Design
 //!
-//! # Design tenets
+//! The executor runs on one thread. Run one executor on each thread that needs to execute
+//! tasks. Only one executor can be alive on a thread. You can create a replacement after
+//! you drop the previous executor. A runtime integration supplies a [`TaskCompletion`]
+//! target when it registers a task.
 //!
-//! The executor is single-threaded. If you want to execute tasks on multiple threads, you need to
-//! run one executor on each thread. At most one executor may be alive on a thread; a replacement
-//! may be created after the previous executor is dropped. Runtime integrations provide a
-//! [`TaskCompletion`] target when they register a task.
+//! A task ends when its future returns `Poll::Ready`, when it panics, or when
+//! executor shutdown cancels it. The executor does not provide methods to
+//! remove or cancel one task.
 //!
-//! Tasks cannot be taken out of the executor - the only way for them to end is to either end
-//! naturally (with the future returning `Poll::Ready`) or for the executor to be shut down. Not
-//! only is there no "remove" function but similarly, there is no "cancel" function - once a task
-//! has started executing, the only thing that can terminate it is the task itself, by completing.
+//! During steady operation, the executor reuses task storage and does not allocate.
 //!
-//! In a steady state, the executor is allocation-free, as all memory used by the executor is
-//! reused for new tasks when old ones complete.
+//! A cloned task waker can outlive its task. After task completion or cancellation,
+//! the waker does nothing and cannot delay executor shutdown.
 //!
-//! Cloned task wakers may outlive their tasks. After completion or cancellation, an escaped waker
-//! remains callable but becomes an inert no-op and cannot delay executor shutdown.
-//!
-//! Task panics are contained. [`ExecutorBuilder::panic_policy`](crate::ExecutorBuilder::panic_policy)
-//! selects whether they start executor shutdown.
+//! The executor contains task panics. Use
+//! [`ExecutorBuilder::panic_policy`](crate::ExecutorBuilder::panic_policy) to select
+//! whether a task panic starts executor shutdown.
 
 mod builder;
 mod cycle_outcome;

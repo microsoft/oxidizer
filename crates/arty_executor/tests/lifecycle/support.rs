@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Adapters that turn consuming executor completion callbacks into outcomes
-//! that integration tests can poll.
+//! Adapters that let integration tests poll executor completion outcomes.
 
 use std::cell::RefCell;
 use std::fmt;
@@ -19,7 +18,7 @@ pub(crate) enum TaskOutcome<R> {
     Cancelled(ShutdownCause),
 }
 
-/// Shared state that joins one completion target to one awaitable handle.
+/// Shared state for one completion target and its awaitable handle.
 struct CompletionState<R> {
     outcome: Option<TaskOutcome<R>>,
     waker: Option<Waker>,
@@ -70,7 +69,7 @@ impl<R: 'static> TaskCompletion<R> for CompletionTarget<R> {
     }
 }
 
-/// Receives the terminal outcome published by its paired completion target.
+/// Receives the terminal outcome from its paired completion target.
 pub(crate) struct CompletionHandle<R> {
     state: Rc<RefCell<CompletionState<R>>>,
 }
@@ -89,7 +88,7 @@ impl<R> Future for CompletionHandle<R> {
     }
 }
 
-/// Creates paired completion targets and handles for integration tests.
+/// Creates completion target and handle pairs for integration tests.
 pub(crate) trait TaskSetExt {
     fn add_test<F, R>(&self, future: F, options: TaskOptions) -> CompletionHandle<R>
     where
