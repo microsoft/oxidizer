@@ -5,7 +5,7 @@
 //!
 //! A task stays on one worker while it runs. Its
 //! [`Context`](crate::task::Context) provides a scheduler, clock, I/O handle,
-//! and telemetry sink associated with that worker.
+//! associated with that worker.
 //!
 //! # Keep work on the same worker
 //!

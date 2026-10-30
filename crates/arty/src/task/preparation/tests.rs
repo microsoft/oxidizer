@@ -11,7 +11,6 @@ use std::task::{Context as PollContext, Poll, Wake, Waker};
 
 use arty_executor::{CycleOutcome, Executor, ShutdownCause, ShutdownError, TaskPlacement};
 use futures::executor::block_on;
-use observed::Sink;
 
 use super::*;
 use crate::runtime::worker::blocking::PanicPolicy;
@@ -29,7 +28,6 @@ fn test_context() -> (Runtime, Context) {
 fn remote_factory_remains_deferred_until_poll() {
     let invoked = Arc::new(AtomicBool::new(false));
     let factory_invoked = Arc::clone(&invoked);
-    let sink = Sink::noop();
     let result_pool = JoinHandlePool::new(Shutdown::default());
     let (factory, handle) = prepare_remote(
         &result_pool,
@@ -43,7 +41,6 @@ fn remote_factory_remains_deferred_until_poll() {
                 *value
             }
         },
-        sink.transfer_context(),
         TaskPlacement::Any,
     );
 
@@ -183,12 +180,10 @@ fn remote_factory_panic_is_delivered_to_joiner() {
     #[derive(Debug, PartialEq)]
     struct Payload(u32);
 
-    let sink = Sink::noop();
     let result_pool = JoinHandlePool::new(Shutdown::default());
     let (factory, handle) = prepare_remote(
         &result_pool,
         |_| -> std::future::Ready<()> { panic_any(Payload(42)) },
-        sink.transfer_context(),
         TaskPlacement::Any,
     );
     let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
@@ -220,7 +215,7 @@ fn discarded_remote_factory_reports_the_shutdown_cause() {
     let shutdown = Shutdown::default();
     shutdown.begin(arty_executor::ShutdownError::new(std::io::Error::other("queued shutdown")).into());
     let result_pool = JoinHandlePool::new(shutdown);
-    let (factory, handle) = prepare_remote(&result_pool, |_| async { 42 }, Sink::noop().transfer_context(), TaskPlacement::Any);
+    let (factory, handle) = prepare_remote(&result_pool, |_| async { 42 }, TaskPlacement::Any);
 
     drop(factory);
 

@@ -4,7 +4,6 @@
 use arty_io_host::IoRuntime;
 use many_cpus::{ProcessorSet, SystemHardware};
 use nonempty::NonEmpty;
-use observed::{Sink, emit};
 use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
@@ -13,36 +12,20 @@ use crate::runtime::dispatch::{DispatcherClient, DispatcherCore};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
 use crate::runtime::shutdown::Shutdown;
-use crate::runtime::telemetry::events::{BlockingWorkerPoolMode, RuntimeStartFailed, RuntimeStarted};
 use crate::runtime::worker::{WorkerJoiner, asynchronous};
 
-pub(crate) fn build(
-    processor_config: RuntimeConfig,
-    clock: &InactiveClock,
-    sink: Sink,
-    thread_builder: &ThreadBuilder,
-) -> Result<Runtime, Error> {
+pub(crate) fn build(processor_config: RuntimeConfig, clock: &InactiveClock, thread_builder: &ThreadBuilder) -> Result<Runtime, Error> {
     let available = available_processors();
-    build_with_processors(processor_config, clock, sink, thread_builder, &available)
+    build_with_processors(processor_config, clock, thread_builder, &available)
 }
 
 fn build_with_processors(
     processor_config: RuntimeConfig,
     clock: &InactiveClock,
-    sink: Sink,
     thread_builder: &ThreadBuilder,
     available: &ProcessorSet,
 ) -> Result<Runtime, Error> {
-    let pool_mode = processor_config.blocking_pool_policy.mode_label();
-    let processors = processor_config.workers_policy.select(available).inspect_err(|_| {
-        emit!(
-            &sink,
-            RuntimeStartFailed {
-                blocking_worker_pool_mode: BlockingWorkerPoolMode(pool_mode),
-            }
-        );
-    })?;
-    let processors_used = processors.processors_used();
+    let processors = processor_config.workers_policy.select(available)?;
 
     let mut workers = Vec::with_capacity(processors.len());
 
@@ -55,15 +38,8 @@ fn build_with_processors(
     let panic_policy = processor_config.panic_policy;
 
     let shutdown = Shutdown::default();
-    let io_runtime = IoRuntime::new(sink.clone());
-    let blocking_pools = processor_config.blocking_pool_policy.into_pools().inspect_err(|_| {
-        emit!(
-            &sink,
-            RuntimeStartFailed {
-                blocking_worker_pool_mode: BlockingWorkerPoolMode(pool_mode),
-            }
-        );
-    })?;
+    let io_runtime = IoRuntime::new(observed::Sink::noop());
+    let blocking_pools = processor_config.blocking_pool_policy.into_pools()?;
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         workers.push(asynchronous::start(asynchronous::StartOptions {
@@ -75,17 +51,14 @@ fn build_with_processors(
             blocking_pools: blocking_pools.clone(),
             shutdown: shutdown.clone(),
             io_runtime: io_runtime.clone(),
-            sink: sink.clone(),
             monitor_options: monitor_options.for_worker(),
             panic_policy: panic_policy.clone(),
         }));
     }
 
-    let runtime_sink = sink.clone();
     let dispatcher = DispatcherCore::new(
         NonEmpty::from_vec(workers.iter().map(|worker| worker.endpoint().clone()).collect())
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
-        sink,
         shutdown,
     );
 
@@ -96,16 +69,6 @@ fn build_with_processors(
         join_handles.push(worker.activate(dispatcher_client.clone()));
     }
     let worker_joiner = WorkerJoiner::new(join_handles);
-
-    emit!(
-        runtime_sink,
-        RuntimeStarted {
-            processors_available: available.len().into(),
-            processors_used: processors_used.into(),
-            blocking_worker_pool_mode: BlockingWorkerPoolMode(pool_mode),
-            stack_size_bytes: stack_size.into(),
-        }
-    );
 
     Ok(Runtime::with_dispatcher(dispatcher_client, worker_joiner))
 }
@@ -139,7 +102,6 @@ mod tests {
 
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use many_cpus::fake::HardwareBuilder;
-    use observed_testing::{TEST_ID, test_emitter};
     use performables::arc::{Arc, PerThread};
     use thread_aware::{Thread, ThreadAware};
 
@@ -218,12 +180,10 @@ mod tests {
         const WORKERS: usize = 16;
 
         let hardware = fake_hardware(PROCESSORS);
-        let (sink, processor) = test_emitter(TEST_ID);
         let runtime = runtime_with_processors(
             WorkersPolicy::exactly(WORKERS),
             MonitorPolicy::enabled().into(),
             &hardware.processors(),
-            sink,
         );
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let scheduler = cx.scheduler().clone();
@@ -274,14 +234,6 @@ mod tests {
         assert_eq!(counts.initialized.load(Ordering::SeqCst), WORKERS);
         runtime.stop().unwrap();
         assert_eq!(counts.stopped.load(Ordering::SeqCst), WORKERS);
-        let started = processor
-            .events()
-            .into_iter()
-            .find(|event| event.name() == "arty.rt.started")
-            .unwrap();
-        let dimensions = started.dimensions();
-        assert!(dimensions.contains(&("processors.available".into(), PROCESSORS.to_string().into())));
-        assert!(dimensions.contains(&("processors.used".into(), PROCESSORS.to_string().into())));
     }
 
     #[test]
@@ -289,12 +241,7 @@ mod tests {
         const PROCESSORS: usize = 4;
 
         let hardware = fake_hardware(PROCESSORS);
-        let runtime = runtime_with_processors(
-            WorkersPolicy::at_most(16),
-            MonitorPolicy::disabled().into(),
-            &hardware.processors(),
-            Sink::noop(),
-        );
+        let runtime = runtime_with_processors(WorkersPolicy::at_most(16), MonitorPolicy::disabled().into(), &hardware.processors());
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let workers: HashSet<_> = cx
             .control()
@@ -315,12 +262,7 @@ mod tests {
         const PROCESSORS: usize = 4;
 
         let hardware = fake_hardware(PROCESSORS);
-        let runtime = runtime_with_processors(
-            WorkersPolicy::all(),
-            MonitorPolicy::disabled().into(),
-            &hardware.processors(),
-            Sink::noop(),
-        );
+        let runtime = runtime_with_processors(WorkersPolicy::all(), MonitorPolicy::disabled().into(), &hardware.processors());
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let workers: HashSet<_> = cx
             .control()
@@ -341,7 +283,7 @@ mod tests {
         ))
     }
 
-    fn runtime_with_processors(policy: WorkersPolicy, monitor_options: MonitorOptions, processors: &ProcessorSet, sink: Sink) -> Runtime {
+    fn runtime_with_processors(policy: WorkersPolicy, monitor_options: MonitorOptions, processors: &ProcessorSet) -> Runtime {
         build_with_processors(
             RuntimeConfig {
                 workers_policy: policy,
@@ -351,7 +293,6 @@ mod tests {
                 panic_policy: PanicPolicy::default(),
             },
             &InactiveClock::new_isolated(),
-            sink,
             &ThreadBuilder::default(),
             processors,
         )

@@ -3,9 +3,6 @@
 
 //! Worker services and thread-aware relocation.
 
-use observed::Sink;
-#[cfg(debug_assertions)]
-use observed::emit;
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
@@ -13,8 +10,6 @@ use tick::Clock;
 use crate::io::Io;
 use crate::runtime::RuntimeControl;
 use crate::runtime::dispatch::DispatcherClient;
-#[cfg(debug_assertions)]
-use crate::runtime::telemetry::events::{BacktraceText, ContextThreadMismatch, ThreadName};
 use crate::task::scheduler::Scheduler;
 
 /// Services supplied to an async task on its worker.
@@ -66,7 +61,6 @@ struct ContextInner {
     thread: Thread,
     clock: Clock,
     io: Io,
-    sink: Sink,
 }
 
 impl Context {
@@ -95,8 +89,6 @@ impl Context {
     #[must_use]
     #[inline]
     pub fn scheduler(&self) -> &Scheduler {
-        self.validate();
-
         &self.inner.scheduler
     }
 
@@ -108,8 +100,6 @@ impl Context {
     #[must_use]
     #[inline]
     pub fn control(&self) -> &RuntimeControl {
-        self.validate();
-
         &self.inner.control
     }
 
@@ -132,8 +122,6 @@ impl Context {
     #[must_use]
     #[inline]
     pub fn thread(&self) -> &Thread {
-        self.validate();
-
         &self.inner.thread
     }
 
@@ -160,8 +148,6 @@ impl Context {
     #[must_use]
     #[inline]
     pub fn clock(&self) -> &Clock {
-        self.validate();
-
         &self.inner.clock
     }
 
@@ -169,64 +155,7 @@ impl Context {
     #[must_use]
     #[inline]
     pub fn io(&self) -> &Io {
-        self.validate();
         &self.inner.io
-    }
-
-    /// Returns this runtime's telemetry sink.
-    ///
-    /// Emit application events through this [`Sink`] to use the same telemetry
-    /// configuration as the runtime. It is a no-op sink unless one was provided
-    /// with [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink).
-    ///
-    /// # Examples
-    ///
-    /// An application that also depends on `observed` can emit its own event:
-    ///
-    /// ```
-    /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// #[observed::event("app.task.started")]
-    /// #[info("task started")]
-    /// struct TaskStarted;
-    ///
-    /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Context) {
-    /// observed::emit!(cx.sink(), TaskStarted);
-    /// # }
-    /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
-    /// ```
-    #[must_use]
-    #[inline]
-    pub fn sink(&self) -> &Sink {
-        self.validate();
-
-        &self.inner.sink
-    }
-
-    #[cfg_attr(test, mutants::skip)]
-    #[cfg(debug_assertions)]
-    fn validate(&self) {
-        let thread = std::thread::current();
-        if thread.id() != self.inner.thread.id() {
-            let backtrace = std::backtrace::Backtrace::capture();
-            emit!(
-                &self.inner.sink,
-                ContextThreadMismatch {
-                    name: ThreadName::new(thread.name().unwrap_or_default()),
-                    id: thread.id().into(),
-                    backtrace: BacktraceText(backtrace.to_string()),
-                }
-            );
-        }
-    }
-
-    #[cfg(not(debug_assertions))]
-    #[cfg_attr(test, mutants::skip)]
-    #[expect(clippy::unused_self, reason = "Optimized away on release builds")]
-    #[inline(always)]
-    fn validate(&self) {
-        // Disabled on release builds
     }
 }
 
@@ -247,12 +176,11 @@ impl ThreadAware for Context {
         inner.thread = destination.clone();
         inner.clock.relocate(Some(&source), destination);
         inner.io.relocate(Some(&source), destination);
-        inner.sink.relocate(Some(&source), destination);
     }
 }
 
 impl Context {
-    pub(crate) fn new(dispatcher: DispatcherClient, clock: Clock, io: Io, thread: Thread, sink: Sink) -> Self {
+    pub(crate) fn new(dispatcher: DispatcherClient, clock: Clock, io: Io, thread: Thread) -> Self {
         Self {
             inner: Arc::new(ContextInner {
                 scheduler: Scheduler::new(dispatcher.clone(), thread.clone()),
@@ -260,7 +188,6 @@ impl Context {
                 thread,
                 clock,
                 io,
-                sink,
             }),
         }
     }
@@ -281,12 +208,5 @@ impl AsRef<Clock> for Context {
     #[inline]
     fn as_ref(&self) -> &Clock {
         self.clock()
-    }
-}
-
-impl AsRef<Sink> for Context {
-    #[inline]
-    fn as_ref(&self) -> &Sink {
-        self.sink()
     }
 }

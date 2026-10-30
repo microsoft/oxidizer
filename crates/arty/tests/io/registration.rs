@@ -205,7 +205,7 @@ fn nested_context_retrieval_panics_and_stops_the_runtime() {
 
 #[test]
 fn inconsistent_primary_role_on_another_worker_is_rejected() {
-    let (runtime, processor) = runtime_with_telemetry(WORKERS);
+    let runtime = runtime(WORKERS);
     let workers = worker_schedulers(&runtime, WORKERS);
     let scenario = Scenario::options(RolePlan::Inconsistent);
     scenario.fail_shutdown.store(true, Ordering::SeqCst);
@@ -241,7 +241,6 @@ fn inconsistent_primary_role_on_another_worker_is_rejected() {
             .contains("driver does not support assigned role Primary")
     );
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
-    assert_eq!(event_count(&processor, "arty.rt.io.driver.shutdown_failed"), 1);
 }
 
 #[test]

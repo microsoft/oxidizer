@@ -9,9 +9,10 @@
 mod support;
 
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 
@@ -20,9 +21,6 @@ use arty::task::{Context, Scheduler};
 use arty::time::Clock;
 #[cfg(feature = "macros")]
 use futures::future::join_all;
-use many_cpus::SystemHardware;
-use observed::Sink;
-use observed_testing::{TEST_ID, test_emitter};
 use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
@@ -64,9 +62,103 @@ fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
     }
 }
 
+/// Keeps callbacks blocked so queued work remains available while the test observes pool growth.
+struct BlockingGate {
+    released: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl BlockingGate {
+    fn wait(&self) {
+        let mut released = self.released.lock().unwrap();
+        while !*released {
+            released = self.changed.wait(released).unwrap();
+        }
+    }
+
+    fn release(&self) {
+        *self.released.lock().unwrap() = true;
+        self.changed.notify_all();
+    }
+}
+
+/// Releases blocked callbacks during unwinding so runtime teardown can complete.
+struct ReleaseBlockingGate(Arc<BlockingGate>);
+
+impl Drop for ReleaseBlockingGate {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
+/// Exercises automatic pool growth and its configured thread limit with a blocked workload.
+fn assert_blocking_pool_limit(max_threads: usize) {
+    const QUEUED_TASK_COUNT: usize = 6;
+
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(max_threads))
+        .build()
+        .unwrap();
+    let gate = Arc::new(BlockingGate {
+        released: Mutex::new(false),
+        changed: Condvar::new(),
+    });
+    let _release_gate = ReleaseBlockingGate(Arc::clone(&gate));
+    let scheduler = runtime.scheduler();
+    let (blocker_started_tx, blocker_started_rx) = mpsc::channel();
+    let blocker = scheduler.spawn_blocking({
+        let gate = Arc::clone(&gate);
+        move || {
+            let worker = thread::current().id();
+            blocker_started_tx.send(worker).unwrap();
+            gate.wait();
+            worker
+        }
+    });
+    let blocker_worker = blocker_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    let (queued_started_tx, queued_started_rx) = mpsc::channel();
+    // Keep enough callbacks blocked to exceed the pool's per-thread growth threshold.
+    let queued: [_; QUEUED_TASK_COUNT] = std::array::from_fn(|_| {
+        let gate = Arc::clone(&gate);
+        let queued_started_tx = queued_started_tx.clone();
+        scheduler.spawn_blocking(move || {
+            let worker = thread::current().id();
+            queued_started_tx.send(worker).unwrap();
+            gate.wait();
+            worker
+        })
+    });
+    drop(queued_started_tx);
+
+    if max_threads > 1 {
+        let growth_worker = queued_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+        assert_ne!(growth_worker, blocker_worker);
+    }
+
+    gate.release();
+    let mut worker_ids = HashSet::new();
+    worker_ids.insert(blocker.join().unwrap());
+    worker_ids.extend(queued.into_iter().map(|task| task.join().unwrap()));
+    runtime.stop().unwrap();
+
+    assert_eq!(worker_ids.len(), max_threads);
+}
+
 #[test]
 fn public_policy_defaults_are_automatic_and_shared() {
     assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::shared());
+}
+
+#[test]
+fn blocking_pool_grows_when_overloaded_below_its_limit() {
+    assert_blocking_pool_limit(2);
+}
+
+#[test]
+fn blocking_pool_growth_respects_its_configured_limit() {
+    assert_blocking_pool_limit(1);
 }
 
 #[test]
@@ -96,26 +188,15 @@ fn zero_stack_size_is_rejected_by_the_setter() {
 }
 
 #[test]
-fn resource_setters_preserve_worker_count_stack_and_pool_independently() {
-    const STACK: usize = 4 * 1024 * 1024;
-    let (sink, processor) = test_emitter(TEST_ID);
+fn resource_setters_preserve_worker_count_and_pool_policy() {
     let runtime = Runtime::builder()
-        .stack_size(STACK)
         .blocking_pool(BlockingPoolPolicy::per_worker())
         .workers(WorkersPolicy::at_most(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .workers(WorkersPolicy::exactly(2))
-        .sink(sink)
         .build()
         .unwrap();
     assert_eq!(count_workers(&runtime), 2);
-    runtime
-        .scheduler()
-        .block_on(async |cx| {
-            assert!(!cx.sink().is_noop());
-            cx.sink().flush().unwrap();
-        })
-        .unwrap();
     let first = worker_scheduler(&runtime);
     let second = worker_scheduler(&runtime);
     assert_eq!(
@@ -123,22 +204,6 @@ fn resource_setters_preserve_worker_count_stack_and_pool_independently() {
         second.spawn_blocking(|| thread::current().id()).join().unwrap()
     );
     runtime.stop().unwrap();
-    let events = processor.events();
-    let started: Vec<_> = events.iter().filter(|event| event.name() == "arty.rt.started").collect();
-    assert_eq!(started.len(), 1);
-    let configured_minimum = std::env::var("RUST_MIN_STACK")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or_default();
-    let processors_used = if cfg!(miri) {
-        2
-    } else {
-        SystemHardware::current().processors().len().min(2)
-    };
-    let dimensions = started[0].dimensions();
-    assert!(dimensions.contains(&("processors.used".into(), processors_used.to_string().into())));
-    assert!(dimensions.contains(&("blocking_worker_pool.mode".into(), "shared".into())));
-    assert!(dimensions.contains(&("stack_size_bytes".into(), STACK.max(configured_minimum).to_string().into())));
 }
 
 #[test]
@@ -258,7 +323,7 @@ fn blocking_callbacks_reject_block_on_before_factory_submission() {
 }
 
 #[test]
-fn context_publish_the_same_services_on_every_worker() {
+fn context_publishes_scheduler_and_clock_on_every_worker() {
     let runtime = runtime(2);
     let context = runtime.scheduler().block_on(async |cx| cx).unwrap();
     let tasks: Vec<_> = context
@@ -269,11 +334,8 @@ fn context_publish_the_same_services_on_every_worker() {
             context.scheduler().spawn_at(worker, context.clone(), |cx: Context| async move {
                 let scheduler: &Scheduler = cx.as_ref();
                 let clock: &Clock = cx.as_ref();
-                let sink: &Sink = cx.as_ref();
                 assert!(std::ptr::eq(scheduler, cx.scheduler()));
                 assert!(std::ptr::eq(clock, cx.clock()));
-                assert!(std::ptr::eq(sink, cx.sink()));
-                assert!(sink.is_noop());
                 assert_eq!(cx.thread().id(), thread::current().id());
                 assert_eq!(scheduler.spawn(async |_| 42).await.unwrap(), 42);
                 cx.thread().id()
@@ -301,47 +363,6 @@ async fn worker_services_are_ready_before_spawning(cx: Context) {
     let actual = join_all(tasks).await.into_iter().map(Result::unwrap).collect::<Vec<_>>();
 
     assert_eq!(actual, expected);
-}
-
-#[cfg(all(feature = "macros", not(miri)))]
-#[arty::test]
-async fn emitter_is_available_by_default(cx: Context) {
-    assert!(cx.sink().is_noop());
-}
-
-#[cfg(not(miri))]
-#[test]
-fn configured_emitter_is_available_from_context() {
-    use observed::metadata::EventDescription;
-    use observed::processing::{EventProcessor, EventView};
-
-    struct TestProcessor;
-
-    impl EventProcessor for TestProcessor {
-        fn is_interested(&self, _description: &EventDescription) -> bool {
-            true
-        }
-
-        fn process(&self, _event: &EventView<'_>) {}
-
-        fn flush(&self) -> Result<(), observed::FlushError> {
-            Ok(())
-        }
-    }
-
-    let sink = Sink::builder("test")
-        .clock(tick::SimpleClock::new_frozen())
-        .processors(vec![Arc::new(TestProcessor)])
-        .build();
-    let runtime = Runtime::builder().sink(sink).build().unwrap();
-
-    runtime
-        .scheduler()
-        .block_on(async move |cx: Context| {
-            assert!(!cx.sink().is_noop());
-            cx.sink().flush().unwrap();
-        })
-        .unwrap();
 }
 
 #[cfg(feature = "test-util")]

@@ -7,7 +7,6 @@ use std::thread::{self, JoinHandle};
 use arty_executor::discard_task_panic_payload;
 use arty_io_host::IoRuntime;
 use many_cpus::ProcessorSet;
-use observed::{Sink, emit};
 use performables::arc::Arc;
 use performables::sync::channel;
 use performables::sync::channel::{OneshotReceiver, OneshotSender, Sender};
@@ -20,10 +19,6 @@ use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::{DispatcherClient, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::shutdown::Shutdown;
-use crate::runtime::telemetry::events::{
-    AsyncWorkerActive, AsyncWorkerStarted, AsyncWorkerStopped, PanicMessage, SystemMetricCount, ThreadExiting, ThreadName, ThreadPanicked,
-    ThreadSpawn, ThreadStarted,
-};
 use crate::runtime::worker::{asynchronous, blocking};
 
 /// Inputs required to spawn one asynchronous worker.
@@ -37,7 +32,6 @@ pub(crate) struct StartOptions {
     pub(crate) blocking_pools: blocking::Pools,
     pub(crate) shutdown: Shutdown,
     pub(crate) io_runtime: IoRuntime,
-    pub(crate) sink: Sink,
     pub(crate) monitor_options: MonitorOptions,
     pub(crate) panic_policy: PanicPolicy,
 }
@@ -72,7 +66,6 @@ pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
     let (ready_tx, ready_rx) = channel::unbounded();
     let thread_name = format!("oxidizer-rt-{}", options.worker_index);
     let stack_size = options.stack_size;
-    let sink = options.sink.clone();
     let thread_entry = ThreadEntry {
         options,
         command_rx,
@@ -80,7 +73,7 @@ pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
         ready_tx,
         endpoint_tx,
     };
-    let join_handle = spawn_thread(&sink, &thread_name, stack_size, move || thread_entry.run());
+    let join_handle = spawn_thread(&thread_name, stack_size, move || thread_entry.run());
     let endpoint = endpoint_rx
         .recv()
         .expect("failed to receive the worker endpoint from the starting worker");
@@ -131,18 +124,15 @@ impl ThreadEntry {
         let StartOptions {
             inactive_clock,
             processor,
-            worker_index,
             thread_builder,
             blocking_pools,
             shutdown,
             io_runtime,
-            sink,
             monitor_options,
             panic_policy,
             ..
         } = options;
 
-        let worker_sink = sink.clone();
         let thread_builder = thread_builder.with_numa_node(processor.processors().first().memory_region_id());
         processor.pin_current_thread_to();
         let current = thread_builder.build(thread::current().id());
@@ -157,12 +147,7 @@ impl ThreadEntry {
             arty_executor::PanicPolicy::Ignore => blocking::PanicPolicy::Ignore,
             arty_executor::PanicPolicy::Shutdown => blocking::PanicPolicy::Shutdown(worker_waker.clone()),
         };
-        let blocking_worker = blocking::Worker::new(
-            blocking_pools.pool_for_worker(),
-            worker_sink.clone(),
-            shutdown,
-            blocking_panic_policy,
-        );
+        let blocking_worker = blocking::Worker::new(blocking_pools.pool_for_worker(), shutdown, blocking_panic_policy);
 
         endpoint_tx
             .send(Endpoint {
@@ -183,22 +168,13 @@ impl ThreadEntry {
             command_rx,
             dispatcher.clone(),
             current,
-            sink,
             io,
-            &blocking_worker,
             clock,
             signal,
             monitor_options,
             panic_policy,
         );
 
-        emit!(
-            worker_sink,
-            AsyncWorkerStarted {
-                processor_index: worker_index.into(),
-            }
-        );
-        emit!(worker_sink, AsyncWorkerActive { delta: 1 });
         _ = ready_tx.send(());
 
         let run_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));
@@ -206,15 +182,6 @@ impl ThreadEntry {
         let drop_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(worker)));
         report_failure(&drop_outcome, &dispatcher);
         let outcome = combine_outcomes(run_outcome, drop_outcome);
-        if outcome.is_ok() {
-            emit!(
-                worker_sink,
-                AsyncWorkerStopped {
-                    processor_index: worker_index.into(),
-                }
-            );
-        }
-        emit!(worker_sink, AsyncWorkerActive { delta: -1 });
 
         blocking_worker.join();
         if let Err(panic) = outcome {
@@ -223,67 +190,14 @@ impl ThreadEntry {
     }
 }
 
-fn spawn_thread(sink: &Sink, name: &str, stack_size: usize, task: impl FnOnce() + Send + 'static) -> JoinHandle<()> {
-    let owner_thread = thread::current();
-    emit!(
-        sink,
-        ThreadSpawn {
-            name: ThreadName::new(name),
-            stack_size_bytes: Some(SystemMetricCount::from(stack_size)),
-            owner_name: owner_thread.name().map(ThreadName::new),
-            owner_id: owner_thread.id().into(),
-        }
-    );
-    let thread_sink = sink.clone();
-
+fn spawn_thread(name: &str, stack_size: usize, task: impl FnOnce() + Send + 'static) -> JoinHandle<()> {
     thread::Builder::new()
         .name(name.to_string())
         .stack_size(stack_size)
-        .spawn(move || thread_main(&thread_sink, task))
+        .spawn(task)
         // Fallible construction and partial-startup cleanup are intentionally
         // deferred: https://github.com/microsoft/oxidizer/pull/785#discussion_r4183811801
         .expect("failed to spawn thread")
-}
-
-fn thread_main(sink: &Sink, task: impl FnOnce() + Send + 'static) {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-
-    let thread = thread::current();
-    emit!(
-        sink,
-        ThreadStarted {
-            name: thread.name().map(ThreadName::new),
-            id: thread.id().into(),
-        }
-    );
-
-    let result = catch_unwind(AssertUnwindSafe(task));
-    if let Err(panic) = result {
-        let message = if let Some(message) = panic.downcast_ref::<&str>() {
-            (*message).to_owned()
-        } else if let Some(message) = panic.downcast_ref::<String>() {
-            message.clone()
-        } else {
-            "unknown panic".to_owned()
-        };
-        emit!(
-            sink,
-            ThreadPanicked {
-                name: thread.name().map(ThreadName::new),
-                id: thread.id().into(),
-                message: PanicMessage(message),
-            }
-        );
-        std::panic::resume_unwind(panic);
-    }
-
-    emit!(
-        sink,
-        ThreadExiting {
-            name: thread.name().map(ThreadName::new),
-            id: thread.id().into(),
-        }
-    );
 }
 
 fn report_failure(outcome: &std::thread::Result<()>, dispatcher: &DispatcherClient) {
@@ -310,8 +224,6 @@ mod tests {
     use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
     use nonempty::NonEmpty;
-    use observed::Value;
-    use observed_testing::{TEST_ID, test_emitter};
 
     use super::*;
     use crate::runtime::dispatch::DispatcherCore;
@@ -319,7 +231,7 @@ mod tests {
     #[test]
     fn spawn_executes_task_successfully() {
         let result = StdArc::new(StdMutex::new(0));
-        let handle = spawn_thread(&Sink::noop(), "test-thread", 2 * 1024 * 1024, {
+        let handle = spawn_thread("test-thread", 2 * 1024 * 1024, {
             let result = StdArc::clone(&result);
             move || *result.lock().unwrap() = 42
         });
@@ -331,7 +243,7 @@ mod tests {
 
     #[test]
     fn spawn_propagates_panic() {
-        let handle = spawn_thread(&Sink::noop(), "panicking-thread", 2 * 1024 * 1024, || {
+        let handle = spawn_thread("panicking-thread", 2 * 1024 * 1024, || {
             panic!("task panicked");
         });
 
@@ -339,41 +251,9 @@ mod tests {
     }
 
     #[test]
-    fn panicking_thread_emits_panic_event() {
-        let cases: [(fn(), &str); 3] = [
-            (|| panic!("test test 123"), "test test 123"),
-            (|| std::panic::panic_any(String::from("owned message")), "owned message"),
-            (|| std::panic::panic_any(42u32), "unknown panic"),
-        ];
-        for (body, expected_message) in cases {
-            let (sink, processor) = test_emitter(TEST_ID);
-            let handle = spawn_thread(&sink, "panicking-thread", 2 * 1024 * 1024, body);
-            handle.join().unwrap_err();
-            let panic_event = processor
-                .events()
-                .into_iter()
-                .find(|event| event.name() == "arty.rt.thread.panic")
-                .expect("a panicking thread emits arty.rt.thread.panic");
-            let attribute = |key: &str| -> Option<String> {
-                panic_event
-                    .dimensions()
-                    .into_iter()
-                    .find(|(name, _)| name == key)
-                    .and_then(|(_, value)| match value {
-                        Value::String(value) => Some(value.to_string()),
-                        _ => None,
-                    })
-            };
-
-            assert_eq!(attribute("panic.message"), Some(expected_message.to_owned()));
-            assert_eq!(attribute("thread.name"), Some("panicking-thread".to_owned()));
-        }
-    }
-
-    #[test]
     fn spawn_names_the_thread() {
         const THREAD_NAME: &str = "named-thread";
-        let handle = spawn_thread(&Sink::noop(), THREAD_NAME, 2 * 1024 * 1024, || {
+        let handle = spawn_thread(THREAD_NAME, 2 * 1024 * 1024, || {
             assert_eq!(thread::current().name(), Some(THREAD_NAME));
         });
 
@@ -408,19 +288,14 @@ mod tests {
         let (command_tx, _command_rx) = channel::unbounded();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(
-            blocking::Pool::new(None),
-            Sink::noop(),
-            shutdown.clone(),
-            blocking::PanicPolicy::Ignore,
-        );
+        let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
             command_tx,
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,
         };
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), Sink::noop(), shutdown.clone()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone()));
 
         report_failure(&Err(Box::new("worker panic")), &dispatcher);
 
@@ -432,19 +307,14 @@ mod tests {
         let (command_tx, _command_rx) = channel::unbounded();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(
-            blocking::Pool::new(None),
-            Sink::noop(),
-            shutdown.clone(),
-            blocking::PanicPolicy::Ignore,
-        );
+        let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
             command_tx,
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,
         };
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), Sink::noop(), shutdown.clone()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone()));
 
         report_failure(&Ok(()), &dispatcher);
 
