@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime construction, configuration, and task capabilities.
+//! Runtime construction, configuration, and shutdown.
 //!
 //! Use [`Runtime`] to run async work from synchronous code and control
-//! when workers stop. [`Runtime::new`] starts the default configuration;
+//! when workers stop. [`Runtime::new`] starts the default configuration.
 //! [`Runtime::builder`] lets you choose workers, blocking pools, and clocks
 //! before they start.
 //!
@@ -16,31 +16,100 @@
 //! coordinates and can request shutdown without consuming the runtime owner.
 //!
 //! Keep the runtime owner alive until required work completes. Shutdown cancels
-//! pending tasks and waits for blocking callbacks that have already started;
-//! keeping a scheduler does not keep the runtime running.
+//! pending tasks and waits for blocking callbacks that have already started.
+//! Keeping a scheduler does not keep the runtime running.
 //!
-//! By default, the first contained panic from a user task or blocking callback
-//! starts coordinated runtime shutdown. Use [`PanicPolicy::ignore`] to keep the
-//! runtime running. The failed join still reports the panic. Arty applies this
-//! policy only while it creates or polls a task, or runs a blocking callback.
-//! It does not guarantee recovery from other panic sources.
+//! # Configuration
 //!
-//! # Examples
+//! [`RuntimeBuilder`] collects configuration before any worker starts.
+//! [`RuntimeBuilder::build`] validates the configuration and starts the runtime.
+//! The policy types contain the detailed choices and their resource effects.
 //!
-//! Let the entry-point attribute manage the runtime's lifetime:
+//! ## Defaults
+//!
+//! [`Runtime::new`] and an unchanged [`RuntimeBuilder`] use these defaults:
+//!
+//! - [`WorkersPolicy::default`] starts one async worker.
+//! - Each async worker uses a 2 MiB stack. A larger `RUST_MIN_STACK` value
+//!   takes precedence.
+//! - [`BlockingPoolPolicy::default`] creates one shared blocking pool. Its
+//!   implicit thread limits are implementation details. Use
+//!   [`BlockingPoolPolicy::max`] to set an explicit maximum.
+//! - The clock follows real time.
+//! - [`MonitorPolicy::default`] selects the enabled monitoring policy. This
+//!   policy does not start a monitor or instrument tasks.
+//! - [`PanicPolicy::default`] starts coordinated shutdown after a contained
+//!   task factory, async task, or blocking callback panic.
+//!
+//! The [`test`](crate::test) attribute selects the disabled monitoring policy
+//! by default. See [`main`](crate::main) and [`test`](crate::test) for all
+//! entry-point defaults.
+//!
+//! ## Policy types
+//!
+//! - [`WorkersPolicy`] selects the async worker count and processor placement.
+//! - [`BlockingPoolPolicy`] selects a shared or per-worker blocking pool and
+//!   sets its thread limit.
+//! - [`PanicPolicy`] selects shutdown or continued operation after a contained
+//!   panic.
+//! - [`MonitorPolicy`] selects the monitoring configuration.
+//!
+//! [`RuntimeBuilder::stack_size`] sets the async worker stack size.
+//! [`RuntimeBuilder::clock`] selects the runtime clock. See each linked API for
+//! validation rules, resource limits, and examples.
+//!
+//! This example uses at most two async workers and one shared blocking pool
+//! with up to four threads:
 //!
 //! ```
-//! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! #[arty::main]
-//! async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
-//!     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+//! use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+//!
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let runtime = Runtime::builder()
+//!         .workers(WorkersPolicy::at_most(2))
+//!         .blocking_pool(BlockingPoolPolicy::shared().max(4))
+//!         .build()?;
+//!     assert_eq!(runtime.scheduler().block_on(async |_| 42)?, 42);
+//!     runtime.stop()?;
 //!     Ok(())
 //! }
-//! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 //! ```
 //!
-//! See the [configuration](crate::documentation::configuration) and
-//! [shutdown](crate::documentation::shutdown) guides for more.
+//! # Entry-point attributes
+//!
+//! With `macros` enabled, [`arty::main`](crate::main) and
+//! [`arty::test`](crate::test) create and stop the runtime. Their arguments set
+//! the worker count, monitoring policy, and panic policy. See [`main`](crate::main)
+//! and [`test`](crate::test) for the supported syntax and defaults.
+//!
+//! Build the runtime explicitly for custom clocks, blocking pools, stack sizes,
+//! or [`WorkersPolicy::at_most`]. Explicit construction also lets the caller
+//! own shutdown and handle construction errors.
+//!
+//! # Runtime services
+//!
+//! The runtime combines three service groups. The [`task`](crate::task) module
+//! documents task placement, blocking work, and result handles. The
+//! [`time`](crate::time) module documents clocks, timers, and controlled test
+//! time. The [`io`](crate::io) module documents external I/O driver hosting.
+//!
+//! # Shutdown
+//!
+//! [`Runtime`] owns the workers. Scheduler and [`Context`](crate::task::Context)
+//! handles do not keep the runtime running. [`RuntimeControl::request_stop`]
+//! requests shutdown without waiting. [`Runtime::stop`] consumes the owner,
+//! waits for every worker, and reports shutdown failures. Dropping the owner
+//! also requests shutdown and waits, but it cannot return an error.
+//!
+//! Shutdown rejects new submissions, cancels pending async tasks, and discards
+//! queued blocking callbacks. Blocking callbacks that already run can finish.
+//! Their completion can delay shutdown. [`JoinError`](crate::task::JoinError)
+//! identifies task cancellation and preserves a runtime failure when one
+//! started shutdown.
+//!
+//! Keep the runtime owner on an external thread. Stopping or dropping it on an
+//! Arty task or blocking worker panics. Worker code must use
+//! [`RuntimeControl::request_stop`].
 
 mod bootstrap;
 mod builder;

@@ -3,16 +3,20 @@
 
 //! Matched Arty/Tokio scheduling workloads, measured with metabench.
 //!
-//! Use `--criterion --allocations`. Threaded workloads are not isolated instruction costs.
-//! Runtimes, reusable vectors, and the external waking thread are prepared before measurement.
-//! Both runtimes use the same external join driver. From-task wall-clock
-//! samples measure inside the async entry; allocation measurement also includes
-//! that entry and its setup.
+//! For allocation data, use `--criterion --allocations`. Threaded workloads do
+//! not measure isolated instruction costs. Each case creates its runtime,
+//! reusable vectors, and external waking thread before measurement. It reuses
+//! this input for every measured iteration.
 //!
-//! The `timeout` workload runs one task per worker, concurrently. Each task arms and cancels
-//! `count` request timeouts per iteration, the common pattern of a deadline that almost never
-//! fires. It measures how timer registration scales when every worker uses timers at once.
-//! Tokio places its tasks itself, so one task per Tokio worker is likely but not guaranteed.
+//! Both runtimes use the same external join driver. Wall-clock samples for
+//! from-task workloads start inside the async entry. Allocation measurement
+//! also includes that entry and its setup.
+//!
+//! The `timeout` workload runs one concurrent task per worker. Each task arms
+//! and cancels `count` request timeouts per iteration. This models deadlines
+//! that almost never expire. It measures timer registration when all workers
+//! use timers at the same time. Tokio selects task placement, so it does not
+//! guarantee one task per worker.
 
 use std::future::poll_fn;
 use std::hint::black_box;
@@ -36,8 +40,8 @@ const BLOCKING_THREADS: usize = 4;
 const COUNTS: [usize; 2] = [1, 20];
 const WORKERS: [usize; 2] = [1, 4];
 
-// Neither deadline is reached during a benchmark. The background timer keeps every request
-// timeout from being the earliest deadline, as in a server that always has a shorter timer armed.
+// Neither deadline expires during a benchmark. The background timer remains
+// the earliest deadline, as in a server that always has a shorter timer armed.
 const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(30);
 const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 
@@ -301,9 +305,10 @@ impl TokioCase {
     }
 }
 
-/// Arms and cancels `operations` request timeouts on the current worker while a background
-/// timer stays armed. Each timeout is polled once, which registers it, then dropped, which
-/// unregisters it.
+/// Arms and cancels `operations` request timeouts on the current worker.
+///
+/// A background timer stays armed. Each request timeout is polled once to
+/// register it, then dropped to unregister it.
 async fn timeout_churn<T, F>(operations: u64, mut timer: F)
 where
     T: Future<Output = ()>,
@@ -328,7 +333,7 @@ async fn arm<T: Future<Output = ()>>(mut timer: Pin<&mut T>) {
     .await;
 }
 
-// A single self-wake, independent of either runtime's convenience APIs.
+// Use one self-wake without either runtime's convenience API.
 #[derive(Debug, Default)]
 struct YieldOnce(bool);
 

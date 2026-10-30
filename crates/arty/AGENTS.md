@@ -21,10 +21,10 @@
 - Do not add recovery guarantees for panicking destructors, custom wakers,
   notification hooks, poisoned state, or failed runtime invariants merely to
   make a test pass.
-- Unsupported panics may abort, leak, or stop progress, but must not cause
+- Unsupported panics can abort, leak, or stop progress, but must not cause
   undefined behavior.
 - Do not add dedicated recovery for failed runtime invariants, poisoned state,
-  or unsafe-contract violations. An existing outer task boundary may still
+  or unsafe-contract violations. An existing outer task boundary can still
   report such a panic through `JoinError`.
 - Add `catch_unwind` only for a realistic safe-Rust path with a sound
   post-panic state and useful caller-visible behavior. If any of these are

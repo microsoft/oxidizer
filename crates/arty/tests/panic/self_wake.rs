@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Self-wake notifications queued before a panic cannot repoll a completed future.
+//! Self-wake notifications queued before a panic cannot poll a completed future again.
 
 use std::pin::Pin;
 use std::rc::Rc;

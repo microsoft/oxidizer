@@ -210,7 +210,8 @@ impl Pool {
     }
 
     /// Initial number of threads in the pool.
-    /// It should be reasonable to start at one thread and ramp up the number if necessary.
+    ///
+    /// The pool starts with one thread and grows when the queue is overloaded.
     const INITIAL_THREAD_COUNT: usize = 1;
 
     /// Queue-growth heuristic following the [`blocking`](https://github.com/smol-rs/blocking/blob/master/src/lib.rs) pool.
@@ -334,7 +335,7 @@ mod tests {
         assert_eq!(
             blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(),
             Pool::INITIAL_THREAD_COUNT + 1,
-            "Number of worker threads should be increased by 1"
+            "worker thread count must increase by one"
         );
     }
 
@@ -375,9 +376,8 @@ mod tests {
 
     #[test]
     fn blocking_pool_reports_configured_max_thread_count() {
-        // A configured value distinct from both 1 and the initial thread count keeps
-        // this assertion honest: the getter must return the exact maximum it was
-        // built with, and the default path must fall back to the crate default.
+        // The configured maximum differs from the initial count and the crate
+        // default. The getter must return it without substituting either.
         assert_eq!(Pool::new(Some(limit(7))).max_thread_count(), 7);
         assert_eq!(Pool::new(None).max_thread_count(), Pool::MAX_THREAD_COUNT_DEFAULT.get());
     }
@@ -424,10 +424,8 @@ mod tests {
             sender.send("joined").unwrap();
         });
 
-        // The sender lives only inside the dispatched task. A pool that never runs
-        // the task drops it (and its sender) instead, so `recv` observes an
-        // immediate disconnect and this test fails deterministically rather than
-        // hanging.
+        // The sender exists only in the task. If the pool drops the task,
+        // `recv` returns a disconnect instead of waiting.
         let res = receiver.recv().expect("the worker pool must run the dispatched task");
         assert_eq!(res, "joined");
     }
@@ -554,8 +552,8 @@ mod tests {
             let (worker_thread_started_tx, worker_thread_started_rx) = channel();
             let (worker_thread_finished_tx, worker_thread_finished_rx) = Event::<()>::boxed();
 
-            // These are only used by the first thread but the compiler does not know that, so we
-            // wrap them in Arc + Mutex + Option to make it safe.
+            // Only the first thread uses this receiver. The wrapper provides
+            // the thread-safe type that the task boundary requires.
             let worker_thread_finished_rx = Arc::new(Mutex::<Option<_>>::new(Some(worker_thread_finished_rx)));
 
             for i in 0..Pool::MAX_TASKS_PER_THREAD {
@@ -590,13 +588,13 @@ mod tests {
 
             assert!(
                 !blocking_pool.is_overloaded(),
-                "Worker pool should be at the task limit but not overloaded"
+                "worker pool must be at the task limit but not overloaded"
             );
 
-            // This task can be empty, the blocked thread pool won't have a chance to start it anyway
+            // The blocked thread pool cannot start this task before the assertion.
             blocking_pool.execute(move || {});
 
-            assert!(blocking_pool.is_overloaded(), "Worker pool should be overloaded");
+            assert!(blocking_pool.is_overloaded(), "worker pool must be overloaded");
 
             // Now we can release the second barrier and clean up
             worker_thread_finished_tx.send(());
@@ -624,10 +622,8 @@ mod tests {
                     }
                 }));
 
-                // The sender lives only inside the blocking task. A worker that never runs
-                // the task drops it (and its sender) instead, so `recv` observes an
-                // immediate disconnect and this test fails deterministically rather than
-                // hanging.
+                // The sender exists only in the blocking task. If the worker
+                // drops the task, `recv` returns a disconnect instead of waiting.
                 task_start_rx.recv().expect("the worker must run the blocking task");
 
                 worker.remote_results.shutdown().begin(ShutdownCause::default());

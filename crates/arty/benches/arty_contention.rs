@@ -1,12 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Focused Arty/Tokio contention workloads for common nested-task patterns.
+//! Arty and Tokio contention benchmarks for common nested-task patterns.
 //!
 //! Each case submits one outer task and fans out ten inner operations. The
 //! relocated-cache workload black-boxes each cache touch so it measures the
 //! scheduling work around an observable operation rather than an optimized-away
 //! future.
+//!
+//! Each benchmark case creates one runtime before measurement and reuses it for
+//! every measured iteration. The relocated-cache cases also create and reuse
+//! one cache.
 //!
 //! The cache is a mutex behind a per-thread `performables::arc::Arc`. Arty
 //! relocates that payload before the outer task starts; Tokio uses the same
@@ -16,11 +20,11 @@
 //! task waker, transitions to pending, wakes through the retained clone, and
 //! returns `Pending`. Its next poll returns `Ready`.
 //!
-//! Arty's inner tasks stay on their outer task's worker (also the worker selected
-//! for the relocated cache in that workload), while Tokio may move its child
-//! tasks between workers. The cases are comparable in child lifecycle, cache
-//! work where applicable, and task count at one and eight workers, but these are
-//! coordination workloads rather than claims about general runtime performance.
+//! Arty keeps each inner task on its outer task's worker. This worker also owns
+//! the relocated cache for that workload. Tokio can move child tasks between
+//! workers. The cases use the same child lifecycle, cache work, and task count
+//! at one and eight workers. These coordination workloads do not represent
+//! general runtime performance.
 //!
 //! Gungraun results are available as a coarse instruction-path diagnostic, but
 //! Callgrind cannot model the scheduling and cross-worker contention these

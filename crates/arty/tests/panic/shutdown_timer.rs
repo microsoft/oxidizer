@@ -59,7 +59,7 @@ impl Drop for CancellationTimer {
         let mut timer = self.clock.delay(duration);
         let waker = Waker::from(Arc::new(PanicWake));
         assert!(Pin::new(&mut timer).poll(&mut Context::from_waker(&waker)).is_pending());
-        // Keep the registration alive; a poisoned timer lock cannot be used by Delay::drop.
+        // Keep the registration alive. `Delay::drop` cannot use a poisoned timer lock.
         std::mem::forget(timer);
         let watch = self.clock.stopwatch();
         let deadline = Instant::now() + TEST_TIMEOUT;

@@ -11,11 +11,10 @@ use performables::sync::mutex::Mutex;
 /// A task failed to return its result.
 ///
 /// Returned by [`JoinHandle`](super::JoinHandle) and as the source of a
-/// scheduler's `block_on` error. Use [`is_panic`](Self::is_panic) to identify a
-/// task panic, [`is_shutdown`](Self::is_shutdown) to identify cancellation or
-/// shutdown rejection, or
-/// [`is_invalid_destination`](Self::is_invalid_destination) when a requested
-/// worker is not supported by the runtime.
+/// scheduler's `block_on` error. [`is_panic`](Self::is_panic) identifies a task
+/// panic. [`is_shutdown`](Self::is_shutdown) identifies cancellation or
+/// shutdown rejection. [`is_invalid_destination`](Self::is_invalid_destination)
+/// identifies a worker that the runtime does not support.
 ///
 /// This is separate from an error returned by the task's own code. Joining a
 /// task that returns `Result<T, E>` produces `Result<Result<T, E>, JoinError>`.

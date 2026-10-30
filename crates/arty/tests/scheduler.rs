@@ -10,13 +10,9 @@ use std::cell::RefCell;
 use arty::task::{Context, Scheduler};
 
 #[arty::test]
-#[expect(
-    clippy::float_cmp,
-    reason = "fake logic for tests, no computation involved - direct comparison is fine"
-)]
+#[expect(clippy::float_cmp, reason = "the test uses a fixed value, so direct comparison is correct")]
 async fn stash_scheduler(cx: Context) {
-    // We store a scheduler in some object that can schedule tasks without having knowledge of the
-    // exact type of the task or task context.
+    // The object stores a scheduler and can submit tasks without knowing the task or context type.
 
     struct Thingy {
         scheduler: Scheduler,
@@ -30,8 +26,7 @@ async fn stash_scheduler(cx: Context) {
 
     cx.scheduler()
         .spawn(async move |cx| {
-            // We store the scheduler in a thingy and try to use it from the thingy
-            // without having direct access to the task context.
+            // The object uses the stored scheduler without direct access to the task context.
             let thingy = Thingy {
                 scheduler: cx.scheduler().clone(),
             };
@@ -58,18 +53,18 @@ async fn stash_scheduler(cx: Context) {
 
     cx.scheduler()
         .spawn(async move |cx| {
-            // We store the scheduler in a thread-local variable.
+            // The task stores the scheduler in thread-local state.
             THREAD_LOCAL_STASH.with_borrow_mut(|stash| {
                 *stash = Some(cx.scheduler().clone());
             });
 
-            // And we try to use it from another task on the same thread.
+            // Another task on the same thread uses the stored scheduler.
             let result = cx
                 .scheduler()
                 .spawn(async move |_| {
                     let scheduler = THREAD_LOCAL_STASH.with_borrow(|stash| stash.clone().unwrap());
 
-                    // It works, right? Right.
+                    // The stored scheduler remains usable.
                     scheduler.spawn(async move |_| 49).await.unwrap()
                 })
                 .await

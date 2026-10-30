@@ -39,8 +39,8 @@ fn can_suspend(cycle_outcome: &CycleOutcome, batch_exhausted: bool) -> bool {
 /// processor capacity. The worker executes async tasks that are woken by local
 /// or remote futures, incoming commands, and timers.
 ///
-/// The type represents the internal state of the worker. This state is connected to other objects
-/// through messaging channels that allow components of the runtime to deliver work and signals.
+/// This type contains the internal worker state. Runtime components send work
+/// and signals to it through channels.
 ///
 /// # Ownership
 ///
@@ -48,30 +48,28 @@ fn can_suspend(cycle_outcome: &CycleOutcome, batch_exhausted: bool) -> bool {
 ///
 /// # Lifecycle
 ///
-/// The worker lifecycle consists of multiple stages:
+/// The worker has these lifecycle stages:
 ///
-/// 1. Startup - bootstrap creates the thread and worker from the configuration supplied by
-///    [`RuntimeBuilder`][crate::runtime::RuntimeBuilder]. Bootstrap and the worker coordinate
-///    initialization until the worker is ready to start operating.
-/// 2. Running - the worker is processing tasks, advancing timers, and waiting for commands.
-/// 3. Shutting down - the worker has received a command to shut down. It rejects queued and new
-///    submissions, stops blocking work, drops the executor to cancel async tasks, and runs final
-///    timer callbacks.
-/// 4. Dead - the worker has completed its shutdown process and the thread has terminated.
+/// 1. Startup: Bootstrap creates the thread and worker from the
+///    [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) configuration. Bootstrap
+///    and the worker coordinate initialization until the worker is ready.
+/// 2. Running: The worker processes tasks, advances timers, and waits for
+///    commands.
+/// 3. Shutting down: The worker rejects queued and new submissions, stops
+///    blocking work, cancels async tasks, and runs final timer callbacks.
+/// 4. Dead: The worker completed shutdown and its thread terminated.
 ///
-/// Once in the Running state, workers keep running until they receive a stop command (i.e. until
-/// something calls [`request_stop()`][crate::runtime::RuntimeControl::request_stop]
-/// or stops or drops the runtime owner).
+/// A running worker stops after
+/// [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop),
+/// `Runtime::stop`, or `Runtime` destruction.
 ///
 /// # Thread safety
 ///
-/// This type is single-threaded - it only exists on the designated worker thread.
+/// This type is single-threaded. It only exists on its designated worker thread.
 #[derive(Debug)]
 pub(crate) struct Worker {
-    // Exclusively used by top level worker logic, never via reentrant task logic.
-    // We drop this when we receive the shutdown signal, to ensure that any tasks that
-    // happen to be enqueued after shutdown starts are discarded when an attempt is
-    // made to send them.
+    // Only top-level worker logic uses this field.
+    // Shutdown drops the receiver. Later submissions then fail and discard their tasks.
     command_rx: Option<channel::Receiver<Command>>,
 
     // Dropped when shutdown starts so no more tasks can be enqueued and worker-local
@@ -261,7 +259,7 @@ impl Worker {
                     Command::Shutdown => {
                         self.begin_shutdown();
 
-                        // Shutdown closes the command channel - no more commands can be received.
+                        // Shutdown closes the command channel. No more commands can arrive.
                         return false;
                     }
                 },
@@ -272,7 +270,7 @@ impl Worker {
                 }
             }
         }
-        // An exhausted batch may leave commands queued; do not park before checking again.
+        // An exhausted batch can leave commands queued. Read the queue again before parking.
         true
     }
 
@@ -290,11 +288,11 @@ impl Worker {
             .stop(self.shutdown.cause().unwrap_or_default());
 
         LocalWorker::clear_scheduler();
-        // Drop worker-local services, as they may hold references to resources that
-        // block executor shutdown (via various futures, waiters, etc).
+        // Drop worker-local services first. Their futures and waiters can hold
+        // resources that block executor shutdown.
         self.context = None;
 
-        // The command channel is henceforth closed. We will not receive any more commands.
+        // The command channel is now closed. No more commands can arrive.
         self.command_rx = None;
 
         // Safe executor shutdown synchronously cancels and releases all remaining task storage.
@@ -1060,15 +1058,14 @@ mod tests {
                 .unwrap();
             Signal::waker(&signal).wake_by_ref();
 
-            // Command sent! Now wait for something to happen.
+            // Wait for the command to complete.
             outer_completed_rx.await.unwrap();
 
-            // Test body completed. Now let's shut it down.
+            // Shut down after the test body completes.
             command_tx.send(Command::Shutdown).unwrap();
             Signal::waker(&signal).wake_by_ref();
 
-            // Wait for the worker to finish. It is harmless to continue immediately but we wait
-            // just in case some errors occurred during shutdown - in which case we want to panic here.
+            // Join the worker so this test reports shutdown errors.
             async_worker_thread.join().unwrap();
         });
     }
@@ -1076,7 +1073,7 @@ mod tests {
     #[test]
     fn worker_setup_can_register_new_tasks() {
         async_test(async || {
-            // To verify tasks get executed.
+            // Observe both tasks.
             let (initial_completed_tx, initial_completed_rx) = Event::boxed();
             let (spawned_completed_tx, spawned_completed_rx) = Event::boxed();
 
@@ -1111,24 +1108,22 @@ mod tests {
             spawned_completed_rx.await.unwrap();
             initial_completed_rx.into_value().unwrap();
 
-            // Tasks worked fine. Now let's shut it down.
+            // Shut down after both tasks complete.
             command_tx.send(Command::Shutdown).unwrap();
             Signal::waker(&signal).wake_by_ref();
 
-            // Wait for the worker to finish. It is harmless to continue immediately but we wait
-            // just in case some errors occurred during shutdown - in which case we want to panic here.
+            // Join the worker so this test reports shutdown errors.
             worker_thread.join().unwrap();
         });
     }
 
     #[test]
     fn task_after_shutdown_is_ignored() {
-        // It is possible to have "new task" commands in the async worker queue after shutdown
-        // starts due to the asynchronous task-submission path.
+        // The asynchronous submission path can enqueue a new-task command after
+        // shutdown starts.
         //
-        // While we cannot honor these commands, we must still do something and ensure that all
-        // resources are properly managed. What we do is simply drop the tasks on the floor and
-        // make their remote join handles report shutdown.
+        // The worker drops these tasks so their remote join handles report
+        // shutdown and release all task resources.
 
         let (command_tx, command_rx) = channel::unbounded();
         let worker_command_tx = command_tx.clone();
@@ -1151,7 +1146,7 @@ mod tests {
 
         let (completed_tx, completed_rx) = Event::boxed();
 
-        // We ignore the result because the worker is shutting down and the channel might be closed already.
+        // The channel can already be closed because the worker is shutting down.
         let _ = command_tx.send(enqueue(RemoteFutureFactory::new({
             move |_: Context, tasks: &TaskSet| {
                 tasks.add_test(async move {

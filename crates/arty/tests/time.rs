@@ -21,7 +21,7 @@ const CONTROLLED_TIMER_STEP: Duration = Duration::from_secs(1);
 #[arty::test]
 async fn many_timers_with_relocation_ensure_advanced(context: Context) {
     let scheduler = context.scheduler();
-    // Ensure each relocated task keeps access to the runtime clock.
+    // Make sure that each relocated task keeps access to the runtime clock.
     let handles: Vec<_> = (0..TIMER_COUNT)
         .map(|_| {
             scheduler.spawn_anywhere(context.clone(), move |context| async move {

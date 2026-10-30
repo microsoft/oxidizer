@@ -11,7 +11,7 @@ fn main() -> Result<(), ohno::AppError> {
     let runtime = Runtime::builder().workers(WorkersPolicy::at_most(2)).build()?;
     let answer = runtime.scheduler().block_on(async |cx| {
         cx.clock().delay(Duration::from_millis(1)).await;
-        // This scheduler keeps the child on the parent's worker.
+        // This scheduler runs the child on the same worker as its parent.
         cx.scheduler().spawn(async |_| 42).await
     })??;
     println!("{answer}");

@@ -3,7 +3,7 @@
 
 //! Public handles consuming values or panics from task execution.
 //!
-//! Task execution owns the result transport; join handles await its outcome.
+//! Task execution owns the result transport. Join handles await its outcome.
 
 mod channel;
 mod error;
