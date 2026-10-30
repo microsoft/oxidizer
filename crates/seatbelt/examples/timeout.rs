@@ -5,11 +5,8 @@
 //! This example uses timeout middleware.
 //!
 //! It cancels operations that take too long.
-//! When `ANVIL_EXAMPLE` is set, the example advances its clock without real waits.
 
-use std::future::poll_fn;
-use std::pin::pin;
-use std::task::Poll;
+use std::future::pending;
 use std::time::Duration;
 
 use layered::{Execute, Service, Stack};
@@ -18,19 +15,17 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
 use seatbelt::ResilienceContext;
 use seatbelt::timeout::Timeout;
-use tick::{Clock, ClockControl};
+use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 const TIMEOUT_DURATION: Duration = Duration::from_millis(100);
-const PROCESSING_DELAY: Duration = Duration::from_millis(500);
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let meter_provider = configure_telemetry();
 
-    let clock_control = std::env::var_os("ANVIL_EXAMPLE").is_some().then(ClockControl::new);
-    let clock = clock_control.as_ref().map_or_else(Clock::new_tokio, ClockControl::to_clock);
+    let clock = Clock::new_tokio();
 
     // Create shared configuration.
     let context = ResilienceContext::new(&clock).use_metrics(&meter_provider);
@@ -42,35 +37,15 @@ async fn main() -> Result<(), AppError> {
             .timeout(TIMEOUT_DURATION)
             // Create the error output for a timeout.
             .timeout_error(|args| app_err!("timeout occurred, timeout: {}ms", args.timeout().as_millis())),
-        Execute::new({
-            let clock = clock.clone();
-            move |_input| {
-                let clock = clock.clone();
-                async move {
-                    clock.delay(PROCESSING_DELAY).await; // Add enough delay to trigger the timeout.
-                    Ok(())
-                }
-            }
-        }),
+        Execute::new(move |_input| pending::<Result<(), AppError>>()),
     );
 
     // Create the service from the stack.
     let service = stack.into_service();
 
     for i in 0..10 {
-        let mut response = pin!(service.execute(i.to_string()));
-        if let Some(control) = &clock_control {
-            // Register both delays before advancing only to the timeout deadline.
-            poll_fn(|cx| {
-                assert!(response.as_mut().poll(cx).is_pending());
-                Poll::Ready(())
-            })
-            .await;
-            control.advance(TIMEOUT_DURATION);
-        }
-
         // Execute the service. The call returns a timeout error.
-        let timeout_error = response.await.unwrap_err();
+        let timeout_error = service.execute(i.to_string()).await.unwrap_err();
         println!("{i} attempt, error: {timeout_error}");
     }
 

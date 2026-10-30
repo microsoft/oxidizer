@@ -2705,6 +2705,7 @@ name = "http_extensions"
 version = "0.13.0"
 dependencies = [
  "alloc_tracker",
+ "argh",
  "benchmarking",
  "bytes",
  "bytesbuf",
@@ -2736,6 +2737,7 @@ dependencies = [
 name = "http_headers"
 version = "0.1.1"
 dependencies = [
+ "argh",
  "axum",
  "base64 0.23.1",
  "bolero",
@@ -4768,7 +4770,6 @@ dependencies = [
  "libc",
  "seismograph",
  "seismograph_rallocator",
- "tempfile",
 ]
 
 [[package]]
@@ -5101,6 +5102,7 @@ name = "routerama"
 version = "0.3.0"
 dependencies = [
  "alloc_tracker",
+ "argh",
  "axum",
  "bolero",
  "criterion",
@@ -5455,7 +5457,6 @@ name = "seismograph_rallocator"
 version = "0.3.0"
 dependencies = [
  "seismograph",
- "tempfile",
 ]
 
 [[package]]

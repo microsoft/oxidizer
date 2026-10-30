@@ -42,9 +42,6 @@ exclude = true
 seismograph.workspace = true
 seismograph_rallocator.workspace = true
 
-[dev-dependencies]
-tempfile = { workspace = true, features = ["getrandom"] }
-
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

@@ -21,15 +21,9 @@ static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::ne
 );
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let temporary_output = std::env::var_os("ANVIL_EXAMPLE").is_some().then(tempfile::tempdir).transpose()?;
-    let output = temporary_output.as_ref().map_or_else(
-        || {
-            std::env::args_os()
-                .nth(1)
-                .map_or_else(|| std::path::PathBuf::from("native-demo.seismograph"), std::path::PathBuf::from)
-        },
-        |directory| directory.path().join("native-demo.seismograph"),
-    );
+    let output = std::env::args_os()
+        .nth(1)
+        .map_or_else(|| std::path::PathBuf::from("native-demo.seismograph"), std::path::PathBuf::from);
     seismograph::snapshot::register_source(&SOURCE);
     seismograph::recorder(seismograph::recorder::Configuration {
         allocations: seismograph::recorder::RecordingPolicy {

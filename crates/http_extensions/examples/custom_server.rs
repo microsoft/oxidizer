@@ -3,12 +3,14 @@
 
 //! This example defines an HTTP server with `http_extensions` and `hyper`.
 //!
-//! The server listens on `http://localhost:8080` and returns "Hello, World!" for each request.
+//! The server uses an OS-assigned local port by default. Use `--port PORT` to select a port.
+//! It prints the selected address and returns "Hello, World!" for each request.
 //! Middleware from `layered` logs requests and responses.
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use argh::FromArgs;
 use bytesbuf::BytesView;
 use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use futures::TryStreamExt;
@@ -25,8 +27,17 @@ use tokio::net::TcpListener;
 
 const SERVER_LIFETIME: Duration = Duration::from_secs(2);
 
+/// Command-line options for the server example.
+#[derive(FromArgs)]
+struct ServerOptions {
+    /// local TCP port; the operating system selects a port when this is zero
+    #[argh(option, default = "0")]
+    port: u16,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
+    let options: ServerOptions = argh::from_env();
     let clock = Clock::new_tokio();
 
     // An application framework normally provides the global memory pool.
@@ -50,7 +61,7 @@ async fn main() -> Result<(), ohno::AppError> {
         }),
     );
 
-    let Ok(res) = serve_with_hyper(stack.into_service(), body_builder_clone)
+    let Ok(res) = serve_with_hyper(stack.into_service(), body_builder_clone, options.port)
         .timeout(&clock, SERVER_LIFETIME)
         .await
     else {
@@ -74,14 +85,9 @@ fn map_incoming_to_http_body(incoming: Incoming, body_builder: &HttpBodyBuilder)
     body_builder.stream(stream, &HttpBodyOptions::default())
 }
 
-async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder: HttpBodyBuilder) -> Result<(), ohno::AppError> {
+async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder: HttpBodyBuilder, port: u16) -> Result<(), ohno::AppError> {
     let service = Arc::new(service);
-    let address = if std::env::var_os("ANVIL_EXAMPLE").is_some() {
-        "127.0.0.1:0"
-    } else {
-        "127.0.0.1:8080"
-    };
-    let listener = TcpListener::bind(address).await?;
+    let listener = TcpListener::bind(("127.0.0.1", port)).await?;
 
     println!("Listening on: {}", listener.local_addr()?);
 
