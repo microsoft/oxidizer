@@ -78,7 +78,9 @@ fn inspection_counts_undescribed_tasks_toward_the_work_bound() {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     tasks.add(std::future::pending::<()>(), TaskOptions::default(), Completion);
-    tasks.add_with_inspection(std::future::pending::<()>(), TaskOptions::default(), Completion, |_, _| Some(42_u32));
+    tasks.add_with_inspection(std::future::pending::<()>(), TaskOptions::default(), Completion, |_, _| {
+        Some(42_u32)
+    });
     let mut described = Vec::new();
 
     let status = executor.inspect(1, |value: &u32| described.push(*value)).unwrap();
