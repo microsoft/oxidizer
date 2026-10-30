@@ -1,0 +1,60 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "arty_tokio"
+description = "Lets Arty tasks use Tokio-based libraries."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["arty", "async", "runtime", "tokio"]
+categories = ["asynchronous"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio"
+
+# Tokio's enabled I/O drivers call operating-system APIs that Miri cannot
+# interpret. Native tests, coverage, cargo careful, and Tokio's own Miri suite
+# retain the relevant behavior and unsafe-code coverage.
+[package.metadata.anvil.miri]
+exclude = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["arty::task::context::Context", "tokio::runtime::handle::Handle"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+
+[dependencies]
+arty = { workspace = true, features = ["rt"] }
+derive_more = { workspace = true, features = ["debug"] }
+ohno = { workspace = true }
+performables = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt-multi-thread", "time"] }
+
+[dev-dependencies]
+arty = { path = "../arty", features = ["macros", "rt"] }
+futures = { workspace = true, features = ["executor"] }
+ohno = { path = "../ohno", features = ["app-err"] }
+static_assertions = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "sync"] }
+
+[[example]]
+name = "external_runtime"
+
+[[example]]
+name = "tokio_library"
+
+[[example]]
+name = "tokio_drivers"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
