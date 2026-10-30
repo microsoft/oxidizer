@@ -48,7 +48,7 @@ fn events() -> Vec<(EventKind, Allocation)> {
             .iter()
             .find(|source| source.id == seismograph_rallocator::source::ID)
         {
-            assert_eq!(source.schema_version, 3);
+            assert_eq!(source.schema_version, 4);
             let allocator = seismograph_rallocator::decode(&source.data).unwrap();
             assert!(allocator.owner_count >= allocator.owners.len() as u64);
             assert!(allocator.global.local_limit_bytes > 0);

@@ -220,6 +220,41 @@ fn all_native_fields_round_trip() {
 }
 
 #[test]
+fn recording_independent_publication_uses_round_and_lease_freshness() {
+    let snapshot = Snapshot {
+        captured_nanos: 20,
+        round: 7,
+        ..Snapshot::default()
+    };
+    let owner = Owner {
+        id: 1,
+        generation: 3,
+        leased: true,
+        source: ObservationSource::Published,
+        observation: Some(Observation {
+            generation: 3,
+            round: 7,
+            captured_nanos: 10,
+            ..Observation::EMPTY
+        }),
+    };
+
+    assert_eq!(
+        (owner.freshness(&snapshot), owner.freshness(&Snapshot { round: 8, ..snapshot })),
+        (Freshness::Current, Freshness::PreviousRound)
+    );
+}
+
+#[test]
+fn historical_session_tagged_schema_three_remains_readable() {
+    let expected = fixture();
+    let mut encoded = bytes(&expected);
+    encoded[8..10].copy_from_slice(&3_u16.to_le_bytes());
+
+    assert_eq!(decode(&encoded).unwrap(), expected);
+}
+
+#[test]
 fn borrowed_rows_override_metadata_vector_and_match_owned_encoding() {
     let snapshot = fixture();
     let expected = bytes(&snapshot);
@@ -359,7 +394,7 @@ fn malformed_payload_diagnostics_explain_the_rejection() {
         (decode(&invalid_magic).unwrap_err(), "the magic bytes are invalid"),
         (
             decode(&unsupported_schema).unwrap_err(),
-            "schema 7 is unsupported; expected schema 3",
+            "schema 7 is unsupported; expected schema 3 or 4",
         ),
         (decode(&[]).unwrap_err(), "the payload ended before all fields were available"),
         (

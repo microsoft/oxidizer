@@ -76,9 +76,7 @@ fn operation(key: u64, free: bool) {
     reason = "Six fixed demo rows avoid invoking the application allocator during capture"
 )]
 fn capture(context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
-    let session_id = context
-        .recording_observation()
-        .map_or(0, |observation| observation.generation.get());
+    let session_id = 0;
     let round = native::observation_round();
     let mut observation = Observation {
         generation: 1,

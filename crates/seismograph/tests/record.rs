@@ -11,7 +11,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp, ObjectId, Record};
 use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId};
-use seismograph::recorder::{Configuration, EventBufferCapacity, Policy, generation, is_enabled, try_record, without_recording};
+use seismograph::recorder::{Configuration, EventBufferCapacity, Policy, is_enabled, without_recording};
 use seismograph::snapshot::{self, EventBufferDisposition, SnapshotContext, SnapshotOptions, Source, SourceData, SourceId};
 
 static RECORDING: Mutex<()> = Mutex::new(());
@@ -99,74 +99,53 @@ fn invalid_event_capacity_conversion_returns_an_error_without_panicking() {
 }
 
 #[test]
-fn record_checks_categories_and_try_record_reports_the_accepting_generation() {
+fn record_rejects_mismatched_event_categories() {
     let _recording = Recording::start(Configuration {
         general_events: Policy::all(false),
         arc_dereferences: Policy::all(false),
         ..Default::default()
     });
-    let recording_generation = generation().unwrap();
-
     seismograph::record(EventClass::General, || Some(object(EventKind::MutexAccess)));
-    let accepted = try_record(EventClass::ArcDereference, || Some(object(EventKind::ArcDeref)));
+    seismograph::record(EventClass::ArcDereference, || Some(object(EventKind::ArcDeref)));
     seismograph::record(EventClass::General, || Some(object(EventKind::ArcDeref)));
-    let rejected = try_record(EventClass::ArcDereference, || Some(object(EventKind::MutexRelease)));
+    seismograph::record(EventClass::ArcDereference, || Some(object(EventKind::MutexRelease)));
     seismograph::record(EventClass::General, || Some(object(EventKind::MutexRelease)));
 
     let captured = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let decoded = snapshot::decode(captured.as_bytes()).unwrap();
     assert_eq!(
-        (
-            accepted,
-            rejected,
-            generation(),
-            decoded.events.events.iter().map(|event| event.kind).collect::<Vec<_>>(),
-        ),
-        (
-            Some(recording_generation),
-            None,
-            Some(recording_generation),
-            vec![EventKind::MutexAccess, EventKind::ArcDeref, EventKind::MutexRelease],
-        )
+        decoded.events.events.iter().map(|event| event.kind).collect::<Vec<_>>(),
+        vec![EventKind::MutexAccess, EventKind::ArcDeref, EventKind::MutexRelease],
     );
 }
 
 #[test]
-fn generation_is_process_wide_and_independent_of_thread_suppression() {
+fn category_queries_follow_thread_suppression() {
     let _recording = Recording::start(Configuration {
         general_events: Policy::all(false),
         ..Default::default()
     });
-    let active = generation().unwrap();
-    let observe = || (generation(), is_enabled(EventClass::General), is_enabled(EventClass::Allocation));
+    let observe = || (is_enabled(EventClass::General), is_enabled(EventClass::Allocation));
 
     let before = observe();
     let suppressed = without_recording(observe);
     let after = observe();
 
-    assert_eq!(
-        (before, suppressed, after),
-        (
-            (Some(active), true, false),
-            (Some(active), false, false),
-            (Some(active), true, false)
-        )
-    );
+    assert_eq!((before, suppressed, after), ((true, false), (false, false), (true, false)));
 }
 
 #[test]
 #[cfg_attr(coverage_nightly, coverage(off))] // Disabled and stopped recording deliberately skips these builders.
-fn disabled_and_stopped_recording_skip_builders_and_restarts_change_generation() {
+fn disabled_and_stopped_recording_skip_builders() {
     let _recording = Recording::start(Configuration::default());
     let constructed = Cell::new(0);
     let build = || {
         constructed.set(constructed.get() + 1);
         Some(object(EventKind::MutexAccess))
     };
-    assert!(generation().is_none());
     assert!(!is_enabled(EventClass::General));
     seismograph::record(EventClass::General, build);
-    assert!(try_record(EventClass::General, build).is_none());
+    seismograph::record(EventClass::General, build);
     assert_eq!(constructed.get(), 0);
 
     let configuration = Configuration {
@@ -176,13 +155,10 @@ fn disabled_and_stopped_recording_skip_builders_and_restarts_change_generation()
     };
     seismograph::recorder(configuration);
     assert!(is_enabled(EventClass::General));
-    let first = try_record(EventClass::General, build).unwrap();
+    seismograph::record(EventClass::General, build);
     seismograph::recorder(configuration);
-    assert_eq!(generation(), Some(first));
 
     seismograph::recorder::clear_buffers().unwrap();
-    let second = generation().unwrap();
-    assert_ne!(first, second);
     assert_eq!(constructed.get(), 1);
     seismograph::record(EventClass::General, build);
     assert_eq!(constructed.get(), 2);
@@ -191,9 +167,8 @@ fn disabled_and_stopped_recording_skip_builders_and_restarts_change_generation()
         event_buffers: EventBufferDisposition::Stop,
     })
     .unwrap();
-    assert!(generation().is_none());
     seismograph::record(EventClass::General, build);
-    assert!(try_record(EventClass::General, build).is_none());
+    seismograph::record(EventClass::General, build);
     assert_eq!(constructed.get(), 2);
 }
 
@@ -204,36 +179,29 @@ fn suppression_is_nested_thread_local_and_restored_after_unwinding() {
         general_events: Policy::all(false),
         ..Default::default()
     });
-    let recording_generation = generation().unwrap();
     let constructed = Cell::new(false);
 
     without_recording(|| {
-        assert_eq!(generation(), Some(recording_generation));
         assert!(!is_enabled(EventClass::General));
         seismograph::record(EventClass::General, || {
             constructed.set(true);
             Some(object(EventKind::MutexAccess))
         });
-        assert!(
-            try_record(EventClass::General, || {
-                constructed.set(true);
-                Some(object(EventKind::MutexAccess))
-            })
-            .is_none()
-        );
+        seismograph::record(EventClass::General, || {
+            constructed.set(true);
+            Some(object(EventKind::MutexAccess))
+        });
         without_recording(|| assert!(!is_enabled(EventClass::General)));
         assert!(!is_enabled(EventClass::General));
-        assert_eq!(std::thread::spawn(generation).join().unwrap(), Some(recording_generation));
+        assert!(std::thread::spawn(|| is_enabled(EventClass::General)).join().unwrap());
     });
     assert!(!constructed.get());
     assert!(is_enabled(EventClass::General));
-    assert_eq!(generation(), Some(recording_generation));
 
     let panic = catch_unwind(AssertUnwindSafe(|| {
         without_recording(|| panic!("test suppression unwinding"));
     }));
     assert!(panic.is_err());
-    assert_eq!(generation(), Some(recording_generation));
     seismograph::record(EventClass::General, || Some(object(EventKind::MutexAccess)));
     let captured = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let decoded = snapshot::decode(captured.as_bytes()).unwrap();
@@ -249,9 +217,9 @@ fn querying_or_skipping_events_does_not_initialize_event_buffers() {
         general_events: Policy::all(false),
         ..Default::default()
     });
-    assert!(generation().is_some());
+    assert!(is_enabled(EventClass::General));
     seismograph::record(EventClass::General, || None);
-    assert!(try_record(EventClass::General, || None).is_none());
+    seismograph::record(EventClass::General, || None);
 
     let captured = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let decoded = snapshot::decode(captured.as_bytes()).unwrap();
@@ -281,13 +249,10 @@ fn recording_changes_inside_builders_reject_the_old_event() {
         Some(object(EventKind::MutexAccess))
     });
 
-    assert!(
-        try_record(EventClass::General, || {
-            seismograph::recorder(configuration);
-            Some(object(EventKind::MutexAccess))
-        })
-        .is_none()
-    );
+    seismograph::record(EventClass::General, || {
+        seismograph::recorder(configuration);
+        Some(object(EventKind::MutexAccess))
+    });
     let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let decoded = snapshot::decode(encoded.as_bytes()).unwrap();
     assert_eq!((decoded.events.total_events, decoded.events.events.len()), (0, 0));
@@ -336,28 +301,18 @@ fn event_backtraces_follow_the_category_policy() {
     );
 }
 
-#[expect(clippy::unwrap_used, reason = "this test source is registered only after recording starts")]
-fn capture_observation(context: SnapshotContext<'_>) -> Result<SourceData, seismograph::Error> {
-    let observation: snapshot::Observation = context.recording_observation().unwrap();
-    let mut bytes = [0; 16];
-    bytes[..8].copy_from_slice(&observation.generation.get().to_le_bytes());
-    bytes[8..].copy_from_slice(&observation.observed_at.ticks().to_le_bytes());
-    SourceData::copy_from(&bytes)
+fn capture_events(context: SnapshotContext<'_>) -> Result<SourceData, seismograph::Error> {
+    SourceData::copy_from(&context.events().total_events.to_le_bytes())
 }
 
 #[test]
-fn source_observations_keep_the_recording_generation_and_stop_boundary() {
-    static SOURCE: Source = Source::new(
-        SourceId::new(0x7265_636f_7264_696e),
-        "recording observation",
-        1,
-        capture_observation,
-    );
+fn sources_receive_the_events_captured_before_stop() {
+    static SOURCE: Source = Source::new(SourceId::new(0x7265_636f_7264_696e), "recording events", 1, capture_events);
     let _recording = Recording::start(Configuration {
         general_events: Policy::all(false),
         ..Default::default()
     });
-    let recording_generation = generation().unwrap();
+    seismograph::record(EventClass::General, || Some(object(EventKind::MutexAccess)));
     snapshot::register_source(&SOURCE);
     let capture = |disposition| {
         let encoded = seismograph::snapshot(SnapshotOptions {
@@ -374,6 +329,35 @@ fn source_observations_keep_the_recording_generation_and_stop_boundary() {
     };
 
     let stopped = capture(EventBufferDisposition::Stop);
-    assert_eq!(u64::from_le_bytes(stopped[..8].try_into().unwrap()), recording_generation.get());
-    assert_eq!(capture(EventBufferDisposition::Retain), stopped);
+    assert_eq!(u64::from_le_bytes(stopped[..8].try_into().unwrap()), 1);
+    assert_eq!(u64::from_le_bytes(capture(EventBufferDisposition::Retain).try_into().unwrap()), 0);
+}
+
+#[test]
+fn recorder_thread_identity_remains_available_to_late_tls_destructors() {
+    use std::cell::RefCell;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct CaptureOnDrop(Arc<AtomicU64>);
+    impl Drop for CaptureOnDrop {
+        fn drop(&mut self) {
+            self.0.store(seismograph::recorder::thread_id().get(), Ordering::Release);
+        }
+    }
+    thread_local! {
+        static LATE: RefCell<Option<CaptureOnDrop>> = const { RefCell::new(None) };
+    }
+    let _recording = Recording::start(Configuration::default());
+    let captured = Arc::new(AtomicU64::new(0));
+    let result = Arc::clone(&captured);
+
+    let expected = std::thread::spawn(move || {
+        LATE.set(Some(CaptureOnDrop(result)));
+        seismograph::recorder::thread_id().get()
+    })
+    .join()
+    .unwrap();
+
+    assert_eq!(captured.load(Ordering::Acquire), expected);
 }

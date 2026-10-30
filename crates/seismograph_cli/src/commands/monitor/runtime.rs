@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use seismograph::recorder::event::{EventKind, Events};
-use seismograph_runtime::snapshot::{Snapshot, TaskActivity, TaskActivityState};
+use seismograph_runtime::snapshot::{Snapshot, TaskActivity, TaskActivityState, TaskCollection, WorkerState};
 
 use super::data::{AllocationStackFilter, primitive_stack};
 use super::runtime_timeline::{ExecutionMetrics, Interval, TimeWindow, occupancy, union};
@@ -360,7 +360,7 @@ fn import_source(source: Option<&Snapshot>, workers: &mut Workers, tasks: &mut B
                     runtime_id,
                     worker_id: Some(worker.id.get()),
                     role: format!("{:?}", worker.role),
-                    state: format!("{:?}", worker.state),
+                    state: worker_state(worker.state, worker.task_collection),
                     thread_id: worker.thread_id.map(seismograph::recorder::thread::ThreadId::get),
                     current_task: worker.current_task.map(seismograph::recorder::runtime::TaskId::get),
                     ..RuntimeWorkerSummary::default()
@@ -401,9 +401,6 @@ fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
     task.row.state = "Unknown".into();
     let Some(activity) = activity else { return };
     let observed = activity.observed_at.ticks();
-    if observed == 0 {
-        return;
-    }
     match activity.state {
         TaskActivityState::Running => {
             let Some(started_at) = activity.poll_started_at.map(seismograph::recorder::event::EventTimestamp::ticks) else {
@@ -448,16 +445,25 @@ fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
             }
         }
         TaskActivityState::Ready => {
+            if activity.ready_since.is_none()
+                && activity.queued_since.is_none()
+                && activity.poll_started_at.is_none()
+                && activity.poll_worker_id.is_none()
+            {
+                task.row.activity = TaskActivitySummary {
+                    state: "Ready".into(),
+                    ..TaskActivitySummary::default()
+                };
+                task.row.state = "Ready".into();
+                return;
+            }
             let (Some(ready_at), Some(queued_at)) = (
                 activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks),
                 activity.queued_since.map(seismograph::recorder::event::EventTimestamp::ticks),
             ) else {
                 return;
             };
-            if activity.poll_started_at.is_some() {
-                return;
-            }
-            if activity.poll_worker_id.is_some() {
+            if activity.poll_started_at.is_some() || activity.poll_worker_id.is_some() {
                 return;
             }
             if ready_at > queued_at {
@@ -493,6 +499,25 @@ fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
         _ => {}
     }
     task.row.state.clone_from(&task.row.activity.state);
+}
+
+fn worker_state(state: WorkerState, collection: TaskCollection) -> String {
+    let state = match state {
+        WorkerState::Running => "Running",
+        WorkerState::Parked => "Parked",
+        WorkerState::Stopped => "Stopped",
+        _ => "Unknown",
+    };
+    let availability = match collection {
+        TaskCollection::Retained | TaskCollection::Complete => return state.into(),
+        TaskCollection::Truncated => "truncated",
+        TaskCollection::Busy => "busy",
+        TaskCollection::TimedOut => "timed out",
+        TaskCollection::Stopped => "stopped",
+        TaskCollection::Failed => "failed",
+        TaskCollection::Unavailable => "unavailable",
+    };
+    format!("{state} (tasks {availability})")
 }
 
 pub(super) fn display_windows(events: &Events, source: Option<&Snapshot>) -> BTreeMap<u64, TimeWindow> {
@@ -563,7 +588,7 @@ mod tests {
     use seismograph::recorder::event::{Address, BacktraceCapture, Event, EventPayload, EventSequence, EventTimestamp};
     use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
     use seismograph::recorder::thread::ThreadId;
-    use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskMetrics, Worker, WorkerState};
+    use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskMetrics, Worker};
     use seismograph_runtime::worker::WorkerRole;
 
     use super::*;
@@ -597,6 +622,7 @@ mod tests {
                 created_at: EventTimestamp::from_ticks(1),
                 retired_at: None,
                 counters: Counters::default(),
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 workers: vec![Worker {
                     id: WorkerId::from_raw(1).unwrap(),
                     role: WorkerRole::Core,
@@ -604,13 +630,15 @@ mod tests {
                     processor_index: None,
                     thread_id: Some(ThreadId::new(1)),
                     current_task: Some(TaskId::from_raw(1).unwrap()),
+                    task_collection: TaskCollection::Retained,
                 }],
                 tasks: vec![Task {
                     id: TaskId::from_raw(1).unwrap(),
                     parent: None,
                     type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
                     future_size_bytes: None,
-                    spawned_at: EventTimestamp::from_ticks(1),
+                    spawned_at: Some(EventTimestamp::from_ticks(1)),
+                    metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                     last_worker_id: WorkerId::from_raw(1),
                     metrics: TaskMetrics {
                         poll_count: 100_000,
@@ -636,6 +664,38 @@ mod tests {
             RuntimeMonitorSnapshot::from_events(&events, None, &[]).workers[0].tasks[0].future_size_bytes
         });
         assert_eq!(sizes, [None, Some(0), Some(16_384)]);
+    }
+
+    #[test]
+    fn native_ready_state_does_not_invent_a_queue_age() {
+        let native = source(Some(TaskActivity {
+            observed_at: EventTimestamp::from_ticks(0),
+            state: TaskActivityState::Ready,
+            ready_since: None,
+            poll_started_at: None,
+            poll_worker_id: None,
+            queued_since: None,
+        }));
+
+        let captured = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&native), &[]);
+        let task = &captured.workers[0].tasks[0];
+
+        assert_eq!(
+            (task.state.as_str(), task.activity.ready_for, task.activity.running_for),
+            ("Ready", None, None)
+        );
+    }
+
+    #[test]
+    fn unavailable_native_tasks_are_visible_in_worker_status() {
+        let mut native = source(None);
+        native.runtimes[0].tasks.clear();
+        native.runtimes[0].workers[0].task_collection = TaskCollection::TimedOut;
+        native.runtimes[0].workers[0].current_task = None;
+
+        let captured = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&native), &[]);
+
+        assert_eq!(captured.workers[0].state, "Running (tasks timed out)");
     }
 
     #[test]

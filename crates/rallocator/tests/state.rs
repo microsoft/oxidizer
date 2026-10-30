@@ -45,7 +45,7 @@ fn capture() -> Snapshot {
             .iter()
             .find(|source| source.id == seismograph_rallocator::source::ID)
             .expect("native allocator source is registered");
-        assert_eq!(source.schema_version, 3);
+        assert_eq!(source.schema_version, 4);
         seismograph_rallocator::decode(&source.data).expect("decode native allocator source")
     })
 }

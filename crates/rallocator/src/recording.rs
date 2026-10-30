@@ -7,7 +7,7 @@ use std::alloc::Layout;
 
 use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
 use seismograph::recorder::event::{Address, EventClass, Record};
-use seismograph::recorder::{Generation, is_enabled, try_record, without_recording};
+use seismograph::recorder::{is_enabled, without_recording};
 
 static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
     seismograph_rallocator::source::ID,
@@ -44,8 +44,9 @@ fn allocate_core(layout: Layout, zeroed: bool) -> *mut u8 {
 #[inline(never)]
 fn allocate_recorded(layout: Layout, zeroed: bool) -> *mut u8 {
     let address = allocate_core(layout, zeroed);
-    if let Some(session) = emit(address, layout.size(), layout.align(), false) {
-        crate::observation::publish(session);
+    if !address.is_null() {
+        emit(address, layout.size(), layout.align(), false);
+        crate::observation::publish();
     }
     address
 }
@@ -64,12 +65,10 @@ pub(crate) unsafe fn deallocate(address: *mut u8, layout: Layout) {
 
 #[inline(never)]
 unsafe fn deallocation_recorded(address: *mut u8, layout: Layout) {
-    let session = emit(address, layout.size(), layout.align(), true);
+    emit(address, layout.size(), layout.align(), true);
     // SAFETY: The caller transfers a live allocation for destruction.
     unsafe { crate::thread::deallocate(address) };
-    if let Some(session) = session {
-        crate::observation::publish(session);
-    }
+    crate::observation::publish();
 }
 
 /// # Safety
@@ -114,21 +113,19 @@ unsafe fn reallocate_recorded_with_release(address: *mut u8, layout: Layout, new
         replacement
     };
     if !replacement.is_null() && new_size != layout.size() {
-        let freed = emit(address, layout.size(), layout.align(), true);
+        emit(address, layout.size(), layout.align(), true);
         if !retained {
             release(address);
         }
-        let allocated = emit(replacement, new_size, layout.align(), false);
-        if let Some(session) = allocated.or(freed) {
-            crate::observation::publish(session);
-        }
+        emit(replacement, new_size, layout.align(), false);
+        crate::observation::publish();
     }
     replacement
 }
 
 #[inline]
-fn emit(address: *mut u8, size: usize, alignment: usize, freed: bool) -> Option<Generation> {
-    try_record(EventClass::Allocation, || {
+fn emit(address: *mut u8, size: usize, alignment: usize, freed: bool) {
+    seismograph::record(EventClass::Allocation, || {
         if address.is_null() {
             return None;
         }
@@ -150,10 +147,10 @@ fn emit(address: *mut u8, size: usize, alignment: usize, freed: bool) -> Option<
         } else {
             Record::allocation(allocation)
         })
-    })
+    });
 }
 
-fn capture(context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
+fn capture(_context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
     without_recording(|| {
         let round = seismograph_rallocator::native::observation_round();
         let captured_nanos = seismograph_rallocator::native::captured_nanos();
@@ -163,9 +160,7 @@ fn capture(context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seismo
         let global = crate::backend::observe();
         let snapshot = seismograph_rallocator::native::Snapshot {
             captured_nanos: seismograph_rallocator::native::captured_nanos(),
-            session_id: context
-                .recording_observation()
-                .map_or(0, |observation| observation.generation.get()),
+            session_id: 0,
             round,
             owner_count,
             owners_complete,

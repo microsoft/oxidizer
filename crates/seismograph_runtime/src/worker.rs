@@ -6,13 +6,13 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use seismograph::recorder::Generation;
 use seismograph::recorder::event::{BacktraceCapture, EventClass, EventKind, EventTimestamp};
 use seismograph::recorder::runtime::{TaskId, TransferId, WorkerId};
+use seismograph::recorder::{is_enabled, without_recording};
 
 use crate::snapshot::WorkerState;
 use crate::task::TaskPoll;
-use crate::{RuntimeHandle, TaskControl, WorkerControl, duration_nanos, next_transfer_id, record_at, record_now};
+use crate::{RuntimeHandle, WorkerControl, duration_nanos, lock, next_transfer_id, record_at, record_now};
 
 /// Functional role assigned to a runtime worker.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -120,6 +120,52 @@ pub struct WorkerHandle {
 }
 
 impl WorkerHandle {
+    pub(crate) const fn new(runtime: RuntimeHandle, worker: Arc<WorkerControl>) -> Self {
+        Self { runtime, worker }
+    }
+
+    /// Copies task-event identities and policy without cloning shared handles.
+    #[must_use]
+    pub fn task_events(&self) -> crate::task::EventContext {
+        crate::task::EventContext::new(self.runtime.id(), Some(self.worker.id), self.runtime.control.lifecycle_backtraces)
+    }
+
+    /// Returns whether the next execution cycle needs diagnostic poll hooks.
+    ///
+    /// Check once outside the normal poll loop. When false, do not call the
+    /// per-poll instrumentation methods. This query does not read a clock or
+    /// mutate diagnostic state.
+    #[must_use]
+    #[inline]
+    pub fn is_observed(&self) -> bool {
+        self.runtime.control.requests.load(Ordering::Relaxed) != 0 || is_enabled(EventClass::RuntimeTask)
+    }
+
+    /// Routes bounded task requests to this worker's native storage.
+    ///
+    /// The callback runs on the diagnostic caller and must return promptly.
+    /// Queue the request for the worker and wake it. The worker responds between
+    /// execution cycles, after copying descriptions out of its native storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the worker already stopped.
+    pub fn register_task_provider(
+        &self,
+        provider: impl Fn(crate::task::TaskRequest) + Send + Sync + 'static,
+    ) -> Result<(), seismograph::Error> {
+        without_recording(|| {
+            let mut slot = lock(&self.worker.provider);
+            if self.worker.state.load(Ordering::Acquire) == WorkerState::Stopped.wire_value() {
+                return Err(seismograph::Error::new("cannot register a task provider on a stopped worker"));
+            }
+            let previous = slot.replace(Arc::new(provider));
+            drop(slot);
+            drop(previous);
+            Ok(())
+        })
+    }
+
     /// Returns the process-monotonic worker identity.
     #[must_use]
     pub fn id(&self) -> WorkerId {
@@ -149,104 +195,50 @@ impl WorkerHandle {
     /// Starts a task poll and associates the task with this worker.
     #[inline]
     pub fn task_poll_started(&self, task_id: TaskId) -> TaskPoll {
-        self.task_poll_started_at(task_id, EventTimestamp::now(), None)
-    }
-
-    #[inline]
-    pub(crate) fn task_poll_started_at(
-        &self,
-        task_id: TaskId,
-        started_at: EventTimestamp,
-        ready_since: Option<EventTimestamp>,
-    ) -> TaskPoll {
-        let ready_wait_nanos = ready_since.map_or(0, |ready_since| duration_nanos(started_at, ready_since));
+        let window = self.runtime.control.timing_window.load(Ordering::Acquire);
+        let started_at = (window != 0 || is_enabled(EventClass::RuntimeTask)).then(EventTimestamp::now);
         self.worker.current_task.store(task_id.get(), Ordering::Release);
-        self.record_at(
-            started_at,
-            EventKind::TaskPollStarted,
-            task_id.get(),
-            0,
-            ready_wait_nanos,
-            u64::from(ready_since.is_some()),
-            BacktraceCapture::Never,
-        );
+        if let Some(at) = started_at {
+            self.record_at(at, EventKind::TaskPollStarted, task_id.get(), 0, 0, 0, BacktraceCapture::Never);
+        }
         TaskPoll {
-            task_id,
+            task: task_id,
+            worker: Arc::clone(&self.worker),
             started_at,
-            session: None,
-            task: None,
+            window,
+            active: true,
         }
     }
 
-    pub(crate) fn task_poll_started_recorded(
-        &self,
-        task_id: TaskId,
-        started_at: EventTimestamp,
-        queued_since: Option<EventTimestamp>,
-        session: Option<Generation>,
-    ) -> TaskPoll {
-        self.worker.current_task.store(task_id.get(), Ordering::Release);
-        if session.is_some() {
-            seismograph::record(EventClass::RuntimeTask, || {
-                Some(crate::runtime_record(
-                    started_at,
-                    self.runtime.id(),
-                    Some(self.id()),
-                    EventKind::TaskPollStarted,
-                    task_id.get(),
-                    0,
-                    queued_since.map_or(0, |queued| duration_nanos(started_at, queued)),
-                    if queued_since.is_some() { 2 } else { 0 },
-                    BacktraceCapture::Never,
-                ))
+    /// Finishes an observed poll without retaining task state.
+    ///
+    /// Only a still-active measurement window receives poll aggregates.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the token belongs to another worker.
+    #[inline]
+    pub fn task_poll_finished(&self, mut poll: TaskPoll) {
+        assert_eq!(poll.worker.id, self.id(), "finish a poll on the worker that started it");
+        poll.active = false;
+        self.worker.current_task.store(0, Ordering::Release);
+        let Some(started_at) = poll.started_at else { return };
+        let finished_at = EventTimestamp::now();
+        let elapsed = duration_nanos(finished_at, started_at);
+        if poll.window != 0 && self.runtime.control.timing_window.load(Ordering::Acquire) == poll.window {
+            without_recording(|| {
+                let mut measurements = lock(&self.worker.measurements);
+                if self.runtime.control.timing_window.load(Ordering::Acquire) == poll.window {
+                    measurements.add(poll.window, poll.task, started_at, elapsed);
+                }
             });
         }
-        TaskPoll {
-            task_id,
-            started_at,
-            session,
-            task: None,
-        }
-    }
-
-    /// Finishes a task poll and updates aggregate poll duration.
-    #[inline]
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "consuming the token prevents callers from finishing one poll twice"
-    )]
-    pub fn task_poll_finished(&self, poll: TaskPoll) {
-        self.task_poll_finished_with_control(&poll, poll.task.as_deref());
-    }
-
-    pub(crate) fn task_poll_finished_with_control(&self, poll: &TaskPoll, task: Option<&TaskControl>) {
-        let finished_at = if let Some(task) = task
-            && poll.session.is_some()
-        {
-            task.activity.poll_finished(poll.session, poll.started_at, EventTimestamp::now)
-        } else {
-            EventTimestamp::now()
-        };
-        let duration_nanos = duration_nanos(finished_at, poll.started_at);
-        self.runtime.control.counters.poll_count.fetch_add(1, Ordering::Relaxed);
-        self.runtime
-            .control
-            .counters
-            .poll_duration_nanos
-            .fetch_add(duration_nanos, Ordering::Relaxed);
-        if let Some(task) = task {
-            task.poll_count.fetch_add(1, Ordering::Relaxed);
-            task.poll_duration_nanos.fetch_add(duration_nanos, Ordering::Relaxed);
-            task.max_poll_duration_nanos.fetch_max(duration_nanos, Ordering::Relaxed);
-            task.last_poll_finished_at.store(finished_at.ticks().max(1), Ordering::Release);
-        }
-        self.worker.current_task.store(0, Ordering::Release);
         self.record_at(
             finished_at,
             EventKind::TaskPollFinished,
-            poll.task_id.get(),
+            poll.task.get(),
             0,
-            duration_nanos,
+            elapsed,
             0,
             BacktraceCapture::Never,
         );
@@ -307,9 +299,13 @@ impl WorkerHandle {
         );
     }
 
-    fn stop(&self) {
+    pub(crate) fn stop(&self) {
+        let mut slot = lock(&self.worker.provider);
         self.worker.current_task.store(0, Ordering::Relaxed);
         let previous = self.worker.state.swap(WorkerState::Stopped.wire_value(), Ordering::AcqRel);
+        let provider = slot.take();
+        drop(slot);
+        drop(provider);
         if previous != WorkerState::Stopped.wire_value() {
             self.record(
                 EventKind::WorkerStopped,

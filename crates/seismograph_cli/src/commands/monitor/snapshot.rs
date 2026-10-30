@@ -51,7 +51,7 @@ pub(super) fn prepare_with_progress(
             let native = seismograph_rallocator::decode(&source.data)
                 .map_err(super::Error::MemorySnapshot)
                 .map_err(|error| error.to_string())?;
-            if source.schema_version != seismograph_rallocator::source::SCHEMA_VERSION {
+            if !matches!(source.schema_version, 3 | seismograph_rallocator::source::SCHEMA_VERSION) {
                 return Err(format!("unsupported allocator source schema {}", source.schema_version));
             }
             let mut snapshot = crate::allocator_view::Snapshot::event_only(crate::allocator_view::Version::new(0, 1, 0));

@@ -19,7 +19,6 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::snapshot::Observation;
 use crate::system::SystemSlice;
 
 /// Allocation event types.
@@ -33,10 +32,7 @@ pub mod runtime;
 /// Thread event types.
 pub mod thread;
 
-use event::{
-    Address, BacktraceCapture, Event, EventClass, EventClock, EventKind, EventPayload, EventSequence, EventTimestamp, Events, ObjectId,
-    Record,
-};
+use event::{Address, BacktraceCapture, Event, EventClass, EventClock, EventKind, EventPayload, EventSequence, Events, ObjectId, Record};
 use thread::{ThreadId, ThreadLog};
 
 const DEFAULT_EVENT_CAPACITY_PER_THREAD: usize = 65_536;
@@ -263,6 +259,7 @@ pub(crate) fn test_configuration() -> Configuration {
 thread_local! {
     static SUPPRESSION_DEPTH: Cell<usize> = const { Cell::new(0) };
     static LOCAL_RECORDER: LocalRecorder = const { LocalRecorder::new() };
+    static RECORDER_THREAD_ID: Cell<u64> = const { Cell::new(0) };
 }
 
 /// Runtime telemetry configuration.
@@ -337,7 +334,7 @@ impl Default for Policy {
 /// Returns whether a category is enabled and not suppressed on this thread.
 ///
 /// [`crate::record`] already checks this before building an event.
-/// Runtime hooks also use this query to skip updates to recording-only task state.
+/// Integrations also use this query to skip event-only work outside the builder.
 /// A concurrent configuration change can still prevent an event from being accepted.
 #[must_use]
 #[expect(
@@ -349,29 +346,23 @@ pub fn is_enabled(class: EventClass) -> bool {
     policy_enabled(policy_atomic(class).load(Ordering::Relaxed)) && !is_suppressed()
 }
 
-/// Returns the process-wide active recording generation.
-///
-/// Returns `None` when no recording is active.
-/// The generation changes when recording restarts, configuration changes, or event buffers are cleared.
-/// This query ignores category policies and thread suppression. Use [`is_enabled`] to check a category.
-/// A concurrent configuration change can invalidate the returned generation immediately.
+/// Reads the private active recorder epoch for internal assertions.
 #[must_use]
-#[expect(clippy::inline_always, reason = "keep the single atomic load inline on recording hot paths")]
-#[inline(always)]
-pub fn generation() -> Option<Generation> {
-    Generation::from_raw(ACTIVE_SESSION.load(Ordering::Acquire))
+#[cfg(test)]
+pub(crate) fn generation() -> Option<Generation> {
+    NonZeroU64::new(ACTIVE_SESSION.load(Ordering::Acquire))
 }
 
 /// Builds an event and returns the generation that accepts it.
 ///
-/// This follows the same policies as [`crate::record`]. Use it when a snapshot
-/// source must update its state only after an event is accepted.
+/// This follows the same policies as [`crate::record`]. The accepted epoch is
+/// private recorder bookkeeping, not a task identity or a source observation.
 /// Returns `None` for disabled, suppressed, skipped, sampled-out, or rejected events.
 ///
 /// # Panics
 ///
 /// Propagates a panic from `build`.
-pub fn try_record(class: EventClass, build: impl FnOnce() -> Option<Record>) -> Option<Generation> {
+pub(crate) fn try_record(class: EventClass, build: impl FnOnce() -> Option<Record>) -> Option<Generation> {
     let policy = policy_atomic(class).load(Ordering::Relaxed);
     if !policy_enabled(policy) {
         return None;
@@ -379,43 +370,7 @@ pub fn try_record(class: EventClass, build: impl FnOnce() -> Option<Record>) -> 
     try_record_enabled(class, build, policy)
 }
 
-/// Process-local recording generation.
-///
-/// Obtain this generation from [`generation`], [`try_record`], or [`Observation`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct Generation(NonZeroU64);
-
-// Written only under ConfigurationLock. A stopped session keeps its observation
-// boundary so sources do not turn frozen state into continuously growing ages.
-static SESSION_STOPPED_AT: AtomicU64 = AtomicU64::new(0);
-
-fn recording_observation_locked() -> Option<Observation> {
-    let generation = Generation::from_raw(LAST_SESSION.load(Ordering::Acquire))?;
-    let stopped_at = SESSION_STOPPED_AT.load(Ordering::Acquire);
-    Some(Observation {
-        generation,
-        observed_at: if stopped_at == 0 {
-            EventTimestamp::now()
-        } else {
-            EventTimestamp::from_ticks(stopped_at)
-        },
-    })
-}
-
-impl Generation {
-    /// Returns the numeric generation.
-    #[must_use]
-    pub const fn get(self) -> u64 {
-        self.0.get()
-    }
-
-    pub(crate) const fn from_raw(generation: u64) -> Option<Self> {
-        match NonZeroU64::new(generation) {
-            Some(generation) => Some(Self(generation)),
-            None => None,
-        }
-    }
-}
+type Generation = NonZeroU64;
 
 /// Configures runtime event recording for the process.
 pub(crate) fn configure(configuration: Configuration) {
@@ -458,9 +413,6 @@ fn configure_locked(configuration: Configuration) {
         }
         return;
     }
-    if ACTIVE_SESSION.load(Ordering::Acquire) != 0 {
-        SESSION_STOPPED_AT.store(EventTimestamp::now().ticks().max(1), Ordering::Release);
-    }
     ACTIVE_SESSION.store(0, Ordering::SeqCst);
     EVENT_CAPACITY.store(capacity, Ordering::SeqCst);
     ALLOCATION_POLICY.store(allocation_policy, Ordering::SeqCst);
@@ -479,7 +431,6 @@ fn configure_locked(configuration: Configuration) {
         LAST_CACHE_POLICY.store(cache_policy, Ordering::Release);
         LAST_SESSION.store(session, Ordering::Release);
         ACTIVITY_GENERATION.store(session, Ordering::Release);
-        SESSION_STOPPED_AT.store(0, Ordering::Release);
         ACTIVE_SESSION.store(session, Ordering::Release);
     }
 }
@@ -605,7 +556,7 @@ fn try_record_enabled(class: EventClass, event: impl FnOnce() -> Option<Record>,
     }
     let capacity = EVENT_CAPACITY.load(Ordering::Relaxed);
     record_enabled(session, class, record, policy, capacity)
-        .then(|| Generation::from_raw(session).expect("session was checked as nonzero before the event builder ran"))
+        .then(|| NonZeroU64::new(session).expect("session was checked as nonzero before the event builder ran"))
 }
 
 #[cold]
@@ -656,26 +607,18 @@ pub(crate) fn snapshot(disposition: crate::snapshot::EventBufferDisposition) -> 
     try_snapshot(disposition).ok().flatten()
 }
 
-#[cfg(test)]
 pub(crate) fn try_snapshot(disposition: crate::snapshot::EventBufferDisposition) -> Result<Option<Events>, crate::Error> {
-    try_snapshot_with_observation(disposition).map(|(events, _)| events)
-}
-
-pub(crate) fn try_snapshot_with_observation(
-    disposition: crate::snapshot::EventBufferDisposition,
-) -> Result<(Option<Events>, Option<Observation>), crate::Error> {
     let _suppression = SuppressionGuard::enter();
     if disposition != crate::snapshot::EventBufferDisposition::Retain {
         return reset_event_buffers(disposition, true);
     }
     let _configuration = ConfigurationLock::acquire_until(wait_deadline())
         .ok_or_else(|| crate::Error::new("seismograph snapshot timed out waiting for configuration"))?;
-    let observation = recording_observation_locked();
     let session = LAST_SESSION.load(Ordering::Acquire);
     if session == 0 {
-        return Ok((None, observation));
+        return Ok(None);
     }
-    snapshot_from_recorders_until(session, RECORDERS.load(Ordering::Acquire), wait_deadline()).map(|events| (events, observation))
+    snapshot_from_recorders_until(session, RECORDERS.load(Ordering::Acquire), wait_deadline())
 }
 
 #[cfg(test)]
@@ -722,12 +665,20 @@ fn is_suppressed() -> bool {
 /// Returns the current thread's process-unique recorder identity.
 ///
 /// Calling this function initializes the thread-local recorder when necessary.
+/// The identity remains available after the thread's event recorder retires.
 #[must_use]
 pub fn thread_id() -> ThreadId {
-    let recorder = local_recorder();
-    // SAFETY: local_recorder returns a process-lifetime recorder allocated
-    // through System and owned for writes by this thread.
-    unsafe { &*recorder }.thread_id
+    if let Some(recorder) = try_local_recorder() {
+        // SAFETY: Published recorders remain allocated for the process lifetime.
+        return unsafe { &*recorder }.thread_id;
+    }
+    let cached = RECORDER_THREAD_ID.get();
+    if cached != 0 {
+        return ThreadId::new(cached);
+    }
+    let id = NEXT_THREAD_ID.fetch_add(1, Ordering::Relaxed);
+    RECORDER_THREAD_ID.set(id);
+    ThreadId::new(id)
 }
 
 /// Runs synchronous work without recording events on this thread.
@@ -1327,7 +1278,7 @@ fn last_recording_policies() -> Policies {
 
 #[cfg(test)]
 fn destructive_snapshot(disposition: crate::snapshot::EventBufferDisposition) -> Result<Option<Events>, crate::Error> {
-    reset_event_buffers(disposition, true).map(|(events, _)| events)
+    reset_event_buffers(disposition, true)
 }
 
 /// Empties all event rings without capturing a snapshot or invoking snapshot sources.
@@ -1344,10 +1295,7 @@ pub fn clear_buffers() -> Result<(), crate::Error> {
     reset_event_buffers(crate::snapshot::EventBufferDisposition::Clear, false).map(|_| ())
 }
 
-fn reset_event_buffers(
-    disposition: crate::snapshot::EventBufferDisposition,
-    capture: bool,
-) -> Result<(Option<Events>, Option<Observation>), crate::Error> {
+fn reset_event_buffers(disposition: crate::snapshot::EventBufferDisposition, capture: bool) -> Result<Option<Events>, crate::Error> {
     let deadline = wait_deadline();
     let _configuration = ConfigurationLock::acquire_until(deadline)
         .ok_or_else(|| crate::Error::new("seismograph recorder timed out waiting for configuration"))?;
@@ -1358,10 +1306,6 @@ fn reset_event_buffers(
     let runtime_task_policy = RUNTIME_TASK_POLICY.load(Ordering::SeqCst);
     let io_policy = IO_POLICY.load(Ordering::SeqCst);
     let cache_policy = CACHE_POLICY.load(Ordering::SeqCst);
-    let previous_stopped_at = SESSION_STOPPED_AT.load(Ordering::Acquire);
-    if ACTIVE_SESSION.load(Ordering::Acquire) != 0 {
-        SESSION_STOPPED_AT.store(EventTimestamp::now().ticks().max(1), Ordering::Release);
-    }
     let was_enabled = ACTIVE_SESSION.swap(0, Ordering::SeqCst) != 0;
     ALLOCATION_POLICY.store(disabled_policy(allocation_policy), Ordering::SeqCst);
     GENERAL_POLICY.store(disabled_policy(general_policy), Ordering::SeqCst);
@@ -1369,10 +1313,8 @@ fn reset_event_buffers(
     RUNTIME_TASK_POLICY.store(disabled_policy(runtime_task_policy), Ordering::SeqCst);
     IO_POLICY.store(disabled_policy(io_policy), Ordering::SeqCst);
     CACHE_POLICY.store(disabled_policy(cache_policy), Ordering::SeqCst);
-    let observation = recording_observation_locked();
 
     if !wait_for_writers_until(deadline) {
-        SESSION_STOPPED_AT.store(previous_stopped_at, Ordering::Release);
         restore_recording_policies(
             allocation_policy,
             general_policy,
@@ -1392,7 +1334,6 @@ fn reset_event_buffers(
     let snapshot = match captured {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            SESSION_STOPPED_AT.store(previous_stopped_at, Ordering::Release);
             restore_recording_policies(
                 allocation_policy,
                 general_policy,
@@ -1416,7 +1357,6 @@ fn reset_event_buffers(
         let current = unsafe { &*recorder };
         if !current.clear(release || current.retired.load(Ordering::Acquire), deadline) {
             if !stop {
-                SESSION_STOPPED_AT.store(previous_stopped_at, Ordering::Release);
                 restore_recording_policies(
                     allocation_policy,
                     general_policy,
@@ -1433,12 +1373,11 @@ fn reset_event_buffers(
     }
 
     if stop {
-        return Ok((snapshot, observation));
+        return Ok(snapshot);
     }
-    // Clear must invalidate recording-only source state even while stopped.
+    // Cleared buffers start a fresh private recorder epoch.
     LAST_SESSION.store(next_session, Ordering::Release);
     if was_enabled {
-        SESSION_STOPPED_AT.store(0, Ordering::Release);
         ACTIVE_SESSION.store(next_session, Ordering::SeqCst);
     }
     ALLOCATION_POLICY.store(allocation_policy, Ordering::SeqCst);
@@ -1447,7 +1386,7 @@ fn reset_event_buffers(
     RUNTIME_TASK_POLICY.store(runtime_task_policy, Ordering::SeqCst);
     IO_POLICY.store(io_policy, Ordering::SeqCst);
     CACHE_POLICY.store(cache_policy, Ordering::SeqCst);
-    Ok((snapshot, observation))
+    Ok(snapshot)
 }
 
 const fn disabled_policy(policy: u64) -> u64 {
@@ -1522,6 +1461,7 @@ fn wait_expired(deadline: Instant) -> bool {
     }
 }
 
+#[cfg(test)]
 fn local_recorder() -> *const ThreadRecorder {
     LOCAL_RECORDER.with(initialize_local_recorder)
 }
@@ -1540,8 +1480,10 @@ fn initialize_local_recorder(local: &LocalRecorder) -> *const ThreadRecorder {
     let _suppression = SuppressionGuard::enter();
     let layout = Layout::new::<ThreadRecorder>();
     let allocated = allocate_thread_recorder(layout);
+    let recorder = ThreadRecorder::new();
+    RECORDER_THREAD_ID.set(recorder.thread_id.get());
     // SAFETY: allocated is properly aligned writable storage for one value.
-    unsafe { allocated.write(ThreadRecorder::new()) };
+    unsafe { allocated.write(recorder) };
     RECORDERS
         .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
             // SAFETY: allocated points to the initialized recorder owned by this
@@ -1626,6 +1568,7 @@ fn capture_platform_stack(frames: &mut [u64]) -> usize {
 mod tests {
     use super::*;
     use crate::record;
+    use crate::recorder::event::EventTimestamp;
 
     const ACTIVITY_CLASSES: [(EventClass, EventKind); 6] = [
         (EventClass::Allocation, EventKind::Allocation),
@@ -1980,7 +1923,7 @@ mod tests {
         .join()
         .unwrap();
         let before = try_activity().unwrap();
-        let source_session = recording_observation_locked().unwrap().generation;
+        let source_session = LAST_SESSION.load(Ordering::Acquire);
         // SAFETY: this thread owns the process-lifetime recorder.
         let recorder = unsafe { &*local_recorder() };
         let ring = recorder.ring_lock();
@@ -1992,7 +1935,7 @@ mod tests {
                 failed,
                 before.class_events,
                 after.class_events,
-                recording_observation_locked().unwrap().generation
+                LAST_SESSION.load(Ordering::Acquire)
             ),
             (true, [0, 2, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0], source_session)
         );
@@ -2838,34 +2781,6 @@ mod tests {
 
         configure(Configuration::default());
         assert_eq!(ACTIVE_SESSION.load(Ordering::Acquire), 0);
-    }
-
-    #[test]
-    fn recording_observations_freeze_at_configuration_and_snapshot_stops() {
-        let _test = TEST_LOCK.lock().unwrap();
-        let enabled = timeout_configuration();
-        configure(enabled);
-        let active = recording_observation_locked().unwrap();
-        assert_eq!(SESSION_STOPPED_AT.load(Ordering::Acquire), 0);
-        assert_eq!(active.generation, generation().unwrap());
-
-        configure(Configuration::default());
-        let configured_stop = SESSION_STOPPED_AT.load(Ordering::Acquire);
-        let first = recording_observation_locked().unwrap();
-        std::thread::sleep(Duration::from_millis(1));
-        let second = recording_observation_locked().unwrap();
-        assert_eq!(
-            (configured_stop, first.observed_at.ticks(), second.observed_at.ticks()),
-            (configured_stop, configured_stop, configured_stop)
-        );
-        assert_ne!(configured_stop, 0);
-
-        configure(enabled);
-        let (_, observation) = reset_event_buffers(crate::snapshot::EventBufferDisposition::Stop, false).unwrap();
-        let snapshot_stop = SESSION_STOPPED_AT.load(Ordering::Acquire);
-        assert_eq!(observation.unwrap().observed_at.ticks(), snapshot_stop);
-        assert_ne!(snapshot_stop, 0);
-        configure(Configuration::default());
     }
 
     #[test]
@@ -3750,7 +3665,7 @@ mod tests {
             std::mem::size_of::<ThreadRecorder>() + capacity.get() * std::mem::size_of::<Slot>()
         );
         assert_eq!(EventSampling::default(), EventSampling::ALL);
-        assert_eq!(Generation::from_raw(0), None);
+        assert_eq!(NonZeroU64::new(0), None);
 
         configure(Configuration {
             general_events: Policy::all(false),

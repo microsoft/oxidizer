@@ -67,7 +67,7 @@ fn allocator_backed_capture_recovers_after_source_error_and_panic() {
         .iter()
         .find(|source| source.id == seismograph_rallocator::source::ID)
         .unwrap();
-    assert_eq!(native.schema_version, 3);
+    assert_eq!(native.schema_version, 4);
     assert!(seismograph_rallocator::decode(&native.data).unwrap().global.local_limit_bytes > 0);
     assert_eq!(CACHE.lock().unwrap().take().unwrap(), vec![0x5a; 16_384]);
     drop(retained);

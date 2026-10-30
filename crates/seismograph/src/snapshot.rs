@@ -132,23 +132,10 @@ impl Source {
     }
 }
 
-/// Recording generation and clock boundary for source state.
-///
-/// Snapshot capture creates this value and passes it to sources through
-/// [`SnapshotContext::recording_observation`].
-#[derive(Clone, Copy, Debug)]
-pub struct Observation {
-    /// Retained recording generation, including a just-stopped generation.
-    pub generation: recorder::Generation,
-    /// Latest time at which the recording's source state can be interpreted.
-    pub observed_at: EventTimestamp,
-}
-
 /// Recorder data available while a registered source contributes its payload.
 #[derive(Clone, Copy, Debug)]
 pub struct SnapshotContext<'a> {
     events: &'a Events,
-    observation: Option<Observation>,
 }
 
 impl<'a> SnapshotContext<'a> {
@@ -156,15 +143,6 @@ impl<'a> SnapshotContext<'a> {
     #[must_use]
     pub const fn events(self) -> &'a Events {
         self.events
-    }
-
-    /// Recording generation and observation boundary associated with this capture.
-    ///
-    /// Destructive captures retain the pre-reset generation. A stopped capture
-    /// retains its stop-time boundary rather than advancing frozen task ages.
-    #[must_use]
-    pub const fn recording_observation(self) -> Option<Observation> {
-        self.observation
     }
 }
 
@@ -321,13 +299,10 @@ impl fmt::Debug for Snapshot {
 pub(crate) fn snapshot(options: SnapshotOptions) -> Result<Snapshot, Error> {
     let _suppression = SuppressionGuard::enter();
     let started_at = Instant::now();
-    let (events, observation) = recorder::try_snapshot_with_observation(options.event_buffers)?;
+    let events = recorder::try_snapshot(options.event_buffers)?;
     let mut events = events.unwrap_or_default();
     events.clock = EventClock::CURRENT;
-    let sources = capture_sources(SnapshotContext {
-        events: &events,
-        observation,
-    })?;
+    let sources = capture_sources(SnapshotContext { events: &events })?;
     encode_snapshot(&DecodedSnapshot {
         capture_duration_nanos: u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX),
         events,
@@ -1267,7 +1242,6 @@ mod tests {
         assert_eq!(
             (source.capture)(SnapshotContext {
                 events: &Events::default(),
-                observation: None,
             })
             .unwrap()
             .as_bytes(),
@@ -1856,34 +1830,25 @@ mod tests {
     }
 
     #[test]
-    fn source_payload_retains_the_capture_observation() {
+    fn source_payload_can_inspect_captured_events() {
         fn capture(context: SnapshotContext<'_>) -> Result<SourceData, Error> {
-            let observation = context.recording_observation().unwrap();
-            let mut payload = observation.generation.get().to_le_bytes().to_vec();
-            payload.extend_from_slice(&observation.observed_at.ticks().to_le_bytes());
-            SourceData::copy_from(&payload)
+            SourceData::copy_from(&context.events().total_events.to_le_bytes())
         }
 
-        let source = Source::new(SourceId::new(106), "observation", 1, capture);
-        let captured = capture_sources_from(
-            ptr::from_ref(&source).cast_mut(),
-            SnapshotContext {
-                events: &Events::default(),
-                observation: Some(Observation {
-                    generation: recorder::Generation::from_raw(17).unwrap(),
-                    observed_at: EventTimestamp::from_ticks(23),
-                }),
-            },
-        )
-        .unwrap();
+        let source = Source::new(SourceId::new(106), "events", 1, capture);
+        let events = Events {
+            total_events: 17,
+            ..Events::default()
+        };
+        let captured = capture_sources_from(ptr::from_ref(&source).cast_mut(), SnapshotContext { events: &events }).unwrap();
 
         assert_eq!(
             captured,
             vec![SourceSnapshot {
                 id: SourceId::new(106),
-                name: "observation".into(),
+                name: "events".into(),
                 schema_version: 1,
-                data: [17_u64.to_le_bytes(), 23_u64.to_le_bytes()].concat(),
+                data: 17_u64.to_le_bytes().to_vec(),
             }]
         );
     }
@@ -1908,7 +1873,6 @@ mod tests {
                 ptr::from_ref(&first).cast_mut(),
                 SnapshotContext {
                     events: &Events::default(),
-                    observation: None,
                 }
             )
             .is_err()
@@ -1920,7 +1884,6 @@ mod tests {
                 ptr::from_ref(&panicked).cast_mut(),
                 SnapshotContext {
                     events: &Events::default(),
-                    observation: None,
                 }
             )
             .is_err()
@@ -1932,7 +1895,6 @@ mod tests {
                 ptr::from_ref(&failed).cast_mut(),
                 SnapshotContext {
                     events: &Events::default(),
-                    observation: None,
                 }
             )
             .is_err()
@@ -1945,7 +1907,6 @@ mod tests {
             ptr::from_ref(&first).cast_mut(),
             SnapshotContext {
                 events: &Events::default(),
-                observation: None,
             },
         )
         .unwrap();

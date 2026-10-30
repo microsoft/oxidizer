@@ -493,12 +493,14 @@ fn active_source() -> Snapshot {
             created_at: EventTimestamp::from_ticks(0),
             retired_at: None,
             counters: Counters::default(),
+            counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
             workers: Vec::new(),
             tasks: vec![Task {
                 id: TaskId::from_raw(1).unwrap(),
                 parent: None,
                 type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
-                spawned_at: EventTimestamp::from_ticks(0),
+                spawned_at: None,
+                metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                 last_worker_id: None,
                 metrics: TaskMetrics::default(),
                 activity: Some(TaskActivity {

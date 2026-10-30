@@ -12,6 +12,7 @@ use observed::Sink;
 use pin_project::{pin_project, pinned_drop};
 use plurality::MultiPool;
 
+use crate::inspection::Inspector;
 use crate::{
     ExecutorShared, ShutdownCause, TaskCreatedReporter, TaskHandle, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal,
     discard_task_panic_payload,
@@ -30,11 +31,12 @@ pub(crate) struct TaskLinks {
 /// The executor usually accesses it through [`TypeErasedTask`] because only the
 /// task needs its concrete types.
 #[derive(Debug)]
-struct Task<F, R, T>
+struct Task<F, R, T, I = ()>
 where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
+    I: Inspector<F>,
 {
     /// `None` after the task completes or the executor abandons it during shutdown.
     ///
@@ -43,7 +45,7 @@ where
     /// wake signal using the wake signal. All access is through shared references, so there are no
     /// aliasing violations, with `UnsafeCell` used when mutation of the contents is needed.
     /// (Outer) mutation of the fields only occurs by the executor, ensuring thread-safety.
-    payload: UnsafeCell<Option<Payload<F, R, T>>>,
+    payload: UnsafeCell<Option<Payload<F, R, T, I>>>,
 
     /// Initialized once on the owner, before any waker is exposed. The signal is never replaced.
     wake_signal: OnceCell<WakeSignal>,
@@ -68,20 +70,23 @@ where
 // private and owner-thread-only. Cross-thread wakers touch only separately synchronized wake
 // metadata. Completion and cancellation empty the non-Send payload before the owner releases its
 // final scheduling reference, so remote final reclamation cannot drop user state.
-unsafe impl<F, R, T> Send for Task<F, R, T>
+// The optional inspector belongs to that payload and is also retired on the owner thread.
+unsafe impl<F, R, T, I> Send for Task<F, R, T, I>
 where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
+    I: Inspector<F>,
 {
 }
 
-// SAFETY: This uses the same invariant as `Send`. Shared remote access never reaches task payload fields.
-unsafe impl<F, R, T> Sync for Task<F, R, T>
+// SAFETY: Same invariant as `Send`; shared remote access never reaches task payload fields.
+unsafe impl<F, R, T, I> Sync for Task<F, R, T, I>
 where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
+    I: Inspector<F>,
 {
 }
 
@@ -92,10 +97,26 @@ where
     T: TaskCompletion<R>,
 {
     fn new_with_target(future: F, result_target: T, options: TaskOptions, sink: Sink) -> Self {
+        Self::new_inspected(future, result_target, options, sink, ())
+    }
+}
+
+impl<F, R, T, I> Task<F, R, T, I>
+where
+    F: Future<Output = R> + 'static,
+    R: 'static,
+    T: TaskCompletion<R>,
+    I: Inspector<F>,
+{
+    fn new_inspected(future: F, result_target: T, options: TaskOptions, sink: Sink, inspector: I) -> Self {
         Self {
             payload: UnsafeCell::new(Some(Payload {
                 future: FutureStorage::new(future),
                 result_target: Some(result_target),
+                #[cfg(feature = "inspection")]
+                inspector,
+                #[cfg(not(feature = "inspection"))]
+                _inspector: inspector,
             })),
             wake_signal: OnceCell::new(),
             handle_slot: TaskHandleSlot::new(),
@@ -106,6 +127,24 @@ where
             _requires_pin: PhantomPinned,
         }
     }
+}
+
+#[cfg(feature = "inspection")]
+pub(crate) fn allocate_inspected_task<F, R, T, I>(
+    pool: &MultiPool,
+    future: F,
+    options: TaskOptions,
+    sink: Sink,
+    completion: T,
+    inspector: I,
+) -> TaskHandle
+where
+    F: Future<Output = R> + 'static,
+    R: 'static,
+    T: TaskCompletion<R>,
+    I: Inspector<F>,
+{
+    TaskHandle::new(pool.alloc_arc_pin(Task::new_inspected(future, completion, options, sink, inspector)))
 }
 
 pub(crate) fn allocate_task<F, R, T>(pool: &MultiPool, future: F, options: TaskOptions, sink: Sink, completion: T) -> TaskHandle
@@ -145,12 +184,30 @@ pub(crate) fn allocate_test_task_in(pool: &MultiPool) -> TaskHandle {
     )
 }
 
-impl<F, R, T> TypeErasedTask for Task<F, R, T>
+impl<F, R, T, I> TypeErasedTask for Task<F, R, T, I>
 where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
+    I: Inspector<F>,
 {
+    #[cfg(feature = "inspection")]
+    fn inspect(&self, state: crate::TaskState, visitor: &mut dyn FnMut(&dyn std::any::Any)) {
+        // SAFETY: Inspection runs on the owner between cycles or immediately before polling.
+        // The shared future reference ends before a poll or retirement can borrow its payload.
+        let payload = unsafe { &*self.payload.get() };
+        if let Some(payload) = payload
+            && let Some(future) = &payload.future.inner
+        {
+            payload.inspector.inspect(future, state, visitor);
+        }
+    }
+
+    #[cfg(feature = "inspection")]
+    fn is_notified(&self) -> bool {
+        self.wake_signal.get().is_some_and(WakeSignal::has_queued_notification)
+    }
+
     fn poll(self: Pin<&Self>, shared: &ExecutorShared) -> task::Poll<()> {
         self.poll_count.set(self.poll_count.get().saturating_add(1));
         self.options.with_context(|| self.poll_in_context(shared))
@@ -202,11 +259,12 @@ where
     }
 }
 
-impl<F, R, T> Task<F, R, T>
+impl<F, R, T, I> Task<F, R, T, I>
 where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
+    I: Inspector<F>,
 {
     fn pinned_wake_signal(self: Pin<&Self>) -> Pin<&WakeSignal> {
         let signal = self.get_ref().wake_signal.get().expect("task must be initialized before poll()");
@@ -256,7 +314,7 @@ where
 
     fn finish_panicked(
         self: Pin<&Self>,
-        maybe_payload: &mut Option<Payload<F, R, T>>,
+        maybe_payload: &mut Option<Payload<F, R, T, I>>,
         wake_signal: Pin<&WakeSignal>,
         panic: TaskPanicPayload,
         shared: &ExecutorShared,
@@ -280,7 +338,7 @@ where
         task::Poll::Ready(())
     }
 
-    fn finish_terminal(self: Pin<&Self>, maybe_payload: &mut Option<Payload<F, R, T>>, outcome: TerminalOutcome<R>) {
+    fn finish_terminal(self: Pin<&Self>, maybe_payload: &mut Option<Payload<F, R, T, I>>, outcome: TerminalOutcome<R>) {
         let Some(payload) = maybe_payload.as_mut() else {
             debug_assert!(matches!(outcome, TerminalOutcome::Cancelled(_)));
             return;
@@ -339,17 +397,22 @@ pub(crate) fn on_unhandled_task_panic(panic: TaskPanicPayload) -> ! {
 }
 
 /// Stores the future and completion target for a task.
-struct Payload<F, R, T>
+struct Payload<F, R, T, I>
 where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
+    I: Inspector<F>,
 {
     /// The future that will be polled by the executor to progress the task.
     future: FutureStorage<F>,
 
     /// The task owns its completion target until it publishes a terminal outcome.
     result_target: Option<T>,
+    #[cfg(feature = "inspection")]
+    inspector: I,
+    #[cfg(not(feature = "inspection"))]
+    _inspector: I,
 }
 
 enum TerminalOutcome<R> {
@@ -469,6 +532,13 @@ pub(crate) trait TypeErasedTask: Send + Sync {
     ///
     /// Panics if called more than once.
     fn initialize(self: Pin<&Self>, wake_signal: WakeSignal);
+
+    // Keep optional diagnostics last so they do not shift ordinary hot-path vtable entries.
+    #[cfg(feature = "inspection")]
+    fn inspect(&self, state: crate::TaskState, visitor: &mut dyn FnMut(&dyn std::any::Any));
+
+    #[cfg(feature = "inspection")]
+    fn is_notified(&self) -> bool;
 }
 
 #[cfg(test)]

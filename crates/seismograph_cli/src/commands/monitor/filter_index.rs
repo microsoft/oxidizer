@@ -681,6 +681,7 @@ mod tests {
                 created_at: EventTimestamp::from_ticks(1),
                 retired_at: None,
                 counters: Counters::default(),
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 workers: [Some(TaskId::from_raw(1).unwrap()), None]
                     .into_iter()
                     .enumerate()
@@ -691,6 +692,7 @@ mod tests {
                         processor_index: None,
                         thread_id: None,
                         current_task,
+                        task_collection: seismograph_runtime::snapshot::TaskCollection::Retained,
                     })
                     .collect(),
                 tasks: vec![Task {
@@ -698,7 +700,8 @@ mod tests {
                     parent: None,
                     type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
                     future_size_bytes: None,
-                    spawned_at: EventTimestamp::from_ticks(1),
+                    spawned_at: Some(EventTimestamp::from_ticks(1)),
+                    metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                     last_worker_id: None,
                     activity: None,
                     metrics: TaskMetrics::default(),
@@ -864,6 +867,7 @@ mod tests {
                 created_at: EventTimestamp::from_ticks(0),
                 retired_at: None,
                 counters: Counters::default(),
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 workers: vec![Worker {
                     id: WorkerId::from_raw(1).unwrap(),
                     role: WorkerRole::Core,
@@ -871,6 +875,7 @@ mod tests {
                     processor_index: None,
                     thread_id: Some(ThreadId::new(1)),
                     current_task: Some(TaskId::from_raw(1).unwrap()),
+                    task_collection: seismograph_runtime::snapshot::TaskCollection::Retained,
                 }],
                 tasks: [1, 2]
                     .into_iter()
@@ -879,7 +884,8 @@ mod tests {
                         parent: None,
                         type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
                         future_size_bytes: None,
-                        spawned_at: EventTimestamp::from_ticks(1),
+                        spawned_at: Some(EventTimestamp::from_ticks(1)),
+                        metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                         last_worker_id: Some(WorkerId::from_raw(1).unwrap()),
                         activity: (id == 2).then_some(TaskActivity {
                             poll_worker_id: Some(WorkerId::from_raw(1).unwrap()),

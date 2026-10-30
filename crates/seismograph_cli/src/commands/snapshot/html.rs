@@ -64,7 +64,7 @@ fn decode_snapshot(bytes: &[u8]) -> Result<(Snapshot, Vec<seismograph::snapshot:
 
     let mut snapshot = empty_allocator_snapshot();
     if let Some(source) = allocator_source(&seismograph.sources)? {
-        if source.schema_version != seismograph_rallocator::source::SCHEMA_VERSION {
+        if !matches!(source.schema_version, 3 | seismograph_rallocator::source::SCHEMA_VERSION) {
             return Err(Error::UnsupportedSchema(source.schema_version));
         }
         snapshot.native = Some(std::sync::Arc::new(

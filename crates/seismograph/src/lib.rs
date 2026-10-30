@@ -187,8 +187,6 @@ pub fn recorder(configuration: recorder::Configuration) {
 /// and captures a backtrace according to the category and event policies.
 /// Events from a different category or a concurrent configuration change are dropped.
 ///
-/// Use [`recorder::try_record`] only when source state depends on event acceptance.
-///
 /// # Panics
 ///
 /// Propagates a panic from `build`.

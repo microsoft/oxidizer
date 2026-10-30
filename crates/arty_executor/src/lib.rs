@@ -63,4 +63,8 @@ pub(crate) use task_handle::*;
 pub(crate) use task_list::*;
 pub use task_options::*;
 pub use task_set::*;
+
+mod inspection;
+#[cfg(feature = "inspection")]
+pub use inspection::{InspectionError, InspectionStatus, PollObserver, TaskState};
 pub(crate) use wake::*;
