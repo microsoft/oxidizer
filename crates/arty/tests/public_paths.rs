@@ -21,10 +21,8 @@ assert_impl_all!(Runtime: Send, Sync, Debug);
 assert_not_impl_any!(Runtime: ThreadAware);
 assert_impl_all!(RuntimeBuilder: Debug);
 assert_impl_all!(Context: Send, Sync, Clone, Debug, ThreadAware,
-    AsRef<Scheduler>, AsRef<arty::time::Clock>, AsRef<observed::Sink>);
+    AsRef<Scheduler>, AsRef<arty::time::Clock>);
 assert_impl_all!(Scheduler: Send, Sync, Clone, Debug);
-// Scheduler reaches application-controlled telemetry processors, and Arty does
-// not recover their state after a telemetry panic.
 assert_not_impl_any!(Scheduler: UnwindSafe, RefUnwindSafe);
 assert_impl_all!(JoinHandle<()>: Future, Send, UnwindSafe, RefUnwindSafe);
 assert_impl_all!(JoinError: StdError, Send, Sync, Debug);

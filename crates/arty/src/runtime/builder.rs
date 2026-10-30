@@ -3,7 +3,6 @@
 
 use std::num::NonZeroUsize;
 
-use observed::Sink;
 use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
@@ -12,15 +11,15 @@ use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, Run
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
 
-/// Configures workers, clocks, and telemetry before starting a runtime.
+/// Configures workers and clocks before starting a runtime.
 ///
 /// Obtain a builder from [`Runtime::builder`], change the settings you need,
 /// then call [`build`](Self::build) to start the workers. Setters replace earlier
 /// values for the same setting; configuring a builder does not start threads.
 ///
 /// The defaults are [`WorkersPolicy::default`], 2 MiB async-worker stacks,
-/// a shared blocking pool, a real-time clock, a no-op telemetry sink, and
-/// [`MonitorPolicy::enabled`]. A contained async task panic starts
+/// a shared blocking pool, a real-time clock, and [`MonitorPolicy::enabled`].
+/// A contained async task panic starts
 /// coordinated shutdown by default.
 ///
 /// # Examples
@@ -39,7 +38,6 @@ use crate::runtime::handle::Runtime;
 pub struct RuntimeBuilder {
     processor_config: RuntimeConfig,
     clock: InactiveClock,
-    sink: Sink,
 }
 
 impl RuntimeBuilder {
@@ -189,35 +187,6 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Sets the telemetry sink for runtime events and task enrichment.
-    ///
-    /// The default is [`Sink::noop`], which disables events and enrichment.
-    /// With a regular sink configured, async tasks inherit enrichment active
-    /// at submission, including their completion events. A regular sink with
-    /// no processors preserves enrichment without dispatching events.
-    /// Retrieve the sink inside a task with
-    /// [`Context::sink`](crate::task::Context::sink).
-    ///
-    /// Configured event processors must not panic. Runtime events are emitted
-    /// synchronously; Arty does not provide telemetry-panic recovery.
-    ///
-    /// # Examples
-    ///
-    /// Pass a sink configured by the application:
-    ///
-    /// ```
-    /// use arty::runtime::{Runtime, RuntimeBuilder};
-    ///
-    /// fn app_builder(sink: observed::Sink) -> RuntimeBuilder {
-    ///     Runtime::builder().sink(sink)
-    /// }
-    /// ```
-    #[must_use]
-    pub fn sink(mut self, sink: Sink) -> Self {
-        self.sink = sink;
-        self
-    }
-
     /// Starts the configured workers and returns their runtime owner.
     ///
     /// Blocks the calling thread until workers are ready to receive tasks.
@@ -242,7 +211,7 @@ impl RuntimeBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build(self) -> Result<Runtime, Error> {
-        bootstrap::build(self.processor_config, &self.clock, self.sink, &ThreadBuilder::default())
+        bootstrap::build(self.processor_config, &self.clock, &ThreadBuilder::default())
     }
 }
 
@@ -252,7 +221,6 @@ impl RuntimeBuilder {
         Self {
             clock: InactiveClock::new_isolated(),
             processor_config: RuntimeConfig::default(),
-            sink: Sink::noop(),
         }
     }
 }

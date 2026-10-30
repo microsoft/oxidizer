@@ -24,9 +24,9 @@ There is no process-global runtime: each instance owns its workers and
 services. Workers use thread-local bookkeeping rather than a global
 runtime singleton.
 
-Arty provides task scheduling, clocks, telemetry, external I/O driver
-hosting, and pools for offloading blocking callbacks. It does not provide
-an async I/O implementation or move running tasks between workers.
+Arty provides task scheduling, clocks, external I/O driver hosting, and
+pools for offloading blocking callbacks. It does not provide an async I/O
+implementation or move running tasks between workers.
 
 ## Quickstart
 
@@ -111,15 +111,13 @@ The [guides][__link17] explain Arty’s capabilities in more detail:
 * [Scheduling][__link18] explains where tasks run,
   local non-`Send` work, and blocking pools.
 * [Configuration][__link19] explains worker counts,
-  blocking-pool policies, clocks, and telemetry sinks.
+  blocking-pool policies, and clocks.
 * [Shutdown][__link20] explains runtime ownership,
   task cancellation, and what stopping the workers waits for.
 * [Thread awareness][__link21] explains
   stable task placement and explicit relocation of values.
 * [Time][__link22] explains system timers, timeouts, and
   externally controlled time in tests.
-* [Telemetry][__link23] explains runtime events
-  and links to [`observed`][__link24] for further details.
 
 The `documentation` module is included only for docs.rs builds and
 doc-test collection with all documentation features, including `test-util`;
@@ -130,12 +128,12 @@ it is not part of the public API available to applications.
 The default feature set enables `rt`, `macros`, and `monitor`.
 
 * **`rt`** - Enables the runtime, task, and I/O APIs, and implies `time`.
-* **`macros`** - Enables [`main`][__link25] and [`test`][__link26], and implies `rt`.
+* **`macros`** - Enables [`main`][__link23] and [`test`][__link24], and implies `rt`.
 * **`monitor`** - Enables the Seismograph monitor dependency. It forwards
   `performables` telemetry support when `performables` is enabled. It does
-  not start monitoring or emit new telemetry.
+  not start monitoring.
 * **`time`** - Enables clocks, timers, and timeouts.
-* **`test-util`** - Enables testing utilities, including [`ClockControl`][__link27] with `time`.
+* **`test-util`** - Enables testing utilities, including [`ClockControl`][__link25] with `time`.
   Enable it in dev-dependencies, not production dependencies.
 
 
@@ -144,7 +142,7 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbv6QDBjbrlusbj4fg8WxQVBwbxfNholNsajob3AZlXQ41tgJhZIOCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4wgmhvYnNlcnZlZGYwLjI5LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbYgvrzzCJ6-IbSK27HMf6gocbT5GiK2Oe1D8bpyHo2e5nQQ5hZIKCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.5.0/arty/?search=time::Clock
@@ -161,11 +159,9 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link20]: https://docs.rs/arty/0.5.0/arty/?search=documentation::shutdown
  [__link21]: https://docs.rs/arty/0.5.0/arty/?search=documentation::thread_awareness
  [__link22]: https://docs.rs/arty/0.5.0/arty/?search=documentation::time
- [__link23]: https://docs.rs/arty/0.5.0/arty/?search=documentation::telemetry
- [__link24]: https://crates.io/crates/observed/0.29.0
- [__link25]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
- [__link26]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
- [__link27]: https://docs.rs/arty/0.5.0/arty/?search=time::ClockControl
+ [__link23]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
+ [__link24]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
+ [__link25]: https://docs.rs/arty/0.5.0/arty/?search=time::ClockControl
  [__link3]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
  [__link4]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
  [__link5]: https://docs.rs/arty/0.5.0/arty/?search=runtime::Runtime

@@ -4,17 +4,15 @@
 //! Blocking worker admission and pool execution implementation.
 
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::{fmt, thread};
 
 use arty_executor::discard_task_panic_payload;
-use observed::{Sink, emit};
 use performables::arc::Arc;
 use performables::sync::channel;
 use performables::sync::mutex::Mutex;
 
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
-use crate::runtime::telemetry::events::{BlockingWorkerPoolMode, BlockingWorkerPoolSaturated, SystemMetricCount};
 use crate::runtime::worker::blocking::{LocalWorker, PanicPolicy, PoolIdentity};
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::prepare_blocking;
@@ -144,23 +142,17 @@ impl fmt::Debug for JoinableThreadPool {
 #[derive(Debug)]
 pub(crate) struct Worker {
     pool: Pool,
-    sink: Sink,
     remote_results: JoinHandlePool,
     panic_policy: PanicPolicy,
 }
 
 impl Worker {
-    pub(crate) fn new(pool: Pool, sink: Sink, runtime_shutdown: Shutdown, panic_policy: PanicPolicy) -> Arc<Self> {
+    pub(crate) fn new(pool: Pool, runtime_shutdown: Shutdown, panic_policy: PanicPolicy) -> Arc<Self> {
         Arc::new(Self {
             pool,
-            sink,
             remote_results: JoinHandlePool::new(runtime_shutdown),
             panic_policy,
         })
-    }
-
-    pub(crate) fn sink(&self) -> &Sink {
-        &self.sink
     }
 
     /// Submits a blocking task to the worker. If the worker is shutting down, the task will be ignored.
@@ -169,16 +161,6 @@ impl Worker {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.spawn_blocking_with_completion(body, || {})
-    }
-
-    fn spawn_blocking_with_completion<F, R, C>(&self, body: F, completion: C) -> JoinHandle<R>
-    where
-        F: FnOnce() -> R + Send + 'static,
-        R: Send + 'static,
-        C: FnOnce() + Send + 'static,
-    {
-        let pool = self.pool.clone();
         let runtime_shutdown = self.remote_results.shutdown().clone();
         let (task, join_handle) = prepare_blocking(&self.remote_results, body, self.panic_policy.clone());
         if matches!(runtime_shutdown.state(), ShutdownState::Started) {
@@ -192,21 +174,10 @@ impl Worker {
             } else {
                 task();
             }
-            pool.clear_saturation_if_recovered();
-            completion();
         };
 
-        if matches!(self.remote_results.shutdown().state(), ShutdownState::Running)
-            && self.pool.execute(task)
-            && self.pool.record_saturation_transition()
-        {
-            emit!(
-                &self.sink,
-                BlockingWorkerPoolSaturated {
-                    blocking_worker_pool_mode: BlockingWorkerPoolMode(self.pool.mode()),
-                    max_threads: SystemMetricCount::from(self.pool.max_thread_count()),
-                }
-            );
+        if matches!(self.remote_results.shutdown().state(), ShutdownState::Running) && self.pool.execute(task) {
+            self.pool.grow_if_overloaded();
         }
 
         join_handle
@@ -228,9 +199,7 @@ impl Worker {
 pub(crate) struct Pool {
     inner: Arc<Mutex<Option<JoinableThreadPool>>>,
     identity: PoolIdentity,
-    saturation_reported: Arc<AtomicBool>,
     max_thread_count: NonZeroUsize,
-    mode: &'static str,
 }
 
 impl Pool {
@@ -250,12 +219,7 @@ impl Pool {
     /// Default per-pool thread limit for blocking tasks.
     const MAX_THREAD_COUNT_DEFAULT: NonZeroUsize = NonZeroUsize::new(64).expect("the default blocking thread limit is nonzero");
 
-    #[cfg(test)]
     pub(crate) fn new(max_thread_count: Option<NonZeroUsize>) -> Self {
-        Self::new_with_mode(max_thread_count, "shared")
-    }
-
-    pub(crate) fn new_with_mode(max_thread_count: Option<NonZeroUsize>, mode: &'static str) -> Self {
         // Start with one thread and let the pool grow as needed.
         let identity = Arc::new(());
         let thread_pool = JoinableThreadPool::new(Self::INITIAL_THREAD_COUNT, Arc::clone(&identity));
@@ -263,9 +227,7 @@ impl Pool {
         Self {
             inner: Arc::new(Mutex::new(Some(thread_pool))),
             identity,
-            saturation_reported: Arc::new(AtomicBool::new(false)),
             max_thread_count: max_thread_count.unwrap_or(Self::MAX_THREAD_COUNT_DEFAULT),
-            mode,
         }
     }
 
@@ -309,12 +271,9 @@ impl Pool {
         true
     }
 
+    #[cfg(test)]
     pub(crate) fn max_thread_count(&self) -> usize {
         self.max_thread_count.get()
-    }
-
-    fn mode(&self) -> &'static str {
-        self.mode
     }
 
     #[cfg(test)]
@@ -323,29 +282,18 @@ impl Pool {
         pool.as_ref().is_some_and(Self::thread_pool_is_overloaded)
     }
 
-    fn record_saturation_transition(&self) -> bool {
+    fn grow_if_overloaded(&self) {
         let mut pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
         let Some(pool) = pool.as_mut() else {
-            return false;
+            return;
         };
         if !Self::thread_pool_is_overloaded(pool) {
-            self.saturation_reported.store(false, Ordering::Release);
-            return false;
+            return;
         }
 
         let new_thread_count = pool.max_count().saturating_add(1);
         if new_thread_count <= self.max_thread_count.get() {
             pool.set_num_threads(new_thread_count);
-            return false;
-        }
-
-        !self.saturation_reported.swap(true, Ordering::AcqRel)
-    }
-
-    fn clear_saturation_if_recovered(&self) {
-        let pool = self.inner.lock_result().expect(ERR_POISONED_LOCK);
-        if pool.as_ref().is_none_or(|pool| !Self::thread_pool_is_overloaded(pool)) {
-            self.saturation_reported.store(false, Ordering::Release);
         }
     }
 
@@ -364,8 +312,6 @@ mod tests {
 
     use arty_executor::ShutdownCause;
     use events_once::Event;
-    use observed::{Sink, Value};
-    use observed_testing::{CapturedEvent, TEST_ID, test_emitter};
     use performables::arc::Arc;
     use performables::sync::mutex::Mutex;
     use testing_aids::{TEST_TIMEOUT, execute_or_abandon};
@@ -406,6 +352,25 @@ mod tests {
 
         // It says "max" but it is effectively the "current" count because growth is async.
         assert_eq!(blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 5);
+    }
+
+    #[test]
+    fn overloaded_pool_grows_only_to_configured_thread_limit() {
+        let pool = Pool::new(Some(limit(2)));
+        let queued_task_count = Pool::MAX_TASKS_PER_THREAD * 2 + 1;
+        pool.inner
+            .lock_result()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .queued_count
+            .store(queued_task_count, Ordering::SeqCst);
+
+        pool.grow_if_overloaded();
+        assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
+
+        pool.grow_if_overloaded();
+        assert_eq!(pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 2);
     }
 
     #[test]
@@ -470,7 +435,7 @@ mod tests {
     #[test]
     fn closed_pool_rejects_worker_submission_after_admission() {
         let pool = Pool::new(NonZeroUsize::new(1));
-        let worker = Worker::new(pool.clone(), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore);
+        let worker = Worker::new(pool.clone(), Shutdown::default(), PanicPolicy::Ignore);
         pool.join();
 
         let invoked = Arc::new(AtomicBool::new(false));
@@ -481,7 +446,7 @@ mod tests {
 
         assert!(join.join().unwrap_err().is_shutdown());
         assert!(!invoked.load(Ordering::Relaxed));
-        assert!(!pool.record_saturation_transition());
+        pool.grow_if_overloaded();
     }
 
     #[test]
@@ -640,209 +605,6 @@ mod tests {
         .unwrap();
     }
 
-    #[cfg_attr(test, mutants::skip)] // Test-only helper.
-    fn dimension(event: &CapturedEvent, key: &str) -> Option<Value> {
-        event.dimensions().into_iter().find(|(k, _)| k == key).map(|(_, v)| v)
-    }
-
-    /// Runs `spawn_blocking` against a pool of the given size, holding one worker
-    /// thread busy while `queued_task_count` further tasks are spawned, and returns
-    /// the telemetry captured while the saturation guard was evaluated on each spawn.
-    #[cfg_attr(test, mutants::skip)] // Test-only helper.
-    fn spawn_blocking_telemetry(max_thread_count: Option<usize>, queued_task_count: usize) -> (Vec<CapturedEvent>, Vec<usize>) {
-        let (sink, processor) = test_emitter(TEST_ID);
-        let worker = Worker::new(
-            Pool::new(max_thread_count.and_then(NonZeroUsize::new)),
-            sink,
-            Shutdown::default(),
-            PanicPolicy::Ignore,
-        );
-
-        // Occupy the pool's single initial thread with a task that blocks until released,
-        // so every task spawned afterwards stays queued and counts towards the overload
-        // threshold instead of completing and disappearing.
-        let (blocker_started_tx, blocker_started_rx) = channel();
-        let (release_tx, release_rx) = Event::<()>::boxed();
-        let release_rx = Arc::new(Mutex::<Option<_>>::new(Some(release_rx)));
-
-        drop(worker.spawn_blocking({
-            let release_rx = Arc::clone(&release_rx);
-            move || {
-                blocker_started_tx.send(()).unwrap();
-                futures::executor::block_on(async {
-                    let release_rx = release_rx.lock_result().unwrap().take().unwrap();
-                    release_rx.await.unwrap();
-                });
-            }
-        }));
-
-        // The sender lives only inside the blocker task. A worker that never runs the
-        // task drops it (and its sender) instead, so `recv` observes an immediate
-        // disconnect and the saturation tests fail deterministically rather than
-        // hanging.
-        blocker_started_rx.recv().expect("the worker must run the blocker task");
-
-        // Each spawn re-evaluates the saturation guard; capture whatever it emits.
-        let mut saturation_counts = Vec::with_capacity(queued_task_count);
-        for _ in 0..queued_task_count {
-            drop(worker.spawn_blocking(|| {}));
-            saturation_counts.push(
-                processor
-                    .events()
-                    .iter()
-                    .filter(|event| event.name() == "arty.rt.blocking_worker.pool_saturated")
-                    .count(),
-            );
-        }
-
-        let events = processor.events();
-
-        // Release the blocker so the queued tasks drain, then wait for the pool to settle.
-        release_tx.send(());
-        worker.remote_results.shutdown().begin(ShutdownCause::default());
-        worker.join();
-
-        (events, saturation_counts)
-    }
-
-    #[test]
-    fn spawn_blocking_reports_saturation_when_overloaded_pool_cannot_grow() {
-        // A pool capped at one thread cannot grow, so overloading it must surface saturation.
-        let (events, saturation_counts) = spawn_blocking_telemetry(Some(1), Pool::MAX_TASKS_PER_THREAD + 1);
-
-        let saturated: Vec<_> = events
-            .iter()
-            .filter(|event| event.name() == "arty.rt.blocking_worker.pool_saturated")
-            .collect();
-        assert!(!saturated.is_empty(), "an overloaded pool that cannot grow must report saturation");
-        assert_eq!(saturated.len(), 1, "one saturation episode emits one warning");
-        assert_eq!(
-            saturation_counts[Pool::MAX_TASKS_PER_THREAD - 1],
-            1,
-            "the first overloaded submission emits the warning, not a later submission"
-        );
-        assert_eq!(
-            dimension(saturated[0], "blocking_worker_pool.max_threads"),
-            Some("1".into()),
-            "the saturation event reports the pool's maximum thread count"
-        );
-        assert_eq!(
-            dimension(saturated[0], "blocking_worker_pool.mode"),
-            Some("shared".into()),
-            "the saturation event reports the configured pool mode"
-        );
-    }
-
-    #[test]
-    fn spawn_blocking_reports_each_distinct_saturation_episode() {
-        let (sink, processor) = test_emitter(TEST_ID);
-        let worker = Worker::new(Pool::new(Some(limit(1))), sink, Shutdown::default(), PanicPolicy::Ignore);
-
-        for expected_events in 1..=2 {
-            let (blocker_started_tx, blocker_started_rx) = channel();
-            let (release_tx, release_rx) = Event::<()>::boxed();
-            drop(worker.spawn_blocking(move || {
-                blocker_started_tx.send(()).unwrap();
-                futures::executor::block_on(release_rx).unwrap();
-            }));
-            blocker_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
-
-            for _ in 0..=Pool::MAX_TASKS_PER_THREAD {
-                drop(worker.spawn_blocking(|| {}));
-            }
-            let (completed_tx, completed_rx) = channel();
-            drop(worker.spawn_blocking_with_completion(|| {}, move || completed_tx.send(()).unwrap()));
-            release_tx.send(());
-            completed_rx.recv_timeout(TEST_TIMEOUT).unwrap();
-            assert!(
-                !worker.pool.saturation_reported.load(Ordering::Acquire),
-                "the task wrapper must reset saturation before reporting completion"
-            );
-            assert_eq!(
-                processor
-                    .events()
-                    .iter()
-                    .filter(|event| event.name() == "arty.rt.blocking_worker.pool_saturated")
-                    .count(),
-                expected_events,
-            );
-        }
-
-        worker.remote_results.shutdown().begin(ShutdownCause::default());
-        worker.join();
-    }
-
-    #[test]
-    fn task_completion_during_overload_does_not_split_the_episode() {
-        let (sink, processor) = test_emitter(TEST_ID);
-        let worker = Worker::new(Pool::new(Some(limit(1))), sink, Shutdown::default(), PanicPolicy::Ignore);
-        let (first_started_tx, first_started_rx) = channel();
-        let (release_first_tx, release_first_rx) = Event::<()>::boxed();
-        drop(worker.spawn_blocking(move || {
-            first_started_tx.send(()).unwrap();
-            futures::executor::block_on(release_first_rx).unwrap();
-        }));
-        first_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
-
-        let (second_started_tx, second_started_rx) = channel();
-        let (release_second_tx, release_second_rx) = Event::<()>::boxed();
-        drop(worker.spawn_blocking(move || {
-            second_started_tx.send(()).unwrap();
-            futures::executor::block_on(release_second_rx).unwrap();
-        }));
-        for _ in 0..Pool::MAX_TASKS_PER_THREAD {
-            drop(worker.spawn_blocking(|| {}));
-        }
-        assert_eq!(
-            processor
-                .events()
-                .iter()
-                .filter(|event| event.name() == "arty.rt.blocking_worker.pool_saturated")
-                .count(),
-            1,
-        );
-
-        release_first_tx.send(());
-        second_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
-        drop(worker.spawn_blocking(|| {}));
-        assert_eq!(
-            processor
-                .events()
-                .iter()
-                .filter(|event| event.name() == "arty.rt.blocking_worker.pool_saturated")
-                .count(),
-            1,
-            "a task completion while the queue remains overloaded must not start a new episode"
-        );
-
-        release_second_tx.send(());
-        worker.remote_results.shutdown().begin(ShutdownCause::default());
-        worker.join();
-    }
-
-    #[test]
-    fn spawn_blocking_grows_pool_without_reporting_saturation() {
-        let (events, _) = spawn_blocking_telemetry(Some(2), Pool::MAX_TASKS_PER_THREAD + 1);
-
-        assert!(
-            events.iter().all(|event| event.name() != "arty.rt.blocking_worker.pool_saturated"),
-            "an overloaded pool that can grow must not report saturation"
-        );
-    }
-
-    #[test]
-    fn spawn_blocking_stays_quiet_when_maxed_out_pool_is_not_overloaded() {
-        // A pool at its maximum size that is not overloaded must stay quiet: saturation is
-        // only reported when an overload coincides with an inability to grow, never on the
-        // inability to grow alone.
-        let (events, _) = spawn_blocking_telemetry(Some(1), 1);
-
-        assert!(
-            events.iter().all(|event| event.name() != "arty.rt.blocking_worker.pool_saturated"),
-            "a pool that is merely at its size limit, without being overloaded, must stay quiet"
-        );
-    }
-
     #[test]
     fn blocking_worker_join_waits_for_tasks_to_complete() {
         let events = Arc::new(Mutex::<Vec<&str>>::new(Vec::new()));
@@ -851,7 +613,7 @@ mod tests {
         let thread_join_handle = thread::spawn({
             let events = Arc::clone(&events);
             move || {
-                let worker = Worker::new(Pool::new(None), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore);
+                let worker = Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore);
 
                 drop(worker.spawn_blocking({
                     let events = Arc::clone(&events);
@@ -907,7 +669,7 @@ mod tests {
         let dropped = Arc::new(AtomicBool::new(false));
         let work_done = Arc::new(AtomicBool::new(false));
 
-        let worker = Worker::new(Pool::new(None), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore);
+        let worker = Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore);
 
         worker.remote_results.shutdown().begin(ShutdownCause::default());
 
@@ -928,12 +690,7 @@ mod tests {
     #[test]
     fn runtime_shutdown_cancels_queued_work_before_worker_shutdown() {
         let runtime_shutdown = Shutdown::default();
-        let worker = Worker::new(
-            Pool::new(Some(limit(1))),
-            Sink::noop(),
-            runtime_shutdown.clone(),
-            PanicPolicy::Ignore,
-        );
+        let worker = Worker::new(Pool::new(Some(limit(1))), runtime_shutdown.clone(), PanicPolicy::Ignore);
         let (started_tx, started_rx) = channel();
         let (release_tx, release_rx) = Event::<()>::boxed();
 
@@ -962,7 +719,7 @@ mod tests {
     fn runtime_shutdown_rejects_new_work_before_worker_shutdown() {
         let runtime_shutdown = Shutdown::default();
         runtime_shutdown.begin(ShutdownCause::default());
-        let worker = Worker::new(Pool::new(Some(limit(1))), Sink::noop(), runtime_shutdown, PanicPolicy::Ignore);
+        let worker = Worker::new(Pool::new(Some(limit(1))), runtime_shutdown, PanicPolicy::Ignore);
         let invoked = Arc::new(AtomicBool::new(false));
 
         let rejected = worker.spawn_blocking({
@@ -978,7 +735,7 @@ mod tests {
 
     #[test]
     fn worker_shutdown_rejects_same_pool_join_without_deadlock_guard() {
-        let worker = Worker::new(Pool::new(Some(limit(1))), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore);
+        let worker = Worker::new(Pool::new(Some(limit(1))), Shutdown::default(), PanicPolicy::Ignore);
         attach_thread(Arc::clone(&worker.pool.identity));
         worker.remote_results.shutdown().begin(ShutdownCause::default());
 

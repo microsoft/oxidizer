@@ -9,7 +9,6 @@ use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
 use arty_executor::{CycleOutcome, Executor, TaskSet};
-use observed::Sink;
 use performables::arc::Arc;
 use performables::sync::channel;
 use thread_aware::Thread;
@@ -21,6 +20,7 @@ use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{Command, LocalWorker, Signal};
+#[cfg(test)]
 use crate::runtime::worker::blocking;
 use crate::task::Context;
 
@@ -106,9 +106,7 @@ impl Worker {
         command_rx: channel::Receiver<Command>,
         dispatcher: DispatcherClient,
         thread: Thread,
-        sink: Sink,
         io: Io,
-        blocking_worker: &blocking::Worker,
         clock: InactiveClock,
         signal: Arc<Signal>,
         monitor_options: MonitorOptions,
@@ -121,14 +119,13 @@ impl Worker {
 
         let executor = Executor::builder()
             .owner_waker(worker_waker)
-            .sink(blocking_worker.sink().clone())
             .thread(thread.clone())
             .panic_policy(panic_policy.into_executor_policy())
             .build();
         let tasks = executor.tasks();
         let executor_shutdown = executor.shutdown();
 
-        let context = Context::new(dispatcher, clock, io, thread, sink);
+        let context = Context::new(dispatcher, clock, io, thread);
         LocalWorker::register_scheduler(context.clone(), tasks.clone(), executor_shutdown);
 
         Self {
@@ -357,12 +354,7 @@ mod tests {
     fn test_blocking_worker() -> (Arc<blocking::Worker>, Shutdown) {
         let shutdown = Shutdown::default();
         (
-            blocking::Worker::new(
-                blocking::Pool::new(None),
-                Sink::noop(),
-                shutdown.clone(),
-                blocking::PanicPolicy::Ignore,
-            ),
+            blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore),
             shutdown,
         )
     }
@@ -463,7 +455,6 @@ mod tests {
         monitor_options: MonitorOptions,
     ) -> Worker {
         let (blocking_worker, shutdown) = blocking;
-        let sink = Sink::noop();
         let thread = ThreadBuilder::default().build(thread::current().id());
         let endpoint = WorkerEndpoint {
             command_tx,
@@ -471,8 +462,8 @@ mod tests {
             thread: thread.clone(),
             blocking_worker: Arc::clone(&blocking_worker),
         };
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), sink.clone(), shutdown));
-        let io_runtime = arty_io_host::IoRuntime::new(sink.clone());
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown));
+        let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
         if !LocalWorker::is_current() {
             LocalWorker::attach();
@@ -484,9 +475,7 @@ mod tests {
             command_rx,
             dispatcher,
             thread,
-            sink,
             io,
-            blocking_worker.as_ref(),
             clock,
             signal,
             monitor_options,
