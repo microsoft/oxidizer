@@ -23,8 +23,8 @@ type EngineMap<K, V> = HashMap<K, V, foldhash::fast::RandomState>;
 /// Sized for a service handling a moderate number of concurrent messages: high enough that an
 /// ordinary request burst is served from the pool rather than rebuilding, low enough that idle
 /// engine state is not retained indefinitely for a workload that has gone quiet. A conservative
-/// starting point rather than a measured optimum -- a caller who knows its concurrency should say
-/// so with [`Resources::with_pool_capacity`][crate::Resources::with_pool_capacity].
+/// starting point rather than a measured optimum. A caller that knows its concurrency can set it
+/// with [`Resources::with_pool_capacity`][crate::Resources::with_pool_capacity].
 const DEFAULT_CAPACITY: usize = 16;
 
 /// Identifies engines that are interchangeable with one another.
@@ -41,27 +41,26 @@ pub(crate) struct EngineKey {
 
 /// A shared, cloneable pool of reusable compression engine state.
 ///
-/// Building an engine allocates and initializes a substantial amount of state -- on a small message,
-/// as much work as the compression itself -- so recycling removes a cost that is roughly fixed per
+/// Building an engine allocates and initializes a substantial amount of state. For a small message,
+/// this costs about as much as compression. Recycling removes a cost that is roughly fixed per
 /// engine and therefore matters most for small messages.
 ///
-/// Reached through [`Resources`][crate::Resources]; a capacity of zero recycles nothing.
+/// Accessed through [`Resources`][crate::Resources]. A capacity of zero disables recycling.
 ///
 /// # What is pooled
 ///
 /// | Engine | Reused? |
 /// |---|---|
-/// | `deflate` / `zlib` / `gzip` compressor | yes -- `reset` preserves its container and level |
-/// | `deflate` / `zlib` decompressor | yes -- `reset` restores the framing |
-/// | `gzip` decompressor | no -- see below |
-/// | `zstd` compressor and decompressor | yes -- `reset` keeps the context's allocations, which is where most of the cost is |
-/// | `brotli` compressor and decompressor | no -- upstream exposes no reset, and recycling its buffers through a custom allocator was measured and did not pay for itself |
+/// | `deflate` / `zlib` / `gzip` compressor | yes. `reset` preserves its container and level. |
+/// | `deflate` / `zlib` decompressor | yes. `reset` restores the framing. |
+/// | `gzip` decompressor | no. See below. |
+/// | `zstd` compressor and decompressor | yes. `reset` keeps the context allocations. |
+/// | `brotli` compressor and decompressor | no. Upstream exposes no reset, and measurements did not justify a custom allocator. |
 ///
 /// The gzip decompressor is the gap worth explaining. `flate2`'s reset takes a boolean that cannot
-/// express gzip framing, so a recycled engine would silently decompress as raw deflate. Taking that
-/// framing over here would let gzip decompressors join the pool, but only by owning header parsing
-/// and checksum validation permanently to route around an upstream API gap. If `flate2` gains a
-/// reset that can express gzip framing, they can start being pooled with no change elsewhere.
+/// express gzip framing, so a recycled engine silently decompresses as raw deflate. One workaround
+/// is for this crate to own header parsing and checksum validation. The other is a `flate2` reset
+/// that preserves gzip framing. Suitable upstream reset support permits pooling with no API change.
 ///
 /// # Bounds
 ///
@@ -79,7 +78,7 @@ pub(crate) struct Pool {
 ///
 /// Each engine class gets its own [`Mutex`] rather than one lock over everything, so a compressor
 /// being returned never waits on a decompressor being taken, and poisoning is contained to the one
-/// class whose critical section panicked -- every checkout treats a poisoned lock as "nothing to
+/// class whose critical section panicked. Every checkout treats a poisoned lock as "nothing to
 /// reuse" and builds a fresh engine instead.
 struct Inner {
     #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
@@ -92,7 +91,7 @@ struct Inner {
     ///
     /// Not keyed by level: checkout resets with `SessionAndParameters` and the compressor then
     /// applies its level unconditionally, so any idle context serves any level. Keying by level
-    /// would only fragment reuse and let a caller-chosen level grow the map.
+    /// only fragments reuse and lets a caller-selected level grow the map.
     #[cfg(any(test, feature = "zstd"))]
     zstd_compressors: Mutex<Vec<zstd_safe::CCtx<'static>>>,
     #[cfg(any(test, feature = "zstd"))]
@@ -148,8 +147,7 @@ impl Pool {
 
     /// Whether this pool stores nothing, so that every access can return without locking.
     ///
-    /// A pool of capacity zero can neither hand an engine out nor keep one, so the locks it would
-    /// take are pure overhead.
+    /// A pool of capacity zero cannot return or retain an engine, so its locks are pure overhead.
     #[cfg_attr(
         not(any(test, feature = "deflate", feature = "gzip", feature = "zlib", feature = "zstd")),
         expect(dead_code, reason = "only the pooled formats ask, and none of them is enabled")
@@ -172,7 +170,7 @@ impl Pool {
             return None;
         }
 
-        // A poisoned pool is not worth propagating: recycling is an optimisation, so building a
+        // Do not propagate a poisoned pool. Recycling is an optimization, so building a
         // fresh engine is always preferable to failing the caller's compression.
         let mut engine = self.inner.compressors.lock_result().ok()?.get_mut(&key).and_then(Vec::pop)?;
 
@@ -184,7 +182,7 @@ impl Pool {
     ///
     /// The engine is borrowed rather than consumed so that a pool which will not store it never
     /// takes ownership. Every caller is a [`Drop`] implementation, and dropping the engine there
-    /// would free it while the value being destroyed is still borrowed, which the aliasing rules
+    /// frees it while the value being destroyed is still borrowed, which the aliasing rules
     /// forbid.
     #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
     pub(crate) fn return_compressor(&self, key: EngineKey, engine: &mut Option<flate2::Compress>) {
@@ -194,7 +192,7 @@ impl Pool {
 
         if let Ok(mut guard) = self.inner.compressors.lock_result() {
             // Probe before inserting. `entry(..).or_default()` leaves an empty bucket behind for
-            // every key it is asked about, so a full pool would still grow the map without bound.
+            // every requested key, so a full pool can still grow the map without a bound.
             if guard.get(&key).map_or(0, Vec::len) < self.inner.capacity
                 && let Some(engine) = engine.take()
             {
@@ -205,7 +203,7 @@ impl Pool {
 
     /// Takes an idle decompressor for `wrapper`, or reports that one must be built.
     ///
-    /// Only called for containers whose reset restores the framing; see
+    /// Called only for containers whose reset restores framing. See
     /// [`Wrapper::reset_restores_framing`].
     #[cfg(any(test, feature = "deflate", feature = "zlib"))]
     pub(crate) fn take_decompressor(&self, wrapper: Wrapper) -> Option<flate2::Decompress> {
@@ -219,7 +217,8 @@ impl Pool {
         Some(engine)
     }
 
-    /// Takes `engine` for reuse, leaving it in place when the pool cannot keep it; see [`Self::return_compressor`].
+    /// Takes `engine` for reuse. It leaves the value in place if the pool cannot retain it.
+    /// See [`Self::return_compressor`].
     #[cfg(any(test, feature = "deflate", feature = "zlib"))]
     pub(crate) fn return_decompressor(&self, wrapper: Wrapper, engine: &mut Option<flate2::Decompress>) {
         if self.is_disabled() {
@@ -364,7 +363,7 @@ mod tests {
             pool.return_compressor(key(6), &mut Some(engine()));
             assert_eq!(idle(&pool, key(6)), 1);
 
-            assert!(pool.take_compressor(key(6)).is_some(), "the returned engine should come back");
+            assert!(pool.take_compressor(key(6)).is_some(), "the returned engine must be available");
             assert_eq!(idle(&pool, key(6)), 0, "taking an engine removes it from the pool");
         }
 
@@ -404,7 +403,7 @@ mod tests {
             let mut dirty = engine();
             let mut scratch = [0_u8; 256];
             dirty.compress(b"half a stream", &mut scratch, flate2::FlushCompress::None).unwrap();
-            assert!(dirty.total_in() > 0, "the engine should be dirty");
+            assert!(dirty.total_in() > 0, "the engine must contain prior input state");
 
             let pool = Pool::new();
             pool.return_compressor(key(6), &mut Some(dirty));
@@ -418,15 +417,15 @@ mod tests {
         fn a_poisoned_pool_silently_drops_a_returned_compressor() {
             let pool = Pool::new();
 
-            // Poison the compressors mutex the same way a panicking holder would.
+            // Poison the compressor mutex in the same way as a panicking holder.
             let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _guard = pool.inner.compressors.lock();
                 panic!("poisoning the mutex for the test");
             }));
-            assert!(poisoned.is_err(), "the panic should have been caught");
+            assert!(poisoned.is_err(), "the test must catch the panic");
             assert!(pool.inner.compressors.is_poisoned(), "the mutex must now be poisoned");
 
-            // Recycling is an optimisation, so a poisoned pool must not panic the caller.
+            // Recycling is an optimization, so a poisoned pool must not panic the caller.
             pool.return_compressor(key(6), &mut Some(engine()));
             assert!(pool.take_compressor(key(6)).is_none(), "a poisoned pool has nothing to give");
         }
@@ -463,7 +462,7 @@ mod tests {
             pool.return_decompressor(wrapper(), &mut Some(engine()));
             assert_eq!(idle(&pool, wrapper()), 1);
 
-            assert!(pool.take_decompressor(wrapper()).is_some(), "the returned engine should come back");
+            assert!(pool.take_decompressor(wrapper()).is_some(), "the returned engine must be available");
             assert_eq!(idle(&pool, wrapper()), 0, "taking an engine removes it from the pool");
         }
 
@@ -493,7 +492,7 @@ mod tests {
                 let _guard = pool.inner.decompressors.lock();
                 panic!("poisoning the mutex for the test");
             }));
-            assert!(poisoned.is_err(), "the panic should have been caught");
+            assert!(poisoned.is_err(), "the test must catch the panic");
             assert!(pool.inner.decompressors.is_poisoned(), "the mutex must now be poisoned");
 
             pool.return_decompressor(wrapper(), &mut Some(engine()));
@@ -522,7 +521,7 @@ mod tests {
             pool.return_zstd_compressor(&mut Some(zstd_safe::CCtx::create()));
             assert_eq!(idle_compressors(&pool), 1);
 
-            assert!(pool.take_zstd_compressor().is_some(), "the returned engine should come back");
+            assert!(pool.take_zstd_compressor().is_some(), "the returned engine must be available");
             assert_eq!(idle_compressors(&pool), 0, "taking an engine removes it from the pool");
         }
 
@@ -552,7 +551,7 @@ mod tests {
                 let _guard = pool.inner.zstd_compressors.lock();
                 panic!("poisoning the mutex for the test");
             }));
-            assert!(poisoned.is_err(), "the panic should have been caught");
+            assert!(poisoned.is_err(), "the test must catch the panic");
             assert!(pool.inner.zstd_compressors.is_poisoned(), "the mutex must now be poisoned");
 
             pool.return_zstd_compressor(&mut Some(zstd_safe::CCtx::create()));
@@ -567,7 +566,7 @@ mod tests {
             pool.return_zstd_decompressor(&mut Some(zstd_safe::DCtx::create()));
             assert_eq!(idle_decompressors(&pool), 1);
 
-            assert!(pool.take_zstd_decompressor().is_some(), "the returned engine should come back");
+            assert!(pool.take_zstd_decompressor().is_some(), "the returned engine must be available");
             assert_eq!(idle_decompressors(&pool), 0, "taking an engine removes it from the pool");
         }
 

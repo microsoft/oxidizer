@@ -15,17 +15,17 @@ use crate::limits::FormatLimits;
 
 /// The deflate family's default bounds.
 ///
-/// Deflate cannot expand its input by more than about `1032x` -- a structural property of the format,
-/// not a tuning choice -- so a single stream is inherently bounded. Measured worst case for 1 MiB of
+/// Deflate cannot expand its input by more than about `1032x`. This limit is a structural property
+/// of the format, not a tuning choice. The measured worst case for 1 MiB of
 /// zeros is `1015x`, so this sits just above what the format can actually produce and never rejects
-/// data deflate could legitimately have generated. Total output and stream count are left open, so
-/// a stream of any length passes through; the buffering conveniences bound what they accumulate.
+/// data that deflate can generate. Total output and stream count are open. Whole-buffer functions
+/// add limits for accumulated output and concatenated stream count.
 pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(1_100), None, None);
 
 /// The deflate window size exponent: the maximum the backend accepts, for the best compression
 /// ratio.
 ///
-/// Only the gzip container needs it explicitly; the raw and zlib constructors default to it.
+/// Only the gzip container needs it explicitly. The raw and zlib constructors use it by default.
 #[cfg(any(test, feature = "gzip"))]
 const WINDOW_BITS: u8 = 15;
 
@@ -80,7 +80,7 @@ impl Wrapper {
     /// Whether a recycled decompressor keeps this container's framing after a reset.
     ///
     /// `Decompress::reset` takes a boolean selecting raw deflate or zlib, so it cannot express
-    /// gzip, which the engine compresses as `window_bits + 16`. Recycling a gzip decompressor would
+    /// gzip, which the engine compresses as `window_bits + 16`. Recycling a gzip decompressor can
     /// silently drop it to raw deflate, so gzip decompressors are never pooled.
     pub(crate) fn reset_restores_framing(self) -> bool {
         match self {
@@ -143,8 +143,8 @@ mod tests {
 
     #[test]
     fn the_level_maps_onto_flates_scale_unchanged() {
-        // Brotli and zstd pin the arithmetic of their mappings; this is flate's, and it being the
-        // identity is exactly why it is worth pinning -- a passthrough is the easiest thing to
+        // Brotli and zstd pin the arithmetic of their mappings. This test pins the flate mapping.
+        // The identity mapping is easy to
         // replace with a constant without anything noticing.
         assert_eq!(compression_for(Level::MIN).level(), 0, "the floor must line up");
         assert_eq!(compression_for(Level::HIGH).level(), 9, "the ceiling must line up");

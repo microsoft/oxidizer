@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! End-to-end behaviour of gzip, including the parts no other format exercises.
+//! End-to-end behavior of gzip, including the parts no other format exercises.
 //!
 //! Gzip-specific: interop fixtures produced by the system `gzip`, and the concatenated-stream
-//! behaviour that only gzip enables by default. Drives the crate-private mechanics where a
+//! behavior that only gzip enables by default. These tests drive crate-private mechanics when a
 //! transition has to be observed rather than inferred from the final bytes.
 
 use std::num::NonZeroU64;
@@ -20,8 +20,8 @@ use crate::{DecompressorLimits, Resources, gzip};
 /// Caps every drain loop in this file.
 ///
 /// A conforming engine always terminates, so exceeding this means the code under test is
-/// spinning. A hanging test reports nothing at all, so the cap turns a hang into a failure --
-/// which also lets mutation testing reach a verdict instead of timing out.
+/// spinning. A hanging test reports nothing, so the cap turns a hang into a failure. This also
+/// lets mutation testing reach a verdict instead of timing out.
 ///
 /// The cap has to stay tight enough for that verdict to arrive inside the mutation harness's
 /// per-mutant timeout. No test here needs more than a few hundred steps, so this leaves well over
@@ -92,7 +92,7 @@ fn streams_a_large_payload_with_a_bounded_working_set() {
     const CHUNK: usize = 16 * 1024;
 
     let payload = b"large streamed payload, compressible but not trivially so; ".repeat(20_000);
-    assert!(payload.len() > 1024 * 1024, "the payload should be large enough to matter");
+    assert!(payload.len() > 1024 * 1024, "the payload must exceed one mebibyte");
 
     let mut compressor = gzip::Compressor::builder()
         .output_chunk_size(chunk(CHUNK))
@@ -120,7 +120,10 @@ fn streams_a_large_payload_with_a_bounded_working_set() {
     }
 
     let gz = BytesView::from_views(compressed);
-    assert!(gz.len() < payload.len() / 10, "the payload should compress well");
+    assert!(
+        gz.len() < payload.len() / 10,
+        "the compressed payload must be less than one tenth of the input"
+    );
 
     let decompressor = gzip::Decompressor::builder()
         .output_chunk_size(chunk(CHUNK))
@@ -134,13 +137,17 @@ fn streams_a_large_payload_with_a_bounded_working_set() {
 #[test]
 fn rejects_a_bomb_before_materialising_it() {
     // A megabyte of zeros compresses to a few hundred bytes. The guard must fire long before the
-    // output is fully materialised, so the cap is set far below what the bomb would expand to.
+    // output is fully materialized, so the cap is far below the expanded bomb size.
     //
     // The cap is set explicitly rather than relying on the default: deflate cannot expand by more
-    // than about `1032x`, so its default ratio never fires on data the format could have produced.
+    // than about `1032x`, so its default ratio never fires on data that the format can produce.
     // An absolute cap is what actually protects a caller that buffers the output.
     let bomb = gzip::compress(view(&vec![0_u8; 1024 * 1024]), &Resources::default()).unwrap();
-    assert!(bomb.len() < 16 * 1024, "the bomb should be tiny: {} bytes", bomb.len());
+    assert!(
+        bomb.len() < 16 * 1024,
+        "the compressed bomb must be less than 16 KiB: {} bytes",
+        bomb.len()
+    );
 
     let mut decompressor = gzip::Decompressor::builder()
         .limits(DecompressorLimits::new().max_output_len(NonZeroU64::new(16 * 1024).unwrap()))
@@ -161,14 +168,14 @@ fn rejects_a_bomb_before_materialising_it() {
     assert!(error.is_limit_exceeded(), "got {error}");
     assert!(
         decompressor.total_out() < 1024 * 1024,
-        "the guard should fire before the full expansion, stopped at {}",
+        "the guard must fire before complete expansion, stopped at {}",
         decompressor.total_out()
     );
 }
 
 #[test]
 fn a_custom_memory_provider_is_used_for_output() {
-    // Anything implementing `MemoryShared` works; the engine never reaches for a global allocator
+    // Any `MemoryShared` implementation works. The engine never uses a global allocator
     // of its own. Counting the reservations is what proves it, rather than merely building a
     // provider and hoping.
     let (memory, activity) = crate::testing::counting_memory();
@@ -206,15 +213,15 @@ fn a_stream_of_many_tiny_members_is_rejected_without_the_caller_setting_any_limi
     assert!(error.is_limit_exceeded(), "expected a limit failure, got: {error}");
     assert!(
         error.to_string().contains("decoded stream count"),
-        "the stream cap should be what fired: {error}"
+        "the stream cap must cause the error: {error}"
     );
 }
 
 #[test]
 fn the_crate_level_decompress_applies_the_default_ceiling_unless_the_caller_decided() {
     // `decompress` takes an already-built decompressor, so without a ceiling of its own it was
-    // bounded only by whatever that decompressor carried -- and brotli declares no defaults at all,
-    // so a hundred compressed bytes could expand without limit.
+    // bounded only by the decompressor settings. Brotli declares no defaults, so one hundred
+    // compressed bytes can expand without a limit.
     let over_the_cap = vec![0_u8; usize::try_from(DEFAULT_MAX_OUTPUT_LEN).unwrap() + 1];
     let compressed = gzip::compress(&*over_the_cap, &Resources::default()).unwrap();
 

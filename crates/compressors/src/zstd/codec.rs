@@ -21,7 +21,7 @@ use crate::zstd::{CompressionLevel, Zstd};
 /// zstd's positive levels run to 22, but the top of that range is not a sensible destination for a
 /// portable "highest quality" setting: compression time rises steeply there while the ratio gain
 /// flattens out. The scale is therefore anchored on zstd's own default rather than stretched across
-/// the whole range, so [`Level::DEFAULT`] means what it says on every format -- a balanced
+/// the complete range, so [`Level::DEFAULT`] maps to a balanced
 /// trade-off.
 ///
 /// Reach the levels outside this range, including zstd's negative fast levels, with
@@ -29,8 +29,8 @@ use crate::zstd::{CompressionLevel, Zstd};
 fn compression_level(level: Level) -> i32 {
     // Two fixed points and an interpolation, rather than a measured curve. `Level::DEFAULT` must
     // land on zstd's own default of 3, and `Level::MAX` must stop short of the expensive top of the
-    // native range. The entries between them are chosen for a smooth, monotonic climb with the
-    // steps widening towards the top, where each additional level costs more; they are not
+    // native range. The entries between them form a smooth, monotonic climb. The steps widen
+    // towards the top, where each additional level costs more. They are not
     // individually derived from a benchmark, so retuning one is a policy change rather than a
     // regression against a recorded measurement.
     const MAPPING: [i32; 10] = [1, 1, 2, 2, 3, 3, 3, 6, 9, 12];
@@ -41,9 +41,9 @@ fn compression_level(level: Level) -> i32 {
 /// Lends zstd an output slice that is still uninitialized.
 ///
 /// Zstd writes into the output without ever reading it, and `WriteBuf` is the trait zstd-safe
-/// provides to say exactly that: the capacity may be uninitialized, and the callee reports what it
+/// provides for this case. The capacity can be uninitialized, and the callee reports what it
 /// filled. Handing over the engine's spare capacity directly is what keeps this engine from zeroing
-/// a whole output chunk before every step, which would defeat the point of reserving uninitialized
+/// a complete output chunk before every step. That initialization defeats the purpose of reserving
 /// memory in the first place.
 struct UninitOutput<'a> {
     buffer: &'a mut [MaybeUninit<u8>],
@@ -53,7 +53,7 @@ struct UninitOutput<'a> {
 
 // SAFETY: `as_mut_ptr` returns a pointer to `capacity` writable bytes that stays valid for the
 // borrow, and `as_slice` never covers more than `filled`, which only ever advances through
-// `filled_until` -- whose own contract is that the caller initialized that many bytes, and which
+// `filled_until`. Its contract requires the caller to initialize that many bytes, and
 // refuses a count larger than the allocation.
 unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
     fn as_slice(&self) -> &[u8] {
@@ -77,8 +77,8 @@ unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
     // zstd is handed `capacity()` and reports back how much of it it wrote, so `n` is always within
     // the buffer. This is checked rather than assumed, and in every build: `as_slice` hands out
     // `filled` bytes as initialized, so a wrong `n` here is the difference between sound and
-    // unsound. Clamping would not be a recovery -- it would assert that the whole buffer was
-    // written, which is exactly what a nonsense report gives no reason to believe -- so an
+    // unsound. Clamping is not recovery. It asserts that the complete buffer was
+    // written, but an invalid report gives no reason to believe that. Therefore, an
     // out-of-range count aborts instead.
     unsafe fn filled_until(&mut self, n: usize) {
         self.check_reported_count(n);
@@ -93,12 +93,12 @@ impl<'a> UninitOutput<'a> {
 }
 
 impl UninitOutput<'_> {
-    /// Rejects a reported write count that the buffer could not have held.
+    /// Rejects a reported write count that exceeds the buffer.
     ///
     /// Split out from [`filled_until`][zstd_safe::WriteBuf::filled_until] so this bound can be
-    /// tested without an unsafe call that could not honour its contract: that method requires the
-    /// caller to have initialized `n` bytes, and a count past the end of the buffer is by
-    /// definition one no caller could have initialized. Checking is safe on its own; recording the
+    /// tested without an unsafe call that cannot honor its contract. That method requires the
+    /// caller to initialize `n` bytes. No caller can initialize a count past the buffer end.
+    /// The range test is safe on its own. Recording the
     /// count is not, which is why only the check moved.
     fn check_reported_count(&self, n: usize) {
         assert!(
@@ -111,7 +111,7 @@ impl UninitOutput<'_> {
 
 /// Reads zstd's "bytes still buffered" answer as a step outcome.
 ///
-/// A zero remaining count means the epilogue is out and the flush or finish is complete; a non-zero
+/// A zero remaining count means that the epilogue is complete. A non-zero
 /// count means the engine has more to give and must be driven again.
 // Treating a zero remaining count as anything else leaves a finish that never completes, so that
 // mutant hangs rather than failing and mutation testing records a timeout instead of a verdict.
@@ -138,9 +138,9 @@ fn decompression_failed(code: usize) -> Error {
 ///
 /// This is therefore defensive against the bundled native library's contract rather than a check on
 /// this crate's own invariants: the bounds are queried from `zstd_safe` at run time, so a future
-/// zstd could narrow them or add validation `set_parameter` does not perform today. It is reported
-/// rather than asserted for that reason -- a caller can act on a build failure from a dependency it
-/// did not choose, whereas a panic would take the process down for an upstream change.
+/// zstd can narrow them or add validation that `set_parameter` does not perform today. Therefore,
+/// this function reports an error instead of asserting. A caller can handle a dependency build
+/// failure, but a panic terminates the process for an upstream change.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)]
 #[cold]
@@ -156,7 +156,7 @@ fn compression_level_rejected(level: i32, code: usize) -> BuildError {
 ///
 /// Defensive against the bundled native library's contract rather than this crate's invariants, for
 /// the same reason as [`compression_level_rejected`]: those limits come from the linked zstd, so a
-/// different build of it could reject a value this one accepts.
+/// different build can reject a value that this build accepts.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)]
 #[cold]
@@ -167,7 +167,7 @@ fn window_log_rejected(window: u32, code: usize) -> BuildError {
     ))
 }
 
-/// Resetting a session, with no parameters to validate, has no documented failure mode; this
+/// Resetting a session has no parameters to validate and no documented failure mode. This
 /// guards against a native error the bundled zstd version has never been observed to return.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)]
@@ -246,7 +246,7 @@ unsafe impl Codec for ZstdCompress {
             .compress_stream2(&mut out_buffer, &mut in_buffer, directive)
             .map_err(compression_failed)?;
 
-        // `ZSTD_e_end` reports zero only once the frame's epilogue has been flushed.
+        // `ZSTD_e_end` reports zero only after it flushes the frame epilogue.
         let step = finish_step(operation, remaining);
 
         Ok((step, in_buffer.pos(), out_buffer.pos()))
@@ -341,7 +341,7 @@ unsafe impl Codec for ZstdDecompress {
             .decompress_stream(&mut out_buffer, &mut in_buffer)
             .map_err(decompression_failed)?;
 
-        // Zero means the frame ended exactly here; anything else is a hint at the next read size.
+        // Zero means that the frame ended here. Another value is a hint for the next read size.
         let step = if hint == 0 { Step::StreamEnd } else { Step::Continue };
 
         Ok((step, in_buffer.pos(), out_buffer.pos()))
@@ -430,12 +430,12 @@ mod tests {
         // `as_slice` hands out `filled` bytes as initialized, so a count past the end is the
         // difference between sound and unsound. It has to fail in release builds too, which is why
         // this is an `assert!` rather than a `debug_assert!`, and why it does not clamp: clamping
-        // would claim the whole buffer was written, which a nonsense report gives no reason to
+        // claims that the complete buffer was written, but an invalid report gives no reason to
         // believe.
         //
         // Driven through the safe check rather than through `filled_until`. That method requires
         // its caller to have initialized `n` bytes, and nine bytes cannot be initialized in an
-        // eight-byte allocation, so calling it here could not have honoured its contract -- the
+        // eight-byte allocation, so calling it here cannot honor its contract. The
         // assertion happening to run first does not make the call legitimate.
         let mut raw = [MaybeUninit::new(0xff_u8); 8];
         let out = UninitOutput::new(&mut raw);
@@ -504,10 +504,7 @@ mod tests {
 
         drop(ZstdCompress::new(Level::DEFAULT, &Zstd::new(), pool.clone()).unwrap());
 
-        assert!(
-            pool.take_zstd_compressor().is_some(),
-            "the context should have been returned to the pool"
-        );
+        assert!(pool.take_zstd_compressor().is_some(), "the context must return to the pool");
     }
 
     #[test]
@@ -525,10 +522,7 @@ mod tests {
             .unwrap(),
         );
 
-        assert!(
-            pool.take_zstd_decompressor().is_some(),
-            "the context should have been returned to the pool"
-        );
+        assert!(pool.take_zstd_decompressor().is_some(), "the context must return to the pool");
     }
 
     #[test]
@@ -538,19 +532,19 @@ mod tests {
 
         let payload = b"zstd flush boundary check payload, repeated so the flush has real work to do. ".repeat(64);
         let (_, consumed, _) = codec.step(&payload, &mut scratch, Operation::Process).unwrap();
-        assert_eq!(consumed, payload.len(), "the whole input should have been consumed");
+        assert_eq!(consumed, payload.len(), "the engine must consume the complete input");
 
         // A one byte buffer cannot hold the whole flush in a single call, so the guard must
         // report `Continue`, not `FlushComplete`, while zstd still has buffered output.
         let mut tiny = [MaybeUninit::uninit(); 1];
         let (step, consumed, produced) = codec.step(&[], &mut tiny, Operation::Flush).unwrap();
         assert_eq!(consumed, 0, "no new input was supplied");
-        assert_eq!(produced, 1, "the tiny buffer should be filled completely");
+        assert_eq!(produced, 1, "the engine must fill the one-byte buffer");
         assert_eq!(step, Step::Continue, "the flush cannot be complete while output remains buffered");
 
         // A generous buffer drains the rest of the same flush and reports completion. This must
         // be a single call, not a retry loop: calling `Flush` again after it already completed
-        // would ask zstd to emit another empty flush frame, so the test only issues exactly the
+        // asks zstd to emit another empty flush frame, so the test issues exactly the
         // calls this one flush needs.
         let mut generous = [MaybeUninit::uninit(); 4096];
         let (step, consumed, _) = codec.step(&[], &mut generous, Operation::Flush).unwrap();

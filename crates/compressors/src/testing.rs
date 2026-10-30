@@ -17,9 +17,9 @@ use thread_aware::{Thread, ThreadAware};
 use crate::core::{Compress, Compression, CompressionInternal, Destination, Output};
 use crate::{Error, Result};
 
-/// What a [`counting_memory`] provider has been asked to do.
+/// Operations requested from a [`counting_memory`] provider.
 ///
-/// A cloneable handle onto the counters, so a test can hold one after the provider has been moved
+/// A cloneable handle to the counters. A test can retain it after moving the provider
 /// into a [`Resources`][crate::Resources].
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MemoryActivity {
@@ -28,12 +28,12 @@ pub(crate) struct MemoryActivity {
 }
 
 impl MemoryActivity {
-    /// How many times a buffer has been reserved from the provider.
+    /// The number of buffer reservations from the provider.
     pub(crate) fn reservations(&self) -> usize {
         self.reservations.load(Ordering::SeqCst)
     }
 
-    /// How many times the provider has been told it moved.
+    /// The number of reported provider moves.
     pub(crate) fn relocations(&self) -> usize {
         self.relocations.load(Ordering::SeqCst)
     }
@@ -125,7 +125,7 @@ impl CompressionInternal for ProgressCompression {
         Ok(Output::Progress)
     }
 
-    // No caller on the path this fixture exists for asks for the byte counters; they are here only
+    // No caller on this fixture path asks for the byte counters. They exist only
     // because the trait requires them.
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)]
@@ -150,7 +150,7 @@ impl Compression for RejectsPush {
 }
 
 impl CompressionInternal for RejectsPush {
-    // Accepting input would make this fixture, whose whole purpose is to reject it, ask for input
+    // If this fixture accepts input, it asks for input
     // endlessly instead. The mutant hangs rather than failing, so no verdict is available.
     #[cfg_attr(test, mutants::skip)]
     fn push(&mut self, _input: BytesView) -> Result<()> {
@@ -163,7 +163,7 @@ impl CompressionInternal for RejectsPush {
         Ok(Output::NeedInput)
     }
 
-    // No caller on the path this fixture exists for asks for the byte counters; they are here only
+    // No caller on this fixture path asks for the byte counters. They exist only
     // because the trait requires them.
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)]

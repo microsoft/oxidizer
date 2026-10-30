@@ -3,25 +3,21 @@
 
 //! Defines `cfg(any_format)`: true when at least one format feature is enabled.
 //!
-//! Several items exist only to hold the crate together when no format is compiled -- the
-//! uninhabited `dispatch!` arm, and the lint suppressions for the parameters and helpers that arm
-//! leaves unused. Spelling that condition inline means repeating all five format features at every
-//! such site, and every future format has to be added to each copy. Naming it once here covers
-//! them all.
+//! Some items exist only when no format is compiled. These items include the uninhabited
+//! `dispatch!` arm and its lint suppressions. An inline condition must repeat all five format
+//! features at each site. This alias keeps the condition in one place.
 //!
-//! This is derived from the enabled features rather than declared as a feature of its own on
-//! purpose. An internal feature that each format turned on would look equivalent, but Cargo lets
-//! anything enable it directly, and `cargo hack --feature-powerset` does exactly that: it would
-//! compile a configuration claiming a format exists while none does, which is the opposite of what
-//! these sites assume. A derived cfg cannot disagree with the features it is computed from, and it
-//! adds nothing to the powerset.
+//! The build derives this alias from the enabled features. It is not a Cargo feature because any
+//! dependency can enable a Cargo feature directly. `cargo hack --feature-powerset` also enables
+//! features directly. A direct enablement can claim that a format exists when none exists.
+//! A derived `cfg` always matches its source features and does not add to the feature powerset.
 
 use cfg_aliases::cfg_aliases;
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
 
-    // Emits the matching `rustc-check-cfg` too, so `unexpected_cfgs` still catches a misspelling.
+    // This also emits the matching `rustc-check-cfg`. `unexpected_cfgs` still detects a misspelling.
     cfg_aliases! {
         any_format: {
             any(
