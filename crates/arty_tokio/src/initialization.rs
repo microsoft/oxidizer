@@ -344,7 +344,7 @@ mod tests {
         };
 
         let result = futures::executor::block_on(installer.finish());
-        runtime.stop().unwrap();
+        runtime.stop().unwrap_err();
 
         assert!(result.is_err());
     }

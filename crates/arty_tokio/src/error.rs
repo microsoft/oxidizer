@@ -151,7 +151,7 @@ mod tests {
         assert!(has_source::<InstallerPanicError>(&classify_join(panic)));
         assert!(has_source::<ArtyShutdownError>(&classify_join(shutdown)));
 
-        runtime.stop().unwrap();
+        runtime.stop().unwrap_err();
         foreign_runtime.stop().unwrap();
     }
 }
