@@ -34,16 +34,17 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 
 ## Changelogs
 
-The changelogs are updated by `scripts/release-packages.ps1` at release time, based on Git history. It is not necessary to make manual edits
-to the changelogs, though you are permitted to do so if explicitly instructed.
+Ordinary code PRs do not update changelogs. Changelog entries are prepared as
+part of an on-demand version PR through the `prepare-release` skill; see
+[docs/releasing.md](docs/releasing.md).
 
 ## Releasing Packages
 
-See [docs/releasing.md](docs/releasing.md) for the release tooling
-reference: glossary (direct/transitive dependent vs dependency, cascade
-direction, change type vs version component, release set, pending
-release, elevation), the cascade-organisation invariants, and the
-workflow for `scripts/release-packages.ps1`.
+See [docs/releasing.md](docs/releasing.md) for the on-demand version-planning
+workflow. Use the repository's `prepare-release` skill as the human entry point;
+it coordinates `increment-versions` and release changelogs. Version preparation
+is not required for ordinary code PRs and does not authorize merging,
+tagging, or publication.
 
 ## Packaging
 
