@@ -142,30 +142,30 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbYgvrzzCJ6-IbSK27HMf6gocbT5GiK2Oe1D8bpyHo2e5nQQ5hZIKCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbYgvrzzCJ6-IbSK27HMf6gocbT5GiK2Oe1D8bpyHo2e5nQQ5hZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link1]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
- [__link10]: https://docs.rs/arty/0.5.0/arty/?search=time::Clock
- [__link11]: https://docs.rs/arty/0.5.0/arty/?search=time::ClockControl
- [__link12]: https://docs.rs/arty/0.5.0/arty/?search=core::Thread
- [__link13]: https://docs.rs/arty/0.5.0/arty/?search=core::ThreadAware
- [__link14]: https://docs.rs/arty/0.5.0/arty/?search=task::RuntimeScheduler::block_on
- [__link15]: https://docs.rs/arty/0.5.0/arty/?search=task::Scheduler::spawn_blocking
- [__link16]: https://docs.rs/arty/0.5.0/arty/?search=task::RuntimeScheduler::spawn_blocking
- [__link17]: https://docs.rs/arty/0.5.0/arty/?search=documentation
- [__link18]: https://docs.rs/arty/0.5.0/arty/?search=documentation::scheduling
- [__link19]: https://docs.rs/arty/0.5.0/arty/?search=documentation::configuration
- [__link2]: https://docs.rs/arty/0.5.0/arty/?search=task::JoinError
- [__link20]: https://docs.rs/arty/0.5.0/arty/?search=documentation::shutdown
- [__link21]: https://docs.rs/arty/0.5.0/arty/?search=documentation::thread_awareness
- [__link22]: https://docs.rs/arty/0.5.0/arty/?search=documentation::time
- [__link23]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
- [__link24]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
- [__link25]: https://docs.rs/arty/0.5.0/arty/?search=time::ClockControl
- [__link3]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
- [__link4]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
- [__link5]: https://docs.rs/arty/0.5.0/arty/?search=runtime::Runtime
- [__link6]: https://docs.rs/arty/0.5.0/arty/?search=task::Context
- [__link7]: https://docs.rs/arty/0.5.0/arty/?search=task::RuntimeScheduler
- [__link8]: https://docs.rs/arty/0.5.0/arty/?search=io::Io
- [__link9]: https://docs.rs/arty/0.5.0/arty/?search=task::Scheduler
+ [__link1]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
+ [__link10]: https://docs.rs/arty/0.6.0/arty/?search=time::Clock
+ [__link11]: https://docs.rs/arty/0.6.0/arty/?search=time::ClockControl
+ [__link12]: https://docs.rs/arty/0.6.0/arty/?search=core::Thread
+ [__link13]: https://docs.rs/arty/0.6.0/arty/?search=core::ThreadAware
+ [__link14]: https://docs.rs/arty/0.6.0/arty/?search=task::RuntimeScheduler::block_on
+ [__link15]: https://docs.rs/arty/0.6.0/arty/?search=task::Scheduler::spawn_blocking
+ [__link16]: https://docs.rs/arty/0.6.0/arty/?search=task::RuntimeScheduler::spawn_blocking
+ [__link17]: https://docs.rs/arty/0.6.0/arty/?search=documentation
+ [__link18]: https://docs.rs/arty/0.6.0/arty/?search=documentation::scheduling
+ [__link19]: https://docs.rs/arty/0.6.0/arty/?search=documentation::configuration
+ [__link2]: https://docs.rs/arty/0.6.0/arty/?search=task::JoinError
+ [__link20]: https://docs.rs/arty/0.6.0/arty/?search=documentation::shutdown
+ [__link21]: https://docs.rs/arty/0.6.0/arty/?search=documentation::thread_awareness
+ [__link22]: https://docs.rs/arty/0.6.0/arty/?search=documentation::time
+ [__link23]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
+ [__link24]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
+ [__link25]: https://docs.rs/arty/0.6.0/arty/?search=time::ClockControl
+ [__link3]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
+ [__link4]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
+ [__link5]: https://docs.rs/arty/0.6.0/arty/?search=runtime::Runtime
+ [__link6]: https://docs.rs/arty/0.6.0/arty/?search=task::Context
+ [__link7]: https://docs.rs/arty/0.6.0/arty/?search=task::RuntimeScheduler
+ [__link8]: https://docs.rs/arty/0.6.0/arty/?search=io::Io
+ [__link9]: https://docs.rs/arty/0.6.0/arty/?search=task::Scheduler
