@@ -8,43 +8,41 @@ use crate::{Cycle, DriverError};
 /// A worker-local I/O driver.
 ///
 /// The runtime creates one driver for each async worker and calls its methods on that worker.
-/// Drivers need not be [`Send`] or [`Sync`]. A driver owns the worker-local state needed to
-/// submit I/O and process completed operations.
+/// Drivers do not need to implement [`Send`] or [`Sync`]. A driver owns the local state that
+/// submits I/O and processes completed operations.
 ///
 /// Dropping a driver must remain memory-safe even when its context still exists.
 pub trait Driver: 'static {
     /// Returns a waker that makes a waiting [`execute_cycle`](Self::execute_cycle) return promptly.
     ///
-    /// Any wake that occurs before or during a wait applies to that wait. If no wait is active, it
-    /// remains latched for the next wait, regardless of how much time passes before that wait
-    /// starts. Waking requires the wait to stop promptly but does not constrain whether the driver
-    /// also processes ready I/O completions.
+    /// A wake before or during a wait applies to that wait. If no wait is active, the wake remains
+    /// latched for the next wait. The elapsed time before that wait does not change this rule. The
+    /// wait must stop promptly. The driver can also process ready I/O completions.
     ///
-    /// The returned waker may be called from any thread and remains safe to invoke after the
-    /// driver is dropped. It must return promptly.
+    /// Any thread can call the returned waker. The waker remains safe to call after the driver is
+    /// dropped. It must return promptly.
     ///
-    /// The returned waker must not be the owner waker supplied through
+    /// The returned waker must differ from the owner waker supplied through
     /// [`DriverOptions::owner_waker`](crate::DriverOptions::owner_waker):
-    /// [`Waker::will_wake`] must return `false` for that pair. It also must not
+    /// [`Waker::will_wake`] must return `false` for that pair. The returned waker must not
     /// synchronously wake the owner waker.
     #[must_use]
     fn waker(&self) -> Waker;
 
-    /// Processes submissions and completions, optionally waiting for I/O.
+    /// Processes submissions and completions and can wait for I/O.
     ///
     /// The runtime invokes secondary drivers first and always gives them
-    /// `Cycle::max_wait() == Duration::ZERO`. A secondary processes completions that are ready
-    /// now, or returns immediately when another thread processes its notifications.
+    /// `Cycle::max_wait() == Duration::ZERO`. A secondary either processes ready completions or
+    /// returns immediately when another thread processes its notifications.
     ///
-    /// The runtime invokes the primary driver last. The primary may wait for I/O for up to
+    /// The runtime invokes the primary driver last. The primary can wait for I/O for up to
     /// [`Cycle::max_wait`].
     ///
-    /// The driver processes completed operations and returns rather than looping indefinitely.
-    /// If more completed operations are already ready when it returns, it must call the owner
-    /// waker from [`DriverOptions`](crate::DriverOptions). A secondary that needs another cycle
-    /// when a later notification arrives must also arrange for that waker to be called. A primary
-    /// does not need to wake the worker for later completions because its next `execute_cycle`
-    /// call performs the worker's I/O wait.
+    /// The driver processes completed operations and returns. It must not loop indefinitely. If
+    /// more completed operations are ready, it must call the owner waker from
+    /// [`DriverOptions`](crate::DriverOptions) before it returns. A secondary must also arrange a
+    /// wake when a later notification requires another cycle. A primary does not need this wake.
+    /// Its next `execute_cycle` call performs the worker's I/O wait.
     ///
     /// # Errors
     ///
@@ -56,19 +54,18 @@ pub trait Driver: 'static {
     /// Closes the context to new operations and releases the driver's resources.
     ///
     /// The runtime calls this method synchronously after it stops calling `execute_cycle` on the
-    /// async worker. Operations still in flight are no longer assumed to be valuable; the driver
-    /// may cancel or disrupt them instead of waiting for them to finish. Any cleanup that remains
-    /// must make progress by itself or on the driver's own threads and must not require another
-    /// driver on that async worker to run. The driver chooses a finite time limit and returns an
-    /// error instead of waiting indefinitely.
+    /// async worker. The driver can cancel or disrupt in-flight operations instead of waiting for
+    /// them. Remaining cleanup must make progress by itself or on the driver's own threads. It
+    /// must not require another driver on that async worker. The driver uses a finite time limit
+    /// and returns an error instead of waiting indefinitely.
     ///
-    /// The runtime attempts remaining drivers after an error. It may shut down secondaries before
-    /// the primary.
+    /// The runtime attempts to shut down the remaining drivers after an error. It can shut down
+    /// secondaries before the primary.
     ///
-    /// Shutdown is best effort. This method reports failures returned by the implementation; it
-    /// does not convert panics into [`DriverError`]. Drivers and their custom wakers, diagnostics,
-    /// and cleanup hooks must not panic. The runtime does not promise recovery from those panics,
-    /// poisoned state, or failed invariants.
+    /// Shutdown is best effort. This method reports failures from the implementation. It does not
+    /// convert panics into [`DriverError`]. Drivers, custom wakers, diagnostics, and cleanup hooks
+    /// must not panic. The runtime does not guarantee recovery from a panic, poisoned state, or
+    /// failed invariant.
     ///
     /// # Errors
     ///
