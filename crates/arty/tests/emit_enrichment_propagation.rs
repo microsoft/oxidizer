@@ -13,7 +13,7 @@ use std::sync::mpsc;
 use std::task::Poll;
 
 use arty::runtime::{PanicPolicy, Runtime, WorkersPolicy};
-use arty::task::Builtins;
+use arty::task::Context;
 use observed::enrichment::EnrichFutureExt;
 use observed::{Enrichment, Sink, emit, event};
 use support::JoinHandleExt as _;
@@ -135,7 +135,7 @@ fn enrichment_propagates_via_scheduler_spawn() {
             async {
                 let handle = cx.scheduler().spawn({
                     let sink = sink.clone();
-                    async move |_cx: Builtins| collect_enrichment_keys(&sink)
+                    async move |_cx: Context| collect_enrichment_keys(&sink)
                 });
                 handle.await.unwrap()
             }
@@ -180,7 +180,7 @@ fn no_enrichment_leak_without_context() {
             // No .enrich() here — spawn directly.
             let handle = cx.scheduler().spawn({
                 let sink = sink.clone();
-                async move |_cx: Builtins| collect_enrichment_keys(&sink)
+                async move |_cx: Context| collect_enrichment_keys(&sink)
             });
             handle.await.unwrap()
         })
@@ -201,12 +201,12 @@ fn nested_spawn_preserves_enrichment_chain() {
                 // Spawn level-1 task.
                 let handle = cx.scheduler().spawn({
                     let level_one_sink = sink.clone();
-                    async move |cx: Builtins| {
+                    async move |cx: Context| {
                         // Level-1 adds its own enrichment and spawns level-2.
                         async {
                             let handle = cx.scheduler().spawn({
                                 let level_two_sink = level_one_sink.clone();
-                                async move |_cx: Builtins| collect_enrichment_keys(&level_two_sink)
+                                async move |_cx: Context| collect_enrichment_keys(&level_two_sink)
                             });
                             handle.await.unwrap()
                         }

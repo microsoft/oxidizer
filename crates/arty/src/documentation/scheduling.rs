@@ -10,20 +10,20 @@
 //!
 //! Borrow a [`RuntimeScheduler`](crate::task::RuntimeScheduler) from the runtime
 //! to let it place a new task. A [`Scheduler`](crate::task::Scheduler)
-//! from [`Builtins`](crate::task::Builtins) keeps child tasks on its worker,
+//! from [`Context`](crate::task::Context) keeps child tasks on its worker,
 //! even when cloned.
 //!
 //! Use [`spawn_anywhere`](crate::task::Scheduler::spawn_anywhere) to let the
 //! runtime choose a worker for a new task and relocate a `ThreadAware` value.
 //! Use [`spawn_at`](crate::task::Scheduler::spawn_at) with a coordinate from
-//! [`Builtins::control`](crate::task::Builtins::control) to target one
+//! [`Context::control`](crate::task::Context::control) to target one
 //! worker. The runtime-wide `spawn_anywhere` also relocates its `ThreadAware`
 //! input. Pass that input separately to a non-capturing function, rather than
 //! capturing it in a closure. The order in which you submit tasks does not
 //! determine when they finish.
 //!
 //! When you call `spawn_anywhere` or `spawn_at` through a `Scheduler` from
-//! `Builtins`, the result must also implement
+//! `Context`, the result must also implement
 //! [`ThreadAware`](crate::core::ThreadAware), which includes `Send`. If an Arty
 //! worker awaits the returned handle, Arty relocates a successful result to that
 //! worker. This is usually the worker that submitted the task. If code outside
@@ -42,10 +42,10 @@
 //! use std::rc::Rc;
 //! use std::time::Duration;
 //!
-//! use arty::task::Builtins;
+//! use arty::task::Context;
 //!
 //! # #[arty::main]
-//! # async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
+//! # async fn main(cx: Context) -> Result<(), arty::task::JoinError> {
 //! let answer = cx
 //!     .scheduler()
 //!     .spawn(|child| {
@@ -71,10 +71,10 @@
 //! `settings.toml` from the current directory:
 //!
 //! ```no_run
-//! use arty::task::Builtins;
+//! use arty::task::Context;
 //!
 //! # #[arty::main]
-//! # async fn main(cx: Builtins) -> Result<(), ohno::AppError> {
+//! # async fn main(cx: Context) -> Result<(), ohno::AppError> {
 //! let contents = cx
 //!     .scheduler()
 //!     .spawn_blocking(|| std::fs::read_to_string("settings.toml"))

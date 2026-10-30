@@ -11,7 +11,7 @@
 //!
 //! # Use the task's clock
 //!
-//! Each task gets a clock through [`Builtins::clock`](crate::task::Builtins::clock).
+//! Each task gets a clock through [`Context::clock`](crate::task::Context::clock).
 //! Use a stopwatch for elapsed time and `system_time()` for a wall-clock
 //! timestamp, which can change independently of elapsed time.
 //!
@@ -19,11 +19,11 @@
 //! use std::future::pending;
 //! use std::time::Duration;
 //!
-//! use arty::task::Builtins;
+//! use arty::task::Context;
 //! use tick::FutureExt;
 //!
 //! # #[arty::main]
-//! # async fn main(cx: Builtins) {
+//! # async fn main(cx: Context) {
 //! let watch = cx.clock().stopwatch();
 //! cx.clock().delay(Duration::from_millis(1)).await;
 //! assert!(watch.elapsed() >= Duration::from_millis(1));
@@ -53,11 +53,11 @@
 //! use std::task::Poll;
 //! use std::time::Duration;
 //!
-//! use arty::task::Builtins;
+//! use arty::task::Context;
 //! use arty::time::ClockControl;
 //!
 //! #[arty::test]
-//! async fn controlled_delay(cx: Builtins, control: ClockControl) {
+//! async fn controlled_delay(cx: Context, control: ClockControl) {
 //!     let watch = cx.clock().stopwatch();
 //!     let mut delay = pin!(cx.clock().delay(Duration::from_secs(30)));
 //!     poll_fn(|context| {

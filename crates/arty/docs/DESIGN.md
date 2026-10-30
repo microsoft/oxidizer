@@ -1,7 +1,7 @@
 # Design
 
 Arty runs async tasks on dedicated workers, with separate pools for blocking
-work. Tasks receive `Builtins` with their worker's scheduler, clock, I/O handle,
+work. Tasks receive `Context` with their worker's scheduler, clock, I/O handle,
 and telemetry sink.
 
 This document describes the application-facing design. Maintainers should also
@@ -29,7 +29,7 @@ independently.
 ## Placing new work
 
 `Runtime::scheduler()` lets the runtime place new work.
-`Builtins::scheduler()` submits ordinary child tasks to its worker, even when
+`Context::scheduler()` submits ordinary child tasks to its worker, even when
 cloned or used from another thread.
 
 Ordinary task factories and results must be `Send`, but their futures need not
@@ -38,7 +38,7 @@ the destination worker.
 
 `spawn_anywhere` lets the runtime choose a worker.
 `Scheduler::spawn_at` targets a worker coordinate obtained from
-`Builtins::control().workers()`. Submission order does not guarantee
+`Context::control().workers()`. Submission order does not guarantee
 completion order. See the
 [scheduling guide](../src/documentation/scheduling.rs) for examples.
 
@@ -69,15 +69,15 @@ potentially using more threads.
 
 Arty provides timers and hosts drivers supplied by I/O libraries built on
 `arty_io_core`, but it does not include a built-in network or file I/O
-implementation. Access compatible contexts through `Builtins::io()`; see
+implementation. Access compatible contexts through `Context::io()`; see
 [I/O](IO.md). Use `spawn_blocking` for synchronous I/O.
 
 ## Runtime lifetime and shutdown
 
-Schedulers, joins, and `Builtins` do not keep the runtime running. Dropping a
+Schedulers, joins, and `Context` do not keep the runtime running. Dropping a
 join handle neither cancels its task nor waits for it.
 
-`Builtins::control()` is the only source of `RuntimeControl`.
+`Context::control()` is the only source of `RuntimeControl`.
 `RuntimeControl::request_stop` requests shutdown without waiting.
 `Runtime::stop` consumes the owner, normally waits, and reports shutdown errors.
 Dropping the owner also requests shutdown and normally waits, but cannot return

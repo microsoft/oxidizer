@@ -19,7 +19,7 @@ use crate::runtime::telemetry::events::{RuntimeStopped, RuntimeStopping};
 use crate::runtime::thread::waiter::ThreadWaiter;
 use crate::runtime::worker::protocol::{AsyncWorkerCommand, QueuedIoAccess, QueuedTaskFactory};
 use crate::runtime::{Error, Workers};
-use crate::task::Builtins;
+use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::prepare_remote;
 
@@ -149,7 +149,7 @@ impl DispatcherCore {
 
     pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
@@ -158,7 +158,7 @@ impl DispatcherCore {
 
     pub(crate) fn spawn_relocating<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
@@ -168,7 +168,7 @@ impl DispatcherCore {
 
     pub(crate) fn spawn_at_worker_relocating<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
@@ -187,7 +187,7 @@ impl DispatcherCore {
         self.worker_endpoints.first().thread.owner() == thread.owner()
     }
 
-    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Builtins) + Send>) -> Result<(), Error> {
+    pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Context) + Send>) -> Result<(), Error> {
         if matches!(self.shutdown().state(), ShutdownState::Started) {
             return Err(self.runtime_shutting_down_error());
         }
@@ -241,7 +241,7 @@ impl DispatcherCore {
 
     pub(crate) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
@@ -251,7 +251,7 @@ impl DispatcherCore {
     /// Records the execution worker so a successful result can relocate when its join is polled.
     fn spawn_relocating_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
@@ -261,7 +261,7 @@ impl DispatcherCore {
 
     fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {

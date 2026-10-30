@@ -7,14 +7,14 @@
 
 use std::cell::RefCell;
 
-use arty::task::{Builtins, Scheduler};
+use arty::task::{Context, Scheduler};
 
 #[arty::test]
 #[expect(
     clippy::float_cmp,
     reason = "fake logic for tests, no computation involved - direct comparison is fine"
 )]
-async fn stash_scheduler(cx: Builtins) {
+async fn stash_scheduler(cx: Context) {
     // We store a scheduler in some object that can schedule tasks without having knowledge of the
     // exact type of the task or task context.
 

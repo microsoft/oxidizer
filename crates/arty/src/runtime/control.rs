@@ -7,7 +7,7 @@ use crate::task::Scheduler;
 
 /// A handle for requesting runtime shutdown.
 ///
-/// Borrow this handle through [`Builtins::control`](crate::task::Builtins::control).
+/// Borrow this handle through [`Context::control`](crate::task::Context::control).
 /// It can be cloned and used from any thread without keeping the runtime alive
 /// or retaining an association with the task's worker.
 ///
@@ -34,7 +34,7 @@ impl RuntimeControl {
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// let tasks: Vec<_> = cx
     ///     .control()
     ///     .workers()

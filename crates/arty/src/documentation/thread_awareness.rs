@@ -4,7 +4,7 @@
 //! Keep work on its worker, or move worker-aware values explicitly.
 //!
 //! A task stays on one worker while it runs. Its
-//! [`Builtins`](crate::task::Builtins) provides a scheduler, clock, I/O handle,
+//! [`Context`](crate::task::Context) provides a scheduler, clock, I/O handle,
 //! and telemetry sink associated with that worker.
 //!
 //! # Keep work on the same worker
@@ -13,10 +13,10 @@
 //! clone from a blocking thread to submit work back to the original worker:
 //!
 //! ```
-//! use arty::task::Builtins;
+//! use arty::task::Context;
 //!
 //! # #[arty::main]
-//! # async fn main(cx: Builtins) -> Result<(), arty::task::JoinError> {
+//! # async fn main(cx: Context) -> Result<(), arty::task::JoinError> {
 //! let home = cx.thread().id();
 //! let executed_on = cx
 //!     .scheduler()
@@ -39,10 +39,10 @@
 //! to the chosen worker before the task uses it:
 //!
 //! ```
-//! use arty::task::{Builtins, JoinError};
+//! use arty::task::{Context, JoinError};
 //!
 //! # #[arty::main]
-//! # async fn main(cx: Builtins) -> Result<(), JoinError> {
+//! # async fn main(cx: Context) -> Result<(), JoinError> {
 //! let home = cx.thread().clone();
 //! let (worker, scheduler) = cx
 //!     .scheduler()
@@ -60,13 +60,13 @@
 //! ```
 //!
 //! The runtime may choose the original worker. If a task only needs its own
-//! services, the runtime-wide scheduler passes `Builtins` to its factory instead
+//! services, the runtime-wide scheduler passes `Context` to its factory instead
 //! of requiring an existing value to be moved.
 //!
 //! # What stays put
 //!
 //! `spawn_anywhere` starts a new task; it never moves a running one. Simply
-//! moving or cloning `Builtins` does not change its worker association.
+//! moving or cloning `Context` does not change its worker association.
 //! Scheduler handles and worker coordinates do not keep the runtime alive.
 //!
 //! Ordinary `spawn` and `block_on` do not relocate captures or returned values.

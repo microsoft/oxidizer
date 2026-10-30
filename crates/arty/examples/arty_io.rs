@@ -5,7 +5,7 @@
 
 use std::task::Waker;
 
-use arty::task::{Builtins, JoinError};
+use arty::task::{Context, JoinError};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use thread_aware::ThreadAware;
 
@@ -46,13 +46,13 @@ impl Driver for ExampleDriver {
 }
 
 #[arty::main(workers = 2)]
-async fn main(builtins: Builtins) -> Result<(), JoinError> {
-    let tasks: Vec<_> = builtins
+async fn main(cx: Context) -> Result<(), JoinError> {
+    let tasks: Vec<_> = cx
         .control()
         .workers()
         .into_iter()
         .map(|worker| {
-            builtins.scheduler().spawn_at(worker, builtins.clone(), |worker| async move {
+            cx.scheduler().spawn_at(worker, cx.clone(), |worker| async move {
                 let _ = worker.io().context::<ExampleContext>(&());
             })
         })

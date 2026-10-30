@@ -6,10 +6,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::discard_task_panic_payload;
 
-use crate::task::Builtins;
+use crate::task::Context;
 use crate::task::preparation::RemoteFutureFactory;
 
-pub(crate) type IoAccess = Box<dyn FnOnce(&Builtins) + Send>;
+pub(crate) type IoAccess = Box<dyn FnOnce(&Context) + Send>;
 
 /// Owns a queued closure until the destination worker consumes it.
 ///
@@ -120,7 +120,7 @@ mod tests {
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
-        let builtins = runtime.scheduler().block_on(async |builtins| builtins).unwrap();
+        let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let executor = Executor::builder().build();
         let invoked = Arc::new(AtomicBool::new(false));
         let factory_invoked = Arc::clone(&invoked);
@@ -128,7 +128,7 @@ mod tests {
             factory_invoked.store(true, Ordering::Release);
         });
 
-        let _registered = QueuedTaskFactory::new(factory).into_inner().register(builtins, &executor.tasks());
+        let _registered = QueuedTaskFactory::new(factory).into_inner().register(cx, &executor.tasks());
 
         assert!(invoked.load(Ordering::Acquire));
         runtime.stop().unwrap();

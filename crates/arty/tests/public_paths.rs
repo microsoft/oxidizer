@@ -13,14 +13,14 @@ use std::panic::{RefUnwindSafe, UnwindSafe};
 use arty::runtime::{
     BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, RuntimeBuilder, RuntimeControl, Workers, WorkersPolicy,
 };
-use arty::task::{Builtins, JoinError, JoinHandle, RuntimeScheduler, Scheduler};
+use arty::task::{Context, JoinError, JoinHandle, RuntimeScheduler, Scheduler};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware::ThreadAware;
 
 assert_impl_all!(Runtime: Send, Sync, Debug);
 assert_not_impl_any!(Runtime: ThreadAware);
 assert_impl_all!(RuntimeBuilder: Debug);
-assert_impl_all!(Builtins: Send, Sync, Clone, Debug, ThreadAware,
+assert_impl_all!(Context: Send, Sync, Clone, Debug, ThreadAware,
     AsRef<Scheduler>, AsRef<arty::time::Clock>, AsRef<observed::Sink>);
 assert_impl_all!(Scheduler: Send, Sync, Clone, Debug);
 // Scheduler reaches application-controlled telemetry processors, and Arty does
@@ -29,7 +29,7 @@ assert_not_impl_any!(Scheduler: UnwindSafe, RefUnwindSafe);
 assert_impl_all!(JoinHandle<()>: Future, Send, UnwindSafe, RefUnwindSafe);
 assert_impl_all!(JoinError: StdError, Send, Sync, Debug);
 assert_impl_all!(RuntimeControl: Send, Sync, Clone, Debug);
-assert_not_impl_any!(RuntimeControl: ThreadAware, From<&'static Builtins>, From<&'static Runtime>);
+assert_not_impl_any!(RuntimeControl: ThreadAware, From<&'static Context>, From<&'static Runtime>);
 assert_impl_all!(Workers: Send, Sync, Debug);
 assert_not_impl_any!(Workers: Clone);
 assert_impl_all!(RuntimeScheduler: Send, Sync, Debug);
@@ -53,7 +53,7 @@ const _: fn(RuntimeBuilder, PanicPolicy) -> RuntimeBuilder = RuntimeBuilder::pan
 
 const _: fn(&Runtime) -> &RuntimeScheduler = Runtime::scheduler;
 const _: fn(Runtime) -> Result<(), Error> = Runtime::stop;
-const _: fn(&Builtins) -> &RuntimeControl = Builtins::control;
+const _: fn(&Context) -> &RuntimeControl = Context::control;
 const _: fn(&RuntimeControl) = RuntimeControl::request_stop;
 const _: fn(&RuntimeControl) -> &Workers = RuntimeControl::workers;
 fn assert_join_output<F: Future<Output = Result<u32, JoinError>>>() {}

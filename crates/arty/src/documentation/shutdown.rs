@@ -4,14 +4,14 @@
 //! Runtime shutdown and task cancellation.
 //!
 //! [`Runtime`](crate::runtime::Runtime) owns the workers. Scheduler and
-//! [`Builtins`](crate::task::Builtins) handles do not keep the runtime running.
+//! [`Context`](crate::task::Context) handles do not keep the runtime running.
 //! The [`main`](crate::main) and [`test`](crate::test) attributes stop their
 //! runtime when the annotated body returns; await child tasks that must finish
 //! before then.
 //!
 //! # Requesting and waiting for shutdown
 //!
-//! [`Builtins::control`](crate::task::Builtins::control) exposes
+//! [`Context::control`](crate::task::Context::control) exposes
 //! [`RuntimeControl`](crate::runtime::RuntimeControl), whose
 //! [`request_stop`](crate::runtime::RuntimeControl::request_stop) method
 //! requests shutdown without waiting and can be called repeatedly. Keep the
