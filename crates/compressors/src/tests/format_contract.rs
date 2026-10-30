@@ -940,7 +940,7 @@ macro_rules! format_contract {
 
                     let mut compressed = BytesBuf::new();
                     // Use one guard, not two. The shared `StepGuard` can trip first and
-                    // reported the generic message, leaving this bound unreachable. This one keeps
+                    // report the generic message, leaving this bound unreachable. This one keeps
                     // the chunk size in the diagnostic, which is what the test is varying.
                     let mut pulls = 0;
                     loop {
