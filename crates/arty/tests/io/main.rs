@@ -25,7 +25,6 @@ use arty::io::Io;
 use arty::runtime::{Runtime, RuntimeBuilder, WorkersPolicy};
 use arty::task::{JoinError, JoinHandle, Scheduler};
 use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
-use observed_testing::{CapturedEvent, MockProcessor, TEST_ID, test_emitter};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use testing_aids::is_mutation_testing;
 use tick::SimpleClock;
@@ -562,16 +561,6 @@ fn runtime(workers: usize) -> Runtime {
     Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
 }
 
-fn runtime_with_telemetry(workers: usize) -> (Runtime, MockProcessor) {
-    let (sink, processor) = test_emitter(TEST_ID);
-    let runtime = Runtime::builder()
-        .workers(WorkersPolicy::exactly(workers))
-        .sink(sink)
-        .build()
-        .unwrap();
-    (runtime, processor)
-}
-
 fn worker_schedulers(runtime: &Runtime, workers: usize) -> Vec<Scheduler> {
     let schedulers: Vec<_> = (0..workers)
         .map(|_| {
@@ -590,10 +579,6 @@ fn flush_workers(workers: &[Scheduler]) {
     for worker in workers {
         worker.spawn(async |_| {}).join().unwrap();
     }
-}
-
-fn event_count(processor: &MockProcessor, name: &str) -> usize {
-    processor.events().iter().filter(|event| event.name() == name).count()
 }
 
 fn wait_until(mut condition: impl FnMut() -> bool) {
@@ -619,4 +604,3 @@ mod cycles;
 mod external;
 mod failures;
 mod registration;
-mod telemetry;

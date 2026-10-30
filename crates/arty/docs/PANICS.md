@@ -11,9 +11,9 @@ first contained async task or blocking callback panic shuts down the runtime.
 `PanicPolicy::ignore()` keeps the runtime running.
 
 Arty does not guarantee recovery from panics raised by destructors, custom
-wakers, join notifications, telemetry processors, or other cleanup and
-notification hooks. Arty also does not recover poisoned state, failed
-invariants, or unsafe-contract violations.
+wakers, join notifications, or other cleanup and notification hooks. Arty also
+does not recover poisoned state, failed invariants, or unsafe-contract
+violations.
 
 Arty may catch some of these panics to maintain memory safety, but callers
 cannot rely on continued operation or complete cleanup. The process may abort,

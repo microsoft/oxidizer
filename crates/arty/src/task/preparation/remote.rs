@@ -4,7 +4,6 @@
 use std::cell::Cell;
 
 use arty_executor::{TaskOptions, TaskPlacement, TaskSet};
-use observed::context::Transfer;
 use plurality::{Box as PoolBox, MultiPool, coerce};
 
 use crate::task::Context;
@@ -16,27 +15,24 @@ thread_local! {
 }
 
 struct TaskFactory<F> {
-    pending: Option<(F, Transfer)>,
+    pending: Option<F>,
 }
 
 impl<F> TaskFactory<F> {
-    fn new(inner: F, enrichment: Transfer) -> Self {
-        Self {
-            pending: Some((inner, enrichment)),
-        }
+    fn new(inner: F) -> Self {
+        Self { pending: Some(inner) }
     }
 
-    fn into_parts(mut self) -> (F, Transfer) {
+    fn into_inner(mut self) -> F {
         self.pending.take().expect("a queued factory is consumed exactly once")
     }
 }
 
 impl<F> Drop for TaskFactory<F> {
     fn drop(&mut self) {
-        let Some((factory, enrichment)) = self.pending.take() else {
+        let Some(factory) = self.pending.take() else {
             return;
         };
-        let _guard = enrichment.apply_current_thread();
         discard_panicking_drop(factory);
     }
 }
@@ -92,7 +88,6 @@ impl RemoteFutureFactory {
 pub(crate) fn prepare_remote<FF, F, R>(
     result_pool: &JoinHandlePool,
     future_factory: FF,
-    parent_task_enrichment: Transfer,
     placement: TaskPlacement,
 ) -> (RemoteFutureFactory, JoinHandle<R>)
 where
@@ -101,11 +96,11 @@ where
     R: Send + 'static,
 {
     let (handle, result_tx) = result_pool.handle();
-    let future_factory = TaskFactory::new(future_factory, parent_task_enrichment);
+    let future_factory = TaskFactory::new(future_factory);
     let future_factory = RemoteFutureFactory::new(move |cx, tasks| {
-        let (future_factory, parent_task_enrichment) = future_factory.into_parts();
+        let future_factory = future_factory.into_inner();
         let inner = DeferredTask::new(future_factory, cx);
-        let options = TaskOptions::observed(parent_task_enrichment, placement);
+        let options = TaskOptions::new(placement);
         tasks.add(inner, options, result_tx);
     });
     (future_factory, handle)
@@ -118,8 +113,6 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
-
-    use observed::Sink;
 
     use super::*;
 
@@ -178,8 +171,7 @@ mod tests {
                 }
             }
 
-            let sink = Sink::noop();
-            drop(TaskFactory::new(PanicOnDrop(&dropped), sink.transfer_context()));
+            drop(TaskFactory::new(PanicOnDrop(&dropped)));
         }));
         result.unwrap();
         assert!(dropped.load(Ordering::Acquire));

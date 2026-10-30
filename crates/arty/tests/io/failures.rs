@@ -32,7 +32,7 @@ fn external_initialization_failure_is_returned_and_stops_runtime() {
 
 #[test]
 fn try_context_reports_driver_construction_failure_and_stops_runtime() {
-    let (runtime, processor) = runtime_with_telemetry(1);
+    let runtime = runtime(1);
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.fail_driver_at.store(1, Ordering::SeqCst);
@@ -52,7 +52,6 @@ fn try_context_reports_driver_construction_failure_and_stops_runtime() {
     assert_eq!(error, "driver construction failed");
     assert_eq!(runtime.stop().unwrap_err().to_string(), "driver construction failed");
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 0);
-    assert_eq!(event_count(&processor, "arty.rt.io.driver.initialization_failed"), 1);
 }
 
 #[test]

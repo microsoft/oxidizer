@@ -93,7 +93,6 @@ mod tests {
     use std::task::{Context, Poll, Wake, Waker};
 
     use arty_executor::{Executor, TaskPlacement};
-    use observed::Sink;
 
     use super::*;
     use crate::task::preparation::prepare_remote;
@@ -138,9 +137,8 @@ mod tests {
 
     #[test]
     fn queued_factory_disposal_contains_join_notification_panic() {
-        let sink = Sink::noop();
         let result_pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
-        let (factory, join) = prepare_remote(&result_pool, |_| async { 42 }, sink.transfer_context(), TaskPlacement::Any);
+        let (factory, join) = prepare_remote(&result_pool, |_| async { 42 }, TaskPlacement::Any);
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
         let waker = Waker::from(Arc::clone(&wake));
