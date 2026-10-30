@@ -8,10 +8,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use arty::core::{Thread, ThreadAware};
 use arty::task::{Builtins, JoinHandle};
 use performables::sync::channel::{OneshotReceiver, OneshotSender, WatchReceiver, WatchSender, oneshot, watch};
-use performables::sync::mutex::Mutex;
-use tokio::runtime::{Handle, Runtime, RuntimeFlavor};
+use tokio::runtime::{Handle, RuntimeFlavor};
 
-use crate::error::{classify_join, context_conflict, initialization_aborted, runtime_build, unsupported_runtime};
+use crate::error::{classify_join, context_conflict, initialization_aborted, unsupported_runtime};
 use crate::{InitError, TokioHandle};
 
 const PHASE_PREPARING: u8 = 0;
@@ -32,85 +31,6 @@ impl Phase {
             PHASE_ABORTED => Self::Aborted,
             _ => Self::Preparing,
         }
-    }
-}
-
-enum RuntimeOwner {
-    Internal(Runtime),
-    External(Handle),
-}
-
-impl RuntimeOwner {
-    fn new(tokio: TokioHandle) -> Result<Self, InitError> {
-        match tokio.kind {
-            crate::TokioHandleKind::Default => {
-                let runtime = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(runtime_build)?;
-                Ok(Self::Internal(runtime))
-            }
-            crate::TokioHandleKind::External(handle) => {
-                if !matches!(handle.runtime_flavor(), RuntimeFlavor::MultiThread) {
-                    return Err(unsupported_runtime());
-                }
-                Ok(Self::External(handle))
-            }
-        }
-    }
-
-    fn install(self, control: &arty::runtime::RuntimeControl) -> InstalledRuntime {
-        match self {
-            Self::Internal(runtime) => {
-                let handle = runtime.handle().clone();
-                let runtime = Arc::new(Mutex::new(Some(runtime)));
-                let shutdown_runtime = Arc::clone(&runtime);
-                control
-                    .on_shutdown(move || {
-                        if let Some(runtime) = shutdown_runtime.lock().take() {
-                            shutdown_committed_runtime(runtime);
-                        }
-                    })
-                    .expect("Tokio initialization runs as an Arty task before shutdown callbacks can complete");
-                InstalledRuntime {
-                    handle,
-                    rollback: Some(RuntimeRollback { runtime: Some(runtime) }),
-                }
-            }
-            Self::External(handle) => InstalledRuntime { handle, rollback: None },
-        }
-    }
-}
-
-struct InstalledRuntime {
-    handle: Handle,
-    rollback: Option<RuntimeRollback>,
-}
-
-struct RuntimeRollback {
-    runtime: Option<Arc<Mutex<Option<Runtime>>>>,
-}
-
-impl RuntimeRollback {
-    fn disarm(&mut self) {
-        self.runtime = None;
-    }
-}
-
-impl Drop for RuntimeRollback {
-    fn drop(&mut self) {
-        let Some(runtime) = self.runtime.take().and_then(|runtime| runtime.lock().take()) else {
-            return;
-        };
-        runtime.shutdown_background();
-    }
-}
-
-fn shutdown_committed_runtime(runtime: Runtime) {
-    if Handle::try_current().is_ok() {
-        runtime.shutdown_background();
-    } else {
-        drop(runtime);
     }
 }
 
@@ -223,13 +143,11 @@ impl Installer {
 }
 
 pub(crate) async fn initialize_all_workers(cx: &Builtins, tokio: TokioHandle) -> Result<(), InitError> {
-    let runtime = RuntimeOwner::new(tokio)?;
-    initialize_all_workers_with_runtime(cx, runtime).await
-}
-
-async fn initialize_all_workers_with_runtime(cx: &Builtins, runtime: RuntimeOwner) -> Result<(), InitError> {
+    let handle = tokio.handle;
+    if !matches!(handle.runtime_flavor(), RuntimeFlavor::MultiThread) {
+        return Err(unsupported_runtime());
+    }
     let workers: Vec<Thread> = cx.control().workers().into_iter().cloned().collect();
-    let InstalledRuntime { handle, mut rollback } = runtime.install(cx.control());
     let (transaction, phase_changed) = Transaction::new(handle);
     let mut installers = workers
         .iter()
@@ -266,9 +184,6 @@ async fn initialize_all_workers_with_runtime(cx: &Builtins, runtime: RuntimeOwne
     }
 
     if commit_if_started(&transaction, startup_succeeded(failure.as_ref(), ready, installers.len())) {
-        if let Some(rollback) = &mut rollback {
-            rollback.disarm();
-        }
         abort_on_drop.disarm();
         return Ok(());
     }

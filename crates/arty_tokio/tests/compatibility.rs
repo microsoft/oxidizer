@@ -8,7 +8,7 @@
 mod support;
 
 use std::error::Error as _;
-use std::future::{pending, poll_fn, ready};
+use std::future::{poll_fn, ready};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
@@ -42,22 +42,15 @@ fn worker_has_context(scheduler: &Scheduler, worker: &Thread) -> bool {
     futures::executor::block_on(scheduler.spawn_at(worker, (), |()| async { Handle::try_current().is_ok() })).unwrap()
 }
 
-struct DropSignal(mpsc::SyncSender<()>);
-
-impl Drop for DropSignal {
-    fn drop(&mut self) {
-        let _send_result = self.0.send(());
-    }
-}
-
 #[test]
-fn default_init_makes_tokio_available_on_every_worker() {
+fn external_init_makes_tokio_available_on_every_worker() {
+    let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
     let runtime = runtime(2);
 
     let observations = runtime
         .scheduler()
         .block_on(async |cx| {
-            arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap();
+            arty_tokio::init(&cx, tokio.handle()).await.unwrap();
             let workers = cx.control().workers().into_iter().cloned().collect::<Vec<_>>();
             let tasks = workers
                 .iter()
@@ -81,24 +74,21 @@ fn default_init_makes_tokio_available_on_every_worker() {
 
     assert_eq!(observations, vec![(true, 42, 42); 2]);
     stop_bounded(runtime);
+    drop(tokio);
 }
 
 #[test]
 fn duplicate_init_rolls_back_without_removing_existing_contexts() {
+    let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
     let runtime = runtime(2);
 
     let (errors, contexts) = runtime
         .scheduler()
         .block_on(async |cx| {
-            arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap();
+            arty_tokio::init(&cx, tokio.handle()).await.unwrap();
             let mut errors = Vec::new();
             for _ in 0..3 {
-                errors.push(
-                    arty_tokio::init(&cx, arty_tokio::TokioHandle::default())
-                        .await
-                        .unwrap_err()
-                        .to_string(),
-                );
+                errors.push(arty_tokio::init(&cx, tokio.handle()).await.unwrap_err().to_string());
             }
             (errors, worker_contexts(&cx).await)
         })
@@ -107,6 +97,7 @@ fn duplicate_init_rolls_back_without_removing_existing_contexts() {
     assert_eq!(errors, vec!["an Arty worker already has a Tokio runtime context"; 3]);
     assert_eq!(contexts, vec![true, true]);
     stop_bounded(runtime);
+    drop(tokio);
 }
 
 #[test]
@@ -141,23 +132,26 @@ fn external_runtime_supports_tokio_tasks_and_in_memory_io() {
 
 #[test]
 fn tokio_join_handles_keep_native_panic_semantics() {
+    let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
     let runtime = runtime(1);
 
     let error = runtime
         .scheduler()
         .block_on(async |cx| {
-            arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap();
+            arty_tokio::init(&cx, tokio.handle()).await.unwrap();
             tokio::spawn(async { panic!("Tokio task panic") }).await.unwrap_err()
         })
         .unwrap();
 
     assert!(error.is_panic());
     stop_bounded(runtime);
+    drop(tokio);
 }
 
 #[test]
 fn tokio_handle_debug_is_opaque() {
-    assert_eq!(format!("{:?}", arty_tokio::TokioHandle::default()), "TokioHandle { .. }");
+    let tokio = Builder::new_multi_thread().build().unwrap();
+    assert_eq!(format!("{:?}", arty_tokio::TokioHandle::from(tokio.handle())), "TokioHandle { .. }");
 }
 
 fn current_thread_init_error() -> arty_tokio::InitError {
@@ -194,13 +188,14 @@ fn init_error_preserves_its_private_source() {
 
 #[test]
 fn shutdown_during_submission_is_a_typed_init_error() {
+    let tokio = Builder::new_multi_thread().build().unwrap();
     let runtime = runtime(1);
 
     let error = runtime
         .scheduler()
         .block_on(async |cx| {
             cx.control().request_stop();
-            arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap_err()
+            arty_tokio::init(&cx, tokio.handle()).await.unwrap_err()
         })
         .unwrap();
 
@@ -209,6 +204,7 @@ fn shutdown_during_submission_is_a_typed_init_error() {
         "Arty shut down during Tokio compatibility initialization\ncaused by: runtime is shutting down"
     );
     stop_bounded(runtime);
+    drop(tokio);
 }
 
 struct ExistingContext {
@@ -260,6 +256,17 @@ impl ThreadAware for InitOutcome {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
+struct InitRequest {
+    builtins: Builtins,
+    handle: Handle,
+}
+
+impl ThreadAware for InitRequest {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        self.builtins.relocate(source, destination);
+    }
+}
+
 #[test]
 fn partial_conflict_rolls_back_and_allows_retry() {
     let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
@@ -299,15 +306,22 @@ fn partial_conflict_rolls_back_and_allows_retry() {
     );
     blocker_ready.recv_timeout(TEST_TIMEOUT).unwrap();
 
-    let initialization = scheduler.spawn_at(&clean_worker, builtins.clone(), |cx| async move {
-        match arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await {
-            Ok(()) => InitOutcome::Success,
-            Err(error) => {
-                assert_eq!(error.to_string(), "an Arty worker already has a Tokio runtime context");
-                InitOutcome::Failed
+    let initialization = scheduler.spawn_at(
+        &clean_worker,
+        InitRequest {
+            builtins: builtins.clone(),
+            handle: tokio.handle().clone(),
+        },
+        |request| async move {
+            match arty_tokio::init(&request.builtins, request.handle).await {
+                Ok(()) => InitOutcome::Success,
+                Err(error) => {
+                    assert_eq!(error.to_string(), "an Arty worker already has a Tokio runtime context");
+                    InitOutcome::Failed
+                }
             }
-        }
-    });
+        },
+    );
     let deadline = Instant::now() + TEST_TIMEOUT;
     while !worker_has_context(&scheduler, &clean_worker) {
         assert!(Instant::now() < deadline, "clean worker did not prepare its Tokio context");
@@ -323,9 +337,14 @@ fn partial_conflict_rolls_back_and_allows_retry() {
 
     context_release.send(()).unwrap();
     futures::executor::block_on(holder).unwrap();
-    let retry = scheduler.spawn_at(&clean_worker, builtins, |cx| async move {
-        arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.is_ok()
-    });
+    let retry = scheduler.spawn_at(
+        &clean_worker,
+        InitRequest {
+            builtins,
+            handle: tokio.handle().clone(),
+        },
+        |request| async move { arty_tokio::init(&request.builtins, request.handle).await.is_ok() },
+    );
     assert!(futures::executor::block_on(retry).unwrap());
 
     stop_bounded(runtime);
@@ -334,13 +353,13 @@ fn partial_conflict_rolls_back_and_allows_retry() {
 
 #[test]
 fn cancelled_init_rolls_back_and_allows_retry() {
+    let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
     let runtime = runtime(2);
-    let (runtime_dropped, runtime_drop_observed) = mpsc::sync_channel(1);
 
     runtime
         .scheduler()
-        .block_on(async move |cx| {
-            let mut initialization = Box::pin(arty_tokio::init(&cx, arty_tokio::TokioHandle::default()));
+        .block_on(async |cx| {
+            let mut initialization = Box::pin(arty_tokio::init(&cx, tokio.handle()));
             poll_fn(|context| match initialization.as_mut().poll(context) {
                 std::task::Poll::Pending => std::task::Poll::Ready(()),
                 std::task::Poll::Ready(result) => {
@@ -350,13 +369,6 @@ fn cancelled_init_rolls_back_and_allows_retry() {
             .await;
 
             assert_eq!(worker_contexts(&cx).await, vec![true, true]);
-            let (task_started, task_ready) = oneshot();
-            drop(tokio::spawn(async move {
-                let _drop_signal = DropSignal(runtime_dropped);
-                task_started.send(()).unwrap();
-                pending::<()>().await;
-            }));
-            task_ready.await.unwrap();
             drop(initialization);
 
             let deadline = Instant::now() + TEST_TIMEOUT;
@@ -364,27 +376,29 @@ fn cancelled_init_rolls_back_and_allows_retry() {
                 assert!(Instant::now() < deadline, "canceled initialization did not clean up");
             }
 
-            arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap();
+            arty_tokio::init(&cx, tokio.handle()).await.unwrap();
             assert_eq!(worker_contexts(&cx).await, vec![true, true]);
         })
         .unwrap();
 
-    runtime_drop_observed.recv_timeout(TEST_TIMEOUT).unwrap();
     stop_bounded(runtime);
+    drop(tokio);
 }
 
 #[test]
-fn independent_arty_runtimes_have_independent_default_tokio_runtimes() {
+fn independent_arty_runtimes_can_use_independent_tokio_runtimes() {
     let first = runtime(1);
     let second = runtime(1);
+    let first_tokio = Builder::new_multi_thread().enable_all().build().unwrap();
+    let second_tokio = Builder::new_multi_thread().enable_all().build().unwrap();
     let completed = Arc::new(AtomicUsize::new(0));
 
-    for runtime in [&first, &second] {
+    for (runtime, tokio) in [(&first, &first_tokio), (&second, &second_tokio)] {
         let completed = Arc::clone(&completed);
         runtime
             .scheduler()
             .block_on(async |cx: Builtins| {
-                arty_tokio::init(&cx, arty_tokio::TokioHandle::default()).await.unwrap();
+                arty_tokio::init(&cx, tokio.handle()).await.unwrap();
                 tokio::spawn(async move {
                     completed.fetch_add(1, Ordering::SeqCst);
                 })
@@ -397,4 +411,6 @@ fn independent_arty_runtimes_have_independent_default_tokio_runtimes() {
     assert_eq!(completed.load(Ordering::SeqCst), 2);
     stop_bounded(first);
     stop_bounded(second);
+    drop(first_tokio);
+    drop(second_tokio);
 }
