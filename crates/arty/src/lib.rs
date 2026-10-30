@@ -353,13 +353,7 @@ pub use arty_macros::main;
 #[doc(inline)]
 pub use arty_macros::test;
 
-#[cfg(all(
-    doc,
-    any(docsrs, doctest),
-    feature = "rt",
-    feature = "macros",
-    feature = "test-util"
-))]
+#[cfg(all(doc, any(docsrs, doctest), feature = "rt", feature = "macros", feature = "test-util"))]
 pub mod documentation;
 
 #[cfg(any(test, feature = "rt"))]
