@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Verifies the feature-gated public facade.
+//! Verifies the public facade.
 
 #[test]
 fn core_types_are_reexported() {
@@ -13,7 +13,6 @@ fn core_types_are_reexported() {
     assert_thread_aware::<String>();
 }
 
-#[cfg(feature = "time")]
 #[test]
 fn time_types_are_reexported() {
     use arty::time::Clock;
@@ -21,8 +20,8 @@ fn time_types_are_reexported() {
     let _ = std::mem::size_of::<Clock>();
 }
 
-#[cfg(all(feature = "time", feature = "test-util"))]
+#[cfg(feature = "test-util")]
 #[test]
-fn clock_control_is_reexported_with_both_features() {
+fn clock_control_is_reexported_with_test_util() {
     let _ = std::mem::size_of::<arty::time::ClockControl>();
 }

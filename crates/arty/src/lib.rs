@@ -5,7 +5,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
-    not(all(docsrs, feature = "rt", feature = "macros", feature = "time", feature = "test-util")),
+    not(all(docsrs, feature = "rt", feature = "macros", feature = "test-util")),
     expect(rustdoc::broken_intra_doc_links, reason = "feature-gated items and docs.rs-only guides")
 )]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png")]
@@ -131,13 +131,12 @@
 //!
 //! The default feature set enables `rt`, `macros`, and `monitor`.
 //!
-//! - **`rt`** - Enables the runtime, task, and I/O APIs, and implies `time`.
+//! - **`rt`** - Enables the runtime, task, and I/O APIs.
 //! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
 //! - **`monitor`** - Enables the Seismograph monitor dependency. It forwards
 //!   `performables` telemetry support when `performables` is enabled. It does
-//!   not start monitoring.
-//! - **`time`** - Enables clocks, timers, and timeouts.
-//! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
+//!   not start monitoring or emit new telemetry.
+//! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl).
 //!   Enable it in dev-dependencies, not production dependencies.
 
 use arty_io_core as _;
@@ -359,7 +358,6 @@ pub use arty_macros::test;
     any(docsrs, doctest),
     feature = "rt",
     feature = "macros",
-    feature = "time",
     feature = "test-util"
 ))]
 pub mod documentation;
@@ -387,10 +385,9 @@ pub mod core {
 
 /// Runtime clocks and controlled test time.
 ///
-/// Enable `time` to use [`Clock`](crate::time::Clock) without starting an Arty
+/// [`Clock`](crate::time::Clock) is always available, even without an Arty
 /// runtime. A task's `Context::clock()` has timers driven by its worker.
-/// Applications that need timer future types or extension traits should use
-/// the underlying [`tick`] API directly.
+/// Use the underlying [`tick`] API for timer future types and extension traits.
 ///
 /// Enable `test-util` in dev-dependencies to use `ClockControl` for simulated time.
 ///
@@ -409,7 +406,6 @@ pub mod core {
 /// # }
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
-#[cfg(any(test, feature = "time"))]
 pub mod time {
     #[doc(inline)]
     pub use tick::Clock;

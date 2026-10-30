@@ -38,7 +38,6 @@ default = ["rt", "macros", "monitor"]
 macros = ["rt", "dep:arty_macros"]
 monitor = ["dep:seismograph", "seismograph/monitor", "performables?/seismograph"]
 rt = [
-    "time",
     "dep:arty_executor",
     "dep:arty_io_host",
     "dep:derive_more",
@@ -54,8 +53,7 @@ rt = [
     "dep:plurality",
     "dep:thread_aware",
 ]
-time = ["dep:tick"]
-test-util = ["tick?/test-util", "many_cpus?/test-util"]
+test-util = ["tick/test-util", "many_cpus?/test-util"]
 
 [dependencies]
 arty_executor = { workspace = true, optional = true }
@@ -76,7 +74,7 @@ plurality = { workspace = true, features = ["std"], optional = true }
 seismograph = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
-tick = { workspace = true, optional = true }
+tick = { workspace = true }
 
 [dev-dependencies]
 arty_executor = { path = "../arty_executor" }
