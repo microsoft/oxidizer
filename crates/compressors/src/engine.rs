@@ -247,8 +247,8 @@ impl Pump {
     /// The buffering fallbacks in force for this destination.
     ///
     /// Empty for [`Destination::Stream`]: each chunk is consumed and dropped, so neither cumulative
-    /// output nor stream count measures anything the caller retains. Bounding them can stop
-    /// off long streams for no benefit.
+    /// output nor stream count measures anything the caller retains. Bounding them can stop long
+    /// streams for no benefit.
     const fn buffered(&self, into: Destination) -> BufferedFallbacks {
         match into {
             Destination::Buffer => self.buffered,
