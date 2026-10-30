@@ -118,18 +118,17 @@ fn assert_blocking_pool_limit(max_threads: usize) {
 
     let (queued_started_tx, queued_started_rx) = mpsc::channel();
     // Six queued tasks exceed the pool's five-task-per-thread growth threshold.
-    let queued = (0..6)
-        .map(|_| {
-            let gate = Arc::clone(&gate);
-            let queued_started_tx = queued_started_tx.clone();
-            scheduler.spawn_blocking(move || {
-                let worker = thread::current().id();
-                queued_started_tx.send(worker).unwrap();
-                gate.wait();
-                worker
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut queued = Vec::with_capacity(6);
+    for _ in 0..6 {
+        let gate = Arc::clone(&gate);
+        let queued_started_tx = queued_started_tx.clone();
+        queued.push(scheduler.spawn_blocking(move || {
+            let worker = thread::current().id();
+            queued_started_tx.send(worker).unwrap();
+            gate.wait();
+            worker
+        }));
+    }
     drop(queued_started_tx);
 
     if max_threads > 1 {
@@ -138,9 +137,9 @@ fn assert_blocking_pool_limit(max_threads: usize) {
     }
 
     gate.release();
-    let worker_ids = std::iter::once(blocker.join().unwrap())
-        .chain(queued.into_iter().map(|task| task.join().unwrap()))
-        .collect::<HashSet<_>>();
+    let mut worker_ids = HashSet::new();
+    worker_ids.insert(blocker.join().unwrap());
+    worker_ids.extend(queued.into_iter().map(|task| task.join().unwrap()));
     runtime.stop().unwrap();
 
     assert_eq!(worker_ids.len(), max_threads);
