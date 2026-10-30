@@ -66,6 +66,12 @@ mod private {
     impl Sealed for super::PerNuma {}
     impl Sealed for super::PerProcess {}
 
+    pub trait MakeMutSealed {}
+
+    impl<T: Clone> MakeMutSealed for T {}
+    impl<T: Clone> MakeMutSealed for [T] {}
+    impl MakeMutSealed for str {}
+
     pub trait AffinityStrategy: Sealed {
         type Key: Clone + Debug + Eq + Hash + Send + Sync + 'static;
 
@@ -140,9 +146,9 @@ pub trait Strategy<T: ?Sized>: private::Sealed {
         T: Send + Sync;
 }
 
-/// Internal cloning contract for process-wide [`Arc::make_mut`].
+/// Sealed cloning contract for process-wide [`Arc::make_mut`].
 #[doc(hidden)]
-pub trait MakeMutTarget {
+pub trait MakeMutTarget: private::MakeMutSealed {
     /// Clones the allocation when necessary and returns unique mutable access.
     fn make_mut(arc: &mut StdArc<Self>) -> &mut Self;
 }
@@ -854,14 +860,6 @@ where
     #[must_use]
     pub fn as_ptr(this: &Self) -> *const T {
         StdArc::as_ptr(S::current(&this.state))
-    }
-
-    /// Returns the current pointee address used as the telemetry identity.
-    #[cfg(feature = "seismograph")]
-    #[doc(hidden)]
-    #[must_use]
-    pub fn telemetry_object_id(this: &Self) -> seismograph::recorder::event::ObjectId {
-        seismograph::recorder::event::ObjectId::from_ptr(Self::as_ptr(this).cast::<()>())
     }
 }
 

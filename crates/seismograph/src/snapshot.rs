@@ -7,12 +7,8 @@
 //! [`crate::snapshot::decode()`] continues to accept versions 1 through 7.
 //! Unknown future format versions are rejected.
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::Path;
-#[cfg(test)]
-use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::time::Instant;
 use std::{fmt, ptr};
@@ -25,7 +21,7 @@ use crate::recorder::event::{
 use crate::recorder::io::{BufferId, IoEvent, IoOperationId, IoOutcome, IoResourceId, IoResourceKind};
 use crate::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
 use crate::recorder::thread::{ThreadId, ThreadLog};
-use crate::recorder::{self, EventSampling, MAX_STACK_FRAMES, RecordingPolicies, RecordingPolicy, SuppressionGuard};
+use crate::recorder::{self, EventSampling, MAX_STACK_FRAMES, Policies, Policy, SuppressionGuard};
 use crate::system::SystemSlice;
 
 const MAGIC: [u8; 8] = *b"SEISMOG\0";
@@ -37,17 +33,7 @@ const LEGACY_EVENT_V1_FIXED_LEN: usize = 28;
 const LEGACY_EVENT_V2_FIXED_LEN: usize = 76;
 const THREAD_FIXED_LEN: usize = 24;
 const THREAD_NAMED_FIXED_LEN: usize = 26;
-const SNAPSHOT_ARENA_CHUNK_BYTES: usize = 4_194_304;
-const SNAPSHOT_ARENA_DEDICATED_THRESHOLD: usize = 2_097_152;
-
 static SOURCES: AtomicPtr<Source> = AtomicPtr::new(ptr::null_mut());
-
-thread_local! {
-    static ACTIVE_SNAPSHOT_ARENA: Cell<*mut SnapshotArena> = const { Cell::new(ptr::null_mut()) };
-    static SNAPSHOT_ARENA_SUSPENSION_DEPTH: Cell<usize> = const { Cell::new(0) };
-    #[cfg(test)]
-    static LIVE_SNAPSHOT_ARENA_CHUNKS: Cell<usize> = const { Cell::new(0) };
-}
 
 /// Treatment of recorder event buffers after a snapshot captures them.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -117,13 +103,13 @@ pub struct Source {
     id: SourceId,
     name: &'static str,
     schema_version: u16,
-    capture: Capture,
+    capture: CaptureFn,
     registered: AtomicBool,
     next: AtomicPtr<Self>,
 }
 
 /// Callback that contributes one source payload to a snapshot.
-pub type Capture = for<'a> fn(SnapshotContext<'a>) -> Result<SourceData, Error>;
+pub type CaptureFn = for<'a> fn(SnapshotContext<'a>) -> Result<SourceData, Error>;
 
 impl Source {
     /// Creates a source descriptor suitable for static storage.
@@ -132,7 +118,7 @@ impl Source {
     ///
     /// Panics when `name` is empty or `schema_version` is zero.
     #[must_use]
-    pub const fn new(id: SourceId, name: &'static str, schema_version: u16, capture: Capture) -> Self {
+    pub const fn new(id: SourceId, name: &'static str, schema_version: u16, capture: CaptureFn) -> Self {
         assert!(!name.is_empty(), "a seismograph source name must not be empty");
         assert!(schema_version != 0, "a seismograph source schema version must be nonzero");
         Self {
@@ -150,7 +136,6 @@ impl Source {
 #[derive(Clone, Copy, Debug)]
 pub struct SnapshotContext<'a> {
     events: &'a Events,
-    observation: Option<recorder::RecordingObservation>,
 }
 
 impl<'a> SnapshotContext<'a> {
@@ -158,15 +143,6 @@ impl<'a> SnapshotContext<'a> {
     #[must_use]
     pub const fn events(self) -> &'a Events {
         self.events
-    }
-
-    /// Recording generation and observation boundary associated with this capture.
-    ///
-    /// Destructive captures retain the pre-reset generation. A stopped capture
-    /// retains its stop-time boundary rather than advancing frozen task ages.
-    #[must_use]
-    pub const fn recording_observation(self) -> Option<recorder::RecordingObservation> {
-        self.observation
     }
 }
 
@@ -321,21 +297,16 @@ impl fmt::Debug for Snapshot {
 /// Returns an error when a source fails, source identities conflict, or the
 /// output buffer cannot be allocated.
 pub(crate) fn snapshot(options: SnapshotOptions) -> Result<Snapshot, Error> {
-    with_snapshot_arena(|| {
-        let _suppression = SuppressionGuard::enter();
-        let started_at = Instant::now();
-        let (events, observation) = recorder::try_snapshot_with_observation(options.event_buffers)?;
-        let mut events = events.unwrap_or_default();
-        events.clock = EventClock::CURRENT;
-        let sources = capture_sources(SnapshotContext {
-            events: &events,
-            observation,
-        })?;
-        encode_snapshot(&DecodedSnapshot {
-            capture_duration_nanos: u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX),
-            events,
-            sources,
-        })
+    let _suppression = SuppressionGuard::enter();
+    let started_at = Instant::now();
+    let events = recorder::try_snapshot(options.event_buffers)?;
+    let mut events = events.unwrap_or_default();
+    events.clock = EventClock::CURRENT;
+    let sources = capture_sources(SnapshotContext { events: &events })?;
+    encode_snapshot(&DecodedSnapshot {
+        capture_duration_nanos: u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX),
+        events,
+        sources,
     })
 }
 
@@ -470,23 +441,23 @@ fn decode_sampling(reader: &mut Reader<'_>, format_version: u16) -> Result<u64, 
     validated_sampling(u64::from(sampling)).map(u64::from)
 }
 
-fn decode_recording_policies(reader: &mut Reader<'_>, format_version: u16) -> Result<RecordingPolicies, Error> {
+fn decode_recording_policies(reader: &mut Reader<'_>, format_version: u16) -> Result<Policies, Error> {
     if format_version < 5 {
         let sampling =
             EventSampling::one_in(usize::try_from(decode_sampling(reader, format_version)?).map_err(|_error| Error::invalid_format())?)
                 .ok_or_else(Error::invalid_format)?;
-        let policy = RecordingPolicy {
+        let policy = Policy {
             enabled: true,
             capture_backtraces: false,
             event_sampling: sampling,
         };
-        return Ok(RecordingPolicies {
+        return Ok(Policies {
             allocations: policy,
             general_events: policy,
             arc_dereferences: policy,
             runtime_tasks: policy,
-            io: RecordingPolicy::default(),
-            cache: RecordingPolicy::default(),
+            io: Policy::default(),
+            cache: Policy::default(),
         });
     }
     let allocations = decode_recording_policy(reader)?;
@@ -500,14 +471,14 @@ fn decode_recording_policies(reader: &mut Reader<'_>, format_version: u16) -> Re
     let io = if format_version >= 7 {
         decode_recording_policy(reader)?
     } else {
-        RecordingPolicy::default()
+        Policy::default()
     };
     let cache = if format_version >= 8 {
         decode_recording_policy(reader)?
     } else {
-        RecordingPolicy::default()
+        Policy::default()
     };
-    Ok(RecordingPolicies {
+    Ok(Policies {
         allocations,
         general_events,
         arc_dereferences,
@@ -517,7 +488,7 @@ fn decode_recording_policies(reader: &mut Reader<'_>, format_version: u16) -> Re
     })
 }
 
-fn decode_recording_policy(reader: &mut Reader<'_>) -> Result<RecordingPolicy, Error> {
+fn decode_recording_policy(reader: &mut Reader<'_>) -> Result<Policy, Error> {
     let enabled = reader.u8()?;
     let capture_backtraces = reader.u8()?;
     if enabled > 1 || capture_backtraces > 1 || reader.u16()? != 0 {
@@ -526,7 +497,7 @@ fn decode_recording_policy(reader: &mut Reader<'_>) -> Result<RecordingPolicy, E
     let sampling = reader.u32()?;
     let event_sampling =
         EventSampling::one_in(usize::try_from(sampling).map_err(|_error| Error::invalid_format())?).ok_or_else(Error::invalid_format)?;
-    Ok(RecordingPolicy {
+    Ok(Policy {
         enabled: enabled != 0,
         capture_backtraces: capture_backtraces != 0,
         event_sampling,
@@ -810,7 +781,7 @@ fn encode_snapshot(snapshot: &DecodedSnapshot) -> Result<Snapshot, Error> {
     Ok(encoded)
 }
 
-fn encode_recording_policy(writer: &mut Writer<'_>, policy: RecordingPolicy) -> Result<(), Error> {
+fn encode_recording_policy(writer: &mut Writer<'_>, policy: Policy) -> Result<(), Error> {
     writer.u8(u8::from(policy.enabled))?;
     writer.u8(u8::from(policy.capture_backtraces))?;
     writer.u16(0)?;
@@ -913,349 +884,6 @@ impl SystemBytes {
     fn as_mut_slice(&mut self) -> &mut [u8] {
         &mut self.bytes
     }
-}
-
-struct SnapshotArenaChunk {
-    previous: *mut Self,
-    next: *mut Self,
-    layout: Layout,
-    cursor: usize,
-    dedicated: bool,
-}
-
-#[derive(Clone, Copy)]
-struct SnapshotArenaRange {
-    start: usize,
-    end: usize,
-    chunk: *mut SnapshotArenaChunk,
-}
-
-#[cfg_attr(test, mutants::skip)] // Equal starts must remain before older ranges so parent fallback stays deterministic.
-const fn range_starts_before(existing: usize, inserted: usize) -> bool {
-    existing < inserted
-}
-
-struct SnapshotArena {
-    head: *mut SnapshotArenaChunk,
-    parent: *mut Self,
-    // Shared chunks live until arena drop. Cache only those ranges, never
-    // independently freed dedicated chunks, to amortize sequential stack frees.
-    last_shared_range: std::ops::Range<usize>,
-    ranges: Option<SystemSlice<SnapshotArenaRange>>,
-    range_count: usize,
-    #[cfg(test)]
-    lookup_steps: Cell<usize>,
-}
-
-impl SnapshotArena {
-    const fn new() -> Self {
-        Self {
-            head: ptr::null_mut(),
-            parent: ptr::null_mut(),
-            last_shared_range: 0..0,
-            ranges: None,
-            range_count: 0,
-            #[cfg(test)]
-            lookup_steps: Cell::new(0),
-        }
-    }
-
-    #[expect(
-        clippy::cast_ptr_alignment,
-        reason = "System allocated the mapping with SnapshotArenaChunk alignment"
-    )]
-    fn allocate(&mut self, layout: Layout) -> *mut u8 {
-        let size = layout.size().max(1);
-        // SAFETY: a non-null head points to a live chunk owned by this arena.
-        let head_is_reusable = !self.head.is_null() && !unsafe { (*self.head).dedicated };
-        if head_is_reusable {
-            // SAFETY: the head is a live, exclusively owned arena chunk.
-            let address = unsafe { allocate_from_snapshot_chunk(self.head, size, layout.align()) };
-            if !address.is_null() {
-                return address;
-            }
-        }
-        // Layout guarantees that size rounded up to alignment fits in isize;
-        // adding the small chunk header therefore fits in usize.
-        let required = size_of::<SnapshotArenaChunk>()
-            .checked_add(layout.align().saturating_sub(1))
-            .and_then(|required| required.checked_add(size))
-            .expect("Layout guarantees that its padded size fits in isize");
-        let dedicated = required > SNAPSHOT_ARENA_DEDICATED_THRESHOLD;
-        let bytes = if dedicated {
-            required
-        } else {
-            SNAPSHOT_ARENA_CHUNK_BYTES.max(required)
-        };
-        let Ok(mapping_layout) = Layout::from_size_align(bytes, align_of::<SnapshotArenaChunk>()) else {
-            return ptr::null_mut();
-        };
-        // SAFETY: mapping_layout is nonzero and valid, and the resulting
-        // allocation is owned by this arena.
-        let mapping = unsafe { System.alloc(mapping_layout) };
-        if mapping.is_null() {
-            return ptr::null_mut();
-        }
-        #[cfg(test)]
-        LIVE_SNAPSHOT_ARENA_CHUNKS.with(|count| count.set(count.get() + 1));
-        let chunk = mapping.cast::<SnapshotArenaChunk>();
-        // SAFETY: the mapping is writable and large enough for this header.
-        unsafe {
-            chunk.write(SnapshotArenaChunk {
-                previous: self.head,
-                next: ptr::null_mut(),
-                layout: mapping_layout,
-                cursor: size_of::<SnapshotArenaChunk>(),
-                dedicated,
-            });
-        }
-        if !self.head.is_null() {
-            // SAFETY: the old head is a live, exclusively owned mapping.
-            unsafe { (*self.head).next = chunk };
-        }
-        self.head = chunk;
-        self.insert_range(SnapshotArenaRange {
-            start: chunk.addr(),
-            end: chunk.addr().saturating_add(mapping_layout.size()),
-            chunk,
-        });
-        // SAFETY: chunk was initialized above and is exclusively owned.
-        unsafe { allocate_from_snapshot_chunk(chunk, size, layout.align()) }
-    }
-
-    fn deallocate(&mut self, address: *mut u8) -> bool {
-        if self.last_shared_range.contains(&address.addr()) {
-            return true;
-        }
-        if let Some((index, range)) = self.find_range(address.addr()) {
-            let chunk = range.chunk;
-            // SAFETY: chunk is a live node owned by this arena.
-            let chunk_layout = unsafe { (*chunk).layout };
-            // SAFETY: chunk is a live node owned by this arena.
-            let dedicated = unsafe { (*chunk).dedicated };
-            if dedicated {
-                // SAFETY: both links belong to this live, exclusively owned chunk.
-                let previous = unsafe { (*chunk).previous };
-                // SAFETY: chunk remains live while its links are read.
-                let next = unsafe { (*chunk).next };
-                if next.is_null() {
-                    self.head = previous;
-                } else {
-                    // SAFETY: next is the live newer node that links to chunk.
-                    unsafe { (*next).previous = previous };
-                }
-                if !previous.is_null() {
-                    // SAFETY: previous is the live older node that links to chunk.
-                    unsafe { (*previous).next = next };
-                }
-                let ranges = self.ranges.as_mut().expect("find_range found a live indexed mapping");
-                ranges.copy_within(index + 1..self.range_count, index);
-                self.range_count -= 1;
-                // SAFETY: this dedicated mapping was unlinked above and was allocated
-                // by System with chunk_layout. No cached range refers to dedicated chunks.
-                unsafe { System.dealloc(chunk.cast(), chunk_layout) };
-                #[cfg(test)]
-                LIVE_SNAPSHOT_ARENA_CHUNKS.with(|count| count.set(count.get() - 1));
-            } else {
-                self.last_shared_range = range.start..range.end;
-            }
-            return true;
-        }
-        if self.parent.is_null() {
-            false
-        } else {
-            // SAFETY: nested arenas are stack-scoped and the parent outlives
-            // this child activation.
-            unsafe { (*self.parent).deallocate(address) }
-        }
-    }
-
-    fn insert_range(&mut self, range: SnapshotArenaRange) {
-        let capacity = self.ranges.as_ref().map_or(0, |ranges| ranges.len());
-        if self.range_count == capacity {
-            // SystemSlice bypasses the global allocator: growing an index inside
-            // GlobalAlloc must not recursively re-enter this active snapshot arena.
-            let capacity = capacity.saturating_mul(2).max(32);
-            self.ranges = Some(SystemSlice::from_fn(capacity, |index| {
-                if index < self.range_count {
-                    self.ranges.as_ref().unwrap_or_else(|| unreachable!("nonempty ranges have storage"))[index]
-                } else {
-                    SnapshotArenaRange {
-                        start: 0,
-                        end: 0,
-                        chunk: ptr::null_mut(),
-                    }
-                }
-            }));
-        }
-        let ranges = self.ranges.as_mut().expect("range storage was allocated above");
-        let index = ranges[..self.range_count].partition_point(|existing| range_starts_before(existing.start, range.start));
-        ranges.copy_within(index..self.range_count, index + 1);
-        ranges[index] = range;
-        self.range_count += 1;
-    }
-
-    fn find_range(&self, address: usize) -> Option<(usize, SnapshotArenaRange)> {
-        let ranges = self.ranges.as_ref()?;
-        let index = ranges[..self.range_count]
-            .partition_point(|range| {
-                #[cfg(test)]
-                {
-                    self.lookup_steps.set(self.lookup_steps.get() + 1);
-                }
-                range.start <= address
-            })
-            .checked_sub(1)?;
-        let range = ranges[index];
-        (address < range.end).then_some((index, range))
-    }
-}
-
-impl Drop for SnapshotArena {
-    fn drop(&mut self) {
-        let mut chunk = self.head;
-        while !chunk.is_null() {
-            // SAFETY: the list contains live mappings owned by this arena.
-            let previous = unsafe { (*chunk).previous };
-            // SAFETY: chunk remains live until it is deallocated below.
-            let layout = unsafe { (*chunk).layout };
-            // SAFETY: chunk was allocated by System with layout.
-            unsafe { System.dealloc(chunk.cast(), layout) };
-            #[cfg(test)]
-            LIVE_SNAPSHOT_ARENA_CHUNKS.with(|count| count.set(count.get() - 1));
-            chunk = previous;
-        }
-    }
-}
-
-struct SnapshotArenaActivation {
-    previous: *mut SnapshotArena,
-}
-
-impl Drop for SnapshotArenaActivation {
-    fn drop(&mut self) {
-        let _ = ACTIVE_SNAPSHOT_ARENA.try_with(|active| active.set(self.previous));
-    }
-}
-
-struct SnapshotArenaSuspension;
-
-impl Drop for SnapshotArenaSuspension {
-    fn drop(&mut self) {
-        let _ = SNAPSHOT_ARENA_SUSPENSION_DEPTH.try_with(|depth| depth.set(depth.get().saturating_sub(1)));
-    }
-}
-
-fn with_snapshot_arena<R>(operation: impl FnOnce() -> R) -> R {
-    let mut arena = SnapshotArena::new();
-    let previous = ACTIVE_SNAPSHOT_ARENA
-        .try_with(|active| {
-            let previous = active.get();
-            arena.parent = previous;
-            active.set(ptr::from_mut(&mut arena));
-            previous
-        })
-        .unwrap_or(ptr::null_mut());
-    let _activation = SnapshotArenaActivation { previous };
-    operation()
-}
-
-/// Runs an operation with snapshot-arena allocation temporarily disabled.
-///
-/// Snapshot sources must use this around updates to process-lifetime caches;
-/// otherwise cache storage allocated during capture is reclaimed when the
-/// current snapshot finishes.
-#[doc(hidden)]
-pub fn with_snapshot_arena_suspended<R>(operation: impl FnOnce() -> R) -> R {
-    let _suspension = SNAPSHOT_ARENA_SUSPENSION_DEPTH
-        .try_with(|depth| {
-            depth.set(depth.get().saturating_add(1));
-            SnapshotArenaSuspension
-        })
-        .ok();
-    operation()
-}
-
-/// Returns whether snapshot-arena allocation is suspended on this thread.
-#[doc(hidden)]
-#[must_use]
-pub fn snapshot_arena_allocation_suspended() -> bool {
-    SNAPSHOT_ARENA_SUSPENSION_DEPTH.try_with(|depth| depth.get() != 0).unwrap_or(true)
-}
-
-/// Returns whether this thread is collecting a snapshot.
-///
-/// Allocator integrations can exclude this storage from telemetry without
-/// restricting ordinary Rust allocation lifetimes to the capture scope.
-#[doc(hidden)]
-#[must_use]
-pub fn snapshot_collection_active() -> bool {
-    ACTIVE_SNAPSHOT_ARENA.try_with(|active| !active.get().is_null()).unwrap_or(false)
-}
-
-/// Allocates from the active snapshot arena, when snapshotting this thread.
-///
-/// Storage is scoped to this capture. Global allocators must not use this for
-/// arbitrary Rust allocations: source caches, errors and panic payloads can
-/// outlive capture. Use [`snapshot_collection_active`] to select independently owned
-/// storage instead.
-#[doc(hidden)]
-#[must_use]
-pub fn snapshot_arena_allocate(layout: Layout) -> Option<*mut u8> {
-    if snapshot_arena_allocation_suspended() {
-        return None;
-    }
-    ACTIVE_SNAPSHOT_ARENA
-        .try_with(|active| {
-            let arena = active.get();
-            if arena.is_null() {
-                None
-            } else {
-                // SAFETY: the TLS pointer is installed only while its stack-owned
-                // arena remains live on this thread.
-                Some(unsafe { (*arena).allocate(layout) })
-            }
-        })
-        .unwrap_or(None)
-}
-
-/// Releases or recognizes storage owned by the active snapshot arena.
-#[doc(hidden)]
-pub fn snapshot_arena_deallocate(address: *mut u8) -> bool {
-    ACTIVE_SNAPSHOT_ARENA
-        .try_with(|active| {
-            let arena = active.get();
-            if arena.is_null() {
-                false
-            } else {
-                // SAFETY: the TLS pointer is installed only while its stack-owned
-                // arena remains live on this thread.
-                unsafe { (*arena).deallocate(address) }
-            }
-        })
-        .unwrap_or(false)
-}
-
-unsafe fn allocate_from_snapshot_chunk(chunk: *mut SnapshotArenaChunk, size: usize, alignment: usize) -> *mut u8 {
-    // SAFETY: the caller guarantees that chunk identifies a live arena chunk.
-    let cursor = unsafe { (*chunk).cursor };
-    let base = chunk.addr();
-    // SAFETY: the caller guarantees that chunk identifies a live arena chunk.
-    let chunk_size = unsafe { (*chunk).layout.size() };
-    let Some((aligned_address, end)) = snapshot_chunk_address(base, cursor, size, alignment, chunk_size) else {
-        return ptr::null_mut();
-    };
-    // SAFETY: the arena has exclusive access to the chunk cursor.
-    unsafe { (*chunk).cursor = end };
-    chunk.cast::<u8>().with_addr(aligned_address)
-}
-
-fn snapshot_chunk_address(base: usize, cursor: usize, size: usize, alignment: usize, chunk_size: usize) -> Option<(usize, usize)> {
-    let current = base.checked_add(cursor)?;
-    let aligned_address = current.checked_add(alignment - 1)? & !(alignment - 1);
-    let end_address = aligned_address.checked_add(size)?;
-    let end = end_address.checked_sub(base)?;
-    (end <= chunk_size).then_some((aligned_address, end))
 }
 
 struct Writer<'a> {
@@ -1384,13 +1012,13 @@ mod tests {
         register_source(&TEST_SOURCE);
         register_source(&TEST_SOURCE);
         recorder::configure(recorder::Configuration {
-            arc_dereferences: recorder::RecordingPolicy {
+            arc_dereferences: recorder::Policy {
                 enabled: true,
                 ..Default::default()
             },
             ..recorder::test_configuration()
         });
-        recorder::record(recorder::event::EventClass::ArcDereference, || {
+        crate::record(recorder::event::EventClass::ArcDereference, || {
             Some(recorder::event::Record::object(EventKind::ArcDeref, ObjectId::new(42)))
         });
 
@@ -1413,33 +1041,33 @@ mod tests {
 
     #[test]
     fn snapshot_round_trips_independent_recording_policies() {
-        let recording = recorder::RecordingPolicies {
-            allocations: recorder::RecordingPolicy {
+        let recording = recorder::Policies {
+            allocations: recorder::Policy {
                 enabled: true,
                 capture_backtraces: true,
                 event_sampling: recorder::EventSampling::one_in(16).expect("valid test sampling"),
             },
-            general_events: recorder::RecordingPolicy {
+            general_events: recorder::Policy {
                 enabled: false,
                 capture_backtraces: true,
                 event_sampling: recorder::EventSampling::one_in(4).expect("valid test sampling"),
             },
-            arc_dereferences: recorder::RecordingPolicy {
+            arc_dereferences: recorder::Policy {
                 enabled: true,
                 capture_backtraces: false,
                 event_sampling: recorder::EventSampling::one_in(100).expect("valid test sampling"),
             },
-            runtime_tasks: recorder::RecordingPolicy {
+            runtime_tasks: recorder::Policy {
                 enabled: true,
                 capture_backtraces: true,
                 event_sampling: recorder::EventSampling::one_in(8).expect("valid test sampling"),
             },
-            io: recorder::RecordingPolicy {
+            io: recorder::Policy {
                 enabled: true,
                 capture_backtraces: false,
                 event_sampling: recorder::EventSampling::one_in(2).expect("valid test sampling"),
             },
-            cache: recorder::RecordingPolicy {
+            cache: recorder::Policy {
                 enabled: true,
                 capture_backtraces: false,
                 event_sampling: recorder::EventSampling::one_in(32).expect("valid test sampling"),
@@ -1496,7 +1124,7 @@ mod tests {
                 clock: EventClock::CURRENT,
                 total_events: 2,
                 lost_events: 0,
-                recording: RecordingPolicies::default(),
+                recording: Policies::default(),
                 threads: vec![ThreadLog {
                     thread_id: ThreadId::new(7),
                     total_events: 2,
@@ -1532,7 +1160,7 @@ mod tests {
             events: Events {
                 clock: EventClock::CURRENT,
                 total_events: events.len() as u64,
-                recording: RecordingPolicies::default(),
+                recording: Policies::default(),
                 events: events.clone(),
                 ..Events::default()
             },
@@ -1604,172 +1232,6 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_collection_stays_active_while_arena_allocation_is_suspended() {
-        let before = snapshot_collection_active();
-        let during = with_snapshot_arena(|| {
-            (
-                snapshot_collection_active(),
-                with_snapshot_arena_suspended(snapshot_collection_active),
-            )
-        });
-        assert_eq!((before, during, snapshot_collection_active()), (false, (true, true), false));
-    }
-
-    #[test]
-    fn snapshot_arena_recognizes_its_allocations() {
-        with_snapshot_arena(|| {
-            let layout = Layout::from_size_align(128, 64).unwrap();
-            let address = snapshot_arena_allocate(layout).unwrap();
-            assert_eq!(address.addr() % 64, 0);
-            assert!(snapshot_arena_deallocate(address));
-        });
-    }
-
-    fn sequential_arena_frees(chunks: usize, per_chunk: usize) -> usize {
-        let mut arena = SnapshotArena::new();
-        let layout = Layout::from_size_align(24 * size_of::<usize>(), align_of::<usize>()).unwrap();
-        let mut addresses = Vec::with_capacity(chunks * per_chunk);
-        for _ in 0..chunks {
-            if !arena.head.is_null() {
-                // SAFETY: this test exclusively owns the live head. Skipping its
-                // unused tail forces a chunk boundary without touching gigabytes.
-                let head = unsafe { &mut *arena.head };
-                head.cursor = head.layout.size();
-            }
-            for _ in 0..per_chunk {
-                let address = arena.allocate(layout);
-                assert!(!address.is_null());
-                addresses.push(address);
-            }
-        }
-        let start = Instant::now();
-        for address in addresses {
-            assert!(arena.deallocate(address));
-        }
-        let elapsed = start.elapsed();
-        eprintln!(
-            "chunks={chunks} frees={} visits={} elapsed={elapsed:?}",
-            chunks * per_chunk,
-            arena.lookup_steps.get()
-        );
-        arena.lookup_steps.get()
-    }
-
-    #[test]
-    fn snapshot_arena_sequential_frees_do_not_rescan_each_allocation() {
-        let chunks = if cfg!(miri) { 3 } else { 12 };
-        assert!(sequential_arena_frees(chunks, 128) <= chunks * (usize::try_from(chunks.ilog2()).unwrap() + 2));
-    }
-
-    #[test]
-    fn snapshot_arena_shuffled_frees_and_misses_have_bounded_lookup_cost() {
-        let count = if cfg!(miri) { 4_usize } else { 64 };
-        let mut arena = SnapshotArena::new();
-        let mut addresses = Vec::new();
-        for _ in 0..count {
-            if !arena.head.is_null() {
-                // SAFETY: the test owns this live header; filling its cursor forces
-                // another range without touching the unused multi-megabyte payload.
-                let head = unsafe { &mut *arena.head };
-                head.cursor = head.layout.size();
-            }
-            addresses.push(arena.allocate(Layout::new::<u64>()));
-        }
-        for index in 0..count * 8 {
-            assert!(arena.deallocate(addresses[(index * 17) % count]));
-            assert!(!arena.deallocate(ptr::without_provenance_mut(1)));
-        }
-        let maximum_probes = count * 16 * (usize::try_from(count.ilog2()).unwrap() + 2);
-        assert!((1..=maximum_probes).contains(&arena.lookup_steps.get()));
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    #[ignore = "manual CPU scaling probe; reserves 512 MiB without populating chunk tails"]
-    #[cfg_attr(coverage_nightly, coverage(off))] // Manual profiling, not an automated test.
-    fn snapshot_arena_sequential_free_scaling_probe() {
-        sequential_arena_frees(128, 8192);
-    }
-
-    #[test]
-    fn snapshot_arena_cached_range_excludes_dedicated_and_unknown_storage() {
-        let mut arena = SnapshotArena::new();
-        let small = Layout::new::<u64>();
-        let first = arena.allocate(small);
-        assert!(!first.is_null());
-        assert!(arena.deallocate(first));
-        let first_range = arena.last_shared_range.clone();
-        assert!(!arena.deallocate(ptr::without_provenance_mut(first_range.end)));
-        assert!(!arena.deallocate(ptr::null_mut()));
-
-        let large = Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES, 16).unwrap();
-        let dedicated = arena.allocate(large);
-        assert!(!dedicated.is_null());
-        let second = arena.allocate(small);
-        assert!(!second.is_null());
-        let reusable = arena.head;
-        // The dedicated chunk is now inside the list, not at its head.
-        assert!(arena.deallocate(dedicated));
-        assert!(!arena.deallocate(dedicated));
-        assert_eq!(arena.last_shared_range, first_range);
-        assert!(arena.deallocate(second));
-        assert!(arena.deallocate(first));
-
-        let dedicated = arena.allocate(large);
-        assert!(!dedicated.is_null());
-        assert!(arena.deallocate(dedicated));
-        assert!(!arena.deallocate(dedicated));
-        assert_eq!(arena.last_shared_range, first_range);
-        let reused = arena.allocate(small);
-        assert!(!reused.is_null());
-        assert_eq!(arena.head, reusable);
-        assert!(arena.deallocate(reused));
-        let mut foreign = 0_u8;
-        assert!(!arena.deallocate(ptr::from_mut(&mut foreign)));
-        assert!(arena.deallocate(second));
-    }
-
-    #[test]
-    fn snapshot_arena_cached_ranges_preserve_parent_fallback() {
-        let mut parent = SnapshotArena::new();
-        let small = Layout::new::<u64>();
-        let outer = parent.allocate(small);
-        assert!(!outer.is_null());
-        assert!(parent.deallocate(outer));
-        let dedicated = parent.allocate(Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES, 16).unwrap());
-        assert!(!dedicated.is_null());
-        {
-            let mut child = SnapshotArena::new();
-            child.parent = ptr::from_mut(&mut parent);
-            let inner = child.allocate(small);
-            assert!(!inner.is_null());
-            assert!(child.deallocate(inner));
-            assert!(child.deallocate(outer));
-            assert!(child.deallocate(dedicated));
-            assert!(!child.deallocate(dedicated));
-            assert!(child.deallocate(inner));
-            let mut foreign = 0_u8;
-            assert!(!child.deallocate(ptr::from_mut(&mut foreign)));
-        }
-        assert!(parent.deallocate(outer));
-    }
-
-    #[test]
-    fn snapshot_arena_can_be_suspended_for_persistent_allocations() {
-        with_snapshot_arena(|| {
-            let layout = Layout::from_size_align(128, 16).unwrap();
-            let address = snapshot_arena_allocate(layout).unwrap();
-
-            with_snapshot_arena_suspended(|| {
-                assert_eq!(snapshot_arena_allocate(layout), None);
-                assert!(snapshot_arena_deallocate(address));
-            });
-
-            assert!(snapshot_arena_allocate(layout).is_some());
-        });
-    }
-
-    #[test]
     fn source_storage_debug_and_file_persistence_work() {
         fn capture(_context: SnapshotContext<'_>) -> Result<SourceData, Error> {
             SourceData::copy_from(b"source")
@@ -1780,7 +1242,6 @@ mod tests {
         assert_eq!(
             (source.capture)(SnapshotContext {
                 events: &Events::default(),
-                observation: None,
             })
             .unwrap()
             .as_bytes(),
@@ -2262,81 +1723,10 @@ mod tests {
     }
 
     #[test]
-    fn system_bytes_and_arena_cover_empty_dedicated_and_parent_storage() {
+    fn system_bytes_support_empty_storage() {
         let empty = SystemBytes::zeroed(0).unwrap();
         assert_eq!(empty.as_slice(), &[]);
         drop(empty);
-
-        let mut arena = SnapshotArena::new();
-        let small = arena.allocate(Layout::from_size_align(128, 16).unwrap());
-        assert!(!small.is_null());
-        let reused = arena.allocate(Layout::from_size_align(128, 16).unwrap());
-        assert!(!reused.is_null());
-        assert!(arena.deallocate(reused));
-        assert!(!arena.deallocate(NonNull::<u8>::dangling().as_ptr()));
-
-        let mut dedicated_arena = SnapshotArena::new();
-        let dedicated = dedicated_arena.allocate(Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES / 2, 16).unwrap());
-        assert!(!dedicated.is_null());
-        // SAFETY: a non-null arena head points to its live chunk.
-        assert!(unsafe { (*dedicated_arena.head).dedicated });
-        assert!(dedicated_arena.deallocate(dedicated));
-
-        let mut reuse_arena = SnapshotArena::new();
-        assert!(!reuse_arena.allocate(Layout::from_size_align(64, 8).unwrap()).is_null());
-        let first_head = reuse_arena.head;
-        assert!(!reuse_arena.allocate(Layout::from_size_align(64, 8).unwrap()).is_null());
-        assert_eq!(reuse_arena.head, first_head);
-
-        let header = size_of::<SnapshotArenaChunk>();
-        let exact_shared_size = SNAPSHOT_ARENA_DEDICATED_THRESHOLD - header;
-        let mut boundary_arena = SnapshotArena::new();
-        assert!(
-            !boundary_arena
-                .allocate(Layout::from_size_align(exact_shared_size, 1).unwrap())
-                .is_null()
-        );
-        // SAFETY: a non-null arena head points to its live chunk.
-        assert!(!unsafe { (*boundary_arena.head).dedicated });
-        let mut over_boundary_arena = SnapshotArena::new();
-        assert!(
-            !over_boundary_arena
-                .allocate(Layout::from_size_align(exact_shared_size + 1, 1).unwrap())
-                .is_null()
-        );
-        // SAFETY: a non-null arena head points to its live chunk.
-        assert!(unsafe { (*over_boundary_arena.head).dedicated });
-
-        let shared = Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES / 3, 16).unwrap();
-        assert!(!arena.allocate(shared).is_null());
-        assert!(!arena.allocate(shared).is_null());
-        assert!(!arena.allocate(shared).is_null());
-
-        with_snapshot_arena(|| {
-            let address = snapshot_arena_allocate(Layout::from_size_align(64, 8).unwrap()).unwrap();
-            with_snapshot_arena(|| assert!(snapshot_arena_deallocate(address)));
-        });
-        assert_eq!(snapshot_arena_allocate(Layout::from_size_align(8, 8).unwrap()), None);
-    }
-
-    #[test]
-    fn snapshot_arena_releases_all_owned_chunks() {
-        let initial = LIVE_SNAPSHOT_ARENA_CHUNKS.get();
-        {
-            let mut arena = SnapshotArena::new();
-            assert!(
-                !arena
-                    .allocate(Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES / 3, 16).unwrap())
-                    .is_null()
-            );
-            assert!(
-                !arena
-                    .allocate(Layout::from_size_align(SNAPSHOT_ARENA_CHUNK_BYTES / 3, 16).unwrap())
-                    .is_null()
-            );
-            assert_eq!(LIVE_SNAPSHOT_ARENA_CHUNKS.get(), initial + 1);
-        }
-        assert_eq!(LIVE_SNAPSHOT_ARENA_CHUNKS.get(), initial);
     }
 
     #[test]
@@ -2352,17 +1742,17 @@ mod tests {
     #[test]
     fn version_five_policies_and_legacy_thread_names_are_compatible() {
         let policies = [
-            RecordingPolicy {
+            Policy {
                 enabled: true,
                 capture_backtraces: false,
                 event_sampling: EventSampling::one_in(3).unwrap(),
             },
-            RecordingPolicy {
+            Policy {
                 enabled: false,
                 capture_backtraces: true,
                 event_sampling: EventSampling::one_in(5).unwrap(),
             },
-            RecordingPolicy {
+            Policy {
                 enabled: true,
                 capture_backtraces: true,
                 event_sampling: EventSampling::one_in(7).unwrap(),
@@ -2378,13 +1768,13 @@ mod tests {
         let decoded = decode_recording_policies(&mut Reader::new(&bytes), 5).unwrap();
         assert_eq!(
             decoded,
-            RecordingPolicies {
+            Policies {
                 allocations: policies[0],
                 general_events: policies[1],
                 arc_dereferences: policies[2],
                 runtime_tasks: policies[1],
-                io: RecordingPolicy::default(),
-                cache: RecordingPolicy::default(),
+                io: Policy::default(),
+                cache: Policy::default(),
             }
         );
 
@@ -2397,7 +1787,7 @@ mod tests {
 
     #[test]
     fn version_seven_policies_default_cache_recording_to_disabled() {
-        let policy = RecordingPolicy {
+        let policy = Policy {
             enabled: true,
             capture_backtraces: true,
             event_sampling: EventSampling::one_in(7).unwrap(),
@@ -2412,7 +1802,7 @@ mod tests {
 
         let decoded = decode_recording_policies(&mut Reader::new(&bytes), 7).unwrap();
 
-        assert_eq!(decoded.cache, RecordingPolicy::default());
+        assert_eq!(decoded.cache, Policy::default());
     }
 
     #[test]
@@ -2440,34 +1830,25 @@ mod tests {
     }
 
     #[test]
-    fn source_payload_retains_the_capture_observation() {
+    fn source_payload_can_inspect_captured_events() {
         fn capture(context: SnapshotContext<'_>) -> Result<SourceData, Error> {
-            let observation = context.recording_observation().unwrap();
-            let mut payload = observation.session.get().to_le_bytes().to_vec();
-            payload.extend_from_slice(&observation.observed_at.ticks().to_le_bytes());
-            SourceData::copy_from(&payload)
+            SourceData::copy_from(&context.events().total_events.to_le_bytes())
         }
 
-        let source = Source::new(SourceId::new(106), "observation", 1, capture);
-        let captured = capture_sources_from(
-            ptr::from_ref(&source).cast_mut(),
-            SnapshotContext {
-                events: &Events::default(),
-                observation: Some(recorder::RecordingObservation {
-                    session: recorder::RecordingSession::from_raw(17).unwrap(),
-                    observed_at: EventTimestamp::from_ticks(23),
-                }),
-            },
-        )
-        .unwrap();
+        let source = Source::new(SourceId::new(106), "events", 1, capture);
+        let events = Events {
+            total_events: 17,
+            ..Events::default()
+        };
+        let captured = capture_sources_from(ptr::from_ref(&source).cast_mut(), SnapshotContext { events: &events }).unwrap();
 
         assert_eq!(
             captured,
             vec![SourceSnapshot {
                 id: SourceId::new(106),
-                name: "observation".into(),
+                name: "events".into(),
                 schema_version: 1,
-                data: [17_u64.to_le_bytes(), 23_u64.to_le_bytes()].concat(),
+                data: 17_u64.to_le_bytes().to_vec(),
             }]
         );
     }
@@ -2492,7 +1873,6 @@ mod tests {
                 ptr::from_ref(&first).cast_mut(),
                 SnapshotContext {
                     events: &Events::default(),
-                    observation: None,
                 }
             )
             .is_err()
@@ -2504,7 +1884,6 @@ mod tests {
                 ptr::from_ref(&panicked).cast_mut(),
                 SnapshotContext {
                     events: &Events::default(),
-                    observation: None,
                 }
             )
             .is_err()
@@ -2516,7 +1895,6 @@ mod tests {
                 ptr::from_ref(&failed).cast_mut(),
                 SnapshotContext {
                     events: &Events::default(),
-                    observation: None,
                 }
             )
             .is_err()
@@ -2529,7 +1907,6 @@ mod tests {
             ptr::from_ref(&first).cast_mut(),
             SnapshotContext {
                 events: &Events::default(),
-                observation: None,
             },
         )
         .unwrap();
@@ -2549,60 +1926,6 @@ mod tests {
                     data: b"ok".to_vec(),
                 },
             ]
-        );
-    }
-
-    #[test]
-    fn arena_absence_and_large_layout_failures_are_reported() {
-        let layout = Layout::from_size_align(8, 8).unwrap();
-        assert_eq!(snapshot_arena_allocate(layout), None);
-        assert!(!snapshot_arena_deallocate(NonNull::<u8>::dangling().as_ptr()));
-
-        let mut arena = SnapshotArena::new();
-        let huge = Layout::from_size_align(isize::MAX as usize, 1).unwrap();
-        assert!(arena.allocate(huge).is_null());
-        #[cfg(not(miri))]
-        {
-            let unallocatable = Layout::from_size_align(1_usize << 60, 1).unwrap();
-            assert!(arena.allocate(unallocatable).is_null());
-        }
-
-        assert_eq!(snapshot_chunk_address(usize::MAX, 1, 1, 1, usize::MAX), None);
-        assert_eq!(snapshot_chunk_address(usize::MAX - 1, 0, 1, 4, usize::MAX), None);
-        assert_eq!(snapshot_chunk_address(0, 0, usize::MAX, 1, usize::MAX - 1), None);
-        assert_eq!(snapshot_chunk_address(10, 0, 1, 1, 0), None);
-        assert_eq!(snapshot_chunk_address(100, 3, 5, 8, 16), Some((104, 9)));
-        assert_eq!(snapshot_chunk_address(100, 3, 8, 8, 12), Some((104, 12)));
-        assert_eq!(snapshot_chunk_address(100, 3, 9, 8, 12), None);
-        assert_eq!(snapshot_chunk_address(100, 4, 5, 8, 16), Some((104, 9)));
-
-        let mut arena = SnapshotArena::new();
-        let layout = Layout::from_size_align(64, 8).unwrap();
-        let address = arena.allocate(layout);
-        assert!(!address.is_null());
-        // SAFETY: head identifies the live chunk containing address.
-        let chunk_size = unsafe { (*arena.head).layout.size() };
-        // SAFETY: adding the allocation's exact size produces its one-past-the-end pointer.
-        let end = unsafe { arena.head.byte_add(chunk_size) }.cast::<u8>();
-        assert!(!arena.deallocate(end));
-    }
-
-    #[test]
-    #[ignore = "snapshot-arena shuffled-release profiling probe"]
-    #[cfg_attr(coverage_nightly, coverage(off))] // Manual profiling, not an automated test.
-    fn arena_shuffled_lookup_profile() {
-        let mut arena = SnapshotArena::new();
-        let layout = Layout::from_size_align(1_048_576, 8).unwrap();
-        let addresses = (0..1_024).map(|_| arena.allocate(layout)).collect::<Vec<_>>();
-        assert!(addresses.iter().all(|address| !address.is_null()));
-        let started = Instant::now();
-        for index in 0..2_000_000_usize {
-            assert!(arena.deallocate(addresses[(index * 257) % addresses.len()]));
-        }
-        println!(
-            "shuffled arena lookups: {:.3}s, {} search probes",
-            started.elapsed().as_secs_f64(),
-            arena.lookup_steps.get()
         );
     }
 }

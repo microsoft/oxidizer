@@ -3271,8 +3271,8 @@ mod tests {
             clock: EventClock::ProcessMonotonic,
             total_events: 5,
             lost_events: 1,
-            recording: seismograph::recorder::RecordingPolicies {
-                allocations: seismograph::recorder::RecordingPolicy {
+            recording: seismograph::recorder::Policies {
+                allocations: seismograph::recorder::Policy {
                     enabled: true,
                     event_sampling: seismograph::recorder::EventSampling::one_in(8).expect("valid test sampling"),
                     ..Default::default()

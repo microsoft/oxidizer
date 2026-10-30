@@ -90,7 +90,7 @@ fn snapshot_html_reads_native_seismograph_capture() {
     fs::create_dir_all(&directory).unwrap();
     let input = directory.join("capture.seismograph");
     seismograph::recorder(seismograph::recorder::Configuration {
-        arc_dereferences: seismograph::recorder::RecordingPolicy {
+        arc_dereferences: seismograph::recorder::Policy {
             enabled: true,
             ..Default::default()
         },

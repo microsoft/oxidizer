@@ -7,7 +7,7 @@
 //!
 //! [`native::Snapshot`] inventories persistent owners, including never-observed
 //! active endpoints, and an independently collected global backend. Owner state
-//! is bounded and may be stale: compare session, lease generation and round.
+//! is bounded and can be stale: compare lease generation, round, and capture time.
 //! Idle inspection is fresh under the pool lock; busy, unobserved and slot
 //! allocation failure (`Unavailable`) are explicitly unknown. Native capacity is not application-live
 //! memory, remote batching budget is not pending bytes, and globally cached
@@ -18,7 +18,7 @@
 //! object counts. Incoming front/back inequality means potential work only,
 //! not guaranteed ready links or queue depth; equality does not prove emptiness.
 //!
-//! [`encoded_len`], [`encode`] and [`decode`] implement schema 3 exclusively.
+//! [`encoded_len`] and [`encode`] implement schema 4. [`decode`] also accepts schema 3.
 //! The decoder bounds allocation by both the payload length and [`MAX_OWNERS`],
 //! rejects invalid flags, duplicates, inconsistent inventory and trailing bytes.
 //! Application allocation events remain in the unchanged Seismograph container.
@@ -32,10 +32,10 @@
 //! Self-publication defaults on, but recording defaults off. Polling requests
 //! another observation round without a background thread or per-operation clock
 //! check. Controls belong to this plugin, not the allocator's public API.
-//! Only contributing accepted recorded allocation/free operations publish, after
-//! the native operation ends; sampled-out events and merely enabled attempts do
-//! not contribute. Collectors request the next round after collection, and apps
-//! may use [`native::request_observation`] to schedule requests explicitly.
+//! Operations with an enabled allocation policy publish after the native operation
+//! ends, at most once per lease and requested round. Event sampling does not
+//! control publication. Collectors request the next round after collection.
+//! Applications can also call [`native::request_observation`] explicitly.
 //!
 //! # Explore a sample capture
 //!
@@ -62,6 +62,6 @@ pub mod source {
     pub const ID: seismograph::snapshot::SourceId = seismograph::snapshot::SourceId::new(0x5241_4c4c_4f43_4154);
     /// Human-readable source name.
     pub const NAME: &str = "rallocator";
-    /// Native inventory schema; older schemas are intentionally unsupported.
-    pub const SCHEMA_VERSION: u16 = 3;
+    /// Native inventory schema with recording-independent observations.
+    pub const SCHEMA_VERSION: u16 = 4;
 }

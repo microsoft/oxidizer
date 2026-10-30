@@ -26,6 +26,9 @@ allowed_external_types = [
     "thread_aware_core::thread::Thread",
 ]
 
+[features]
+inspection = []
+
 [dependencies]
 data_privacy = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }

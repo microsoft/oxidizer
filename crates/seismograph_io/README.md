@@ -18,6 +18,7 @@ Low-overhead I/O event instrumentation for [`seismograph`][__link0].
 [`Resource`][__link1] lazily acquires its identity when an enabled I/O event is first
 recorded. [`Operation`][__link2] pairs start and finish events without reading a
 clock or allocating any identity outside [`seismograph::record`][__link3].
+Completion can appear without a retained start event after recording restarts.
 
 
 <hr/>
@@ -25,7 +26,7 @@ clock or allocating any identity outside [`seismograph::record`][__link3].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_io">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbwvQGUXHupQUbqE4catDCCMEbvq2XFMYaIMUbcS9wVq_ahy9hZIKCa3NlaXNtb2dyYXBoZTAuMy4wgm5zZWlzbW9ncmFwaF9pb2UwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbpBJ2-5yEUbEb-5VhS10gFz0baRIp3CQ-JtgbNVGqn7o_lIhhZIKCa3NlaXNtb2dyYXBoZTAuMy4wgm5zZWlzbW9ncmFwaF9pb2UwLjMuMA
  [__link0]: https://crates.io/crates/seismograph/0.3.0
  [__link1]: https://docs.rs/seismograph_io/0.3.0/seismograph_io/struct.Resource.html
  [__link2]: https://docs.rs/seismograph_io/0.3.0/seismograph_io/struct.Operation.html

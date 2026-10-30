@@ -27,7 +27,7 @@ fn retained_allocation_events_render_actors_stacks_locations_and_escaped_symbols
         capture_allocation_symbol,
     );
     seismograph::recorder(seismograph::recorder::Configuration {
-        allocations: seismograph::recorder::RecordingPolicy::all(true),
+        allocations: seismograph::recorder::Policy::all(true),
         ..Default::default()
     });
     let allocation = Allocation {

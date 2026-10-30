@@ -35,6 +35,39 @@ struct ExecutorSharedInner {
 }
 
 impl ExecutorShared {
+    #[cfg(feature = "inspection")]
+    pub(crate) fn add_inspected_task<F, R, T, I>(&self, future: F, options: TaskOptions, completion: T, inspector: I)
+    where
+        F: Future<Output = R> + 'static,
+        R: 'static,
+        T: TaskCompletion<R>,
+        I: crate::inspection::Inspector<F>,
+    {
+        if self.shutdown().is_triggered() {
+            completion.cancelled(self.shutdown().cause());
+            return;
+        }
+        self.register_task(crate::task::allocate_inspected_task(
+            &self.inner.task_storage,
+            future,
+            options,
+            self.inner.sink.clone(),
+            completion,
+            inspector,
+        ));
+    }
+
+    #[cfg(feature = "inspection")]
+    pub(crate) fn inspect_new_tasks(&self, mut visit: impl FnMut(&TaskHandle) -> bool) -> Result<(), crate::InspectionError> {
+        let tasks = self.inner.new_tasks.try_borrow().map_err(|_borrow| crate::InspectionError::Busy)?;
+        for task in tasks.iter() {
+            if !visit(task) {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn new(owner_waker: Waker, sink: Sink, thread_id: ThreadId, panic_policy: PanicPolicy) -> Self {
         let shutdown = Shutdown::new(owner_waker.clone());
         let (wake, remote_wakes) = WakeShared::new(owner_waker, thread_id);

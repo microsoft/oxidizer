@@ -42,6 +42,13 @@ exclude = true
 seismograph.workspace = true
 seismograph_rallocator.workspace = true
 
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "rallocator_telemetry"
+harness = false
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

@@ -26,7 +26,6 @@ exclude = true
 allowed_external_types = ["seismograph::*"]
 
 [dependencies]
-backtrace = { workspace = true, features = ["std"] }
 seismograph.workspace = true
 
 # >>> anvil-managed: anvil-lints

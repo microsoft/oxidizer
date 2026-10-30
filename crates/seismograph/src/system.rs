@@ -8,16 +8,15 @@ use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
 /// A fixed-size initialized slice whose backing bypasses the process global allocator.
-#[doc(hidden)]
 #[derive(Debug)]
-pub struct SystemSlice<T> {
+pub(crate) struct SystemSlice<T> {
     pointer: NonNull<T>,
     len: usize,
 }
 
 impl<T> SystemSlice<T> {
     /// Allocates and initializes `len` elements through [`System`].
-    pub fn from_fn(len: usize, mut initialize: impl FnMut(usize) -> T) -> Self {
+    pub(crate) fn from_fn(len: usize, mut initialize: impl FnMut(usize) -> T) -> Self {
         if len == 0 {
             return Self {
                 pointer: NonNull::dangling(),
@@ -54,7 +53,7 @@ impl<T> SystemSlice<T> {
 impl SystemSlice<u8> {
     /// Allocates `len` zeroed bytes through [`System`], returning `None` on allocation failure.
     #[must_use]
-    pub fn try_zeroed(len: usize) -> Option<Self> {
+    pub(crate) fn try_zeroed(len: usize) -> Option<Self> {
         if len == 0 {
             return Some(Self {
                 pointer: NonNull::dangling(),

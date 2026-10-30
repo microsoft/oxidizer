@@ -1072,31 +1072,31 @@ fn lazy_lock_supports_debug_default_and_poisoning() {
 #[expect(clippy::too_many_lines, reason = "one scenario verifies all telemetry-enabled primitives")]
 fn ownership_and_lock_operations_emit_runtime_telemetry() {
     seismograph::recorder(Configuration {
-        general_events: seismograph::recorder::RecordingPolicy {
+        general_events: seismograph::recorder::Policy {
             enabled: true,
             capture_backtraces: true,
             ..Default::default()
         },
-        arc_dereferences: seismograph::recorder::RecordingPolicy {
+        arc_dereferences: seismograph::recorder::Policy {
             enabled: true,
             capture_backtraces: true,
             ..Default::default()
         },
-        event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(4_096).unwrap(),
+        event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(4_096),
         ..Default::default()
     });
 
     let value = Arc::new(7_u64);
-    let arc_id = Arc::telemetry_object_id(&value);
+    let arc_id = recorder::ObjectId::from_ptr(Arc::as_ptr(&value).cast::<()>());
     let other_thread = Arc::clone(&value);
     join_with_timeout(std::thread::spawn(move || std::hint::black_box(*other_thread)));
     std::hint::black_box(*value);
     let dropped = Arc::new(8_u64);
-    let dropped_id = Arc::telemetry_object_id(&dropped);
+    let dropped_id = recorder::ObjectId::from_ptr(Arc::as_ptr(&dropped).cast::<()>());
     drop(dropped);
 
     let mut relocated = Arc::<u64, PerThread>::new_with(|| 13);
-    let relocated_id = Arc::telemetry_object_id(&relocated);
+    let relocated_id = recorder::ObjectId::from_ptr(Arc::as_ptr(&relocated).cast::<()>());
     _ = Relocator::between_threads().relocate(&mut relocated);
 
     let mutex = Mutex::new(());

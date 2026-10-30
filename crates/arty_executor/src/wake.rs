@@ -130,6 +130,14 @@ impl WakeSignal {
         }
     }
 
+    #[cfg(feature = "inspection")]
+    pub(crate) fn has_queued_notification(&self) -> bool {
+        matches!(
+            self.schedule_state.load(atomic::Ordering::Acquire),
+            TASK_ACTIVE_LOCAL | TASK_ACTIVE_REMOTE
+        )
+    }
+
     fn wake(&self) {
         let remote = !executor_context::is_current(self.shared.thread_id());
         if !self.begin_notification(remote) {

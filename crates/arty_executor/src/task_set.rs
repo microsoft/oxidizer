@@ -13,6 +13,23 @@ pub struct TaskSet {
 }
 
 impl TaskSet {
+    /// Adds a task whose description is built only by explicit inspection.
+    ///
+    /// The inspector is stored with the native future, without a separate task
+    /// allocation. Ordinary execution cycles do not call it.
+    #[cfg(feature = "inspection")]
+    pub fn add_with_inspection<F, R, T, D, I>(&self, future: F, options: TaskOptions, completion: T, inspect: I)
+    where
+        F: Future<Output = R> + 'static,
+        R: 'static,
+        T: TaskCompletion<R>,
+        D: 'static,
+        I: Fn(&F, crate::TaskState) -> Option<D> + 'static,
+    {
+        self.shared
+            .add_inspected_task(future, options, completion, crate::inspection::InspectWith::new(inspect));
+    }
+
     pub(crate) fn new(core: &ExecutorShared) -> Self {
         Self { shared: core.clone() }
     }

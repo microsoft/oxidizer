@@ -6,7 +6,9 @@
     reason = "Event totals and the retained event collection are intentionally explicit in the public snapshot model"
 )]
 
-//! Allocation-safe, bounded process event recording.
+//! Event recording.
+//!
+//! Use [`crate::record`] to emit events.
 
 use std::alloc::{GlobalAlloc, Layout, System, handle_alloc_error};
 use std::cell::{Cell, UnsafeCell};
@@ -30,15 +32,13 @@ pub mod runtime;
 /// Thread event types.
 pub mod thread;
 
-use event::{
-    Address, BacktraceCapture, Event, EventClass, EventClock, EventKind, EventPayload, EventSequence, EventTimestamp, Events, ObjectId,
-    Record,
-};
+use event::{Address, BacktraceCapture, Event, EventClass, EventClock, EventKind, EventPayload, EventSequence, Events, ObjectId, Record};
 use thread::{ThreadId, ThreadLog};
 
 const DEFAULT_EVENT_CAPACITY_PER_THREAD: usize = 65_536;
 const MIN_EVENT_CAPACITY_PER_THREAD: usize = 64;
 const MAX_EVENT_CAPACITY_PER_THREAD: usize = 1_048_576;
+const INVALID_EVENT_BUFFER_CAPACITY: &str = "event buffer capacity must be a power of two between 64 and 1048576";
 const MAX_EVENT_SAMPLING_ONE_IN: usize = 1_048_576;
 #[cfg(not(miri))]
 const RECORDER_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -57,14 +57,17 @@ impl EventBufferCapacity {
     /// Default event-buffer capacity.
     pub const DEFAULT: Self = Self(DEFAULT_EVENT_CAPACITY_PER_THREAD);
 
-    /// Validates a per-thread event capacity.
+    /// Creates a per-thread event buffer capacity.
+    ///
+    /// Use [`TryFrom<usize>`] for values that can be invalid.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless `value` is a power of two from 64 through 1,048,576, inclusive.
     #[must_use]
-    pub const fn new(value: usize) -> Option<Self> {
-        if value >= MIN_EVENT_CAPACITY_PER_THREAD && value <= MAX_EVENT_CAPACITY_PER_THREAD && value.is_power_of_two() {
-            Some(Self(value))
-        } else {
-            None
-        }
+    pub const fn new(value: usize) -> Self {
+        assert!(Self::is_valid(value), "{}", INVALID_EVENT_BUFFER_CAPACITY);
+        Self(value)
     }
 
     /// Returns the event count represented by this capacity.
@@ -86,11 +89,27 @@ impl EventBufferCapacity {
     const fn from_exponent(exponent: u32) -> Self {
         Self(1usize << exponent)
     }
+
+    const fn is_valid(value: usize) -> bool {
+        value >= MIN_EVENT_CAPACITY_PER_THREAD && value <= MAX_EVENT_CAPACITY_PER_THREAD && value.is_power_of_two()
+    }
 }
 
 impl Default for EventBufferCapacity {
     fn default() -> Self {
         Self::DEFAULT
+    }
+}
+
+impl TryFrom<usize> for EventBufferCapacity {
+    type Error = crate::Error;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        if Self::is_valid(value) {
+            Ok(Self(value))
+        } else {
+            Err(crate::Error::new(INVALID_EVENT_BUFFER_CAPACITY))
+        }
     }
 }
 
@@ -155,7 +174,7 @@ pub(crate) struct Statistics {
     /// Memory currently retained by recorder metadata and event buffers.
     pub(crate) allocated_bytes: u64,
     /// Policies used by the active recording session.
-    pub(crate) recording: RecordingPolicies,
+    pub(crate) recording: Policies,
 }
 
 #[cfg(any(test, feature = "monitor"))]
@@ -240,30 +259,31 @@ pub(crate) fn test_configuration() -> Configuration {
 thread_local! {
     static SUPPRESSION_DEPTH: Cell<usize> = const { Cell::new(0) };
     static LOCAL_RECORDER: LocalRecorder = const { LocalRecorder::new() };
+    static RECORDER_THREAD_ID: Cell<u64> = const { Cell::new(0) };
 }
 
 /// Runtime telemetry configuration.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Configuration {
     /// Recording policy for allocation lifecycle events.
-    pub allocations: RecordingPolicy,
+    pub allocations: Policy,
     /// Recording policy for ordinary primitive events.
-    pub general_events: RecordingPolicy,
+    pub general_events: Policy,
     /// Recording policy for high-frequency Arc dereferences.
-    pub arc_dereferences: RecordingPolicy,
+    pub arc_dereferences: Policy,
     /// Recording policy for runtime task and scheduling events.
-    pub runtime_tasks: RecordingPolicy,
+    pub runtime_tasks: Policy,
     /// Recording policy for I/O primitive operations.
-    pub io: RecordingPolicy,
+    pub io: Policy,
     /// Recording policy for cache operations.
-    pub cache: RecordingPolicy,
+    pub cache: Policy,
     /// Events retained by each participating thread.
     pub event_capacity_per_thread: EventBufferCapacity,
 }
 
 /// Recording controls for one event class.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RecordingPolicy {
+pub struct Policy {
     /// Whether events in this class are recorded.
     pub enabled: bool,
     /// Whether configured events capture instruction-pointer backtraces.
@@ -272,7 +292,7 @@ pub struct RecordingPolicy {
     pub event_sampling: EventSampling,
 }
 
-impl RecordingPolicy {
+impl Policy {
     /// Records every object and uses the supplied backtrace setting.
     #[must_use]
     pub const fn all(capture_backtraces: bool) -> Self {
@@ -286,22 +306,22 @@ impl RecordingPolicy {
 
 /// Recording policies for all independently selectable event classes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct RecordingPolicies {
+pub struct Policies {
     /// Allocation lifecycle policy.
-    pub allocations: RecordingPolicy,
+    pub allocations: Policy,
     /// Ordinary primitive-event policy.
-    pub general_events: RecordingPolicy,
+    pub general_events: Policy,
     /// Arc dereference policy.
-    pub arc_dereferences: RecordingPolicy,
+    pub arc_dereferences: Policy,
     /// Runtime task and scheduling-event policy.
-    pub runtime_tasks: RecordingPolicy,
+    pub runtime_tasks: Policy,
     /// I/O primitive operation policy.
-    pub io: RecordingPolicy,
+    pub io: Policy,
     /// Cache operation policy.
-    pub cache: RecordingPolicy,
+    pub cache: Policy,
 }
 
-impl Default for RecordingPolicy {
+impl Default for Policy {
     fn default() -> Self {
         Self {
             enabled: false,
@@ -311,70 +331,46 @@ impl Default for RecordingPolicy {
     }
 }
 
-/// Identifies one active runtime-event recording session.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RecordingSession(NonZeroU64);
-
-// Written only under ConfigurationLock. A stopped session keeps its observation
-// boundary so sources do not turn frozen state into continuously growing ages.
-static SESSION_STOPPED_AT: AtomicU64 = AtomicU64::new(0);
-
-/// Session and clock boundary used to interpret recording-only source state.
-#[derive(Clone, Copy, Debug)]
-pub struct RecordingObservation {
-    /// Retained recording generation, including a just-stopped generation.
-    pub session: RecordingSession,
-    /// Latest time at which the session's source state may be interpreted.
-    pub observed_at: EventTimestamp,
-}
-
-/// Returns the active generation without touching thread-local recorder state.
+/// Returns whether a category is enabled and not suppressed on this thread.
 ///
-/// Sources must first use [`recording_enabled_for`] and revalidate this
-/// generation after acquiring their own state synchronization.
-#[doc(hidden)]
+/// [`crate::record`] already checks this before building an event.
+/// Integrations also use this query to skip event-only work outside the builder.
+/// A concurrent configuration change can still prevent an event from being accepted.
 #[must_use]
-pub fn active_recording_session() -> Option<RecordingSession> {
-    RecordingSession::from_raw(ACTIVE_SESSION.load(Ordering::Acquire))
+#[expect(
+    clippy::inline_always,
+    reason = "keep category checks inline at allocator and runtime hook call sites"
+)]
+#[inline(always)]
+pub fn is_enabled(class: EventClass) -> bool {
+    policy_enabled(policy_atomic(class).load(Ordering::Relaxed)) && !is_suppressed()
 }
 
-/// Reads a coherent recording observation, or `None` if configuration is busy.
-#[doc(hidden)]
+/// Reads the private active recorder epoch for internal assertions.
 #[must_use]
-pub fn recording_observation() -> Option<RecordingObservation> {
-    let _configuration = ConfigurationLock::acquire_until(Instant::now())?;
-    recording_observation_locked()
+#[cfg(test)]
+pub(crate) fn generation() -> Option<Generation> {
+    NonZeroU64::new(ACTIVE_SESSION.load(Ordering::Acquire))
 }
 
-fn recording_observation_locked() -> Option<RecordingObservation> {
-    let session = RecordingSession::from_raw(LAST_SESSION.load(Ordering::Acquire))?;
-    let stopped_at = SESSION_STOPPED_AT.load(Ordering::Acquire);
-    Some(RecordingObservation {
-        session,
-        observed_at: if stopped_at == 0 {
-            EventTimestamp::now()
-        } else {
-            EventTimestamp::from_ticks(stopped_at)
-        },
-    })
-}
-
-impl RecordingSession {
-    /// Returns the numeric session identifier.
-    #[must_use]
-    pub const fn get(self) -> u64 {
-        self.0.get()
+/// Builds an event and returns the generation that accepts it.
+///
+/// This follows the same policies as [`crate::record`]. The accepted epoch is
+/// private recorder bookkeeping, not a task identity or a source observation.
+/// Returns `None` for disabled, suppressed, skipped, sampled-out, or rejected events.
+///
+/// # Panics
+///
+/// Propagates a panic from `build`.
+pub(crate) fn try_record(class: EventClass, build: impl FnOnce() -> Option<Record>) -> Option<Generation> {
+    let policy = policy_atomic(class).load(Ordering::Relaxed);
+    if !policy_enabled(policy) {
+        return None;
     }
-
-    /// Reconstructs a recording session from a previously stored identifier.
-    #[must_use]
-    pub const fn from_raw(session_id: u64) -> Option<Self> {
-        match NonZeroU64::new(session_id) {
-            Some(session_id) => Some(Self(session_id)),
-            None => None,
-        }
-    }
+    try_record_enabled(class, build, policy)
 }
+
+type Generation = NonZeroU64;
 
 /// Configures runtime event recording for the process.
 pub(crate) fn configure(configuration: Configuration) {
@@ -417,9 +413,6 @@ fn configure_locked(configuration: Configuration) {
         }
         return;
     }
-    if ACTIVE_SESSION.load(Ordering::Acquire) != 0 {
-        SESSION_STOPPED_AT.store(EventTimestamp::now().ticks().max(1), Ordering::Release);
-    }
     ACTIVE_SESSION.store(0, Ordering::SeqCst);
     EVENT_CAPACITY.store(capacity, Ordering::SeqCst);
     ALLOCATION_POLICY.store(allocation_policy, Ordering::SeqCst);
@@ -438,7 +431,6 @@ fn configure_locked(configuration: Configuration) {
         LAST_CACHE_POLICY.store(cache_policy, Ordering::Release);
         LAST_SESSION.store(session, Ordering::Release);
         ACTIVITY_GENERATION.store(session, Ordering::Release);
-        SESSION_STOPPED_AT.store(0, Ordering::Release);
         ACTIVE_SESSION.store(session, Ordering::Release);
     }
 }
@@ -456,60 +448,6 @@ pub(crate) fn configuration() -> Configuration {
         cache: decode_policy(CACHE_POLICY.load(Ordering::Acquire)),
         event_capacity_per_thread: decode_capacity(EVENT_CAPACITY.load(Ordering::Acquire)),
     }
-}
-
-/// Returns whether any event class is currently enabled.
-#[doc(hidden)]
-#[must_use]
-#[inline]
-pub fn recording_enabled() -> bool {
-    !is_suppressed()
-        && (policy_enabled(ALLOCATION_POLICY.load(Ordering::Relaxed))
-            || policy_enabled(GENERAL_POLICY.load(Ordering::Relaxed))
-            || policy_enabled(ARC_DEREFERENCE_POLICY.load(Ordering::Relaxed))
-            || policy_enabled(RUNTIME_TASK_POLICY.load(Ordering::Relaxed))
-            || policy_enabled(IO_POLICY.load(Ordering::Relaxed))
-            || policy_enabled(CACHE_POLICY.load(Ordering::Relaxed)))
-}
-
-/// Returns whether one event class is currently enabled.
-#[doc(hidden)]
-#[must_use]
-#[inline]
-pub fn recording_enabled_for(class: EventClass) -> bool {
-    policy_enabled(policy_atomic(class).load(Ordering::Relaxed)) && !is_suppressed()
-}
-
-/// Selects an object for recording and binds it to the active session.
-#[must_use]
-#[inline]
-pub fn select_object(object_id: ObjectId) -> Option<RecordingSession> {
-    select_object_for(EventClass::General, object_id)
-}
-
-/// Selects an object in one event class and binds it to the active session.
-#[doc(hidden)]
-#[must_use]
-#[inline]
-pub fn select_object_for(class: EventClass, object_id: ObjectId) -> Option<RecordingSession> {
-    let policy = policy_atomic(class).load(Ordering::Relaxed);
-    if !policy_enabled(policy) || is_suppressed() {
-        return None;
-    }
-    let session = ACTIVE_SESSION.load(Ordering::Relaxed);
-    if !decode_sampling(policy).includes(object_id) {
-        return None;
-    }
-    if !selection_still_current(class, policy, session) {
-        return None;
-    }
-    RecordingSession::from_raw(session)
-}
-
-#[inline]
-#[cfg_attr(coverage_nightly, coverage(off))] // State can change only in the race window between the paired loads.
-fn selection_still_current(class: EventClass, policy: u64, session: u64) -> bool {
-    session != 0 && policy_atomic(class).load(Ordering::Acquire) == policy && ACTIVE_SESSION.load(Ordering::Acquire) == session
 }
 
 /// Reads recorder counters without copying retained events.
@@ -598,30 +536,10 @@ fn read_activity(include_threads: bool) -> Result<Activity, crate::Error> {
     Ok(activity)
 }
 
-/// Lazily constructs and records an event in a known class.
-///
-/// The builder may return `None` to omit the event without initializing a recorder.
-#[inline]
-pub(crate) fn record(class: EventClass, event: impl FnOnce() -> Option<Record>) {
-    let _ = record_session(class, event);
-}
-
-/// Lazily constructs an event and returns the session that accepted it.
-///
-/// A builder returning `None` intentionally omits the event and returns no session.
-#[inline]
-pub(crate) fn record_session(class: EventClass, event: impl FnOnce() -> Option<Record>) -> Option<RecordingSession> {
-    let policy = policy_atomic(class).load(Ordering::Relaxed);
-    if !policy_enabled(policy) {
-        return None;
-    }
-    record_session_enabled(class, event, policy)
-}
-
 // Keep TLS access and event construction out of disabled callers, even under LTO.
 #[cold]
 #[inline(never)]
-fn record_session_enabled(class: EventClass, event: impl FnOnce() -> Option<Record>, policy: u64) -> Option<RecordingSession> {
+fn try_record_enabled(class: EventClass, event: impl FnOnce() -> Option<Record>, policy: u64) -> Option<Generation> {
     if is_suppressed() {
         return None;
     }
@@ -638,39 +556,7 @@ fn record_session_enabled(class: EventClass, event: impl FnOnce() -> Option<Reco
     }
     let capacity = EVENT_CAPACITY.load(Ordering::Relaxed);
     record_enabled(session, class, record, policy, capacity)
-        .then(|| RecordingSession::from_raw(session).expect("recording requires a nonzero active session"))
-}
-
-/// Records an event only while its originating session remains active.
-///
-/// A builder returning `None` intentionally omits the event and returns `false`.
-#[inline]
-pub(crate) fn record_in_session(session: RecordingSession, event: impl FnOnce() -> Option<Record>) -> bool {
-    record_in_session_classified(session, EventClass::General, event)
-}
-
-/// Records a classified event only while its originating session remains active.
-///
-/// A builder returning `None` intentionally omits the event and returns `false`
-/// without initializing a recorder.
-#[inline]
-#[doc(hidden)]
-pub fn record_in_session_classified(session: RecordingSession, class: EventClass, event: impl FnOnce() -> Option<Record>) -> bool {
-    let policy = policy_atomic(class).load(Ordering::Relaxed);
-    if !policy_enabled(policy) || is_suppressed() || ACTIVE_SESSION.load(Ordering::Relaxed) != session.get() {
-        return false;
-    }
-    let Some(record) = event() else {
-        return false;
-    };
-    if record.class() != class {
-        return false;
-    }
-    if !decode_sampling(policy).includes(record.sampling_object_id()) {
-        return false;
-    }
-    let capacity = EVENT_CAPACITY.load(Ordering::Relaxed);
-    record_enabled(session.get(), class, record, policy, capacity)
+        .then(|| NonZeroU64::new(session).expect("session was checked as nonzero before the event builder ran"))
 }
 
 #[cold]
@@ -721,26 +607,18 @@ pub(crate) fn snapshot(disposition: crate::snapshot::EventBufferDisposition) -> 
     try_snapshot(disposition).ok().flatten()
 }
 
-#[cfg(test)]
 pub(crate) fn try_snapshot(disposition: crate::snapshot::EventBufferDisposition) -> Result<Option<Events>, crate::Error> {
-    try_snapshot_with_observation(disposition).map(|(events, _)| events)
-}
-
-pub(crate) fn try_snapshot_with_observation(
-    disposition: crate::snapshot::EventBufferDisposition,
-) -> Result<(Option<Events>, Option<RecordingObservation>), crate::Error> {
     let _suppression = SuppressionGuard::enter();
     if disposition != crate::snapshot::EventBufferDisposition::Retain {
         return reset_event_buffers(disposition, true);
     }
     let _configuration = ConfigurationLock::acquire_until(wait_deadline())
         .ok_or_else(|| crate::Error::new("seismograph snapshot timed out waiting for configuration"))?;
-    let observation = recording_observation_locked();
     let session = LAST_SESSION.load(Ordering::Acquire);
     if session == 0 {
-        return Ok((None, observation));
+        return Ok(None);
     }
-    snapshot_from_recorders_until(session, RECORDERS.load(Ordering::Acquire), wait_deadline()).map(|events| (events, observation))
+    snapshot_from_recorders_until(session, RECORDERS.load(Ordering::Acquire), wait_deadline())
 }
 
 #[cfg(test)]
@@ -779,74 +657,54 @@ fn snapshot_from_recorders_until(
 }
 
 /// Returns whether telemetry-internal work is suppressed on this thread.
-#[doc(hidden)]
 #[must_use]
-pub fn is_suppressed() -> bool {
+fn is_suppressed() -> bool {
     SUPPRESSION_DEPTH.try_with(|depth| depth.get() != 0).unwrap_or(true)
 }
 
 /// Returns the current thread's process-unique recorder identity.
 ///
 /// Calling this function initializes the thread-local recorder when necessary.
+/// The identity remains available after the thread's event recorder retires.
 #[must_use]
-pub fn current_thread_id() -> ThreadId {
-    let recorder = local_recorder();
-    // SAFETY: local_recorder returns a process-lifetime recorder allocated
-    // through System and owned for writes by this thread.
-    unsafe { &*recorder }.thread_id
+pub fn thread_id() -> ThreadId {
+    if let Some(recorder) = try_local_recorder() {
+        // SAFETY: Published recorders remain allocated for the process lifetime.
+        return unsafe { &*recorder }.thread_id;
+    }
+    let cached = RECORDER_THREAD_ID.get();
+    if cached != 0 {
+        return ThreadId::new(cached);
+    }
+    let id = NEXT_THREAD_ID.fetch_add(1, Ordering::Relaxed);
+    RECORDER_THREAD_ID.set(id);
+    ThreadId::new(id)
 }
 
-/// Captures a backtrace using the active recording policy.
-#[doc(hidden)]
-#[must_use]
-pub fn capture_backtrace(policy: BacktraceCapture) -> Vec<Address> {
-    let runtime_policy = RUNTIME_TASK_POLICY.load(Ordering::Relaxed);
-    if !policy_enabled(runtime_policy) {
-        return Vec::new();
-    }
-    let enabled = match policy {
-        BacktraceCapture::Configured => policy_backtraces(runtime_policy),
-        BacktraceCapture::Never => false,
-        BacktraceCapture::Always => true,
-    };
-    if !enabled {
-        return Vec::new();
-    }
-
-    let _suppression = SuppressionGuard::enter();
-    let (frames, frame_count) = capture_stack();
-    frames[..usize::from(frame_count)].iter().copied().map(Address::new).collect()
-}
-
-/// Converts a captured return address to the address used for symbol lookup.
+/// Runs synchronous work without recording events on this thread.
 ///
-/// Windows stack capture reports return addresses. Looking up the preceding
-/// instruction avoids attributing a boundary return address to the next
-/// function while preserving the original captured address as its identity.
-#[doc(hidden)]
-#[must_use]
-pub const fn symbol_lookup_address(address: Address) -> Address {
-    #[cfg(windows)]
-    {
-        Address::new(address.get().saturating_sub(1))
-    }
-    #[cfg(not(windows))]
-    {
-        address
-    }
+/// Nested calls remain suppressed until the outer call returns. Recording is
+/// restored when `operation` returns or unwinds. Other threads are not affected.
+/// Returning a future does not suppress its later execution.
+///
+/// # Panics
+///
+/// Propagates a panic from `operation`.
+pub fn without_recording<R>(operation: impl FnOnce() -> R) -> R {
+    let _suppression = SuppressionGuard::enter();
+    operation()
 }
 
 /// A thread-local guard that suppresses telemetry-internal operations.
-#[doc(hidden)]
 #[derive(Debug)]
-pub struct SuppressionGuard {
+pub(crate) struct SuppressionGuard {
     entered: bool,
 }
 
 impl SuppressionGuard {
     /// Enters a nested telemetry-suppression scope.
     #[must_use]
-    pub fn enter() -> Self {
+    pub(crate) fn enter() -> Self {
         let entered = SUPPRESSION_DEPTH.try_with(|depth| depth.set(depth.get().saturating_add(1))).is_ok();
         Self { entered }
     }
@@ -1356,7 +1214,7 @@ impl Drop for ConfigurationLock {
     }
 }
 
-const fn encode_policy(policy: RecordingPolicy) -> u64 {
+const fn encode_policy(policy: Policy) -> u64 {
     let mut flags = 0;
     if policy.enabled {
         flags |= RECORDING_ENABLED;
@@ -1367,8 +1225,8 @@ const fn encode_policy(policy: RecordingPolicy) -> u64 {
     (flags as u64) + ((policy.event_sampling.get() as u64) << SAMPLING_SHIFT)
 }
 
-const fn decode_policy(policy: u64) -> RecordingPolicy {
-    RecordingPolicy {
+const fn decode_policy(policy: u64) -> Policy {
+    Policy {
         enabled: policy_enabled(policy),
         capture_backtraces: policy_backtraces(policy),
         event_sampling: decode_sampling(policy),
@@ -1407,8 +1265,8 @@ const fn decode_sampling(policy: u64) -> EventSampling {
     }
 }
 
-fn last_recording_policies() -> RecordingPolicies {
-    RecordingPolicies {
+fn last_recording_policies() -> Policies {
+    Policies {
         allocations: decode_policy(LAST_ALLOCATION_POLICY.load(Ordering::Acquire)),
         general_events: decode_policy(LAST_GENERAL_POLICY.load(Ordering::Acquire)),
         arc_dereferences: decode_policy(LAST_ARC_DEREFERENCE_POLICY.load(Ordering::Acquire)),
@@ -1420,7 +1278,7 @@ fn last_recording_policies() -> RecordingPolicies {
 
 #[cfg(test)]
 fn destructive_snapshot(disposition: crate::snapshot::EventBufferDisposition) -> Result<Option<Events>, crate::Error> {
-    reset_event_buffers(disposition, true).map(|(events, _)| events)
+    reset_event_buffers(disposition, true)
 }
 
 /// Empties all event rings without capturing a snapshot or invoking snapshot sources.
@@ -1432,15 +1290,12 @@ fn destructive_snapshot(disposition: crate::snapshot::EventBufferDisposition) ->
 ///
 /// Returns an error if configuration, writers, or ring readers do not quiesce in
 /// time. Policies are restored on failure; some rings may already have been emptied.
-pub fn clear_event_buffers() -> Result<(), crate::Error> {
+pub fn clear_buffers() -> Result<(), crate::Error> {
     let _suppression = SuppressionGuard::enter();
     reset_event_buffers(crate::snapshot::EventBufferDisposition::Clear, false).map(|_| ())
 }
 
-fn reset_event_buffers(
-    disposition: crate::snapshot::EventBufferDisposition,
-    capture: bool,
-) -> Result<(Option<Events>, Option<RecordingObservation>), crate::Error> {
+fn reset_event_buffers(disposition: crate::snapshot::EventBufferDisposition, capture: bool) -> Result<Option<Events>, crate::Error> {
     let deadline = wait_deadline();
     let _configuration = ConfigurationLock::acquire_until(deadline)
         .ok_or_else(|| crate::Error::new("seismograph recorder timed out waiting for configuration"))?;
@@ -1451,10 +1306,6 @@ fn reset_event_buffers(
     let runtime_task_policy = RUNTIME_TASK_POLICY.load(Ordering::SeqCst);
     let io_policy = IO_POLICY.load(Ordering::SeqCst);
     let cache_policy = CACHE_POLICY.load(Ordering::SeqCst);
-    let previous_stopped_at = SESSION_STOPPED_AT.load(Ordering::Acquire);
-    if ACTIVE_SESSION.load(Ordering::Acquire) != 0 {
-        SESSION_STOPPED_AT.store(EventTimestamp::now().ticks().max(1), Ordering::Release);
-    }
     let was_enabled = ACTIVE_SESSION.swap(0, Ordering::SeqCst) != 0;
     ALLOCATION_POLICY.store(disabled_policy(allocation_policy), Ordering::SeqCst);
     GENERAL_POLICY.store(disabled_policy(general_policy), Ordering::SeqCst);
@@ -1462,10 +1313,8 @@ fn reset_event_buffers(
     RUNTIME_TASK_POLICY.store(disabled_policy(runtime_task_policy), Ordering::SeqCst);
     IO_POLICY.store(disabled_policy(io_policy), Ordering::SeqCst);
     CACHE_POLICY.store(disabled_policy(cache_policy), Ordering::SeqCst);
-    let observation = recording_observation_locked();
 
     if !wait_for_writers_until(deadline) {
-        SESSION_STOPPED_AT.store(previous_stopped_at, Ordering::Release);
         restore_recording_policies(
             allocation_policy,
             general_policy,
@@ -1485,7 +1334,6 @@ fn reset_event_buffers(
     let snapshot = match captured {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            SESSION_STOPPED_AT.store(previous_stopped_at, Ordering::Release);
             restore_recording_policies(
                 allocation_policy,
                 general_policy,
@@ -1509,7 +1357,6 @@ fn reset_event_buffers(
         let current = unsafe { &*recorder };
         if !current.clear(release || current.retired.load(Ordering::Acquire), deadline) {
             if !stop {
-                SESSION_STOPPED_AT.store(previous_stopped_at, Ordering::Release);
                 restore_recording_policies(
                     allocation_policy,
                     general_policy,
@@ -1526,12 +1373,11 @@ fn reset_event_buffers(
     }
 
     if stop {
-        return Ok((snapshot, observation));
+        return Ok(snapshot);
     }
-    // Clear must invalidate recording-only source state even while stopped.
+    // Cleared buffers start a fresh private recorder epoch.
     LAST_SESSION.store(next_session, Ordering::Release);
     if was_enabled {
-        SESSION_STOPPED_AT.store(0, Ordering::Release);
         ACTIVE_SESSION.store(next_session, Ordering::SeqCst);
     }
     ALLOCATION_POLICY.store(allocation_policy, Ordering::SeqCst);
@@ -1540,7 +1386,7 @@ fn reset_event_buffers(
     RUNTIME_TASK_POLICY.store(runtime_task_policy, Ordering::SeqCst);
     IO_POLICY.store(io_policy, Ordering::SeqCst);
     CACHE_POLICY.store(cache_policy, Ordering::SeqCst);
-    Ok((snapshot, observation))
+    Ok(snapshot)
 }
 
 const fn disabled_policy(policy: u64) -> u64 {
@@ -1615,6 +1461,7 @@ fn wait_expired(deadline: Instant) -> bool {
     }
 }
 
+#[cfg(test)]
 fn local_recorder() -> *const ThreadRecorder {
     LOCAL_RECORDER.with(initialize_local_recorder)
 }
@@ -1633,8 +1480,10 @@ fn initialize_local_recorder(local: &LocalRecorder) -> *const ThreadRecorder {
     let _suppression = SuppressionGuard::enter();
     let layout = Layout::new::<ThreadRecorder>();
     let allocated = allocate_thread_recorder(layout);
+    let recorder = ThreadRecorder::new();
+    RECORDER_THREAD_ID.set(recorder.thread_id.get());
     // SAFETY: allocated is properly aligned writable storage for one value.
-    unsafe { allocated.write(ThreadRecorder::new()) };
+    unsafe { allocated.write(recorder) };
     RECORDERS
         .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
             // SAFETY: allocated points to the initialized recorder owned by this
@@ -1718,6 +1567,8 @@ fn capture_platform_stack(frames: &mut [u64]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::record;
+    use crate::recorder::event::EventTimestamp;
 
     const ACTIVITY_CLASSES: [(EventClass, EventKind); 6] = [
         (EventClass::Allocation, EventKind::Allocation),
@@ -1732,7 +1583,7 @@ mod tests {
     fn activity_attributes_all_classes_and_excludes_suppressed_and_disabled_events() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         for (index, (class, kind)) in ACTIVITY_CLASSES.into_iter().enumerate() {
             for _ in 0..=index {
                 record(class, || Some(Record::object(kind, ObjectId::new(1))));
@@ -1755,16 +1606,16 @@ mod tests {
             ),
             ([1, 2, 3, 4, 5, 6], 21, [1, 2, 3, 4, 5, 6], before.threads)
         );
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
     }
 
     #[test]
     fn activity_excludes_sampled_out_events_in_every_class() {
         let _test = TEST_LOCK.lock().unwrap();
         let sampling = EventSampling::one_in(2).unwrap();
-        let policy = RecordingPolicy {
+        let policy = Policy {
             event_sampling: sampling,
-            ..RecordingPolicy::all(false)
+            ..Policy::all(false)
         };
         configure(Configuration {
             allocations: policy,
@@ -1773,9 +1624,9 @@ mod tests {
             runtime_tasks: policy,
             io: policy,
             cache: policy,
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
         });
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         let selected = (1..100).map(ObjectId::new).find(|id| sampling.includes(*id)).unwrap();
         let skipped = (1..100).map(ObjectId::new).find(|id| !sampling.includes(*id)).unwrap();
         for (class, kind) in ACTIVITY_CLASSES {
@@ -1797,7 +1648,7 @@ mod tests {
             ([0; 6], 0, [1; 6], 6)
         );
         configure(Configuration::default());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
     }
 
     #[test]
@@ -1805,12 +1656,12 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         for capacity in [64, 128] {
             configure(Configuration {
-                general_events: RecordingPolicy::all(false),
-                event_capacity_per_thread: EventBufferCapacity::new(capacity).unwrap(),
+                general_events: Policy::all(false),
+                event_capacity_per_thread: EventBufferCapacity::new(capacity),
                 ..Default::default()
             });
-            clear_event_buffers().unwrap();
-            let thread_id = current_thread_id();
+            clear_buffers().unwrap();
+            let thread_id = thread_id();
             for count in 1..=capacity + 3 {
                 record(EventClass::General, || {
                     Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
@@ -1841,7 +1692,7 @@ mod tests {
                 }
             }
             configure(Configuration {
-                event_capacity_per_thread: EventBufferCapacity::new(capacity * 2).unwrap(),
+                event_capacity_per_thread: EventBufferCapacity::new(capacity * 2),
                 ..Default::default()
             });
             let stopped = try_activity().unwrap();
@@ -1851,7 +1702,7 @@ mod tests {
             );
         }
         configure(Configuration::default());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
     }
 
     #[test]
@@ -1859,7 +1710,7 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         let enabled = timeout_configuration();
         configure(enabled);
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         for disposition in [
             crate::snapshot::EventBufferDisposition::Clear,
             crate::snapshot::EventBufferDisposition::Release,
@@ -1868,7 +1719,7 @@ mod tests {
             record(EventClass::Cache, || Some(Record::object(EventKind::CacheHit, ObjectId::new(1))));
             let before = try_activity().unwrap();
             if disposition == crate::snapshot::EventBufferDisposition::Clear {
-                clear_event_buffers().unwrap();
+                clear_buffers().unwrap();
             } else {
                 try_snapshot(disposition).unwrap();
             }
@@ -1887,10 +1738,10 @@ mod tests {
             let restarted = try_activity().unwrap();
             assert_ne!(restarted.session_id, before.session_id);
             assert_eq!((restarted.class_events, restarted.threads[0].total_events), ([0, 0, 0, 0, 0, 1], 1));
-            clear_event_buffers().unwrap();
+            clear_buffers().unwrap();
         }
         configure(Configuration {
-            event_capacity_per_thread: EventBufferCapacity::new(128).unwrap(),
+            event_capacity_per_thread: EventBufferCapacity::new(128),
             ..enabled
         });
         record(EventClass::General, || {
@@ -1899,14 +1750,14 @@ mod tests {
         let resized = try_activity().unwrap();
         assert_eq!((resized.class_events, resized.threads[0].event_capacity), ([0, 1, 0, 0, 0, 0], 128));
         configure(Configuration::default());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
     }
 
     #[test]
     fn activity_does_not_read_locked_event_slots_or_change_recorder_state() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
@@ -1923,14 +1774,14 @@ mod tests {
         assert_eq!(recorder.ring().unwrap().slots.as_ptr(), ring_address);
         drop(slot);
         configure(Configuration::default());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
     }
 
     #[test]
     fn activity_retains_exited_thread_counts_after_ring_release() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let (exit_tx, exit_rx) = std::sync::mpsc::channel();
         let worker = std::thread::Builder::new()
@@ -1939,7 +1790,7 @@ mod tests {
                 record(EventClass::General, || {
                     Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
                 });
-                ready_tx.send(current_thread_id()).unwrap();
+                ready_tx.send(thread_id()).unwrap();
                 exit_rx.recv().unwrap();
             })
             .unwrap();
@@ -1993,20 +1844,20 @@ mod tests {
             )
         );
         configure(Configuration::default());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
     }
 
     #[test]
     fn activity_class_totals_survive_retired_ring_eviction_with_concurrent_growth() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         let emit_classes = || {
             std::thread::spawn(|| {
                 for (class, kind) in ACTIVITY_CLASSES {
                     record(class, || Some(Record::object(kind, ObjectId::new(1))));
                 }
-                current_thread_id()
+                thread_id()
             })
             .join()
             .unwrap()
@@ -2049,7 +1900,7 @@ mod tests {
             ),
             (before.session_id, [2, 12, 2, 2, 2, 2], 10, 3)
         );
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         let cleared = try_activity().unwrap();
         assert_ne!(cleared.session_id, before.session_id);
         assert_eq!((cleared.class_events, cleared.threads.len()), ([0; 6], 0));
@@ -2060,7 +1911,7 @@ mod tests {
     fn activity_partial_clear_failure_changes_the_rate_generation() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
@@ -2072,11 +1923,11 @@ mod tests {
         .join()
         .unwrap();
         let before = try_activity().unwrap();
-        let source_session = recording_observation().unwrap().session;
+        let source_session = LAST_SESSION.load(Ordering::Acquire);
         // SAFETY: this thread owns the process-lifetime recorder.
         let recorder = unsafe { &*local_recorder() };
         let ring = recorder.ring_lock();
-        let failed = clear_event_buffers().is_err();
+        let failed = clear_buffers().is_err();
         drop(ring);
         let after = try_activity().unwrap();
         assert_eq!(
@@ -2084,7 +1935,7 @@ mod tests {
                 failed,
                 before.class_events,
                 after.class_events,
-                recording_observation().unwrap().session
+                LAST_SESSION.load(Ordering::Acquire)
             ),
             (true, [0, 2, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0], source_session)
         );
@@ -2095,14 +1946,14 @@ mod tests {
         let resumed = try_activity().unwrap();
         assert_eq!((resumed.session_id, resumed.class_events), (after.session_id, [0, 2, 0, 0, 0, 0]));
         configure(Configuration::default());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
     }
 
     #[test]
     fn activity_read_cannot_cross_a_clear_session_boundary() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
@@ -2116,7 +1967,7 @@ mod tests {
             assert!(Instant::now() < deadline, "activity reader did not acquire the configuration lock");
             std::thread::yield_now();
         }
-        let reset = std::thread::spawn(clear_event_buffers);
+        let reset = std::thread::spawn(clear_buffers);
         drop(ring);
         let observed = reader.join().unwrap();
         reset.join().unwrap().unwrap();
@@ -2133,7 +1984,7 @@ mod tests {
     #[test]
     fn contended_ring_rejects_a_new_session_without_changing_the_old_one() {
         let recorder = ThreadRecorder::new();
-        let capacity = EventBufferCapacity::new(64).unwrap();
+        let capacity = EventBufferCapacity::new(64);
         let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
         assert!(recorder.record(1, capacity, event, [0; MAX_STACK_FRAMES], 0));
         let ring = recorder.ring_lock();
@@ -2155,19 +2006,19 @@ mod tests {
     fn contended_slot_drops_an_event_and_releases_the_writer() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
-            general_events: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            general_events: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Default::default()
         });
         let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
-        let session = record_session(EventClass::General, || Some(event)).unwrap();
+        try_record(EventClass::General, || Some(event)).unwrap();
         // SAFETY: this thread owns the process-lifetime recorder and its writer context.
         let recorder = unsafe { &*local_recorder() };
         let slot = recorder.ring().unwrap().slots[1].lock_until(wait_deadline()).unwrap();
-        let accepted = record_in_session(session, || Some(event));
+        let accepted = try_record(EventClass::General, || Some(event)).is_some();
         drop(slot);
         let writer_active = recorder.writer_active.load(Ordering::Acquire);
-        let resumed = record_in_session(session, || Some(event));
+        let resumed = try_record(EventClass::General, || Some(event)).is_some();
         let activity = try_activity().unwrap();
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
         configure(Configuration::default());
@@ -2186,7 +2037,7 @@ mod tests {
     #[test]
     fn expired_snapshot_releases_ring_lock_when_a_slot_is_busy() {
         let recorder = ThreadRecorder::new();
-        let capacity = EventBufferCapacity::new(64).unwrap();
+        let capacity = EventBufferCapacity::new(64);
         assert!(recorder.record(
             1,
             capacity,
@@ -2205,8 +2056,8 @@ mod tests {
     fn contended_statistics_returns_error_and_legacy_fallback() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
-            general_events: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            general_events: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Default::default()
         });
         // SAFETY: this thread owns the process-lifetime recorder.
@@ -2229,13 +2080,13 @@ mod tests {
 
     fn timeout_configuration() -> Configuration {
         Configuration {
-            allocations: RecordingPolicy::all(false),
-            general_events: RecordingPolicy::all(false),
-            arc_dereferences: RecordingPolicy::all(false),
-            runtime_tasks: RecordingPolicy::all(false),
-            io: RecordingPolicy::all(false),
-            cache: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            allocations: Policy::all(false),
+            general_events: Policy::all(false),
+            arc_dereferences: Policy::all(false),
+            runtime_tasks: Policy::all(false),
+            io: Policy::all(false),
+            cache: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
         }
     }
 
@@ -2252,12 +2103,12 @@ mod tests {
         let error = destructive_snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap_err();
         drop(writer);
         let restored = (configuration(), ACTIVE_SESSION.load(Ordering::Acquire));
-        let resumed = record_session(EventClass::General, || {
+        let resumed = try_record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
         configure(Configuration::default());
         assert_eq!(
-            (error.to_string(), restored, resumed.map(RecordingSession::get)),
+            (error.to_string(), restored, resumed.map(Generation::get)),
             (
                 "seismograph snapshot timed out waiting for active event writers".into(),
                 (expected, session),
@@ -2272,14 +2123,14 @@ mod tests {
         let expected = timeout_configuration();
         configure(expected);
         let event = Record::object(EventKind::MutexAccess, ObjectId::new(1));
-        let session = record_session(EventClass::General, || Some(event)).unwrap();
+        let session = try_record(EventClass::General, || Some(event)).unwrap();
         // SAFETY: this thread owns the process-lifetime recorder.
         let recorder = unsafe { &*local_recorder() };
         let ring = recorder.ring_lock();
         let error = destructive_snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap_err();
         drop(ring);
         let restored = (configuration(), ACTIVE_SESSION.load(Ordering::Acquire));
-        let resumed = record_in_session(session, || Some(event));
+        let resumed = try_record(EventClass::General, || Some(event)).is_some();
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
         configure(Configuration::default());
         assert_eq!(
@@ -2309,12 +2160,12 @@ mod tests {
         let error = destructive_snapshot(crate::snapshot::EventBufferDisposition::Clear).unwrap_err();
         drop(ring);
         let restored = (configuration(), ACTIVE_SESSION.load(Ordering::Acquire));
-        let resumed = record_session(EventClass::General, || {
+        let resumed = try_record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
         configure(Configuration::default());
         assert_eq!(
-            (error.to_string(), restored, resumed.map(RecordingSession::get)),
+            (error.to_string(), restored, resumed.map(Generation::get)),
             (
                 "seismograph snapshot timed out clearing an event recorder".into(),
                 (expected, session),
@@ -2453,16 +2304,6 @@ mod tests {
         assert_eq!(decode_sampling(0), EventSampling::ALL);
     }
 
-    #[test]
-    fn symbol_lookup_address_preserves_recorded_identity_semantics() {
-        let address = Address::new(0x1000);
-        #[cfg(windows)]
-        assert_eq!(symbol_lookup_address(address), Address::new(0x0fff));
-        #[cfg(not(windows))]
-        assert_eq!(symbol_lookup_address(address), address);
-        assert_eq!(symbol_lookup_address(Address::new(0)), Address::new(0));
-    }
-
     struct LateTelemetryUser;
 
     impl Drop for LateTelemetryUser {
@@ -2481,7 +2322,7 @@ mod tests {
     fn omitted_event_builders_do_not_initialize_recorders_and_allow_later_events() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         let before = try_activity().unwrap().statistics;
         std::thread::spawn(move || {
             let registered = RECORDERS.load(Ordering::Acquire);
@@ -2490,7 +2331,7 @@ mod tests {
                 constructed.set(constructed.get() + 1);
                 None
             });
-            let omitted_session = record_session(EventClass::General, || {
+            let omitted_session = try_record(EventClass::General, || {
                 constructed.set(constructed.get() + 1);
                 None
             });
@@ -2512,11 +2353,11 @@ mod tests {
                 Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
             });
             assert_eq!(
-                record_session(EventClass::General, || Some(Record::object(
+                try_record(EventClass::General, || Some(Record::object(
                     EventKind::MutexAccess,
                     ObjectId::new(2)
                 ))),
-                active_recording_session()
+                generation()
             );
         })
         .join()
@@ -2530,20 +2371,19 @@ mod tests {
     }
 
     #[test]
-    fn omitted_session_bound_builders_do_not_initialize_recorders_and_allow_later_events() {
+    fn skipped_events_in_different_classes_do_not_initialize_recorders() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(timeout_configuration());
-        clear_event_buffers().unwrap();
-        let session = active_recording_session().unwrap();
+        clear_buffers().unwrap();
         let before = try_activity().unwrap().statistics;
         std::thread::spawn(move || {
             let registered = RECORDERS.load(Ordering::Acquire);
             let constructed = Cell::new(0);
-            let omitted = record_in_session(session, || {
+            let omitted = try_record(EventClass::General, || {
                 constructed.set(constructed.get() + 1);
                 None
             });
-            let omitted_classified = record_in_session_classified(session, EventClass::Cache, || {
+            let omitted_cache = try_record(EventClass::Cache, || {
                 constructed.set(constructed.get() + 1);
                 None
             });
@@ -2552,22 +2392,24 @@ mod tests {
                 (
                     constructed.get(),
                     omitted,
-                    omitted_classified,
+                    omitted_cache,
                     LOCAL_RECORDER.with(|local| local.recorder.get().is_null()),
                     RECORDERS.load(Ordering::Acquire),
                     after.statistics,
                     after.class_events,
                     after.threads.len(),
                 ),
-                (2, false, false, true, registered, before, [0; 6], 0)
+                (2, None, None, true, registered, before, [0; 6], 0)
             );
 
-            assert!(record_in_session(session, || {
-                Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
-            }));
-            assert!(record_in_session_classified(session, EventClass::Cache, || {
-                Some(Record::object(EventKind::CacheHit, ObjectId::new(2)))
-            }));
+            assert!(
+                try_record(EventClass::General, || Some(Record::object(
+                    EventKind::MutexAccess,
+                    ObjectId::new(1)
+                )))
+                .is_some()
+            );
+            assert!(try_record(EventClass::Cache, || Some(Record::object(EventKind::CacheHit, ObjectId::new(2)))).is_some());
         })
         .join()
         .unwrap();
@@ -2589,8 +2431,9 @@ mod tests {
             constructed.fetch_add(1, Ordering::Relaxed);
             Some(Record::object(EventKind::ArcDeref, ObjectId::new(42)))
         });
-        GENERAL_POLICY.store(encode_policy(RecordingPolicy::all(false)), Ordering::Release);
+        GENERAL_POLICY.store(encode_policy(Policy::all(false)), Ordering::Release);
         ACTIVE_SESSION.store(0, Ordering::Release);
+        assert!(generation().is_none());
         record(EventClass::General, || {
             constructed.fetch_add(1, Ordering::Relaxed);
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(42)))
@@ -2603,28 +2446,28 @@ mod tests {
     fn recording_switches_preserve_lazy_event_construction() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration::default());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         let constructed = Cell::new(0);
         let event = || {
             constructed.set(constructed.get() + 1);
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(42)))
         };
 
-        assert!(record_session(EventClass::General, event).is_none());
+        assert!(try_record(EventClass::General, event).is_none());
         configure(Configuration {
-            general_events: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
+            general_events: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD),
             ..Default::default()
         });
-        let session = active_recording_session().unwrap();
-        assert_eq!(record_session(EventClass::General, event), Some(session));
+        let session = generation().unwrap();
+        assert_eq!(try_record(EventClass::General, event), Some(session));
         {
             let _suppression = SuppressionGuard::enter();
-            assert!(record_session(EventClass::General, event).is_none());
+            assert!(try_record(EventClass::General, event).is_none());
         }
-        assert_eq!(record_session(EventClass::General, event), Some(session));
+        assert_eq!(try_record(EventClass::General, event), Some(session));
         configure(Configuration::default());
-        assert!(record_session(EventClass::General, event).is_none());
+        assert!(try_record(EventClass::General, event).is_none());
 
         let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
         assert_eq!(constructed.get(), 2);
@@ -2638,7 +2481,7 @@ mod tests {
     fn event_classes_are_enabled_independently_before_record_construction() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
-            arc_dereferences: RecordingPolicy {
+            arc_dereferences: Policy {
                 enabled: true,
                 ..Default::default()
             },
@@ -2662,12 +2505,10 @@ mod tests {
     fn record_rejects_events_from_a_different_class() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
-            general_events: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
+            general_events: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD),
             ..Default::default()
         });
-        let session = RecordingSession::from_raw(ACTIVE_SESSION.load(Ordering::Acquire)).unwrap();
-
         record(EventClass::General, || {
             Some(Record::runtime(
                 EventTimestamp::from_ticks(1),
@@ -2683,21 +2524,24 @@ mod tests {
                 BacktraceCapture::Never,
             ))
         });
-        assert!(!record_in_session_classified(session, EventClass::General, || {
-            Some(Record::runtime(
-                EventTimestamp::from_ticks(2),
-                EventKind::TaskSpawned,
-                runtime::RuntimeEvent {
-                    runtime_id: runtime::RuntimeId::from_raw(1).unwrap(),
-                    worker_id: None,
-                    subject_id: 2,
-                    related_id: 0,
-                    value_0: 0,
-                    value_1: 0,
-                },
-                BacktraceCapture::Never,
-            ))
-        }));
+        assert!(
+            try_record(EventClass::General, || {
+                Some(Record::runtime(
+                    EventTimestamp::from_ticks(2),
+                    EventKind::TaskSpawned,
+                    runtime::RuntimeEvent {
+                        runtime_id: runtime::RuntimeId::from_raw(1).unwrap(),
+                        worker_id: None,
+                        subject_id: 2,
+                        related_id: 0,
+                        value_0: 0,
+                        value_1: 0,
+                    },
+                    BacktraceCapture::Never,
+                ))
+            })
+            .is_none()
+        );
 
         assert!(snapshot(crate::snapshot::EventBufferDisposition::Release).is_none_or(|captured| captured.events.is_empty()));
         configure(Configuration::default());
@@ -2707,7 +2551,7 @@ mod tests {
     fn recording_during_tls_teardown_ignores_destroyed_local_recorder() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
-            allocations: RecordingPolicy {
+            allocations: Policy {
                 enabled: true,
                 ..Default::default()
             },
@@ -2718,7 +2562,7 @@ mod tests {
         std::thread::spawn(|| {
             assert!(!is_suppressed());
             LATE_TELEMETRY_USER.with(|_| {});
-            let _ = current_thread_id();
+            let _ = thread_id();
         })
         .join()
         .unwrap();
@@ -2730,7 +2574,7 @@ mod tests {
     fn runtime_events_round_trip_through_snapshot_model() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
-            arc_dereferences: RecordingPolicy {
+            arc_dereferences: Policy {
                 enabled: true,
                 capture_backtraces: !cfg!(miri),
                 ..Default::default()
@@ -2761,7 +2605,7 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         let runtime_id = runtime::RuntimeId::from_raw(1).unwrap();
         configure(Configuration {
-            runtime_tasks: RecordingPolicy {
+            runtime_tasks: Policy {
                 enabled: true,
                 capture_backtraces: true,
                 ..Default::default()
@@ -2811,24 +2655,12 @@ mod tests {
     }
 
     #[test]
-    fn current_thread_id_is_stable() {
+    fn thread_id_is_stable() {
         let _test = TEST_LOCK.lock().unwrap();
-        let current = current_thread_id();
-        let other = std::thread::spawn(current_thread_id).join().unwrap();
+        let current = thread_id();
+        let other = std::thread::spawn(thread_id).join().unwrap();
 
-        assert_eq!((current_thread_id(), current != other, current.get() != 0), (current, true, true));
-    }
-
-    #[test]
-    fn capacities_require_bounded_powers_of_two() {
-        assert_eq!(
-            (
-                EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD),
-                EventBufferCapacity::new(1_000),
-                EventBufferCapacity::new(MAX_EVENT_CAPACITY_PER_THREAD.saturating_mul(2)),
-            ),
-            (Some(EventBufferCapacity(MIN_EVENT_CAPACITY_PER_THREAD)), None, None)
-        );
+        assert_eq!((thread_id(), current != other, current.get() != 0), (current, true, true));
     }
 
     #[test]
@@ -2888,14 +2720,14 @@ mod tests {
     #[test]
     fn configuration_changes_rotate_sessions_and_preserve_exact_policies() {
         let _test = TEST_LOCK.lock().unwrap();
-        let base_policy = RecordingPolicy {
+        let base_policy = Policy {
             enabled: true,
             capture_backtraces: false,
             event_sampling: EventSampling::one_in(3).unwrap(),
         };
         let base = Configuration {
             general_events: base_policy,
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Default::default()
         };
         configure(base);
@@ -2908,34 +2740,34 @@ mod tests {
 
         let variants = [
             Configuration {
-                allocations: RecordingPolicy::all(false),
+                allocations: Policy::all(false),
                 ..base
             },
             Configuration {
-                general_events: RecordingPolicy {
+                general_events: Policy {
                     capture_backtraces: true,
                     ..base_policy
                 },
                 ..base
             },
             Configuration {
-                arc_dereferences: RecordingPolicy::all(false),
+                arc_dereferences: Policy::all(false),
                 ..base
             },
             Configuration {
-                runtime_tasks: RecordingPolicy::all(false),
+                runtime_tasks: Policy::all(false),
                 ..base
             },
             Configuration {
-                io: RecordingPolicy::all(false),
+                io: Policy::all(false),
                 ..base
             },
             Configuration {
-                cache: RecordingPolicy::all(false),
+                cache: Policy::all(false),
                 ..base
             },
             Configuration {
-                event_capacity_per_thread: EventBufferCapacity::new(128).unwrap(),
+                event_capacity_per_thread: EventBufferCapacity::new(128),
                 ..base
             },
         ];
@@ -2952,76 +2784,48 @@ mod tests {
     }
 
     #[test]
-    fn recording_observations_freeze_at_configuration_and_snapshot_stops() {
-        let _test = TEST_LOCK.lock().unwrap();
-        let enabled = timeout_configuration();
-        configure(enabled);
-        let active = recording_observation().unwrap();
-        assert_eq!(SESSION_STOPPED_AT.load(Ordering::Acquire), 0);
-        assert_eq!(Some(active.session), active_recording_session());
-
-        configure(Configuration::default());
-        let configured_stop = SESSION_STOPPED_AT.load(Ordering::Acquire);
-        let first = recording_observation().unwrap();
-        std::thread::sleep(Duration::from_millis(1));
-        let second = recording_observation().unwrap();
-        assert_eq!(
-            (configured_stop, first.observed_at.ticks(), second.observed_at.ticks()),
-            (configured_stop, configured_stop, configured_stop)
-        );
-        assert_ne!(configured_stop, 0);
-
-        configure(enabled);
-        let (_, observation) = reset_event_buffers(crate::snapshot::EventBufferDisposition::Stop, false).unwrap();
-        let snapshot_stop = SESSION_STOPPED_AT.load(Ordering::Acquire);
-        assert_eq!(observation.unwrap().observed_at.ticks(), snapshot_stop);
-        assert_ne!(snapshot_stop, 0);
-        configure(Configuration::default());
-    }
-
-    #[test]
-    fn every_recording_class_controls_global_and_class_enablement() {
+    fn every_recording_class_controls_class_enablement() {
         let _test = TEST_LOCK.lock().unwrap();
         let cases = [
             (
                 EventClass::Allocation,
                 Configuration {
-                    allocations: RecordingPolicy::all(false),
+                    allocations: Policy::all(false),
                     ..Default::default()
                 },
             ),
             (
                 EventClass::General,
                 Configuration {
-                    general_events: RecordingPolicy::all(false),
+                    general_events: Policy::all(false),
                     ..Default::default()
                 },
             ),
             (
                 EventClass::ArcDereference,
                 Configuration {
-                    arc_dereferences: RecordingPolicy::all(false),
+                    arc_dereferences: Policy::all(false),
                     ..Default::default()
                 },
             ),
             (
                 EventClass::RuntimeTask,
                 Configuration {
-                    runtime_tasks: RecordingPolicy::all(false),
+                    runtime_tasks: Policy::all(false),
                     ..Default::default()
                 },
             ),
             (
                 EventClass::Io,
                 Configuration {
-                    io: RecordingPolicy::all(false),
+                    io: Policy::all(false),
                     ..Default::default()
                 },
             ),
             (
                 EventClass::Cache,
                 Configuration {
-                    cache: RecordingPolicy::all(false),
+                    cache: Policy::all(false),
                     ..Default::default()
                 },
             ),
@@ -3029,14 +2833,10 @@ mod tests {
 
         for (enabled_class, configuration) in cases {
             configure(configuration);
-            assert!(recording_enabled());
-            assert!(select_object_for(enabled_class, ObjectId::new(1)).is_some());
             for (class, _) in cases {
-                assert_eq!(recording_enabled_for(class), class == enabled_class);
+                assert_eq!(is_enabled(class), class == enabled_class);
             }
         }
-        ACTIVE_SESSION.store(0, Ordering::Release);
-        assert!(select_object_for(EventClass::Cache, ObjectId::new(1)).is_none());
         configure(Configuration::default());
     }
 
@@ -3053,12 +2853,12 @@ mod tests {
             .find(|object_id| !sampling.includes(*object_id))
             .unwrap();
         configure(Configuration {
-            general_events: RecordingPolicy {
+            general_events: Policy {
                 enabled: true,
                 event_sampling: sampling,
                 ..Default::default()
             },
-            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD),
             ..Default::default()
         });
         let thread_count = statistics().thread_count;
@@ -3094,12 +2894,12 @@ mod tests {
             .find(|subject_id| !sampling.includes(ObjectId::new(*subject_id)))
             .unwrap();
         configure(Configuration {
-            runtime_tasks: RecordingPolicy {
+            runtime_tasks: Policy {
                 enabled: true,
                 event_sampling: sampling,
                 ..Default::default()
             },
-            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD),
             ..Default::default()
         });
 
@@ -3137,9 +2937,9 @@ mod tests {
     #[test]
     fn destructive_snapshots_clear_or_release_buffers() {
         let _test = TEST_LOCK.lock().unwrap();
-        let capacity = EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap();
+        let capacity = EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD);
         configure(Configuration {
-            arc_dereferences: RecordingPolicy {
+            arc_dereferences: Policy {
                 enabled: true,
                 ..Default::default()
             },
@@ -3194,7 +2994,7 @@ mod tests {
                 stopped.io,
                 stopped.cache
             ],
-            [RecordingPolicy::default(); 6]
+            [Policy::default(); 6]
         );
         assert_eq!(ACTIVE_SESSION.load(Ordering::Acquire), 0);
         let mut pointer = RECORDERS.load(Ordering::Acquire);
@@ -3212,8 +3012,8 @@ mod tests {
             EventClass::Io,
             EventClass::Cache,
         ] {
-            assert!(!recording_enabled_for(class));
-            assert!(record_session(class, || panic!("stopped classes must not construct events")).is_none());
+            assert!(!is_enabled(class));
+            assert!(try_record(class, || panic!("stopped classes must not construct events")).is_none());
         }
         configure(Configuration::default());
     }
@@ -3249,7 +3049,7 @@ mod tests {
             2
         );
         assert_eq!(configuration(), Configuration::default());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
     }
 
     #[test]
@@ -3275,12 +3075,12 @@ mod tests {
 
         let _test = TEST_LOCK.lock().unwrap();
         let enabled = Configuration {
-            allocations: RecordingPolicy {
+            allocations: Policy {
                 enabled: false,
                 capture_backtraces: true,
                 event_sampling: EventSampling::one_in(4).unwrap(),
             },
-            cache: RecordingPolicy {
+            cache: Policy {
                 enabled: true,
                 capture_backtraces: true,
                 event_sampling: EventSampling::one_in(8).unwrap(),
@@ -3307,7 +3107,7 @@ mod tests {
             (ring.slots.as_ptr(), ring.capacity())
         };
         let before = active_storage();
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         assert_eq!(
             (configuration(), try_statistics().unwrap().retained_events, active_storage()),
             (enabled, 0, before)
@@ -3322,7 +3122,7 @@ mod tests {
         });
         assert_eq!(try_statistics().unwrap().retained_events, 1);
         configure(Configuration::default());
-        clear_event_buffers().unwrap();
+        clear_buffers().unwrap();
         assert_eq!(
             (configuration(), try_statistics().unwrap().retained_events, active_storage()),
             (Configuration::default(), 0, before)
@@ -3342,7 +3142,7 @@ mod tests {
             let result = if capture {
                 try_snapshot(crate::snapshot::EventBufferDisposition::Stop).map(|_| ())
             } else {
-                clear_event_buffers()
+                clear_buffers()
             };
             drop(writer);
             assert!(result.unwrap_err().to_string().contains("timed out"));
@@ -3368,7 +3168,7 @@ mod tests {
         let error = try_snapshot(crate::snapshot::EventBufferDisposition::Stop).unwrap_err();
         drop(ring);
         assert!(error.to_string().contains("clearing an event recorder"));
-        assert!(!recording_enabled());
+        assert_eq!(configuration().general_events, Policy::default());
         assert_ne!(recorder.ring_capacity.load(Ordering::Acquire), 0);
         try_snapshot(crate::snapshot::EventBufferDisposition::Stop).unwrap();
         assert_eq!(recorder.ring_capacity.load(Ordering::Acquire), 0);
@@ -3393,7 +3193,7 @@ mod tests {
                     let result = if stop {
                         try_snapshot(crate::snapshot::EventBufferDisposition::Stop).map(|events| events.unwrap().events.len())
                     } else {
-                        clear_event_buffers().map(|()| 0)
+                        clear_buffers().map(|()| 0)
                     };
                     sender.send(result).unwrap();
                 });
@@ -3404,7 +3204,7 @@ mod tests {
                 drop(writer);
                 assert_eq!(receiver.recv_timeout(Duration::from_secs(3)).unwrap().unwrap(), usize::from(stop));
             });
-            assert_eq!(recording_enabled(), !stop);
+            assert_eq!(generation().is_some(), !stop);
         }
         configure(Configuration::default());
     }
@@ -3412,9 +3212,9 @@ mod tests {
     #[test]
     fn bounded_ring_wraparound_preserves_generation_and_thread_metadata() {
         let _test = TEST_LOCK.lock().unwrap();
-        let capacity = EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap();
+        let capacity = EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD);
         configure(Configuration {
-            general_events: RecordingPolicy::all(false),
+            general_events: Policy::all(false),
             event_capacity_per_thread: capacity,
             ..Default::default()
         });
@@ -3460,8 +3260,8 @@ mod tests {
         );
         assert_eq!(
             statistics.recording,
-            RecordingPolicies {
-                general_events: RecordingPolicy::all(false),
+            Policies {
+                general_events: Policy::all(false),
                 ..Default::default()
             }
         );
@@ -3491,7 +3291,7 @@ mod tests {
     #[test]
     fn destructive_snapshot_restores_policies_and_starts_a_new_generation() {
         let _test = TEST_LOCK.lock().unwrap();
-        let policy = |sampling, capture_backtraces| RecordingPolicy {
+        let policy = |sampling, capture_backtraces| Policy {
             enabled: true,
             capture_backtraces,
             event_sampling: EventSampling::one_in(sampling).unwrap(),
@@ -3503,7 +3303,7 @@ mod tests {
             runtime_tasks: policy(5, true),
             io: policy(6, false),
             cache: policy(7, true),
-            event_capacity_per_thread: EventBufferCapacity::new(128).unwrap(),
+            event_capacity_per_thread: EventBufferCapacity::new(128),
         };
         configure(expected_configuration);
         let before = ACTIVE_SESSION.load(Ordering::Acquire);
@@ -3523,7 +3323,7 @@ mod tests {
                 decode_policy(disabled_policy(encode_policy(expected_configuration.general_events))),
             ),
             (
-                RecordingPolicies {
+                Policies {
                     allocations: expected_configuration.allocations,
                     general_events: expected_configuration.general_events,
                     arc_dereferences: expected_configuration.arc_dereferences,
@@ -3534,7 +3334,7 @@ mod tests {
                 1,
                 expected_configuration,
                 true,
-                RecordingPolicy {
+                Policy {
                     enabled: false,
                     ..expected_configuration.general_events
                 },
@@ -3547,12 +3347,12 @@ mod tests {
     fn recorder_rejects_each_stale_state_dimension() {
         let _test = TEST_LOCK.lock().unwrap();
         let configuration = Configuration {
-            general_events: RecordingPolicy {
+            general_events: Policy {
                 enabled: true,
                 event_sampling: EventSampling::one_in(3).unwrap(),
                 ..Default::default()
             },
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Default::default()
         };
         configure(configuration);
@@ -3604,7 +3404,7 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         let _ = local_recorder();
         let previous_general_policy = LAST_GENERAL_POLICY.swap(
-            encode_policy(RecordingPolicy {
+            encode_policy(Policy {
                 enabled: true,
                 capture_backtraces: true,
                 event_sampling: EventSampling::one_in(3).unwrap(),
@@ -3668,8 +3468,8 @@ mod tests {
     fn destructive_snapshot_waits_until_an_active_writer_finishes() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
-            general_events: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
+            general_events: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD),
             ..Default::default()
         });
         let recorder = local_recorder();
@@ -3711,7 +3511,7 @@ mod tests {
     #[test]
     fn equal_capacity_reuses_the_existing_ring_between_sessions() {
         let recorder = ThreadRecorder::new();
-        let capacity = EventBufferCapacity::new(64).unwrap();
+        let capacity = EventBufferCapacity::new(64);
         recorder.begin_session(1, capacity);
         let first = recorder.ring().unwrap().slots.as_ptr();
         recorder.begin_session(2, capacity);
@@ -3723,9 +3523,9 @@ mod tests {
     #[test]
     fn snapshot_releases_a_retired_thread_ring_after_capturing_it() {
         let _test = TEST_LOCK.lock().unwrap();
-        let capacity = EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap();
+        let capacity = EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD);
         configure(Configuration {
-            arc_dereferences: RecordingPolicy {
+            arc_dereferences: Policy {
                 enabled: true,
                 ..Default::default()
             },
@@ -3759,11 +3559,11 @@ mod tests {
     fn retired_thread_rings_are_bounded_and_evict_the_oldest_history() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
-            arc_dereferences: RecordingPolicy {
+            arc_dereferences: Policy {
                 enabled: true,
                 ..Default::default()
             },
-            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD),
             ..Default::default()
         });
         let _initial = snapshot(crate::snapshot::EventBufferDisposition::Release);
@@ -3797,7 +3597,7 @@ mod tests {
     fn evicted_retired_ring_is_released_after_an_existing_reader() {
         static RECORDER: std::sync::LazyLock<ThreadRecorder> = std::sync::LazyLock::new(ThreadRecorder::new);
         let recorder = &*RECORDER;
-        recorder.begin_session(1, EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap());
+        recorder.begin_session(1, EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD));
         let ring = recorder.ring_lock();
 
         std::thread::scope(|scope| {
@@ -3818,9 +3618,9 @@ mod tests {
     #[test]
     fn release_snapshot_quiesces_concurrent_recording() {
         let _test = TEST_LOCK.lock().unwrap();
-        let capacity = EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap();
+        let capacity = EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD);
         configure(Configuration {
-            arc_dereferences: RecordingPolicy {
+            arc_dereferences: Policy {
                 enabled: true,
                 ..Default::default()
             },
@@ -3865,57 +3665,52 @@ mod tests {
             std::mem::size_of::<ThreadRecorder>() + capacity.get() * std::mem::size_of::<Slot>()
         );
         assert_eq!(EventSampling::default(), EventSampling::ALL);
-        assert_eq!(RecordingSession::from_raw(0), None);
+        assert_eq!(NonZeroU64::new(0), None);
 
         configure(Configuration {
-            general_events: RecordingPolicy::all(false),
+            general_events: Policy::all(false),
             ..test_configuration()
         });
-        assert!(recording_enabled());
-        assert!(recording_enabled_for(EventClass::General));
-        let session = select_object(ObjectId::new(1)).unwrap();
         let constructed = Cell::new(0);
         let event = || {
             constructed.set(constructed.get() + 1);
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         };
-        assert!(record_in_session_classified(session, EventClass::General, event));
+        assert!(try_record(EventClass::General, event).is_some());
         assert_eq!(constructed.get(), 1);
         {
             let _suppression = SuppressionGuard::enter();
-            assert!(!recording_enabled());
-            assert!(!recording_enabled_for(EventClass::General));
-            assert_eq!(select_object(ObjectId::new(1)), None);
-            assert!(!record_in_session(session, event));
-            assert!(!record_in_session_classified(session, EventClass::General, event));
+            assert!(!is_enabled(EventClass::General));
+            assert!(try_record(EventClass::General, event).is_none());
         }
         configure(Configuration::default());
-        assert!(!recording_enabled());
-        assert_eq!(select_object(ObjectId::new(1)), None);
-        assert!(!record_in_session(session, event));
-        assert!(!record_in_session_classified(session, EventClass::General, event));
+        assert!(generation().is_none());
+        assert!(try_record(EventClass::General, event).is_none());
         assert_eq!(constructed.get(), 1);
     }
 
     #[test]
-    fn unsampled_and_stale_sessions_are_rejected() {
+    fn unsampled_events_and_stale_writes_are_rejected() {
         let _test = TEST_LOCK.lock().unwrap();
         let sampling = EventSampling::one_in(2).unwrap();
         let skipped = (1..100).map(ObjectId::new).find(|object| !sampling.includes(*object)).unwrap();
         configure(Configuration {
-            general_events: RecordingPolicy {
+            general_events: Policy {
                 enabled: true,
                 event_sampling: sampling,
                 ..Default::default()
             },
-            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD),
             ..Default::default()
         });
-        assert_eq!(select_object(skipped), None);
+        assert_eq!(
+            try_record(EventClass::General, || Some(Record::object(EventKind::MutexAccess, skipped))),
+            None
+        );
         let selected = (1..100).map(ObjectId::new).find(|object| sampling.includes(*object)).unwrap();
-        let session = select_object(selected).unwrap();
+        let session = try_record(EventClass::General, || Some(Record::object(EventKind::MutexAccess, selected))).unwrap();
         let skipped_event = Record::object(EventKind::MutexAccess, skipped);
-        assert!(!record_in_session(session, || Some(skipped_event)));
+        assert!(try_record(EventClass::General, || Some(skipped_event)).is_none());
         let local = local_recorder();
         let policy = GENERAL_POLICY.load(Ordering::Relaxed);
         let capacity = EVENT_CAPACITY.load(Ordering::Relaxed);
@@ -3933,61 +3728,21 @@ mod tests {
             constructed.set(constructed.get() + 1);
             Some(Record::object(EventKind::MutexAccess, selected))
         };
-        assert!(record_in_session_classified(session, EventClass::General, event));
+        assert!(try_record(EventClass::General, event).is_some());
         assert_eq!(constructed.get(), 1);
         configure(Configuration {
-            general_events: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(128).unwrap(),
+            general_events: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(128),
             ..Default::default()
         });
-        assert!(!record_in_session(session, event));
-        assert!(!record_in_session_classified(session, EventClass::General, event));
-        assert_eq!(constructed.get(), 1);
+        assert!(try_record(EventClass::General, event).is_some());
+        assert_eq!(constructed.get(), 2);
         configure(Configuration::default());
     }
 
     #[test]
-    fn selection_revalidation_rejects_each_stale_dimension() {
+    fn empty_recorder_paths_are_explicit() {
         let _test = TEST_LOCK.lock().unwrap();
-        configure(Configuration {
-            general_events: RecordingPolicy::all(false),
-            ..Default::default()
-        });
-        let policy = GENERAL_POLICY.load(Ordering::Relaxed);
-        let session = ACTIVE_SESSION.load(Ordering::Relaxed);
-
-        assert!(selection_still_current(EventClass::General, policy, session));
-        assert!(!selection_still_current(EventClass::General, policy, 0));
-        assert!(!selection_still_current(
-            EventClass::General,
-            policy ^ u64::from(RECORDING_ENABLED),
-            session,
-        ));
-        assert!(!selection_still_current(EventClass::General, policy, session + 1));
-
-        configure(Configuration::default());
-    }
-
-    #[test]
-    fn backtrace_and_empty_recorder_paths_are_explicit() {
-        let _test = TEST_LOCK.lock().unwrap();
-        configure(Configuration::default());
-        assert_eq!(capture_backtrace(BacktraceCapture::Configured), Vec::new());
-        configure(Configuration {
-            runtime_tasks: RecordingPolicy::all(false),
-            ..Default::default()
-        });
-        assert_eq!(capture_backtrace(BacktraceCapture::Configured), Vec::new());
-        configure(Configuration {
-            runtime_tasks: RecordingPolicy::all(true),
-            ..Default::default()
-        });
-        assert_eq!(capture_backtrace(BacktraceCapture::Never), Vec::new());
-        let captured = capture_backtrace(BacktraceCapture::Always);
-        #[cfg(all(any(target_os = "windows", target_os = "linux", target_os = "macos"), not(miri)))]
-        assert!(!captured.is_empty());
-        assert!(captured.len() <= MAX_STACK_FRAMES);
-
         let recorder = ThreadRecorder::new();
         let snapshot = recorder.snapshot();
         assert_eq!((snapshot.log.total_events, snapshot.events.len()), (0, 0));
@@ -4008,15 +3763,15 @@ mod tests {
     }
 
     #[test]
-    fn cache_policy_participates_in_global_enablement() {
+    fn cache_policy_controls_class_enablement() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration::default());
         configure(Configuration {
-            cache: RecordingPolicy::all(false),
+            cache: Policy::all(false),
             ..Default::default()
         });
 
-        assert_eq!((recording_enabled(), recording_enabled_for(EventClass::Cache)), (true, true));
+        assert!(is_enabled(EventClass::Cache));
         configure(Configuration::default());
     }
 

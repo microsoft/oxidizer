@@ -1,0 +1,29 @@
+error[E0277]: the trait bound `Custom: arc::private::MakeMutSealed` is not satisfied
+  --> tests/ui/make_mut_target_is_sealed.rs:10:24
+   |
+10 | impl MakeMutTarget for Custom {
+   |                        ^^^^^^ the trait `Clone` is not implemented for `Custom`
+   |
+help: the following other types implement trait `arc::private::MakeMutSealed`
+  --> src/arc/mod.rs
+   |
+   |     impl<T: Clone> MakeMutSealed for [T] {}
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `[T]`
+   |     impl MakeMutSealed for str {}
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ `str`
+   = note: required for `Custom` to implement `arc::private::MakeMutSealed`
+note: required by a bound in `performables::arc::MakeMutTarget`
+  --> src/arc/mod.rs
+   |
+   | pub trait MakeMutTarget: private::MakeMutSealed {
+   |                          ^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `MakeMutTarget`
+   = note: `MakeMutTarget` is a "sealed trait", because to implement it you also need to implement `performables::arc::private::MakeMutSealed`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+   = help: the following types implement the trait:
+             [T]
+             str
+             T
+help: consider annotating `Custom` with `#[derive(Clone)]`
+   |
+ 8 + #[derive(Clone)]
+ 9 | struct Custom;
+   |
