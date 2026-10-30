@@ -53,8 +53,12 @@
 #     rather than `?? "--workspace"`, which would splat an empty arg cargo
 #     rejects).
 #   * "--package A@v --package B@v" - the tier has members. Packages are
-#     version-qualified cargo specs so they resolve uniquely even when a
-#     like-named crate is also a transitive dependency.
+#     version-qualified cargo specs. Aggregate Cargo commands instead call
+#     _anvil-impact-exclude, which returns the same set as
+#     "--workspace --exclude C ...": Cargo resolves that against workspace
+#     members only, so it stays unambiguous when a registry dependency has
+#     the same name and version as a member. Per-package fan-out passes the
+#     specs to cargo-each and uses its source-qualified '{cargo-spec}'.
 #   * "--skip" - the tier is empty for this change (recipe exits 0).
 #
 # These resolver outputs are only meaningful when the resolver succeeded, so

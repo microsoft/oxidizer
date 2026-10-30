@@ -22,7 +22,16 @@ updates:
     - dependency-name: "*"
       update-types: ["version-update:semver-patch"]
 
-- package-ecosystem: "github-actions"
+- exclude-paths:
+    - ".github/actions/anvil-impact/action.yml"
+    - ".github/actions/anvil-report-status/action.yml"
+    - ".github/actions/anvil-run-group/action.yml"
+    - ".github/actions/anvil-setup/action.yml"
+    - ".github/workflows/anvil-pr-impl.yml"
+    - ".github/workflows/anvil-pr.yml"
+    - ".github/workflows/anvil-scheduled-impl.yml"
+    - ".github/workflows/anvil-scheduled.yml"
+  package-ecosystem: "github-actions"
   directory: "/"
   schedule:
     interval: "monthly"

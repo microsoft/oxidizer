@@ -9,15 +9,34 @@
 //! the method and path to a [`#[resolver]`](routerama::resolver) and matches on
 //! the typed result. The list route separately decodes and produces a typed
 //! query string.
+//!
+//! The server uses an OS-assigned local port by default. Use `--port PORT` to select a port.
+//! Use `--terminate-after SECONDS` to stop it automatically. Normal runs continue until stopped.
+//! Anvil uses two seconds when this option is not present.
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use argh::FromArgs;
 use axum::Router;
 use axum::extract::State;
 use axum::http::{Method, StatusCode, Uri};
 use routerama::query::{FromQuery, ToQuery};
 use routerama::{ResolveError, resolver};
 use tokio::net::TcpListener;
+
+const ANVIL_TERMINATE_AFTER: Duration = Duration::from_secs(2);
+
+/// Command-line options for the server example.
+#[derive(FromArgs)]
+struct ServerOptions {
+    /// local TCP port; the operating system selects a port when this is zero
+    #[argh(option, default = "0")]
+    port: u16,
+    /// stop the server after this number of seconds
+    #[argh(option)]
+    terminate_after: Option<u64>,
+}
 
 #[derive(Clone, Debug, FromQuery, ToQuery)]
 struct BooksQuery {
@@ -104,7 +123,8 @@ fn list_books(books: &[(u32, &'static str)], query: &str) -> (StatusCode, String
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let options: ServerOptions = argh::from_env();
     let resolver = Route::resolver();
 
     let state = Arc::new(AppState {
@@ -116,14 +136,21 @@ async fn main() {
         ],
     });
 
-    let listener = TcpListener::bind("127.0.0.1:8080").await.expect("failed to bind 127.0.0.1:8080");
+    let listener = TcpListener::bind(("127.0.0.1", options.port)).await?;
+    println!("listening on http://{}", listener.local_addr()?);
 
     let app = Router::new().fallback(dispatch).with_state(state);
     let server = axum::serve(listener, app);
 
-    if std::env::var_os("ANVIL_EXAMPLE").is_some() {
-        server.with_graceful_shutdown(async {}).await.expect("server error");
+    let terminate_after = options
+        .terminate_after
+        .map(Duration::from_secs)
+        .or_else(|| std::env::var_os("ANVIL_EXAMPLE").is_some().then_some(ANVIL_TERMINATE_AFTER));
+
+    if let Some(terminate_after) = terminate_after {
+        server.with_graceful_shutdown(tokio::time::sleep(terminate_after)).await?;
     } else {
-        server.await.expect("server error");
+        server.await?;
     }
+    Ok(())
 }

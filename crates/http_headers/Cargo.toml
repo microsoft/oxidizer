@@ -80,6 +80,7 @@ smallvec = { workspace = true, features = ["const_new"] }
 zeroize = { workspace = true, optional = true, features = ["alloc"] }
 
 [dev-dependencies]
+argh = { workspace = true }
 axum = { workspace = true, features = ["http1", "json", "tokio"] }
 base64 = { workspace = true, features = ["std"] }
 bolero = { workspace = true, features = ["std"] }
@@ -96,7 +97,7 @@ paste = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 sha1 = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tower = { workspace = true, features = ["util"] }
 zeroize = { workspace = true, features = ["alloc"] }
 

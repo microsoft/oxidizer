@@ -472,7 +472,6 @@ pub(crate) trait TypeErasedTask: Send + Sync {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::pin::pin;
     use std::sync::Arc;

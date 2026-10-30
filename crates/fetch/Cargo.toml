@@ -50,6 +50,10 @@ all-features = true
 [package.metadata.cargo-machete]
 ignored = ["ctor"]
 
+[package.metadata.anvil.examples]
+# These examples need explicit client certificates and command-line arguments.
+no-run = ["http_client_mtls", "http_client_native_tls_mtls"]
+
 [features]
 default = []
 tls = ["rustls"]
@@ -190,6 +194,7 @@ rustls-platform-verifier = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
+tempfile = { workspace = true, features = ["getrandom"] }
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { path = "../tick", features = [
