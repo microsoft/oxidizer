@@ -76,7 +76,7 @@ fn secondary_only_worker_is_woken_for_another_cycle() {
         .join()
         .unwrap();
 
-    let cancelled = workers[1].spawn(async |_| std::future::pending::<()>().await);
+    let cancelled = workers[0].spawn(async |_| std::future::pending::<()>().await);
     secondary.fail_normal_cycle.store(true, Ordering::SeqCst);
     secondary.wake_owners();
     let cancellation = cancelled.join().unwrap_err();

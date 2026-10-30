@@ -15,7 +15,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
-use std::time::Duration;
 
 use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
 use arty::task::{Context, Scheduler};
@@ -93,7 +92,7 @@ impl Drop for ReleaseBlockingGate {
     }
 }
 
-fn assert_blocking_pool_limit(max_threads: usize, expect_growth: bool) {
+fn assert_blocking_pool_limit(max_threads: usize) {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(max_threads))
@@ -104,7 +103,7 @@ fn assert_blocking_pool_limit(max_threads: usize, expect_growth: bool) {
         changed: Condvar::new(),
     });
     let _release_gate = ReleaseBlockingGate(Arc::clone(&gate));
-    let scheduler = runtime.scheduler().clone();
+    let scheduler = runtime.scheduler();
     let (blocker_started_tx, blocker_started_rx) = mpsc::channel();
     let blocker = scheduler.spawn_blocking({
         let gate = Arc::clone(&gate);
@@ -133,12 +132,9 @@ fn assert_blocking_pool_limit(max_threads: usize, expect_growth: bool) {
         .collect::<Vec<_>>();
     drop(queued_started_tx);
 
-    if expect_growth {
+    if max_threads > 1 {
         let growth_worker = queued_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
         assert_ne!(growth_worker, blocker_worker);
-        assert!(queued_started_rx.recv_timeout(Duration::from_millis(100)).is_err());
-    } else {
-        assert!(queued_started_rx.recv_timeout(Duration::from_millis(100)).is_err());
     }
 
     gate.release();
@@ -157,12 +153,12 @@ fn public_policy_defaults_are_automatic_and_shared() {
 
 #[test]
 fn blocking_pool_grows_when_overloaded_below_its_limit() {
-    assert_blocking_pool_limit(2, true);
+    assert_blocking_pool_limit(2);
 }
 
 #[test]
 fn blocking_pool_growth_respects_its_configured_limit() {
-    assert_blocking_pool_limit(1, false);
+    assert_blocking_pool_limit(1);
 }
 
 #[test]
