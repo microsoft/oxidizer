@@ -205,9 +205,8 @@ fn made_no_progress(consumed: usize, produced: usize) -> bool {
 // Excluded for the same reason as its output-budget caller: a mutant answering a small constant is
 // not wrong, only slow. Through `remaining_output` it shrinks the per-step slice to the probe byte,
 // so the pump produces the right bytes one at a time and the harness times out instead of reaching
-// a verdict. This does not hide `tighter => None`, which is the answer that loosens a
-// bound, is caught, and `Pump::max_streams`, its other caller, is mutated and caught in its own
-// right.
+// a verdict. A `None` result loosens a bound, and tests catch that change. Tests also mutate and
+// catch `Pump::max_streams`, the other caller.
 #[cfg_attr(test, mutants::skip)]
 fn tighter(engine: Option<u64>, buffered: Option<u64>) -> Option<u64> {
     match (engine, buffered) {
