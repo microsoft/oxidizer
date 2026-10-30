@@ -6,14 +6,14 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use arty_executor::{ShutdownCause, TaskCompletion};
 
 use crate::runtime::ShutdownStart;
-use crate::runtime::blocking_worker::BlockingPanicPolicy;
+use crate::runtime::worker::blocking::PanicPolicy;
 use crate::task::handle::{JoinHandle, JoinHandlePool, Sender};
 use crate::task::preparation::discard_panicking_drop;
 
 pub(crate) fn prepare_blocking<F, R>(
     result_pool: &JoinHandlePool,
     body: F,
-    panic_policy: BlockingPanicPolicy,
+    panic_policy: PanicPolicy,
 ) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
 where
     F: FnOnce() -> R + Send + 'static,
@@ -29,7 +29,7 @@ where
 
 struct BlockingTask<F, R: Send + 'static> {
     pending: Option<(F, Sender<R>)>,
-    panic_policy: BlockingPanicPolicy,
+    panic_policy: PanicPolicy,
 }
 
 impl<F, R> BlockingTask<F, R>
@@ -44,7 +44,7 @@ where
                 result_tx.completed(result);
             }
             Err(panic) => {
-                if let BlockingPanicPolicy::Shutdown(waker) = &self.panic_policy
+                if let PanicPolicy::Shutdown(waker) = &self.panic_policy
                     && result_tx.shutdown().begin(ShutdownCause::panic()) == ShutdownStart::Started
                 {
                     waker.wake_by_ref();

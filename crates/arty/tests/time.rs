@@ -19,18 +19,18 @@ const TIMER_COUNT: usize = 8;
 const CONTROLLED_TIMER_STEP: Duration = Duration::from_secs(1);
 
 #[arty::test]
-async fn many_timers_with_relocation_ensure_advanced(cx: Context) {
-    let scheduler = cx.scheduler();
+async fn many_timers_with_relocation_ensure_advanced(context: Context) {
+    let scheduler = context.scheduler();
     // Ensure each relocated task keeps access to the runtime clock.
     let handles: Vec<_> = (0..TIMER_COUNT)
         .map(|_| {
-            scheduler.spawn_anywhere(cx.clone(), move |cx| async move {
-                println!("delay(pending) - clock: {:?}, thread: {:?}", cx.clock(), cx.thread());
+            scheduler.spawn_anywhere(context.clone(), move |context| async move {
+                println!("delay(pending) - clock: {:?}, thread: {:?}", context.clock(), context.thread());
 
-                let watch = cx.clock().stopwatch();
-                cx.clock().delay(Duration::from_millis(50)).await;
+                let watch = context.clock().stopwatch();
+                context.clock().delay(Duration::from_millis(50)).await;
 
-                println!("delay(done) - clock: {:?}, thread: {:?}", cx.clock(), cx.thread());
+                println!("delay(done) - clock: {:?}, thread: {:?}", context.clock(), context.thread());
 
                 assert!(watch.elapsed().as_millis() >= 50);
             })
@@ -38,16 +38,17 @@ async fn many_timers_with_relocation_ensure_advanced(cx: Context) {
         .collect();
 
     for handle in handles {
-        handle.timeout(cx.clock(), Duration::from_secs(10)).await.unwrap().unwrap();
+        handle.timeout(context.clock(), Duration::from_secs(10)).await.unwrap().unwrap();
     }
 }
 
 #[arty::test]
-async fn many_timers_ensure_advanced(cx: Context) {
+async fn many_timers_ensure_advanced(context: Context) {
     let handles: Vec<_> = (0..TIMER_COUNT)
         .map(|_| {
-            cx.scheduler()
-                .spawn_anywhere(cx.clone(), |cx| cx.clock().delay(Duration::from_millis(1)))
+            context
+                .scheduler()
+                .spawn_anywhere(context.clone(), |context| context.clock().delay(Duration::from_millis(1)))
         })
         .collect();
 
@@ -57,15 +58,16 @@ async fn many_timers_ensure_advanced(cx: Context) {
 }
 
 #[arty::test]
-async fn timer_with_relocated_context(cx: Context) {
-    cx.scheduler()
-        .spawn_anywhere(cx.clone(), |cx| cx.clock().delay(Duration::from_millis(10)))
+async fn timer_with_relocated_context(context: Context) {
+    context
+        .scheduler()
+        .spawn_anywhere(context.clone(), |context| context.clock().delay(Duration::from_millis(10)))
         .await
         .unwrap();
 }
 
 #[test]
-fn timer_callback_direct_submission_wakes_waiting_same_worker() {
+fn controlled_timer_callback_submission_wakes_bound_worker() {
     struct SpawnOnWake {
         scheduler: arty::task::Scheduler,
         task_ran: mpsc::Sender<(thread::ThreadId, thread::ThreadId)>,
@@ -82,21 +84,17 @@ fn timer_callback_direct_submission_wakes_waiting_same_worker() {
     }
 
     struct TimerWakeHarness {
-        setup_delay: Pin<Box<tick::Delay>>,
         callback_delay: Pin<Box<tick::Delay>>,
         callback_waker: Waker,
         registration: Option<mpsc::Sender<thread::ThreadId>>,
-        control: ClockControl,
-        setup_wake_drained: bool,
     }
 
     impl Future for TimerWakeHarness {
         type Output = ();
 
-        fn poll(self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<Self::Output> {
+        fn poll(self: Pin<&mut Self>, _cx: &mut PollContext<'_>) -> Poll<Self::Output> {
             let this = self.get_mut();
             if let Some(registration) = this.registration.take() {
-                assert_eq!(this.setup_delay.as_mut().poll(cx), Poll::Pending);
                 assert_eq!(
                     this.callback_delay
                         .as_mut()
@@ -104,15 +102,6 @@ fn timer_callback_direct_submission_wakes_waiting_same_worker() {
                     Poll::Pending
                 );
                 registration.send(thread::current().id()).unwrap();
-                let _configured = this.control.clone().auto_advance(CONTROLLED_TIMER_STEP);
-                return Poll::Pending;
-            }
-
-            if !this.setup_wake_drained {
-                let _disabled = this.control.clone().auto_advance(Duration::ZERO);
-                assert_eq!(this.setup_delay.as_mut().poll(cx), Poll::Ready(()));
-                this.setup_wake_drained = true;
-                let _restored = this.control.clone().auto_advance(CONTROLLED_TIMER_STEP);
             }
             Poll::Pending
         }
@@ -127,28 +116,24 @@ fn timer_callback_direct_submission_wakes_waiting_same_worker() {
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let (timer_registered, registration) = mpsc::channel();
     let (task_ran, completion) = mpsc::channel();
-    let _timer_task = scheduler.spawn(move |cx| {
-        // The first expiry wakes this setup task so the worker consumes every setup notification.
-        // The second then depends exclusively on the direct submission notifying the worker.
-        TimerWakeHarness {
-            setup_delay: Box::pin(cx.clock().delay(CONTROLLED_TIMER_STEP)),
-            callback_delay: Box::pin(cx.clock().delay(CONTROLLED_TIMER_STEP * 2)),
-            callback_waker: Waker::from(Arc::new(SpawnOnWake {
-                scheduler: cx.scheduler().clone(),
-                task_ran,
-            })),
-            registration: Some(timer_registered),
-            control,
-            setup_wake_drained: false,
-        }
+    let _timer_task = scheduler.spawn(move |cx| TimerWakeHarness {
+        callback_delay: Box::pin(cx.clock().delay(CONTROLLED_TIMER_STEP)),
+        callback_waker: Waker::from(Arc::new(SpawnOnWake {
+            scheduler: cx.scheduler().clone(),
+            task_ran,
+        })),
+        registration: Some(timer_registered),
     });
     let worker_thread = registration.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+    let control_thread = thread::current().id();
+
+    control.advance(CONTROLLED_TIMER_STEP);
 
     let observed_threads = completion.recv_timeout(testing_aids::TEST_TIMEOUT);
     runtime.stop().unwrap();
 
     assert_eq!(
-        observed_threads.expect("the timer callback's direct same-worker submission must wake the waiting worker"),
-        (worker_thread, worker_thread)
+        observed_threads.expect("the controlled timer callback submission must wake its bound worker"),
+        (control_thread, worker_thread)
     );
 }

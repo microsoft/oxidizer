@@ -3,7 +3,26 @@
 
 //! I/O access from ordinary threads and non-Arty runtimes.
 
+use std::cell::RefCell;
+
 use crate::*;
+
+thread_local! {
+    static IO_ON_DROP: RefCell<Option<IoOnDrop>> = const { RefCell::new(None) };
+}
+
+struct IoOnDrop {
+    io: Io,
+    options: ScenarioOptions,
+    completed: mpsc::Sender<thread::ThreadId>,
+}
+
+impl Drop for IoOnDrop {
+    fn drop(&mut self) {
+        let context = self.io.context::<TestContext<CacheContext>>(&self.options);
+        self.completed.send(context.thread.unwrap().id()).unwrap();
+    }
+}
 
 #[test]
 fn context_clone_initializes_and_accesses_io_from_a_non_runtime_thread() {
@@ -32,6 +51,35 @@ fn context_clone_initializes_and_accesses_io_from_a_non_runtime_thread() {
     assert!(scenario.option_workers().is_empty());
     runtime.stop().unwrap();
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn thread_local_io_lookup_survives_scheduler_slot_teardown() {
+    let runtime = runtime(1);
+    let context = runtime.scheduler().block_on(async |context| context).unwrap();
+    let worker = context.thread().id();
+    let scheduler = context.scheduler().clone();
+    let (completed, observed) = mpsc::channel();
+
+    thread::spawn(move || {
+        IO_ON_DROP.with(|owner| {
+            assert!(
+                owner
+                    .replace(Some(IoOnDrop {
+                        io: context.io().clone(),
+                        options: Scenario::options(RolePlan::PreferPrimary),
+                        completed,
+                    }))
+                    .is_none()
+            );
+        });
+        scheduler.spawn(async |_| {}).join().unwrap();
+    })
+    .join()
+    .unwrap();
+
+    assert_eq!(observed.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap(), worker);
+    runtime.stop().unwrap();
 }
 
 #[test]

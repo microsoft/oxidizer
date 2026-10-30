@@ -116,8 +116,8 @@ The [guides][__link17] explain Arty’s capabilities in more detail:
   task cancellation, and what stopping the workers waits for.
 * [Thread awareness][__link21] explains
   stable task placement and explicit relocation of values.
-* [Time][__link22] explains worker-driven timers, timeouts,
-  and controlled time in tests.
+* [Time][__link22] explains system timers, timeouts, and
+  externally controlled time in tests.
 * [Telemetry][__link23] explains runtime events
   and links to [`observed`][__link24] for further details.
 
@@ -144,7 +144,7 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbcSYkZpsLEKgbquTpa-01FPYb79nz9TZvU3cb-PdlG0NnLEZhZIOCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4wgmhvYnNlcnZlZGYwLjMwLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbv6QDBjbrlusbj4fg8WxQVBwbxfNholNsajob3AZlXQ41tgJhZIOCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4wgmhvYnNlcnZlZGYwLjMwLjA
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.6.0/arty/?search=time::Clock

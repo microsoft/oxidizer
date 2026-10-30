@@ -75,21 +75,25 @@ fn blocking_callback_cannot_wait_for_blocking_work() {
 }
 
 #[test]
-fn blocking_callback_block_on_can_await_another_pools_blocking_task() {
+fn blocking_callback_block_on_rejects_before_factory_invocation() {
     let caller = runtime();
     let target = Arc::new(runtime());
     let captured = Arc::clone(&target);
+    let invoked = Arc::new(AtomicBool::new(false));
+    let invoked_by_factory = Arc::clone(&invoked);
     let outcome = caller
         .scheduler()
         .spawn_blocking(move || {
-            captured
-                .scheduler()
-                .block_on(async |cx| cx.scheduler().spawn_blocking(|| 7).await.unwrap())
+            captured.scheduler().block_on(move |_| {
+                invoked_by_factory.store(true, Ordering::Relaxed);
+                async { 7 }
+            })
         })
         .join()
         .unwrap();
 
-    assert_eq!(outcome.unwrap(), 7);
+    assert_eq!(outcome.unwrap_err().to_string(), "block_on cannot be called from an Arty worker");
+    assert!(!invoked.load(Ordering::Relaxed));
     caller.stop().unwrap();
     Arc::try_unwrap(target).unwrap().stop().unwrap();
 }

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Runtime submission and control capabilities.
+
 use std::any::type_name;
 use std::fmt::Debug;
 use std::thread::ThreadId;
@@ -9,9 +11,9 @@ use arty_executor::ShutdownCause;
 use performables::arc::Arc;
 use thread_aware::ThreadAware;
 
-use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
 use crate::runtime::shutdown::Shutdown;
+use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
 use crate::task::Context;
 use crate::task::handle::JoinHandle;
@@ -37,15 +39,14 @@ impl DispatcherClient {
             command_tx,
             waker: std::task::Waker::noop().clone(),
             thread: thread.clone(),
-            blocking_worker: BlockingWorker::new(
-                crate::runtime::blocking_worker::BlockingPool::new(None),
+            blocking_worker: Worker::new(
+                crate::runtime::worker::blocking::Pool::new(None),
                 observed::Sink::noop(),
                 shutdown.clone(),
-                crate::runtime::blocking_worker::BlockingPanicPolicy::Ignore,
+                crate::runtime::worker::blocking::PanicPolicy::Ignore,
             ),
         };
         Self::new(DispatcherCore::new(
-            crate::runtime::thread::waiter::ThreadWaiter::new(Vec::new()),
             nonempty::NonEmpty::new(endpoint),
             observed::Sink::noop(),
             shutdown,
@@ -60,7 +61,7 @@ impl DispatcherClient {
         self.core.workers()
     }
 
-    pub(crate) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<BlockingWorker> {
+    pub(crate) fn blocking_worker(&self, worker_index: WorkerIndex) -> Arc<Worker> {
         self.core.blocking_worker(worker_index)
     }
 
@@ -68,7 +69,7 @@ impl DispatcherClient {
         self.core.wake_worker(worker_index);
     }
 
-    pub(crate) fn next_blocking_worker(&self) -> Arc<BlockingWorker> {
+    pub(crate) fn next_blocking_worker(&self) -> Arc<Worker> {
         self.core.next_blocking_worker()
     }
 
@@ -81,10 +82,6 @@ impl DispatcherClient {
     }
 
     #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
-    pub(crate) fn is_current_blocking_thread(&self) -> bool {
-        self.core.is_current_blocking_thread()
-    }
-
     /// Submits to a previously resolved worker without discarding destination affinity.
     pub(crate) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
@@ -131,11 +128,8 @@ impl DispatcherClient {
         self.core.stop_inner(cause.into())
     }
 
-    // Impractical to test real waiting at this API layer. We test the real waiter implementation
-    // but not the API layers that simply call the waiter, as it is hard to prove the wait failed.
-    #[cfg_attr(test, mutants::skip)]
-    pub(crate) fn wait(&self) -> Result<(), Error> {
-        self.core.join()
+    pub(crate) fn report_stopped(&self) {
+        self.core.report_stopped();
     }
 }
 
@@ -158,9 +152,8 @@ mod tests {
     use thread_aware::Thread;
 
     use super::*;
-    use crate::runtime::blocking_worker::{BlockingPanicPolicy, BlockingPool};
     use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
-    use crate::runtime::thread::waiter::ThreadWaiter;
+    use crate::runtime::worker::blocking::{PanicPolicy, Pool};
     use crate::task::scheduler::Scheduler;
 
     #[test]
@@ -170,15 +163,9 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: test_threads(1).pop().unwrap(),
-            blocking_worker: BlockingWorker::new(
-                BlockingPool::new(None),
-                Sink::noop(),
-                Shutdown::default(),
-                BlockingPanicPolicy::Ignore,
-            ),
+            blocking_worker: Worker::new(Pool::new(None), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore),
         };
         let client = DispatcherClient::new(DispatcherCore::new(
-            ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
             Shutdown::default(),
@@ -196,17 +183,10 @@ mod tests {
         // Create a dispatcher with 2 workers so we can verify which one receives tasks.
         let (worker0_tx, worker0_rx) = channel::unbounded();
         let (worker1_tx, worker1_rx) = channel::unbounded();
-        let wfs = ThreadWaiter::new(vec![]);
         let threads = test_threads(2);
-        let blocking_worker = BlockingWorker::new(
-            BlockingPool::new(None),
-            Sink::noop(),
-            Shutdown::default(),
-            BlockingPanicPolicy::Ignore,
-        );
+        let blocking_worker = Worker::new(Pool::new(None), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore);
 
         let dispatcher = DispatcherCore::new(
-            wfs,
             nonempty::NonEmpty::from_vec(vec![
                 WorkerEndpoint {
                     command_tx: worker0_tx,
@@ -247,23 +227,12 @@ mod tests {
     fn relocate_switches_blocking_worker() {
         let threads = test_threads(2);
 
-        let source_worker = BlockingWorker::new(
-            BlockingPool::new(None),
-            Sink::noop(),
-            Shutdown::default(),
-            BlockingPanicPolicy::Ignore,
-        );
+        let source_worker = Worker::new(Pool::new(None), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore);
         let destination_shutdown = Shutdown::default();
-        let destination_worker = BlockingWorker::new(
-            BlockingPool::new(None),
-            Sink::noop(),
-            destination_shutdown.clone(),
-            BlockingPanicPolicy::Ignore,
-        );
+        let destination_worker = Worker::new(Pool::new(None), Sink::noop(), destination_shutdown.clone(), PanicPolicy::Ignore);
         destination_shutdown.begin(ShutdownCause::default());
 
         let dispatcher = DispatcherCore::new(
-            ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::from_vec(vec![
                 WorkerEndpoint {
                     command_tx: channel::unbounded().0,
@@ -344,15 +313,9 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: threads[0].clone(),
-            blocking_worker: BlockingWorker::new(
-                BlockingPool::new(None),
-                Sink::noop(),
-                Shutdown::default(),
-                BlockingPanicPolicy::Ignore,
-            ),
+            blocking_worker: Worker::new(Pool::new(None), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore),
         };
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
-            ThreadWaiter::new(vec![]),
             nonempty::NonEmpty::new(worker),
             Sink::noop(),
             Shutdown::default(),

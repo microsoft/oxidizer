@@ -14,7 +14,7 @@ use futures::executor::block_on;
 use observed::Sink;
 
 use super::*;
-use crate::runtime::blocking_worker::BlockingPanicPolicy;
+use crate::runtime::worker::blocking::PanicPolicy;
 use crate::runtime::{Runtime, Shutdown, WorkersPolicy};
 use crate::task::Context;
 use crate::task::handle::JoinHandlePool;
@@ -114,7 +114,7 @@ fn blocking_task_delivers_its_result() {
         order: Arc::clone(&order),
         expected: 0,
     }));
-    let (task, handle) = prepare_blocking(&result_pool, || 42, BlockingPanicPolicy::Shutdown(waker));
+    let (task, handle) = prepare_blocking(&result_pool, || 42, PanicPolicy::Shutdown(waker));
     task();
 
     assert_eq!(block_on(handle).unwrap(), 42);
@@ -125,7 +125,7 @@ fn blocking_task_delivers_its_result() {
 #[test]
 fn blocking_panic_is_delivered_to_joiner() {
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (task, handle) = prepare_blocking(&result_pool, || panic!("blocking task"), BlockingPanicPolicy::Ignore);
+    let (task, handle) = prepare_blocking(&result_pool, || panic!("blocking task"), PanicPolicy::Ignore);
     task();
 
     assert!(block_on(handle).unwrap_err().is_panic());
@@ -150,7 +150,7 @@ fn blocking_panic_publishes_its_cause_before_worker_and_join_notifications() {
             order: Arc::clone(&order),
             expected: 0,
         }));
-        let (task, handle) = prepare_blocking(&result_pool, || panic_any(42_u32), BlockingPanicPolicy::Shutdown(worker_waker));
+        let (task, handle) = prepare_blocking(&result_pool, || panic_any(42_u32), PanicPolicy::Shutdown(worker_waker));
         let mut handle = pin!(handle);
         let worker_notifications = usize::from(existing.is_none());
         let join_waker = Waker::from(Arc::new(ObserveShutdownWake {
@@ -203,7 +203,7 @@ fn discarded_preparation_reports_the_shutdown_cause() {
     let shutdown = Shutdown::default();
     shutdown.begin(arty_executor::ShutdownError::new(std::io::Error::other("blocking shutdown")).into());
     let result_pool = JoinHandlePool::new(shutdown);
-    let (task, handle) = prepare_blocking(&result_pool, || 42, BlockingPanicPolicy::Ignore);
+    let (task, handle) = prepare_blocking(&result_pool, || 42, PanicPolicy::Ignore);
     drop(task);
     let mut handle = pin!(handle);
     let mut context = PollContext::from_waker(Waker::noop());
@@ -241,7 +241,7 @@ fn discarded_blocking_task_contains_body_destructor_panic() {
 
     let capture = PanicOnDrop;
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (task, handle) = prepare_blocking(&result_pool, move || drop(capture), BlockingPanicPolicy::Ignore);
+    let (task, handle) = prepare_blocking(&result_pool, move || drop(capture), PanicPolicy::Ignore);
     catch_unwind(AssertUnwindSafe(|| drop(task))).unwrap();
     assert!(block_on(handle).unwrap_err().is_shutdown());
 }
@@ -249,7 +249,7 @@ fn discarded_blocking_task_contains_body_destructor_panic() {
 #[test]
 fn discarded_blocking_task_contains_join_waker_panic() {
     let result_pool = JoinHandlePool::new(Shutdown::default());
-    let (task, handle) = prepare_blocking(&result_pool, || 42, BlockingPanicPolicy::Ignore);
+    let (task, handle) = prepare_blocking(&result_pool, || 42, PanicPolicy::Ignore);
     let mut handle = pin!(handle);
     let waker = Waker::from(Arc::new(PanicWake));
     assert!(handle.as_mut().poll(&mut PollContext::from_waker(&waker)).is_pending());

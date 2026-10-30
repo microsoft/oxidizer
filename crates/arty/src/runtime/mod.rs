@@ -42,7 +42,6 @@
 //! See the [configuration](crate::documentation::configuration) and
 //! [shutdown](crate::documentation::shutdown) guides for more.
 
-pub(crate) mod blocking_worker;
 mod bootstrap;
 mod builder;
 pub(crate) mod config;
@@ -52,8 +51,7 @@ mod error;
 mod handle;
 mod shutdown;
 pub(crate) mod telemetry;
-pub(crate) mod thread;
-mod worker;
+pub(crate) mod worker;
 mod workers;
 
 #[doc(inline)]
