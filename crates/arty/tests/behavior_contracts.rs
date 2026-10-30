@@ -62,6 +62,7 @@ fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
     }
 }
 
+/// Keeps callbacks blocked so queued work remains available while the test observes pool growth.
 struct BlockingGate {
     released: Mutex<bool>,
     changed: Condvar,
@@ -81,6 +82,7 @@ impl BlockingGate {
     }
 }
 
+/// Releases blocked callbacks during unwinding so runtime teardown can complete.
 struct ReleaseBlockingGate(Arc<BlockingGate>);
 
 impl Drop for ReleaseBlockingGate {
@@ -89,7 +91,10 @@ impl Drop for ReleaseBlockingGate {
     }
 }
 
+/// Exercises automatic pool growth and its configured thread limit with a blocked workload.
 fn assert_blocking_pool_limit(max_threads: usize) {
+    const QUEUED_TASK_COUNT: usize = 6;
+
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(max_threads))
@@ -114,18 +119,17 @@ fn assert_blocking_pool_limit(max_threads: usize) {
     let blocker_worker = blocker_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
 
     let (queued_started_tx, queued_started_rx) = mpsc::channel();
-    // Six queued tasks exceed the pool's five-task-per-thread growth threshold.
-    let mut queued = Vec::with_capacity(6);
-    for _ in 0..6 {
+    // Keep enough callbacks blocked to exceed the pool's per-thread growth threshold.
+    let queued: [_; QUEUED_TASK_COUNT] = std::array::from_fn(|_| {
         let gate = Arc::clone(&gate);
         let queued_started_tx = queued_started_tx.clone();
-        queued.push(scheduler.spawn_blocking(move || {
+        scheduler.spawn_blocking(move || {
             let worker = thread::current().id();
             queued_started_tx.send(worker).unwrap();
             gate.wait();
             worker
-        }));
-    }
+        })
+    });
     drop(queued_started_tx);
 
     if max_threads > 1 {

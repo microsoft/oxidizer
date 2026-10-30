@@ -76,6 +76,7 @@ fn secondary_only_worker_is_woken_for_another_cycle() {
         .join()
         .unwrap();
 
+    // Use the primary worker so task admission does not wake the secondary worker under test.
     let cancelled = workers[0].spawn(async |_| std::future::pending::<()>().await);
     secondary.fail_normal_cycle.store(true, Ordering::SeqCst);
     secondary.wake_owners();
