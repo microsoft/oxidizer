@@ -1,8 +1,8 @@
 # Design
 
 Arty runs async tasks on dedicated worker threads. It uses separate thread pools
-for blocking work. Each task receives `Context` with its scheduler, clock, I/O
-handle, runtime control, and telemetry sink.
+for blocking work. Each task receives `Context` with its scheduler, clock, I/O handle, and runtime
+control.
 
 This document describes the application-facing design.
 
@@ -130,7 +130,7 @@ A cloned waker can outlive its task and runtime. Completion and cancellation
 disconnect each clone before Arty reclaims task resources. Later wake calls do
 nothing, and a retained clone does not delay shutdown.
 
-## Panics and telemetry
+## Panics
 
 Application errors remain task results. Arty reports a caught task or blocking
 callback panic through `JoinError` when possible.
@@ -140,9 +140,7 @@ By default, the first caught panic requests coordinated runtime shutdown.
 application state.
 
 Arty does not guarantee recovery from a panic in a destructor, custom waker,
-join notification, telemetry processor, or cleanup hook. Such a panic can abort
-the process or stop runtime progress. Failure to initialize or run an I/O driver
-stops the runtime.
+join notification, or cleanup hook. Such a panic can abort the process or stop
+runtime progress. Failure to initialize or run an I/O driver stops the runtime.
 
-Runtime telemetry uses a no-op sink by default. Configured telemetry processors
-must not panic. See [panic handling](PANICS.md) for the full policy.
+See [panic handling](PANICS.md) for the full policy.

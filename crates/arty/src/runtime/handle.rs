@@ -26,9 +26,9 @@ use crate::task::RuntimeScheduler;
 /// callbacks already running are allowed to finish. A blocking callback that
 /// never returns can therefore prevent shutdown from completing.
 ///
-/// Implicit cleanup cannot return shutdown errors. Worker panic and I/O driver
-/// diagnostics are still emitted; use [`stop`](Self::stop) to receive the
-/// shutdown outcome.
+/// Implicit cleanup cannot return shutdown errors. Call [`stop`](Self::stop)
+/// to receive errors for worker panics or I/O driver failures during
+/// initialization or cycle execution. I/O driver shutdown failures are not returned.
 ///
 /// Dropping the owner on a task or blocking worker panics. Keep the owner on an
 /// external thread, and use [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop)
@@ -145,10 +145,9 @@ impl Runtime {
     /// # Errors
     ///
     /// Returns an error if a worker panicked or an I/O driver failed during
-    /// initialization or cycle execution. Driver shutdown errors are reported
-    /// through telemetry while shutdown continues. All workers are joined
-    /// before reporting a failure; task failures must be observed through their
-    /// own join handles.
+    /// initialization or cycle execution. It does not return I/O driver shutdown
+    /// failures. It joins all workers before it reports a failure. Task failures
+    /// must be observed through their own join handles.
     ///
     /// # Panics
     ///
@@ -187,7 +186,6 @@ impl Runtime {
 
     fn wait(&self) -> Result<(), Error> {
         let wait_error = self.worker_joiner.join().err();
-        self.scheduler.dispatcher.report_stopped();
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
             return Err(Error::shutdown_failure(error));
         }
@@ -236,7 +234,6 @@ mod tests {
     use std::task::{Poll, Waker};
     use std::thread;
 
-    use observed::Sink;
     use performables::sync::channel;
     use thread_aware::ThreadBuilder;
 
@@ -266,14 +263,12 @@ mod tests {
             thread: ThreadBuilder::default().build(worker.thread().id()),
             blocking_worker: Worker::new(
                 Pool::new(None),
-                Sink::noop(),
                 crate::runtime::shutdown::Shutdown::default(),
                 PanicPolicy::Ignore,
             ),
         };
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
-            Sink::noop(),
             crate::runtime::shutdown::Shutdown::default(),
         ));
         let runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(vec![worker]));
@@ -289,14 +284,12 @@ mod tests {
             thread: ThreadBuilder::default().build(worker.thread().id()),
             blocking_worker: Worker::new(
                 Pool::new(None),
-                Sink::noop(),
                 crate::runtime::shutdown::Shutdown::default(),
                 PanicPolicy::Ignore,
             ),
         };
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
-            Sink::noop(),
             crate::runtime::shutdown::Shutdown::default(),
         ));
         let runtime = Runtime::with_dispatcher(dispatcher.clone(), WorkerJoiner::new(vec![worker]));

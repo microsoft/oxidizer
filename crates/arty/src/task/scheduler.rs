@@ -156,12 +156,10 @@ impl Scheduler {
             if current.thread() != &self.binding.thread {
                 return Err(future_factory);
             }
-            let sink = current.context().sink();
-            let parent_task_enrichment = sink.transfer_context();
             let context = current.context().clone();
             let (handle, result_tx) = current.results().handle();
             let inner = DeferredTask::new(future_factory, context);
-            let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
+            let options = TaskOptions::new(TaskPlacement::SameThread);
             current.tasks().add(inner, options, result_tx);
             self.dispatcher.wake_worker(self.binding.worker_index);
             Ok(handle)

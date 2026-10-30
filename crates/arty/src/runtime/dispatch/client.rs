@@ -41,14 +41,12 @@ impl DispatcherClient {
             thread: thread.clone(),
             blocking_worker: Worker::new(
                 crate::runtime::worker::blocking::Pool::new(None),
-                observed::Sink::noop(),
                 shutdown.clone(),
                 crate::runtime::worker::blocking::PanicPolicy::Ignore,
             ),
         };
         Self::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
-            observed::Sink::noop(),
             shutdown,
         ))
     }
@@ -128,9 +126,6 @@ impl DispatcherClient {
         self.core.stop_inner(cause.into())
     }
 
-    pub(crate) fn report_stopped(&self) {
-        self.core.report_stopped();
-    }
 }
 
 impl Debug for DispatcherClient {
@@ -163,11 +158,10 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: test_threads(1).pop().unwrap(),
-            blocking_worker: Worker::new(Pool::new(None), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore),
+            blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),
         };
         let client = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(worker),
-            Sink::noop(),
             Shutdown::default(),
         ));
         let clone = client.clone();
@@ -184,7 +178,7 @@ mod tests {
         let (worker0_tx, worker0_rx) = channel::unbounded();
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let threads = test_threads(2);
-        let blocking_worker = Worker::new(Pool::new(None), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore);
+        let blocking_worker = Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore);
 
         let dispatcher = DispatcherCore::new(
             nonempty::NonEmpty::from_vec(vec![
@@ -202,7 +196,6 @@ mod tests {
                 },
             ])
             .unwrap(),
-            Sink::noop(),
             Shutdown::default(),
         );
 
@@ -227,9 +220,9 @@ mod tests {
     fn relocate_switches_blocking_worker() {
         let threads = test_threads(2);
 
-        let source_worker = Worker::new(Pool::new(None), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore);
+        let source_worker = Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore);
         let destination_shutdown = Shutdown::default();
-        let destination_worker = Worker::new(Pool::new(None), Sink::noop(), destination_shutdown.clone(), PanicPolicy::Ignore);
+        let destination_worker = Worker::new(Pool::new(None), destination_shutdown.clone(), PanicPolicy::Ignore);
         destination_shutdown.begin(ShutdownCause::default());
 
         let dispatcher = DispatcherCore::new(
@@ -248,7 +241,6 @@ mod tests {
                 },
             ])
             .unwrap(),
-            Sink::noop(),
             Shutdown::default(),
         );
 
@@ -313,11 +305,10 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: threads[0].clone(),
-            blocking_worker: Worker::new(Pool::new(None), Sink::noop(), Shutdown::default(), PanicPolicy::Ignore),
+            blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),
         };
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(worker),
-            Sink::noop(),
             Shutdown::default(),
         ));
         let thread = if registered { threads[0].clone() } else { threads[1].clone() };
