@@ -6,13 +6,12 @@ use std::task::{self, Poll};
 
 use arty_executor::ShutdownCause;
 use events_once::PooledReceiver;
-use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
 use super::JoinError;
 use crate::runtime::Shutdown;
-use crate::runtime::blocking_worker::is_current_blocking_pool;
-use crate::task::Scheduler;
+use crate::runtime::worker::asynchronous::LocalWorker as AsyncLocalWorker;
+use crate::runtime::worker::blocking::{LocalWorker as BlockingLocalWorker, PoolIdentity};
 
 /// A handle for receiving an async or blocking task's result.
 ///
@@ -25,7 +24,8 @@ use crate::task::Scheduler;
 /// If the task returns its own `Result<T, E>`, joining it produces
 /// `Result<Result<T, E>, JoinError>`.
 ///
-/// A result from [`Scheduler::spawn_anywhere`] or [`Scheduler::spawn_at`] is
+/// A result from [`Scheduler::spawn_anywhere`](crate::task::Scheduler::spawn_anywhere)
+/// or [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at) is
 /// relocated to the joining Arty worker before it is returned. Joining from
 /// outside an Arty worker leaves its association unchanged. Other submission
 /// methods do not relocate their results.
@@ -57,7 +57,7 @@ where
 {
     #[debug(ignore)]
     state: State<R>,
-    blocking_pool: Option<Arc<()>>,
+    blocking_pool: Option<PoolIdentity>,
     #[debug(ignore)]
     relocation: Option<ResultRelocation<R>>,
 }
@@ -129,7 +129,7 @@ where
         }
     }
 
-    pub(crate) fn blocking_pool(mut self, pool: Arc<()>) -> Self {
+    pub(crate) fn blocking_pool(mut self, pool: PoolIdentity) -> Self {
         self.blocking_pool = Some(pool);
         self
     }
@@ -153,9 +153,9 @@ where
 }
 
 #[cfg_attr(test, mutants::skip)] // Removing this guard makes the black-box blocking-pool regression deadlock.
-fn assert_not_current_blocking_pool(blocking_pool: Option<&Arc<()>>) {
+fn assert_not_current_blocking_pool(blocking_pool: Option<&PoolIdentity>) {
     assert!(
-        !blocking_pool.is_some_and(is_current_blocking_pool),
+        !blocking_pool.is_some_and(BlockingLocalWorker::is_current_pool),
         "blocking JoinHandle cannot be polled while the current blocking pool waits for it"
     );
 }
@@ -183,7 +183,7 @@ where
 
         if let Poll::Ready(Ok(value)) = &mut result
             && let Some(relocation) = this.relocation.as_ref()
-            && let Some(destination) = Scheduler::current_thread()
+            && let Some(destination) = AsyncLocalWorker::current_thread()
         {
             (relocation.relocate)(value, Some(&relocation.source), &destination);
         }

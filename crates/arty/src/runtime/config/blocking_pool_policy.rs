@@ -3,8 +3,8 @@
 
 use std::num::NonZeroUsize;
 
-use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::error::Error;
+use crate::runtime::worker::blocking::Pools;
 
 /// A sharing policy for blocking-task thread pools.
 ///
@@ -108,15 +108,15 @@ impl BlockingPoolPolicy {
 
     /// Resolves this configuration into the concrete pool resources used by
     /// workers at runtime.
-    pub(crate) fn into_pools(self) -> Result<BlockingPools, Error> {
+    pub(crate) fn into_pools(self) -> Result<Pools, Error> {
         match self.mode {
             Mode::PerWorker => {
                 let max_workers = validated_max(self.max_workers)?;
-                Ok(BlockingPools::per_worker(max_workers))
+                Ok(Pools::per_worker(max_workers))
             }
             Mode::Shared => {
                 let max_workers = validated_max(self.max_workers)?;
-                Ok(BlockingPools::shared(max_workers))
+                Ok(Pools::shared(max_workers))
             }
         }
     }
@@ -142,10 +142,7 @@ mod tests {
     #[test]
     fn per_worker_into_pools_is_per_worker() {
         assert!(
-            matches!(
-                BlockingPoolPolicy::per_worker().into_pools().unwrap(),
-                BlockingPools::PerWorker(None)
-            ),
+            matches!(BlockingPoolPolicy::per_worker().into_pools().unwrap(), Pools::PerWorker(None)),
             "expected PerWorker variant"
         );
     }
@@ -153,7 +150,7 @@ mod tests {
     #[test]
     fn shared_into_pools_is_shared() {
         assert!(
-            matches!(BlockingPoolPolicy::shared().into_pools().unwrap(), BlockingPools::Shared(_)),
+            matches!(BlockingPoolPolicy::shared().into_pools().unwrap(), Pools::Shared(_)),
             "expected Shared variant"
         );
     }
@@ -162,11 +159,11 @@ mod tests {
     fn maximum_applies_to_both_pool_modes() {
         assert!(matches!(
             BlockingPoolPolicy::per_worker().max(3).into_pools().unwrap(),
-            BlockingPools::PerWorker(Some(max)) if max.get() == 3
+            Pools::PerWorker(Some(max)) if max.get() == 3
         ));
         assert!(matches!(
             BlockingPoolPolicy::shared().max(4).into_pools().unwrap(),
-            BlockingPools::Shared(pool) if pool.max_thread_count() == 4
+            Pools::Shared(pool) if pool.max_thread_count() == 4
         ));
     }
 }

@@ -7,7 +7,8 @@
 //! [`ClockControl`](crate::time::ClockControl) through `arty::time`. Use
 //! [`tick`] directly for delay and timeout futures, extension traits,
 //! stopwatches, and periodic timers. The `time` feature works without an Arty
-//! runtime; `rt` also enables time and drives timers for its workers.
+//! runtime; `rt` also enables time and drives system timers for its workers.
+//! A [`ClockControl`](crate::time::ClockControl) owner advances controlled time.
 //!
 //! # Use the task's clock
 //!

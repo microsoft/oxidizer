@@ -120,8 +120,8 @@
 //!   task cancellation, and what stopping the workers waits for.
 //! - [Thread awareness](crate::documentation::thread_awareness) explains
 //!   stable task placement and explicit relocation of values.
-//! - [Time](crate::documentation::time) explains worker-driven timers, timeouts,
-//!   and controlled time in tests.
+//! - [Time](crate::documentation::time) explains system timers, timeouts, and
+//!   externally controlled time in tests.
 //! - [Telemetry](crate::documentation::telemetry) explains runtime events
 //!   and links to [`observed`] for further details.
 //!

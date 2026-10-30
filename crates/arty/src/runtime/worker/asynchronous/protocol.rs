@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Commands and queued work sent to an asynchronous worker.
+
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -45,19 +47,19 @@ impl<T> Drop for QueuedClosure<T> {
 /// The closure includes every unregistered capture, such as the user's factory and its result
 /// sender. Captured endpoints retain their own disposal guards for paths that do not pass through
 /// this wrapper.
-pub(crate) type QueuedTaskFactory = QueuedClosure<RemoteFutureFactory>;
+pub(crate) type QueuedFactory = QueuedClosure<RemoteFutureFactory>;
 
 /// Owns a synchronous I/O access closure until the destination worker invokes it.
 pub(crate) type QueuedIoAccess = QueuedClosure<IoAccess>;
 
-pub(crate) enum AsyncWorkerCommand {
+pub(crate) enum Command {
     /// Schedules a new task for execution on this worker, providing the factory function that will
     /// be used to create the future that becomes the body of the task. The factory registers the
     /// future it creates with the worker's task set, which lets the executor store the future
     /// inline instead of behind an extra box.
     ///
     /// The task may end up never getting executed if the runtime is shut down before it gets to it.
-    EnqueueTask { future_factory: QueuedTaskFactory },
+    EnqueueTask { future_factory: QueuedFactory },
 
     /// Executes synchronous I/O context access on this worker.
     AccessIo { access: QueuedIoAccess },
@@ -70,7 +72,7 @@ pub(crate) enum AsyncWorkerCommand {
     Shutdown,
 }
 
-impl fmt::Debug for AsyncWorkerCommand {
+impl fmt::Debug for Command {
     #[cfg_attr(coverage_nightly, coverage(off))] // Command names are diagnostic text only.
     #[cfg_attr(test, mutants::skip)] // We have no contract to test here - can return anything.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -120,7 +122,7 @@ mod tests {
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
-        let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
+        let context = runtime.scheduler().block_on(async |context| context).unwrap();
         let executor = Executor::builder().build();
         let invoked = Arc::new(AtomicBool::new(false));
         let factory_invoked = Arc::clone(&invoked);
@@ -128,7 +130,7 @@ mod tests {
             factory_invoked.store(true, Ordering::Release);
         });
 
-        let _registered = QueuedTaskFactory::new(factory).into_inner().register(cx, &executor.tasks());
+        let _registered = QueuedFactory::new(factory).into_inner().register(context, &executor.tasks());
 
         assert!(invoked.load(Ordering::Acquire));
         runtime.stop().unwrap();
@@ -144,7 +146,7 @@ mod tests {
         let waker = Waker::from(Arc::clone(&wake));
         assert!(join.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
 
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(QueuedTaskFactory::new(factory)))).unwrap();
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(QueuedFactory::new(factory)))).unwrap();
 
         let Poll::Ready(Err(error)) = join.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
             panic!("discarded queued task must report shutdown");
@@ -162,7 +164,7 @@ mod tests {
         });
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            drop(QueuedTaskFactory::new(factory));
+            drop(QueuedFactory::new(factory));
         }));
 
         result.unwrap();

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Blocking callback panic handling.
+
 use std::task::Waker;
 
 /// Selects how a contained blocking-callback panic affects the runtime.
@@ -8,7 +10,7 @@ use std::task::Waker;
 /// The shutdown variant wakes the associated async worker so it can coordinate
 /// shutdown with the other workers.
 #[derive(Clone, Debug)]
-pub(crate) enum BlockingPanicPolicy {
+pub(crate) enum PanicPolicy {
     Ignore,
     Shutdown(Waker),
 }

@@ -154,7 +154,8 @@ impl RuntimeBuilder {
     ///
     /// The default follows real time. Pass an [`InactiveClock`] or, with
     /// `test-util` enabled, a `ClockControl` to choose a different time source.
-    /// Workers activate their own clocks and drive their timers.
+    /// Workers drive system timers. A `ClockControl` owner advances controlled
+    /// time and wakes due timers.
     ///
     /// # Examples
     ///
@@ -179,9 +180,9 @@ impl RuntimeBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
-    /// Automatic timer advancement occurs eagerly on timer registration or time
-    /// reads. Use manual advancement when concurrent timers' relative order
-    /// matters; see the [time guide](crate::documentation::time).
+    /// Automatic timer advancement occurs eagerly on timer registration or
+    /// explicit controlled-time reads. Use manual advancement when concurrent
+    /// timers' relative order matters; see the [time guide](crate::documentation::time).
     #[must_use]
     pub fn clock(mut self, clock: impl Into<InactiveClock>) -> Self {
         self.clock = clock.into();

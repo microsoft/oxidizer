@@ -3,7 +3,6 @@
 
 use crate::runtime::Workers;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::task::Scheduler;
 
 /// A handle for requesting runtime shutdown.
 ///
@@ -79,6 +78,6 @@ impl RuntimeControl {
     #[cfg_attr(test, mutants::skip)] // It is impractical to test for "stuff not happening", so mutating this easily leads to timeouts.
     pub fn request_stop(&self) {
         let cause = self.dispatcher.stop(arty_executor::ShutdownCause::default());
-        Scheduler::begin_current_executor_shutdown(&self.dispatcher, cause);
+        crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(&self.dispatcher, cause);
     }
 }

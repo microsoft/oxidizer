@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Wake notification shared by an asynchronous worker and its callers.
+
 use std::sync::{Arc as StdArc, OnceLock};
 use std::task::{Wake, Waker};
 use std::time::Duration;
@@ -10,14 +12,14 @@ use performables::sync::notify::Notify;
 
 /// A coalescing notification shared by task wakers and the command dispatcher.
 #[derive(Debug, Default)]
-pub(crate) struct WorkerSignal {
+pub(crate) struct Signal {
     ready: Notify,
     driver_waker: OnceLock<Waker>,
     #[cfg(test)]
     wait_observer: Option<std::sync::mpsc::Sender<()>>,
 }
 
-impl WorkerSignal {
+impl Signal {
     #[cfg(test)]
     pub(crate) fn with_wait_observer(wait_observer: std::sync::mpsc::Sender<()>) -> Self {
         Self {
@@ -73,7 +75,7 @@ impl WorkerSignal {
     }
 }
 
-impl Wake for WorkerSignal {
+impl Wake for Signal {
     fn wake(self: StdArc<Self>) {
         self.notify();
     }
@@ -95,8 +97,8 @@ mod tests {
 
     #[test]
     fn notification_before_wait_is_retained_and_consumed() {
-        let signal = Arc::new(WorkerSignal::default());
-        let waker = WorkerSignal::waker(&signal);
+        let signal = Arc::new(Signal::default());
+        let waker = Signal::waker(&signal);
         waker.wake_by_ref();
         assert!(signal.is_notified());
         signal.wait(Duration::ZERO);
@@ -110,7 +112,7 @@ mod tests {
     #[test]
     fn remote_wake_releases_an_indefinite_waiter() {
         let (wait_entered, wait_entry) = mpsc::channel();
-        let signal = Arc::new(WorkerSignal::with_wait_observer(wait_entered));
+        let signal = Arc::new(Signal::with_wait_observer(wait_entered));
         let (done_tx, done_rx) = mpsc::channel();
         let waiter = Arc::clone(&signal);
         let worker = thread::spawn(move || {
@@ -122,15 +124,15 @@ mod tests {
             done_rx.recv_timeout(Duration::from_millis(20)),
             Err(mpsc::RecvTimeoutError::Timeout)
         );
-        WorkerSignal::waker(&signal).wake_by_ref();
+        Signal::waker(&signal).wake_by_ref();
         done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         worker.join().unwrap();
     }
 
     #[test]
     fn notification_before_indefinite_wait_is_retained_and_consumed() {
-        let signal = Arc::new(WorkerSignal::default());
-        WorkerSignal::waker(&signal).wake_by_ref();
+        let signal = Arc::new(Signal::default());
+        Signal::waker(&signal).wake_by_ref();
 
         signal.wait_for_notification();
 
@@ -142,7 +144,7 @@ mod tests {
         if is_mutation_testing() {
             return;
         }
-        let signal = WorkerSignal::default();
+        let signal = Signal::default();
         let timeout = Duration::from_millis(20);
         let start = std::time::Instant::now();
         signal.wait(timeout);

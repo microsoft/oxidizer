@@ -75,8 +75,8 @@
 //! Request a context with [`Io::context`]. Each concrete context type is
 //! registered once per runtime and reused on later requests.
 
-mod current_host;
+mod driver_host;
 mod handle;
 
-pub(crate) use current_host::RuntimeDriverHost;
+pub(crate) use driver_host::RuntimeDriverHost;
 pub use handle::Io;

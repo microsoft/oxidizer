@@ -140,8 +140,9 @@ impl Context {
     /// Returns the associated worker's clock.
     ///
     /// Use it for time queries, delays, stopwatches, and timeouts. The runtime
-    /// drives its timers while the worker is running; retaining the clock does
-    /// not keep that worker alive.
+    /// drives system timers while the worker is running. A `ClockControl` owner
+    /// advances controlled timers. Retaining the clock does not keep that
+    /// worker alive.
     ///
     /// # Examples
     ///

@@ -21,6 +21,8 @@
 //! shutdown, and waits for workers to stop. Dropping the owner also requests
 //! shutdown and normally waits, but cannot report shutdown errors. Prefer
 //! explicit `stop` when the caller needs to observe the result.
+//! Keep the owner on an external thread. Stopping or dropping it on a task or
+//! blocking worker panics.
 //!
 //! # Pending and running work
 //!
@@ -58,14 +60,11 @@
 //!
 //! # Calling from a worker
 //!
-//! `Runtime::stop` requests shutdown but returns an error rather than waiting
-//! when called from an async Arty worker or one of the runtime's blocking
-//! callbacks. Dropping the owner on any async Arty worker also requests shutdown
-//! without waiting or panicking.
-//!
-//! Dropping the owner from its own blocking callback requests shutdown without
-//! waiting for that callback. Neither case guarantees that shutdown has completed
-//! when destruction returns.
+//! `Runtime::stop` and `Runtime` destruction panic on task and blocking workers.
+//! Runtime ownership on a worker is a programming error because that worker
+//! cannot join itself. Keep the owner on an external thread. Use
+//! [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop)
+//! to request shutdown from worker code.
 //!
 //! Explicit `stop` waits for all workers before reporting a worker failure.
 //! Dropping the owner cannot return that error.
