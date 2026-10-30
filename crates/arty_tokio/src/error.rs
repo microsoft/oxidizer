@@ -5,11 +5,6 @@ use std::error::Error;
 use std::fmt;
 
 #[ohno::error]
-#[from(std::io::Error)]
-#[display("could not build the shared Tokio runtime")]
-struct RuntimeBuildError;
-
-#[ohno::error]
 #[display("Tokio compatibility requires a multi-thread Tokio runtime")]
 struct UnsupportedRuntimeError;
 
@@ -38,7 +33,6 @@ struct InitializationAbortedError;
 
 /// Internal details for a Tokio compatibility initialization error.
 #[ohno::error]
-#[from(RuntimeBuildError)]
 #[from(UnsupportedRuntimeError)]
 #[from(ContextConflictError)]
 #[from(ArtyShutdownError)]
@@ -72,7 +66,6 @@ macro_rules! impl_from_condition {
 }
 
 impl_from_condition!(
-    RuntimeBuildError,
     UnsupportedRuntimeError,
     ContextConflictError,
     ArtyShutdownError,
@@ -91,10 +84,6 @@ impl Error for InitError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.inner.source()
     }
-}
-
-pub(crate) fn runtime_build(error: std::io::Error) -> InitError {
-    RuntimeBuildError::from(error).into()
 }
 
 pub(crate) fn unsupported_runtime() -> InitError {
@@ -136,12 +125,10 @@ mod tests {
 
     #[test]
     fn direct_failures_keep_private_source_types() {
-        let runtime_build = runtime_build(std::io::Error::other("build failed"));
         let unsupported = unsupported_runtime();
         let conflict = context_conflict();
         let aborted = initialization_aborted();
 
-        assert!(has_source::<RuntimeBuildError>(&runtime_build));
         assert!(has_source::<UnsupportedRuntimeError>(&unsupported));
         assert!(has_source::<ContextConflictError>(&conflict));
         assert!(has_source::<InitializationAbortedError>(&aborted));

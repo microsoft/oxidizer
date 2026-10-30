@@ -11,69 +11,9 @@
 //! same Tokio runtime context on every fixed Arty worker and returns when all
 //! workers are ready.
 //!
-//! # Default runtime
+//! # Setup
 //!
-//! Pass [`TokioHandle::default`] to build one multi-thread Tokio runtime shared
-//! by all Arty workers:
-//!
-//! ```
-//! use arty::task::Builtins;
-//! use arty_tokio::TokioHandle;
-//!
-//! # #[arty::main]
-//! # async fn main(cx: Builtins) -> Result<(), ohno::AppError> {
-//! arty_tokio::init(&cx, TokioHandle::default()).await?;
-//! let value = tokio::spawn(async { 42 })
-//!     .await
-//!     .expect("Tokio task must complete");
-//! assert_eq!(value, 42);
-//! Ok(())
-//! # }
-//! ```
-//!
-//! This crate owns the runtime until Arty stops. It uses
-//! [`tokio::runtime::Builder::new_multi_thread`] and Tokio's default worker
-//! count, with all Tokio drivers enabled.
-//!
-//! # Using a Tokio-based library
-//!
-//! After initialization, an Arty task can await async code that requires a
-//! Tokio runtime context:
-//!
-//! ```no_run
-//! use std::time::Duration;
-//!
-//! use arty::task::Builtins;
-//! use arty_tokio::TokioHandle;
-//!
-//! async fn call_tokio_based_library() -> u64 {
-//!     tokio::time::sleep(Duration::from_millis(1)).await;
-//!     42
-//! }
-//!
-//! # #[arty::main]
-//! # async fn main(cx: Builtins) -> Result<(), ohno::AppError> {
-//! arty_tokio::init(&cx, TokioHandle::default()).await?;
-//! assert_eq!(call_tokio_based_library().await, 42);
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! The complete runnable version is in the `tokio_library` example:
-//! `cargo run -p arty_tokio --example tokio_library`.
-//!
-//! # Initialization failure
-//!
-//! Initialization prepares every worker before it commits. If any worker
-//! fails, [`init`] removes the contexts created by that attempt. Canceling
-//! [`init`] starts the same cleanup. A later call can retry after cleanup
-//! finishes. If this crate created a runtime for the failed attempt, it starts
-//! non-waiting Tokio shutdown during rollback.
-//!
-//! # External runtime
-//!
-//! Pass a multi-thread Tokio [`Handle`] to use a runtime owned by the
-//! application:
+//! Create a multi-thread Tokio runtime and pass its handle to [`init`]:
 //!
 //! ```
 //! use arty::task::Builtins;
@@ -87,12 +27,48 @@
 //!     .await
 //!     .expect("Tokio task must complete");
 //! assert_eq!(value, 42);
+//! Ok(())
+//! # }
+//! ```
+//!
+//! The application owns the Tokio runtime. Keep it alive while Arty tasks use
+//! Tokio. This crate stores only a clone of its handle. [`init`] rejects
+//! current-thread Tokio runtimes.
+//!
+//! # Using a Tokio-based library
+//!
+//! After initialization, an Arty task can await async code that requires a
+//! Tokio runtime context:
+//!
+//! ```no_run
+//! use std::time::Duration;
+//!
+//! use arty::task::Builtins;
+//! use tokio::runtime::Builder;
+//!
+//! async fn call_tokio_based_library() -> u64 {
+//!     tokio::time::sleep(Duration::from_millis(1)).await;
+//!     42
+//! }
+//!
+//! # #[arty::main]
+//! # async fn main(cx: Builtins) -> Result<(), ohno::AppError> {
+//! let tokio = Builder::new_multi_thread().enable_all().build()?;
+//! arty_tokio::init(&cx, tokio.handle()).await?;
+//! assert_eq!(call_tokio_based_library().await, 42);
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! This crate stores only a clone of the handle. Keep the runtime alive while
-//! Arty uses Tokio. [`init`] rejects current-thread Tokio runtimes.
+//! The complete runnable version is in the `tokio_library` example:
+//! `cargo run -p arty_tokio --example tokio_library`.
+//!
+//! # Initialization failure
+//!
+//! Initialization prepares every worker before it commits. If any worker
+//! fails, [`init`] removes the contexts created by that attempt. Canceling
+//! [`init`] starts the same cleanup. A later call can retry after cleanup
+//! finishes.
 //!
 //! # Compatibility
 //!
@@ -127,15 +103,8 @@
 //! # Shutdown
 //!
 //! Installer tasks stay parked until Arty stops. Arty drops each installer on
-//! its worker, which leaves the Tokio context. If this crate owns the runtime,
-//! it then shuts down the runtime. Tokio waits for blocking work during normal
-//! runtime drop, so long [`tokio::task::spawn_blocking`] work can delay Arty
-//! shutdown.
-//!
-//! If Arty shutdown completes on a Tokio runtime thread, this crate starts
-//! background Tokio shutdown instead. This prevents that thread from waiting
-//! for itself. In this case, Arty shutdown does not wait for outstanding Tokio
-//! blocking work.
+//! its worker, which leaves the Tokio context and releases the cloned handle.
+//! The application remains responsible for Tokio shutdown.
 
 use tokio::runtime::Handle;
 
@@ -146,9 +115,9 @@ pub use error::InitError;
 
 /// Selects the Tokio runtime used by [`init`].
 ///
-/// Use [`Default`] for a runtime that this crate builds and owns. To use an
-/// application-owned multi-thread runtime, convert its Tokio [`Handle`].
-/// The value is opaque and its [`Debug`] output does not expose runtime details.
+/// Convert an owned or borrowed Tokio [`Handle`] from an application-owned
+/// multi-thread runtime. The value is opaque and its [`Debug`] output does not
+/// expose runtime details.
 ///
 /// Owned runtimes are not accepted:
 ///
@@ -161,27 +130,12 @@ pub use error::InitError;
 #[derive(derive_more::Debug)]
 pub struct TokioHandle {
     #[debug(ignore)]
-    kind: TokioHandleKind,
-}
-
-enum TokioHandleKind {
-    Default,
-    External(Handle),
-}
-
-impl Default for TokioHandle {
-    fn default() -> Self {
-        Self {
-            kind: TokioHandleKind::Default,
-        }
-    }
+    handle: Handle,
 }
 
 impl From<Handle> for TokioHandle {
     fn from(handle: Handle) -> Self {
-        Self {
-            kind: TokioHandleKind::External(handle),
-        }
+        Self { handle }
     }
 }
 
@@ -193,10 +147,9 @@ impl From<&Handle> for TokioHandle {
 
 /// Enters one Tokio runtime context on every worker in the current Arty runtime.
 ///
-/// Pass [`TokioHandle::default`] to create a runtime. To use an existing
-/// multi-thread Tokio runtime, pass its owned or borrowed [`Handle`]. The
-/// function returns after every fixed worker enters the same context. The
-/// contexts remain until Arty stops.
+/// Pass the owned or borrowed [`Handle`] of an application-owned multi-thread
+/// Tokio runtime. The function returns after every fixed worker enters the
+/// same context. The contexts remain until Arty stops.
 ///
 /// Calling this function again on the same Arty runtime returns an error and
 /// leaves the existing contexts in place.

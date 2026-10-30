@@ -46,9 +46,6 @@ static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "sync"] }
 
 [[example]]
-name = "default_runtime"
-
-[[example]]
 name = "external_runtime"
 
 [[example]]

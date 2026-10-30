@@ -6,13 +6,14 @@
 use std::time::Duration;
 
 use arty::task::Builtins;
-use arty_tokio::TokioHandle;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::runtime::Builder;
 
 #[arty::main]
 async fn main(cx: Builtins) -> Result<(), ohno::AppError> {
-    arty_tokio::init(&cx, TokioHandle::default()).await?;
+    let tokio = Builder::new_multi_thread().enable_all().build()?;
+    arty_tokio::init(&cx, tokio.handle()).await?;
     tokio::time::sleep(Duration::from_millis(10)).await;
 
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
