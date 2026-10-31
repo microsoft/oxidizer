@@ -21,10 +21,10 @@ use crate::task::RuntimeScheduler;
 ///
 /// # Drop
 ///
-/// Dropping the owner requests shutdown and normally waits for workers to stop. Pending
-/// async tasks and queued blocking callbacks are cancelled; blocking
-/// callbacks already running are allowed to finish. A blocking callback that
-/// never returns can therefore prevent shutdown from completing.
+/// Dropping the owner requests shutdown and normally waits for workers to stop.
+/// Arty cancels pending async tasks and queued blocking callbacks. Blocking
+/// callbacks that already run can finish. A callback that never returns can
+/// prevent shutdown from completing.
 ///
 /// Implicit cleanup cannot return shutdown errors. Call [`stop`](Self::stop)
 /// to receive errors for worker panics or I/O driver failures during
@@ -61,8 +61,8 @@ impl Runtime {
     /// Creates and starts a runtime with the default configuration.
     ///
     /// Equivalent to [`Runtime::builder().build()`](RuntimeBuilder::build).
-    /// The default monitoring policy is
-    /// [`MonitorPolicy::enabled`](crate::runtime::MonitorPolicy::enabled).
+    /// See the [runtime defaults](crate::runtime#defaults) for the complete
+    /// configuration.
     ///
     /// # Errors
     ///

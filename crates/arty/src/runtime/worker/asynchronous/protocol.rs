@@ -53,22 +53,21 @@ pub(crate) type QueuedFactory = QueuedClosure<RemoteFutureFactory>;
 pub(crate) type QueuedIoAccess = QueuedClosure<IoAccess>;
 
 pub(crate) enum Command {
-    /// Schedules a new task for execution on this worker, providing the factory function that will
-    /// be used to create the future that becomes the body of the task. The factory registers the
-    /// future it creates with the worker's task set, which lets the executor store the future
-    /// inline instead of behind an extra box.
+    /// Schedules a new task on this worker.
     ///
-    /// The task may end up never getting executed if the runtime is shut down before it gets to it.
+    /// The factory creates the task future and registers it with the worker task
+    /// set. This lets the executor store the future inline. The task does not
+    /// run if shutdown reaches the worker first.
     EnqueueTask { future_factory: QueuedFactory },
 
     /// Executes synchronous I/O context access on this worker.
     AccessIo { access: QueuedIoAccess },
 
-    /// Initiates the shutdown process. The worker will stop accepting new tasks and will discard
-    /// any tasks that are enqueued after this command is received (e.g. because other threads do
-    /// not yet know about the shutdown).
+    /// Starts shutdown on this worker.
     ///
-    /// It is fine to send this command multiple times - duplicates will be ignored.
+    /// The worker stops accepting new tasks. It discards tasks enqueued after
+    /// this command, including tasks from threads that have not observed
+    /// shutdown. Duplicate commands have no effect.
     Shutdown,
 }
 

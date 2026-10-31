@@ -115,8 +115,7 @@ impl DispatcherCore {
         }
 
         for endpoint in &self.worker_endpoints {
-            // We ignore the result here because we do not care if the channel is already closed for
-            // whatever reason (after all, that is relatively compatible with the "shut down" idea).
+            // A closed channel means that the worker no longer accepts commands.
             _ = endpoint.command_tx.send(Command::Shutdown);
             endpoint.waker.wake_by_ref();
         }
@@ -251,8 +250,8 @@ impl DispatcherCore {
             .expect("worker index must identify a registered runtime worker");
         let (future_factory, join_handle) = prepare_remote(&self.remote_results, future_factory, placement);
 
-        // There is nothing we can really do if the worker is already gone and closed the channel.
-        // That may be the case when we landed here when the runtime was already shutting down.
+        // A worker can close its channel before this send if shutdown already
+        // reached that worker. The join handle detects the disconnection.
         _ = endpoint.command_tx.send(Command::EnqueueTask {
             future_factory: QueuedFactory::new(future_factory),
         });
@@ -323,11 +322,9 @@ mod tests {
 
     #[test]
     fn dispatch_spawn_two() {
-        // We dispatch two tasks to two workers, one each. Note that this test assumes we have
-        // "fair" scheduling where tasks are evenly spread (e.g. round-robin). This is a coincidence
-        // today as it is simply an implementation detail. If we change our scheduling logic, we
-        // have to refactor this test to plug in a specific round-robin scheduling strategy to
-        // accommodate the expectations (or perhaps move such a test to a test of the strategy).
+        // Dispatch one task to each worker. This test depends on the current
+        // round-robin implementation. If the scheduling strategy changes, move
+        // this expectation to a test for that strategy.
 
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let (worker2_tx, worker2_rx) = channel::unbounded();
@@ -467,7 +464,7 @@ mod tests {
         assert_eq!(drain_rx(&worker1_rx).len(), 1);
         assert_eq!(drain_rx(&worker2_rx).len(), 1);
 
-        // Call for a stop twice - we expect no further stop commands to be sent.
+        // A second stop call sends no more stop commands.
         dispatcher.stop_inner(ShutdownCause::default());
 
         assert_eq!(drain_rx(&worker1_rx).len(), 0);
@@ -476,8 +473,8 @@ mod tests {
 
     #[test]
     fn spawn_after_command_channel_closed_returns_disconnected_join_handle() {
-        // Once the worker has closed the command channel (e.g. because it is shutting down)
-        // we ignore any further spawn requests (they simply return disconnected join handles).
+        // After a worker closes its command channel during shutdown, later
+        // spawn requests return disconnected join handles.
 
         let (worker_tx, worker_rx) = channel::unbounded();
         let threads = test_threads(1);

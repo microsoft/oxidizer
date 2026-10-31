@@ -4,7 +4,7 @@
 //! Runtime construction errors.
 
 #![cfg(feature = "rt")]
-// Under Miri, test-util supplies a processor model for the same selection logic.
+// Under Miri, `test-util` supplies a processor model for the same selection logic.
 
 use std::error::Error as StdError;
 

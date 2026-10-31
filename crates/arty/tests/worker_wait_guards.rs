@@ -35,7 +35,7 @@ impl Drop for BlockingThreadExit {
     }
 }
 
-/// Exercises the wait guard while cancellation destroys a task on its worker.
+/// A probe that exercises the wait guard while cancellation destroys a task on its worker.
 struct Probe {
     block_on_runtime: Arc<Runtime>,
     outcome: mpsc::Sender<bool>,
@@ -59,7 +59,7 @@ fn a_remote_task_wake_is_retained_before_the_runtime_worker_parks() {
         type Output = u64;
 
         fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<u64> {
-            // Observe the readiness publication independently of wake delivery.
+            // Observe the published ready state independently from wake delivery.
             if self.ready.load(Ordering::Acquire) {
                 return Poll::Ready(7);
             }
@@ -85,7 +85,7 @@ fn a_remote_task_wake_is_retained_before_the_runtime_worker_parks() {
         } else {
             received.recv_timeout(TEST_TIMEOUT).unwrap()
         };
-        // Publish the predicate before waking; the test does not use waking as a memory barrier.
+        // Publish the predicate before the wake. The test does not use the wake as a memory barrier.
         ready.store(true, Ordering::Release);
         waker.wake_by_ref();
         waker.wake_by_ref();

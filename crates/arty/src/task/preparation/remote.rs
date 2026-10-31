@@ -37,17 +37,20 @@ impl<F> Drop for TaskFactory<F> {
     }
 }
 
-/// A future factory for a remote future scheduled from a different thread. The future factory
-/// itself must be `Send` to deliver it to the thread where the task is to be scheduled but this
-/// does not set any constraints on the future it creates - it may be single-threaded.
+/// A future factory for a remote future scheduled from a different thread.
 ///
-/// The factory occupies a reusable slot in the submitting thread's pool. Its owning handle can
-/// cross threads and outlive that pool, without depending on the submitting thread's stack.
+/// The factory must be `Send` so Arty can move it to the destination thread.
+/// The future that it creates does not need to be `Send`.
 ///
-/// The factory registers the future it creates with the provided task set instead of returning it.
-/// This keeps the concrete future type visible at the point of registration, so the executor can
-/// store the future inline in its task storage pool. Returning the future would require erasing its
-/// type behind a `Pin<Box<dyn Future>>`, adding a heap allocation to every remote spawn.
+/// The factory occupies a reusable slot in the submitting thread's storage
+/// pool. Its owning handle can cross threads and outlive that pool. It does not
+/// depend on the submitting thread stack.
+///
+/// The factory registers its future with the provided task set instead of
+/// returning it. This keeps the concrete future type visible during
+/// registration. The executor can then store the future inline in its task
+/// storage pool. Returning the future requires a `Pin<Box<dyn Future>>` and a
+/// heap allocation for every remote spawn.
 type ErasedRemoteFutureFactory = dyn Fn(Context, &TaskSet) + Send;
 
 pub(crate) struct RemoteFutureFactory {
