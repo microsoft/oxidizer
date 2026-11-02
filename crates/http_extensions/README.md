@@ -170,39 +170,39 @@ A pooled provider can reuse memory after the body data is consumed.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb9zpOVazdOWUbz0LoasLuC_EbSXsHWxyT2r0bHcdheDLoihxhZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMi4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xMy4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb9zpOVazdOWUbz0LoasLuC_EbSXsHWxyT2r0bHcdheDLoihxhZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMy4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xNC4w
  [__link0]: https://crates.io/crates/http/1.5.0
- [__link1]: https://docs.rs/http_extensions/0.13.0/http_extensions/type.HttpRequest.html
- [__link10]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=StatusExt
- [__link11]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=RequestExt
- [__link12]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=ResponseExt
- [__link13]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpRequestExt
- [__link14]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HeaderMapExt
- [__link15]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HeaderValueExt
+ [__link1]: https://docs.rs/http_extensions/0.14.0/http_extensions/type.HttpRequest.html
+ [__link10]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=StatusExt
+ [__link11]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=RequestExt
+ [__link12]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=ResponseExt
+ [__link13]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpRequestExt
+ [__link14]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HeaderMapExt
+ [__link15]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HeaderValueExt
  [__link16]: https://docs.rs/http/1.5.0/http/?search=HeaderValue
  [__link17]: https://docs.rs/bytes/1.12.1/bytes/?search=Bytes
- [__link18]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=ExtensionsExt
+ [__link18]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=ExtensionsExt
  [__link19]: https://docs.rs/http/1.5.0/http/?search=Extensions
- [__link2]: https://docs.rs/http_extensions/0.13.0/http_extensions/type.HttpResponse.html
- [__link20]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=FakeHandler
- [__link21]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=RequestHandler
- [__link22]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpRequestBuilder
- [__link23]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=StatusExt::ensure_success
+ [__link2]: https://docs.rs/http_extensions/0.14.0/http_extensions/type.HttpResponse.html
+ [__link20]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=FakeHandler
+ [__link21]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=RequestHandler
+ [__link22]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpRequestBuilder
+ [__link23]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=StatusExt::ensure_success
  [__link24]: https://crates.io/crates/http/1.5.0
  [__link25]: https://docs.rs/http/1.5.0/http/?search=Request
  [__link26]: https://docs.rs/http/1.5.0/http/?search=Response
  [__link27]: https://docs.rs/http/1.5.0/http/?search=Method
  [__link28]: https://docs.rs/http/1.5.0/http/?search=StatusCode
  [__link29]: https://docs.rs/http/1.5.0/http/?search=HeaderMap
- [__link3]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpBody
+ [__link3]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpBody
  [__link30]: https://docs.rs/http-body/1.1.0/http_body/?search=Body
- [__link31]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=FakeHandler
- [__link32]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=Json
- [__link33]: https://crates.io/crates/bytesbuf/0.12.0
- [__link34]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpBodyBuilder
- [__link4]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpRequestBuilder
- [__link5]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpResponseBuilder
- [__link6]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpBody
- [__link7]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpBodyBuilder
- [__link8]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=HttpError
- [__link9]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=RequestHandler
+ [__link31]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=FakeHandler
+ [__link32]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=Json
+ [__link33]: https://crates.io/crates/bytesbuf/0.13.0
+ [__link34]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpBodyBuilder
+ [__link4]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpRequestBuilder
+ [__link5]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpResponseBuilder
+ [__link6]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpBody
+ [__link7]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpBodyBuilder
+ [__link8]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpError
+ [__link9]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=RequestHandler
