@@ -18,13 +18,13 @@ use crate::trailing::TrailingData;
 /// Narrows one engine-counter delta to the `usize` the pump works in.
 ///
 /// Both slices handed to the engine are bounded by `usize`, so a delta that does not fit means the
-/// engine's counters disagree with the buffers it was given. Saturating would be the wrong answer:
+/// engine's counters disagree with the supplied buffers. Saturation is incorrect because
 /// `produced` is the count [`Pump::pull`][crate::engine::Pump::pull] declares initialized, so
 /// over-reporting it is a soundness question rather than a cosmetic one, and `consumed` decides
 /// whether the pump believes it made progress.
 ///
 /// On a 64-bit target the conversion is a no-op and this cannot fail, which is why it is excluded
-/// from coverage; it earns its place on narrower targets.
+/// from coverage. It is required on narrower targets.
 // Excluded from mutation testing for a related reason: this runs on every engine step, so a mutant
 // that fixes the result to a small constant makes every step report a byte-sized delta. The pump
 // then needs one step per byte and the harness times out before any assertion can fail.
@@ -122,8 +122,8 @@ unsafe impl Codec for FlateCompress {
 /// consumed before the next one starts, so the reset happens lazily and only if another stream
 /// actually arrives.
 ///
-/// `recycle` is absent for gzip, whose decompressor cannot be pooled -- `flate2`'s reset takes a
-/// boolean that cannot express gzip framing, so a recycled engine would decode as raw deflate.
+/// `recycle` is absent for gzip because its decompressor cannot be pooled. The `flate2` reset takes
+/// a boolean that cannot express gzip framing. A recycled engine decodes as raw deflate.
 #[derive(Debug)]
 pub(crate) struct FlateDecompress {
     /// `Some` until the engine is handed back in `drop`.
@@ -292,10 +292,7 @@ mod tests {
 
         drop(FlateCompress::new(Wrapper::Gzip, Level::DEFAULT, pool.clone()));
 
-        assert!(
-            pool.take_compressor(key).is_some(),
-            "the engine should have been returned to the pool"
-        );
+        assert!(pool.take_compressor(key).is_some(), "the engine must return to the pool");
     }
 
     #[test]
@@ -312,7 +309,7 @@ mod tests {
 
         assert!(
             pool.take_decompressor(Wrapper::Zlib).is_some(),
-            "the engine should have been returned to the pool"
+            "the engine must return to the pool"
         );
     }
 
@@ -323,19 +320,19 @@ mod tests {
 
         let payload = b"flush boundary check payload";
         let (_, consumed, _) = codec.step(payload, &mut scratch, Operation::Process).unwrap();
-        assert_eq!(consumed, payload.len(), "the whole input should have been consumed");
+        assert_eq!(consumed, payload.len(), "the engine must consume the complete input");
 
         // A one byte buffer cannot hold the whole flush in a single call, so the guard must
         // report `Continue`, not `FlushComplete`, while output remains buffered.
         let mut tiny = [MaybeUninit::uninit(); 1];
         let (step, consumed, produced) = codec.step(&[], &mut tiny, Operation::Flush).unwrap();
         assert_eq!(consumed, 0, "no new input was supplied");
-        assert_eq!(produced, 1, "the tiny buffer should be filled completely");
+        assert_eq!(produced, 1, "the engine must fill the one-byte buffer");
         assert_eq!(step, Step::Continue, "the flush cannot be complete while output remains buffered");
 
         // A generous buffer drains the rest of the same flush and reports completion. This must
         // be a single call, not a retry loop: calling `Flush` again after it already completed
-        // would ask flate2 to insert another sync marker, so the test only issues exactly the
+        // asks flate2 to insert another sync marker, so the test issues exactly the
         // calls this one flush needs.
         let mut generous = [MaybeUninit::uninit(); 256];
         let (step, consumed, _) = codec.step(&[], &mut generous, Operation::Flush).unwrap();

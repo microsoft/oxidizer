@@ -7,9 +7,9 @@
 /// must be valid. This policy applies when multi-stream decoding is disabled.
 ///
 /// [`Reject`][Self::Reject] is the default. Silently discarding trailing bytes is a parser
-/// differential: a proxy or scanner built on this crate would see only the benign prefix of a body
-/// whose tail something downstream still reads. Opt into [`Ignore`][Self::Ignore] when the input is
-/// a container whose framing legitimately puts other data after the compressed stream.
+/// differential. A proxy or scanner can inspect only the prefix while a downstream component reads
+/// the suffix. Use [`Ignore`][Self::Ignore] for a container that places other data after the
+/// compressed stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum TrailingData {
