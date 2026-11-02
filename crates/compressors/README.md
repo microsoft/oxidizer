@@ -145,13 +145,14 @@ part of the public contract.
 ## Security
 
 Each format can expand its input by orders of magnitude. Untrusted compressed data can exhaust
-memory. `CompressionStream` does not accumulate output, but its caller can still retain chunks.
+memory. The [Streaming][__link14] section explains how `CompressionStream` returns
+output without accumulating it. Its caller can still retain chunks.
 Whole-buffer decompression adds fallback limits for bounds that the caller did not set. The
 fallbacks are 64 MiB of output and 1024 concatenated streams.
 
 If you buffer decompressed output, set
-[`max_output_len`][__link14] to an affordable value. Also limit the
-number of operations that decompress data at the same time. [`DecompressorLimits`][__link15] lists the
+[`max_output_len`][__link15] to an affordable value. Also limit the
+number of operations that decompress data at the same time. [`DecompressorLimits`][__link16] lists the
 defaults for each format.
 
 Decompression can yield bytes before a checksum or trailer has rejected the stream, so treat
@@ -159,7 +160,7 @@ them as provisional until the decompressor reports that it is done. A checksum m
 authenticity claim. These formats are not authenticated. Decompression does not make content
 trusted.
 
-See [`documentation`][__link16] for the full threat model.
+See [`documentation`][__link17] for the full threat model.
 
 ## Features
 
@@ -177,12 +178,12 @@ Each format is a separate feature. No format is enabled by default:
   `futures_core::Stream` over any stream of byte sequences.
 
 The deflate-family features share one dependency. A build that needs only `brotli` or `zstd`
-does not compile `flate2`. A build with no format still provides [`Compression`][__link17], the builders,
-and [`Resources`][__link18].
+does not compile `flate2`. A build with no format still provides [`Compression`][__link18], the builders,
+and [`Resources`][__link19].
 
 ## Further reading
 
-See [`documentation`][__link19] for the longer form guides.
+See [`documentation`][__link20] for the longer form guides.
 
 
 <hr/>
@@ -190,20 +191,21 @@ See [`documentation`][__link19] for the longer form guides.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbwX-5obSxPe0bxnSI6-lTchIb2_uhGjVkqI8b_k6Vq2bZ8S1hZIKCaGJ5dGVzYnVmZjAuMTIuMIJrY29tcHJlc3NvcnNlMC4zLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbOtaCC-uVwSYb0joeV2ZWDPwb13xRWsBZq1Eb42Si4QRSR9RhZIKCaGJ5dGVzYnVmZjAuMTIuMIJrY29tcHJlc3NvcnNlMC4zLjA
  [__link0]: https://crates.io/crates/bytesbuf/0.12.0
  [__link1]: https://docs.rs/compressors/0.3.0/compressors/?search=Result
  [__link10]: https://docs.rs/compressors/0.3.0/compressors/?search=format
  [__link11]: https://docs.rs/compressors/0.3.0/compressors/?search=CompressorBuilder::build_format
  [__link12]: https://docs.rs/compressors/0.3.0/compressors/?search=Resources
  [__link13]: https://docs.rs/compressors/0.3.0/compressors/?search=Resources::with_pool_capacity
- [__link14]: https://docs.rs/compressors/0.3.0/compressors/?search=DecompressorLimits::max_output_len
- [__link15]: https://docs.rs/compressors/0.3.0/compressors/?search=DecompressorLimits
- [__link16]: https://docs.rs/compressors/0.3.0/compressors/documentation/index.html
- [__link17]: https://docs.rs/compressors/0.3.0/compressors/?search=core::Compression
- [__link18]: https://docs.rs/compressors/0.3.0/compressors/?search=Resources
- [__link19]: https://docs.rs/compressors/0.3.0/compressors/documentation/index.html
+ [__link14]: crate#streaming
+ [__link15]: https://docs.rs/compressors/0.3.0/compressors/?search=DecompressorLimits::max_output_len
+ [__link16]: https://docs.rs/compressors/0.3.0/compressors/?search=DecompressorLimits
+ [__link17]: https://docs.rs/compressors/0.3.0/compressors/documentation/index.html
+ [__link18]: https://docs.rs/compressors/0.3.0/compressors/?search=core::Compression
+ [__link19]: https://docs.rs/compressors/0.3.0/compressors/?search=Resources
  [__link2]: https://docs.rs/compressors/0.3.0/compressors/?search=Resources
+ [__link20]: https://docs.rs/compressors/0.3.0/compressors/documentation/index.html
  [__link3]: https://docs.rs/bytesbuf/0.12.0/bytesbuf/?search=BytesView
  [__link4]: https://docs.rs/bytesbuf/0.12.0/bytesbuf/?search=BytesBuf
  [__link5]: https://docs.rs/compressors/0.3.0/compressors/?search=Resources
