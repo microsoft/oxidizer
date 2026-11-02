@@ -209,6 +209,121 @@ fn observer_panics_propagate_and_live_active_tasks_remain_inspectable() {
 }
 
 #[test]
+fn a_woken_pending_task_is_inspected_once_after_an_observer_panics() {
+    #[derive(Debug)]
+    struct Broken;
+    impl PollObserver for Broken {
+        fn poll_started(&self, _: &dyn Any) {
+            std::panic::panic_any(71_u32);
+        }
+        fn poll_finished(&self, _: bool) {
+            panic!("no observed poll completed");
+        }
+        fn inspection_failed(&self, _: InspectionError) {
+            panic!("observer failures must propagate");
+        }
+    }
+    let mut executor = Executor::builder().build();
+    let waker = Rc::new(RefCell::new(None::<Waker>));
+    let future = std::future::poll_fn({
+        let waker = Rc::clone(&waker);
+        move |cx| {
+            *waker.borrow_mut() = Some(cx.waker().clone());
+            Poll::<()>::Pending
+        }
+    });
+    executor
+        .tasks()
+        .add_with_inspection(future, TaskOptions::default(), Completion, |_, state| Some((7_u32, state)));
+    let _ = executor.execute_cycle();
+    waker.borrow().as_ref().unwrap().wake_by_ref();
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| executor.execute_cycle_observed(&Broken))).unwrap_err();
+    let mut visited = Vec::new();
+    let status = executor
+        .inspect(1, |description: &(u32, TaskState)| visited.push(*description))
+        .unwrap();
+
+    assert_eq!(
+        (panic.downcast_ref::<u32>(), status, visited),
+        (Some(&71), InspectionStatus::Complete, vec![(7, TaskState::Ready)])
+    );
+}
+
+#[test]
+fn inspector_capture_drop_panics_preserve_each_terminal_notification() {
+    #[derive(Clone, Copy, Debug)]
+    enum Mode {
+        Complete,
+        Panicked,
+        Cancel,
+    }
+    #[derive(Debug, Eq, PartialEq)]
+    enum Terminal {
+        Completed(u32),
+        Panicked(Option<u32>),
+        Cancelled,
+    }
+    #[derive(Debug)]
+    struct Report(Rc<RefCell<Vec<Terminal>>>);
+    impl TaskCompletion<u32> for Report {
+        fn completed(self, result: u32) {
+            self.0.borrow_mut().push(Terminal::Completed(result));
+        }
+        fn panicked(self, panic: TaskPanicPayload, _: Option<ShutdownCause>) {
+            self.0.borrow_mut().push(Terminal::Panicked(panic.downcast_ref::<u32>().copied()));
+            arty_executor::discard_task_panic_payload(panic);
+        }
+        fn cancelled(self, _: ShutdownCause) {
+            self.0.borrow_mut().push(Terminal::Cancelled);
+        }
+    }
+    struct Capture(Rc<Cell<usize>>);
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+            panic!("inspector capture destructor");
+        }
+    }
+    for (mode, expected) in [
+        (Mode::Complete, Terminal::Completed(42)),
+        (Mode::Panicked, Terminal::Panicked(Some(51))),
+        (Mode::Cancel, Terminal::Cancelled),
+    ] {
+        let mut executor = Executor::builder().build();
+        let terminal = Rc::new(RefCell::new(Vec::new()));
+        let drops = Rc::new(Cell::new(0));
+        let future = std::future::poll_fn(move |_| match mode {
+            Mode::Complete => Poll::Ready(42),
+            Mode::Panicked => std::panic::panic_any(51_u32),
+            Mode::Cancel => Poll::Pending,
+        });
+        executor
+            .tasks()
+            .add_with_inspection(future, TaskOptions::default(), Report(Rc::clone(&terminal)), {
+                let capture = Capture(Rc::clone(&drops));
+                move |_, _| {
+                    let _keep = &capture;
+                    Some(())
+                }
+            });
+
+        let retired = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if !matches!(mode, Mode::Cancel) {
+                let _ = executor.execute_cycle();
+            }
+            drop(executor);
+        }));
+
+        assert_eq!(
+            (retired.is_ok(), drops.get(), std::mem::take(&mut *terminal.borrow_mut())),
+            (true, 1, vec![expected]),
+            "{mode:?}"
+        );
+    }
+}
+
+#[test]
 fn submissions_with_inspection_after_shutdown_report_cancellation_without_polling() {
     #[derive(Debug)]
     struct Canceled(Rc<Cell<bool>>);

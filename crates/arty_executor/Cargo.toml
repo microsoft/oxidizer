@@ -29,10 +29,6 @@ allowed_external_types = [
 [features]
 inspection = []
 
-[[test]]
-name = "inspection"
-required-features = ["inspection"]
-
 [dependencies]
 data_privacy = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
@@ -54,6 +50,10 @@ mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }
 static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["std"] }
+
+[[test]]
+name = "inspection"
+required-features = ["inspection"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

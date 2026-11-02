@@ -435,6 +435,9 @@ fn apply_running_activity(task: &mut TaskBuilder, activity: TaskActivity) -> boo
             poll_worker_id: activity.poll_worker_id.map(seismograph::recorder::runtime::WorkerId::get),
             ..TaskActivitySummary::default()
         };
+        if let Some(worker_id) = task.row.activity.poll_worker_id {
+            task.workers.insert(worker_id);
+        }
         return true;
     };
     if activity.queued_since.is_some() || started_at > observed {
@@ -689,7 +692,7 @@ mod tests {
     #[test]
     fn native_running_state_does_not_invent_execution_intervals() {
         for poll_worker_id in [None, WorkerId::from_raw(1)] {
-            let native = source(Some(TaskActivity {
+            let mut native = source(Some(TaskActivity {
                 observed_at: EventTimestamp::from_ticks(100),
                 state: TaskActivityState::Running,
                 ready_since: None,
@@ -697,13 +700,29 @@ mod tests {
                 poll_worker_id,
                 queued_since: None,
             }));
+            native.runtimes[0].tasks[0].last_worker_id = None;
+            native.runtimes[0].workers[0].current_task = None;
 
             let captured = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&native), &[]);
-            let task = &captured.workers[0].tasks[0];
+            let tasks = captured
+                .workers
+                .iter()
+                .flat_map(|worker| {
+                    worker.tasks.iter().map(move |task| {
+                        (
+                            worker.worker_id,
+                            task.state.as_str(),
+                            task.activity.clone(),
+                            task.metrics.polls.as_slice(),
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
 
             assert_eq!(
-                (task.state.as_str(), task.activity.clone(), task.metrics.polls.as_slice()),
-                (
+                tasks,
+                vec![(
+                    poll_worker_id.map(WorkerId::get),
                     "Running",
                     TaskActivitySummary {
                         state: "Running".into(),
@@ -711,7 +730,7 @@ mod tests {
                         ..TaskActivitySummary::default()
                     },
                     &[][..]
-                )
+                )]
             );
         }
     }

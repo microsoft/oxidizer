@@ -331,7 +331,7 @@ where
         if let Err(disposal) = unsafe { Pin::new_unchecked(&mut payload.future) }.destroy_pinned() {
             discard_task_panic_payload(disposal);
         }
-        *maybe_payload = None;
+        Self::retire_payload(maybe_payload);
         let shutdown = shared.shutdown();
         if matches!(shared.panic_policy(), crate::PanicPolicy::Shutdown) {
             _ = shutdown.publish(ShutdownCause::panic());
@@ -358,8 +358,7 @@ where
             // SAFETY: The future is pinned with Task and destroyed in place.
             unsafe { Pin::new_unchecked(&mut payload.future) }.destroy_pinned().err()
         };
-        // Assignment drops the retired storage in place without moving its pinned future.
-        *maybe_payload = None;
+        Self::retire_payload(maybe_payload);
 
         match outcome {
             TerminalOutcome::Succeeded(result) => {
@@ -375,6 +374,14 @@ where
                     discard_task_panic_payload(panic);
                 }
             }
+        }
+    }
+
+    fn retire_payload(maybe_payload: &mut Option<Payload<F, R, T, I>>) {
+        // The future is retired and the completion target has been transferred.
+        // Diagnostic captures must not prevent delivery of that terminal outcome.
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| *maybe_payload = None)) {
+            discard_task_panic_payload(panic);
         }
     }
 }

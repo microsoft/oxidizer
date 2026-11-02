@@ -414,7 +414,7 @@ mod tests {
             .unwrap();
 
         let result = capture_state(&runtime.handle.control);
-        let request = receiver.recv().unwrap();
+        let request = receiver.try_recv().unwrap();
 
         assert_eq!(
             (
@@ -444,7 +444,7 @@ mod tests {
             |_| panic!("untimed capture"),
             |_, _| Err(mpsc::RecvTimeoutError::Disconnected),
         );
-        let request = receiver.recv().unwrap();
+        let request = receiver.try_recv().unwrap();
         let canceled = request.is_canceled();
         let debug_is_empty = format!("{request:?}").is_empty();
         request.respond(Vec::new(), TaskCollection::Complete);
@@ -490,7 +490,7 @@ mod tests {
                 Err(mpsc::RecvTimeoutError::Timeout)
             },
         );
-        let canceled = receiver.recv().unwrap().is_canceled();
+        let canceled = receiver.try_recv().unwrap().is_canceled();
 
         assert_eq!(
             (budget, captured.workers[0].task_collection, canceled),
@@ -605,13 +605,20 @@ mod tests {
         });
         let mut terminal_at = None;
 
-        discard_panic_with(panic, |panic| {
-            stopped.store(true, Ordering::Relaxed);
-            terminal_at = Some(drops.load(Ordering::Relaxed));
-            drop(panic);
-        });
+        let disposed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            discard_panic_with(panic, |panic| {
+                stopped.store(true, Ordering::Relaxed);
+                terminal_at = Some(drops.load(Ordering::Relaxed));
+                drop(panic);
+            });
+        }));
+        let completed = disposed.is_ok();
+        // A broken disposer must fail the assertion, not restart the replacement
+        // chain while the test harness disposes its escaping panic.
+        stopped.store(true, Ordering::Relaxed);
+        drop(disposed);
 
-        assert_eq!((terminal_at, drops.load(Ordering::Relaxed)), (Some(32), 33));
+        assert_eq!((completed, terminal_at, drops.load(Ordering::Relaxed)), (true, Some(32), 33));
     }
 
     #[test]
@@ -661,9 +668,16 @@ mod tests {
     fn timed_capture_waits_for_the_requested_interval_and_releases_demand() {
         let runtime = register_runtime(RuntimeMetadata::new("capture-pause", 1));
         let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-        worker
-            .handle()
-            .register_task_provider(|request| request.respond(Vec::new(), TaskCollection::Complete))
+        let handle = worker.handle();
+        let task = allocate_task_id();
+        let descriptor = allocate_type_descriptor_id();
+        handle
+            .register_task_provider(move |request| {
+                request.respond(
+                    vec![Task::new(task, descriptor, TaskActivityState::Waiting)],
+                    TaskCollection::Complete,
+                );
+            })
             .unwrap();
         let measure_for = Duration::from_secs(1);
         let mut waited = None;
@@ -675,14 +689,83 @@ mod tests {
                 ..CaptureOptions::default()
             },
             &SimpleClock::new_frozen(),
-            |duration| waited = Some(duration),
+            |duration| {
+                waited = Some(duration);
+                let poll = handle.poll_started_with(task, || EventTimestamp::from_ticks(10));
+                handle.poll_finished_with(poll, || EventTimestamp::from_ticks(50));
+            },
             ready,
         );
 
         assert_eq!(
-            (waited, result.workers[0].task_collection, worker.handle().is_observed()),
-            (Some(measure_for), TaskCollection::Complete, false)
+            (
+                waited,
+                result.workers[0].task_collection,
+                result.tasks[0].metrics_scope,
+                result.tasks[0].metrics,
+                handle.is_observed()
+            ),
+            (
+                Some(measure_for),
+                TaskCollection::Complete,
+                TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(10)),
+                TaskMetrics {
+                    poll_count: 1,
+                    poll_duration_nanos: 40,
+                    max_poll_duration_nanos: 40,
+                    ..TaskMetrics::default()
+                },
+                false
+            )
         );
+    }
+
+    #[test]
+    fn state_only_capture_does_not_read_poll_clocks_or_open_measurement_windows() {
+        let runtime = register_runtime(RuntimeMetadata::new("untimed-polls", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let handle = worker.handle();
+        let task = allocate_task_id();
+        let descriptor = allocate_type_descriptor_id();
+        handle
+            .register_task_provider({
+                let handle = handle.clone();
+                move |request| {
+                    let poll = handle.poll_started_with(task, || panic!("state-only capture read a start clock"));
+                    handle.poll_finished_with(poll, || panic!("state-only capture read a finish clock"));
+                    request.respond(
+                        vec![Task::new(task, descriptor, TaskActivityState::Waiting)],
+                        TaskCollection::Complete,
+                    );
+                }
+            })
+            .unwrap();
+
+        let result = capture_state(&runtime.handle.control);
+
+        assert_eq!(
+            (
+                result.workers[0].task_collection,
+                result.tasks[0].metrics_scope,
+                result.tasks[0].metrics
+            ),
+            (TaskCollection::Complete, TaskMetricsScope::Uncollected, TaskMetrics::default())
+        );
+    }
+
+    #[test]
+    fn recording_only_poll_tokens_do_not_populate_measurement_storage() {
+        let runtime = register_runtime(RuntimeMetadata::new("recording-without-measurement", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let handle = worker.handle();
+        let mut poll = handle.poll_started_with(allocate_task_id(), || EventTimestamp::from_ticks(10));
+        // A recording-only token has a timestamp but no measurement window.
+        poll.started_at = Some(EventTimestamp::from_ticks(10));
+
+        handle.poll_finished_with(poll, || EventTimestamp::from_ticks(50));
+        let workers = lock(&runtime.handle.control.workers);
+
+        assert_eq!(lock(&workers[0].measurements).tasks.len(), 0);
     }
 
     #[test]

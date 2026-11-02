@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(feature = "inspection")]
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 #[cfg(feature = "inspection")]
@@ -20,7 +22,7 @@ use crate::{
     CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskSet, TypeErasedTask, executor_context,
 };
 #[cfg(feature = "inspection")]
-use crate::{InspectionError, InspectionStatus, PollObserver, TaskState, discard_task_panic_payload};
+use crate::{InspectionError, InspectionStatus, PollObserver, TaskPtr, TaskState, discard_task_panic_payload};
 
 /// An async task executor that runs on one thread.
 ///
@@ -237,13 +239,20 @@ impl Executor {
         let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
         let inspected = catch_unwind(AssertUnwindSafe(|| {
             let mut count = 0;
+            let mut visited = HashSet::new();
             let truncated = std::cell::Cell::new(false);
-            let mut inspect = |task: Pin<&dyn TypeErasedTask>, state| {
+            let mut inspect = |pointer: TaskPtr, state| {
+                // An unwinding observer can leave a runnable task linked in pending.
+                if !visited.insert(pointer) {
+                    return ControlFlow::Continue(());
+                }
                 if count == limit {
                     truncated.set(true);
                     return ControlFlow::Break(());
                 }
                 count += 1;
+                // SAFETY: Each queue retains the task throughout this owner-only visit.
+                let task = unsafe { pointer.as_task() };
                 let state = if task.is_notified() { TaskState::Ready } else { state };
                 task.inspect(state, &mut |description| {
                     if let Some(description) = description.downcast_ref::<D>() {
@@ -252,23 +261,12 @@ impl Executor {
                 });
                 ControlFlow::Continue(())
             };
-            self.shared.inspect_new_tasks(|handle| {
-                // SAFETY: Submission storage retains the task and is borrowed for this visit.
-                inspect(unsafe { handle.as_task() }, TaskState::Ready)
-            })?;
+            self.shared.inspect_new_tasks(|handle| inspect(handle.as_ptr(), TaskState::Ready))?;
             if !truncated.get() {
-                for handle in &self.active {
-                    // SAFETY: The executor owns the live task and cannot poll during inspection.
-                    if inspect(unsafe { handle.as_task() }, TaskState::Ready).is_break() {
-                        break;
-                    }
-                }
+                let _traversal = self.active.iter().try_for_each(|handle| inspect(handle.as_ptr(), TaskState::Ready));
             }
             if !truncated.get() {
-                self.pending.inspect_until(|pointer| {
-                    // SAFETY: The pending list owns the task on this thread throughout the visit.
-                    inspect(unsafe { pointer.as_task() }, TaskState::Waiting)
-                });
+                self.pending.inspect_until(|pointer| inspect(pointer, TaskState::Waiting));
             }
             Ok(if truncated.get() {
                 InspectionStatus::Truncated

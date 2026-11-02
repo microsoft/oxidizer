@@ -618,6 +618,22 @@ impl<T: ?Sized> Arc<T, PerProcess> {
 
 impl<T: ?Sized + MakeMutTarget> Arc<T, PerProcess> {
     /// Makes the allocation uniquely owned and returns mutable access.
+    ///
+    /// You cannot supply a custom cloning implementation:
+    ///
+    /// ```compile_fail,E0277
+    /// use std::sync::Arc;
+    ///
+    /// use performables::arc::MakeMutTarget;
+    ///
+    /// struct Custom;
+    ///
+    /// impl MakeMutTarget for Custom {
+    ///     fn make_mut(arc: &mut Arc<Self>) -> &mut Self {
+    ///         Arc::get_mut(arc).unwrap()
+    ///     }
+    /// }
+    /// ```
     pub fn make_mut(this: &mut Self) -> &mut T {
         T::make_mut(&mut this.state)
     }
