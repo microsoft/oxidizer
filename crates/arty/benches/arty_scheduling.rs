@@ -1,30 +1,35 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Matched Arty/Tokio scheduling workloads, measured with metabench.
+//! Equivalent task-scheduling workloads for Arty and Tokio, measured with metabench.
 //!
-//! Use `--criterion --allocations`. Threaded workloads are not isolated instruction costs.
-//! Runtimes, reusable vectors, and the external waking thread are prepared before measurement.
-//! Both runtimes use the same external join driver. From-task wall-clock
-//! samples measure inside the async entry; allocation measurement also includes
-//! that entry and its setup.
+//! For allocation data, use `--criterion --allocations`. Threaded workloads do
+//! not measure isolated instruction costs. Each case creates its runtime,
+//! reusable vectors, and external waking thread before measurement. It reuses
+//! this input for every measured iteration.
 //!
-//! The `timeout` workload runs one task per worker, concurrently. Each task arms and cancels
-//! `count` request timeouts per iteration, the common pattern of a deadline that almost never
-//! fires. It measures how timer registration scales when every worker uses timers at once.
-//! Tokio places its tasks itself, so one task per Tokio worker is likely but not guaranteed.
+//! Both runtimes use the same code outside the runtime to wait for task results.
+//! For from-task workloads, timing starts inside the initial async task.
+//! Allocation measurements also include that task and its setup.
+//!
+//! The `timeout` workload runs as many concurrent tasks as there are workers.
+//! Each task starts
+//! and cancels `count` request timeouts per iteration. This models deadlines
+//! that almost never expire. It measures the cost of registering timers when all
+//! workers use them at the same time. Tokio chooses each task's worker, so it does not
+//! guarantee one task per worker.
 
 use std::future::poll_fn;
 use std::hint::black_box;
 use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
-use std::task::{Context, Poll, Waker};
+use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
-use arty::task::{Builtins, JoinHandle};
+use arty::task::{Context, JoinHandle};
 use criterion::{BenchmarkId, Criterion, Throughput};
 #[cfg(target_os = "linux")]
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
@@ -36,8 +41,8 @@ const BLOCKING_THREADS: usize = 4;
 const COUNTS: [usize; 2] = [1, 20];
 const WORKERS: [usize; 2] = [1, 4];
 
-// Neither deadline is reached during a benchmark. The background timer keeps every request
-// timeout from being the earliest deadline, as in a server that always has a shorter timer armed.
+// Neither deadline expires during a benchmark. The background timer remains
+// the earliest deadline, as in a server that always has a shorter timer armed.
 const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(30);
 const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 
@@ -108,7 +113,7 @@ impl ArtyCase {
         case
     }
 
-    fn remote<F>(&mut self, iterations: u64, factory: fn(Builtins, ()) -> F) -> Duration
+    fn remote<F>(&mut self, iterations: u64, factory: fn(Context, ()) -> F) -> Duration
     where
         F: Future<Output = ()> + 'static,
     {
@@ -301,9 +306,10 @@ impl TokioCase {
     }
 }
 
-/// Arms and cancels `operations` request timeouts on the current worker while a background
-/// timer stays armed. Each timeout is polled once, which registers it, then dropped, which
-/// unregisters it.
+/// Arms and cancels `operations` request timeouts on the current worker.
+///
+/// A background timer stays armed. Each request timeout is polled once to
+/// register it, then dropped to unregister it.
 async fn timeout_churn<T, F>(operations: u64, mut timer: F)
 where
     T: Future<Output = ()>,
@@ -328,14 +334,14 @@ async fn arm<T: Future<Output = ()>>(mut timer: Pin<&mut T>) {
     .await;
 }
 
-// A single self-wake, independent of either runtime's convenience APIs.
+// Use one self-wake without either runtime's convenience API.
 #[derive(Debug, Default)]
 struct YieldOnce(bool);
 
 impl Future for YieldOnce {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<()> {
         if self.0 {
             Poll::Ready(())
         } else {
@@ -407,7 +413,7 @@ impl RemoteWake {
 impl Future for RemoteWake {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<()> {
         if self.ready.load(Ordering::Acquire) {
             Poll::Ready(())
         } else {

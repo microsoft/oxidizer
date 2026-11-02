@@ -436,7 +436,8 @@ _install-tool-core name version installer source_prereq="":
     # every post-restore run would try to re-install on top of the
     # cached binaries and fail with "binary already exists in destination".
     $installed = $null
-    $pattern = '^' + [regex]::Escape($name) + ' v(\S+):'
+    # Path and git installs append their source: `name vX.Y.Z (source):`.
+    $pattern = '^' + [regex]::Escape($name) + ' v(\S+?)(?: \(.*\))?:$'
     foreach ($line in (& cargo {{_anvil_stable_toolchain_args}} install --list 2>$null)) {
         if ($line -match $pattern) { $installed = $Matches[1]; break }
     }
@@ -495,7 +496,8 @@ _check-tool name version:
     $version = '{{version}}'
 
     $installed = $null
-    $pattern = '^' + [regex]::Escape($name) + ' v(\S+):'
+    # Path and git installs append their source: `name vX.Y.Z (source):`.
+    $pattern = '^' + [regex]::Escape($name) + ' v(\S+?)(?: \(.*\))?:$'
     $previousAutoInstall = $env:RUSTUP_AUTO_INSTALL
     try {
         # Validation must not let the rustup proxy provision a missing selection.

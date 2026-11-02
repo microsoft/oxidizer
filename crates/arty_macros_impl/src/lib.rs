@@ -163,7 +163,7 @@ fn worker_policy(mut value: &Expr, runtime_path: &TokenStream) -> syn::Result<To
 /// let expanded = arty_macros_impl::main(
 ///     quote!(),
 ///     quote!(
-///         async fn main(cx: arty::task::Builtins) {}
+///         async fn main(cx: arty::task::Context) {}
 ///     ),
 /// );
 /// assert!(!expanded.is_empty());
@@ -191,7 +191,7 @@ pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
 /// let expanded = arty_macros_impl::test(
 ///     quote!(),
 ///     quote!(
-///         async fn checks_answer(cx: arty::task::Builtins) {
+///         async fn checks_answer(cx: arty::task::Context) {
 ///             assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 ///         }
 ///     ),
@@ -227,7 +227,10 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
         return fail(syn::Error::new_spanned(sig.fn_token, "function must be async to use the attribute"));
     }
     let Some(syn::FnArg::Typed(state)) = inputs.next() else {
-        return fail(syn::Error::new_spanned(sig.fn_token, "function must take a Builtins argument"));
+        return fail(syn::Error::new_spanned(
+            sig.fn_token,
+            "function must take an Arty task context argument, such as cx: arty::task::Context",
+        ));
     };
     let syn::Pat::Ident(state_ident) = state.pat.as_ref() else {
         return fail(syn::Error::new_spanned(&state.pat, "argument must have an identifier"));
@@ -235,7 +238,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let syn::Type::Path(state_type) = state.ty.as_ref() else {
         return fail(syn::Error::new_spanned(
             &state.ty,
-            "the first parameter must take Builtins by value, such as cx: arty::task::Builtins",
+            "the first parameter must take arty::task::Context by value, such as cx: arty::task::Context",
         ));
     };
     let state_ident = state_ident.clone();
@@ -329,7 +332,7 @@ mod tests {
         let expansion = main(
             TokenStream::new(),
             quote! {
-                pub async fn main(cx: arty::task::Builtins) -> Result<(), Error> {
+                pub async fn main(cx: arty::task::Context) -> Result<(), Error> {
                     run(cx).await
                 }
             },
@@ -340,7 +343,7 @@ mod tests {
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
                 .scheduler()
-                .block_on(async move |cx: arty::task::Builtins| { run(cx).await });
+                .block_on(async move |cx: arty::task::Context| { run(cx).await });
             let __arty_shutdown = __arty_runtime.stop();
             __arty_result
                 .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -355,7 +358,7 @@ mod tests {
             TokenStream::new(),
             quote! {
                 #[should_panic(expected = "original payload")]
-                async fn fails(mut cx: arty::task::Builtins) {
+                async fn fails(mut cx: arty::task::Context) {
                     fail(&mut cx).await;
                 }
             },
@@ -370,7 +373,7 @@ mod tests {
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
                 .scheduler()
-                .block_on(async move |mut cx: arty::task::Builtins| {
+                .block_on(async move |mut cx: arty::task::Context| {
                     fail(&mut cx).await;
                 });
             let __arty_shutdown = __arty_runtime.stop();
@@ -413,7 +416,7 @@ mod tests {
     #[test]
     fn all_workers_selects_all_available_processors() {
         let input = quote! {
-            async fn run(cx: Builtins) {}
+            async fn run(cx: Context) {}
         };
         let main_expansion = main(quote!(workers = all), input.clone());
         let expected_main = quote! {
@@ -424,7 +427,7 @@ mod tests {
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
                     .scheduler()
-                    .block_on(async move |cx: Builtins| {});
+                    .block_on(async move |cx: Context| {});
                 let __arty_shutdown = __arty_runtime.stop();
                 __arty_result
                     .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -444,7 +447,7 @@ mod tests {
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
                     .scheduler()
-                    .block_on(async move |cx: Builtins| {});
+                    .block_on(async move |cx: Context| {});
                 let __arty_shutdown = __arty_runtime.stop();
                 __arty_result
                     .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -459,7 +462,7 @@ mod tests {
         let expansion = test(
             quote!(workers = all),
             quote! {
-                async fn run(cx: Builtins, time: ClockControl) {}
+                async fn run(cx: Context, time: ClockControl) {}
             },
         );
         let expected = quote! {
@@ -474,7 +477,7 @@ mod tests {
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
                     .scheduler()
-                    .block_on(async move |cx: Builtins| {
+                    .block_on(async move |cx: Context| {
                         let time: ClockControl = __arty_clock_control;
                         {}
                     });
@@ -533,7 +536,7 @@ mod tests {
         let expansion = test(
             TokenStream::new(),
             quote! {
-                async fn run(cx: Builtins, time: ClockControl) {
+                async fn run(cx: Context, time: ClockControl) {
                     run(cx, time).await;
                 }
             },
@@ -549,7 +552,7 @@ mod tests {
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
                     .scheduler()
-                    .block_on(async move |cx: Builtins| {
+                    .block_on(async move |cx: Context| {
                         let time: ClockControl = __arty_clock_control;
                         {
                             run(cx, time).await;
@@ -571,7 +574,7 @@ mod tests {
             let expansion = main(
                 quote!(monitor = #setting),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             );
             let expected = quote! {
@@ -582,7 +585,7 @@ mod tests {
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
                         .scheduler()
-                        .block_on(async move |cx: Builtins| {});
+                        .block_on(async move |cx: Context| {});
                     let __arty_shutdown = __arty_runtime.stop();
                     __arty_result
                         .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -600,7 +603,7 @@ mod tests {
             let expansion = test(
                 quote!(monitor = #setting),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             );
             let expected = quote! {
@@ -612,7 +615,7 @@ mod tests {
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
                         .scheduler()
-                        .block_on(async move |cx: Builtins| {});
+                        .block_on(async move |cx: Context| {});
                     let __arty_shutdown = __arty_runtime.stop();
                     __arty_result
                         .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -630,7 +633,7 @@ mod tests {
             let expansion = main(
                 quote!(panic = #policy),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             );
             let expected = quote! {
@@ -641,7 +644,7 @@ mod tests {
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
                         .scheduler()
-                        .block_on(async move |cx: Builtins| {});
+                        .block_on(async move |cx: Context| {});
                     let __arty_shutdown = __arty_runtime.stop();
                     __arty_result
                         .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -659,7 +662,7 @@ mod tests {
             let expansion = test(
                 quote!(panic = #policy),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             );
             let expected = quote! {
@@ -672,7 +675,7 @@ mod tests {
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
                         .scheduler()
-                        .block_on(async move |cx: Builtins| {});
+                        .block_on(async move |cx: Context| {});
                     let __arty_shutdown = __arty_runtime.stop();
                     __arty_result
                         .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
@@ -688,7 +691,7 @@ mod tests {
     fn monitor_composes_independently_of_argument_order() {
         for expand in [main, test] {
             let input = quote! {
-                async fn run(cx: Builtins) {}
+                async fn run(cx: Context) {}
             };
             let workers_first = expand(quote!(workers = 2, monitor = disabled), input.clone());
             let monitor_first = expand(quote!(monitor = disabled, workers = 2), input);
@@ -701,7 +704,7 @@ mod tests {
     fn panic_composes_with_other_settings_independently_of_argument_order() {
         for expand in [main, test] {
             let input = quote! {
-                async fn run(cx: Builtins) {}
+                async fn run(cx: Context) {}
             };
             let panic_last = expand(quote!(workers = 2, monitor = disabled, panic = ignore), input.clone());
             let panic_first = expand(quote!(panic = ignore, monitor = disabled, workers = 2), input);
@@ -724,7 +727,7 @@ mod tests {
             let expansion = main(
                 quote!(workers = #workers),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             );
             assert!(!expansion.to_string().contains("compile_error"));
@@ -777,7 +780,7 @@ mod tests {
                 let expansion = expand(
                     quote!(workers = #workers),
                     quote! {
-                        async fn run(cx: Builtins) {}
+                        async fn run(cx: Context) {}
                     },
                 )
                 .to_string();
@@ -803,7 +806,7 @@ mod tests {
                 let expansion = expand(
                     quote!(monitor = #monitor),
                     quote! {
-                        async fn run(cx: Builtins) {}
+                        async fn run(cx: Context) {}
                     },
                 )
                 .to_string();
@@ -820,7 +823,7 @@ mod tests {
             let expansion = expand(
                 quote!(monitor = enabled, monitor = disabled),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             )
             .to_string();
@@ -846,7 +849,7 @@ mod tests {
                 let expansion = expand(
                     quote!(panic = #panic),
                     quote! {
-                        async fn run(cx: Builtins) {}
+                        async fn run(cx: Context) {}
                     },
                 )
                 .to_string();
@@ -863,7 +866,7 @@ mod tests {
             let expansion = expand(
                 quote!(panic = shutdown, panic = ignore),
                 quote! {
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 },
             )
             .to_string();
@@ -879,7 +882,7 @@ mod tests {
                 let expansion = expand(
                     args.clone(),
                     quote! {
-                        async fn run(cx: Builtins) {}
+                        async fn run(cx: Context) {}
                     },
                 )
                 .to_string();
@@ -893,19 +896,19 @@ mod tests {
     fn injected_clock_requires_a_named_owned_second_test_parameter() {
         for input in [
             quote!(
-                async fn run(cx: Builtins, _: ClockControl) {}
+                async fn run(cx: Context, _: ClockControl) {}
             ),
             quote!(
-                async fn run(cx: Builtins, control: &ClockControl) {}
+                async fn run(cx: Context, control: &ClockControl) {}
             ),
             quote!(
-                async fn run(cx: Builtins, control: ClockControl, extra: ClockControl) {}
+                async fn run(cx: Context, control: ClockControl, extra: ClockControl) {}
             ),
             quote!(
-                async fn run(cx: Builtins, cx: ClockControl) {}
+                async fn run(cx: Context, cx: ClockControl) {}
             ),
             quote!(
-                async fn run(cx: Builtins, r#cx: ClockControl) {}
+                async fn run(cx: Context, r#cx: ClockControl) {}
             ),
         ] {
             for expand in [main, test] {
@@ -917,7 +920,7 @@ mod tests {
         let expansion = main(
             TokenStream::new(),
             quote!(
-                async fn run(cx: Builtins, control: ClockControl) {}
+                async fn run(cx: Context, control: ClockControl) {}
             ),
         )
         .to_string();
@@ -929,7 +932,7 @@ mod tests {
         let cases = [
             (
                 quote!(
-                    fn run(cx: Builtins) {}
+                    fn run(cx: Context) {}
                 ),
                 "function must be async",
             ),
@@ -937,23 +940,23 @@ mod tests {
                 quote!(
                     async fn run() {}
                 ),
-                "function must take a Builtins argument",
+                "function must take an Arty task context argument",
             ),
             (
                 quote!(
-                    async fn run(_: Builtins) {}
+                    async fn run(_: Context) {}
                 ),
                 "argument must have an identifier",
             ),
             (
                 quote!(
-                    async fn run(cx: &Builtins) {}
+                    async fn run(cx: &Context) {}
                 ),
-                "the first parameter must take Builtins by value",
+                "arty::task::Context by value",
             ),
             (
                 quote!(
-                    async fn run(cx: Builtins, extra: ()) {}
+                    async fn run(cx: Context, extra: ()) {}
                 ),
                 "unexpected arguments",
             ),
@@ -975,19 +978,19 @@ mod tests {
             (
                 quote!(@),
                 quote!(
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 ),
             ),
             (
                 quote!(unknown = 1),
                 quote!(
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 ),
             ),
             (
                 quote!(workers = 1, workers = 2),
                 quote!(
-                    async fn run(cx: Builtins) {}
+                    async fn run(cx: Context) {}
                 ),
             ),
         ] {

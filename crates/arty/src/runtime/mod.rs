@@ -1,46 +1,130 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime construction, configuration, and task capabilities.
+//! Creating, configuring, and stopping a runtime.
 //!
-//! Use [`Runtime`] to run async work from synchronous code and control
-//! when workers stop. [`Runtime::new`] starts the default configuration;
-//! [`Runtime::builder`] lets you choose workers, blocking pools, clocks, and
-//! a telemetry sink before they start.
+//! Use [`Runtime`] to run async tasks from synchronous code and control
+//! when workers stop. [`Runtime::new`] starts the default configuration.
+//! Each async task stays on one worker thread until it finishes or is cancelled.
+//! Arty can pass values between workers through
+//! [`ThreadAware`](crate::core::ThreadAware), which lets values update their state
+//! for the receiving worker.
 //!
-//! Each task receives [`Builtins`](crate::task::Builtins) with its worker's
+//! A blocking pool is a set of threads for blocking functions.
+//! [`Runtime::builder`] lets you choose workers, blocking pools, and clocks
+//! before they start.
+//!
+//! Each task receives [`Context`](crate::task::Context) with its worker's
 //! scheduler and clock. [`Runtime::scheduler`] lets the runtime place new
-//! tasks, while [`Builtins::scheduler`](crate::task::Builtins::scheduler)
+//! tasks, while [`Context::scheduler`](crate::task::Context::scheduler)
 //! keeps children on their parent's worker.
-//! [`Builtins::control`](crate::task::Builtins::control) exposes worker
-//! coordinates and can request shutdown without consuming the runtime owner.
+//! [`Context::control`](crate::task::Context::control) lists the workers and
+//! can request shutdown without calling `Runtime::stop`.
 //!
-//! Keep the runtime owner alive until required work completes. Shutdown cancels
-//! pending tasks and waits for blocking callbacks that have already started;
-//! keeping a scheduler does not keep the runtime running.
+//! Keep the `Runtime` value alive until required tasks finish.
+//! Shutdown cancels pending tasks and waits for blocking functions that have
+//! already started.
+//! Keeping a scheduler does not keep the runtime running.
 //!
-//! [`PanicPolicy`] selects the intended response to a contained task panic.
-//! This release stores the policy in runtime configuration but does not yet
-//! change panic behavior. A follow-up change will enforce the selected policy.
+//! # Configuration
 //!
-//! # Examples
+//! [`RuntimeBuilder`] collects configuration before any worker starts.
+//! [`RuntimeBuilder::build`] rejects invalid configuration and starts the runtime.
+//! The policy types describe each choice and its use of threads and memory.
 //!
-//! Let the entry-point attribute manage the runtime's lifetime:
+//! ## Defaults
+//!
+//! [`Runtime::new`] and an unchanged [`RuntimeBuilder`] use these defaults:
+//!
+//! - [`WorkersPolicy::default`] starts one async worker.
+//! - Each async worker uses a 2 MiB stack. A larger `RUST_MIN_STACK` value
+//!   overrides this default.
+//! - [`BlockingPoolPolicy::default`] creates one shared blocking pool. Its
+//!   default thread limits can change. Use [`BlockingPoolPolicy::max`] to set
+//!   a maximum.
+//! - The clock follows real time.
+//! - [`MonitorPolicy::default`] enables monitoring in the runtime configuration.
+//!   This choice does not start a monitor or add task measurements.
+//! - [`PanicPolicy::default`] stops the runtime after Arty catches a panic
+//!   while it creates or polls a task, or runs a blocking function.
+//!
+//! The [`test`](crate::test) attribute disables monitoring by default.
+//! See [`main`](crate::main) and [`test`](crate::test) for their other defaults.
+//!
+//! ## Policy types
+//!
+//! - [`WorkersPolicy`] selects how many async workers run and which processors they use.
+//! - [`BlockingPoolPolicy`] selects a shared or per-worker blocking pool and
+//!   sets its thread limit.
+//! - [`PanicPolicy`] selects whether the runtime stops after Arty catches a panic.
+//! - [`MonitorPolicy`] selects the monitoring configuration.
+//!
+//! [`RuntimeBuilder::stack_size`] sets the async worker stack size.
+//! [`RuntimeBuilder::clock`] selects the runtime clock. See each linked API for
+//! configuration requirements, resource limits, and examples.
+//!
+//! This example uses at most two async workers and one shared blocking pool
+//! with up to four threads:
 //!
 //! ```
-//! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! #[arty::main]
-//! async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
-//!     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+//! use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
+//!
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let runtime = Runtime::builder()
+//!         .workers(WorkersPolicy::at_most(2))
+//!         .blocking_pool(BlockingPoolPolicy::shared().max(4))
+//!         .build()?;
+//!     assert_eq!(runtime.scheduler().block_on(async |_| 42)?, 42);
+//!     runtime.stop()?;
 //!     Ok(())
 //! }
-//! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 //! ```
 //!
-//! See the [configuration](crate::documentation::configuration) and
-//! [shutdown](crate::documentation::shutdown) guides for more.
+//! # Entry-point attributes
+//!
+//! With `macros` enabled, [`arty::main`](crate::main) and
+//! [`arty::test`](crate::test) create and stop the runtime. Their arguments set
+//! the worker count, monitoring, and response to task panics. See [`main`](crate::main)
+//! and [`test`](crate::test) for the supported syntax and defaults.
+//!
+//! Use [`RuntimeBuilder`] for custom clocks, blocking pools, stack sizes,
+//! or [`WorkersPolicy::at_most`].
+//! Use the builder to receive configuration errors and choose when to stop the runtime.
+//!
+//! # Runtime services
+//!
+//! The runtime provides three service groups:
+//!
+//! - [`task`](crate::task) explains worker selection, blocking functions, and
+//!   task results.
+//! - [`time`](crate::time) explains clocks, timers, and controlled test time.
+//! - [`io`](crate::io) explains how to connect I/O libraries.
+//!
+//! # Shutdown
+//!
+//! [`Runtime`] owns the workers.
+//! Schedulers and [`Context`](crate::task::Context) values do not keep the runtime running.
+//! [`RuntimeControl::request_stop`]
+//! requests shutdown without waiting. [`Runtime::stop`] takes ownership of the runtime,
+//! waits for every worker, and reports shutdown failures. Dropping the `Runtime` value
+//! also requests shutdown and waits, but it cannot return an error.
+//!
+//! Shutdown:
+//!
+//! - Rejects new tasks.
+//! - Cancels pending async tasks.
+//! - Discards queued blocking functions.
+//!
+//! Blocking functions that already started can finish.
+//! Their completion can delay shutdown. [`JoinError`](crate::task::JoinError)
+//! reports task cancellation. If a runtime failure started shutdown, the error
+//! also gives access to that failure.
+//!
+//! Keep the `Runtime` value on a thread that is not an Arty worker.
+//! Stopping or dropping it in an Arty task or on a blocking worker panics.
+//! Worker code must use
+//! [`RuntimeControl::request_stop`].
 
-pub(crate) mod blocking_worker;
 mod bootstrap;
 mod builder;
 pub(crate) mod config;
@@ -49,9 +133,7 @@ pub(crate) mod dispatch;
 mod error;
 mod handle;
 mod shutdown;
-pub(crate) mod telemetry;
-pub(crate) mod thread;
-mod worker;
+pub(crate) mod worker;
 mod workers;
 
 #[doc(inline)]
@@ -64,7 +146,7 @@ pub use control::RuntimeControl;
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
-pub(crate) use shutdown::{Shutdown, ShutdownState};
+pub(crate) use shutdown::{Shutdown, ShutdownStart, ShutdownState};
 #[doc(inline)]
 pub use workers::Workers;
 

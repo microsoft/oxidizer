@@ -22,6 +22,7 @@ mod factory_disposal;
 mod join_notifications;
 mod owner_drop;
 mod payload_chain;
+mod policy;
 mod rejected_borrowing;
 mod relocation;
 mod scoped;
@@ -31,7 +32,7 @@ mod stop_race;
 mod waker_lifetimes;
 
 #[cfg(feature = "macros")]
-use arty::task::Builtins;
+use arty::task::Context;
 #[cfg(feature = "macros")]
 use arty::test;
 
@@ -39,7 +40,7 @@ use arty::test;
 #[cfg(feature = "macros")]
 #[test]
 #[should_panic(expected = "this is a panic and we expect it to be visible in the test output")]
-async fn main(cx: Builtins) {
+async fn main(cx: Context) {
     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
     panic!("this is a panic and we expect it to be visible in the test output");
 }

@@ -7,16 +7,16 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty_io_core/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty_io_core/favicon.ico")]
 
-//! Stable contracts for integrating I/O drivers into thread-aware runtimes.
+//! Contracts between I/O drivers and thread-aware runtimes.
 //!
-//! Drivers provide I/O; runtimes provide scheduling. This crate defines
-//! the interfaces between them, but provides neither a runtime nor an I/O implementation.
+//! Drivers provide I/O. Runtimes provide scheduling. This crate defines the interfaces between
+//! them. It does not provide a runtime or an I/O implementation.
 //!
 //! # How drivers work
 //!
-//! Applications access I/O through an [`IoContext`]. The runtime creates one worker-local
-//! [`Driver`] for that context on each async worker. The driver submits I/O and processes
-//! completed operations in [`Driver::execute_cycle`].
+//! Applications access I/O through an [`IoContext`]. On each async worker, the runtime creates
+//! one local [`Driver`] for that context. The driver submits I/O and processes completed
+//! operations in [`Driver::execute_cycle`].
 //!
 //! ```
 //! use std::task::Waker;
@@ -68,41 +68,42 @@
 //! ## Primary and secondary drivers
 //!
 //! An async worker has at most one [`Primary`](DriverRole::Primary) driver. [`DriverOptions`]
-//! provides the role assigned during creation. A primary may wait for I/O for up to
+//! contains the assigned role. A primary can wait for I/O for up to
 //! [`Cycle::max_wait`].
 //!
 //! The runtime calls [`Secondary`](DriverRole::Secondary) drivers with
-//! `Cycle::max_wait() == Duration::ZERO`. A secondary processes completions that are already ready
-//! or returns immediately if another thread handles its notifications. A secondary must wake its
-//! async worker when another cycle is needed.
+//! `Cycle::max_wait() == Duration::ZERO`. A secondary either processes ready completions or
+//! returns immediately if another thread handles its notifications. It must wake its async worker
+//! when another cycle is necessary.
 //!
 //! # Runtime responsibilities
 //!
-//! The runtime registers each concrete context type once. When an async worker first retrieves a context,
-//! the runtime clones it, calls [`ThreadAware::relocate`](thread_aware_core::ThreadAware::relocate),
-//! then calls [`IoContext::driver`]. The relocation destination and [`DriverOptions::thread`]
-//! identify the same worker. [`DriverOptions`] also supplies the assigned role.
+//! The runtime registers each concrete context type once. When a worker first retrieves a context,
+//! the runtime clones it. The runtime then calls
+//! [`ThreadAware::relocate`](thread_aware_core::ThreadAware::relocate) and
+//! [`IoContext::driver`]. The relocation destination and [`DriverOptions::thread`] identify the
+//! same worker. [`DriverOptions`] also contains the assigned role.
 //!
 //! The runtime calls `driver` at most once per registration and async worker, not once per clone.
-//! Application-facing operations require successful initialization. Implementations can reject
-//! duplicate driver creation and operations on contexts without that initialization.
-//! Clones of initialized contexts remain usable without another driver call.
-//! Later relocation remains optional under [`ThreadAware`](thread_aware_core::ThreadAware).
+//! Application operations require successful initialization. Implementations can reject duplicate
+//! driver creation. They can also reject operations on uninitialized contexts. Clones of
+//! initialized contexts remain usable without another driver call. Later relocation is optional
+//! under [`ThreadAware`](thread_aware_core::ThreadAware).
 //!
 //! The runtime invokes secondaries before the primary. If there is no primary, the runtime waits
-//! for work itself. The owner waker in [`DriverOptions`] wakes the async worker, while
+//! for work itself. The owner waker in [`DriverOptions`] wakes the async worker.
 //! [`Driver::waker`] makes a waiting driver return promptly.
 //!
-//! A driver creation or cycle error is fatal. The runtime starts shutdown on every async worker
-//! and calls `shutdown` on every driver that was created successfully, including the driver whose
-//! cycle failed. Contexts already returned by another worker become unusable as shutdown closes
-//! them to new operations.
+//! A driver creation or cycle error is fatal. The runtime starts shutdown on every async worker.
+//! It calls `shutdown` on every driver that was created successfully, including the driver whose
+//! cycle failed. Shutdown closes each context to new operations. Contexts returned by other workers
+//! must then reject new operations.
 //!
 //! # Shutdown
 //!
-//! When an async worker shuts down, the runtime stops calling `execute_cycle` and synchronously
-//! calls [`Driver::shutdown`] for every driver owned by that worker. Each driver rejects new
-//! operations and uses a finite shutdown limit. A returned [`DriverError`] does not prevent the
+//! When an async worker shuts down, the runtime stops calling `execute_cycle`. It synchronously
+//! calls [`Driver::shutdown`] for every driver that the worker owns. Each driver rejects new
+//! operations and uses a finite shutdown limit. A returned [`DriverError`] does not stop the
 //! runtime from attempting to shut down the remaining drivers.
 pub use cycle::Cycle;
 pub use driver::Driver;

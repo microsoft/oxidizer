@@ -1,38 +1,43 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Focused Arty/Tokio contention workloads for common nested-task patterns.
+//! Arty and Tokio contention benchmarks for common nested-task patterns.
 //!
-//! Each case submits one outer task and fans out ten inner operations. The
-//! relocated-cache workload black-boxes each cache touch so it measures the
-//! scheduling work around an observable operation rather than an optimized-away
-//! future.
+//! Each case submits one outer task that starts ten inner operations.
+//! The relocated-cache case uses `black_box` on each cache access.
+//! This prevents the compiler from removing the operation that the benchmark measures.
+//!
+//! Each benchmark case creates one runtime before measurement and reuses it for
+//! every measured iteration. The relocated-cache cases also create and reuse
+//! one cache.
 //!
 //! The cache is a mutex behind a per-thread `performables::arc::Arc`. Arty
-//! relocates that payload before the outer task starts; Tokio uses the same
-//! cache type without an equivalent relocation hook.
+//! updates that value's state for the worker before the outer task starts.
+//! Tokio uses the same cache type without that update.
 //!
-//! On its first poll, each nested retained-waker future clones and retains its
-//! task waker, transitions to pending, wakes through the retained clone, and
-//! returns `Pending`. Its next poll returns `Ready`.
+//! A waker tells a worker that a task is ready to run again.
+//! On its first poll, each nested retained-waker future saves a clone of its
+//! task waker. It uses that clone to request another poll and returns `Pending`.
+//! Its next poll returns `Ready`.
 //!
-//! Arty's inner tasks stay on their outer task's worker (also the worker selected
-//! for the relocated cache in that workload), while Tokio may move its child
-//! tasks between workers. The cases are comparable in child lifecycle, cache
-//! work where applicable, and task count at one and eight workers, but these are
-//! coordination workloads rather than claims about general runtime performance.
+//! Arty keeps each inner task on its outer task's worker. This worker also owns
+//! the relocated cache for that workload. Tokio can move child tasks between
+//! workers. The cases start and finish child tasks the same way.
+//! They do the same cache work and use the same task count at one and eight workers.
+//! These workloads do not represent
+//! general runtime performance.
 //!
-//! Gungraun results are available as a coarse instruction-path diagnostic, but
-//! Callgrind cannot model the scheduling and cross-worker contention these
-//! workloads are intended to expose. Use Criterion for runtime comparisons.
+//! Gungraun results give a rough view of which instructions run.
+//! Callgrind cannot model how tasks share workers or compete across workers.
+//! Use Criterion to compare runtime performance for these workloads.
 
 use std::hint::black_box;
 use std::pin::Pin;
-use std::task::{Context, Poll, Waker};
+use std::task::{Context as PollContext, Poll, Waker};
 use std::time::{Duration, Instant};
 
 use arty::runtime::{Runtime, WorkersPolicy};
-use arty::task::Builtins;
+use arty::task::Context;
 use criterion::{BenchmarkId, Criterion, Throughput};
 #[cfg(target_os = "linux")]
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
@@ -165,7 +170,7 @@ impl ArtyNestedRetainedWakerCase {
     }
 }
 
-async fn arty_outer(cx: Builtins, cache: Cache) {
+async fn arty_outer(cx: Context, cache: Cache) {
     let scheduler = cx.scheduler().clone();
     let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
     for (operation, handle) in handles.iter_mut().enumerate() {
@@ -181,7 +186,7 @@ async fn arty_outer(cx: Builtins, cache: Cache) {
     }
 }
 
-async fn arty_retained_waker_outer(cx: Builtins, (): ()) {
+async fn arty_retained_waker_outer(cx: Context, (): ()) {
     let scheduler = cx.scheduler();
     let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
     for handle in &mut handles {
@@ -313,7 +318,7 @@ struct RetainedWaker {
 impl Future for RetainedWaker {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<()> {
         if self.retained.take().is_some() {
             Poll::Ready(())
         } else {

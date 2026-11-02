@@ -1,48 +1,58 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Selects how an Arty runtime will respond to a contained task panic.
+/// Selects how an Arty runtime responds to a panic that it catches in a user task.
 ///
 /// Pass a policy to
 /// [`RuntimeBuilder::panic`](crate::runtime::RuntimeBuilder::panic).
 /// The shutdown policy is the default.
 ///
-/// This release stores the policy in the runtime configuration. It does not
-/// yet change panic behavior. A follow-up change will enforce the policy at
-/// the documented panic boundaries.
+/// Arty applies this policy when it catches a panic while it creates or polls
+/// an async task, or runs a blocking function. See the
+/// [panic handling guide](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/PANICS.md)
+/// for the operations this covers and the limits on recovery.
 ///
 /// # Examples
 ///
-/// Select the ignore policy:
+/// Keep the runtime running after Arty catches a task panic:
 ///
 /// ```
 /// use arty::runtime::{PanicPolicy, Runtime};
 ///
-/// let builder = Runtime::builder().panic(PanicPolicy::ignore());
+/// let runtime = Runtime::builder().panic(PanicPolicy::ignore()).build()?;
+/// runtime.stop()?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[repr(transparent)]
 #[derive(Debug, Clone)]
 pub struct PanicPolicy {
-    shutdown: bool,
+    inner: arty_executor::PanicPolicy,
 }
 
 impl PanicPolicy {
-    /// Creates a policy that selects coordinated runtime shutdown after a
-    /// contained panic.
+    /// Creates a policy that stops the runtime after Arty catches a panic in a user task.
     #[must_use]
     pub const fn shutdown() -> Self {
-        Self { shutdown: true }
+        Self {
+            inner: arty_executor::PanicPolicy::Shutdown,
+        }
     }
 
-    /// Creates a policy that selects continued runtime operation after a
-    /// contained panic.
+    /// Creates a policy that keeps the runtime running after a caught task panic.
+    ///
+    /// The task's or blocking function's [`JoinHandle`](crate::task::JoinHandle)
+    /// still returns an error when awaited.
+    /// Arty cannot repair application data. If a panic leaves that data in an
+    /// invalid state, this policy can keep the application running with corrupted shared data.
     #[must_use]
     pub const fn ignore() -> Self {
-        Self { shutdown: false }
+        Self {
+            inner: arty_executor::PanicPolicy::Ignore,
+        }
     }
 
-    pub(crate) const fn starts_shutdown(&self) -> bool {
-        self.shutdown
+    pub(crate) fn into_executor_policy(self) -> arty_executor::PanicPolicy {
+        self.inner
     }
 }
 
@@ -58,12 +68,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_policy_selects_shutdown() {
-        assert!(PanicPolicy::default().starts_shutdown());
+    fn default_policy_starts_shutdown() {
+        assert!(matches!(
+            PanicPolicy::default().into_executor_policy(),
+            arty_executor::PanicPolicy::Shutdown
+        ));
     }
 
     #[test]
-    fn ignore_policy_does_not_select_shutdown() {
-        assert!(!PanicPolicy::ignore().starts_shutdown());
+    fn ignore_policy_keeps_the_runtime_running() {
+        assert!(matches!(
+            PanicPolicy::ignore().into_executor_policy(),
+            arty_executor::PanicPolicy::Ignore
+        ));
     }
 }

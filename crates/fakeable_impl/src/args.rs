@@ -19,6 +19,7 @@ pub(super) struct FakeableArgs {
     /// Whether to generate mockall fake (for impl blocks only).
     pub(super) generate_mockall_fake: Option<bool>,
     /// The module where mockall fake should be generated (for impl blocks only).
+    #[cfg(feature = "mockall")]
     pub(super) mockall_fake_module: Option<String>,
     /// Effective visibility of the generated mock container (for impl blocks only).
     pub(super) mockall_fake_visibility: Option<syn::Visibility>,
@@ -99,6 +100,7 @@ impl Parse for FakeableArgs {
             fake_impl,
             fake_constructor,
             generate_mockall_fake,
+            #[cfg(feature = "mockall")]
             mockall_fake_module,
             mockall_fake_visibility,
         })

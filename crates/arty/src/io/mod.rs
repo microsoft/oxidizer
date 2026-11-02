@@ -1,23 +1,29 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! I/O drivers for Arty runtimes.
+//! Connecting I/O libraries to Arty.
 //!
-//! Arty hosts I/O drivers but does not implement I/O itself. An I/O provider
-//! supplies an [`IoContext`](arty_io_core::IoContext) and
-//! [`Driver`](arty_io_core::Driver); Arty runs the driver and gives tasks access
-//! to the context. Providers remain free to use any protocol, library, or
-//! operating-system facility.
+//! An I/O context gives your code access to an I/O library.
+//! A driver processes that library's I/O requests.
+//! Related crates and third-party libraries connect to Arty through `arty_io_core`.
+//! They supply an [`IoContext`](arty_io_core::IoContext) and
+//! [`Driver`](arty_io_core::Driver).
+//! Each worker creates a driver when it first requests that context.
+//! A worker has at most one driver for each context type.
 //!
-//! # Example
+//! I/O libraries must add `arty_io_core` as a direct dependency.
+//! Applications add Arty and the selected I/O library.
 //!
-//! Obtain an I/O context from the task's built-in services, then use the
-//! operations exposed by that context:
+//! # Use an I/O library
+//!
+//! Obtain a library's context from [`Context::io`](crate::task::Context::io).
+//! Then use the operations that the library provides. This example requires
+//! `macros`, which enables `rt`:
 //!
 //! ```
 //! # use std::task::Waker;
 //! # use arty::core::{Thread, ThreadAware};
-//! # use arty::task::Builtins;
+//! # use arty::task::Context;
 //! # use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
 //! # #[derive(Clone)]
 //! # struct ExampleIo;
@@ -55,28 +61,30 @@
 //! # }
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! #[arty::main]
-//! async fn main(cx: Builtins) {
+//! async fn main(cx: Context) {
 //!     let io = cx.io().context::<ExampleIo>(&());
 //!     io.submit("request");
 //! }
 //! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 //! ```
 //!
-//! `ExampleIo` stands in for a provider's context; real contexts expose their
-//! own operations.
+//! `ExampleIo` represents an I/O library's context.
 //!
-//! # Using multiple providers
+//! # Driver roles
 //!
-//! A runtime can host multiple context types, with one driver of each type per
-//! worker. The first context type requested becomes the blocking
-//! [`Primary`](arty_io_core::DriverRole::Primary); the others run as non-blocking
-//! [`Secondary`](arty_io_core::DriverRole::Secondary) drivers.
+//! The driver for the first context type registered in the runtime is
+//! [`Primary`](arty_io_core::DriverRole::Primary). It can wait for I/O.
+//! Drivers for later context types are
+//! [`Secondary`](arty_io_core::DriverRole::Secondary). They must not wait for I/O.
+//! [`Io::context`] creates each context type once per runtime.
+//! The first call that creates the context determines its options.
+//! Each worker creates its driver when it first requests that context.
 //!
-//! Request a context with [`Io::context`]. Each concrete context type is
-//! registered once per runtime and reused on later requests.
+//! See the [I/O guide](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md)
+//! for cross-thread access, failure, and shutdown behavior.
 
-mod current_host;
+mod driver_host;
 mod handle;
 
-pub(crate) use current_host::RuntimeDriverHost;
+pub(crate) use driver_host::RuntimeDriverHost;
 pub use handle::Io;

@@ -8,6 +8,26 @@ Keep repository-specific automation only for capabilities outside Anvil's
 scope, such as release tooling and tests for that tooling. Generated Anvil
 files are updated with `cargo anvil`, not edited directly.
 
+Coverage collection uses `cargo coverage-gate run` on the pinned nightly toolchain.
+It runs both `--all-features` and `--no-default-features` configurations.
+The local gate and CI uploads use the same filtered LCOV files, which contain
+line-coverage counts, under `target/coverage`.
+Ordinary inline `#[cfg(test)]` modules need no `coverage(off)` attribute.
+If macros make source ownership uncertain, the filter keeps ambiguous counters.
+Keep explicit exclusions for exceptional production paths and helpers that the
+filter cannot classify.
+
+Anvil runs examples by default. Fetch examples that send real requests use
+public endpoints such as `https://example.com`. Automated runs require public
+network access and can fail if the endpoint or network is unavailable.
+Examples that need developer credentials, manual arguments, or separately
+installed profiling tools remain build-only in
+`[package.metadata.anvil.examples].no-run`.
+Server examples use OS-assigned ports by default. Axum and Routerama stop
+after two seconds during automated runs. Fetch streaming uses an unnamed
+temporary file. Snapshot examples write their named artifacts to the current
+directory.
+
 The handwritten `repository-checks.yml` also verifies the
 `http_headers_simd` `no_std` contract with package-isolated unit and integration
 tests on AArch64 and x86-family Linux. The generated Anvil test groups can select the

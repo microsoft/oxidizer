@@ -3,32 +3,33 @@
 
 use std::num::NonZeroUsize;
 
-use crate::runtime::bootstrap::pools::BlockingPools;
 use crate::runtime::error::Error;
+use crate::runtime::worker::blocking::Pools;
 
-/// A sharing policy for blocking-task thread pools.
+/// Controls whether async workers share the threads that run blocking functions.
 ///
 /// Pass a policy to
 /// [`RuntimeBuilder::blocking_pool`](crate::runtime::RuntimeBuilder::blocking_pool).
 /// These pools run [`spawn_blocking`](crate::task::Scheduler::spawn_blocking)
-/// callbacks separately from async workers.
+/// functions separately from async workers.
 ///
 /// # Choosing between per-worker and shared
 ///
 /// [`per_worker`](Self::per_worker) gives each async worker its own pool. This
-/// separates blocking work between workers, but can use more threads as
+/// separates blocking functions between workers, but can use more threads as
 /// the number of workers grows.
 ///
 /// [`shared`](Self::shared), the default, gives all workers one pool with a
 /// common thread limit. Chain [`max`](Self::max) to cap the threads in either
 /// the shared pool or each per-worker pool.
 ///
-/// Choose based on your workload; neither policy is faster in every case.
-/// Pool sizing must also account for dependency cycles. A blocking callback
-/// that waits for async work which in turn waits for the same saturated pool
-/// can deadlock. Shared pools make the dependency runtime-wide; per-worker pools
-/// confine it to one async worker's pool. Arty does not track transitive task
-/// dependencies to detect such cycles.
+/// Choose based on your workload. Neither policy is faster in every case.
+/// If all pool threads wait for tasks that need the same pool, none can finish.
+/// This is called a deadlock. It can happen when a blocking function waits
+/// for an async task that submits another blocking function to the full pool.
+/// With a shared pool, this can affect blocking functions from any worker.
+/// With separate pools, it affects blocking functions sent to the same worker's pool.
+/// Arty does not track chains of waiting tasks to detect these cycles.
 ///
 /// # Examples
 ///
@@ -52,8 +53,8 @@ enum Mode {
 impl BlockingPoolPolicy {
     /// Creates a policy with one pool per async worker.
     ///
-    /// Each pool uses the runtime's default blocking-thread limit. The total
-    /// blocking-thread resources therefore grow with the async worker count.
+    /// Each pool uses the runtime's default blocking-thread limit. More async
+    /// workers therefore allow more blocking threads in total.
     ///
     /// # Examples
     ///
@@ -90,33 +91,25 @@ impl BlockingPoolPolicy {
     /// Sets the maximum number of threads in the shared pool or in each
     /// per-worker pool.
     ///
-    /// A zero count is retained in the policy and rejected by
-    /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build).
+    /// This method accepts zero, but
+    /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) rejects it.
     #[must_use]
     pub const fn max(mut self, max_workers: usize) -> Self {
         self.max_workers = Some(max_workers);
         self
     }
 
-    /// Telemetry label identifying the pool mode (`per_worker` / `shared`).
-    pub(crate) const fn mode_label(&self) -> &'static str {
-        match self.mode {
-            Mode::PerWorker => "per_worker",
-            Mode::Shared => "shared",
-        }
-    }
-
     /// Resolves this configuration into the concrete pool resources used by
     /// workers at runtime.
-    pub(crate) fn into_pools(self) -> Result<BlockingPools, Error> {
+    pub(crate) fn into_pools(self) -> Result<Pools, Error> {
         match self.mode {
             Mode::PerWorker => {
                 let max_workers = validated_max(self.max_workers)?;
-                Ok(BlockingPools::per_worker(max_workers))
+                Ok(Pools::per_worker(max_workers))
             }
             Mode::Shared => {
                 let max_workers = validated_max(self.max_workers)?;
-                Ok(BlockingPools::shared(max_workers))
+                Ok(Pools::shared(max_workers))
             }
         }
     }
@@ -142,10 +135,7 @@ mod tests {
     #[test]
     fn per_worker_into_pools_is_per_worker() {
         assert!(
-            matches!(
-                BlockingPoolPolicy::per_worker().into_pools().unwrap(),
-                BlockingPools::PerWorker(None)
-            ),
+            matches!(BlockingPoolPolicy::per_worker().into_pools().unwrap(), Pools::PerWorker(None)),
             "expected PerWorker variant"
         );
     }
@@ -153,7 +143,7 @@ mod tests {
     #[test]
     fn shared_into_pools_is_shared() {
         assert!(
-            matches!(BlockingPoolPolicy::shared().into_pools().unwrap(), BlockingPools::Shared(_)),
+            matches!(BlockingPoolPolicy::shared().into_pools().unwrap(), Pools::Shared(_)),
             "expected Shared variant"
         );
     }
@@ -162,11 +152,11 @@ mod tests {
     fn maximum_applies_to_both_pool_modes() {
         assert!(matches!(
             BlockingPoolPolicy::per_worker().max(3).into_pools().unwrap(),
-            BlockingPools::PerWorker(Some(max)) if max.get() == 3
+            Pools::PerWorker(Some(max)) if max.get() == 3
         ));
         assert!(matches!(
             BlockingPoolPolicy::shared().max(4).into_pools().unwrap(),
-            BlockingPools::Shared(pool) if pool.max_thread_count() == 4
+            Pools::Shared(pool) if pool.max_thread_count() == 4
         ));
     }
 }
