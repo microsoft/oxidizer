@@ -244,10 +244,9 @@ pub fn stdout_metrics() -> StdoutMetricDestinationBuilder {
 
 /// A metric destination that writes to stdout via the `OTel` stdout exporter.
 #[derive(bon::Builder, Debug)]
-// Temporary compatibility: remove as this crate migrates to Anvil defaults.
 #[expect(
     clippy::empty_structs_with_brackets,
-    reason = "Temporary compatibility with existing empty structs during migration to Anvil defaults"
+    reason = "This exception is due to Bon's macros that don't allow empty structs to be defined without brackets."
 )]
 pub struct StdoutMetricDestination {}
 
