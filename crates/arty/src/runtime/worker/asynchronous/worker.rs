@@ -22,7 +22,7 @@ use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{Command, LocalWorker, Signal};
 #[cfg(test)]
 use crate::runtime::worker::blocking;
-use crate::task::Context;
+use crate::task::{Context, Scheduler};
 
 const COMMANDS_PER_CYCLE: usize = 256;
 
