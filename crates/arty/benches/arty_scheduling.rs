@@ -7,9 +7,6 @@
 //! not measure isolated instruction costs. Each case creates its runtime,
 //! reusable vectors, and external waking thread before measurement. It reuses
 //! this input for every measured iteration.
-//! Both runtimes use the same external join driver. Worker-anywhere samples
-//! submit from a task on a multi-thread runtime. Worker-local samples use an
-//! Arty worker and a Tokio current-thread runtime with a `LocalSet`.
 //!
 //! Both runtimes use the same code outside the runtime to wait for task results.
 //! For from-task workloads, timing starts inside the initial async task.
@@ -21,11 +18,6 @@
 //! that almost never expire. It measures the cost of registering timers when all
 //! workers use them at the same time. Tokio chooses each task's worker, so it does not
 //! guarantee one task per worker.
-
-#![expect(
-    unreachable_pub,
-    reason = "Triggered by metabench expansion for benchmark-local Gungraun configuration."
-)]
 
 use std::future::poll_fn;
 use std::hint::black_box;
@@ -39,18 +31,14 @@ use std::time::{Duration, Instant};
 use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 use arty::task::{Context, JoinHandle};
 use criterion::{BenchmarkId, Criterion, Throughput};
-use gungraun::LibraryBenchmarkConfig;
 #[cfg(target_os = "linux")]
-use gungraun::client_requests::callgrind;
-#[cfg(target_os = "linux")]
-use gungraun::{Callgrind, CallgrindMetrics, EntryPoint};
+use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
 use metabench::benchmark;
 use thread_aware::Unaware;
-use tokio::task::{JoinHandle as TokioJoinHandle, LocalSet};
+use tokio::task::JoinHandle as TokioJoinHandle;
 
 const BLOCKING_THREADS: usize = 4;
 const COUNTS: [usize; 2] = [1, 20];
-const MAX_COUNT: usize = 20;
 const WORKERS: [usize; 2] = [1, 4];
 
 // Neither deadline expires during a benchmark. The background timer remains
@@ -65,18 +53,18 @@ enum Workload {
     RemoteWake,
     Timer,
     Timeout,
-    WorkerAnywhere,
-    WorkerLocal,
+    FromTask,
     Blocking,
 }
 
 impl Workload {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Spawn,
         Self::Yield,
         Self::RemoteWake,
         Self::Timer,
         Self::Timeout,
+        Self::FromTask,
         Self::Blocking,
     ];
 
@@ -87,8 +75,7 @@ impl Workload {
             Self::RemoteWake => "wake",
             Self::Timer => "timer",
             Self::Timeout => "timeout",
-            Self::WorkerAnywhere => "worker_anywhere",
-            Self::WorkerLocal => "worker_local",
+            Self::FromTask => "nested",
             Self::Blocking => "blocking",
         }
     }
@@ -184,8 +171,22 @@ impl ArtyCase {
                 }
                 start.elapsed()
             }
-            Workload::WorkerAnywhere => self.run_worker_anywhere(iterations, false),
-            Workload::WorkerLocal => self.run_worker_local(iterations, false),
+            Workload::FromTask => futures::executor::block_on(self.runtime.scheduler().spawn_anywhere(
+                (iterations, count),
+                |cx, (iterations, count)| async move {
+                    let mut handles = Vec::with_capacity(count);
+                    let start = Instant::now();
+                    for _ in 0..iterations {
+                        handles.clear();
+                        handles.extend((0..count).map(|_| cx.scheduler().spawn(async |_| black_box(()))));
+                        for handle in &mut handles {
+                            black_box(handle).await.expect("benchmark tasks finish before shutdown");
+                        }
+                    }
+                    start.elapsed()
+                },
+            ))
+            .expect("benchmark parent finishes before shutdown"),
             Workload::Blocking => {
                 let start = Instant::now();
                 for _ in 0..iterations {
@@ -199,70 +200,6 @@ impl ArtyCase {
                 start.elapsed()
             }
         }
-    }
-
-    fn run_worker_anywhere(&self, iterations: u64, instrument: bool) -> Duration {
-        let count = self.count;
-        futures::executor::block_on(self.runtime.scheduler().spawn_anywhere(
-            (iterations, count, instrument),
-            |cx, (iterations, count, instrument)| async move {
-                if instrument {
-                    toggle_callgrind_collection();
-                }
-                let elapsed = {
-                    let mut handles = std::array::from_fn::<_, MAX_COUNT, _>(|_| None);
-                    let start = Instant::now();
-                    for _ in 0..iterations {
-                        for handle in handles.iter_mut().take(count) {
-                            *handle = Some(cx.scheduler().spawn_anywhere((), |()| async { black_box(()) }));
-                        }
-                        for handle in handles.iter_mut().take(count) {
-                            black_box(handle.take().expect("all benchmark task slots are filled"))
-                                .await
-                                .expect("benchmark tasks finish before shutdown");
-                        }
-                    }
-                    start.elapsed()
-                };
-                if instrument {
-                    toggle_callgrind_collection();
-                }
-                elapsed
-            },
-        ))
-        .expect("benchmark parent finishes before shutdown")
-    }
-
-    fn run_worker_local(&self, iterations: u64, instrument: bool) -> Duration {
-        let count = self.count;
-        futures::executor::block_on(self.runtime.scheduler().spawn_anywhere(
-            (iterations, count, instrument),
-            |cx, (iterations, count, instrument)| async move {
-                if instrument {
-                    toggle_callgrind_collection();
-                }
-                let elapsed = {
-                    let mut handles = std::array::from_fn::<_, MAX_COUNT, _>(|_| None);
-                    let start = Instant::now();
-                    for _ in 0..iterations {
-                        for handle in handles.iter_mut().take(count) {
-                            *handle = Some(cx.scheduler().spawn(async |_| black_box(())));
-                        }
-                        for handle in handles.iter_mut().take(count) {
-                            black_box(handle.take().expect("all benchmark task slots are filled"))
-                                .await
-                                .expect("benchmark tasks finish before shutdown");
-                        }
-                    }
-                    start.elapsed()
-                };
-                if instrument {
-                    toggle_callgrind_collection();
-                }
-                elapsed
-            },
-        ))
-        .expect("benchmark parent finishes before shutdown")
     }
 }
 
@@ -340,8 +277,19 @@ impl TokioCase {
                 let sender = self.peer.sender();
                 self.remote(iterations, async move || RemoteWake::new(sender.clone()).await)
             }
-            Workload::WorkerAnywhere => self.run_worker_anywhere(iterations, false),
-            Workload::WorkerLocal => unreachable!("worker-local Tokio uses TokioLocalCase"),
+            Workload::FromTask => futures::executor::block_on(self.runtime.spawn(async move {
+                let mut handles = Vec::with_capacity(count);
+                let start = Instant::now();
+                for _ in 0..iterations {
+                    handles.clear();
+                    handles.extend((0..count).map(|_| tokio::spawn(async { black_box(()) })));
+                    for handle in &mut handles {
+                        black_box(handle).await.expect("benchmark tasks do not panic");
+                    }
+                }
+                start.elapsed()
+            }))
+            .expect("benchmark parent task does not panic"),
             Workload::Blocking => {
                 let start = Instant::now();
                 for _ in 0..iterations {
@@ -356,113 +304,12 @@ impl TokioCase {
             }
         }
     }
-
-    fn run_worker_anywhere(&self, iterations: u64, instrument: bool) -> Duration {
-        let count = self.count;
-        futures::executor::block_on(self.runtime.spawn(async move {
-            if instrument {
-                toggle_callgrind_collection();
-            }
-            let mut handles = std::array::from_fn::<_, MAX_COUNT, _>(|_| None);
-            let start = Instant::now();
-            for _ in 0..iterations {
-                for handle in handles.iter_mut().take(count) {
-                    *handle = Some(tokio::spawn(async { black_box(()) }));
-                }
-                for handle in handles.iter_mut().take(count) {
-                    black_box(handle.take().expect("all benchmark task slots are filled"))
-                        .await
-                        .expect("benchmark tasks do not panic");
-                }
-            }
-            let elapsed = start.elapsed();
-            if instrument {
-                toggle_callgrind_collection();
-            }
-            elapsed
-        }))
-        .expect("benchmark parent task does not panic")
-    }
 }
 
-struct TokioLocalCase {
-    runtime: tokio::runtime::Runtime,
-    local: LocalSet,
-    count: usize,
-}
-
-impl TokioLocalCase {
-    fn new(count: usize) -> Self {
-        let mut case = Self {
-            runtime: tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("benchmark runtime initialization must succeed"),
-            local: LocalSet::new(),
-            count,
-        };
-        black_box(case.run(1));
-        case
-    }
-
-    fn run(&mut self, iterations: u64) -> Duration {
-        self.run_with_instrumentation(iterations, false)
-    }
-
-    fn run_with_instrumentation(&mut self, iterations: u64, instrument: bool) -> Duration {
-        let count = self.count;
-        self.local.block_on(&self.runtime, async move {
-            tokio::task::spawn_local(async move {
-                if instrument {
-                    toggle_callgrind_collection();
-                }
-                let mut handles = std::array::from_fn::<_, MAX_COUNT, _>(|_| None);
-                let start = Instant::now();
-                for _ in 0..iterations {
-                    for handle in handles.iter_mut().take(count) {
-                        *handle = Some(tokio::task::spawn_local(async { black_box(()) }));
-                    }
-                    for handle in handles.iter_mut().take(count) {
-                        black_box(handle.take().expect("all benchmark task slots are filled"))
-                            .await
-                            .expect("benchmark tasks do not panic");
-                    }
-                }
-                let elapsed = start.elapsed();
-                if instrument {
-                    toggle_callgrind_collection();
-                }
-                elapsed
-            })
-            .await
-            .expect("benchmark controller task does not panic")
-        })
-    }
-}
-
-fn toggle_callgrind_collection() {
-    #[cfg(target_os = "linux")]
-    callgrind::toggle_collect();
-}
-
-#[cfg(target_os = "linux")]
-fn worker_thread_config() -> LibraryBenchmarkConfig {
-    let mut callgrind = Callgrind::default();
-    callgrind
-        .args(["--branch-sim=yes", "--instr-atstart=no", "--collect-atstart=no"])
-        .entry_point(EntryPoint::None);
-    let mut config = LibraryBenchmarkConfig::default();
-    config.tool(callgrind.format([CallgrindMetrics::Default, CallgrindMetrics::BranchSim]));
-    config
-}
-
-#[cfg(not(target_os = "linux"))]
-fn worker_thread_config() -> LibraryBenchmarkConfig {
-    LibraryBenchmarkConfig::default()
-}
-
-/// Arms and cancels `operations` request timeouts on the current worker while a background
-/// timer stays armed. Each timeout is polled once, which registers it, then dropped, which
-/// unregisters it.
+/// Arms and cancels `operations` request timeouts on the current worker.
+///
+/// A background timer stays armed. Each request timeout is polled once to
+/// register it, then dropped to unregister it.
 async fn timeout_churn<T, F>(operations: u64, mut timer: F)
 where
     T: Future<Output = ()>,
@@ -614,38 +461,6 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         }
     }
     group.finish();
-
-    let mut group = criterion.benchmark_group(ARTY_ANYWHERE.group_name());
-    for workers in WORKERS {
-        for count in COUNTS {
-            let name = format!("spawn_w{workers}_n{count}");
-            group.throughput(Throughput::Elements(u64::try_from(count).expect("benchmark counts fit in u64")));
-            group.bench_function(BenchmarkId::new(ARTY_ANYWHERE.benchmark_name(), &name), |bencher| {
-                let state = ArtyCase::new(workers, count, Workload::WorkerAnywhere);
-                bencher.iter_custom(|iterations| state.run_worker_anywhere(iterations, false));
-            });
-            group.bench_function(BenchmarkId::new(TOKIO_ANYWHERE.benchmark_name(), &name), |bencher| {
-                let state = TokioCase::new(workers, count, Workload::WorkerAnywhere);
-                bencher.iter_custom(|iterations| state.run_worker_anywhere(iterations, false));
-            });
-        }
-    }
-    group.finish();
-
-    let mut group = criterion.benchmark_group(ARTY_LOCAL.group_name());
-    for count in COUNTS {
-        let name = format!("spawn_w1_n{count}");
-        group.throughput(Throughput::Elements(u64::try_from(count).expect("benchmark counts fit in u64")));
-        group.bench_function(BenchmarkId::new(ARTY_LOCAL.benchmark_name(), &name), |bencher| {
-            let mut state = ArtyCase::new(1, count, Workload::WorkerLocal);
-            bencher.iter_custom(|iterations| arty_local_workload(&mut state, iterations).0);
-        });
-        group.bench_function(BenchmarkId::new(TOKIO_LOCAL.benchmark_name(), &name), |bencher| {
-            let mut state = TokioLocalCase::new(count);
-            bencher.iter_custom(|iterations| tokio_local_workload(&mut state, iterations).0);
-        });
-    }
-    group.finish();
 }
 
 #[benchmark(ARTY, "arty_scheduling/tasks", "Arty")]
@@ -669,6 +484,10 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 #[bench::timeout_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::Timeout)), 1)]
 #[bench::timeout_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::Timeout)), 1)]
 #[bench::timeout_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::Timeout)), 1)]
+#[bench::nested_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::FromTask)), 1)]
+#[bench::nested_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::FromTask)), 1)]
+#[bench::nested_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::FromTask)), 1)]
+#[bench::nested_w4_n20(Box::new(ArtyCase::new(4, 20, Workload::FromTask)), 1)]
 #[bench::blocking_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::Blocking)), 1)]
 #[bench::blocking_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::Blocking)), 1)]
 #[bench::blocking_w4_n1(Box::new(ArtyCase::new(4, 1, Workload::Blocking)), 1)]
@@ -702,6 +521,10 @@ fn arty_workload<S: std::borrow::BorrowMut<ArtyCase>>(mut owned_input: S, iterat
 #[bench::timeout_w1_n20(Box::new(TokioCase::new(1, 20, Workload::Timeout)), 1)]
 #[bench::timeout_w4_n1(Box::new(TokioCase::new(4, 1, Workload::Timeout)), 1)]
 #[bench::timeout_w4_n20(Box::new(TokioCase::new(4, 20, Workload::Timeout)), 1)]
+#[bench::nested_w1_n1(Box::new(TokioCase::new(1, 1, Workload::FromTask)), 1)]
+#[bench::nested_w1_n20(Box::new(TokioCase::new(1, 20, Workload::FromTask)), 1)]
+#[bench::nested_w4_n1(Box::new(TokioCase::new(4, 1, Workload::FromTask)), 1)]
+#[bench::nested_w4_n20(Box::new(TokioCase::new(4, 20, Workload::FromTask)), 1)]
 #[bench::blocking_w1_n1(Box::new(TokioCase::new(1, 1, Workload::Blocking)), 1)]
 #[bench::blocking_w1_n20(Box::new(TokioCase::new(1, 20, Workload::Blocking)), 1)]
 #[bench::blocking_w4_n1(Box::new(TokioCase::new(4, 1, Workload::Blocking)), 1)]
@@ -712,77 +535,6 @@ fn tokio_workload<S: std::borrow::BorrowMut<TokioCase>>(mut owned_input: S, iter
         state.run(iterations)
     };
     (result, owned_input)
-}
-
-#[benchmark(
-    ARTY_ANYWHERE,
-    "arty_scheduling/worker_anywhere_spawn",
-    "Arty",
-    gungraun_config = worker_thread_config()
-)]
-#[bench::spawn_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::WorkerAnywhere)), 1)]
-#[bench::spawn_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::WorkerAnywhere)), 1)]
-fn arty_anywhere_workload<S: std::borrow::Borrow<ArtyCase>>(owned_input: S, iterations: u64) -> (Duration, S) {
-    #[cfg(target_os = "linux")]
-    callgrind::start_instrumentation();
-    let elapsed = owned_input.borrow().run_worker_anywhere(iterations, true);
-    #[cfg(target_os = "linux")]
-    callgrind::stop_instrumentation();
-    (elapsed, owned_input)
-}
-
-#[benchmark(
-    TOKIO_ANYWHERE,
-    "arty_scheduling/worker_anywhere_spawn",
-    "Tokio",
-    gungraun_config = worker_thread_config()
-)]
-#[bench::spawn_w1_n1(Box::new(TokioCase::new(1, 1, Workload::WorkerAnywhere)), 1)]
-#[bench::spawn_w1_n20(Box::new(TokioCase::new(1, 20, Workload::WorkerAnywhere)), 1)]
-fn tokio_anywhere_workload<S: std::borrow::Borrow<TokioCase>>(owned_input: S, iterations: u64) -> (Duration, S) {
-    #[cfg(target_os = "linux")]
-    callgrind::start_instrumentation();
-    let elapsed = owned_input.borrow().run_worker_anywhere(iterations, true);
-    #[cfg(target_os = "linux")]
-    callgrind::stop_instrumentation();
-    (elapsed, owned_input)
-}
-
-#[benchmark(
-    ARTY_LOCAL,
-    "arty_scheduling/worker_local_spawn",
-    "Arty",
-    gungraun_config = worker_thread_config()
-)]
-#[bench::spawn_w1_n1(Box::new(ArtyCase::new(1, 1, Workload::WorkerLocal)), 1)]
-#[bench::spawn_w1_n20(Box::new(ArtyCase::new(1, 20, Workload::WorkerLocal)), 1)]
-fn arty_local_workload<S: std::borrow::BorrowMut<ArtyCase>>(mut owned_input: S, iterations: u64) -> (Duration, S) {
-    #[cfg(target_os = "linux")]
-    callgrind::start_instrumentation();
-    let elapsed = owned_input.borrow_mut().run_worker_local(iterations, true);
-    #[cfg(target_os = "linux")]
-    callgrind::stop_instrumentation();
-    (elapsed, owned_input)
-}
-
-#[benchmark(
-    TOKIO_LOCAL,
-    "arty_scheduling/worker_local_spawn",
-    "Tokio",
-    gungraun_config = worker_thread_config()
-)]
-#[bench::spawn_w1_n1(Box::new(TokioLocalCase::new(1)), 1)]
-#[bench::spawn_w1_n20(Box::new(TokioLocalCase::new(20)), 1)]
-fn tokio_local_workload<S: std::borrow::BorrowMut<TokioLocalCase>>(
-    mut owned_input: S,
-    iterations: u64,
-) -> (Duration, S) {
-    #[cfg(target_os = "linux")]
-    callgrind::start_instrumentation();
-    let elapsed = owned_input.borrow_mut().run_with_instrumentation(iterations, true);
-    #[cfg(target_os = "linux")]
-    callgrind::stop_instrumentation();
-    (elapsed, owned_input)
 }
 
 #[cfg(target_os = "linux")]
@@ -799,7 +551,7 @@ metabench::main!(
                 .format([CallgrindMetrics::Default, CallgrindMetrics::BranchSim]),
         );
     },
-    benchmarks = [ARTY, TOKIO, ARTY_ANYWHERE, TOKIO_ANYWHERE, ARTY_LOCAL, TOKIO_LOCAL],
+    benchmarks = [ARTY, TOKIO],
 );
 
 #[cfg(not(target_os = "linux"))]
@@ -809,5 +561,5 @@ metabench::main!(
         benchmarks = criterion_benchmarks,
         unit = "ns",
     },
-    benchmarks = [ARTY, TOKIO, ARTY_ANYWHERE, TOKIO_ANYWHERE, ARTY_LOCAL, TOKIO_LOCAL],
+    benchmarks = [ARTY, TOKIO],
 );

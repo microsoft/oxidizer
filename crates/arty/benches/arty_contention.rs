@@ -27,15 +27,9 @@
 //! These workloads do not represent
 //! general runtime performance.
 //!
-//! Gungraun results give a rough view of which instructions run. Its cases use
-//! one prewarmed worker and collect inside that worker. Callgrind cannot model
-//! how tasks share workers or compete across workers. Use Criterion for
-//! multi-worker runtime comparisons.
-
-#![expect(
-    unreachable_pub,
-    reason = "Triggered by metabench expansion for benchmark-local Gungraun configuration."
-)]
+//! Gungraun results give a rough view of which instructions run.
+//! Callgrind cannot model how tasks share workers or compete across workers.
+//! Use Criterion to compare runtime performance for these workloads.
 
 use std::hint::black_box;
 use std::pin::Pin;
@@ -45,15 +39,12 @@ use std::time::{Duration, Instant};
 use arty::runtime::{Runtime, WorkersPolicy};
 use arty::task::Context;
 use criterion::{BenchmarkId, Criterion, Throughput};
-use gungraun::LibraryBenchmarkConfig;
 #[cfg(target_os = "linux")]
-use gungraun::client_requests::callgrind;
-#[cfg(target_os = "linux")]
-use gungraun::{Callgrind, CallgrindMetrics, EntryPoint};
+use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
 use metabench::benchmark;
 use performables::arc::{Arc, PerThread};
 use performables::sync::mutex::Mutex;
-use thread_aware::{Thread, ThreadAware, Unaware};
+use thread_aware::{Thread, ThreadAware};
 
 const INNER_OPERATIONS: usize = 10;
 const CONCURRENCY: usize = 10;
@@ -138,35 +129,6 @@ impl ArtyCase {
         });
         start.elapsed()
     }
-
-    fn run_instrumented(&self, concurrency: usize) -> Duration {
-        assert_eq!(concurrency, CONCURRENCY, "benchmark uses its fixed concurrency");
-        let caches = std::array::from_fn::<_, CONCURRENCY, _>(|_| self.cache.clone());
-        futures::executor::block_on(self.runtime.scheduler().spawn_anywhere(
-            Unaware((caches, concurrency)),
-            |cx, Unaware((mut caches, concurrency))| async move {
-                toggle_callgrind_collection();
-                let start = Instant::now();
-                let mut handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| None);
-                for cache in caches.iter_mut().take(concurrency) {
-                    cache.relocate(None, cx.thread());
-                }
-                for (cache, handle) in caches.into_iter().zip(handles.iter_mut()).take(concurrency) {
-                    *handle = Some(cx.scheduler().spawn(move |child| arty_outer(child, cache)));
-                }
-                for handle in handles.into_iter().take(concurrency) {
-                    handle
-                        .expect("all benchmark outer task slots are filled")
-                        .await
-                        .expect("benchmark outer task finishes before shutdown");
-                }
-                let elapsed = start.elapsed();
-                toggle_callgrind_collection();
-                elapsed
-            },
-        ))
-        .expect("benchmark controller finishes before shutdown")
-    }
 }
 
 #[derive(Debug)]
@@ -205,28 +167,6 @@ impl ArtyNestedRetainedWakerCase {
             }
         });
         start.elapsed()
-    }
-
-    fn run_instrumented(&self, concurrency: usize) -> Duration {
-        assert_eq!(concurrency, CONCURRENCY, "benchmark uses its fixed concurrency");
-        futures::executor::block_on(self.runtime.scheduler().spawn_anywhere(concurrency, |cx, concurrency| async move {
-            toggle_callgrind_collection();
-            let start = Instant::now();
-            let mut handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| None);
-            for handle in handles.iter_mut().take(concurrency) {
-                *handle = Some(cx.scheduler().spawn(|child| arty_retained_waker_outer(child, ())));
-            }
-            for handle in handles.into_iter().take(concurrency) {
-                handle
-                    .expect("all benchmark outer task slots are filled")
-                    .await
-                    .expect("benchmark outer task finishes before shutdown");
-            }
-            let elapsed = start.elapsed();
-            toggle_callgrind_collection();
-            elapsed
-        }))
-        .expect("benchmark controller finishes before shutdown")
     }
 }
 
@@ -300,29 +240,6 @@ impl TokioCase {
         });
         start.elapsed()
     }
-
-    fn run_instrumented(&self, concurrency: usize) -> Duration {
-        assert_eq!(concurrency, CONCURRENCY, "benchmark uses its fixed concurrency");
-        let cache = self.cache.clone();
-        futures::executor::block_on(self.runtime.spawn(async move {
-            toggle_callgrind_collection();
-            let start = Instant::now();
-            let mut handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| None);
-            for handle in handles.iter_mut().take(concurrency) {
-                *handle = Some(tokio::spawn(tokio_outer(cache.clone())));
-            }
-            for handle in handles.into_iter().take(concurrency) {
-                handle
-                    .expect("all benchmark outer task slots are filled")
-                    .await
-                    .expect("benchmark outer task finishes before shutdown");
-            }
-            let elapsed = start.elapsed();
-            toggle_callgrind_collection();
-            elapsed
-        }))
-        .expect("benchmark controller task does not panic")
-    }
 }
 
 #[derive(Debug)]
@@ -360,28 +277,6 @@ impl TokioNestedRetainedWakerCase {
             }
         });
         start.elapsed()
-    }
-
-    fn run_instrumented(&self, concurrency: usize) -> Duration {
-        assert_eq!(concurrency, CONCURRENCY, "benchmark uses its fixed concurrency");
-        futures::executor::block_on(self.runtime.spawn(async move {
-            toggle_callgrind_collection();
-            let start = Instant::now();
-            let mut handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| None);
-            for handle in handles.iter_mut().take(concurrency) {
-                *handle = Some(tokio::spawn(tokio_retained_waker_outer()));
-            }
-            for handle in handles.into_iter().take(concurrency) {
-                handle
-                    .expect("all benchmark outer task slots are filled")
-                    .await
-                    .expect("benchmark outer task finishes before shutdown");
-            }
-            let elapsed = start.elapsed();
-            toggle_callgrind_collection();
-            elapsed
-        }))
-        .expect("benchmark controller task does not panic")
     }
 }
 
@@ -439,27 +334,6 @@ fn configured_criterion() -> Criterion {
         .sample_size(50)
         .warm_up_time(Duration::from_millis(500))
         .measurement_time(Duration::from_secs(2))
-}
-
-fn toggle_callgrind_collection() {
-    #[cfg(target_os = "linux")]
-    callgrind::toggle_collect();
-}
-
-#[cfg(target_os = "linux")]
-fn worker_contention_config() -> LibraryBenchmarkConfig {
-    let mut callgrind = Callgrind::default();
-    callgrind
-        .args(["--branch-sim=yes", "--instr-atstart=no", "--collect-atstart=no"])
-        .entry_point(EntryPoint::None);
-    let mut config = LibraryBenchmarkConfig::default();
-    config.tool(callgrind.format([CallgrindMetrics::Default, CallgrindMetrics::BranchSim]));
-    config
-}
-
-#[cfg(not(target_os = "linux"))]
-fn worker_contention_config() -> LibraryBenchmarkConfig {
-    LibraryBenchmarkConfig::default()
 }
 
 fn criterion_benchmarks(criterion: &mut Criterion) {
@@ -522,82 +396,54 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     group.finish();
 }
 
-#[benchmark(
-    ARTY,
-    "arty_contention/relocated_cache",
-    "Arty",
-    gungraun_config = worker_contention_config()
-)]
+#[benchmark(ARTY, "arty_contention/relocated_cache", "Arty")]
 #[bench::concurrency_w1(Box::new(ArtyCase::new(1)), 10)]
+#[bench::concurrency_w8(Box::new(ArtyCase::new(8)), 10)]
 fn arty_workload<S: std::borrow::Borrow<ArtyCase>>(owned_input: S, concurrency: u64) -> (Duration, S) {
-    #[cfg(target_os = "linux")]
-    callgrind::start_instrumentation();
-    let elapsed = owned_input
-        .borrow()
-        .run_instrumented(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"));
-    #[cfg(target_os = "linux")]
-    callgrind::stop_instrumentation();
-    (elapsed, owned_input)
+    let result = {
+        let case = owned_input.borrow();
+        case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+    };
+    (result, owned_input)
 }
 
-#[benchmark(
-    TOKIO,
-    "arty_contention/relocated_cache",
-    "Tokio",
-    gungraun_config = worker_contention_config()
-)]
+#[benchmark(TOKIO, "arty_contention/relocated_cache", "Tokio")]
 #[bench::concurrency_w1(Box::new(TokioCase::new(1)), 10)]
+#[bench::concurrency_w8(Box::new(TokioCase::new(8)), 10)]
 fn tokio_workload<S: std::borrow::Borrow<TokioCase>>(owned_input: S, concurrency: u64) -> (Duration, S) {
-    #[cfg(target_os = "linux")]
-    callgrind::start_instrumentation();
-    let elapsed = owned_input
-        .borrow()
-        .run_instrumented(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"));
-    #[cfg(target_os = "linux")]
-    callgrind::stop_instrumentation();
-    (elapsed, owned_input)
+    let result = {
+        let case = owned_input.borrow();
+        case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+    };
+    (result, owned_input)
 }
 
-#[benchmark(
-    ARTY_NESTED_RETAINED_WAKER,
-    "arty_contention/nested_retained_waker",
-    "Arty",
-    gungraun_config = worker_contention_config()
-)]
+#[benchmark(ARTY_NESTED_RETAINED_WAKER, "arty_contention/nested_retained_waker", "Arty")]
 #[bench::concurrency_w1(Box::new(ArtyNestedRetainedWakerCase::new(1)), 10)]
+#[bench::concurrency_w8(Box::new(ArtyNestedRetainedWakerCase::new(8)), 10)]
 fn arty_nested_retained_waker_workload<S: std::borrow::Borrow<ArtyNestedRetainedWakerCase>>(
     owned_input: S,
     concurrency: u64,
 ) -> (Duration, S) {
-    #[cfg(target_os = "linux")]
-    callgrind::start_instrumentation();
-    let elapsed = owned_input
-        .borrow()
-        .run_instrumented(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"));
-    #[cfg(target_os = "linux")]
-    callgrind::stop_instrumentation();
-    (elapsed, owned_input)
+    let result = {
+        let case = owned_input.borrow();
+        case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+    };
+    (result, owned_input)
 }
 
-#[benchmark(
-    TOKIO_NESTED_RETAINED_WAKER,
-    "arty_contention/nested_retained_waker",
-    "Tokio",
-    gungraun_config = worker_contention_config()
-)]
+#[benchmark(TOKIO_NESTED_RETAINED_WAKER, "arty_contention/nested_retained_waker", "Tokio")]
 #[bench::concurrency_w1(Box::new(TokioNestedRetainedWakerCase::new(1)), 10)]
+#[bench::concurrency_w8(Box::new(TokioNestedRetainedWakerCase::new(8)), 10)]
 fn tokio_nested_retained_waker_workload<S: std::borrow::Borrow<TokioNestedRetainedWakerCase>>(
     owned_input: S,
     concurrency: u64,
 ) -> (Duration, S) {
-    #[cfg(target_os = "linux")]
-    callgrind::start_instrumentation();
-    let elapsed = owned_input
-        .borrow()
-        .run_instrumented(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"));
-    #[cfg(target_os = "linux")]
-    callgrind::stop_instrumentation();
-    (elapsed, owned_input)
+    let result = {
+        let case = owned_input.borrow();
+        case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
+    };
+    (result, owned_input)
 }
 
 #[cfg(target_os = "linux")]
