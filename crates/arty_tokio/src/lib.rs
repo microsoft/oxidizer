@@ -90,7 +90,7 @@
 //!
 //! - current-thread Tokio runtimes and implicit `LocalSet` / `spawn_local`
 //!   integration;
-//! - [`tokio::task::block_in_place`] from an Arty worker;
+//! - `tokio::task::block_in_place` from an Arty worker;
 //! - `Runtime::block_on` or `Handle::block_on` from an Arty worker;
 //! - Tokio cooperative scheduling or Tokio task-local context when Arty polls
 //!   a Tokio future directly. If a library needs them, run its root future

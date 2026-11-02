@@ -91,11 +91,11 @@ This crate does not support:
 
 * current-thread Tokio runtimes and implicit `LocalSet` / `spawn_local`
   integration;
-* [`tokio::task::block_in_place`][__link13] from an Arty worker;
+* `tokio::task::block_in_place` from an Arty worker;
 * `Runtime::block_on` or `Handle::block_on` from an Arty worker;
 * Tokio cooperative scheduling or Tokio task-local context when Arty polls
   a Tokio future directly. If a library needs them, run its root future
-  with [`tokio::spawn`][__link14];
+  with [`tokio::spawn`][__link13];
 * Tokio context while Arty cancels tasks or runs their destructors during
   shutdown, including final timer and worker teardown callbacks.
 
@@ -118,14 +118,13 @@ The application remains responsible for Tokio shutdown.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVhRsh_JLDPgbxeNRSAgHeSUbieJVmgbJflEbDsoEpEP5R7VhZIOCZGFydHllMC41LjCCamFydHlfdG9raW9lMC4xLjCCZXRva2lvZjEuNTMuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGG2THYMLM6QbMRQmSDhwv64bDWqspKlcO7UbRgLoR-etjQNhZIOCZGFydHllMC41LjCCamFydHlfdG9raW9lMC4xLjCCZXRva2lvZjEuNTMuMw
  [__link0]: https://crates.io/crates/arty/0.5.0
  [__link1]: https://docs.rs/arty_tokio/0.1.0/arty_tokio/fn.init.html
  [__link10]: https://docs.rs/arty/0.5.0/arty/?search=task::Context
  [__link11]: https://docs.rs/tokio/1.53.3/tokio/?search=task::JoinHandle
  [__link12]: https://docs.rs/tokio/1.53.3/tokio/?search=task::JoinError
- [__link13]: https://docs.rs/tokio/1.53.3/tokio/?search=task::block_in_place
- [__link14]: https://docs.rs/tokio/1.53.3/tokio/?search=spawn
+ [__link13]: https://docs.rs/tokio/1.53.3/tokio/?search=spawn
  [__link2]: https://docs.rs/arty_tokio/0.1.0/arty_tokio/fn.init.html
  [__link3]: https://docs.rs/arty_tokio/0.1.0/arty_tokio/fn.init.html
  [__link4]: https://docs.rs/arty_tokio/0.1.0/arty_tokio/fn.init.html
