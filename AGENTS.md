@@ -105,14 +105,18 @@ Pin GitHub Actions to full-length commit SHAs with a version comment unless
 the exact release is verified as a GitHub immutable release. For immutable
 releases, use the exact version tag instead; never use moving major/minor aliases.
 
+CodeQL is an exception. Pin every `github/codeql-action/*` step to the same
+full-length commit SHA with a version comment, including immutable releases.
+This keeps Dependabot updates SHA-based.
+
 Verify each new release with
 `gh api repos/OWNER/REPO/releases/tags/TAG --jq .immutable`; only `true` qualifies
 for the tag exception.
 
 Preserve pinning-rationale comments when updating dependencies or addressing
 review feedback, and update their versioned links and references. Do not delete
-the rationale merely because Dependabot proposes a SHA pin: retain the exact
-version tag when the new release is still immutable.
+the rationale merely because Dependabot proposes a SHA pin: for actions other
+than CodeQL, retain the exact version tag when the new release is still immutable.
 
 ## Required CI Checks
 
