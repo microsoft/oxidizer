@@ -292,6 +292,9 @@ mod tests {
 
     use super::*;
 
+    // 2026-10-30T09:42:47Z
+    const TEST_TIMESTAMP_OFFSET: Duration = Duration::from_secs(1_793_353_367);
+
     static_assertions::assert_impl_all!(StdoutLogDestination: UnwindSafe, RefUnwindSafe, Send, Sync);
     static_assertions::assert_impl_all!(StdoutMetricDestination: UnwindSafe, RefUnwindSafe, Send, Sync);
 
@@ -339,7 +342,13 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::write_with_newline,
+        reason = "the newline is part of the contract and should be kept explicit"
+    )]
     fn log_destination_filters_records() {
+        use std::fmt::Write;
+
         for (level_filter, outcomes) in [
             // Ensures that the default level filter is Info
             (
@@ -377,29 +386,28 @@ mod tests {
                 .build();
             let logger = provider.logger("stdout");
 
-            // 2026-10-30T09:42:47.000000000Z
-            let system_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1793353367);
-
             let mut expected = "<Resource: >\n".to_string();
 
             for (severity, body, should_emit) in outcomes {
                 let mut record = logger.create_log_record();
-                record.set_timestamp(system_time);
-                record.set_severity_number(severity.clone());
+                record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
+                record.set_severity_number(*severity);
                 record.set_body((*body).into());
                 logger.emit(record);
 
                 if *should_emit {
-                    expected.push_str(&format!(
+                    write!(
+                        expected,
                         "[2026-10-30T09:42:47.000000000Z] {}: {} [stdout-?]\n",
                         severity.name(),
                         *body
-                    ));
+                    )
+                    .unwrap();
                 }
             }
 
             let written = output.contents();
-            assert_eq!(written, expected, "Failed for level_filter={:?}", level_filter);
+            assert_eq!(written, expected, "Failed for level_filter={level_filter:?}");
         }
     }
 
@@ -416,12 +424,9 @@ mod tests {
             .with_resource(Resource::builder_empty().build())
             .build();
 
-        // 2026-10-30T09:42:47.000000000Z
-        let system_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1793353367);
-
         let logger = provider.logger("stdout");
         let mut record = logger.create_log_record();
-        record.set_timestamp(system_time);
+        record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
         record.set_body("request {id}".into());
         record.add_attribute("id", 42);
 
@@ -446,18 +451,15 @@ mod tests {
             )
             .build();
 
-        // 2026-10-30T09:42:47.000000000Z
-        let system_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1793353367);
-
         let logger = provider.logger("stdout");
 
         let mut record = logger.create_log_record();
-        record.set_timestamp(system_time);
+        record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
         logger.emit(record);
 
         // Also emit a second record to verify that the resource header is only printed once.
         let mut record = logger.create_log_record();
-        record.set_timestamp(system_time);
+        record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
         logger.emit(record);
 
         let written = output.contents();
@@ -473,13 +475,10 @@ mod tests {
         let mut processor = StdoutLogProcessor::new(LogFormatConfig::default(), output.clone().into_factory());
         processor.set_resource(&Resource::builder_empty().build());
 
-        // 2026-10-30T09:42:47.000000000Z
-        let system_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1793353367);
-
         let scope = InstrumentationScope::builder("stdout").build();
         let mut record = SdkLoggerProvider::builder().build().logger("stdout").create_log_record();
         record.set_body("before-shutdown".into());
-        record.set_timestamp(system_time);
+        record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
 
         processor.emit(&mut record, &scope);
 
@@ -514,12 +513,9 @@ mod tests {
             let t = s.spawn(|| {
                 let scope = InstrumentationScope::builder("stdout").build();
 
-                // 2026-10-30T09:42:47.000000000Z
-                let system_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1793353367);
-
                 let mut record = SdkLoggerProvider::builder().build().logger("stdout").create_log_record();
                 record.set_body("before-shutdown".into());
-                record.set_timestamp(system_time);
+                record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
 
                 processor.emit(&mut record, &scope);
             });
@@ -557,9 +553,8 @@ mod tests {
 
         let error = processor.force_flush().unwrap_err();
 
-        let error_message = match &error {
-            OTelSdkError::InternalFailure(message) => message,
-            _ => panic!("expected InternalFailure, got {error:?}"),
+        let OTelSdkError::InternalFailure(error_message) = &error else {
+            panic!("expected InternalFailure, got {error:?}")
         };
 
         assert_eq!(error_message, "broken pipe");
@@ -587,16 +582,15 @@ mod tests {
         assert_eq!(metrics.len(), 1);
 
         let service_name = metrics[0].resource().get(&opentelemetry::Key::from_static_str("service.name"));
-        let service_name = service_name.expect("service.name attribute should be present");
-        let opentelemetry::Value::String(service_name) = service_name else {
-            panic!("service.name attribute should be a string");
+        let Some(opentelemetry::Value::String(service_name)) = service_name else {
+            panic!("service.name attribute should be a string")
         };
         assert_eq!(service_name.as_str(), "test service name");
 
-        let scope_metrics = &metrics[0].scope_metrics().nth(0).unwrap();
+        let scope_metrics = &metrics[0].scope_metrics().next().unwrap();
         assert_eq!(scope_metrics.scope().name(), "stdout");
 
-        let metric = scope_metrics.metrics().nth(0).unwrap();
+        let metric = scope_metrics.metrics().next().unwrap();
         assert_eq!(metric.name(), "stdout_contract_requests");
 
         let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() else {

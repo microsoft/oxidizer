@@ -24,7 +24,7 @@ fn stdout_destination_registers() {
     let logger = provider.logger("stdout");
 
     assert!(!logger.event_enabled(Severity::Info, "stdout", None));
-    assert!(logger.event_enabled(Severity::Warn, "stdout", None))
+    assert!(logger.event_enabled(Severity::Warn, "stdout", None));
 }
 
 #[test]
