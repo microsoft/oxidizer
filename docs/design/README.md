@@ -86,6 +86,18 @@ The mutation configurations retain intentional-abort test filters and known-hang
 candidate exclusions as additional safeguards. Hosted Linux mutation jobs also
 disable crash-handler forwarding so expected aborts do not launch crash reporters.
 
+Test watchdogs are disabled during mutation testing. A watchdog exit can count
+as a caught mutation without an assertion that explains the failure.
+Fix tests that hang instead of enabling a watchdog to hide the hang.
+Drive private worker tests through a fixed number of cycles and inspect their
+results without waiting for another worker.
+
+Arty unit tests that start a runtime retain blocking pools through
+`TestPoolOwner`. This fixture joins the pools before the test thread exits,
+even when runtime startup fails. On Windows, releasing the last pool handle
+from thread-local storage can join another thread while the loader lock is
+held. That join can prevent the test process from finishing.
+
 The host configurations exclude known mutation candidates that are inactive on
 the active platform. Without those exclusions, cargo-mutants can mutate
 inactive source, produce an unchanged test binary, and report the surviving

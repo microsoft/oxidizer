@@ -20,12 +20,15 @@ use crate::task::handle::JoinHandlePool;
 
 fn test_context() -> (Runtime, Context) {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-    let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
+    let (context_tx, context_rx) = std::sync::mpsc::channel();
+    let _task = runtime.scheduler().dispatcher.spawn(async move |cx| context_tx.send(cx).unwrap());
+    let cx = context_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
     (runtime, cx)
 }
 
 #[test]
 fn remote_factory_remains_deferred_until_poll() {
+    let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
     let invoked = Arc::new(AtomicBool::new(false));
     let factory_invoked = Arc::clone(&invoked);
     let result_pool = JoinHandlePool::new(Shutdown::default());
@@ -56,6 +59,7 @@ fn remote_factory_remains_deferred_until_poll() {
 
 #[test]
 fn shutdown_cancelled_deferred_task_stays_pending_without_invoking_factory() {
+    let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
     let (runtime, cx) = test_context();
     let invoked = Arc::new(AtomicBool::new(false));
     let factory_invoked = Arc::clone(&invoked);
@@ -187,6 +191,7 @@ fn remote_factory_panic_is_delivered_to_joiner() {
         TaskPlacement::Any,
     );
     let mut executor = Executor::builder().owner_waker(Waker::noop().clone()).build();
+    let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
     let (_runtime, cx) = test_context();
     let _registered = factory.register(cx, &executor.tasks());
     run_to_completion(&mut executor);

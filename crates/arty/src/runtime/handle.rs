@@ -292,6 +292,7 @@ mod tests {
 
     #[test]
     fn task_worker_stop_panics() {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = single_worker_runtime();
         let joiner = runtime.worker_joiner.clone_for_test();
         let scheduler = worker_scheduler(&runtime);
@@ -304,6 +305,7 @@ mod tests {
 
     #[test]
     fn ignored_task_worker_stop_skips_a_later_active_task() {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .panic(crate::runtime::PanicPolicy::ignore())
@@ -357,6 +359,7 @@ mod tests {
 
     #[test]
     fn ignored_task_worker_drop_skips_a_later_active_task() {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .panic(crate::runtime::PanicPolicy::ignore())
@@ -410,6 +413,7 @@ mod tests {
 
     #[test]
     fn blocking_worker_stop_panics() {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = single_worker_runtime();
         let joiner = runtime.worker_joiner.clone_for_test();
         let scheduler = worker_scheduler(&runtime);
@@ -422,6 +426,7 @@ mod tests {
 
     #[test]
     fn task_worker_owner_drop_panics() {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = single_worker_runtime();
         let joiner = runtime.worker_joiner.clone_for_test();
         let scheduler = worker_scheduler(&runtime);
@@ -434,6 +439,7 @@ mod tests {
 
     #[test]
     fn blocking_worker_owner_drop_panics() {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = single_worker_runtime();
         let joiner = runtime.worker_joiner.clone_for_test();
         let scheduler = worker_scheduler(&runtime);
@@ -447,6 +453,7 @@ mod tests {
     #[test]
     fn thread_local_shutdown_guard_survives_worker_slot_teardown() {
         thread::spawn(|| {
+            let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
             let runtime = single_worker_runtime();
             let (control, scheduler) = runtime
                 .scheduler()

@@ -179,6 +179,7 @@ mod tests {
         const PROCESSORS: usize = 4;
         const WORKERS: usize = 16;
 
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let hardware = fake_hardware(PROCESSORS);
         let runtime = runtime_with_processors(
             WorkersPolicy::exactly(WORKERS),
@@ -240,6 +241,7 @@ mod tests {
     fn maximum_workers_remain_bounded_by_fake_processor_capacity() {
         const PROCESSORS: usize = 4;
 
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let hardware = fake_hardware(PROCESSORS);
         let runtime = runtime_with_processors(WorkersPolicy::at_most(16), MonitorPolicy::disabled().into(), &hardware.processors());
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
@@ -261,6 +263,7 @@ mod tests {
     fn all_workers_use_fake_processor_capacity() {
         const PROCESSORS: usize = 4;
 
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let hardware = fake_hardware(PROCESSORS);
         let runtime = runtime_with_processors(WorkersPolicy::all(), MonitorPolicy::disabled().into(), &hardware.processors());
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();

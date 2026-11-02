@@ -117,6 +117,7 @@ mod tests {
 
     #[test]
     fn queued_factory_into_inner_returns_the_factory() {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = crate::runtime::Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()

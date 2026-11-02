@@ -341,7 +341,7 @@ mod tests {
     use events_once::BoxedSender;
     use events_once::{Event, IntoValueError};
     use nonempty::NonEmpty;
-    use testing_aids::{TEST_TIMEOUT, async_test};
+    use testing_aids::TEST_TIMEOUT;
     use thread_aware::{ThreadAware, ThreadBuilder};
     use tick::ClockControl;
 
@@ -463,6 +463,7 @@ mod tests {
             blocking_worker: Arc::clone(&blocking_worker),
         };
         let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown));
+        assert_eq!(dispatcher.worker_index(thread.id()).map(usize::from), Some(0));
         let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
         if !LocalWorker::is_current() {
@@ -853,7 +854,8 @@ mod tests {
                 .poll(&mut std::task::Context::from_waker(&callback_waker))
                 .is_pending()
         );
-        while signal.take_notification() {}
+        _ = signal.take_notification();
+        assert!(!signal.take_notification());
 
         control.advance(Duration::from_secs(1));
 
@@ -1016,35 +1018,18 @@ mod tests {
     }
 
     #[test]
-    fn smoke_test() {
-        async_test(async || {
-            // Run worker, execute one remote task which awaits a nested task, then shut down.
-            let (command_tx, command_rx) = channel::unbounded();
-            let worker_command_tx = command_tx.clone();
-            let signal = Arc::new(Signal::default());
-            let worker_signal = Arc::clone(&signal);
-
-            let async_worker_thread = thread::spawn(move || {
-                let blocking_worker = test_blocking_worker();
-
-                let mut worker = test_worker(
-                    worker_command_tx,
-                    command_rx,
-                    (Arc::clone(&blocking_worker.0), blocking_worker.1.clone()),
-                    InactiveClock::new_isolated(),
-                    worker_signal,
-                );
-                worker.run();
-
-                assert!(blocking_worker.0.is_shutting_down());
-            });
-
-            // Signals that the task waiting on the nested task has completed.
-            let (outer_completed_tx, outer_completed_rx) = Event::boxed();
-
-            // Signals that the nested task has completed.
-            let (inner_completed_tx, inner_completed_rx) = Event::boxed();
-
+    fn remote_factory_can_spawn_dependent_tasks() {
+        let (command_tx, command_rx) = channel::unbounded();
+        let mut worker = test_worker(
+            command_tx.clone(),
+            command_rx,
+            test_blocking_worker(),
+            ClockControl::new().into(),
+            Arc::new(Signal::default()),
+        );
+        let (outer_completed_tx, outer_completed_rx) = Event::boxed();
+        let (inner_completed_tx, inner_completed_rx) = Event::boxed();
+        thread::spawn(move || {
             command_tx
                 .send(enqueue(RemoteFutureFactory::new({
                     move |_: Context, tasks: &TaskSet| {
@@ -1058,67 +1043,43 @@ mod tests {
                     }
                 })))
                 .unwrap();
-            Signal::waker(&signal).wake_by_ref();
+        })
+        .join()
+        .unwrap();
 
-            // Command sent! Now wait for something to happen.
-            outer_completed_rx.await.unwrap();
+        _ = worker.prepare_cycle();
+        _ = worker.prepare_cycle();
 
-            // Test body completed. Now let's shut it down.
-            command_tx.send(Command::Shutdown).unwrap();
-            Signal::waker(&signal).wake_by_ref();
-
-            // Wait for the worker to finish. It is harmless to continue immediately but we wait
-            // just in case some errors occurred during shutdown - in which case we want to panic here.
-            async_worker_thread.join().unwrap();
-        });
+        outer_completed_rx.into_value().unwrap();
     }
 
     #[test]
     fn worker_setup_can_register_new_tasks() {
-        async_test(async || {
-            // To verify tasks get executed.
-            let (initial_completed_tx, initial_completed_rx) = Event::boxed();
-            let (spawned_completed_tx, spawned_completed_rx) = Event::boxed();
+        let (initial_completed_tx, initial_completed_rx) = Event::boxed();
+        let (spawned_completed_tx, spawned_completed_rx) = Event::boxed();
+        let (command_tx, command_rx) = channel::unbounded();
+        let mut worker = test_worker(
+            command_tx.clone(),
+            command_rx,
+            test_blocking_worker(),
+            ClockControl::new().into(),
+            Arc::new(Signal::default()),
+        );
+        worker.tasks.add_test(async move { initial_completed_tx.send(()) });
+        command_tx
+            .send(enqueue(RemoteFutureFactory::new({
+                move |_: Context, tasks: &TaskSet| {
+                    tasks.add_test(async move {
+                        spawned_completed_tx.send(());
+                    });
+                }
+            })))
+            .unwrap();
 
-            let (command_tx, command_rx) = channel::unbounded();
-            let worker_command_tx = command_tx.clone();
-            let signal = Arc::new(Signal::default());
-            let worker_signal = Arc::clone(&signal);
-            let worker_thread = thread::spawn(move || {
-                let mut worker = test_worker(
-                    worker_command_tx,
-                    command_rx,
-                    test_blocking_worker(),
-                    InactiveClock::new_isolated(),
-                    worker_signal,
-                );
-                worker.tasks.add_test(async move { initial_completed_tx.send(()) });
+        _ = worker.prepare_cycle();
 
-                worker.run();
-            });
-
-            command_tx
-                .send(enqueue(RemoteFutureFactory::new({
-                    move |_: Context, tasks: &TaskSet| {
-                        tasks.add_test(async move {
-                            spawned_completed_tx.send(());
-                        });
-                    }
-                })))
-                .unwrap();
-            Signal::waker(&signal).wake_by_ref();
-
-            spawned_completed_rx.await.unwrap();
-            initial_completed_rx.into_value().unwrap();
-
-            // Tasks worked fine. Now let's shut it down.
-            command_tx.send(Command::Shutdown).unwrap();
-            Signal::waker(&signal).wake_by_ref();
-
-            // Wait for the worker to finish. It is harmless to continue immediately but we wait
-            // just in case some errors occurred during shutdown - in which case we want to panic here.
-            worker_thread.join().unwrap();
-        });
+        initial_completed_rx.into_value().unwrap();
+        spawned_completed_rx.into_value().unwrap();
     }
 
     #[test]
@@ -1131,37 +1092,27 @@ mod tests {
         // make their remote join handles report shutdown.
 
         let (command_tx, command_rx) = channel::unbounded();
-        let worker_command_tx = command_tx.clone();
-        let signal = Arc::new(Signal::default());
-        let worker_signal = Arc::clone(&signal);
-
-        let async_worker_thread = thread::spawn(move || {
-            let mut worker = test_worker(
-                worker_command_tx,
-                command_rx,
-                test_blocking_worker(),
-                InactiveClock::new_isolated(),
-                worker_signal,
-            );
-            worker.run();
-        });
-
-        command_tx.send(Command::Shutdown).unwrap();
-        Signal::waker(&signal).wake_by_ref();
-
+        let mut worker = test_worker(
+            command_tx.clone(),
+            command_rx,
+            test_blocking_worker(),
+            ClockControl::new().into(),
+            Arc::new(Signal::default()),
+        );
         let (completed_tx, completed_rx) = Event::boxed();
+        command_tx.send(Command::Shutdown).unwrap();
 
-        // We ignore the result because the worker is shutting down and the channel might be closed already.
-        let _ = command_tx.send(enqueue(RemoteFutureFactory::new({
-            move |_: Context, tasks: &TaskSet| {
-                tasks.add_test(async move {
-                    completed_tx.send(14);
-                });
-            }
-        })));
+        command_tx
+            .send(enqueue(RemoteFutureFactory::new({
+                move |_: Context, tasks: &TaskSet| {
+                    tasks.add_test(async move {
+                        completed_tx.send(14);
+                    });
+                }
+            })))
+            .unwrap();
 
-        // This waits for the worker to shut down.
-        async_worker_thread.join().unwrap();
+        assert!(worker.execute_step().is_break());
 
         let completed_result = completed_rx.into_value();
         assert!(matches!(completed_result, Err(IntoValueError::Disconnected)));

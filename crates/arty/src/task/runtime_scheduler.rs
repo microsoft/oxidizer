@@ -402,6 +402,7 @@ mod tests {
 
     #[cfg(not(miri))]
     fn check_borrowed_future_completion(panics: bool) {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .panic(crate::runtime::PanicPolicy::ignore())

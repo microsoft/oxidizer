@@ -11,6 +11,8 @@ use arty_executor::discard_task_panic_payload;
 use performables::arc::Arc;
 use performables::sync::channel;
 use performables::sync::mutex::Mutex;
+#[cfg(test)]
+pub(crate) use tests::TestPoolOwner;
 
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::blocking::{LocalWorker, PanicPolicy, PoolIdentity};
@@ -224,11 +226,14 @@ impl Pool {
         let identity = Arc::new(());
         let thread_pool = JoinableThreadPool::new(Self::INITIAL_THREAD_COUNT, Arc::clone(&identity));
 
-        Self {
+        let pool = Self {
             inner: Arc::new(Mutex::new(Some(thread_pool))),
             identity,
             max_thread_count: max_thread_count.unwrap_or(Self::MAX_THREAD_COUNT_DEFAULT),
-        }
+        };
+        #[cfg(test)]
+        tests::TestPoolOwner::record(&pool);
+        pool
     }
 
     pub(crate) fn execute<F>(&self, f: F) -> bool
@@ -305,7 +310,9 @@ impl Pool {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::cell::RefCell;
     use std::num::NonZeroUsize;
+    use std::rc::{Rc, Weak};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::channel;
     use std::thread;
@@ -319,12 +326,63 @@ mod tests {
     use super::{Job, JoinableThreadPool, LocalWorker, PanicPolicy, Pool, Worker, attach_thread};
     use crate::runtime::shutdown::Shutdown;
 
+    thread_local! {
+        static TEST_POOLS: RefCell<Option<Weak<RefCell<Vec<Pool>>>>> = const { RefCell::new(None) };
+    }
+
+    #[derive(Debug)]
+    pub(crate) struct TestPoolOwner {
+        pools: Rc<RefCell<Vec<Pool>>>,
+    }
+
+    impl TestPoolOwner {
+        pub(crate) fn new() -> Self {
+            let pools = Rc::new(RefCell::new(Vec::new()));
+            TEST_POOLS.with_borrow_mut(|current| {
+                assert!(current.is_none(), "a test owns its blocking pools in one outer fixture");
+                *current = Some(Rc::downgrade(&pools));
+            });
+            Self { pools }
+        }
+
+        pub(super) fn record(pool: &Pool) {
+            TEST_POOLS.with_borrow(|current| {
+                if let Some(pools) = current.as_ref().and_then(Weak::upgrade) {
+                    pools.borrow_mut().push(pool.clone());
+                }
+            });
+        }
+    }
+
+    impl Drop for TestPoolOwner {
+        fn drop(&mut self) {
+            TEST_POOLS.with_borrow_mut(|current| {
+                current.take().unwrap();
+            });
+            // A failed fixture must join pools before worker TLS can become their last owner.
+            // Joining threads from TLS destruction can deadlock on the Windows loader lock.
+            for pool in std::mem::take(&mut *self.pools.borrow_mut()) {
+                pool.join();
+            }
+        }
+    }
+
     fn limit(value: usize) -> NonZeroUsize {
         NonZeroUsize::new(value).unwrap()
     }
 
     fn joinable_pool(thread_count: usize) -> JoinableThreadPool {
         JoinableThreadPool::new(thread_count, Arc::new(()))
+    }
+
+    #[test]
+    fn fixture_owner_closes_pools_even_when_handles_are_retained() {
+        let pool = {
+            let _owner = TestPoolOwner::new();
+            Pool::new(None)
+        };
+
+        assert!(!pool.execute(|| {}));
     }
 
     #[test]
@@ -400,6 +458,7 @@ mod tests {
     #[test]
     fn runtime_releases_pool_even_when_a_scheduler_is_retained() {
         execute_or_abandon(|| {
+            let _pools = TestPoolOwner::new();
             let runtime = crate::runtime::Runtime::builder()
                 .workers(crate::runtime::WorkersPolicy::exactly(1))
                 .build()

@@ -233,6 +233,7 @@ mod tests {
 
     #[test]
     fn blocking_marker_io_lookup_survives_scheduler_slot_teardown() {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = crate::runtime::Runtime::new().unwrap();
         let context = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let scheduler = context.scheduler().clone();

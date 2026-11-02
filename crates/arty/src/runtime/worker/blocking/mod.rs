@@ -15,6 +15,8 @@ mod worker;
 pub(crate) use local_worker::LocalWorker;
 pub(crate) use panic_policy::PanicPolicy;
 pub(crate) use pools::Pools;
+#[cfg(test)]
+pub(crate) use worker::TestPoolOwner;
 pub(crate) use worker::{Pool, Worker};
 
 pub(crate) type PoolIdentity = performables::arc::Arc<()>;

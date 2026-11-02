@@ -406,6 +406,7 @@ mod tests {
 
     #[test]
     fn worker_execution_registers_the_current_scheduler() {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = crate::runtime::Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
@@ -424,6 +425,7 @@ mod tests {
 
     #[test]
     fn dispatcher_shutdown_rejects_direct_submissions_immediately() {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = crate::runtime::Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
@@ -460,6 +462,7 @@ mod tests {
             }
         }
 
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = crate::runtime::Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
@@ -486,6 +489,7 @@ mod tests {
 
     #[test]
     fn external_spawn_survives_scheduler_slot_teardown() {
+        let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
         let runtime = crate::runtime::Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()

@@ -329,6 +329,7 @@ mod tests {
     #[test]
     fn build_and_stop_inside_futures_executor() {
         futures::executor::block_on(async {
+            let _pools = crate::runtime::worker::blocking::TestPoolOwner::new();
             let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
 
             let (value, scheduler) = runtime
