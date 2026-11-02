@@ -1,41 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::cell::{Cell, RefCell};
-
-use arty_executor::remote::Pool as RemotePool;
-use arty_executor::{ShutdownCause, TaskOptions, TaskPlacement, TaskSet};
+use arty_executor::{TaskOptions, TaskPlacement};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
-use crate::runtime::blocking_worker::BlockingWorker;
 use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
-use crate::task::Builtins;
-use crate::task::execution::DeferredTask;
-use crate::task::join::JoinHandle;
-
-thread_local! {
-    // Remains set while executor shutdown destroys user futures, even after the
-    // direct-registration context is cleared.
-    static ACTIVE_WORKER: Cell<bool> = const { Cell::new(false) };
-
-    // A worker-bound spawn from its owning worker can register directly with the executor.
-    // The channel path remains the fallback for callers on other threads.
-    static CURRENT_WORKER: RefCell<Option<CurrentWorker>> = const { RefCell::new(None) };
-}
-
-#[derive(Debug)]
-struct CurrentWorker {
-    thread: Thread,
-    builtins: Builtins,
-    tasks: TaskSet,
-    // Child submissions must not contend with every other worker's result-channel rentals.
-    results: RemotePool,
-}
+use crate::runtime::worker::asynchronous;
+use crate::runtime::worker::blocking::Worker;
+use crate::task::Context;
+use crate::task::handle::JoinHandle;
+use crate::task::preparation::DeferredTask;
 
 /// A worker-bound handle for submitting async and blocking tasks.
 ///
-/// Get it from [`Builtins::scheduler`] to keep child tasks on the same worker.
+/// Get it from [`Context::scheduler`] to keep child tasks on the same worker.
 /// Clones keep that association but do not keep the runtime running. Use
 /// [`RuntimeScheduler`](crate::task::RuntimeScheduler) to submit work from
 /// synchronous code.
@@ -57,7 +36,7 @@ struct CurrentWorker {
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// # #[arty::main]
-/// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 /// let scheduler = cx.scheduler().clone();
 /// let task = scheduler.spawn(async |_| 42);
 /// assert_eq!(task.await?, 42);
@@ -75,52 +54,10 @@ pub struct Scheduler {
 struct Binding {
     thread: Thread,
     worker_index: WorkerIndex,
-    blocking_worker: Arc<BlockingWorker>,
+    blocking_worker: Arc<Worker>,
 }
 
 impl Scheduler {
-    pub(crate) fn is_current_worker_thread() -> bool {
-        ACTIVE_WORKER.get()
-    }
-
-    pub(crate) fn current_thread() -> Option<Thread> {
-        CURRENT_WORKER.with_borrow(|current| current.as_ref().map(|current| current.thread.clone()))
-    }
-
-    pub(crate) fn register_current(builtins: Builtins, tasks: TaskSet) {
-        assert!(!ACTIVE_WORKER.replace(true), "a worker is already active on this thread");
-        CURRENT_WORKER.with_borrow_mut(|current| {
-            assert!(current.is_none(), "a worker already owns this scheduler context");
-            *current = Some(CurrentWorker {
-                thread: builtins.thread().clone(),
-                builtins,
-                tasks,
-                results: RemotePool::new(),
-            });
-        });
-    }
-
-    pub(crate) fn clear_current() {
-        drop(CURRENT_WORKER.with_borrow_mut(Option::take));
-    }
-
-    pub(crate) fn clear_worker_thread() {
-        Self::clear_current();
-        ACTIVE_WORKER.set(false);
-    }
-
-    pub(crate) fn begin_current_executor_shutdown(dispatcher: &DispatcherClient, cause: ShutdownCause) {
-        _ = CURRENT_WORKER.try_with(|current| {
-            let current = current.borrow();
-            let Some(current) = current.as_ref() else {
-                return;
-            };
-            if dispatcher.owns(&current.thread) {
-                current.tasks.begin_shutdown(cause);
-            }
-        });
-    }
-
     pub(crate) fn new(dispatcher: DispatcherClient, current: Thread) -> Self {
         let worker_index = dispatcher
             .worker_index(current.id())
@@ -153,7 +90,7 @@ impl Scheduler {
 
     /// Submits an async task to this scheduler's worker.
     ///
-    /// The factory receives [`Builtins`] and creates the future on that worker,
+    /// The factory receives [`Context`] and creates the future on that worker,
     /// so the future need not be [`Send`]. Pass a factory, not an already-created
     /// future.
     ///
@@ -171,7 +108,7 @@ impl Scheduler {
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// use std::rc::Rc;
     /// use std::time::Duration;
     ///
@@ -192,7 +129,7 @@ impl Scheduler {
     /// ```
     pub fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
@@ -208,26 +145,24 @@ impl Scheduler {
 
     fn spawn_on_current_worker<FF, F, R>(&self, future_factory: FF) -> Result<JoinHandle<R>, FF>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'static,
+        FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        CURRENT_WORKER.with_borrow(|current| {
-            let Some(current) = current.as_ref() else {
+        asynchronous::LocalWorker::with_scheduler(|current| {
+            let Some(current) = current else {
                 return Err(future_factory);
             };
-            if current.thread != self.binding.thread {
+            if current.thread() != &self.binding.thread {
                 return Err(future_factory);
             }
-            let sink = current.builtins.sink();
-            let parent_task_enrichment = sink.transfer_context();
-            let builtins = current.builtins.clone();
-            let (result_tx, result_rx) = current.results.channel();
-            let inner = DeferredTask::new(future_factory, builtins);
-            let options = TaskOptions::observed(parent_task_enrichment, TaskPlacement::SameThread);
-            current.tasks.add_with_remote_result(inner, options, result_tx);
+            let context = current.context().clone();
+            let (handle, result_tx) = current.results().handle();
+            let inner = DeferredTask::new(future_factory, context);
+            let options = TaskOptions::new(TaskPlacement::SameThread);
+            current.tasks().add(inner, options, result_tx);
             self.dispatcher.wake_worker(self.binding.worker_index);
-            Ok(JoinHandle::new(result_rx))
+            Ok(handle)
         })
     }
 
@@ -250,7 +185,7 @@ impl Scheduler {
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// let answer = cx
     ///     .scheduler()
     ///     .spawn_anywhere(cx.clone(), |moved| async move {
@@ -308,7 +243,7 @@ impl Scheduler {
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
     /// # async fn main(
-    /// #     cx: arty::task::Builtins,
+    /// #     cx: arty::task::Context,
     /// # ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     /// let destination = cx
     ///     .control()
@@ -375,7 +310,8 @@ impl Scheduler {
     ///
     /// Use this for synchronous I/O or library calls that would otherwise prevent
     /// an async worker from polling tasks and advancing timers. The callback
-    /// runs on a separate pool thread; its panic is reported through the join.
+    /// runs on a separate pool thread. A callback panic fails its join handle
+    /// and follows the configured [`PanicPolicy`](crate::runtime::PanicPolicy).
     ///
     /// Uses the associated worker's pool. Configure sharing and limits with
     /// [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
@@ -385,11 +321,9 @@ impl Scheduler {
     /// Pool sizing targets blocking calls, not sustained CPU-parallel workloads.
     ///
     /// A callback must not synchronously poll another blocking handle from its
-    /// own pool; direct attempts panic. It must also avoid indirect cycles through
-    /// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on):
-    /// if the async work awaits a callback queued to the occupied pool, neither
-    /// side can complete. Arty does not track transitive dependencies to detect
-    /// that deadlock.
+    /// own pool; direct attempts panic.
+    /// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
+    /// also rejects calls from blocking callbacks before task submission.
     ///
     /// # Examples
     ///
@@ -398,7 +332,7 @@ impl Scheduler {
     /// ```no_run
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), ohno::AppError> {
+    /// # async fn main(cx: arty::task::Context) -> Result<(), ohno::AppError> {
     /// let contents = cx
     ///     .scheduler()
     ///     .spawn_blocking(|| std::fs::read_to_string("settings.toml"))
@@ -419,7 +353,7 @@ impl Scheduler {
     }
 
     #[cfg(test)]
-    pub(crate) fn blocking_worker(&self) -> &Arc<BlockingWorker> {
+    pub(crate) fn blocking_worker(&self) -> &Arc<Worker> {
         &self.binding.blocking_worker
     }
 }
@@ -444,13 +378,31 @@ impl AsRef<Self> for Scheduler {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
+    use std::cell::RefCell;
     use std::future::Future as _;
     use std::pin::pin;
     use std::sync::mpsc;
     use std::task::{Context, Poll, Waker};
     use std::time::Duration;
 
+    use arty_executor::ShutdownCause;
+
     use super::*;
+
+    thread_local! {
+        static SPAWN_ON_DROP: RefCell<Option<SpawnOnDrop>> = const { RefCell::new(None) };
+    }
+
+    struct SpawnOnDrop {
+        scheduler: Scheduler,
+        spawned: mpsc::Sender<JoinHandle<()>>,
+    }
+
+    impl Drop for SpawnOnDrop {
+        fn drop(&mut self) {
+            self.spawned.send(self.scheduler.spawn(async |_| {})).unwrap();
+        }
+    }
 
     #[test]
     fn worker_execution_registers_the_current_scheduler() {
@@ -461,8 +413,8 @@ mod tests {
         let registered = runtime
             .scheduler()
             .block_on(async |_| {
-                assert!(Scheduler::is_current_worker_thread());
-                CURRENT_WORKER.with_borrow(Option::is_some)
+                assert!(asynchronous::LocalWorker::is_current());
+                asynchronous::LocalWorker::has_scheduler_context()
             })
             .unwrap();
 
@@ -471,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn current_executor_shutdown_rejects_direct_submissions_immediately() {
+    fn dispatcher_shutdown_rejects_direct_submissions_immediately() {
         let runtime = crate::runtime::Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
@@ -479,7 +431,7 @@ mod tests {
         let rejected = runtime
             .scheduler()
             .block_on(async |cx| {
-                Scheduler::begin_current_executor_shutdown(&cx.scheduler().dispatcher, ShutdownCause::default());
+                _ = cx.scheduler().dispatcher.stop(ShutdownCause::default());
                 let mut task = pin!(cx.scheduler().spawn(async |_| 42));
 
                 matches!(
@@ -494,20 +446,16 @@ mod tests {
     }
 
     #[test]
-    fn clearing_worker_thread_retires_the_active_marker() {
-        ACTIVE_WORKER.set(true);
-        Scheduler::clear_worker_thread();
-        assert!(!Scheduler::is_current_worker_thread());
-    }
-
-    #[test]
     fn worker_marker_remains_active_after_scheduler_context_is_cleared() {
         struct DropProbe(mpsc::Sender<(bool, bool)>);
 
         impl Drop for DropProbe {
             fn drop(&mut self) {
                 self.0
-                    .send((CURRENT_WORKER.with_borrow(Option::is_none), Scheduler::is_current_worker_thread()))
+                    .send((
+                        !asynchronous::LocalWorker::has_scheduler_context(),
+                        asynchronous::LocalWorker::is_current(),
+                    ))
                     .unwrap();
             }
         }
@@ -534,5 +482,34 @@ mod tests {
         started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         runtime.stop().unwrap();
         assert_eq!(cleared_rx.recv_timeout(Duration::from_secs(5)).unwrap(), (true, true));
+    }
+
+    #[test]
+    fn external_spawn_survives_scheduler_slot_teardown() {
+        let runtime = crate::runtime::Runtime::builder()
+            .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .build()
+            .unwrap();
+        let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+        let (spawned, received) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            SPAWN_ON_DROP.with(|owner| {
+                assert!(
+                    owner
+                        .replace(Some(SpawnOnDrop {
+                            scheduler: scheduler.clone(),
+                            spawned,
+                        }))
+                        .is_none()
+                );
+            });
+            scheduler.spawn(async |_| {}).join().unwrap();
+        })
+        .join()
+        .unwrap();
+
+        received.recv_timeout(Duration::from_secs(5)).unwrap().join().unwrap();
+        runtime.stop().unwrap();
     }
 }

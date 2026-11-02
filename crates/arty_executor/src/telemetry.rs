@@ -59,7 +59,6 @@ struct TaskPanicked {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use observed_testing::{TEST_ID, test_emitter};
 

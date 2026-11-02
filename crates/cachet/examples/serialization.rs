@@ -7,18 +7,24 @@
 //! a typed L1 cache (`String, String`) and a byte-oriented L2 cache (`BytesView, BytesView`).
 //! Keys and values are automatically serialized/deserialized when crossing the boundary.
 
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use cachet::{Cache, CacheEntry};
 use tick::Clock;
 
 #[tokio::main]
 async fn main() {
     let clock = Clock::new_tokio();
+    let memory = OpaqueMemory::new(GlobalPool::new());
 
     // L2: byte-oriented cache (simulating a remote store like Redis)
     let l2 = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
 
     // L1: typed cache with serialization boundary to L2
-    let cache = Cache::builder::<String, String>(clock).memory().serialize().fallback(l2).build();
+    let cache = Cache::builder::<String, String>(clock)
+        .memory()
+        .serialize(memory)
+        .fallback(l2)
+        .build();
 
     let key = "greeting".to_string();
 

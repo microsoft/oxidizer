@@ -4,14 +4,14 @@
 //! Runtime shutdown and task cancellation.
 //!
 //! [`Runtime`](crate::runtime::Runtime) owns the workers. Scheduler and
-//! [`Builtins`](crate::task::Builtins) handles do not keep the runtime running.
+//! [`Context`](crate::task::Context) handles do not keep the runtime running.
 //! The [`main`](crate::main) and [`test`](crate::test) attributes stop their
 //! runtime when the annotated body returns; await child tasks that must finish
 //! before then.
 //!
 //! # Requesting and waiting for shutdown
 //!
-//! [`Builtins::control`](crate::task::Builtins::control) exposes
+//! [`Context::control`](crate::task::Context::control) exposes
 //! [`RuntimeControl`](crate::runtime::RuntimeControl), whose
 //! [`request_stop`](crate::runtime::RuntimeControl::request_stop) method
 //! requests shutdown without waiting and can be called repeatedly. Keep the
@@ -21,6 +21,8 @@
 //! shutdown, and waits for workers to stop. Dropping the owner also requests
 //! shutdown and normally waits, but cannot report shutdown errors. Prefer
 //! explicit `stop` when the caller needs to observe the result.
+//! Keep the owner on an external thread. Stopping or dropping it on a task or
+//! blocking worker panics.
 //!
 //! # Pending and running work
 //!
@@ -58,14 +60,11 @@
 //!
 //! # Calling from a worker
 //!
-//! `Runtime::stop` requests shutdown but returns an error rather than waiting
-//! when called from an async Arty worker or one of the runtime's blocking
-//! callbacks. Dropping the owner on any async Arty worker also requests shutdown
-//! without waiting or panicking.
-//!
-//! Dropping the owner from its own blocking callback requests shutdown without
-//! waiting for that callback. Neither case guarantees that shutdown has completed
-//! when destruction returns.
+//! `Runtime::stop` and `Runtime` destruction panic on task and blocking workers.
+//! Runtime ownership on a worker is a programming error because that worker
+//! cannot join itself. Keep the owner on an external thread. Use
+//! [`RuntimeControl::request_stop`](crate::runtime::RuntimeControl::request_stop)
+//! to request shutdown from worker code.
 //!
 //! Explicit `stop` waits for all workers before reporting a worker failure.
 //! Dropping the owner cannot return that error.

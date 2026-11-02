@@ -7,12 +7,13 @@ description = "Provides primitives to interact with and manipulate machine time.
 version = "0.8.0"
 readme = "README.md"
 keywords = ["time", "clock", "tick", "stopwatch"]
-categories = ["data-structures"]
+categories = ["date-and-time"]
 edition = { workspace = true }
 rust-version = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 homepage = { workspace = true }
+documentation = "https://docs.rs/tick"
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/tick"
 
@@ -20,7 +21,6 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/tick"
 allowed_external_types = [
     "serde_core::de::*",
     "serde_core::ser::*",
-    "futures_core::stream::Stream",
     "thread_aware_core::thread_aware::ThreadAware",
     "thread_aware_core::thread::Thread",
 ]
@@ -47,7 +47,6 @@ rt-shared = []
 fmt = ["dep:jiff"]
 
 [dependencies]
-futures-core = { workspace = true }
 jiff = { workspace = true, features = ["std"], optional = true }
 performables = { workspace = true }
 pin-project-lite = { workspace = true }
@@ -70,6 +69,7 @@ chrono-tz = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 futures = { workspace = true, features = ["default", "executor", "futures-executor"] }
 jiff = { workspace = true, default-features = true }
+metabench = { path = "../metabench", default-features = false }
 mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
 serde = { workspace = true, features = ["std", "derive"] }
@@ -116,7 +116,7 @@ name = "interop_jiff"
 required-features = ["test-util"]
 
 [[bench]]
-name = "clock_bench"
+name = "tick_clock"
 harness = false
 
 [[bench]]

@@ -124,10 +124,10 @@ impl ClockState {
         Self::System(SystemClockState::new(SystemClockStorage::new_isolated()))
     }
 
-    /// Creates a `System` clock state backed by a single shared timer set. Used by clocks driven
-    /// by a single global driver task (e.g. the Tokio-driven clock created by
-    /// [`Clock::new_tokio`][crate::Clock::new_tokio]). [`ThreadAware::relocate`] is a no-op for
-    /// this variant.
+    /// Creates system-clock state with one shared timer set.
+    ///
+    /// A single driver task uses this state. For example, [`Clock::new_tokio`]
+    /// uses it. [`ThreadAware::relocate`] does nothing for this state.
     #[cfg(any(feature = "rt-shared", test))]
     pub(crate) fn new_system_shared() -> Self {
         Self::System(SystemClockState::new(SystemClockStorage::new_shared()))
@@ -206,17 +206,20 @@ fn unregister_controlled_driver(registration: DriverRegistration) {
 //    that are ready to fire, and taking the lock is not the bottleneck.
 #[derive(Debug, Clone)]
 pub(crate) enum SystemClockStorage {
-    /// A single shared system-clock state. [`ThreadAware::relocate`] is a no-op, so all clones
-    /// observe the same timers, driver registrations, and clock-owner count regardless of thread
-    /// coordinate. Used by clocks driven by a single global driver task, such as
-    /// [`Clock::new_tokio`][crate::Clock::new_tokio].
+    /// System-clock state with one shared timer set.
+    ///
+    /// [`ThreadAware::relocate`] does nothing. All clones use the same timers,
+    /// driver registrations, and clock-owner count on all thread coordinates.
+    /// A single driver task uses this state, such as [`Clock::new_tokio`].
     #[cfg(any(feature = "rt-shared", test))]
     Shared(std::sync::Arc<SystemClockStorageInner>),
 
-    /// Per-thread isolated system-clock state. Within one runtime owner,
-    /// [`ThreadAware::relocate`] creates fresh storage on the destination thread, enabling
-    /// thread-isolated runtimes to operate independently with no cross-thread lock contention.
-    /// A cross-owner move retains the current storage instead.
+    /// System-clock state with one timer set per thread.
+    ///
+    /// Within one runtime owner, [`ThreadAware::relocate`] creates storage on
+    /// the destination thread. Each thread can then work without timer-lock
+    /// contention from other threads. A move to another owner keeps the current
+    /// storage.
     Isolated(Arc<SystemClockStorageInner, PerThread>),
 }
 
@@ -327,7 +330,38 @@ impl SystemClockStorage {
 
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
-        self.with_timers(|timers| timers.advance_timers(now))
+        // The single-slot probe keeps the idle and one-ready-timer paths small. Larger bursts use
+        // eight stack slots per follow-up lock acquisition and loop without imposing a limit.
+        const READY_BATCH_SIZE: usize = 8;
+
+        let mut first = [None];
+        let (count, next) = self.with_timers(|timers| timers.pop_ready_into(now, &mut first));
+        if count == 0 {
+            return next;
+        }
+
+        first[0]
+            .take()
+            .expect("filled by pop_ready_into when one ready timer is reported")
+            .wake();
+        if next.is_none_or(|next| next > now) {
+            return next;
+        }
+
+        let mut ready: [Option<Waker>; READY_BATCH_SIZE] = std::array::from_fn(|_| None);
+
+        loop {
+            let (count, next) = self.with_timers(|timers| timers.pop_ready_into(now, &mut ready));
+
+            // A wake may synchronously re-enter timer code, so invoke each after releasing the lock.
+            for waker in &mut ready[..count] {
+                waker.take().expect("filled by pop_ready_into for every counted slot").wake();
+            }
+
+            if count < READY_BATCH_SIZE || next.is_none_or(|next| next > now) {
+                return next;
+            }
+        }
     }
 }
 
@@ -336,12 +370,47 @@ impl SystemClockStorage {
 mod tests {
     use super::*;
 
+    // These callbacks run synchronously on the test thread. Relaxed atomics avoid mutable
+    // aliasing without publishing other memory between threads.
     #[derive(Debug)]
     struct CountingWake(AtomicUsize);
 
     impl std::task::Wake for CountingWake {
         fn wake(self: std::sync::Arc<Self>) {
             self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    struct ReentrantWake {
+        // Waking probes whether user code can enter timer storage after its lock is released.
+        storage: SystemClockStorage,
+        lock_was_available: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl std::task::Wake for ReentrantWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.lock_was_available
+                .store(self.storage.storage().timers.try_lock().is_some(), Ordering::Relaxed);
+        }
+    }
+
+    struct ReentrantDropWake {
+        // Waking and destruction probe the two callback paths that can re-enter timer storage.
+        storage: SystemClockStorage,
+        lock_was_available: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl std::task::Wake for ReentrantDropWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.lock_was_available
+                .store(self.storage.storage().timers.try_lock().is_some(), Ordering::Relaxed);
+        }
+    }
+
+    impl Drop for ReentrantDropWake {
+        fn drop(&mut self) {
+            self.lock_was_available
+                .store(self.storage.storage().timers.try_lock().is_some(), Ordering::Relaxed);
         }
     }
 
@@ -379,6 +448,71 @@ mod tests {
 
         _ = storage.register_timer(now + std::time::Duration::from_secs(1), Waker::noop().clone());
         assert_eq!(wake_count.0.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn timer_wakers_run_after_releasing_system_timer_lock() {
+        let storage = SystemClockStorage::new_shared();
+        let lock_was_available = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let waker = Waker::from(std::sync::Arc::new(ReentrantWake {
+            storage: storage.clone(),
+            lock_was_available: std::sync::Arc::clone(&lock_was_available),
+        }));
+        let now = Instant::now();
+        _ = storage.register_timer(now, waker);
+
+        storage.try_advance_timers(now);
+
+        assert!(lock_was_available.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn timer_waker_batches_wake_every_due_timer_and_return_the_next_deadline() {
+        let storage = SystemClockStorage::new_shared();
+        let now = Instant::now();
+        let due_wakes: Vec<_> = (0..10).map(|_| std::sync::Arc::new(CountingWake(AtomicUsize::new(0)))).collect();
+        let later_wake = std::sync::Arc::new(CountingWake(AtomicUsize::new(0)));
+        let later = now + std::time::Duration::from_secs(1);
+
+        for wake in &due_wakes {
+            _ = storage.register_timer(now, Waker::from(std::sync::Arc::clone(wake)));
+        }
+        _ = storage.register_timer(later, Waker::from(std::sync::Arc::clone(&later_wake)));
+
+        assert_eq!(storage.try_advance_timers(now), Some(later));
+        assert!(due_wakes.iter().all(|wake| wake.0.load(Ordering::Relaxed) == 1));
+        assert_eq!(later_wake.0.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn displaced_wakers_are_dropped_after_releasing_system_timer_lock() {
+        let storage = SystemClockStorage::new_shared();
+        let clock = crate::Clock::new(ClockState::System(SystemClockState::new(storage.clone())));
+        let lock_was_available = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let waker = Waker::from(std::sync::Arc::new(ReentrantDropWake {
+            storage,
+            lock_was_available: std::sync::Arc::clone(&lock_was_available),
+        }));
+        let key = clock.register_timer(Instant::now() + std::time::Duration::from_secs(1), waker);
+
+        assert!(clock.update_timer_waker(key, Waker::noop()));
+        assert!(lock_was_available.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn unregistered_wakers_are_dropped_after_releasing_system_timer_lock() {
+        let storage = SystemClockStorage::new_shared();
+        let clock = crate::Clock::new(ClockState::System(SystemClockState::new(storage.clone())));
+        let lock_was_available = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let waker = Waker::from(std::sync::Arc::new(ReentrantDropWake {
+            storage,
+            lock_was_available: std::sync::Arc::clone(&lock_was_available),
+        }));
+        let key = clock.register_timer(Instant::now() + std::time::Duration::from_secs(1), waker);
+
+        clock.unregister_timer(key);
+
+        assert!(lock_was_available.load(Ordering::Relaxed));
     }
 
     #[test]

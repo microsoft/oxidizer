@@ -28,11 +28,11 @@
 
 use std::hint::black_box;
 use std::pin::Pin;
-use std::task::{Context, Poll, Waker};
+use std::task::{Context as PollContext, Poll, Waker};
 use std::time::{Duration, Instant};
 
 use arty::runtime::{Runtime, WorkersPolicy};
-use arty::task::Builtins;
+use arty::task::Context;
 use criterion::{BenchmarkId, Criterion, Throughput};
 #[cfg(target_os = "linux")]
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
@@ -165,7 +165,7 @@ impl ArtyNestedRetainedWakerCase {
     }
 }
 
-async fn arty_outer(cx: Builtins, cache: Cache) {
+async fn arty_outer(cx: Context, cache: Cache) {
     let scheduler = cx.scheduler().clone();
     let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
     for (operation, handle) in handles.iter_mut().enumerate() {
@@ -181,7 +181,7 @@ async fn arty_outer(cx: Builtins, cache: Cache) {
     }
 }
 
-async fn arty_retained_waker_outer(cx: Builtins, (): ()) {
+async fn arty_retained_waker_outer(cx: Context, (): ()) {
     let scheduler = cx.scheduler();
     let mut handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|_| None);
     for handle in &mut handles {
@@ -313,7 +313,7 @@ struct RetainedWaker {
 impl Future for RetainedWaker {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<()> {
         if self.retained.take().is_some() {
             Poll::Ready(())
         } else {

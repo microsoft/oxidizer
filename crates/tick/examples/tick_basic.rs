@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates the basic usage of tick APIs.
+//! This example shows the basic `tick` APIs.
 
 use std::time::Duration;
 
@@ -31,15 +31,15 @@ async fn main() -> Result<(), ohno::AppError> {
     println!("Current time (ISO 8601): {iso}");
     println!("Current time (RFC 2822): {rfc}");
 
-    // Calculate the duration between two times.
+    // Measure the duration between two times.
     clock.delay(Duration::from_secs(1)).await;
 
     let new_time = clock.system_time();
 
-    // Checked duration returns an error if the second time precedes the first.
+    // `duration_since` returns an error if `new_time` is earlier than `time`.
     let diff = new_time.duration_since(time)?;
 
-    // Print the difference in milliseconds.
+    // Print the duration in milliseconds.
     println!("Time difference: {}ms", diff.as_millis());
 
     Ok(())

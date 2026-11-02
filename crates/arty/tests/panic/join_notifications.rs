@@ -1,13 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! A safe receiver waker may panic while a task publishes its successful result.
+//! A safe receiver waker may panic while a task publishes its outcome.
 
 use std::pin::pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
+use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
+use observed_testing::{TEST_ID, test_emitter};
 use thread_aware::Unaware;
 
 use crate::runtime_support::runtime;
@@ -29,12 +31,31 @@ impl Wake for PanicWake {
 
 #[test]
 fn remote_panicking_join_waker_preserves_published_result() {
-    let runtime = runtime();
+    assert_remote_notification_preserves_outcome(false);
+}
+
+#[test]
+fn remote_panicking_join_waker_preserves_published_panic() {
+    assert_remote_notification_preserves_outcome(true);
+}
+
+fn assert_remote_notification_preserves_outcome(panics: bool) {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(1))
+        .panic(PanicPolicy::ignore())
+        .sink(sink)
+        .build()
+        .unwrap();
     let (release, gate) = events_once::Event::boxed();
-    let join = runtime.scheduler().spawn_anywhere(Unaware(gate), |_, Unaware(gate)| async move {
-        gate.await.unwrap();
-        42
-    });
+    let join = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware((gate, panics)), |_, Unaware((gate, panics))| async move {
+            gate.await.unwrap();
+            assert!(!panics, "remote task panic");
+            42
+        });
     let mut join = pin!(join);
     let notified = Arc::new(AtomicBool::new(false));
     let notifications = Arc::new(AtomicUsize::new(0));
@@ -49,10 +70,28 @@ fn remote_panicking_join_waker_preserves_published_result() {
         assert!(std::time::Instant::now() < deadline);
         std::thread::yield_now();
     }
-    assert_eq!(futures::executor::block_on(join).unwrap(), 42);
+    // The flag records notification only. The result channel and captured
+    // events establish the task outcome independently.
+    let outcome = futures::executor::block_on(join);
+    if panics {
+        let error = outcome.unwrap_err();
+        assert!(error.is_panic());
+        assert_eq!(*error.into_panic().unwrap().downcast::<&str>().unwrap(), "remote task panic");
+    } else {
+        assert_eq!(outcome.unwrap(), 42);
+    }
     assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).join().unwrap(), 7);
     assert_eq!(notifications.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
+    let events = processor.events();
+    assert_eq!(
+        events.iter().filter(|event| event.name() == "arty.rt.task.succeeded").count(),
+        if panics { 1 } else { 2 }
+    );
+    assert_eq!(
+        events.iter().filter(|event| event.name() == "arty.rt.task.panicked").count(),
+        usize::from(panics)
+    );
 }
 
 #[test]

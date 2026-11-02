@@ -5,23 +5,25 @@
 //!
 //! Use [`Runtime`] to run async work from synchronous code and control
 //! when workers stop. [`Runtime::new`] starts the default configuration;
-//! [`Runtime::builder`] lets you choose workers, blocking pools, clocks, and
-//! a telemetry sink before they start.
+//! [`Runtime::builder`] lets you choose workers, blocking pools, and clocks
+//! before they start.
 //!
-//! Each task receives [`Builtins`](crate::task::Builtins) with its worker's
+//! Each task receives [`Context`](crate::task::Context) with its worker's
 //! scheduler and clock. [`Runtime::scheduler`] lets the runtime place new
-//! tasks, while [`Builtins::scheduler`](crate::task::Builtins::scheduler)
+//! tasks, while [`Context::scheduler`](crate::task::Context::scheduler)
 //! keeps children on their parent's worker.
-//! [`Builtins::control`](crate::task::Builtins::control) exposes worker
+//! [`Context::control`](crate::task::Context::control) exposes worker
 //! coordinates and can request shutdown without consuming the runtime owner.
 //!
 //! Keep the runtime owner alive until required work completes. Shutdown cancels
 //! pending tasks and waits for blocking callbacks that have already started;
 //! keeping a scheduler does not keep the runtime running.
 //!
-//! [`PanicPolicy`] selects the intended response to a contained task panic.
-//! This release stores the policy in runtime configuration but does not yet
-//! change panic behavior. A follow-up change will enforce the selected policy.
+//! By default, the first contained panic from a user task or blocking callback
+//! starts coordinated runtime shutdown. Use [`PanicPolicy::ignore`] to keep the
+//! runtime running. The failed join still reports the panic. Arty applies this
+//! policy only while it creates or polls a task, or runs a blocking callback.
+//! It does not guarantee recovery from other panic sources.
 //!
 //! # Examples
 //!
@@ -30,7 +32,7 @@
 //! ```
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! #[arty::main]
-//! async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+//! async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 //!     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
 //!     Ok(())
 //! }
@@ -40,7 +42,6 @@
 //! See the [configuration](crate::documentation::configuration) and
 //! [shutdown](crate::documentation::shutdown) guides for more.
 
-pub(crate) mod blocking_worker;
 mod bootstrap;
 mod builder;
 pub(crate) mod config;
@@ -49,9 +50,7 @@ pub(crate) mod dispatch;
 mod error;
 mod handle;
 mod shutdown;
-pub(crate) mod telemetry;
-pub(crate) mod thread;
-mod worker;
+pub(crate) mod worker;
 mod workers;
 
 #[doc(inline)]
@@ -64,7 +63,7 @@ pub use control::RuntimeControl;
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
-pub(crate) use shutdown::{Shutdown, ShutdownState};
+pub(crate) use shutdown::{Shutdown, ShutdownStart, ShutdownState};
 #[doc(inline)]
 pub use workers::Workers;
 

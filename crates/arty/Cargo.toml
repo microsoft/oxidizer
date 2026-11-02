@@ -21,7 +21,6 @@ allowed_external_types = [
     "arty_io_core::io_context::IoContext",
     "arty_macros::main",
     "arty_macros::test",
-    "observed::sink::core::Sink",
     "thread_aware_core::thread::NumaNode",
     "thread_aware_core::thread::Owner",
     "thread_aware_core::thread::Thread",
@@ -42,7 +41,6 @@ rt = [
     "time",
     "dep:arty_executor",
     "dep:arty_io_host",
-    "dep:data_privacy",
     "dep:derive_more",
     "dep:events_once",
     "dep:foldhash",
@@ -64,7 +62,6 @@ arty_executor = { workspace = true, optional = true }
 arty_io_core = { workspace = true }
 arty_io_host = { workspace = true, optional = true }
 arty_macros = { workspace = true, optional = true }
-data_privacy = { workspace = true, optional = true }
 derive_more = { workspace = true, features = ["debug"], optional = true }
 events_once = { workspace = true, optional = true }
 foldhash = { workspace = true, features = ["std"], optional = true }
@@ -87,7 +84,6 @@ arty_io_host = { path = "../arty_io_host" }
 arty_macros = { path = "../arty_macros" }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
-data_privacy = { path = "../data_privacy" }
 derive_more = { workspace = true, features = ["debug"] }
 events_once = { workspace = true }
 foldhash = { workspace = true, features = ["std"] }
@@ -98,8 +94,7 @@ many_cpus = { workspace = true, features = ["test-util"] }
 metabench = { path = "../metabench" }
 mutants = { workspace = true }
 nonempty = { workspace = true }
-observed = { path = "../observed", features = ["test-util"] }
-observed_testing = { path = "../observed_testing" }
+observed = { path = "../observed" }
 ohno = { path = "../ohno", features = ["app-err"] }
 performables = { path = "../performables", features = ["seismograph"] }
 pin-project = { workspace = true }
@@ -127,11 +122,6 @@ required-features = ["rt"]
 
 [[bench]]
 name = "arty_contention"
-harness = false
-required-features = ["rt"]
-
-[[bench]]
-name = "arty_telemetry"
 harness = false
 required-features = ["rt"]
 

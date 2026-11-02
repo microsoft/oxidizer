@@ -259,7 +259,6 @@ dependencies = [
  "arty_macros",
  "bolero",
  "criterion",
- "data_privacy",
  "derive_more",
  "events_once",
  "foldhash 0.2.0",
@@ -270,7 +269,6 @@ dependencies = [
  "mutants",
  "nonempty",
  "observed",
- "observed_testing",
  "ohno",
  "performables",
  "pin-project",
@@ -293,8 +291,6 @@ dependencies = [
  "criterion",
  "data_privacy",
  "derive_more",
- "events_once",
- "foldhash 0.2.0",
  "gungraun",
  "metabench",
  "mutants",
@@ -305,9 +301,8 @@ dependencies = [
  "performables",
  "pin-project",
  "plurality",
- "scopeguard",
  "static_assertions",
- "testing_aids",
+ "thread_aware",
  "thread_aware_core",
  "tick",
 ]
@@ -1039,6 +1034,7 @@ dependencies = [
  "serde",
  "serial_test",
  "testing_aids",
+ "thread_aware",
  "tick",
  "tokio",
  "tracing",
@@ -1972,6 +1968,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
+ "tempfile",
  "templated_uri",
  "testing_aids",
  "thread_aware",
@@ -2706,6 +2703,7 @@ name = "http_extensions"
 version = "0.13.0"
 dependencies = [
  "alloc_tracker",
+ "argh",
  "benchmarking",
  "bytes",
  "bytesbuf",
@@ -2737,6 +2735,7 @@ dependencies = [
 name = "http_headers"
 version = "0.1.1"
 dependencies = [
+ "argh",
  "axum",
  "base64 0.23.1",
  "bolero",
@@ -3906,6 +3905,19 @@ dependencies = [
  "thread_local",
  "tick",
  "tokio",
+]
+
+[[package]]
+name = "observed_destination_core"
+version = "0.29.0"
+dependencies = [
+ "jiff",
+ "log",
+ "observed_utils",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "performables",
+ "static_assertions",
 ]
 
 [[package]]
@@ -5088,6 +5100,7 @@ name = "routerama"
 version = "0.3.0"
 dependencies = [
  "alloc_tracker",
+ "argh",
  "axum",
  "bolero",
  "criterion",
@@ -6020,9 +6033,9 @@ dependencies = [
  "chrono-tz",
  "criterion",
  "futures",
- "futures-core",
  "jiff",
  "libc",
+ "metabench",
  "mutants",
  "ohno",
  "performables",

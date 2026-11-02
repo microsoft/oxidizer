@@ -3,7 +3,6 @@
 
 use std::num::NonZeroUsize;
 
-use observed::Sink;
 use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
@@ -12,16 +11,16 @@ use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, Run
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
 
-/// Configures workers, clocks, and telemetry before starting a runtime.
+/// Configures workers and clocks before starting a runtime.
 ///
 /// Obtain a builder from [`Runtime::builder`], change the settings you need,
 /// then call [`build`](Self::build) to start the workers. Setters replace earlier
 /// values for the same setting; configuring a builder does not start threads.
 ///
 /// The defaults are [`WorkersPolicy::default`], 2 MiB async-worker stacks,
-/// a shared blocking pool, a real-time clock, a no-op telemetry sink, and
-/// [`MonitorPolicy::enabled`]. The default panic policy is
-/// [`PanicPolicy::shutdown`].
+/// a shared blocking pool, a real-time clock, and [`MonitorPolicy::enabled`].
+/// A contained async task panic starts
+/// coordinated shutdown by default.
 ///
 /// # Examples
 ///
@@ -39,15 +38,15 @@ use crate::runtime::handle::Runtime;
 pub struct RuntimeBuilder {
     processor_config: RuntimeConfig,
     clock: InactiveClock,
-    sink: Sink,
 }
 
 impl RuntimeBuilder {
-    /// Sets the panic policy for this runtime.
+    /// Sets how the runtime responds to a contained task or callback panic.
     ///
-    /// The default is [`PanicPolicy::shutdown`]. This release stores the
-    /// policy in the runtime configuration. It does not yet change panic
-    /// behavior. A follow-up change will enforce the selected policy.
+    /// The default is [`PanicPolicy::shutdown`]. Use
+    /// [`PanicPolicy::ignore`] to keep the runtime available after a panic.
+    /// The panicking task still fails through its join handle under either
+    /// policy. The policy also applies to blocking callbacks.
     ///
     /// # Examples
     ///
@@ -153,7 +152,8 @@ impl RuntimeBuilder {
     ///
     /// The default follows real time. Pass an [`InactiveClock`] or, with
     /// `test-util` enabled, a `ClockControl` to choose a different time source.
-    /// Workers activate their own clocks and drive their timers.
+    /// Workers drive system timers. A `ClockControl` owner advances controlled
+    /// time and wakes due timers.
     ///
     /// # Examples
     ///
@@ -178,41 +178,12 @@ impl RuntimeBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
-    /// Automatic timer advancement occurs eagerly on timer registration or time
-    /// reads. Use manual advancement when concurrent timers' relative order
-    /// matters; see the [time guide](crate::documentation::time).
+    /// Automatic timer advancement occurs eagerly on timer registration or
+    /// explicit controlled-time reads. Use manual advancement when concurrent
+    /// timers' relative order matters; see the [time guide](crate::documentation::time).
     #[must_use]
     pub fn clock(mut self, clock: impl Into<InactiveClock>) -> Self {
         self.clock = clock.into();
-        self
-    }
-
-    /// Sets the telemetry sink for runtime events and task enrichment.
-    ///
-    /// The default is [`Sink::noop`], which disables events and enrichment.
-    /// With a regular sink configured, async tasks inherit enrichment active
-    /// at submission, including their completion events. A regular sink with
-    /// no processors preserves enrichment without dispatching events.
-    /// Retrieve the sink inside a task with
-    /// [`Builtins::sink`](crate::task::Builtins::sink).
-    ///
-    /// Configured event processors must not panic. Runtime events are emitted
-    /// synchronously; Arty does not provide telemetry-panic recovery.
-    ///
-    /// # Examples
-    ///
-    /// Pass a sink configured by the application:
-    ///
-    /// ```
-    /// use arty::runtime::{Runtime, RuntimeBuilder};
-    ///
-    /// fn app_builder(sink: observed::Sink) -> RuntimeBuilder {
-    ///     Runtime::builder().sink(sink)
-    /// }
-    /// ```
-    #[must_use]
-    pub fn sink(mut self, sink: Sink) -> Self {
-        self.sink = sink;
         self
     }
 
@@ -240,7 +211,7 @@ impl RuntimeBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build(self) -> Result<Runtime, Error> {
-        bootstrap::build(self.processor_config, &self.clock, self.sink, &ThreadBuilder::default())
+        bootstrap::build(self.processor_config, &self.clock, &ThreadBuilder::default())
     }
 }
 
@@ -248,9 +219,8 @@ impl RuntimeBuilder {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
-            clock: InactiveClock::default(),
+            clock: InactiveClock::new_isolated(),
             processor_config: RuntimeConfig::default(),
-            sink: Sink::noop(),
         }
     }
 }
@@ -287,7 +257,10 @@ mod tests {
         assert_eq!(builder.processor_config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
         assert_eq!(builder.processor_config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
         assert!(builder.processor_config.monitor_options.policy().is_enabled());
-        assert!(builder.processor_config.panic_policy.starts_shutdown());
+        assert!(matches!(
+            builder.processor_config.panic_policy.into_executor_policy(),
+            arty_executor::PanicPolicy::Shutdown
+        ));
     }
 
     #[test]
@@ -344,10 +317,13 @@ mod tests {
     }
 
     #[test]
-    fn panic_policy_replaces_the_default() {
+    fn panic_replaces_the_default() {
         let builder = Runtime::builder().panic(PanicPolicy::ignore());
 
-        assert!(!builder.processor_config.panic_policy.starts_shutdown());
+        assert!(matches!(
+            builder.processor_config.panic_policy.into_executor_policy(),
+            arty_executor::PanicPolicy::Ignore
+        ));
     }
 
     #[test]

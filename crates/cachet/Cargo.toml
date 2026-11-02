@@ -30,6 +30,7 @@ all-features = true
 allowed_external_types = [
     # Workspace sibling crates
     "anyspawn::spawner::Spawner",
+    "bytesbuf::mem::opaque_memory::OpaqueMemory",
     "bytesbuf::view::BytesView",
     "cachet_memory::*",
     "cachet_service::*",
@@ -100,6 +101,7 @@ seismograph = { path = "../seismograph" }
 serde = { workspace = true, features = ["derive"] }
 serial_test = { workspace = true }
 testing_aids = { path = "../testing_aids" }
+thread_aware = { path = "../thread_aware" }
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing = { workspace = true, features = ["std"] }
@@ -119,6 +121,11 @@ required-features = ["test-util"]
 name = "refresh"
 harness = false
 required-features = ["test-util"]
+
+[[bench]]
+name = "cachet_serialization"
+harness = false
+required-features = ["memory", "serialize"]
 
 [[test]]
 name = "eviction"

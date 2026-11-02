@@ -4,7 +4,7 @@
 //! Adds `EchoHandler` as a custom transport through [`fetch::custom::create_builder`]. The response
 //! contains the request body without changes.
 
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::custom::{CustomDeps, Isolation, create_builder};
 use fetch::{HttpRequest, HttpResponse, HttpResponseBuilder};
 use http::StatusCode;
@@ -16,7 +16,7 @@ use tick::Clock;
 async fn main() -> Result<(), ohno::AppError> {
     let deps = CustomDeps {
         clock: Clock::new_tokio(),
-        global_pool: GlobalPool::new(),
+        memory: OpaqueMemory::new(GlobalPool::new()),
         extras: (),
     };
 

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::{Context as PollContext, Poll};
 
 use futures::future::{FutureExt, LocalBoxFuture};
 use performables::sync::channel;
@@ -11,9 +11,9 @@ use pin_project::pin_project;
 use crate::core::ThreadAware;
 use crate::runtime::Error;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::task::{Builtins, JoinHandle, Scheduler};
+use crate::task::{Context, JoinHandle};
 
-type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Builtins) -> LocalBoxFuture<'a, R>) + 'a + Send>;
+type BoxedFutureFactory<'a, R> = Box<dyn (FnOnce(Context) -> LocalBoxFuture<'a, R>) + 'a + Send>;
 
 struct ScopedJoin(channel::Receiver<()>);
 
@@ -32,9 +32,9 @@ struct ScopedStorage<T> {
 }
 
 impl<FF> ScopedStorage<FF> {
-    fn into_future<F, R>(self, cx: Builtins) -> ScopedStorage<impl Future<Output = R>>
+    fn into_future<F, R>(self, cx: Context) -> ScopedStorage<impl Future<Output = R>>
     where
-        FF: FnOnce(Builtins) -> F,
+        FF: FnOnce(Context) -> F,
         F: Future<Output = R>,
     {
         let Self { inner, completion } = self;
@@ -48,7 +48,7 @@ impl<FF> ScopedStorage<FF> {
 impl<F: Future> Future for ScopedStorage<F> {
     type Output = F::Output;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<Self::Output> {
         self.project().inner.poll(cx)
     }
 }
@@ -58,7 +58,7 @@ impl<F: Future> Future for ScopedStorage<F> {
 /// Borrow this scheduler through
 /// [`Runtime::scheduler`](crate::runtime::Runtime::scheduler).
 /// It cannot be cloned or retained independently of the runtime owner.
-/// For worker-affine child tasks, use [`Builtins::scheduler`] instead.
+/// For worker-affine child tasks, use [`Context::scheduler`] instead.
 ///
 /// The runtime chooses where new work starts. Submission order does not imply
 /// execution or completion order.
@@ -89,15 +89,10 @@ impl RuntimeScheduler {
     /// if the factory or future panics, or if shutdown cancels or rejects the task.
     /// Rejection does not invoke the factory.
     ///
-    /// Calling this from any async Arty worker returns an error, including
-    /// a worker belonging to another runtime. It also returns an error from
-    /// inside an already-running `futures` executor, before submitting the task.
-    ///
-    /// Calling this from a blocking callback is supported, but the submitted
-    /// work must not depend on another task queued to that callback's pool.
-    /// Such a dependency cannot run until the callback returns, while the
-    /// callback cannot return until `block_on` completes, causing a deadlock.
-    /// Arty does not track transitive task dependencies to detect this cycle.
+    /// Calling this from any Arty worker returns an error. This includes task
+    /// workers, blocking workers, and workers that belong to another runtime.
+    /// It also returns an error inside an active `futures` executor. The method
+    /// rejects these calls before it submits the task.
     ///
     /// # Examples
     ///
@@ -114,11 +109,11 @@ impl RuntimeScheduler {
     /// ```
     pub fn block_on<'a, FF, F, R>(&self, future_factory: FF) -> Result<R, Error>
     where
-        FF: FnOnce(Builtins) -> F + Send + 'a,
+        FF: FnOnce(Context) -> F + Send + 'a,
         F: Future<Output = R> + 'a,
         R: Send + 'static,
     {
-        if Scheduler::is_current_worker_thread() {
+        if crate::runtime::worker::WorkerMarker::is_current() {
             return Err(Error::block_on_from_worker());
         }
         // Validate the ambient executor before any caller-borrowing work is submitted.
@@ -141,7 +136,7 @@ impl RuntimeScheduler {
     ///
     /// Before starting the task, Arty relocates `data` to the chosen worker.
     /// The source worker is unknown because this scheduler can be used from
-    /// outside the runtime. The function pointer receives [`Builtins`] and
+    /// outside the runtime. The function pointer receives [`Context`] and
     /// the relocated data. Its future need not be [`Send`], but its result must
     /// be `Send`. The result is not relocated and need not implement `ThreadAware`.
     ///
@@ -181,7 +176,7 @@ impl RuntimeScheduler {
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn spawn_anywhere<D, F, R>(&self, data: D, future_factory: fn(Builtins, D) -> F) -> JoinHandle<R>
+    pub fn spawn_anywhere<D, F, R>(&self, data: D, future_factory: fn(Context, D) -> F) -> JoinHandle<R>
     where
         D: ThreadAware + 'static,
         F: Future<Output = R> + 'static,
@@ -198,16 +193,15 @@ impl RuntimeScheduler {
     ///
     /// Uses a pool chosen by the runtime for synchronous I/O or other work
     /// that would stall an async worker.
-    /// The callback's panic is reported through its join.
+    /// A callback panic fails its join handle and follows the configured
+    /// [`PanicPolicy`](crate::runtime::PanicPolicy).
     ///
     /// Shutdown rejects new callbacks and cancels queued callbacks before they
     /// start. Already-running callbacks are allowed to finish.
     ///
     /// Do not synchronously poll a handle for work submitted to the same pool;
-    /// direct attempts panic. Also avoid indirect cycles where a blocking
-    /// callback calls [`block_on`](Self::block_on) and that async work awaits
-    /// blocking work from the callback's pool. Arty does not detect that
-    /// transitive dependency and the pool can deadlock.
+    /// direct attempts panic. [`block_on`](Self::block_on) also rejects calls
+    /// from blocking callbacks before task submission.
     ///
     /// # Examples
     ///
@@ -304,7 +298,7 @@ mod tests {
         let mut observed = None;
         let capture = DropAction(|| observed = Some(destroyed.try_recv().unwrap_err().is_empty()));
         let storage = ScopedStorage {
-            inner: move |_: Builtins| {
+            inner: move |_: Context| {
                 drop(capture);
                 ready(())
             },
@@ -333,7 +327,7 @@ mod tests {
     impl Future for BorrowingFuture<'_> {
         type Output = SendOnlyResult;
 
-        fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+        fn poll(mut self: Pin<&mut Self>, _: &mut PollContext<'_>) -> Poll<Self::Output> {
             if let Some(payload) = self.panic.take() {
                 panic_any(payload);
             }
@@ -360,7 +354,7 @@ mod tests {
             },
             completion,
         });
-        let outcome = storage.as_mut().poll(&mut Context::from_waker(Waker::noop()));
+        let outcome = storage.as_mut().poll(&mut PollContext::from_waker(Waker::noop()));
         assert_eq!(
             (outcome, destroyed.try_recv().unwrap_err().is_empty()),
             (Poll::Ready(SendOnlyResult), true)
@@ -410,6 +404,7 @@ mod tests {
     fn check_borrowed_future_completion(panics: bool) {
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
+            .panic(crate::runtime::PanicPolicy::ignore())
             .build()
             .unwrap();
         let worker = runtime.scheduler().block_on(async |_| thread::current().id()).unwrap();

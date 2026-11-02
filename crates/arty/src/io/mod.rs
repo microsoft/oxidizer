@@ -17,7 +17,7 @@
 //! ```
 //! # use std::task::Waker;
 //! # use arty::core::{Thread, ThreadAware};
-//! # use arty::task::Builtins;
+//! # use arty::task::Context;
 //! # use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
 //! # #[derive(Clone)]
 //! # struct ExampleIo;
@@ -55,7 +55,7 @@
 //! # }
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! #[arty::main]
-//! async fn main(cx: Builtins) {
+//! async fn main(cx: Context) {
 //!     let io = cx.io().context::<ExampleIo>(&());
 //!     io.submit("request");
 //! }
@@ -75,8 +75,8 @@
 //! Request a context with [`Io::context`]. Each concrete context type is
 //! registered once per runtime and reused on later requests.
 
-mod current_host;
+mod driver_host;
 mod handle;
 
-pub(crate) use current_host::RuntimeDriverHost;
+pub(crate) use driver_host::RuntimeDriverHost;
 pub use handle::Io;

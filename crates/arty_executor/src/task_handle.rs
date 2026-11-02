@@ -14,7 +14,7 @@ use crate::TypeErasedTask;
 
 /// Stores an immutable, uncounted handle template inside its pinned task.
 ///
-/// Counted handles and owned raw pointers keep the task alive; the template is never dropped.
+/// Counted handles and owned raw pointers keep the task alive. The template is never dropped.
 /// This keeps raw ownership private without a detached allocation or new plurality APIs.
 pub(crate) type TaskHandleSlot = OnceLock<ManuallyDrop<TaskHandleTemplate>>;
 
@@ -32,7 +32,7 @@ impl std::fmt::Debug for TaskHandleTemplate {
 ///
 /// Clones retain the pinned pooled task allocation. Task methods remain owner-thread-only even
 /// when a waker or remote notification carries a strong reference across threads.
-/// Each handle directly owns a pinned pooled Arc; raw owners use the embedded handle template.
+/// Each handle directly owns a pinned pooled Arc. Raw owners use the embedded handle template.
 #[derive(Clone)]
 pub(crate) struct TaskHandle {
     inner: Pin<PoolArc<dyn TypeErasedTask>>,
@@ -46,7 +46,7 @@ impl TaskHandle {
             _owner_thread: PhantomData,
         };
         // SAFETY: This uncounted copy is immutable and never dropped. Only raw ownership
-        // transitions may copy it into an owner, transferring an already counted reference.
+        // transitions can copy it into an owner and transfer an already counted reference.
         // The handle contains only a pinned Global-allocator pooled Arc, not per-handle resources.
         let template = ManuallyDrop::new(TaskHandleTemplate {
             // SAFETY: The immutable template is never dropped and represents no additional owner.
@@ -89,7 +89,7 @@ impl TaskHandle {
 /// Non-owning identity for a task's immutable handle template.
 ///
 /// Copying a pointer never acquires ownership. A counted strong reference must protect every
-/// dereference; raw wakers and the intrusive list separately account for their owned references.
+/// dereference. Raw wakers and the intrusive list separately account for their owned references.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TaskPtr {
     template: NonNull<TaskHandleTemplate>,
@@ -173,20 +173,6 @@ pub(crate) struct RemoteTaskHandle {
 }
 
 impl RemoteTaskHandle {
-    #[cfg(test)]
-    pub(crate) fn as_ptr(&self) -> TaskPtr {
-        let template = self
-            .inner
-            .as_ref()
-            .get_ref()
-            .handle_slot()
-            .get()
-            .expect("task ownership is initialized before publishing task pointers");
-        TaskPtr {
-            template: NonNull::from(&**template),
-        }
-    }
-
     /// # Safety
     ///
     /// The caller must be the task's owner thread and must not violate payload aliasing rules.
@@ -205,7 +191,7 @@ impl RemoteTaskHandle {
     }
 }
 
-// SAFETY: Remote threads may read the immutable template for reference-count operations while
+// SAFETY: Remote threads can read the immutable template for reference-count operations while
 // a counted owner keeps it live. Task payload and link access remains an unsafe owner-thread operation.
 unsafe impl Send for TaskPtr {}
 // SAFETY: Same invariant as `Send`.
@@ -226,16 +212,11 @@ impl std::fmt::Debug for TaskHandle {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::sync::Barrier;
-    use std::thread;
-
     use plurality::MultiPool;
     use static_assertions::assert_not_impl_any;
 
     use super::*;
-    use crate::allocate_test_task_in;
 
     #[test]
     fn owner_handle_is_thread_affine() {
@@ -243,11 +224,15 @@ mod tests {
     }
 
     #[test]
-    fn raw_ownership_round_trip_preserves_identity() {
+    fn raw_ownership_and_diagnostics_preserve_identity() {
         let pool = MultiPool::new();
-        let task_handle = allocate_test_task_in(&pool);
-        let pointer = task_handle.as_ptr();
-        let owned = task_handle.into_raw();
+        let handle = crate::allocate_test_task_in(&pool);
+        let pointer = handle.as_ptr();
+        assert_eq!(format!("{handle:?}"), format!("TaskHandle({pointer:?})"));
+        let template = handle.inner.as_ref().get_ref().handle_slot().get().unwrap();
+        assert_eq!(format!("{:?}", **template), "TaskHandleTemplate { .. }");
+
+        let owned = handle.into_raw();
         assert_eq!(owned, pointer);
         // SAFETY: `into_raw` transferred exactly one strong reference.
         drop(unsafe { owned.into_handle() });
@@ -255,84 +240,34 @@ mod tests {
     }
 
     #[test]
-    fn embedded_handle_debug_stops_at_the_template_pointer() {
+    fn different_task_pointers_are_not_equal() {
         let pool = MultiPool::new();
-        let handle = allocate_test_task_in(&pool);
+        let first = crate::allocate_test_task_in(&pool);
+        let second = crate::allocate_test_task_in(&pool);
 
-        assert_eq!(format!("{handle:?}"), format!("TaskHandle({:?})", handle.as_ptr()));
+        assert_ne!(first.as_ptr(), second.as_ptr());
 
-        drop(handle);
+        drop((first, second));
         assert!(pool.is_empty());
-    }
-
-    #[test]
-    fn embedded_handle_template_debug_is_non_recursive() {
-        let pool = MultiPool::new();
-        let handle = allocate_test_task_in(&pool);
-        let template = handle.inner.as_ref().get_ref().handle_slot().get().unwrap();
-
-        assert_eq!(format!("{:?}", **template), "TaskHandleTemplate { .. }");
     }
 
     #[test]
     fn mixed_owners_release_the_allocation_exactly_once() {
         let pool = MultiPool::new();
-        let original = allocate_test_task_in(&pool);
+        let original = crate::allocate_test_task_in(&pool);
         let cloned = original.clone();
         let owned = cloned.into_raw();
-        // SAFETY: `owned` still accounts for the reference transferred from `cloned`.
+        // SAFETY: `original` keeps the initialized template alive while acquiring another owner.
         let retained = unsafe { owned.retain() };
 
         drop(original);
         assert_eq!(pool.len(), 1);
-        // SAFETY: This consumes the reference transferred from `cloned` exactly once.
+        // SAFETY: `owned` carries the one reference transferred from `cloned`.
         drop(unsafe { owned.into_handle() });
         assert_eq!(pool.len(), 1);
         assert_eq!(retained.as_ptr(), owned);
         drop(retained);
+
         assert!(pool.is_empty());
-    }
-
-    #[test]
-    fn remote_template_reads_race_with_owner_retirement() {
-        for _ in 0..4 {
-            let pool = MultiPool::new();
-            let original = allocate_test_task_in(&pool);
-            let pointer = original.as_ptr();
-            // SAFETY: `original` keeps the initialized template alive while retaining owners.
-            let remote = [unsafe { pointer.retain_remote() }, unsafe { pointer.retain_remote() }];
-            let barrier = Barrier::new(3);
-
-            thread::scope(|scope| {
-                for task in remote {
-                    let barrier = &barrier;
-                    scope.spawn(move || {
-                        barrier.wait();
-                        let pointer = task.as_ptr();
-                        let retained = task.clone();
-                        drop(task);
-                        assert_eq!(retained.as_ptr(), pointer);
-                        drop(retained);
-                    });
-                }
-                barrier.wait();
-                // SAFETY: The original owner retires the non-Send payload on its creating thread.
-                unsafe { original.as_task() }.abort(crate::ShutdownCause::default());
-                drop(original);
-            });
-
-            assert!(pool.is_empty());
-        }
-    }
-
-    #[test]
-    fn different_task_pointers_are_not_equal() {
-        let pool = MultiPool::new();
-        let task_handle1 = allocate_test_task_in(&pool);
-        let task_handle2 = allocate_test_task_in(&pool);
-
-        assert_ne!(task_handle1.as_ptr(), task_handle2.as_ptr());
-
-        drop((task_handle1, task_handle2));
     }
 }

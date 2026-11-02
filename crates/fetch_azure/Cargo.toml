@@ -29,6 +29,10 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
+[package.metadata.anvil.examples]
+# This example uses a live Azure account and developer credentials.
+no-run = ["blob_list"]
+
 [dependencies]
 
 # external

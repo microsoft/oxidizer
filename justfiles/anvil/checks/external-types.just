@@ -9,15 +9,10 @@
 # Affected tier (lints public API of changed crates and reverse dependencies).
 #
 # cargo-check-external-types is per-manifest: no --package/--workspace,
-# only --manifest-path. Iterate the affected library crates and run
-# the tool once each, pointing at the crate's Cargo.toml. Bin-only
-# crates have no public API surface and are skipped.
-# TODO(anvil-runner): even after a `cargo ox-run` helper absorbs the
-# skip/splat preamble, this recipe stays multi-step: cargo-check-
-# external-types is per-manifest (no --package/--workspace), so we
-# build a name->manifest map from cargo metadata, filter to lib crates,
-# intersect with the affected set ($include), and call the tool once per
-# crate. Hard-fails on errors (no tolerance, unlike semver-check).
+# only --manifest-path. cargo-each runs the tool once per affected
+# library crate with its `{manifest}` path, so no package spec reaches
+# Cargo. Bin-only crates have no public API surface and are filtered
+# out. Hard-fails on errors (no tolerance, unlike semver-check).
 
 # Check public APIs for unapproved external types.
 [group("anvil")]
@@ -32,67 +27,23 @@ anvil-external-types: anvil-external-types-validate-prereqs anvil-impact
         exit 0
     }
     $pkg = @(if ($include) { -split $include } else { '--workspace' })
-    # Build pkg-name -> manifest-path map, restricted to library crates.
-    $libPkgs = @{}
-    $metadataJson = & cargo {{_anvil_stable_toolchain_args}} metadata --no-deps --format-version 1
+    Write-Host "anvil-external-types: catalog tool minimum cargo-check-external-types {{ cargo_check_external_types_version }}; rustdoc toolchain {{ rust_nightly_external_types }}"
+    # cargo-check-external-types requires nightly rustdoc (uses unstable -Z
+    # flags) AND pins a specific rustdoc-types schema version. We pin nightly
+    # narrowly to the schema this tool version expects via
+    # `rust_nightly_external_types` in versions.just -- bump that pin
+    # alongside any cargo-check-external-types upgrade. No tolerance for
+    # schema mismatches: if it fails, the pin or the tool needs to move.
+    & cargo {{_anvil_stable_toolchain_args}} each @pkg --filter lib --keep-going '--' cargo '+{{ rust_nightly_external_types }}' check-external-types --manifest-path '{manifest}'
     if ($LASTEXITCODE -ne 0) {
-        Write-Error 'anvil-external-types: cargo metadata failed'
+        Write-Error "anvil-external-types: failed. The installed tool may be newer than the catalog minimum; it must remain compatible with rustdoc from {{ rust_nightly_external_types }}."
         exit $LASTEXITCODE
     }
-    try {
-        $meta = $metadataJson | ConvertFrom-Json
-    } catch {
-        Write-Error "anvil-external-types: could not parse cargo metadata output: $_"
-        exit 1
-    }
-    foreach ($p in $meta.packages) {
-        if ($p.targets | Where-Object { $_.kind -contains 'lib' }) {
-            $libPkgs[$p.name] = $p.manifest_path
-        }
-    }
-    # Decide which packages to check.
-    $packages = @()
-    if ($pkg -contains '--workspace') {
-        $packages = $libPkgs.Keys
-    } else {
-        for ($i = 0; $i -lt $pkg.Count; $i++) {
-            if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
-                # Impact emits version-qualified specs (name@version);
-                # strip the @version to recover the bare package name
-                # this manifest-path map keys on.
-                $name = ($pkg[$i + 1] -split '@', 2)[0]
-                if ($libPkgs.ContainsKey($name)) { $packages += $name }
-                $i++
-            }
-        }
-    }
-    if ($packages.Count -eq 0) {
-        Write-Host 'anvil-external-types: no affected library crates; skipping'
-        exit 0
-    }
-    Write-Host "anvil-external-types: catalog tool minimum cargo-check-external-types {{ cargo_check_external_types_version }}; rustdoc toolchain {{ rust_nightly_external_types }}"
-    $failed = $false
-    foreach ($p in $packages) {
-        Write-Host "anvil-external-types: $p"
-        # cargo-check-external-types requires nightly rustdoc (uses
-        # unstable -Z flags) AND pins a specific rustdoc-types schema
-        # version. We pin nightly narrowly to the schema this tool
-        # version expects via `rust_nightly_external_types` in
-        # versions.just — bump that pin alongside any cargo-check-
-        # external-types upgrade. No tolerance for schema mismatches:
-        # if it fails, the pin or the tool needs to move.
-        & cargo '+{{ rust_nightly_external_types }}' check-external-types --manifest-path $libPkgs[$p]
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "anvil-external-types: '$p' failed. The installed tool may be newer than the catalog minimum; it must remain compatible with rustdoc from {{ rust_nightly_external_types }}."
-            $failed = $true
-        }
-    }
-    if ($failed) { exit 1 }
 
 # Install prerequisites for the `anvil-external-types` recipe.
 [private]
-anvil-external-types-setup installer="install": anvil-toolchain-nightly-external-types-install (anvil-tool-cargo-check-external-types-install installer)
+anvil-external-types-setup installer="install": anvil-toolchain-nightly-external-types-install (anvil-tool-cargo-check-external-types-install installer) (anvil-tool-cargo-each-install installer)
 
 # Validate prerequisites for the `anvil-external-types` recipe.
 [private]
-anvil-external-types-validate-prereqs: anvil-toolchain-nightly-external-types-validate-prereqs anvil-tool-cargo-check-external-types-validate-prereqs
+anvil-external-types-validate-prereqs: anvil-toolchain-nightly-external-types-validate-prereqs anvil-tool-cargo-check-external-types-validate-prereqs anvil-tool-cargo-each-validate-prereqs

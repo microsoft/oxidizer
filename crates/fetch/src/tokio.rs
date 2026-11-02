@@ -10,6 +10,7 @@
 //! These APIs require the `tokio` feature and at least one TLS backend: `rustls` or `native-tls`.
 
 use anyspawn::Spawner;
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch_hyper::HyperTransportBuilder;
 use fetch_options::{SocketOptions, TransportOptions};
 use fetch_tls::{TlsBackend, TlsBackendBuilder};
@@ -31,14 +32,17 @@ use crate::{HttpClient, HttpClientBuilder};
 
 /// Dependencies for HTTP operations on Tokio.
 ///
-/// It contains the clock and memory pool.
+/// It contains the clock and memory provider.
+///
+/// Set `memory` to select the provider for HTTP body allocations.
+/// Cloning dependencies clones that provider, and relocation forwards to it.
 #[derive(Debug, Clone, ThreadAware)]
 #[fundle::deps]
 pub struct TokioDeps {
     /// Clock for timing operations and timeouts.
     pub clock: Clock,
-    /// Memory pool for usage-neutral memory allocations.
-    pub global_pool: bytesbuf::mem::GlobalPool,
+    /// Memory provider for HTTP body allocations.
+    pub memory: OpaqueMemory,
 }
 
 impl Default for TokioDeps {
@@ -48,11 +52,11 @@ impl Default for TokioDeps {
 }
 
 impl TokioDeps {
-    /// Creates `TokioDeps` with the given clock and a dedicated HTTP-client memory pool.
+    /// Creates `TokioDeps` with the given clock and the global memory pool.
     #[must_use]
     pub fn with_clock(clock: &Clock) -> Self {
         Self {
-            global_pool: bytesbuf::mem::GlobalPool::new(),
+            memory: OpaqueMemory::new(GlobalPool::new()),
             clock: clock.clone(),
         }
     }
@@ -138,21 +142,7 @@ impl HttpClient {
     /// # }
     /// ```
     pub fn builder_tokio_with_options(deps: impl Into<TokioDeps>, options: TokioTransportOptions) -> HttpClientBuilder {
-        let deps = deps.into();
-        let clock = deps.clock.clone();
-        let global_pool = deps.global_pool.clone();
-
-        Self::builder_custom_internal(
-            crate::constants::TOKIO_RUNTIME_NAME,
-            crate::constants::HYPER_TRANSPORT_NAME,
-            move |cx| TransportHandler(build_tokio_handler(cx, &options).into()),
-            Isolation::Shared,
-            CustomDeps {
-                clock,
-                global_pool,
-                extras: deps,
-            },
-        )
+        create_tokio_builder(deps.into(), move |cx| TransportHandler(build_tokio_handler(cx, &options).into()))
     }
 
     /// Creates an HTTP client for Tokio.
@@ -166,6 +156,27 @@ impl HttpClient {
     pub fn new_tokio() -> Self {
         Self::builder_tokio(TokioDeps::default()).build()
     }
+}
+
+/// Shares Tokio dependency forwarding with tests that supply a controlled transport.
+fn create_tokio_builder(
+    deps: TokioDeps,
+    factory: impl Fn(CustomContext<TokioDeps>) -> TransportHandler + Send + Sync + 'static,
+) -> HttpClientBuilder {
+    let clock = deps.clock.clone();
+    let memory = deps.memory.clone();
+
+    HttpClient::builder_custom_internal(
+        crate::constants::TOKIO_RUNTIME_NAME,
+        crate::constants::HYPER_TRANSPORT_NAME,
+        factory,
+        Isolation::Shared,
+        CustomDeps {
+            clock,
+            memory,
+            extras: deps,
+        },
+    )
 }
 
 /// Plain-TCP connector for the Tokio transport.
@@ -320,14 +331,49 @@ fn build_tls_backend(options: &TransportOptions, tls: TlsOptions) -> TlsBackend 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use bytesbuf::mem::{CallbackMemory, GlobalPool, HasMemory as _, Memory as _, OpaqueMemory};
     use http::StatusCode;
     use http_extensions::FakeHandler;
-    use thread_aware::Relocator;
+    use thread_aware::{Relocator, unaware};
     use tick::Clock;
 
-    use super::TokioDeps;
+    use super::{TokioDeps, create_tokio_builder};
+    use crate::handlers::TransportHandler;
     use crate::pipeline::Pipeline;
     use crate::{HttpClient, HttpResponseBuilder};
+
+    /// Observes client allocations through the Tokio dependency conversion in ordinary test builds.
+    #[test]
+    fn tokio_dependencies_preserve_caller_selected_memory() {
+        let reservations = Arc::new(Mutex::new(Vec::new()));
+        let memory = CallbackMemory::new(unaware(Arc::clone(&reservations)), |reservations, min_bytes| {
+            reservations.lock().unwrap().push(min_bytes);
+            GlobalPool::new().reserve(min_bytes)
+        });
+        let client = create_tokio_builder(
+            TokioDeps {
+                clock: Clock::new_frozen(),
+                memory: OpaqueMemory::new(memory),
+            },
+            |cx| {
+                // Exercise both factory inputs without initializing TLS or opening sockets.
+                assert!(cx.body_builder.reserve(17).capacity() >= 17);
+                assert!(cx.extras.memory.reserve(19).capacity() >= 19);
+                TransportHandler::new(FakeHandler::from_fn(|_| HttpResponseBuilder::new_fake().build()))
+            },
+        )
+        .minimal_pipeline()
+        .build();
+        let cloned = client.clone();
+
+        // Different ordinary requests distinguish the access paths, not pool boundaries.
+        assert!(client.reserve(29).capacity() >= 29);
+        assert!(client.memory().reserve(31).capacity() >= 31);
+        assert!(cloned.reserve(37).capacity() >= 37);
+        assert_eq!(*reservations.lock().unwrap(), [17, 19, 29, 31, 37]);
+    }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]

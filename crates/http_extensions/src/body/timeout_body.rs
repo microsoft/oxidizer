@@ -98,7 +98,7 @@ mod tests {
     use std::time::Duration;
 
     use bytesbuf::BytesView;
-    use bytesbuf::mem::GlobalPool;
+    use bytesbuf::mem::{GlobalPool, OpaqueMemory};
     use futures::executor::block_on;
     use http_body::{Body, Frame};
     use tick::ClockControl;
@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn stream_body_returns_data_before_timeout() {
         let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
 
         // The stream yields data before the long timeout.
         // exercising the TimeoutBody happy path via stream with timeout options.
@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn stream_body_times_out_when_pending() {
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
 
         // A body that never yields data.
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
@@ -138,7 +138,8 @@ mod tests {
     #[test]
     fn body_timeout_chains_with_buffer_limit() {
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(HttpBodyOptions::default().buffer_limit(1024));
+        let builder =
+            HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock).with_options(HttpBodyOptions::default().buffer_limit(1024));
 
         assert_eq!(builder.options, HttpBodyOptions::default().buffer_limit(1024));
 
@@ -162,7 +163,7 @@ mod tests {
     #[test]
     fn size_hint_delegates_through_timeout_body() {
         let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
 
         // A full body has an exact size hint. TimeoutBody keeps this hint.
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
@@ -178,7 +179,7 @@ mod tests {
     #[test]
     fn is_end_stream_true_when_inner_is_empty() {
         let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
 
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(1));
         let body = builder.body(http_body_util::Empty::new(), &options);
@@ -188,7 +189,7 @@ mod tests {
     #[test]
     fn is_end_stream_false_when_inner_has_data() {
         let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
 
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(1));
         let body = builder.body(http_body_util::Full::new(BytesView::copied_from_slice(b"data", &builder)), &options);
@@ -198,7 +199,7 @@ mod tests {
     #[test]
     fn poll_frame_returns_data_through_timeout_body() {
         let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
 
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
         let body = builder.body(
@@ -212,7 +213,7 @@ mod tests {
     #[test]
     fn poll_frame_times_out_when_pending_with_short_timeout() {
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
 
         // A body that never yields data with a very short timeout.
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(1));
@@ -229,7 +230,7 @@ mod tests {
     fn poll_frame_returns_data_even_when_clock_advanced_past_timeout() {
         let control = ClockControl::new();
         let clock = control.to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
 
         // Use a body that has data immediately available (Full is always ready).
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(1));

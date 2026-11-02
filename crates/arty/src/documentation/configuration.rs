@@ -13,14 +13,14 @@
 //!
 //! The `monitor` Cargo feature enables the Seismograph dependencies for
 //! `performables` and runtime monitoring. This stage only provides configuration
-//! plumbing. It does not start a monitor, instrument tasks, or emit new telemetry.
+//! plumbing. It does not start a monitor or instrument tasks.
 //!
-//! The panic policy defaults to
-//! [`PanicPolicy::shutdown`](crate::runtime::PanicPolicy::shutdown). Use
-//! [`RuntimeBuilder::panic`](crate::runtime::RuntimeBuilder::panic) with
-//! [`PanicPolicy::ignore`](crate::runtime::PanicPolicy::ignore) to select the
-//! other policy. This release stores the selected value but does not yet change
-//! panic behavior. A follow-up change will enforce it.
+//! The panic policy starts coordinated shutdown by default when Arty contains a
+//! task factory, async task, or blocking callback panic. Use
+//! [`RuntimeBuilder::panic`](crate::runtime::RuntimeBuilder::panic)
+//! with [`PanicPolicy::ignore`](crate::runtime::PanicPolicy::ignore) to keep the
+//! runtime available. The failed join still reports a panic. See the
+//! [`runtime`](crate::runtime) module for the exact boundaries.
 //!
 //! # Async workers
 //!
@@ -89,29 +89,25 @@
 //! all available processors. If `N` exceeds the available processor count,
 //! Arty assigns multiple workers to each processor. Use `monitor = enabled` or
 //! `monitor = disabled` to select the monitoring policy. Build the runtime
-//! explicitly for custom clocks, telemetry, blocking pools, stack sizes, or an
+//! explicitly for custom clocks, blocking pools, stack sizes, or an
 //! [`at_most`](crate::runtime::WorkersPolicy::at_most) worker policy.
 //!
 //! See [`main`](crate::main) and [`test`](crate::test) for the supported
 //! signature and configuration. Build the runtime yourself if you need to
 //! handle construction errors or own its shutdown.
 //!
-//! # Clocks and telemetry
+//! # Clocks
 //!
 //! The default clock follows real time. Use
 //! [`RuntimeBuilder::clock`](crate::runtime::RuntimeBuilder::clock) for a
 //! custom clock; see [time](super::time) for controlled-time tests.
-//!
-//! The default telemetry sink disables events and task enrichment. Configure
-//! [`RuntimeBuilder::sink`](crate::runtime::RuntimeBuilder::sink) to enable
-//! them; see [telemetry](super::telemetry).
 //!
 //! # Async I/O
 //!
 //! Arty hosts drivers supplied by I/O libraries built on `arty_io_core`, but it
 //! does not include a built-in network or file I/O implementation. Access
 //! compatible contexts through
-//! [`Builtins::io`](crate::task::Builtins::io); see the
+//! [`Context::io`](crate::task::Context::io); see the
 //! [I/O guide](https://github.com/microsoft/oxidizer/blob/main/crates/arty/docs/IO.md).
 //! Use [`spawn_blocking`](crate::task::Scheduler::spawn_blocking) for synchronous
 //! I/O. Libraries requiring another runtime's I/O driver still need that runtime.

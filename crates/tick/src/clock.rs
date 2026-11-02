@@ -10,66 +10,59 @@ use crate::simple_clock::SimpleClock;
 use crate::state::ClockState;
 use crate::timers::TimerKey;
 
-/// Provides an abstraction for time-related operations.
+/// Provides time and timer operations.
 ///
-/// Working with time is notoriously difficult to test and control. The clock enables time control in tests
-/// while providing zero-cost overhead in production. When the `test-util` feature is enabled, the clock
-/// provides additional functionality to control the passage of time. This makes tests faster and more reliable.
-/// See the [Testing](#testing) section for more information.
+/// Time-dependent code can be slow or difficult to test. With the `test-util`
+/// feature, a clock can use controlled time in tests. Production code has no
+/// overhead from this support when the feature is disabled.
 ///
-/// The clock is used for:
+/// Use a clock to:
 ///
-/// - Retrieving the current absolute time in UTC.
-/// - Creating [`Stopwatch`][super::Stopwatch] instances that
-///   simplify time measurements and can be used as relative units of time.
-/// - Creating [`PeriodicTimer`][super::PeriodicTimer] and [`Delay`][super::Delay] instances.
+/// - Get the current absolute time in UTC.
+/// - Create a [`Stopwatch`][super::Stopwatch] for elapsed time.
+/// - Create a [`Timer`][super::Timer] or [`Delay`][super::Delay].
 ///
 /// # Relative and absolute time
 ///
-/// The clock provides two types of time representation:
+/// A clock provides relative and absolute time:
 ///
-/// - [`Stopwatch`][super::Stopwatch]: Represents relative time that is monotonic. Useful for measuring
-///   elapsed time. Prefer relative time when a point in time does not cross process boundaries.
-/// - Absolute time: Represents an absolute point in time in UTC via [`SystemTime`]. Use this when you need
-///   absolute time support or need to interoperate with other crates using `SystemTime`. With the `fmt` feature
-///   enabled, you can format `SystemTime` into different formats.
+/// - [`Stopwatch`][super::Stopwatch] provides monotonic relative time. Use it
+///   to measure elapsed time within a process.
+/// - [`SystemTime`] provides an absolute UTC time. Use it across process
+///   boundaries or with other APIs that accept `SystemTime`. The `fmt` feature
+///   adds output formats.
 ///
-/// Absolute time is not monotonic and can be affected by system clock changes.
-///
-/// When possible, always prefer [`Stopwatch`][super::Stopwatch] over absolute time due to its monotonic properties.
-/// For scenarios where you need absolute time, use [`system_time()`][Self::system_time].
+/// Absolute time is not monotonic. A system clock change can move it backward.
+/// Use [`Stopwatch`][super::Stopwatch] when you do not need an absolute time.
+/// Call [`system_time()`][Self::system_time] when you do.
 ///
 /// # Clock construction
 ///
-/// The clock requires a runtime to drive the registered timers. This crate provides built-in support
-/// for Tokio via [`Clock::new_tokio()`] (available with the `tokio` feature). For other async runtimes,
-/// you can use types in the [`runtime`][crate::runtime] module to drive the clock.
+/// A runtime must drive registered timers. With the `tokio` feature,
+/// [`Clock::new_tokio()`] creates a Tokio clock. For another async runtime, use
+/// the types in [`runtime`][crate::runtime].
 ///
-/// In tests, the clock can be constructed directly using [`ClockControl`][crate::ClockControl] or via [`Clock::new_frozen`][crate::Clock::new_frozen]
-/// (available with the `test-util` feature) because the passage of time is controlled manually.
+/// With the `test-util` feature, tests can use
+/// [`ClockControl`][crate::ClockControl] or
+/// [`Clock::new_frozen`][crate::Clock::new_frozen]. These clocks use controlled
+/// time.
 ///
 /// See the [Testing](#testing) section for more information.
 ///
 /// # Testing
 ///
-/// When working with time, it's challenging to isolate time-related operations in tests. A typical example is the sleep
-/// operation, which is hard to test and slows down tests. What you want to do is have complete control over the passage
-/// of time that allows you to jump forward in time. This is where the clock comes into play.
-///
-/// The ability to jump forward in time makes tests faster, more reliable and gives you complete control over the passage of time.
-/// By default, the clock does not allow you to control the passage of time. However, when the `test-util` feature is enabled,
-/// this crate provides a [`ClockControl`][crate::ClockControl] type that can be used to control time.
+/// Real waits make tests slow and nondeterministic. Enable `test-util` and use
+/// [`ClockControl`][crate::ClockControl] to advance time without waiting.
 ///
 /// # Cloning and shared state
 ///
-/// Cloning a clock is inexpensive and every clone shares the same underlying state,
-/// including registered timers and, when the `test-util` feature is enabled, the controlled passage of time.
-/// Any timers you register or time adjustments you perform through one clone are visible to every other clone
-/// created from the same clock.
+/// Cloning a clock is inexpensive. Clones share registered timers. Controlled
+/// clones also share controlled time. A timer or time change through one clone
+/// is visible through the others.
 ///
-/// With the `fast-instant` feature, the instant retrieval setting is local to each clone. This allows
-/// precise and fast clones to share timers while independently selecting their instant source.
-/// Timer scheduling remains on the driver's precise time source.
+/// With the `fast-instant` feature, each clone has its own instant-read
+/// setting. Precise and fast clones still share timers. Timer scheduling always
+/// uses the precise driver source.
 ///
 /// ```
 /// use tick::Clock;
@@ -83,36 +76,30 @@ use crate::timers::TimerKey;
 ///
 /// # Thread-aware relocation
 ///
-/// `Clock` implements [`ThreadAware`](thread_aware::ThreadAware), enabling per-thread timer isolation
-/// in thread-isolated runtime architectures.
+/// `Clock` implements [`ThreadAware`](thread_aware::ThreadAware). A
+/// thread-isolated runtime can use this trait to isolate timer storage.
 ///
-/// Per-thread locality is established only when the source and destination
-/// coordinates have the same runtime [`Owner`](thread_aware::Owner). Relocation
-/// across owners keeps the current timer storage: the clock remains functional,
-/// but its storage is not made local to the destination.
+/// Source and destination coordinates must have the same runtime
+/// [`Owner`](thread_aware::Owner) to create thread-local storage. A relocation
+/// to another owner keeps the current storage. The clock still works, but its
+/// storage is not local to the destination.
 ///
-/// How relocation affects the clock depends on the underlying clock variant:
+/// Relocation depends on the clock type:
 ///
-/// - **System clocks**: Relocation creates per-thread timer storage. After relocation, each thread
-///   maintains its own independent set of timers, eliminating cross-thread lock contention. Clones
-///   of a clock on the same thread share timers, while clocks relocated to different threads are
-///   fully isolated. Each thread's timers must be advanced by its own
-///   [`ClockDriver`][crate::runtime::ClockDriver].
+/// - A system clock gets one timer set per relocated thread. Clones on the same
+///   thread share timers. Clocks on different threads have isolated timers.
+///   Each thread needs its own [`ClockDriver`][crate::runtime::ClockDriver].
 ///
-/// - **`ClockControl` clocks** (`test-util`): Relocation is a no-op. All clones share the same
-///   controlled time state regardless of which thread they are on. This is intentional, a single
-///   [`ClockControl`][crate::ClockControl] controls time for all clocks derived from it, even
-///   across threads.
+/// - A [`ClockControl`][crate::ClockControl] clock does not relocate its state.
+///   All clones share one controlled time state across threads.
 ///
-/// - **Tokio clocks** (created via [`Clock::new_tokio()`]): Relocation is a no-op. The Tokio clock
-///   is driven by a single background task that advances a shared set of timers, so all clones
-///   share the same timer storage regardless of which thread they are on. Per-thread relocation
-///   would create independent timer storage on the destination thread that the background driver
-///   does not advance, so relocation is intentionally suppressed.
+/// - A Tokio clock from [`Clock::new_tokio()`] does not relocate its state. One
+///   background task advances a shared timer set for all clones. Separate
+///   thread-local storage cannot be advanced by that shared task.
 ///
-/// For thread-isolated setups, the typical pattern is to clone an
-/// [`InactiveClock`][crate::runtime::InactiveClock], relocate each clone to its target thread,
-/// and then activate it. See the [`runtime`][crate::runtime] module for details.
+/// For a thread-isolated runtime, clone an
+/// [`InactiveClock`][crate::runtime::InactiveClock]. Relocate each clone to its
+/// target thread before activation. See [`runtime`][crate::runtime].
 ///
 /// # Examples
 ///
@@ -168,13 +155,13 @@ use crate::timers::TimerKey;
 /// ```
 /// use std::time::Duration;
 ///
-/// use futures::StreamExt;
-/// use tick::{Clock, PeriodicTimer};
+/// use tick::{Clock, Timer};
 ///
 /// # async fn timer_example(clock: &Clock) {
-/// let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(10));
+/// let mut timer = Timer::new(&clock, Duration::from_millis(10));
 ///
-/// while let Some(()) = timer.next().await {
+/// loop {
+///     timer.next().await;
 ///     // do something
 ///         # break;
 /// }
@@ -215,17 +202,17 @@ impl Clock {
         Self { state, time }
     }
 
-    /// Used for testing. For this clock, timers do not advance.
+    /// Creates a system clock with frozen timers for internal tests.
     #[cfg(test)]
     pub(super) fn new_system_frozen() -> Self {
         Self::new(ClockState::new_system())
     }
 
-    /// Creates a new frozen clock.
+    /// Creates a frozen clock.
     ///
-    /// This is a convenience method equivalent to calling `ClockControl::new().to_clock()`.
+    /// This is equivalent to `ClockControl::new().to_clock()`.
     ///
-    /// > **Note**: The returned clock will not advance time; all time and timers are frozen.
+    /// The returned clock does not advance time or timers.
     ///
     /// # Examples
     ///
@@ -252,11 +239,11 @@ impl Clock {
         crate::ClockControl::new().to_clock()
     }
 
-    /// Creates a new frozen clock at the specified timestamp.
+    /// Creates a frozen clock at `time`.
     ///
-    /// This is a convenience method equivalent to calling `ClockControl::new_at(time).to_clock()`.
+    /// This is equivalent to `ClockControl::new_at(time).to_clock()`.
     ///
-    /// > **Note**: The returned clock will not advance time; all time and timers are frozen at the specified timestamp.
+    /// The returned clock stays at the specified time. Its timers are frozen.
     ///
     /// # Examples
     ///
@@ -280,22 +267,23 @@ impl Clock {
         crate::ClockControl::new_at(time).to_clock()
     }
 
-    /// Configures this clock to use lower-overhead [`Instant`] retrieval where supported.
+    /// Selects lower-overhead [`Instant`] reads where supported.
     ///
-    /// The setting belongs to this clock instance. A differently configured clone can be used
-    /// independently, and stopwatches retain the setting of the clock they were created from.
+    /// The setting applies only to this clock value. A clone can use a different
+    /// setting. A stopwatch keeps the setting of its source clock.
     ///
-    /// On Linux and Windows, enabling this option uses a lower-precision source whose resolution is
-    /// platform-dependent; on Windows it is normally 10 to 16 milliseconds. Timer scheduling
-    /// continues to use the clock driver's precise time source and is unaffected by this setting.
-    /// On other platforms, fast retrieval delegates to [`Instant::now`]. Controlled clocks are
-    /// unaffected.
+    /// On Linux and Windows, this option uses a lower-precision source. The
+    /// platform defines its resolution. On Windows, the resolution is normally
+    /// 10 to 16 milliseconds. Other platforms use [`Instant::now`].
+    ///
+    /// Timer scheduling still uses the precise driver source. This option does
+    /// not affect controlled clocks.
     ///
     /// # Performance
     ///
-    /// Only enable fast instant retrieval when instrumentation shows that the default
-    /// [`Clock::instant`] retrieval is a performance bottleneck. Otherwise, retain the default
-    /// precise source.
+    /// Enable fast instant reads only if measurements show that
+    /// [`Clock::instant`] is a performance bottleneck. Otherwise, use the
+    /// default precise source.
     ///
     /// # Examples
     ///
@@ -317,11 +305,11 @@ impl Clock {
         self
     }
 
-    /// Retrieves the current system time as [`SystemTime`].
+    /// Returns the current system time.
     ///
-    /// > **Note**: The system time is not monotonic and can be affected by system clock changes.
-    /// > When the system clock changes, the current time may be older than a previously retrieved one.
-    /// > For relative time measurements, use [`Stopwatch`][super::Stopwatch].
+    /// [`SystemTime`] is not monotonic. A system clock change can make a later
+    /// read older than an earlier read. Use [`Stopwatch`][super::Stopwatch] to
+    /// measure elapsed time.
     ///
     /// # Examples
     ///
@@ -340,52 +328,60 @@ impl Clock {
         self.simple_clock().system_time()
     }
 
-    /// Retrieves the current system time converted to a target type.
+    /// Returns the current system time as `T`.
     ///
-    /// This is a convenience method that retrieves the current [`SystemTime`] via
-    /// [`system_time()`][Self::system_time] and converts it to the specified target type.
+    /// This method calls [`system_time()`][Self::system_time] and converts the
+    /// result. It is intentionally infallible for practical production use.
+    /// Production data means a current value read from the operating system
+    /// clock without test-controlled offsets. All `tick::fmt` types cover that
+    /// range. Requiring
+    /// every caller to handle a conversion error would add an error path that
+    /// supported production formats cannot reach.
+    ///
+    /// Use [`SimpleClock::system_time_as`][crate::SimpleClock::system_time_as]
+    /// for the same conversion without timer support.
     ///
     /// # Type Parameters
     ///
-    /// * `T` - The target type that implements [`TryFrom<SystemTime>`]. Common examples include
-    ///   timestamp types from external crates that can be constructed from a [`SystemTime`].
+    /// - `T` is a target type that implements [`TryFrom<SystemTime>`]. This can
+    ///   be a timestamp type from another crate.
     ///
     /// # Panics
     ///
-    /// Panics if the current system time cannot be represented by the target type `T`.
+    /// Panics if the target type cannot represent the current system time.
+    /// Supported `tick` formats must represent production clock data. A panic
+    /// means that the target range is unsupported or a controlled
+    /// test clock is outside that range.
     ///
-    /// Callers must choose a target type whose representable range covers the
-    /// [`SystemTime`] values they expect. The conversion can fail in two cases:
+    /// # Examples
     ///
-    /// - **In production**, if `T` has a narrower representable range than [`SystemTime`] and the
-    ///   current system time falls outside it.
-    /// - **In tests** using manual time control (via the `test-util` feature), if controlled time
-    ///   is moved outside the target type's supported range.
+    /// ```
+    /// use std::time::SystemTime;
     ///
-    /// If `T` can represent every [`SystemTime`] value, this conversion never fails and this method
-    /// never panics — the panic above only occurs for target types whose representable range does
-    /// not cover the current time.
+    /// use tick::Clock;
     ///
-    /// Kept consistent with [`SimpleClock::system_time_as`][crate::SimpleClock::system_time_as].
+    /// # #[cfg(feature = "test-util")]
+    /// # {
+    /// let clock = Clock::new_frozen_at(SystemTime::UNIX_EPOCH);
+    /// let time = clock.system_time_as::<SystemTime>();
+    /// assert_eq!(time, SystemTime::UNIX_EPOCH);
+    /// # }
+    /// ```
     #[must_use]
     pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
         self.simple_clock().system_time_as()
     }
 
-    /// Retrieves the current [`Instant`] time.
+    /// Returns the current [`Instant`].
     ///
-    /// An [`Instant`] represents a monotonically non-decreasing time point. Consecutive reads may be
-    /// equal, but later reads do not go backward. Unlike [`system_time`][Self::system_time], the
-    /// instant is not affected by system clock changes and provides a stable reference point for
-    /// measuring elapsed time.
+    /// An [`Instant`] does not decrease. Consecutive reads can be equal. System
+    /// clock changes do not affect it, so it is suitable for elapsed time.
     ///
-    /// > **Note**: For time measurements, consider using [`Stopwatch`][super::Stopwatch] instead,
-    /// > which provides a more convenient API for measuring elapsed time.
+    /// [`Stopwatch`][super::Stopwatch] provides a shorter API for elapsed time.
     ///
-    /// > **Important**: When measuring elapsed time with [`Instant`], use [`Instant::duration_since`]
-    /// > rather than `Instant::elapsed`. The `elapsed` method bypasses the clock and goes directly
-    /// > to system time, which means it won't respect controlled time in tests or when using
-    /// > `ClockControl`.
+    /// When you measure elapsed time with [`Instant`], use
+    /// [`Instant::duration_since`]. Do not use `Instant::elapsed`. That method
+    /// bypasses this clock and does not follow controlled time.
     ///
     /// # Examples
     ///
@@ -404,9 +400,9 @@ impl Clock {
         self.simple_clock().instant()
     }
 
-    /// Creates a new [`Delay`][crate::Delay] that will complete after the specified duration.
+    /// Creates a [`Delay`][crate::Delay] for `duration`.
     ///
-    /// This is a convenience method that calls [`Delay::new`][crate::Delay::new].
+    /// This method calls [`Delay::new`][crate::Delay::new].
     ///
     /// If the duration is [`Duration::ZERO`], the delay completes immediately.
     /// If the duration is [`Duration::MAX`], the delay never completes.
@@ -427,14 +423,14 @@ impl Clock {
     /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
     /// # }
     /// ```
-    #[must_use]
+    #[must_use = "futures do nothing unless awaited or polled"]
     pub fn delay(&self, duration: Duration) -> crate::Delay {
         crate::Delay::new(self, duration)
     }
 
-    /// Creates a new [`Stopwatch`][crate::Stopwatch] that starts measuring elapsed time.
+    /// Creates a [`Stopwatch`][crate::Stopwatch] and starts it.
     ///
-    /// This is a convenience method that calls [`Stopwatch::new`][crate::Stopwatch::new].
+    /// This method calls [`Stopwatch::new`][crate::Stopwatch::new].
     ///
     /// # Examples
     ///
@@ -457,11 +453,11 @@ impl Clock {
         crate::Stopwatch::new(self)
     }
 
-    /// Returns time in the same comparison domain used to advance this clock's timers.
+    /// Returns time in the comparison domain of this clock's timers.
     ///
-    /// Controlled timers must follow their manually advanced clock. System timers must instead
-    /// use the precise source used by the driver: a coarse read can still lag after the driver
-    /// removes and wakes a deadline, leaving the future pending without another wake-up.
+    /// Controlled timers follow controlled time. System timers use the precise
+    /// driver source. A coarse read can lag after the driver wakes a deadline.
+    /// That lag can leave a future pending with no later wake.
     pub(super) fn timer_instant(&self) -> Instant {
         match self.clock_state() {
             #[cfg(any(feature = "test-util", test))]
@@ -479,25 +475,36 @@ impl Clock {
     }
 
     pub(super) fn unregister_timer(&self, key: TimerKey) {
-        match self.clock_state() {
+        let removed = match self.clock_state() {
             #[cfg(any(feature = "test-util", test))]
             ClockState::ClockControl(control) => control.unregister_timer(key),
             ClockState::System(storage) => storage.with_timers(|timers| timers.unregister(key)),
-        }
+        };
+        drop(removed);
+    }
+
+    pub(super) fn update_timer_waker(&self, key: TimerKey, waker: &Waker) -> bool {
+        let replacement = waker.clone();
+        let (exists, displaced) = match self.clock_state() {
+            #[cfg(any(feature = "test-util", test))]
+            ClockState::ClockControl(control) => control.update_timer_waker(key, replacement),
+            ClockState::System(timers) => timers.with_timers(|timers| timers.update_waker(key, replacement)),
+        };
+        drop(displaced);
+        exists
     }
 
     pub(crate) fn clock_state(&self) -> &ClockState {
         &self.state
     }
 
-    /// Returns the [`SimpleClock`] view of this clock.
+    /// Returns the time-only [`SimpleClock`] view.
     ///
-    /// A [`SimpleClock`] exposes only time retrieval (no timers), and is the common abstraction
-    /// shared by all clock kinds. Use it to pass this clock to APIs — such as
-    /// [`Stopwatch`][crate::Stopwatch] — that only need to read the current time.
+    /// [`SimpleClock`] reads time but does not create timers. Use this view for
+    /// an API that only reads time, such as [`Stopwatch`][crate::Stopwatch].
     ///
-    /// This clock also implements [`AsRef<SimpleClock>`], so it can be passed directly to such
-    /// APIs without calling this method explicitly.
+    /// `Clock` also implements [`AsRef<SimpleClock>`]. You can pass it directly
+    /// to an API that accepts this view.
     #[must_use]
     pub fn simple_clock(&self) -> &SimpleClock {
         &self.time

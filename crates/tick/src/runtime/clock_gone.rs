@@ -5,12 +5,11 @@ use std::fmt::{Display, Formatter, Result};
 
 /// Error returned when all owners of a clock have been dropped.
 ///
-/// This error indicates that all [`Clock`](crate::Clock) instances associated with a
-/// [`ClockDriver`](crate::runtime::ClockDriver) have been dropped, meaning there are
-/// no more timers to advance and advancing timers is no longer necessary.
+/// All [`Clock`](crate::Clock) values for the
+/// [`ClockDriver`](crate::runtime::ClockDriver) were dropped. The driver has no
+/// more timers to advance.
 ///
-/// Runtime integrations should use this error to determine when to stop the timer
-/// advancement loop.
+/// A runtime can stop its timer loop after this error.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ClockGone;

@@ -206,18 +206,20 @@ let cache = Cache::builder::<String, String>(clock)
 When a fallback tier operates on serialized bytes (e.g., Redis), use `.serialize()`
 to add a postcard serialization boundary. Keys and values are automatically serialized
 to [`BytesView`][__link19] before reaching the fallback tier, and
-deserialized on the way back.
+deserialized on the way back. Pass the memory provider that serialized bytes must use.
 
 ```rust
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use cachet::{Cache, FallbackPromotionPolicy};
 use tick::Clock;
 
 let clock = Clock::new_tokio();
+let memory = OpaqueMemory::new(GlobalPool::new());
 let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
 
 let cache = Cache::builder::<String, String>(clock)
     .memory()
-    .serialize()
+    .serialize(memory)
     .fallback(remote)
     .promotion_policy(FallbackPromotionPolicy::always())
     .build();
@@ -280,7 +282,7 @@ See the `telemetry_accumulator` example for a DashMap-based accumulation pattern
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb_xlIDv3a6WgboIYzdhk5tYwbm8NaNvZXwrcbhIXs0eaeycFhZIiCaGJ5dGVzYnVmZjAuMTIuMIJmY2FjaGV0ZjAuMTYuMIJtY2FjaGV0X21lbW9yeWUwLjkuMIJuY2FjaGV0X3NlcnZpY2VlMC42LjCCa2NhY2hldF90aWVyZTAuNi4wgmR0aWNrZTAuOC4wgmd0cmFjaW5nZjAuMS40NIJpdW5pZmxpZ2h0ZTAuOC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbaWkqhnCoP40bX0_PVavH0WcbT5lvBYobChYb1adcKzrXPOxhZIiCaGJ5dGVzYnVmZjAuMTIuMIJmY2FjaGV0ZjAuMTYuMIJtY2FjaGV0X21lbW9yeWUwLjkuMIJuY2FjaGV0X3NlcnZpY2VlMC42LjCCa2NhY2hldF90aWVyZTAuNi4wgmR0aWNrZTAuOC4wgmd0cmFjaW5nZjAuMS40NIJpdW5pZmxpZ2h0ZTAuOC4w
  [__link0]: https://docs.rs/cachet/0.16.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.8.0
  [__link10]: https://docs.rs/cachet_tier/0.6.0/cachet_tier/?search=CacheTier
