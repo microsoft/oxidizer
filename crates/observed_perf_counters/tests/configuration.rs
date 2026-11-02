@@ -110,23 +110,28 @@ struct Unmapped {
 
 #[test]
 fn missing_manifest_category_or_instance_is_an_explicit_error() {
-    for builder in [
-        PerfCounterProcessor::builder().category(CATEGORY).instance("worker"),
-        PerfCounterProcessor::builder()
-            .manifest_file(manifest_path())
-            .unwrap()
-            .instance("worker"),
-        PerfCounterProcessor::builder()
-            .manifest_file(manifest_path())
-            .unwrap()
-            .category(CATEGORY),
+    for (builder, field) in [
+        (PerfCounterProcessor::builder().category(CATEGORY).instance("worker"), "manifest"),
+        (
+            PerfCounterProcessor::builder()
+                .manifest_file(manifest_path())
+                .unwrap()
+                .instance("worker"),
+            "category",
+        ),
+        (
+            PerfCounterProcessor::builder()
+                .manifest_file(manifest_path())
+                .unwrap()
+                .category(CATEGORY),
+            "instance",
+        ),
     ] {
-        assert!(
-            builder
-                .bind_event::<RequestCompleted>()
-                .build()
-                .unwrap_err()
-                .is_invalid_configuration()
+        let error = builder.bind_event::<RequestCompleted>().build().unwrap_err();
+        assert!(error.is_invalid_configuration());
+        assert_eq!(
+            error.message().lines().next().unwrap(),
+            format!("invalid performance-counter configuration: {field} must not be empty"),
         );
     }
 }
@@ -210,6 +215,10 @@ fn two_events_cannot_accidentally_write_to_the_same_declared_counter() {
         .build()
         .unwrap_err();
     assert!(error.is_invalid_configuration());
+    assert_eq!(
+        error.message().lines().next().unwrap(),
+        "invalid performance-counter configuration: duplicate counter display name \"Bytes Sent\""
+    );
 }
 
 #[test]
