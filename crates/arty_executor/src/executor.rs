@@ -4,6 +4,7 @@
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 use std::task;
+use std::thread::ThreadId;
 use std::time::Instant;
 
 use nm::{Event, Magnitude, MetricsPusher, Push};
@@ -79,11 +80,11 @@ impl Executor {
     }
 
     #[must_use]
-    pub(crate) fn new(owner_waker: task::Waker, sink: Sink, panic_policy: crate::PanicPolicy) -> Self {
-        let shared = ExecutorShared::new(owner_waker, sink, panic_policy);
+    pub(crate) fn new(owner_waker: task::Waker, sink: Sink, thread_id: ThreadId, panic_policy: crate::PanicPolicy) -> Self {
+        let shared = ExecutorShared::new(owner_waker, sink, thread_id, panic_policy);
         let clock = SimpleClock::new_system().with_fast_instant(true);
         // Register before creating an executor because its Drop unregisters this thread.
-        executor_context::register(shared.wake().executor_id().clone());
+        executor_context::register(thread_id);
         Self {
             shared,
             active: VecDeque::new(),
@@ -131,7 +132,7 @@ impl Executor {
     /// continue to use the executor after such a panic.
     #[must_use]
     pub fn execute_cycle(&mut self) -> CycleOutcome {
-        let _cycle = executor_context::enter_cycle(self.shared.wake().executor_id());
+        let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
         let cycle_started = self.start_cycle();
         self.accept_new_tasks();
         self.activate_awakened_tasks();
@@ -192,7 +193,7 @@ impl Executor {
         self.shared.drain_remote_wakes();
 
         let first_awakened = self.active.len();
-        executor_context::append_wakes(self.shared.wake().executor_id(), &mut self.active);
+        executor_context::append_wakes(self.shared.wake().thread_id(), &mut self.active);
         for task_handle in self.active.range(first_awakened..) {
             // SAFETY: Retirement removes queued notifications before releasing their live tasks.
             unsafe { task_handle.as_task() }.clear_queued_notification();
@@ -255,14 +256,12 @@ impl Executor {
     #[cfg_attr(test, mutants::skip)] // Mutation can make the executor spin without useful work.
     fn has_work_to_do(&self) -> bool {
         debug_assert!(self.active.is_empty(), "active tasks are drained before deciding the next cycle");
-        self.shared.has_new_tasks()
-            || executor_context::has_wakes(self.shared.wake().executor_id())
-            || self.shared.wake().has_remote_wakes()
+        self.shared.has_new_tasks() || executor_context::has_wakes(self.shared.wake().thread_id()) || self.shared.wake().has_remote_wakes()
     }
 
     fn prepare_task_abort(&mut self) -> usize {
         self.shared.close_remote_wakes();
-        executor_context::clear_wakes(self.shared.wake().executor_id());
+        executor_context::clear_wakes(self.shared.wake().thread_id());
         for task_handle in &self.active {
             // SAFETY: Each active owner keeps its task live. Any linked task belongs to this
             // executor's pending list, and shutdown preparation runs on the owner thread.
@@ -320,7 +319,7 @@ impl Drop for Executor {
                     let aborted_count = self.0.prepare_task_abort();
                     self.0.abort_prepared_tasks(aborted_count, false, &cause);
                 }
-                executor_context::unregister(self.0.shared.wake().executor_id());
+                executor_context::unregister(self.0.shared.wake().thread_id());
             }
         }
 

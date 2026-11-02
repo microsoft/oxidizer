@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::cell::Cell;
+
 use arty_executor::{TaskOptions, TaskPlacement};
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
@@ -11,6 +13,22 @@ use crate::runtime::worker::blocking::Worker;
 use crate::task::Context;
 use crate::task::handle::JoinHandle;
 use crate::task::preparation::DeferredTask;
+
+thread_local! {
+    // Direct task registration during an executor cycle does not need a second owner wake.
+    static EXECUTOR_CYCLE_ACTIVE: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(crate) struct CurrentExecutorCycle;
+
+impl Drop for CurrentExecutorCycle {
+    fn drop(&mut self) {
+        assert!(
+            EXECUTOR_CYCLE_ACTIVE.replace(false),
+            "an executor cycle must be active before it can end"
+        );
+    }
+}
 
 /// Submits async tasks and blocking functions for one worker.
 ///
@@ -63,6 +81,14 @@ struct Binding {
 }
 
 impl Scheduler {
+    pub(crate) fn enter_current_executor_cycle() -> CurrentExecutorCycle {
+        assert!(
+            !EXECUTOR_CYCLE_ACTIVE.replace(true),
+            "an executor cycle cannot be entered recursively"
+        );
+        CurrentExecutorCycle
+    }
+
     pub(crate) fn new(dispatcher: DispatcherClient, current: Thread) -> Self {
         let worker_index = dispatcher
             .worker_index(current.id())
@@ -168,7 +194,7 @@ impl Scheduler {
             let inner = DeferredTask::new(future_factory, context);
             let options = TaskOptions::new(TaskPlacement::SameThread);
             current.tasks().add(inner, options, result_tx);
-            if !current.tasks().is_executing() {
+            if !EXECUTOR_CYCLE_ACTIVE.get() {
                 self.dispatcher.wake_worker(self.binding.worker_index);
             }
             Ok(handle)

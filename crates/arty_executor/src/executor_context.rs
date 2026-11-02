@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::thread::ThreadId;
 
 use crate::{TaskHandle, TaskPtr};
 
@@ -17,23 +17,8 @@ thread_local! {
     };
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct ExecutorId {
-    identity: Arc<()>,
-}
-
-impl ExecutorId {
-    pub(crate) fn new() -> Self {
-        Self { identity: Arc::new(()) }
-    }
-
-    fn matches(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.identity, &other.identity)
-    }
-}
-
 struct State {
-    owner: Option<ExecutorId>,
+    owner: Option<ThreadId>,
     awakened: VecDeque<TaskHandle>,
     executing: bool,
 }
@@ -46,7 +31,7 @@ pub(crate) const AWAKENED_CAPACITY: usize = 1024;
 #[cfg(miri)]
 pub(crate) const AWAKENED_CAPACITY: usize = 4;
 
-pub(crate) fn register(owner: ExecutorId) {
+pub(crate) fn register(owner: ThreadId) {
     CURRENT.with_borrow_mut(|current| {
         assert!(current.owner.is_none(), "only one live Executor may exist on a thread");
         current.owner = Some(owner);
@@ -55,47 +40,39 @@ pub(crate) fn register(owner: ExecutorId) {
     });
 }
 
-pub(crate) fn unregister(owner: &ExecutorId) {
+pub(crate) fn unregister(owner: ThreadId) {
     _ = CURRENT.try_with(|current| {
         let mut current = current.borrow_mut();
-        assert!(
-            current.owner.as_ref().is_some_and(|current_owner| current_owner.matches(owner)),
-            "the current thread must unregister its own Executor"
-        );
+        assert_eq!(current.owner, Some(owner), "the current thread must unregister its own Executor");
         current.owner = None;
         current.awakened.clear();
         current.executing = false;
     });
 }
 
-pub(crate) fn is_current(owner: &ExecutorId) -> bool {
+pub(crate) fn is_current(owner: ThreadId) -> bool {
     CURRENT
         .try_with(|current| {
             let current = current.borrow();
-            current.owner.as_ref().is_some_and(|current_owner| current_owner.matches(owner))
+            current.owner == Some(owner)
         })
         .unwrap_or(false)
 }
 
-pub(crate) fn enter_cycle(owner: &ExecutorId) -> CycleGuard {
+pub(crate) fn enter_cycle(owner: ThreadId) -> CycleGuard {
     CURRENT.with_borrow_mut(|current| {
-        assert!(current.owner.as_ref().is_some_and(|current_owner| current_owner.matches(owner)));
+        assert_eq!(current.owner, Some(owner));
         assert!(!current.executing, "Executor::execute_cycle cannot be called reentrantly");
         current.executing = true;
     });
     CycleGuard
 }
 
-pub(crate) fn is_executing(owner: &ExecutorId) -> bool {
-    CURRENT
-        .try_with(|current| {
-            let current = current.borrow();
-            current.owner.as_ref().is_some_and(|current_owner| current_owner.matches(owner)) && current.executing
-        })
-        .unwrap_or(false)
+pub(crate) fn is_executing(owner: ThreadId) -> bool {
+    CURRENT.with_borrow(|current| current.owner == Some(owner) && current.executing)
 }
 
-pub(crate) fn enqueue(owner: &ExecutorId, task_handle: TaskHandle) -> Result<(), TaskHandle> {
+pub(crate) fn enqueue(owner: ThreadId, task_handle: TaskHandle) -> Result<(), TaskHandle> {
     if !is_current(owner) {
         return Err(task_handle);
     }
@@ -103,17 +80,17 @@ pub(crate) fn enqueue(owner: &ExecutorId, task_handle: TaskHandle) -> Result<(),
     Ok(())
 }
 
-pub(crate) fn append_wakes(owner: &ExecutorId, target: &mut VecDeque<TaskHandle>) {
+pub(crate) fn append_wakes(owner: ThreadId, target: &mut VecDeque<TaskHandle>) {
     if is_current(owner) {
         CURRENT.with_borrow_mut(|current| target.append(&mut current.awakened));
     }
 }
 
-pub(crate) fn has_wakes(owner: &ExecutorId) -> bool {
+pub(crate) fn has_wakes(owner: ThreadId) -> bool {
     is_current(owner) && CURRENT.with_borrow(|current| !current.awakened.is_empty())
 }
 
-pub(crate) fn remove_wake(owner: &ExecutorId, task_ptr: TaskPtr) {
+pub(crate) fn remove_wake(owner: ThreadId, task_ptr: TaskPtr) {
     if is_current(owner) {
         CURRENT.with_borrow_mut(|current| {
             current.awakened.retain(|queued| queued.as_ptr() != task_ptr);
@@ -121,7 +98,7 @@ pub(crate) fn remove_wake(owner: &ExecutorId, task_ptr: TaskPtr) {
     }
 }
 
-pub(crate) fn clear_wakes(owner: &ExecutorId) {
+pub(crate) fn clear_wakes(owner: ThreadId) {
     if is_current(owner) {
         CURRENT.with_borrow_mut(|current| current.awakened.clear());
     }
@@ -148,15 +125,15 @@ mod tests {
     fn foreign_owner_operations_leave_local_wakes_unchanged() {
         std::thread::spawn(|| {
             let pool = MultiPool::new();
-            let foreign_owner = ExecutorId::new();
+            let foreign_owner = std::thread::spawn(|| std::thread::current().id()).join().unwrap();
             let task_handle = crate::allocate_test_task_in(&pool);
             let pointer = task_handle.as_ptr();
-            let returned = enqueue(&foreign_owner, task_handle).unwrap_err();
+            let returned = enqueue(foreign_owner, task_handle).unwrap_err();
             let mut target = VecDeque::new();
 
-            append_wakes(&foreign_owner, &mut target);
-            remove_wake(&foreign_owner, pointer);
-            clear_wakes(&foreign_owner);
+            append_wakes(foreign_owner, &mut target);
+            remove_wake(foreign_owner, pointer);
+            clear_wakes(foreign_owner);
 
             assert!(target.is_empty());
             drop(returned);
@@ -170,22 +147,22 @@ mod tests {
     fn cycle_state_and_queued_wakes_follow_owner_transitions() {
         std::thread::spawn(|| {
             let pool = MultiPool::new();
-            let owner = ExecutorId::new();
-            register(owner.clone());
-            assert!(!is_executing(&owner));
+            let owner = std::thread::current().id();
+            register(owner);
+            assert!(!is_executing(owner));
 
             {
-                let _cycle = enter_cycle(&owner);
-                assert!(is_executing(&owner));
+                let _cycle = enter_cycle(owner);
+                assert!(is_executing(owner));
             }
-            assert!(!is_executing(&owner));
+            assert!(!is_executing(owner));
 
-            enqueue(&owner, crate::allocate_test_task_in(&pool)).unwrap();
-            assert!(has_wakes(&owner));
-            clear_wakes(&owner);
-            assert!(!has_wakes(&owner));
+            enqueue(owner, crate::allocate_test_task_in(&pool)).unwrap();
+            assert!(has_wakes(owner));
+            clear_wakes(owner);
+            assert!(!has_wakes(owner));
 
-            unregister(&owner);
+            unregister(owner);
             assert!(pool.is_empty());
         })
         .join()

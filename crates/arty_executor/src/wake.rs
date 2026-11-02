@@ -8,10 +8,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicBool, AtomicU8};
 use std::task::{RawWaker, RawWakerVTable, Waker};
+use std::thread::ThreadId;
 
 use performables::sync::channel;
 
-use crate::executor_context::ExecutorId;
 use crate::{RemoteTaskHandle, TaskPtr, executor_context};
 
 const TASK_ACTIVE: u8 = 0b001;
@@ -25,18 +25,18 @@ pub(crate) struct WakeShared {
 
 #[derive(Debug)]
 struct WakeSharedInner {
-    executor_id: ExecutorId,
+    thread_id: ThreadId,
     parent_waker: Waker,
     remote_wake_tx: channel::Sender<RemoteWake>,
     remote_wakes_pending: AtomicBool,
 }
 
 impl WakeShared {
-    pub(crate) fn new(parent_waker: Waker) -> (Self, channel::Receiver<RemoteWake>) {
+    pub(crate) fn new(parent_waker: Waker, thread_id: ThreadId) -> (Self, channel::Receiver<RemoteWake>) {
         let (remote_wake_tx, remote_wake_rx) = channel::unbounded();
         let shared = Self {
             inner: Arc::new(WakeSharedInner {
-                executor_id: ExecutorId::new(),
+                thread_id,
                 parent_waker,
                 remote_wake_tx,
                 remote_wakes_pending: AtomicBool::new(false),
@@ -45,8 +45,8 @@ impl WakeShared {
         (shared, remote_wake_rx)
     }
 
-    pub(crate) fn executor_id(&self) -> &ExecutorId {
-        &self.inner.executor_id
+    pub(crate) fn thread_id(&self) -> ThreadId {
+        self.inner.thread_id
     }
 
     pub(crate) fn drain_remote_wakes(&self, remote_wakes: &channel::Receiver<RemoteWake>) {
@@ -55,7 +55,7 @@ impl WakeShared {
         }
         loop {
             match remote_wakes.try_recv() {
-                Ok(notification) => notification.schedule_local(&self.inner.executor_id),
+                Ok(notification) => notification.schedule_local(self.inner.thread_id),
                 Err(error) => {
                     debug_assert!(
                         error.is_empty() || error.is_closed(),
@@ -110,7 +110,7 @@ impl WakeSignal {
     pub(crate) fn retire(&self) {
         let previous = self.schedule_state.swap(0, atomic::Ordering::AcqRel);
         if previous == TASK_ACTIVE_LOCAL {
-            executor_context::remove_wake(self.shared.executor_id(), self.task_ptr);
+            executor_context::remove_wake(self.shared.thread_id(), self.task_ptr);
         }
     }
 
@@ -131,7 +131,7 @@ impl WakeSignal {
     }
 
     fn wake(&self) {
-        let remote = !executor_context::is_current(self.shared.executor_id());
+        let remote = !executor_context::is_current(self.shared.thread_id());
         if !self.begin_notification(remote) {
             return;
         }
@@ -157,8 +157,8 @@ impl WakeSignal {
     fn schedule_local(&self) {
         // SAFETY: The signal is embedded in the live task that owns this call.
         let task_handle = unsafe { self.task_ptr.retain() };
-        if executor_context::enqueue(self.shared.executor_id(), task_handle).is_ok() {
-            if !executor_context::is_executing(self.shared.executor_id()) {
+        if executor_context::enqueue(self.shared.thread_id(), task_handle).is_ok() {
+            if !executor_context::is_executing(self.shared.thread_id()) {
                 self.shared.inner.parent_waker.wake_by_ref();
             }
 
@@ -214,7 +214,7 @@ impl RemoteWake {
         Self(unsafe { signal.task_ptr.retain_remote() })
     }
 
-    fn schedule_local(self, owner: &ExecutorId) {
+    fn schedule_local(self, owner: ThreadId) {
         // SAFETY: The receiving executor owns this thread, and the notification retains the task.
         if unsafe { self.0.as_task() }.promote_remote_notification() {
             // SAFETY: Remote wakes are drained only by the registered executor owner.
@@ -304,19 +304,18 @@ mod tests {
 
     #[test]
     fn retirement_removes_a_local_notification() {
+        let _executor = crate::Executor::builder().build();
         let pool = MultiPool::new();
         let task = crate::allocate_test_task_in(&pool);
-        let (shared, _remote_wakes) = WakeShared::new(Waker::noop().clone());
-        executor_context::register(shared.executor_id().clone());
+        let (shared, _remote_wakes) = WakeShared::new(Waker::noop().clone(), thread::current().id());
         let signal = pin!(WakeSignal::new(shared, task.as_ptr()));
 
         assert!(signal.begin_notification(false));
         signal.schedule_local();
-        assert!(executor_context::has_wakes(signal.shared.executor_id()));
+        assert!(executor_context::has_wakes(thread::current().id()));
         signal.retire();
 
-        assert!(!executor_context::has_wakes(signal.shared.executor_id()));
-        executor_context::unregister(signal.shared.executor_id());
+        assert!(!executor_context::has_wakes(thread::current().id()));
         drop(task);
         assert!(pool.is_empty());
     }
@@ -324,9 +323,10 @@ mod tests {
     #[test]
     fn local_schedule_after_owner_loss_notifies_the_parent() {
         let pool = MultiPool::new();
+        let foreign_owner = thread::spawn(|| thread::current().id()).join().unwrap();
         let parent = Arc::new(CountingWake(AtomicUsize::new(0)));
         let task = crate::allocate_test_task_in(&pool);
-        let (shared, _remote_wakes) = WakeShared::new(Waker::from(Arc::clone(&parent)));
+        let (shared, _remote_wakes) = WakeShared::new(Waker::from(Arc::clone(&parent)), foreign_owner);
         let signal = pin!(WakeSignal::new(shared, task.as_ptr()));
 
         assert!(signal.begin_notification(false));
@@ -341,8 +341,9 @@ mod tests {
     #[test]
     fn closed_remote_channel_clears_the_notification() {
         let pool = MultiPool::new();
+        let foreign_owner = thread::spawn(|| thread::current().id()).join().unwrap();
         let task = crate::allocate_test_task_in(&pool);
-        let (shared, remote_wakes) = WakeShared::new(Waker::noop().clone());
+        let (shared, remote_wakes) = WakeShared::new(Waker::noop().clone(), foreign_owner);
         drop(remote_wakes);
         let signal = pin!(WakeSignal::new(shared, task.as_ptr()));
 
@@ -371,7 +372,7 @@ mod tests {
     fn duplicate_remote_wake_publishes_prior_writes() {
         let pool = MultiPool::new();
         let task = crate::allocate_test_task_in(&pool);
-        let (shared, remote_wakes) = WakeShared::new(Waker::noop().clone());
+        let (shared, remote_wakes) = WakeShared::new(Waker::noop().clone(), thread::current().id());
         let signal = pin!(WakeSignal::new(shared, task.as_ptr()));
         // SAFETY: The clone acquires independent task ownership before the borrow ends.
         let waker = unsafe { signal.as_ref().waker_ref() }.clone();
@@ -404,7 +405,7 @@ mod tests {
     fn dropping_an_owned_waker_releases_its_task_reference() {
         let pool = MultiPool::new();
         let task = crate::allocate_test_task_in(&pool);
-        let (shared, _remote_wakes) = WakeShared::new(Waker::noop().clone());
+        let (shared, _remote_wakes) = WakeShared::new(Waker::noop().clone(), thread::current().id());
         let signal = pin!(WakeSignal::new(shared, task.as_ptr()));
         // SAFETY: The clone acquires independent task ownership before the borrow ends.
         let waker = unsafe { signal.as_ref().waker_ref() }.clone();

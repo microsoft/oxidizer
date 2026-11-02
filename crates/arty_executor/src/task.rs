@@ -482,7 +482,7 @@ mod tests {
 
     fn initialized_task<R: 'static>(pool: &MultiPool, future: impl Future<Output = R> + 'static) -> TaskHandle {
         let handle = allocate_task(pool, future, TaskOptions::default(), Sink::noop(), TestCompletion);
-        let (shared, _remote_wakes) = crate::WakeShared::new(Waker::noop().clone());
+        let (shared, _remote_wakes) = crate::WakeShared::new(Waker::noop().clone(), std::thread::current().id());
         let signal = WakeSignal::new(shared, handle.as_ptr());
         // SAFETY: The handle owns the task on its creating thread.
         unsafe { handle.as_task() }.initialize(signal);
@@ -507,7 +507,12 @@ mod tests {
     fn polling_after_completion_panics() {
         let pool = MultiPool::new();
         let handle = initialized_task(&pool, std::future::ready(()));
-        let shared = ExecutorShared::new(Waker::noop().clone(), Sink::noop(), crate::PanicPolicy::Ignore);
+        let shared = ExecutorShared::new(
+            Waker::noop().clone(),
+            Sink::noop(),
+            std::thread::current().id(),
+            crate::PanicPolicy::Ignore,
+        );
         // SAFETY: The handle owns the task on its creating thread.
         let task = unsafe { handle.as_task() };
 
