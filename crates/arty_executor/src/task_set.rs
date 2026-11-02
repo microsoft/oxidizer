@@ -43,7 +43,7 @@ impl TaskSet {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use static_assertions::assert_not_impl_any;
@@ -53,6 +53,18 @@ mod tests {
 
     #[derive(Debug)]
     struct DiscardCompletion;
+
+    thread_local! {
+        static RETAINED_DURING_TEARDOWN: RefCell<Option<TeardownProbe>> = const { RefCell::new(None) };
+    }
+
+    struct TeardownProbe(TaskSet);
+
+    impl Drop for TeardownProbe {
+        fn drop(&mut self) {
+            assert!(!self.0.is_executing());
+        }
+    }
 
     impl TaskCompletion<()> for DiscardCompletion {
         fn completed(self, (): ()) {}
@@ -114,5 +126,19 @@ mod tests {
         _ = replacement.execute_cycle();
 
         assert_eq!(observed.get(), (false, true));
+    }
+
+    #[test]
+    fn retained_task_set_returns_false_after_executor_context_tls_destruction() {
+        std::thread::spawn(|| {
+            RETAINED_DURING_TEARDOWN.with(|_| {});
+            let executor = Executor::builder().build();
+            RETAINED_DURING_TEARDOWN.with_borrow_mut(|retained| {
+                *retained = Some(TeardownProbe(executor.tasks()));
+            });
+            drop(executor);
+        })
+        .join()
+        .unwrap();
     }
 }

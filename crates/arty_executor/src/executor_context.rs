@@ -87,7 +87,12 @@ pub(crate) fn enter_cycle(owner: &ExecutorId) -> CycleGuard {
 }
 
 pub(crate) fn is_executing(owner: &ExecutorId) -> bool {
-    CURRENT.with_borrow(|current| current.owner.as_ref().is_some_and(|current_owner| current_owner.matches(owner)) && current.executing)
+    CURRENT
+        .try_with(|current| {
+            let current = current.borrow();
+            current.owner.as_ref().is_some_and(|current_owner| current_owner.matches(owner)) && current.executing
+        })
+        .unwrap_or(false)
 }
 
 pub(crate) fn enqueue(owner: &ExecutorId, task_handle: TaskHandle) -> Result<(), TaskHandle> {
