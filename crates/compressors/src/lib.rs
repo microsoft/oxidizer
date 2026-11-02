@@ -255,7 +255,7 @@ use crate::core::{Compress, Compression, Decompress, process};
 /// Takes any compressor that implements [`Compression`] with [`Compress`] mode. This includes a
 /// concrete compressor and the `format::Compressor` from [`CompressorBuilder::build_format`].
 ///
-/// This function buffers the complete result. See [Streaming](#streaming) for incremental
+/// This function buffers the complete result. See [Streaming](crate#streaming) for incremental
 /// input with `CompressionStream`.
 ///
 /// # Security
