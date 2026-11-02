@@ -185,18 +185,54 @@ fn capture(_context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seism
 
 #[cfg(test)]
 mod tests {
+    use seismograph::recorder::event::Event;
+    use seismograph::recorder::{Configuration, EventSampling, Policy};
+
     use super::*;
+
+    static RECORDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct Restore(bool);
+
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            seismograph::recorder(Configuration::default());
+            seismograph_rallocator::native::set_publication_enabled(self.0);
+        }
+    }
+
+    #[test]
+    fn null_allocation_emission_is_omitted_while_valid_emission_is_retained() {
+        let _lock = RECORDING.lock().unwrap();
+        let _restore = Restore(seismograph_rallocator::native::publication_enabled());
+        seismograph::recorder(Configuration {
+            allocations: Policy::all(false),
+            ..Configuration::default()
+        });
+        let thread = seismograph::recorder::thread_id();
+        let mut value = 0_u8;
+        let address = &raw mut value;
+
+        emit(address, 1, 1, false);
+        emit(std::ptr::null_mut(), 1, 1, false);
+        let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        let allocations = decoded
+            .events
+            .events
+            .iter()
+            .filter(|event| event.thread_id == thread)
+            .filter_map(Event::allocation)
+            .filter(|allocation| allocation.address.get() == address.addr() as u64 || allocation.address.get() == 0)
+            .map(|allocation| (allocation.address.get(), allocation.size, allocation.alignment))
+            .collect::<Vec<_>>();
+
+        assert_eq!(allocations, [(address.addr() as u64, 1, 1)]);
+    }
 
     #[test]
     fn sampled_out_allocation_still_publishes_the_requested_native_round() {
-        use seismograph::recorder::{Configuration, EventSampling, Policy};
-        struct Restore(bool);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                seismograph::recorder(Configuration::default());
-                seismograph_rallocator::native::set_publication_enabled(self.0);
-            }
-        }
+        let _lock = RECORDING.lock().unwrap();
         let _restore = Restore(seismograph_rallocator::native::publication_enabled());
         seismograph_rallocator::native::set_publication_enabled(true);
         seismograph::recorder(Configuration {
