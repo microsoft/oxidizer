@@ -30,6 +30,12 @@ impl TaskSet {
     {
         self.shared.add_task(future, options, completion);
     }
+
+    /// Returns whether this task set's executor is running a cycle on this thread.
+    #[must_use]
+    pub fn is_executing(&self) -> bool {
+        crate::executor_context::is_executing(self.shared.wake().thread_id())
+    }
 }
 
 #[cfg(test)]

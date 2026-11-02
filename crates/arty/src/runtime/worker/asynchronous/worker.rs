@@ -22,7 +22,7 @@ use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{Command, LocalWorker, Signal};
 #[cfg(test)]
 use crate::runtime::worker::blocking;
-use crate::task::{Context, Scheduler};
+use crate::task::Context;
 
 const COMMANDS_PER_CYCLE: usize = 256;
 
@@ -189,10 +189,7 @@ impl Worker {
             .as_mut()
             .expect("executor removal publishes shutdown, which is handled above");
 
-        let cycle_outcome = {
-            let _cycle = Scheduler::enter_current_executor_cycle();
-            executor.execute_cycle()
-        };
+        let cycle_outcome = executor.execute_cycle();
 
         if let CycleOutcome::Shutdown(cause) = cycle_outcome {
             self.shutdown.begin(cause);
