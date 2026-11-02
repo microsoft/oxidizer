@@ -542,6 +542,17 @@ mod tests {
     }
 
     #[test]
+    fn dropping_a_pool_finishes_accepted_work() {
+        let pool = joinable_pool(1);
+        let (completed, received) = channel();
+        assert!(pool.execute(move || completed.send(42).unwrap()));
+
+        drop(pool);
+
+        assert_eq!(received.try_recv(), Ok(42));
+    }
+
+    #[test]
     fn joinable_pool_rejects_work_after_shutdown() {
         let mut pool = joinable_pool(1);
         pool.shutdown_and_join();

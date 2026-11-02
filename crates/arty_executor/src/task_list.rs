@@ -111,6 +111,7 @@ mod tests {
 
         assert_eq!(list.insert(first), first_pointer);
         assert_eq!(list.insert(second), second_pointer);
+        assert!(!list.is_empty());
         assert_eq!(format!("{list:?}"), "TaskList { .. }");
         // SAFETY: `first_pointer` is live and belongs to `list`.
         drop(unsafe { list.remove(first_pointer) }.unwrap());

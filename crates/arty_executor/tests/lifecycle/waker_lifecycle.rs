@@ -27,6 +27,60 @@ impl Wake for CountingWake {
 }
 
 #[test]
+fn a_remote_wake_during_poll_requests_another_cycle() {
+    let mut executor = Executor::builder().build();
+    let mut first_poll = true;
+    let mut task = executor.tasks().add_test(
+        poll_fn(move |cx| {
+            if first_poll {
+                first_poll = false;
+                let waker = cx.waker().clone();
+                std::thread::spawn(move || waker.wake()).join().unwrap();
+                Poll::Pending
+            } else {
+                Poll::Ready(42)
+            }
+        }),
+        TaskOptions::default(),
+    );
+
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Continue));
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+
+    assert!(matches!(
+        Pin::new(&mut task).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(TaskOutcome::Completed(42))
+    ));
+}
+
+#[test]
+fn a_remote_notification_for_a_completed_task_is_discarded() {
+    let mut executor = Executor::builder().build();
+    let polls = Rc::new(Cell::new(0));
+    let mut task = executor.tasks().add_test(
+        poll_fn({
+            let polls = Rc::clone(&polls);
+            move |cx| {
+                polls.set(polls.get() + 1);
+                let waker = cx.waker().clone();
+                std::thread::spawn(move || waker.wake()).join().unwrap();
+                Poll::Ready(42)
+            }
+        }),
+        TaskOptions::default(),
+    );
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Continue));
+
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+
+    assert_eq!(polls.get(), 1);
+    assert!(matches!(
+        Pin::new(&mut task).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(TaskOutcome::Completed(42))
+    ));
+}
+
+#[test]
 fn remote_wake_burst_notifies_the_owner_once() {
     let owner = Arc::new(CountingWake(AtomicUsize::new(0)));
     let mut executor = Executor::builder().owner_waker(Waker::from(Arc::clone(&owner))).build();

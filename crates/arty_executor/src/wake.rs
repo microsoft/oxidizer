@@ -247,11 +247,13 @@ static BORROWED_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(waker_clone, 
 static OWNED_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(waker_clone, waker_wake, waker_wake_by_ref, waker_drop);
 
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)] // ManuallyDrop and the shared borrow prevent this callback from being invoked.
 fn borrowed_consume(_: *const ()) {
     unreachable!("a borrowed polling waker cannot be consumed");
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)] // ManuallyDrop prevents the borrowed waker from being dropped.
 fn borrowed_drop(_: *const ()) {
     unreachable!("a borrowed polling waker cannot be dropped");
 }
@@ -317,6 +319,41 @@ mod tests {
 
         assert!(!executor_context::has_wakes(thread::current().id()));
         drop(task);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn dropping_a_signal_removes_its_local_notification() {
+        let _executor = crate::Executor::builder().build();
+        let pool = MultiPool::new();
+        let task = crate::allocate_test_task_in(&pool);
+        let (shared, _remote_wakes) = WakeShared::new(Waker::noop().clone(), thread::current().id());
+        let signal = Box::pin(WakeSignal::new(shared, task.as_ptr()));
+        assert!(signal.begin_notification(false));
+        signal.schedule_local();
+
+        drop(signal);
+
+        assert!(!executor_context::has_wakes(thread::current().id()));
+        drop(task);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn closing_remote_wakes_releases_queued_task_ownership() {
+        let pool = MultiPool::new();
+        let task = crate::allocate_test_task_in(&pool);
+        let (shared, remote_wakes) = WakeShared::new(Waker::noop().clone(), thread::current().id());
+        let signal = pin!(WakeSignal::new(shared.clone(), task.as_ptr()));
+        assert!(signal.begin_notification(true));
+        signal.schedule_remote();
+        drop(task);
+        assert!(!pool.is_empty());
+
+        shared.close_remote_wakes(&remote_wakes);
+
+        assert!(remote_wakes.is_closed());
+        assert!(!shared.has_remote_wakes());
         assert!(pool.is_empty());
     }
 

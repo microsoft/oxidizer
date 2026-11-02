@@ -170,4 +170,18 @@ mod tests {
         shared.shutdown().trigger(ShutdownCause::default());
         assert!(shared.shutdown_complete());
     }
+
+    #[test]
+    fn closing_remote_wakes_rejects_later_notifications() {
+        let shared = ExecutorShared::new(
+            Waker::noop().clone(),
+            Sink::noop(),
+            std::thread::current().id(),
+            PanicPolicy::default(),
+        );
+
+        shared.close_remote_wakes();
+
+        assert!(shared.inner.remote_wakes.is_closed());
+    }
 }

@@ -409,3 +409,19 @@ thread_local! {
         .pusher_local(&EXECUTOR_PUSHER)
         .build();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_completed_cycle_records_its_end_for_gap_measurement() {
+        let mut executor = Executor::builder().build();
+        executor.clock = SimpleClock::new_frozen();
+        let expected = executor.clock.instant();
+
+        let _outcome = executor.execute_cycle();
+
+        assert_eq!(executor.last_cycle_ended, Some(expected));
+    }
+}
