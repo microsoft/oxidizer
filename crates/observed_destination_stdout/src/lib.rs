@@ -391,6 +391,7 @@ mod tests {
             for (severity, body, should_emit) in outcomes {
                 let mut record = logger.create_log_record();
                 record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
+                record.set_observed_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
                 record.set_severity_number(*severity);
                 record.set_body((*body).into());
                 logger.emit(record);
@@ -427,6 +428,7 @@ mod tests {
         let logger = provider.logger("stdout");
         let mut record = logger.create_log_record();
         record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
+        record.set_observed_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
         record.set_body("request {id}".into());
         record.add_attribute("id", 42);
 
@@ -455,11 +457,13 @@ mod tests {
 
         let mut record = logger.create_log_record();
         record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
+        record.set_observed_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
         logger.emit(record);
 
         // Also emit a second record to verify that the resource header is only printed once.
         let mut record = logger.create_log_record();
         record.set_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
+        record.set_observed_timestamp(SystemTime::UNIX_EPOCH + TEST_TIMESTAMP_OFFSET);
         logger.emit(record);
 
         let written = output.contents();
@@ -520,7 +524,7 @@ mod tests {
                 processor.emit(&mut record, &scope);
             });
 
-            emitter_started_rx.recv().unwrap();
+            emitter_started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
 
             processor.shutdown_with_timeout(Duration::from_secs(1)).unwrap();
 
