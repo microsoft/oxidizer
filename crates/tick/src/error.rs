@@ -124,6 +124,13 @@ impl Error {
     /// An application can use this classification to distinguish an unsupported
     /// timestamp from malformed input without matching the error message.
     #[must_use]
+    #[cfg_attr(
+        not(any(feature = "fmt", test)),
+        expect(
+            clippy::unused_self,
+            reason = "the receiver is used when fmt or tests enable the out-of-range error kind"
+        )
+    )]
     pub const fn is_out_of_range(&self) -> bool {
         #[cfg(any(feature = "fmt", test))]
         {
