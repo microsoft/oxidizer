@@ -3676,23 +3676,36 @@ mod tests {
         // SAFETY: local_recorder returns this thread's process-lifetime recorder.
         let recorder = unsafe { &*recorder };
         recorder.writer_active.store(true, Ordering::Release);
-        let (started_sender, started_receiver) = std::sync::mpsc::channel();
-        let (finished_sender, finished_receiver) = std::sync::mpsc::channel();
-        std::thread::scope(|scope| {
-            scope.spawn(|| {
-                started_sender.send(()).unwrap();
-                let captured = destructive_snapshot(crate::snapshot::EventBufferDisposition::Clear);
-                finished_sender.send(captured).unwrap();
-            });
-            started_receiver.recv().unwrap();
-            assert_eq!(
-                finished_receiver.recv_timeout(std::time::Duration::from_millis(20)).unwrap_err(),
-                std::sync::mpsc::RecvTimeoutError::Timeout
-            );
-            recorder.writer_active.store(false, Ordering::Release);
-            let _captured = finished_receiver.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+        let (was_waiting, captured) = std::thread::scope(|scope| {
+            let writer = WriterActiveGuard { recorder };
+            let snapshot = scope.spawn(|| destructive_snapshot(crate::snapshot::EventBufferDisposition::Clear));
+            while ACTIVE_SESSION.load(Ordering::Acquire) != 0 && !snapshot.is_finished() {
+                std::thread::yield_now();
+            }
+            let was_waiting = !snapshot.is_finished();
+            drop(writer);
+            (was_waiting, snapshot.join().unwrap())
         });
         configure(Configuration::default());
+
+        assert!(was_waiting);
+        captured.unwrap();
+    }
+
+    #[test]
+    fn active_writer_prevents_quiescence_until_released() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let recorder = local_recorder();
+        // SAFETY: local_recorder returns this thread's process-lifetime recorder.
+        let recorder = unsafe { &*recorder };
+        recorder.writer_active.store(true, Ordering::Release);
+        let writer = WriterActiveGuard { recorder };
+
+        let while_active = wait_for_writers_until(Instant::now());
+        drop(writer);
+        let after_release = wait_for_writers_until(Instant::now());
+
+        assert_eq!((while_active, after_release), (false, true));
     }
 
     #[test]
