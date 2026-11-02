@@ -38,15 +38,22 @@ fn remote_panicking_join_waker_preserves_published_panic() {
 }
 
 fn assert_remote_notification_preserves_outcome(panics: bool) {
+    let succeeded = Arc::new(AtomicUsize::new(0));
+    let panicked = Arc::new(AtomicUsize::new(0));
     let runtime = runtime();
     let (release, gate) = events_once::Event::boxed();
-    let join = runtime
-        .scheduler()
-        .spawn_anywhere(Unaware((gate, panics)), |_, Unaware((gate, panics))| async move {
+    let join = runtime.scheduler().spawn_anywhere(
+        Unaware((gate, panics, Arc::clone(&succeeded), Arc::clone(&panicked))),
+        |_, Unaware((gate, panics, succeeded, panicked))| async move {
             gate.await.unwrap();
-            assert!(!panics, "remote task panic");
+            if panics {
+                panicked.fetch_add(1, Ordering::SeqCst);
+                panic!("remote task panic");
+            }
+            succeeded.fetch_add(1, Ordering::SeqCst);
             42
-        });
+        },
+    );
     let mut join = pin!(join);
     let notified = Arc::new(AtomicBool::new(false));
     let notifications = Arc::new(AtomicUsize::new(0));
@@ -61,7 +68,8 @@ fn assert_remote_notification_preserves_outcome(panics: bool) {
         assert!(std::time::Instant::now() < deadline);
         std::thread::yield_now();
     }
-    // The flag records notification only; the result establishes the outcome.
+    // The flag records notification only. The result channel and execution
+    // counters establish the task outcome independently.
     let outcome = futures::executor::block_on(join);
     if panics {
         let error = outcome.unwrap_err();
@@ -70,9 +78,21 @@ fn assert_remote_notification_preserves_outcome(panics: bool) {
     } else {
         assert_eq!(outcome.unwrap(), 42);
     }
-    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).join().unwrap(), 7);
+    assert_eq!(
+        runtime
+            .scheduler()
+            .spawn_anywhere(Unaware(Arc::clone(&succeeded)), |_, Unaware(succeeded)| async move {
+                succeeded.fetch_add(1, Ordering::SeqCst);
+                7
+            })
+            .join()
+            .unwrap(),
+        7
+    );
     assert_eq!(notifications.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
+    assert_eq!(succeeded.load(Ordering::SeqCst), if panics { 1 } else { 2 });
+    assert_eq!(panicked.load(Ordering::SeqCst), usize::from(panics));
 }
 
 #[test]

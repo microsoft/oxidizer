@@ -771,7 +771,7 @@ fn complete_task(
 }
 
 fn decrement_saturating(value: &AtomicU64) {
-    let _previous = value.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_sub(1));
+    let _previous = value.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_sub(1));
 }
 
 #[inline]
@@ -887,7 +887,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 fn next_id(counter: &AtomicU64) -> NonZeroU64 {
     let value = counter
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
         .expect("a process cannot create u64::MAX runtime telemetry identities");
     NonZeroU64::new(value).expect("runtime telemetry identifier counters are initialized to one")
 }

@@ -184,7 +184,7 @@ pub fn register_source(source: &'static Source) {
     }
 
     SOURCES
-        .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
+        .try_update(Ordering::Release, Ordering::Acquire, |head| {
             source.next.store(head, Ordering::Relaxed);
             Some(ptr::from_ref(source).cast_mut())
         })
