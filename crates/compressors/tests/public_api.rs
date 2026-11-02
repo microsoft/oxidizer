@@ -37,7 +37,7 @@ fn compression_level_conversions_and_named_values_match() {
 
     let error = Level::try_from(10).unwrap_err();
     assert!(error.is_invalid_configuration(), "got {error}");
-    assert!(error.to_string().contains("0..=9"), "the message should name the range: {error}");
+    assert!(error.to_string().contains("0..=9"), "the message must name the range: {error}");
 }
 
 #[test]

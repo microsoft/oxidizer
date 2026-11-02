@@ -513,6 +513,7 @@ mod tests {
         processor.set_resource(&Resource::builder_empty().build());
 
         thread::scope(|s| {
+            let emitter_continue_tx = emitter_continue_tx;
             let t = s.spawn(|| {
                 let scope = InstrumentationScope::builder("stdout").build();
 
