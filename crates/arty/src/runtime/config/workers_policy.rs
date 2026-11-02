@@ -8,18 +8,18 @@ use many_cpus::ProcessorSet;
 use crate::runtime::config::{BlockingPoolPolicy, MonitorOptions, PanicPolicy};
 use crate::runtime::error::Error;
 
-/// A worker-count policy for the async runtime.
+/// Selects how many async workers run and which processors they use.
 ///
 /// The runtime assigns each async worker to one available processor. More than
 /// one worker can share a processor when an exact count exceeds the available
 /// processor count. Pass a policy to
 /// [`RuntimeBuilder::workers`](crate::runtime::RuntimeBuilder::workers).
-/// [`Default`] uses one worker. Use [`at_most`](Self::at_most) for
-/// an upper bound, [`exactly`](Self::exactly) for a fixed worker count, or
+/// [`Default`] uses one worker. Use [`at_most`](Self::at_most) to set
+/// a maximum, [`exactly`](Self::exactly) for a fixed worker count, or
 /// [`all`](Self::all) to use all available processors.
 ///
-/// Counts are validated when the runtime is built. Both `at_most(0)` and
-/// `exactly(0)` produce a construction error.
+/// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) rejects a count of zero.
+/// Both `at_most(0)` and `exactly(0)` return an error when you build the runtime.
 ///
 /// # Examples
 ///
@@ -41,7 +41,7 @@ impl WorkersPolicy {
     ///
     /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) returns
     /// [`Error`] if `count` is zero. Creating the policy does not validate the
-    /// count. Large counts can consume substantial thread and stack resources.
+    /// count. Large counts can use many threads and much memory for their stacks.
     /// Use [`at_most`](Self::at_most) if the application can work with fewer
     /// workers.
     ///
@@ -59,7 +59,7 @@ impl WorkersPolicy {
 
     /// Creates a policy using at most `count` workers.
     ///
-    /// Fewer available processors means fewer workers, not a construction error.
+    /// If fewer processors are available, Arty starts fewer workers instead of returning an error.
     /// A zero count is rejected by
     /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build), not when
     /// creating this policy.
@@ -78,8 +78,7 @@ impl WorkersPolicy {
 
     /// Creates a policy using all available processors.
     ///
-    /// This explicitly selects all processors rather than relying on the
-    /// default policy.
+    /// The default starts one worker. This starts one worker for each available processor.
     ///
     /// # Examples
     ///

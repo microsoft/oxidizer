@@ -200,8 +200,8 @@ fn spawn_at_relocates_results_to_the_source_worker() {
     runtime.stop().unwrap();
 }
 
-// Return Context and schedule child work to prove that its services bind to
-// the worker that receives the result.
+// Return `Context` and schedule child work. This proves that its services bind
+// to the worker that receives the result.
 #[test]
 fn spawn_anywhere_returns_context_bound_to_the_source_worker() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
@@ -222,8 +222,8 @@ fn spawn_anywhere_returns_context_bound_to_the_source_worker() {
     runtime.stop().unwrap();
 }
 
-// Poll the join on a different worker to prove that the receiving worker,
-// rather than the submitting worker, selects the result destination.
+// Poll the join on a different worker. This proves that the receiving worker
+// selects the result destination, not the submitting worker.
 #[test]
 fn spawn_anywhere_relocates_results_to_the_worker_that_receives_the_join() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
@@ -252,8 +252,8 @@ fn spawn_anywhere_relocates_results_to_the_worker_that_receives_the_join() {
     runtime.stop().unwrap();
 }
 
-// Poll outside the runtime to prove that result relocation requires a receiving
-// Arty worker.
+// Poll outside the runtime. This proves that result relocation requires a
+// receiving Arty worker.
 #[test]
 fn spawn_anywhere_results_joined_outside_arty_are_not_relocated() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
@@ -304,12 +304,12 @@ fn a_foreign_owner_cannot_rebind_a_registered_thread_id() {
     assert_eq!(actual, Some(source));
 }
 
-/// Identifies which thread-aware handle a relocation scenario should move.
+/// Identifies the thread-aware handle that the relocation scenario moves.
 #[derive(Clone, Copy)]
 enum RelocationTarget {
-    /// Relocate a worker-bound `Scheduler` clone directly.
+    /// A worker-bound `Scheduler` clone.
     Scheduler,
-    /// Relocate a `Context` clone directly.
+    /// A `Context` clone.
     Context,
 }
 
@@ -319,19 +319,21 @@ struct BeforeAfter {
     after: ThreadId,
 }
 
-/// Observations gathered while relocating a thread-aware handle to a different worker.
+/// Observations from relocating a thread-aware handle to a different worker.
 struct RelocationObservation {
-    /// The thread executing the scenario's outermost task (the source worker).
+    /// The thread that runs the outermost task (the source worker).
     origin: ThreadId,
-    /// Thread that ran a blocking task (`spawn_blocking`) before/after relocation.
+    /// The thread that ran a blocking task (`spawn_blocking`) before and after relocation.
     blocking_task: BeforeAfter,
-    /// Thread that ran an async task (`spawn`) before/after relocation.
+    /// The thread that ran an async task (`spawn`) before and after relocation.
     async_task: BeforeAfter,
 }
 
-/// Builds a two-processor runtime with the given worker-pool policy, relocates the
-/// requested thread-aware handle from the current worker to a different worker, and
-/// records the threads that ran a blocking task and an async task before and after.
+/// Builds a two-processor runtime with the specified worker-pool policy.
+///
+/// It relocates the specified thread-aware handle to another worker. It records
+/// the threads that run a blocking task and an async task before and after
+/// relocation.
 #[cfg(test)]
 fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) -> RelocationObservation {
     let runtime = Runtime::builder()
@@ -346,7 +348,7 @@ fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) ->
             let origin = thread::current().id();
             let here = cx.thread().clone();
 
-            // Discover a different worker by relocating a Context clone onto every worker.
+            // Find another worker by relocating a `Context` clone to each worker.
             let threads =
                 join_all((0..2).map(|_| scheduler.spawn_anywhere(cx.clone(), |worker: Context| async move { worker.thread().clone() })))
                     .await;
@@ -409,10 +411,11 @@ fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) ->
         .unwrap()
 }
 
-/// Async tasks always run on the worker the scheduler is currently associated with,
-/// regardless of the worker-pool policy: before relocation on the origin worker,
-/// after relocation on the (distinct) destination worker.
-#[cfg_attr(test, mutants::skip)] // Test oracle, not production behavior; assertion mutations invalidate the test itself.
+/// Async tasks always run on the worker associated with the scheduler.
+///
+/// The worker-pool policy does not change this behavior. The task runs on the
+/// origin worker before relocation and on the distinct destination worker after it.
+#[cfg_attr(test, mutants::skip)] // This is a test oracle, not production behavior. Assertion mutations invalidate the test.
 fn assert_async_follows_relocation(observation: &RelocationObservation) {
     assert_eq!(
         observation.async_task.before, observation.origin,

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Worker services and thread-aware relocation.
+//! Access to a worker's scheduler, clock, and I/O.
 
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
@@ -14,19 +14,20 @@ use crate::task::scheduler::Scheduler;
 
 /// Services supplied to an async task on its worker.
 ///
-/// This is Arty's task-execution context, not `std::task::Context` or a future's
-/// poll context.
+/// It is not `std::task::Context`, which Rust passes to a future's `poll` method.
 ///
 /// Use [`scheduler`](Self::scheduler) for child tasks and [`clock`](Self::clock)
-/// for delays and timeouts. Runtime task factories receive this value by
-/// ownership.
+/// for delays and timeouts. Arty passes this value to the function that
+/// creates a task's future.
 ///
 /// New tasks receive their own `Context`. Cloning or moving an existing value
 /// does not change its worker or keep its runtime running.
 ///
+/// Relocation updates a value's state for a selected worker.
 /// [`Scheduler::spawn_anywhere`] can relocate an existing `Context` to
-/// another ready worker of the same runtime. A worker from another runtime, or
-/// one that is not ready, leaves its association unchanged.
+/// another ready worker of the same runtime.
+/// Relocation to a worker from another runtime or one that is not ready leaves
+/// the context unchanged.
 ///
 /// # Examples
 ///
@@ -64,11 +65,11 @@ struct ContextInner {
 }
 
 impl Context {
-    /// Returns a scheduler that creates tasks on the associated worker.
+    /// Returns a scheduler that creates tasks on this context's worker.
     ///
     /// A clone still targets the same worker, even if used from another
     /// thread. Use [`Scheduler::spawn_anywhere`] to let the runtime choose
-    /// a worker for new work instead.
+    /// a worker for new tasks instead.
     ///
     /// # Examples
     ///
@@ -94,20 +95,20 @@ impl Context {
 
     /// Returns runtime-wide control available to this task.
     ///
-    /// Use [`RuntimeControl::workers`] to inspect the runtime's worker
-    /// coordinates and [`RuntimeControl::request_stop`] to request shutdown
-    /// without waiting.
+    /// Use [`RuntimeControl::workers`] to list the runtime's workers.
+    /// Use [`RuntimeControl::request_stop`] to request shutdown without waiting.
     #[must_use]
     #[inline]
     pub fn control(&self) -> &RuntimeControl {
         &self.inner.control
     }
 
-    /// Returns the associated worker's coordinate, including its NUMA locality.
+    /// Returns this context's worker details, including its thread and NUMA node.
     ///
-    /// This describes where the services belong, not necessarily the thread
-    /// executing the caller. Moving `Context` without relocation leaves this
-    /// coordinate unchanged.
+    /// A NUMA node groups processors near the same memory.
+    ///
+    /// Moving `Context` to another thread does not change these details unless
+    /// you relocate it.
     ///
     /// # Examples
     ///
@@ -125,12 +126,12 @@ impl Context {
         &self.inner.thread
     }
 
-    /// Returns the associated worker's clock.
+    /// Returns this context's worker clock.
     ///
     /// Use it for time queries, delays, stopwatches, and timeouts. The runtime
-    /// drives system timers while the worker is running. A `ClockControl` owner
-    /// advances controlled timers. Retaining the clock does not keep that
-    /// worker alive.
+    /// wakes tasks when their timers expire while the worker runs.
+    /// With controlled time, use `ClockControl` to advance time.
+    /// Keeping the clock does not keep that worker alive.
     ///
     /// # Examples
     ///
@@ -151,7 +152,7 @@ impl Context {
         &self.inner.clock
     }
 
-    /// Returns access to I/O contexts hosted by this runtime.
+    /// Returns access to this runtime's I/O contexts.
     #[must_use]
     #[inline]
     pub fn io(&self) -> &Io {

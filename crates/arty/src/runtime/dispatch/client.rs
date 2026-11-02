@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn relocate_updates_task_placement() {
-        // Create a dispatcher with 2 workers so we can verify which one receives tasks.
+        // Create two workers and observe which one receives each task.
         let (worker0_tx, worker0_rx) = channel::unbounded();
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let threads = test_threads(2);
@@ -200,13 +200,13 @@ mod tests {
         // Spawn a task on worker 1, not worker 0.
         scheduler.spawn(async |_| {});
 
-        // Worker 0 should have received nothing.
+        // Worker 0 receives no task.
         assert!(
             worker0_rx.try_recv().is_err(),
-            "task should not be dispatched to original worker after relocate"
+            "task must not dispatch to the original worker after relocation"
         );
-        // Worker 1 should have received the task.
-        assert!(worker1_rx.try_recv().is_ok(), "task should be dispatched to the relocated worker");
+        // Worker 1 receives the task.
+        assert!(worker1_rx.try_recv().is_ok(), "task must dispatch to the relocated worker");
     }
 
     #[test]

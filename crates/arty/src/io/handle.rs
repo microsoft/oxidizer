@@ -16,19 +16,25 @@ use crate::runtime::dispatch::{DispatcherClient, WorkerIndex};
 use crate::runtime::worker::asynchronous::LocalWorker;
 use crate::task::Context;
 
-/// Access to I/O contexts hosted by an Arty runtime.
+/// Access to an Arty runtime's I/O contexts.
 ///
-/// Obtain this handle from [`Context::io`](crate::task::Context::io). Clones
-/// remain associated with the same worker until their runtime relocates them.
-/// They can be used from ordinary threads; such access synchronously dispatches
-/// to the associated worker and is slower than worker-local access.
+/// Use [`Context::io`](crate::task::Context::io) to access these contexts.
+/// Cloning an `Io` value keeps its worker assignment.
+/// Arty can pass the value to another worker in the same runtime.
+/// Its [`ThreadAware`] implementation updates its worker assignment.
 ///
-/// A context type is registered once per runtime. The first request creates,
-/// stores a thread-neutral context, then clones and relocates it to initialize
-/// the requesting worker's driver. Other workers initialize their own driver
-/// when they first request that context. The first context type requested from
-/// a runtime is assigned the primary driver role; later context types are
-/// assigned the secondary role.
+/// Threads outside Arty can call [`context`](Self::context) on a clone.
+/// The call sends a request to the assigned worker and waits for its response.
+/// This is slower than access on that worker.
+///
+/// Arty creates each context type once per runtime.
+/// The first request creates and stores a context that does not belong to any worker.
+/// Arty clones it and updates the clone's state for the requesting worker.
+/// It then creates that worker's driver.
+/// Other workers create their own driver when they first request that context.
+/// The driver for the first context type registered in the runtime is primary.
+/// It can wait for I/O.
+/// Later drivers are secondary and must not wait for I/O.
 #[derive(Clone)]
 pub struct Io {
     runtime: IoRuntime,
@@ -45,21 +51,23 @@ impl Io {
         }
     }
 
-    /// Returns the runtime's context of type `C`, registering it if necessary.
+    /// Returns the runtime's context of type `C`, creating it on the first request.
     ///
-    /// `options` must be initialized before this call. Arty may clone it while
-    /// routing the request and accessing the worker-local host. Keep context
-    /// options inexpensive to clone.
+    /// Prepare `options` before this call.
+    /// Arty can clone it while sending the request to the worker or accessing the context there.
+    /// Keep context options inexpensive to clone. The options type must implement `Clone`,
+    /// `Send`, and `'static`.
     ///
-    /// Each concrete context type is initialized once per runtime. The first
-    /// successful call fixes the context created from `options`; later calls
+    /// Arty creates each context type once per runtime. The first call
+    /// that creates the context determines its `options`. Later calls
     /// return clones of that context and ignore any different options supplied.
     ///
     /// # Panics
     ///
     /// Panics if context access cannot complete, such as during shutdown, from
-    /// a non-associated Arty worker, or after driver initialization fails.
-    /// Panics from provider code, diagnostics, and runtime invariants propagate.
+    /// another Arty async worker, or if creating the driver fails.
+    /// Panics in the I/O library or code that reports runtime information also
+    /// pass through this method. So do panics from broken internal assumptions.
     #[must_use]
     pub fn context<C>(&self, options: &C::ContextOptions) -> C
     where
@@ -72,26 +80,31 @@ impl Io {
         }
     }
 
-    /// Returns the runtime's context of type `C`, registering it if necessary.
+    /// Returns the runtime's context of type `C`, creating it on the first request.
     ///
-    /// `options` must be initialized before this call. Arty may clone it while
-    /// routing the request and accessing the worker-local host. Keep context
-    /// options inexpensive to clone.
+    /// Prepare `options` before this call.
+    /// Arty can clone it while sending the request to the worker or accessing the context there.
+    /// Keep context options inexpensive to clone. The options type must implement `Clone`,
+    /// `Send`, and `'static`.
     ///
-    /// Each concrete context type is initialized once per runtime. The first
-    /// successful call fixes the context created from `options`; later calls
+    /// Arty creates each context type once per runtime. The first call
+    /// that creates the context determines its `options`. Later calls
     /// return clones of that context and ignore any different options supplied.
-    /// The requesting worker's driver is initialized before this method
-    /// returns. Other workers initialize their driver on first retrieval.
+    /// The requesting worker's driver is ready before this method returns.
+    /// Other workers create their driver when they first request the context.
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`] if the worker-local driver cannot be initialized,
-    /// the runtime is shutting down, the handle is no longer bound to an active
-    /// worker, the caller is an Arty worker other than the handle's associated
-    /// worker (from the same runtime or a different runtime), or context
-    /// retrieval is nested inside another context's initialization. Driver
-    /// initialization failure also requests runtime shutdown.
+    /// Returns an [`Error`] in these cases:
+    ///
+    /// - Arty cannot create the worker's driver.
+    /// - The runtime is shutting down.
+    /// - This `Io` value does not belong to an active worker.
+    /// - Another Arty async worker calls this method. The worker can belong to
+    ///   the same runtime or a different runtime.
+    /// - Code that creates a context requests another context before it finishes.
+    ///
+    /// If creating a driver fails, Arty also requests runtime shutdown.
     pub(crate) fn try_context<C>(&self, options: &C::ContextOptions) -> Result<C, Error>
     where
         C: IoContext,
