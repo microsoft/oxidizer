@@ -155,7 +155,7 @@
 //! # Security
 //!
 //! Each format can expand its input by orders of magnitude. Untrusted compressed data can exhaust
-//! memory. The [Streaming](crate#streaming) section explains how `CompressionStream` returns
+//! memory. The [Streaming](#streaming) section explains how `CompressionStream` returns
 //! output without accumulating it. Its caller can still retain chunks.
 //! Whole-buffer decompression adds fallback limits for bounds that the caller did not set. The
 //! fallbacks are 64 MiB of output and 1024 concatenated streams.
@@ -255,7 +255,7 @@ use crate::core::{Compress, Compression, Decompress, process};
 /// Takes any compressor that implements [`Compression`] with [`Compress`] mode. This includes a
 /// concrete compressor and the `format::Compressor` from [`CompressorBuilder::build_format`].
 ///
-/// This function buffers the complete result. See [Streaming](crate#streaming) for incremental
+/// This function buffers the complete result. See [Streaming](#streaming) for incremental
 /// input with `CompressionStream`.
 ///
 /// # Security
