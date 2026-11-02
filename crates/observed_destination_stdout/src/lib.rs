@@ -49,11 +49,6 @@
 #![doc(
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/observed_destination_stdout/favicon.ico"
 )]
-// Temporary compatibility: remove as this crate migrates to Anvil defaults.
-#![allow(
-    clippy::empty_structs_with_brackets,
-    reason = "Temporary compatibility with existing empty structs during migration to Anvil defaults"
-)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use std::fmt::Debug;
@@ -249,6 +244,11 @@ pub fn stdout_metrics() -> StdoutMetricDestinationBuilder {
 
 /// A metric destination that writes to stdout via the `OTel` stdout exporter.
 #[derive(bon::Builder, Debug)]
+// Temporary compatibility: remove as this crate migrates to Anvil defaults.
+#[expect(
+    clippy::empty_structs_with_brackets,
+    reason = "Temporary compatibility with existing empty structs during migration to Anvil defaults"
+)]
 pub struct StdoutMetricDestination {}
 
 impl StdoutMetricDestination {
@@ -566,10 +566,16 @@ mod tests {
 
     #[rstest]
     // Flushing must export pending measurements.
-    #[cfg_attr(miri, ignore = "opentelemetry_sdk metric aggregation reads the realtime clock, unavailable under Miri isolation; native and cargo careful runs retain this coverage")]
+    #[cfg_attr(
+        miri,
+        ignore = "opentelemetry_sdk metric aggregation reads the realtime clock, unavailable under Miri isolation; native and cargo careful runs retain this coverage"
+    )]
     #[case::force_flush(SdkMeterProvider::force_flush)]
     // Shutdown must export pending measurements without a prior flush.
-    #[cfg_attr(miri, ignore = "opentelemetry_sdk metric aggregation reads the realtime clock, unavailable under Miri isolation; native and cargo careful runs retain this coverage")]
+    #[cfg_attr(
+        miri,
+        ignore = "opentelemetry_sdk metric aggregation reads the realtime clock, unavailable under Miri isolation; native and cargo careful runs retain this coverage"
+    )]
     #[case::shutdown(SdkMeterProvider::shutdown)]
     fn metric_destination_exports_recorded_metrics(#[case] export: fn(&SdkMeterProvider) -> OTelSdkResult) {
         let exporter = InMemoryMetricExporter::default();
