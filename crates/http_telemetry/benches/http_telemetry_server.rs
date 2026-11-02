@@ -17,7 +17,7 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
-use common::{Failing, NeverResponding, Responding};
+use common::{ACTIVE, Failing, NeverResponding, Responding, Tenant};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::RedactionEngine;
 use http::{Method, StatusCode, Version};
@@ -27,25 +27,27 @@ use layered::Layer;
 use observed::context::Transfer;
 use observed::metadata::{EventDescription, FieldDescriptor};
 use observed::processing::{EventProcessor, EventView, FieldValueFn};
-use observed::{Enrichment, FlushError, Sink, SinkId};
+use observed::{FlushError, Sink, SinkId};
 use tick::SimpleClock;
 
 const GROUP: &str = "http_telemetry_server/request";
 const CASE: &str = "get";
 
-/// Reads every field and every enrichment of each event, and keeps nothing. Thus the measurements
-/// do not include the work of keeping the events.
-#[derive(Default)]
-struct ReadAll(RedactionEngine);
+/// Reads every field and every enrichment of each event whose name `interested` accepts, and keeps
+/// nothing. Thus the measurements do not include the work of keeping the events.
+struct ReadAll {
+    engine: RedactionEngine,
+    interested: fn(&str) -> bool,
+}
 
 impl EventProcessor for ReadAll {
-    fn is_interested(&self, _: &EventDescription) -> bool {
-        true
+    fn is_interested(&self, description: &EventDescription) -> bool {
+        (self.interested)(description.name())
     }
 
     fn process(&self, event: &EventView<'_>) {
         let mut read = |_: &FieldDescriptor, value: &FieldValueFn<'_>| {
-            black_box(value(&self.0));
+            black_box(value(&self.engine));
             ControlFlow::Continue(())
         };
         let _ = event.visit_fields(&mut read);
@@ -57,15 +59,32 @@ impl EventProcessor for ReadAll {
     }
 }
 
-/// A sink with `count` processors that each read every field.
+/// A sink with `count` processors that each read every field of every event.
 fn reading_sink(count: usize) -> Sink {
     Sink::builder(SinkId::new("reading"))
         .clock(SimpleClock::new_frozen())
         .processors(
             (0..count)
-                .map(|_| Arc::new(ReadAll::default()) as Arc<dyn EventProcessor>)
+                .map(|_| {
+                    Arc::new(ReadAll {
+                        engine: RedactionEngine::default(),
+                        interested: |_| true,
+                    }) as Arc<dyn EventProcessor>
+                })
                 .collect(),
         )
+        .build()
+}
+
+/// A sink with one processor that reads every field of each event whose name `interested`
+/// accepts.
+fn filtered_sink(interested: fn(&str) -> bool) -> Sink {
+    Sink::builder(SinkId::new("filtered"))
+        .clock(SimpleClock::new_frozen())
+        .processors(vec![Arc::new(ReadAll {
+            engine: RedactionEngine::default(),
+            interested,
+        })])
         .build()
 }
 
@@ -90,13 +109,6 @@ fn interested_sink() -> Sink {
         .clock(SimpleClock::new_frozen())
         .processors(vec![Arc::new(Interested)])
         .build()
-}
-
-#[derive(Enrichment)]
-struct Tenant {
-    #[dimension(metric = "tenant")]
-    #[unredacted]
-    tenant: &'static str,
 }
 
 /// A `PURGE` request, which `http.request.method` records as `_OTHER`.
@@ -218,6 +230,25 @@ fn enriched_three_sinks<S: Borrow<(Telemetry<Responding>, Transfer)>>(
     (response, setup)
 }
 
+#[metabench::benchmark(ACTIVE_REQUESTS_ONLY, GROUP, "active_requests_only")]
+#[bench::https(
+    Box::new(responding_stack(filtered_sink(|name| name == ACTIVE))),
+    common::get_to("https://example.com/books/1")
+)]
+#[bench::ftp(
+    Box::new(responding_stack(filtered_sink(|name| name == ACTIVE))),
+    common::get_to("ftp://example.com/books/1")
+)]
+fn active_requests_only<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
+    (send(stack.borrow(), request), stack)
+}
+
+#[metabench::benchmark(REQUEST_EVENTS_ONLY, GROUP, "request_events_only")]
+#[bench::get(Box::new(responding_stack(filtered_sink(|name| name != ACTIVE))), common::get())]
+fn request_events_only<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
+    (send(stack.borrow(), request), stack)
+}
+
 #[metabench::benchmark(INNER_ERROR, GROUP, "inner_error")]
 #[bench::validation(Box::new(common::FAILING), common::get())]
 #[bench::connection_refused(Box::new(common::FAILING_CHAINED), common::get())]
@@ -270,6 +301,20 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+    let stack = responding_stack(filtered_sink(|name| name == ACTIVE));
+    for (case, uri) in [("https", "https://example.com/books/1"), ("ftp", "ftp://example.com/books/1")] {
+        group.bench_function(BenchmarkId::new(ACTIVE_REQUESTS_ONLY.benchmark_name(), case), |bencher| {
+            bencher.iter_batched(
+                || common::get_to(uri),
+                |request| active_requests_only(&stack, request).0,
+                BatchSize::SmallInput,
+            );
+        });
+    }
+    let stack = responding_stack(filtered_sink(|name| name != ACTIVE));
+    group.bench_function(BenchmarkId::new(REQUEST_EVENTS_ONLY.benchmark_name(), CASE), |bencher| {
+        bencher.iter_batched(common::get, |request| request_events_only(&stack, request).0, BatchSize::SmallInput);
+    });
     for (case, handler) in [("validation", common::FAILING), ("connection_refused", common::FAILING_CHAINED)] {
         group.bench_function(BenchmarkId::new(INNER_ERROR.benchmark_name(), case), |bencher| {
             bencher.iter_batched(common::get, |request| inner_error(&handler, request).0, BatchSize::SmallInput);
@@ -292,6 +337,8 @@ metabench::main!(
         METHOD_ORIGINAL_READ,
         LONG_METHOD,
         ENRICHED_THREE_SINKS,
+        ACTIVE_REQUESTS_ONLY,
+        REQUEST_EVENTS_ONLY,
         INNER_ERROR,
         HANDLER_ERROR,
     ],

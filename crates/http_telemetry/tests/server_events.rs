@@ -11,24 +11,17 @@ mod common;
 use std::collections::HashSet;
 use std::time::Duration;
 
-use common::{ABANDONED, COMPLETE, Captured, DURATION, ERROR, Probe, duration, server};
+use common::{ABANDONED, ACTIVE, COMPLETE, Capture, Captured, DURATION, ERROR, Probe, Tenant, duration, server};
 use future_assert::{FutureTestExt, poll_once};
 use http::{Method, StatusCode, Version};
 use layered::{Layer, Service};
 use observed::enrichment::EnrichFnExt;
 use observed::metadata::EventDescription;
-use observed::{Enrichment, Severity, Value};
+use observed::{Severity, Value};
 use tick::ClockControl;
 
-#[derive(Enrichment)]
-struct Tenant {
-    #[dimension(metric = "tenant")]
-    #[unredacted]
-    tenant: &'static str,
-}
-
 #[test]
-fn server_complete_event_reports_method_status_version_and_duration() {
+fn server_complete_event_reports_method_scheme_status_version_and_duration() {
     let (sink, capture) = common::capture_sink();
     let clock = ClockControl::new();
     let service =
@@ -36,7 +29,10 @@ fn server_complete_event_reports_method_status_version_and_duration() {
             .clock(clock.to_simple_clock())
             .layer(common::responding_after(&clock, Duration::from_millis(125), StatusCode::OK));
 
-    let response = service.execute(common::get()).unwrap_ready().unwrap();
+    let response = service
+        .execute(common::get_to("https://example.com/books/1"))
+        .unwrap_ready()
+        .unwrap();
 
     assert_eq!(
         (response.status(), capture.single()),
@@ -49,12 +45,14 @@ fn server_complete_event_reports_method_status_version_and_duration() {
                 timestamp: common::sink_time(),
                 logs: vec![
                     ("http.request.method", Value::from("GET")),
+                    ("url.scheme", Value::from("https")),
                     ("network.protocol.version", Value::from("1.1")),
                     ("http.response.status_code", Value::I64(200)),
                     (DURATION, Value::U64(125)),
                 ],
                 dimensions: vec![
                     ("http.request.method", Value::from("GET")),
+                    ("url.scheme", Value::from("https")),
                     ("network.protocol.version", Value::from("1.1")),
                     ("http.response.status_code", Value::I64(200)),
                 ],
@@ -71,7 +69,7 @@ fn server_dropped_future_reports_abandoned_without_status() {
     let clock = ClockControl::new();
     let service = server(sink).clock(clock.to_simple_clock()).layer(common::NeverResponding);
 
-    let mut future = Box::pin(service.execute(common::get()));
+    let mut future = Box::pin(service.execute(common::get_to("https://example.com/books/1")));
     assert!(poll_once(&mut future).is_pending());
     clock.advance(Duration::from_millis(40));
     drop(future);
@@ -85,18 +83,56 @@ fn server_dropped_future_reports_abandoned_without_status() {
             timestamp: common::sink_time(),
             logs: vec![
                 ("http.request.method", Value::from("GET")),
+                ("url.scheme", Value::from("https")),
                 ("network.protocol.version", Value::from("1.1")),
                 ("error.type", Value::from("abandoned")),
                 (DURATION, Value::U64(40)),
             ],
             dimensions: vec![
                 ("http.request.method", Value::from("GET")),
+                ("url.scheme", Value::from("https")),
                 ("network.protocol.version", Value::from("1.1")),
                 ("error.type", Value::from("abandoned")),
             ],
             measurements: vec![duration(40)],
             enrichments: vec![],
         }
+    );
+}
+
+#[test]
+fn url_scheme_is_http_https_other_or_missing() {
+    let schemes_of = |uri: &'static str| {
+        let capture = Capture::new(|_| true);
+        let service = server(common::sink_with(&capture)).layer(common::responding(StatusCode::OK));
+        service.execute(common::get_to(uri)).unwrap_ready().unwrap();
+        capture
+            .events()
+            .iter()
+            .map(|event| (event.name, event.log("url.scheme").cloned(), event.dimension("url.scheme").cloned()))
+            .collect::<Vec<_>>()
+    };
+    let each_event = |scheme: Option<&'static str>| {
+        let scheme = scheme.map(Value::from);
+        [ACTIVE, COMPLETE, ACTIVE]
+            .map(|name| (name, scheme.clone(), scheme.clone()))
+            .to_vec()
+    };
+
+    assert_eq!(
+        [
+            "/books/1",
+            "http://example.com/books/1",
+            "https://example.com/books/1",
+            "ftp://example.com/books/1"
+        ]
+        .map(schemes_of),
+        [
+            each_event(None),
+            each_event(Some("http")),
+            each_event(Some("https")),
+            each_event(Some("_OTHER"))
+        ]
     );
 }
 
@@ -121,7 +157,7 @@ fn each_event_has_own_type_id() {
     let mut names: Vec<_> = asked.iter().map(EventDescription::name).collect();
     names.sort_unstable();
     let type_ids: HashSet<_> = asked.iter().map(|description| description.type_id().unwrap()).collect();
-    assert_eq!((names, type_ids.len()), (vec![ABANDONED, COMPLETE, ERROR], 3));
+    assert_eq!((names, type_ids.len()), (vec![ACTIVE, ABANDONED, COMPLETE, ERROR], 4));
 }
 
 #[test]
@@ -222,5 +258,5 @@ fn interest_is_checked_for_each_request() {
     probe.set_interested(true);
     service.execute(common::get()).unwrap_ready().unwrap();
 
-    assert_eq!(probe.received(), vec![COMPLETE]);
+    assert_eq!(probe.received(), vec![ACTIVE, COMPLETE, ACTIVE]);
 }

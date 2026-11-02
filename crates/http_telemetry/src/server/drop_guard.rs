@@ -12,7 +12,7 @@ use observed::{Sink, Text, emit};
 use tick::Stopwatch;
 
 use super::OTHER;
-use super::events::{RequestAbandoned, RequestComplete, RequestError};
+use super::events::{ActiveRequests, RequestAbandoned, RequestComplete, RequestError};
 
 /// The texts of the statuses 500 to 599, three digits each. `StatusCode::as_str` returns a text that
 /// borrows the status, so the `error.type` of a complete event comes from here.
@@ -54,10 +54,22 @@ pub(crate) struct TelemetryDropGuard<'a> {
     pub(crate) enrichment: Transfer,
     pub(crate) method: Method,
     pub(crate) protocol_version: &'static str,
+    pub(crate) scheme: Option<&'static str>,
     pub(crate) finished: bool,
 }
 
 impl TelemetryDropGuard<'_> {
+    pub(crate) fn add_active_request(&self, delta: i64) {
+        emit!(
+            self.sink,
+            ActiveRequests {
+                delta,
+                method: http_method_name(&self.method),
+                scheme: self.scheme,
+            }
+        );
+    }
+
     pub(crate) fn emit(&mut self, end: RequestEnd<'_>) {
         self.finished = true;
         #[expect(
@@ -80,6 +92,7 @@ impl TelemetryDropGuard<'_> {
                     RequestComplete {
                         method,
                         method_original,
+                        scheme: self.scheme,
                         protocol_version,
                         status_code: i64::from(status_code.as_u16()),
                         error_type,
@@ -92,6 +105,7 @@ impl TelemetryDropGuard<'_> {
                 RequestError {
                     method,
                     method_original,
+                    scheme: self.scheme,
                     protocol_version,
                     error_type: Text::from(collect_error_labels(error).into_cow()),
                     duration_ms,
@@ -102,6 +116,7 @@ impl TelemetryDropGuard<'_> {
                 RequestError {
                     method,
                     method_original,
+                    scheme: self.scheme,
                     protocol_version,
                     error_type: Text::from("panic"),
                     duration_ms,
@@ -112,12 +127,14 @@ impl TelemetryDropGuard<'_> {
                 RequestAbandoned {
                     method,
                     method_original,
+                    scheme: self.scheme,
                     protocol_version,
                     error_type: "abandoned",
                     duration_ms,
                 }
             ),
         }
+        self.add_active_request(-1);
     }
 }
 

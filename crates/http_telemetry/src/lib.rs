@@ -61,9 +61,29 @@
 //! | Attribute | Type | Description | Examples | Presence |
 //! |---|---|---|---|---|
 //! | `http.request.method` | string | HTTP request method. `_OTHER` for any method other than `CONNECT`, `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT` and `TRACE`. | `GET`; `POST`; `_OTHER` | Always |
+//! | `url.scheme` | string | The scheme of the request URI. `_OTHER` for a scheme other than `http` and `https`. | `http`; `https`; `_OTHER` | If the request URI has a scheme. |
 //! | `network.protocol.version` | string | Version of the HTTP protocol. `_OTHER` for a version other than 1.0, 1.1, 2 and 3. | `1.1`; `2` | Always |
 //! | `http.response.status_code` | int | HTTP response status code. | `200` | If the handler returned a response. |
 //! | `error.type` | string | Describes a class of error the request ended with. A handler error gives the labels of the error and its sources, joined with dots ([`collect_error_labels`](http_extensions::collect_error_labels)). A handler panic gives `panic`. A status from 500 to 599 gives the status code. A dropped request future gives `abandoned`. | `validation`; `io.connection_refused`; `panic`; `503`; `abandoned` | If the handler returned an error or panicked, the status is from 500 to 599, or the caller dropped the request future before the handler returned. |
+//!
+//! ## Metric: `http.server.active_requests`
+//!
+//! | Name | Instrument Type | Unit (UCUM) | Description |
+//! |---|---|---|---|
+//! | `http.server.active_requests` | `UpDownCounter` | `{request}` | Number of active HTTP server requests. |
+//!
+//! | Attribute | Type | Description | Examples | Presence |
+//! |---|---|---|---|---|
+//! | `http.request.method` | string | HTTP request method, as for `http.server.request.duration`. | `GET`; `POST`; `_OTHER` | Always |
+//! | `url.scheme` | string | The scheme of the request URI, as for `http.server.request.duration`. | `http`; `https`; `_OTHER` | If the request URI has a scheme. |
+//!
+//! The middleware adds `1` when it starts a request, before it calls the handler. It adds `-1` when
+//! the request ends, after the event of the request. Each change is also the event
+//! `http.server.active_requests` at Debug, with the message `Active HTTP server requests changed`,
+//! the change under the key `http.server.active_requests`, and the attributes of the metric.
+//!
+//! The counter stays one too high when the middleware cannot add the `-1`: if the request future is
+//! dropped while its thread panics, or if a processor panics while the middleware emits.
 //!
 //! # When the middleware emits no event
 //!

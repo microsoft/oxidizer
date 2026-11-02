@@ -22,6 +22,10 @@ pub(crate) struct RequestComplete {
     #[unredacted]
     #[if_none(drop)]
     pub(crate) method_original: Option<Text>,
+    #[dimension(log = "url.scheme", metric = "url.scheme")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) scheme: Option<&'static str>,
     #[dimension(log = "network.protocol.version", metric = "network.protocol.version")]
     #[unredacted]
     pub(crate) protocol_version: &'static str,
@@ -54,6 +58,10 @@ pub(crate) struct RequestError {
     #[unredacted]
     #[if_none(drop)]
     pub(crate) method_original: Option<Text>,
+    #[dimension(log = "url.scheme", metric = "url.scheme")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) scheme: Option<&'static str>,
     #[dimension(log = "network.protocol.version", metric = "network.protocol.version")]
     #[unredacted]
     pub(crate) protocol_version: &'static str,
@@ -83,6 +91,10 @@ pub(crate) struct RequestAbandoned {
     #[unredacted]
     #[if_none(drop)]
     pub(crate) method_original: Option<Text>,
+    #[dimension(log = "url.scheme", metric = "url.scheme")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) scheme: Option<&'static str>,
     #[dimension(log = "network.protocol.version", metric = "network.protocol.version")]
     #[unredacted]
     pub(crate) protocol_version: &'static str,
@@ -92,4 +104,22 @@ pub(crate) struct RequestAbandoned {
     #[dimension(log = "http.server.request.duration")]
     #[unredacted]
     pub(crate) duration_ms: u64,
+}
+
+/// Produces the event `http.server.active_requests`, with `delta` `1` when a request starts and `-1`
+/// when it ends.
+#[event("http.server.active_requests")]
+#[debug("Active HTTP server requests changed")]
+#[updown_counter(delta, desc = "Number of active HTTP server requests.", unit = "{request}")]
+pub(crate) struct ActiveRequests {
+    #[dimension(log = "http.server.active_requests")]
+    #[unredacted]
+    pub(crate) delta: i64,
+    #[dimension(log = "http.request.method", metric = "http.request.method")]
+    #[unredacted]
+    pub(crate) method: &'static str,
+    #[dimension(log = "url.scheme", metric = "url.scheme")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) scheme: Option<&'static str>,
 }

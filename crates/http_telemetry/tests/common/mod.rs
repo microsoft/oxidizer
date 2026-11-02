@@ -20,12 +20,13 @@ use http_telemetry::{Telemetry, TelemetryLayer};
 use layered::{Execute, Service};
 use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind};
 use observed::processing::{EventProcessor, EventView, FieldValueFn};
-use observed::{FlushError, Severity, Sink, SinkId, Value};
+use observed::{Enrichment, FlushError, Severity, Sink, SinkId, Value};
 use tick::{ClockControl, SimpleClock};
 
 pub(crate) const COMPLETE: &str = "http.server.request.complete";
 pub(crate) const ERROR: &str = "http.server.request.error";
 pub(crate) const ABANDONED: &str = "http.server.request.abandoned";
+pub(crate) const ACTIVE: &str = "http.server.active_requests";
 pub(crate) const DURATION: &str = "http.server.request.duration";
 
 /// A server layer over `sink` with a frozen clock. If a test does not set its own clock, each
@@ -82,16 +83,33 @@ impl Captured {
     pub(crate) fn log(&self, key: &str) -> Option<&Value> {
         self.logs.iter().find_map(|(log_key, value)| (*log_key == key).then_some(value))
     }
+
+    /// The value of the metric dimension `key`.
+    pub(crate) fn dimension(&self, key: &str) -> Option<&Value> {
+        self.dimensions
+            .iter()
+            .find_map(|(dimension_key, value)| (*dimension_key == key).then_some(value))
+    }
 }
 
-/// Captures every event. It keeps log fields, metric dimensions, metric values and enrichments
-/// apart, so a test can tell a log-only field from a metric dimension.
-#[derive(Clone, Default)]
+/// Captures each event whose name it is interested in. It keeps log fields, metric dimensions,
+/// metric values and enrichments apart, so a test can tell a log-only field from a metric
+/// dimension.
+#[derive(Clone)]
 pub(crate) struct Capture {
+    interested: fn(&str) -> bool,
     events: Arc<Mutex<Vec<Captured>>>,
 }
 
 impl Capture {
+    /// Captures each event whose name `interested` accepts.
+    pub(crate) fn new(interested: fn(&str) -> bool) -> Self {
+        Self {
+            interested,
+            events: Arc::default(),
+        }
+    }
+
     pub(crate) fn events(&self) -> Vec<Captured> {
         self.events.lock().unwrap().clone()
     }
@@ -108,8 +126,8 @@ impl Capture {
 }
 
 impl EventProcessor for Capture {
-    fn is_interested(&self, _: &EventDescription) -> bool {
-        true
+    fn is_interested(&self, description: &EventDescription) -> bool {
+        (self.interested)(description.name())
     }
 
     fn process(&self, event: &EventView<'_>) {
@@ -155,14 +173,18 @@ impl EventProcessor for Capture {
     }
 }
 
-/// A sink with one [`Capture`] processor, and a frozen clock at [`sink_time`].
-pub(crate) fn capture_sink() -> (Sink, Capture) {
-    let capture = Capture::default();
-    let sink = Sink::builder(SinkId::new("capture"))
+/// A sink whose one processor is `capture`, and a frozen clock at [`sink_time`].
+pub(crate) fn sink_with(capture: &Capture) -> Sink {
+    Sink::builder(SinkId::new("capture"))
         .clock(SimpleClock::new_frozen_at(sink_time()))
         .processors(vec![Arc::new(capture.clone())])
-        .build();
-    (sink, capture)
+        .build()
+}
+
+/// A sink that captures every event except the deltas of `http.server.active_requests`.
+pub(crate) fn capture_sink() -> (Sink, Capture) {
+    let capture = Capture::new(|name| name != ACTIVE);
+    (sink_with(&capture), capture)
 }
 
 /// Tells the sink whether it is interested, with an answer that the test can change. It records
@@ -226,6 +248,19 @@ pub(crate) fn request(method: Method, version: Version) -> HttpRequest {
 /// A `GET` request over HTTP/1.1.
 pub(crate) fn get() -> HttpRequest {
     request(Method::GET, Version::HTTP_11)
+}
+
+/// A `GET` request over HTTP/1.1 to `uri`.
+pub(crate) fn get_to(uri: &'static str) -> HttpRequest {
+    Request::get(uri).body(HttpBodyBuilder::new_fake().empty()).unwrap()
+}
+
+/// An enrichment with the metric dimension `tenant`.
+#[derive(Enrichment)]
+pub(crate) struct Tenant {
+    #[dimension(metric = "tenant")]
+    #[unredacted]
+    pub(crate) tenant: &'static str,
 }
 
 /// Responds to each request with its status and an empty body. It does not allocate.

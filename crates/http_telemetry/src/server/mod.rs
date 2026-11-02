@@ -9,7 +9,7 @@ mod events;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use drop_guard::{RequestEnd, TelemetryDropGuard};
-use events::{RequestAbandoned, RequestComplete, RequestError};
+use events::{ActiveRequests, RequestAbandoned, RequestComplete, RequestError};
 use futures::FutureExt;
 use futures::future::Either;
 use http::Version;
@@ -19,7 +19,7 @@ use observed::Event;
 
 use crate::telemetry::Telemetry;
 
-/// The replacement value for unknown HTTP methods or HTTP protocol versions. We cannot support
+/// The replacement value for unknown HTTP methods, URL schema, or HTTP protocol versions. We cannot support
 /// arbitrary value there and must have finite lists to avoid dimension cardinality blow up.
 const OTHER: &str = "_OTHER";
 
@@ -33,6 +33,7 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
             RequestComplete::DESCRIPTION,
             RequestError::DESCRIPTION,
             RequestAbandoned::DESCRIPTION,
+            ActiveRequests::DESCRIPTION,
         ]
         .iter()
         .any(|description| layer.sink.is_interested(description));
@@ -48,14 +49,22 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
             _ => OTHER,
         };
 
+        let scheme = input.uri().scheme_str().map(|scheme| match scheme {
+            "http" => "http",
+            "https" => "https",
+            _ => OTHER,
+        });
+
         let mut guard = TelemetryDropGuard {
             sink: &layer.sink,
             stopwatch: layer.clock.stopwatch(),
             enrichment: layer.sink.transfer_context(),
             method: input.method().clone(),
             protocol_version,
+            scheme,
             finished: false,
         };
+        guard.add_active_request(1);
         // The middleware resumes each panic that it catches and never polls the handler again, so the
         // handler does not need to be unwind safe. The handler can panic in the call too, because
         // `Execute` runs the handler closure in `execute`.

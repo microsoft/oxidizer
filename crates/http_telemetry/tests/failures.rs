@@ -13,7 +13,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::task::Poll;
 
-use common::{COMPLETE, Capture, Captured, DURATION, ERROR, duration, server};
+use common::{ACTIVE, COMPLETE, Capture, Captured, DURATION, ERROR, duration, server};
 use future_assert::{FutureTestExt, poll_once};
 use http::{StatusCode, Uri};
 use http_extensions::{HttpError, HttpRequest, HttpResponse, collect_error_labels};
@@ -23,12 +23,12 @@ use observed::processing::{EventProcessor, EventView};
 use observed::{FlushError, Severity, Sink, SinkId, Value};
 use tick::SimpleClock;
 
-/// Panics for each event that it gets.
+/// Panics for each event that it gets, except the deltas of `http.server.active_requests`.
 struct PanickingProcessor;
 
 impl EventProcessor for PanickingProcessor {
-    fn is_interested(&self, _: &EventDescription) -> bool {
-        true
+    fn is_interested(&self, description: &EventDescription) -> bool {
+        description.name() != ACTIVE
     }
 
     #[expect(clippy::panic, reason = "this test injects a processor panic")]
@@ -43,11 +43,10 @@ impl EventProcessor for PanickingProcessor {
 
 /// The `error.type` of `event`, as a log field and as a metric dimension.
 fn error_type(event: &Captured) -> (Option<String>, Option<String>) {
-    let dimension = event
-        .dimensions
-        .iter()
-        .find_map(|(key, value)| (*key == "error.type").then(|| value.to_string()));
-    (event.log("error.type").map(ToString::to_string), dimension)
+    (
+        event.log("error.type").map(ToString::to_string),
+        event.dimension("error.type").map(ToString::to_string),
+    )
 }
 
 #[test]
@@ -55,7 +54,10 @@ fn server_handler_error_reports_error_event_without_status() {
     let (sink, capture) = common::capture_sink();
     let service = server(sink).layer(common::FAILING);
 
-    let error = service.execute(common::get()).unwrap_ready().unwrap_err();
+    let error = service
+        .execute(common::get_to("https://example.com/books/1"))
+        .unwrap_ready()
+        .unwrap_err();
 
     assert_eq!(
         (error.to_string(), capture.single()),
@@ -68,12 +70,14 @@ fn server_handler_error_reports_error_event_without_status() {
                 timestamp: common::sink_time(),
                 logs: vec![
                     ("http.request.method", Value::from("GET")),
+                    ("url.scheme", Value::from("https")),
                     ("network.protocol.version", Value::from("1.1")),
                     ("error.type", Value::from("validation")),
                     (DURATION, Value::U64(0)),
                 ],
                 dimensions: vec![
                     ("http.request.method", Value::from("GET")),
+                    ("url.scheme", Value::from("https")),
                     ("network.protocol.version", Value::from("1.1")),
                     ("error.type", Value::from("validation")),
                 ],
@@ -157,7 +161,7 @@ fn synchronous_handler_panic_reports_panic_error() {
 
 #[test]
 fn processor_panic_is_not_reported_as_handler_panic() {
-    let capture = Capture::default();
+    let capture = Capture::new(|name| name != ACTIVE);
     let sink = Sink::builder(SinkId::new("panicking"))
         .clock(SimpleClock::new_frozen())
         .processors(vec![Arc::new(capture.clone()), Arc::new(PanickingProcessor)])
