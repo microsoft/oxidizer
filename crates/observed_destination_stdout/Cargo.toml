@@ -24,8 +24,8 @@ all-features = true
 
 # 3rd-party
 bon = { workspace = true }
-log = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
+log = { workspace = true }
 # ox-sdk
 observed_destination_core = { workspace = true }
 opentelemetry = { workspace = true, features = ["logs"] }
