@@ -1636,7 +1636,7 @@ fn initialize_local_recorder(local: &LocalRecorder) -> *const ThreadRecorder {
     // SAFETY: allocated is properly aligned writable storage for one value.
     unsafe { allocated.write(ThreadRecorder::new()) };
     RECORDERS
-        .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
+        .try_update(Ordering::Release, Ordering::Acquire, |head| {
             // SAFETY: allocated points to the initialized recorder owned by this
             // thread until this atomic update publishes it.
             unsafe { (*allocated).next.store(head, Ordering::Relaxed) };
@@ -3263,7 +3263,7 @@ mod tests {
                 // Release publishes this initialized header to acquiring traversals;
                 // next can be relaxed while the header is still unpublished.
                 RECORDERS
-                    .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
+                    .try_update(Ordering::Release, Ordering::Acquire, |head| {
                         recorder.next.store(head, Ordering::Relaxed);
                         Some(ptr::from_ref(recorder).cast_mut())
                     })

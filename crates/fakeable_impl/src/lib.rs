@@ -303,8 +303,6 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
             .into_compile_error();
     }
 
-    let cfg_attrs: Vec<_> = item_impl.attrs.iter().filter(|attr| attr.path().is_ident("cfg")).collect();
-
     // Extract the struct segment from the impl target, including generic arguments.
     let struct_segment = match extract_struct_segment(item_impl) {
         Ok(segment) => segment,
@@ -377,6 +375,7 @@ fn process_impl(args: &FakeableArgs, item_impl: &ItemImpl) -> proc_macro2::Token
 
         #[cfg(feature = "mockall")]
         {
+            let cfg_attrs: Vec<_> = item_impl.attrs.iter().filter(|attr| attr.path().is_ident("cfg")).collect();
             let fake_name = struct_name.to_string();
             let fake_module = args.mockall_fake_module.as_deref().unwrap_or("fakes");
             let visibility = args.mockall_fake_visibility.clone().unwrap_or_else(|| parse_quote!(pub));
@@ -1180,6 +1179,7 @@ fn trait_path_contains_wrapper_sensitive_type(path: &syn::Path, service_name: &p
 /// Converts an async function signature to a non-async function with impl Future return type because
 /// for methods with impl Future return types, mockall supports futures to be returned by mocks, unlike
 /// for async methods, for which it only supports returning values that are wrapped in immediate futures.
+#[cfg(feature = "mockall")]
 fn convert_async_to_impl_future(sig: &syn::Signature) -> proc_macro2::TokenStream {
     // Extract the original return type
     let output_type = match &sig.output {
@@ -1255,6 +1255,7 @@ fn contains_reference_in_generic(ty: &syn::Type) -> bool {
     count_nested_elided_references(ty, false) > 0
 }
 
+#[cfg(feature = "mockall")]
 fn type_contains_bound_lifetimes(ty: &syn::Type) -> bool {
     struct BoundLifetimeVisitor {
         found: bool,
@@ -1271,6 +1272,7 @@ fn type_contains_bound_lifetimes(ty: &syn::Type) -> bool {
     visitor.found
 }
 
+#[cfg(feature = "mockall")]
 fn type_contains_implicit_higher_ranked_elision(ty: &syn::Type) -> bool {
     struct ElidedReferenceVisitor {
         found: bool,
@@ -1378,6 +1380,7 @@ fn add_lifetime_to_nested_references(ty: &mut syn::Type, lifetime: &syn::Lifetim
     syn::visit_mut::VisitMut::visit_type_mut(&mut visitor, ty);
 }
 
+#[cfg(feature = "mockall")]
 fn validate_mockall_method(method: &syn::ImplItemFn, is_delegated: bool) -> Result<(), syn::Error> {
     if !is_delegated {
         return Ok(());
@@ -1483,6 +1486,7 @@ fn validate_mockall_method(method: &syn::ImplItemFn, is_delegated: bool) -> Resu
 }
 
 /// Generates a mockall mock! macro for the given impl block.
+#[cfg(feature = "mockall")]
 fn generate_mockall_fake(
     item_impl: &ItemImpl,
     fake_name: &str,
