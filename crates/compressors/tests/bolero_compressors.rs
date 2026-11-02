@@ -135,8 +135,8 @@ fn run(scenario: &Scenario) {
     let mutated = mutate(scenario.mutation, &encoded);
 
     // An unmutated valid stream is the only case with a knowable answer, and only when nothing
-    // bounds it below its own size. Every other case can fail. The test determines
-    // that it fails rather than panics or runs away.
+    // bounds it below its own size. Every other case can succeed or fail. The test requires each
+    // case to terminate without a panic while keeping configured bounds active.
     let pristine = scenario.valid && matches!(scenario.mutation, Mutation::None);
     let natural = payload.len() as u64;
 
