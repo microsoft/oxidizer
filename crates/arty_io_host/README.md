@@ -44,7 +44,7 @@ host.execute_cycle(Duration::ZERO)?;
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_host">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbJ2aQtYLoZPIbqsQr94rGs5QbLqqiU9bMpXEb2Rsmum1bD65hZIGCbGFydHlfaW9faG9zdGUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbJ2aQtYLoZPIbqsQr94rGs5QbLqqiU9bMpXEb2Rsmum1bD65hZIGCbGFydHlfaW9faG9zdGUwLjYuMA
  [__link0]: https://docs.rs/arty
- [__link1]: https://docs.rs/arty_io_host/0.2.0/arty_io_host/?search=IoRuntime
- [__link2]: https://docs.rs/arty_io_host/0.2.0/arty_io_host/?search=DriverHost
+ [__link1]: https://docs.rs/arty_io_host/0.6.0/arty_io_host/?search=IoRuntime
+ [__link2]: https://docs.rs/arty_io_host/0.6.0/arty_io_host/?search=DriverHost
