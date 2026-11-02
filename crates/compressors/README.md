@@ -13,7 +13,7 @@
 
 </div>
 
-Streams compression and decompression over [`bytesbuf`][__link0] byte sequences.
+Provides streaming compression and decompression over [`bytesbuf`][__link0] byte sequences.
 
 Each supported format has a module and a Cargo feature with the same name. The formats are
 `deflate`, `zlib`, `gzip`, `brotli`, and `zstd`. Each module provides `compress`, `decompress`,
@@ -190,7 +190,7 @@ See [`documentation`][__link19] for the longer form guides.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbiqZQXhcFxiEbzy3RkWnWzqwbelDYub1Z6pYbQDIZIKQR3j1hZIKCaGJ5dGVzYnVmZjAuMTIuMIJrY29tcHJlc3NvcnNlMC4zLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbwX-5obSxPe0bxnSI6-lTchIb2_uhGjVkqI8b_k6Vq2bZ8S1hZIKCaGJ5dGVzYnVmZjAuMTIuMIJrY29tcHJlc3NvcnNlMC4zLjA
  [__link0]: https://crates.io/crates/bytesbuf/0.12.0
  [__link1]: https://docs.rs/compressors/0.3.0/compressors/?search=Result
  [__link10]: https://docs.rs/compressors/0.3.0/compressors/?search=format

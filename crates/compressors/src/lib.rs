@@ -4,7 +4,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! Streams compression and decompression over [`bytesbuf`] byte sequences.
+//! Provides streaming compression and decompression over [`bytesbuf`] byte sequences.
 //!
 //! Each supported format has a module and a Cargo feature with the same name. The formats are
 //! `deflate`, `zlib`, `gzip`, `brotli`, and `zstd`. Each module provides `compress`, `decompress`,
