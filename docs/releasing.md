@@ -32,8 +32,8 @@ This document is the reference for the human-driven release tooling in
   In every mode the same pipeline runs: plan resolution,
   cascade toward dependents, an interactive elevation review for any
   modified-but-unreleased dependencies, a final plan display, then
-  atomic application of all version-number increments, changelog
-  updates, README regeneration, and `Cargo.toml` rewrites.
+  atomic application of all version-number increments, README
+  regeneration, and `Cargo.toml` rewrites.
 
 Maintainers SHOULD read the **Glossary** below before making changes to
 the release tooling; the rest of the codebase, the PR comments, the
@@ -155,7 +155,7 @@ plan*. The planner reads the entire plan up-front (the `-Packages`
 argument is the entire input — there is no base ref), resolves the
 cascade toward dependents, surfaces any modified-but-unreleased
 dependencies for review, and then applies all version-number increments,
-changelog updates, and `Cargo.toml` rewrites in one shot. A second
+README regeneration, and `Cargo.toml` rewrites in one shot. A second
 invocation is treated as a fresh, independent release plan — there is
 no notion of "adding to a previous run".
 
@@ -632,8 +632,8 @@ The user-review queue therefore contains two categories of finding:
      A breaking proc-macro review result then surfaces direct published
      consumers one edge at a time; propagation stops at the first consumer
      reviewed below breaking. Bin-only reviews do not propagate to consumers.
-   - After review, apply all version-number increments, changelog
-     updates, README regeneration, `Cargo.toml` rewrites, and workspace
+   - After review, apply all version-number increments, README
+     regeneration, `Cargo.toml` rewrites, and workspace
      `[workspace.dependencies]` updates in one shot.
 
 3. Commit the resulting changes and open a PR.

@@ -104,12 +104,12 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $cFinding.DependencyChains[0] | Should -Be @('a', 'b', 'c')
     }
 
-    It 'N6 — CHANGELOG-only edit in dependency still flagged (humans decide materiality)' {
+    It 'N6 — README-only edit in dependency is still flagged' {
         Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n6')
-        $changelog = Join-Path $ws.Path 'crates\dependency\CHANGELOG.md'
-        Add-Content -Path $changelog -Value "`n* maintenance note`n"
-        $ws.AddCommit('previous PR: dependency changelog tweak')
+        $readme = Join-Path $ws.Path 'crates\dependency\README.md'
+        Set-Content -Path $readme -Value "# Dependency`n" -NoNewline
+        $ws.AddCommit('previous PR: dependency documentation tweak')
         $ws.SetVersion('dependent', '0.1.1')
         $ws.AddCommit('current PR: change dependent')
         $ws.ModifySource('dependent')
@@ -924,17 +924,14 @@ publish = true
 # Invoke-ResolvedRelease — atomic multi-package on-disk product.
 #
 # Pins the contract that, when a multi-package plan executes successfully,
-# every artefact for every release-set member is written: per-package
+# every artifact for every release-set member is written: per-package
 # Cargo.toml (new [package] version), workspace root Cargo.toml (new
-# inline-dep version in [workspace.dependencies]), per-package CHANGELOG
-# (new version section prepended, with cascade-from-dependency bullets on
-# cascade-source members), and Update-Readme invoked once per member.
+# inline-dependency version in [workspace.dependencies]), and Update-Readme
+# invoked once per member.
 #
 # Unit-level coverage of each helper proves the helpers work in isolation;
-# this test pins that Invoke-ResolvedRelease wires them all into the per-
-# folder loop so a regression that wrote Cargo.toml but skipped CHANGELOG
-# (or vice versa) is caught — the regression mode the test-suite review
-# identified as the most plausible silent-correctness gap.
+# this test pins that Invoke-ResolvedRelease wires them all into the
+# per-folder loop.
 # --------------------------------------------------------------------------
 
 Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
@@ -942,35 +939,9 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
         . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
     }
 
-    It 'writes Cargo.toml + workspace Cargo.toml + CHANGELOG + Update-Readme call for every plan member' {
+    It 'writes Cargo.toml files and calls Update-Readme for every plan member' {
         Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'invoke-resolved-release-atomic')
-
-        # Replace the bare `## [Unreleased]` placeholder (no trailing newline)
-        # with a body that the Extract-UnreleasedSection regex can actually
-        # match, so the new version section folds the manually-curated note
-        # in — exercising the most common production shape.
-        $dependencyChangelog   = Join-Path $ws.Path 'crates\dependency\CHANGELOG.md'
-        $dependentChangelog = Join-Path $ws.Path 'crates\dependent\CHANGELOG.md'
-        $changelogBody = @(
-            '# Changelog',
-            '',
-            '## [Unreleased]',
-            '',
-            '- manually curated note',
-            ''
-        ) -join "`n"
-        Set-Content -LiteralPath $dependencyChangelog   -Value $changelogBody -NoNewline
-        Set-Content -LiteralPath $dependentChangelog -Value $changelogBody -NoNewline
-
-        # Touch each package with a conventional-commit-formatted message so
-        # Write-Changelog has something to fold into the new section — also
-        # proves Write-Changelog ran (a no-modification call would early-
-        # return with a warning and leave the CHANGELOG untouched).
-        $ws.ModifySource('dependency',   '// dependency feature')
-        $ws.AddCommit('feat(dependency): add dependency feature')
-        $ws.ModifySource('dependent', '// dependent tweak')
-        $ws.AddCommit('feat(dependent): use new dependency feature')
 
         $workspaceBaseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
         $rootCargo = Join-Path $ws.Path 'Cargo.toml'
@@ -1017,8 +988,8 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
         # Mock Update-Readme so we can assert it was invoked once per member
         # without depending on cargo-doc2readme being installed or a real
         # README.j2 template existing in the synthetic workspace. The other
-        # helpers (Update-PackageVersion / Write-Changelog) are exercised
-        # for real so their on-disk side effects are observable.
+        # Update-PackageVersion is exercised for real so its on-disk side
+        # effects are observable.
         Mock -CommandName Update-Readme -MockWith { } -Verifiable:$false
 
         Push-Location $ws.Path
@@ -1061,48 +1032,8 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
         $rootContent | Should -Not -Match '(?m)^dependency\s*=\s*\{[^}]*version\s*=\s*"0\.2\.0"'
         $rootContent | Should -Not -Match '(?m)^dependent\s*=\s*\{[^}]*version\s*=\s*"0\.1\.0"'
 
-        # --- Per-package CHANGELOG: new version section was prepended.
-        $today = (Get-Date).ToString('yyyy-MM-dd')
-        $dependencyChangelogText   = Get-Content $dependencyChangelog   -Raw
-        $dependentChangelogText = Get-Content $dependentChangelog -Raw
-
-        # Top-level `# Changelog` header is preserved.
-        $dependencyChangelogText   | Should -Match '(?m)^# Changelog'
-        $dependentChangelogText | Should -Match '(?m)^# Changelog'
-
-        # New version section header (with today's date) appears in both.
-        $dependencyChangelogText   | Should -Match ('(?m)^## \[0\.2\.1\] - ' + [regex]::Escape($today))
-        $dependentChangelogText | Should -Match ('(?m)^## \[0\.1\.1\] - ' + [regex]::Escape($today))
-
-        # The manually-curated `## [Unreleased]` body line was folded into
-        # the new version section (and the now-empty Unreleased heading was
-        # stripped — Extract-UnreleasedSection consumed it).
-        $dependencyChangelogText   | Should -Match 'manually curated note'
-        $dependentChangelogText | Should -Match 'manually curated note'
-        $dependencyChangelogText   | Should -Not -Match '(?m)^## \[Unreleased\]'
-        $dependentChangelogText | Should -Not -Match '(?m)^## \[Unreleased\]'
-
-        # Conventional-commit bullets from the feat(...) commits are grouped
-        # under a `Features` section header.
-        $dependencyChangelogText   | Should -Match 'Features'
-        $dependencyChangelogText   | Should -Match 'add dependency feature'
-        $dependentChangelogText | Should -Match 'Features'
-        $dependentChangelogText | Should -Match 'use new dependency feature'
-
-        # dependent is cascade-from-dependency: a Maintenance section with
-        # a `Now requires <version> of <target>` bullet must be emitted even
-        # though the package only had a feat commit (cascade bullets live in
-        # their own section, separate from the conventional-commit ones).
-        $dependentChangelogText | Should -Match '🔧 Maintenance'
-        $dependentChangelogText | Should -Match 'Now requires `0\.2\.1` of `dependency`'
-
         # --- Update-Readme: invoked once per release-set member, with the
-        # right per-package arguments. This is the README half of the
-        # atomicity contract — Update-Readme is the only per-folder side
-        # effect that doesn't produce an on-disk artefact in this fixture
-        # (no README.j2 template, so the real implementation warns and
-        # returns), and asserting the call count + arguments closes the
-        # "wrote Cargo.toml but skipped README regen" regression mode.
+        # right per-package arguments.
         Should -Invoke -CommandName Update-Readme -Times 2 -Exactly
         Should -Invoke -CommandName Update-Readme -Times 1 -Exactly `
             -ParameterFilter { $packageName -eq 'dependency' }
@@ -1114,21 +1045,16 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
         (Test-Path (Join-Path $ws.Path 'crates\dependent\README.md')) | Should -BeFalse
     }
 
-    It 'names the DIRECT dependency (not the root cause) in an indirect dependent''s changelog (ADO bug 7536096)' {
-        # Linear3: a -> b -> c (a depends on b, b depends on c). Releasing 'c'
-        # cascades to BOTH b and a. 'a' depends DIRECTLY on b only — so its
-        # changelog must say "Now requires <b's new version> of b", never
-        # "of c" (the root cause it does not directly depend on).
+    It 'updates indirect dependents in dependency order' {
+        # Linear3: a -> b -> c (a depends on b, and b depends on c).
+        # Releasing c cascades to b and a.
         Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'invoke-resolved-release-indirect')
 
         $workspaceBaseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
         $rootCargo = Join-Path $ws.Path 'Cargo.toml'
 
-        # Plan: release c@patch; cascade lifts b and a by patch. CascadeReasons
-        # carry the ROOT cause (c) for both b and a — the OLD bug let those leak
-        # into a's changelog. The executor must instead derive bullets from each
-        # crate's DIRECT deps in the plan.
+        # Plan: release c@patch. The cascade lifts b and a by patch.
         $aReasons = New-Object 'System.Collections.Generic.List[object]'
         [void]$aReasons.Add([pscustomobject]@{ Target = 'c'; Breaking = $false })
         $bReasons = New-Object 'System.Collections.Generic.List[object]'
@@ -1157,7 +1083,7 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
 
         Push-Location $ws.Path
         try {
-            $null = @(Invoke-ResolvedRelease `
+            $releases = @(Invoke-ResolvedRelease `
                 -RepoRoot $ws.Path `
                 -RootCargoToml $rootCargo `
                 -ResolvedReleaseSet $resolved `
@@ -1166,28 +1092,16 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
             Pop-Location
         }
 
-        $aChangelog = Get-Content (Join-Path $ws.Path 'crates\a\CHANGELOG.md') -Raw
-        $bChangelog = Get-Content (Join-Path $ws.Path 'crates\b\CHANGELOG.md') -Raw
-        $cChangelog = Get-Content (Join-Path $ws.Path 'crates\c\CHANGELOG.md') -Raw
-
-        # The indirect dependent 'a' names its DIRECT dep 'b' at b's NEW version.
-        $aChangelog | Should -Match 'Now requires `0\.2\.1` of `b`'
-        # It must NOT name the root-cause crate 'c' (the bug being fixed).
-        $aChangelog | Should -Not -Match 'of `c`'
-
-        # The direct dependent 'b' names its direct dep 'c'.
-        $bChangelog | Should -Match 'Now requires `0\.3\.1` of `c`'
-
-        # The released root 'c' has no direct deps in the set → no cascade bullet.
-        $cChangelog | Should -Not -Match 'Now requires'
+        ($releases | ForEach-Object { $_.Package }) | Should -Be @('c', 'b', 'a')
+        (Get-Content (Join-Path $ws.Path 'crates\a\Cargo.toml') -Raw) | Should -Match '(?m)^version\s*=\s*"0\.1\.1"'
+        (Get-Content (Join-Path $ws.Path 'crates\b\Cargo.toml') -Raw) | Should -Match '(?m)^version\s*=\s*"0\.2\.1"'
+        (Get-Content (Join-Path $ws.Path 'crates\c\Cargo.toml') -Raw) | Should -Match '(?m)^version\s*=\s*"0\.3\.1"'
     }
 
-    It 'puts the cascade bullet under Maintenance for a breaking user target that is a non-breaking cascade dependent (ADO 7536096 reviewer counterexample)' {
+    It 'updates a breaking user target that is also a cascade dependent' {
         # Linear2: dependent -> dependency. Release dependency@patch together
-        # with dependent@breaking. 'dependent' is BOTH a user target (breaking,
-        # 1.0.0 -> 2.0.0) AND a cascade dependent of dependency (the edge is
-        # non-breaking). The "Now requires" bullet must land under 🔧 Maintenance
-        # (driven by the per-edge cascade flag), NOT ⚠️ Breaking.
+        # with dependent@breaking. The dependent is both a user target and a
+        # cascade dependent of dependency.
         Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Spec @{
             Packages = @(
@@ -1229,11 +1143,9 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
             Pop-Location
         }
 
-        $dependentChangelog = Get-Content (Join-Path $ws.Path 'crates\dependent\CHANGELOG.md') -Raw
-
-        $dependentChangelog | Should -Match 'Now requires `0\.2\.1` of `dependency`'
-        $dependentChangelog | Should -Match '🔧 Maintenance'
-        $dependentChangelog | Should -Not -Match '⚠️ Breaking'
+        (Get-Content (Join-Path $ws.Path 'crates\dependency\Cargo.toml') -Raw) |
+            Should -Match '(?m)^version\s*=\s*"0\.2\.1"'
+        (Get-Content (Join-Path $ws.Path 'crates\dependent\Cargo.toml') -Raw) |
+            Should -Match '(?m)^version\s*=\s*"2\.0\.0"'
     }
 }
-
