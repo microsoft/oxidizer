@@ -3,7 +3,7 @@
 
 [package]
 name = "arty"
-description = "Single-threaded, thread-aware application runtime."
+description = "Thread-aware async runtime that keeps each task on one worker thread."
 version = "0.6.0"
 readme = "README.md"
 keywords = ["arty", "async", "runtime"]
