@@ -1,0 +1,65 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "http_telemetry"
+description = "Automatic telemetry collection for incoming HTTP requests."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "http", "telemetry", "logging", "metrics"]
+categories = ["network-programming", "development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry"
+
+# http_telemetry has no unsafe code, and it adds no path into the unsafe code of
+# a dependency. Its tests cover the events and their fields. They run
+# natively and with cargo-careful. Each dependency with unsafe code has its own
+# Miri tests.
+[package.metadata.anvil.miri]
+exclude = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "http::*",
+    "http_extensions::*",
+    "layered::service::Service",
+    "observed::sink::core::Sink",
+    "tick::simple_clock::SimpleClock",
+    "tower_layer::Layer",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+futures = { workspace = true }
+http = { workspace = true }
+http_extensions = { workspace = true }
+layered = { workspace = true }
+observed = { workspace = true }
+tick = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+data_privacy = { path = "../data_privacy" }
+future_assert = { path = "../future_assert" }
+futures = { workspace = true, features = ["executor"] }
+http_extensions = { path = "../http_extensions", features = ["test-util"] }
+metabench = { path = "../metabench" }
+observed_testing = { path = "../observed_testing" }
+tick = { path = "../tick", features = ["test-util"] }
+
+[[bench]]
+name = "http_telemetry_server"
+harness = false
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

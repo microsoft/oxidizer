@@ -2778,6 +2778,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "http_telemetry"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "data_privacy",
+ "future_assert",
+ "futures",
+ "http",
+ "http_extensions",
+ "layered",
+ "metabench",
+ "observed",
+ "observed_testing",
+ "tick",
+]
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
