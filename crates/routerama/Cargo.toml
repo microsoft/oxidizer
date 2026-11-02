@@ -37,6 +37,7 @@ smallvec = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+argh = { workspace = true }
 # `axum` powers the `web_app` example: it is only the HTTP transport, so
 # `routerama` can do all of the routing from a single fallback handler.
 axum = { workspace = true, features = ["tokio", "http1"] }
@@ -58,7 +59,7 @@ route-recognizer = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_html_form = { workspace = true, features = ["de", "ser", "std"] }
 serde_urlencoded = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time"] }
 
 [[bench]]
 name = "routerama"

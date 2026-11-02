@@ -36,7 +36,7 @@ pub fn observation_round() -> u64 {
 /// drives successive rounds; applications can also schedule requests explicitly.
 /// No timer or background worker is started. Saturates instead of wrapping.
 pub fn request_observation() -> u64 {
-    let previous = OBSERVATION_ROUND.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |round| Some(round.saturating_add(1)));
+    let previous = OBSERVATION_ROUND.try_update(Ordering::Relaxed, Ordering::Relaxed, |round| Some(round.saturating_add(1)));
     match previous {
         Ok(round) | Err(round) => round.saturating_add(1),
     }

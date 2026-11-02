@@ -13,20 +13,15 @@
 
 </div>
 
-Single-threaded, thread-aware application runtime.
+Single-threaded, thread-aware runtime for async applications.
 
-An Arty runtime defaults to one worker and can be configured with several,
-but each async task stays on one worker throughout its life. This lets it use
-thread-local and non-[`Send`][__link0] state across awaits. Thread-aware values can be
-explicitly relocated when starting new work on another worker.
+Each async task stays on one worker thread for its entire life, even when
+Arty manages multiple workers. Tasks can keep thread-local and non-[`Send`][__link0]
+state across awaits.
 
-There is no process-global runtime: each instance owns its workers and
-services. Workers use thread-local bookkeeping rather than a global
-runtime singleton.
-
-Arty provides task scheduling, clocks, external I/O driver hosting, and
-pools for offloading blocking callbacks. It does not provide an async I/O
-implementation or move running tasks between workers.
+Arty can pass values between workers without moving running tasks.
+The [`ThreadAware`][__link1] trait lets a value update its state
+for the worker that receives it. This update is called relocation.
 
 ## Quickstart
 
@@ -47,93 +42,90 @@ async fn main(cx: Context) -> Result<(), JoinError> {
 }
 ```
 
-This prints `42`. [`main`][__link1] starts and stops the runtime.
-The `?` returns a [`JoinError`][__link2] if the child fails.
-Await child work before returning; shutdown cancels pending async tasks.
+This prints `42`. [`main`][__link2] starts and stops the runtime.
+The `?` returns a [`JoinError`][__link3] if the child task fails.
+Await child tasks before returning. Shutdown cancels pending async tasks.
 
-## Overview
+## Execution model
 
-* [`main`][__link3] and [`test`][__link4] manage a runtime for an
-  async entry point or test; [`Runtime`][__link5] gives you
-  direct control over its lifetime and settings.
-* [`Context`][__link6] gives each task its scheduler, clock,
-  and worker. [`RuntimeScheduler`][__link7] lets the
-  runtime place new work.
-* [`Io`][__link8] registers external `arty_io_core` contexts and lazily
-  initializes a driver on each worker when that worker first requests the
-  context.
-* [`Scheduler`][__link9] keeps child work on its worker.
-* [`Clock`][__link10] provides timers and timeouts;
-  [`ClockControl`][__link11] controls time in tests.
-* [`Thread`][__link12] describes a worker, and
-  [`ThreadAware`][__link13] values can relocate between workers.
+Each worker is one operating-system thread with a cooperative executor.
+The worker thread polls the tasks assigned to it. When one task awaits an
+operation that is not ready, the worker can poll another assigned task.
+After a task starts, it stays on that worker thread for its entire life.
 
-## Why Arty?
+Choose the initial worker for a new task:
 
-Unlike Tokio’s multi-thread runtime, Arty keeps each task on one worker.
-This supports thread-local and non-`Send` state, keeps worker-local data
-nearby, and can reduce contention for that data. Shared data may still contend.
-Choose Tokio for automatic task distribution or its async I/O ecosystem;
-Arty does not provide Tokio’s I/O implementations.
+* [`Scheduler::spawn`][__link4] uses the worker bound
+  to the scheduler. A cloned scheduler keeps the same binding, even when
+  another thread calls it.
+* [`Scheduler::spawn_anywhere`][__link5] lets
+  the runtime select a worker. This initial placement is similar to Tokio
+  task placement.
+* [`Scheduler::spawn_at`][__link6] uses a worker
+  that you select from the same runtime.
 
-## Blocking work
+Unlike a Tokio task, an Arty task does not move between workers after it
+starts.
 
-Join handles are futures: await them. Arty deliberately does not expose a
-synchronous join operation because async workers must stay free to poll
-tasks and advance timers. Blocking a worker stalls every task assigned to
-it. If the blocked code waits for work on that worker, or blocking callbacks
-wait on each other in an exhausted pool, the stall can become a deadlock.
+A task factory creates the task future on its destination worker. A payload
+is a separate value passed to that factory. If the factory starts, Arty
+relocates a [`ThreadAware`][__link7] payload before the factory
+uses it. Rejected tasks and tasks cancelled before their factory starts can
+drop the payload without relocation.
 
-This deadlocks: the worker waits synchronously for a child that only the
-same worker can poll.
+Cloned values can refer to the same resource while keeping separate state
+on each worker. `ThreadAware` updates that state, but it does not share
+ownership of a resource or store local state for you.
+
+This example compares fixed placement with runtime-selected placement:
 
 ```rust
-#[arty::main]
-async fn main(cx: arty::task::Context) {
-    let child = cx.scheduler().spawn(async |_| 42);
-    let _ = futures::executor::block_on(child);
-}
+let parent_worker = cx.thread().id();
+let child_worker = cx
+    .scheduler()
+    .spawn(async |child| child.thread().id())
+    .await?;
+assert_eq!(child_worker, parent_worker);
+
+// `cx.clone()` is the payload. The closure is the task factory.
+cx.scheduler()
+    .spawn_anywhere(cx.clone(), |moved| async move {
+        assert_eq!(moved.thread().id(), std::thread::current().id());
+    })
+    .await?;
 ```
 
-[`RuntimeScheduler::block_on`][__link14] is
-the narrow blocking entry point for running async work from synchronous
-code. It rejects calls from async workers. For synchronous I/O or library
-calls, use
-[`Scheduler::spawn_blocking`][__link15] or
-[`RuntimeScheduler::spawn_blocking`][__link16]
-and await the join. The callback runs in a blocking pool instead of on an
-async worker.
+`spawn_anywhere` can select the original worker. The relocated context
+always reports the worker that runs the new task.
 
-## Detailed documentation
+Each runtime owns its workers and services. Arty does not use a single
+runtime shared by the whole process. Each worker tracks its own state.
 
-The [guides][__link17] explain Arty’s capabilities in more detail:
+Arty runs tasks, provides clocks, and runs blocking functions on separate threads.
+It can also run I/O drivers, which handle input and output.
+I/O libraries connect to Arty through `arty_io_core`.
+Related I/O crates ship alongside Arty.
 
-* [Scheduling][__link18] explains where tasks run,
-  local non-`Send` work, and blocking pools.
-* [Configuration][__link19] explains worker counts,
-  blocking-pool policies, and clocks.
-* [Shutdown][__link20] explains runtime ownership,
-  task cancellation, and what stopping the workers waits for.
-* [Thread awareness][__link21] explains
-  stable task placement and explicit relocation of values.
-* [Time][__link22] explains system timers, timeouts, and
-  externally controlled time in tests.
+## API overview
 
-The `documentation` module is included only for docs.rs builds and
-doc-test collection with all documentation features, including `test-util`;
-it is not part of the public API available to applications.
+* [`runtime`][__link8] explains how to create, configure, and stop a runtime.
+* [`task`][__link9] explains how to start tasks, choose their workers, and receive results.
+* [`time`][__link10] provides clocks, delays, timeouts, and control over time in tests.
+* [`io`][__link11] connects I/O libraries to the runtime.
+* [`core`][__link12] describes workers and how values update their state for a worker.
+* [`main`][__link13] and [`test`][__link14] start and stop a runtime for an async function or test.
 
 ## Features
 
 The default feature set enables `rt`, `macros`, and `monitor`.
 
-* **`rt`** - Enables the runtime, task, and I/O APIs, and implies `time`.
-* **`macros`** - Enables [`main`][__link23] and [`test`][__link24], and implies `rt`.
-* **`monitor`** - Enables the Seismograph monitor dependency. It forwards
-  `performables` telemetry support when `performables` is enabled. It does
-  not start monitoring.
-* **`time`** - Enables clocks, timers, and timeouts.
-* **`test-util`** - Enables testing utilities, including [`ClockControl`][__link25] with `time`.
+* `rt`: Enables the runtime, task, and I/O APIs.
+* `macros`: Enables [`main`][__link15] and [`test`][__link16]. It also enables `rt`.
+* `monitor`: Enables the Seismograph monitor dependency. It forwards
+  monitoring support for `performables` when `performables` is enabled. It does
+  not start monitoring or emit new telemetry.
+* `test-util`: Enables testing utilities, including
+  [`ClockControl`][__link17].
   Enable it in dev-dependencies, not production dependencies.
 
 
@@ -142,30 +134,22 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbYgvrzzCJ6-IbSK27HMf6gocbT5GiK2Oe1D8bpyHo2e5nQQ5hZIKCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVOOkiwtK_84bGyYJldq1SSMbSs5R1-8kbtkbwouPZ79D401hZIKCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link1]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
- [__link10]: https://docs.rs/arty/0.5.0/arty/?search=time::Clock
- [__link11]: https://docs.rs/arty/0.5.0/arty/?search=time::ClockControl
- [__link12]: https://docs.rs/arty/0.5.0/arty/?search=core::Thread
- [__link13]: https://docs.rs/arty/0.5.0/arty/?search=core::ThreadAware
- [__link14]: https://docs.rs/arty/0.5.0/arty/?search=task::RuntimeScheduler::block_on
- [__link15]: https://docs.rs/arty/0.5.0/arty/?search=task::Scheduler::spawn_blocking
- [__link16]: https://docs.rs/arty/0.5.0/arty/?search=task::RuntimeScheduler::spawn_blocking
- [__link17]: https://docs.rs/arty/0.5.0/arty/?search=documentation
- [__link18]: https://docs.rs/arty/0.5.0/arty/?search=documentation::scheduling
- [__link19]: https://docs.rs/arty/0.5.0/arty/?search=documentation::configuration
- [__link2]: https://docs.rs/arty/0.5.0/arty/?search=task::JoinError
- [__link20]: https://docs.rs/arty/0.5.0/arty/?search=documentation::shutdown
- [__link21]: https://docs.rs/arty/0.5.0/arty/?search=documentation::thread_awareness
- [__link22]: https://docs.rs/arty/0.5.0/arty/?search=documentation::time
- [__link23]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
- [__link24]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
- [__link25]: https://docs.rs/arty/0.5.0/arty/?search=time::ClockControl
- [__link3]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
- [__link4]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
- [__link5]: https://docs.rs/arty/0.5.0/arty/?search=runtime::Runtime
- [__link6]: https://docs.rs/arty/0.5.0/arty/?search=task::Context
- [__link7]: https://docs.rs/arty/0.5.0/arty/?search=task::RuntimeScheduler
- [__link8]: https://docs.rs/arty/0.5.0/arty/?search=io::Io
- [__link9]: https://docs.rs/arty/0.5.0/arty/?search=task::Scheduler
+ [__link1]: https://docs.rs/arty/0.5.0/arty/?search=core::ThreadAware
+ [__link10]: https://docs.rs/arty/0.5.0/arty/time/index.html
+ [__link11]: https://docs.rs/arty/0.5.0/arty/io/index.html
+ [__link12]: https://docs.rs/arty/0.5.0/arty/core/index.html
+ [__link13]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
+ [__link14]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
+ [__link15]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
+ [__link16]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
+ [__link17]: https://docs.rs/arty/0.5.0/arty/?search=time::ClockControl
+ [__link2]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
+ [__link3]: https://docs.rs/arty/0.5.0/arty/?search=task::JoinError
+ [__link4]: https://docs.rs/arty/0.5.0/arty/?search=task::Scheduler::spawn
+ [__link5]: https://docs.rs/arty/0.5.0/arty/?search=task::Scheduler::spawn_anywhere
+ [__link6]: https://docs.rs/arty/0.5.0/arty/?search=task::Scheduler::spawn_at
+ [__link7]: https://docs.rs/arty/0.5.0/arty/?search=core::ThreadAware
+ [__link8]: https://docs.rs/arty/0.5.0/arty/runtime/index.html
+ [__link9]: https://docs.rs/arty/0.5.0/arty/task/index.html

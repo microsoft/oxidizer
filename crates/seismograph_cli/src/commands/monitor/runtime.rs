@@ -400,89 +400,9 @@ fn import_source(source: Option<&Snapshot>, workers: &mut Workers, tasks: &mut B
 fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
     task.row.state = "Unknown".into();
     let Some(activity) = activity else { return };
-    let observed = activity.observed_at.ticks();
-    match activity.state {
-        TaskActivityState::Running => {
-            let Some(started_at) = activity.poll_started_at.map(seismograph::recorder::event::EventTimestamp::ticks) else {
-                return;
-            };
-            if activity.queued_since.is_some() {
-                return;
-            }
-            if started_at > observed {
-                return;
-            }
-            if let Some(ready_at) = activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks) {
-                if ready_at < started_at {
-                    return;
-                }
-                if ready_at > observed {
-                    return;
-                }
-            }
-            let running_for = observed - started_at;
-            task.row.activity = TaskActivitySummary {
-                state: "Running".into(),
-                running_for: Some(running_for),
-                ready_for: None,
-                poll_worker_id: activity.poll_worker_id.map(seismograph::recorder::runtime::WorkerId::get),
-                repoll_requested: activity.ready_since.is_some(),
-            };
-            // Only the worker identity inside the coherent activity is evidence
-            // of this poll's placement; last_worker/current_task can race.
-            if let Some(worker_id) = task.row.activity.poll_worker_id {
-                task.workers.insert(worker_id);
-                task.executed.insert(Some(worker_id));
-                task.metrics.entry(Some(worker_id)).or_default().polls.push(Interval {
-                    start: started_at,
-                    end: observed,
-                });
-            } else {
-                task.unassigned_poll = Some(Interval {
-                    start: started_at,
-                    end: observed,
-                });
-            }
-        }
-        TaskActivityState::Ready => {
-            if activity.ready_since.is_none()
-                && activity.queued_since.is_none()
-                && activity.poll_started_at.is_none()
-                && activity.poll_worker_id.is_none()
-            {
-                task.row.activity = TaskActivitySummary {
-                    state: "Ready".into(),
-                    ..TaskActivitySummary::default()
-                };
-                task.row.state = "Ready".into();
-                return;
-            }
-            let (Some(ready_at), Some(queued_at)) = (
-                activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks),
-                activity.queued_since.map(seismograph::recorder::event::EventTimestamp::ticks),
-            ) else {
-                return;
-            };
-            if activity.poll_started_at.is_some() || activity.poll_worker_id.is_some() {
-                return;
-            }
-            if ready_at > queued_at {
-                return;
-            }
-            if queued_at > observed {
-                return;
-            }
-            let ready_for = observed - queued_at;
-            task.row.activity = TaskActivitySummary {
-                state: "Ready".into(),
-                ready_for: Some(ready_for),
-                ..TaskActivitySummary::default()
-            };
-            task.ready.push(Interval {
-                start: queued_at,
-                end: observed,
-            });
-        }
+    let coherent = match activity.state {
+        TaskActivityState::Running => apply_running_activity(task, activity),
+        TaskActivityState::Ready => apply_ready_activity(task, activity),
         TaskActivityState::Waiting => {
             if matches!(
                 (
@@ -495,10 +415,90 @@ fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
             ) {
                 task.row.activity.state = "Waiting".into();
             }
+            true
         }
-        _ => {}
+        _ => true,
+    };
+    if coherent {
+        task.row.state.clone_from(&task.row.activity.state);
     }
-    task.row.state.clone_from(&task.row.activity.state);
+}
+
+fn apply_running_activity(task: &mut TaskBuilder, activity: TaskActivity) -> bool {
+    let observed = activity.observed_at.ticks();
+    let Some(started_at) = activity.poll_started_at.map(seismograph::recorder::event::EventTimestamp::ticks) else {
+        if activity.ready_since.is_some() || activity.queued_since.is_some() {
+            return false;
+        }
+        task.row.activity = TaskActivitySummary {
+            state: "Running".into(),
+            poll_worker_id: activity.poll_worker_id.map(seismograph::recorder::runtime::WorkerId::get),
+            ..TaskActivitySummary::default()
+        };
+        return true;
+    };
+    if activity.queued_since.is_some() || started_at > observed {
+        return false;
+    }
+    if let Some(ready_at) = activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks)
+        && (ready_at < started_at || ready_at > observed)
+    {
+        return false;
+    }
+    task.row.activity = TaskActivitySummary {
+        state: "Running".into(),
+        running_for: Some(observed - started_at),
+        ready_for: None,
+        poll_worker_id: activity.poll_worker_id.map(seismograph::recorder::runtime::WorkerId::get),
+        repoll_requested: activity.ready_since.is_some(),
+    };
+    // Only the coherent activity identifies this poll's worker.
+    // last_worker/current_task can race with the activity capture.
+    let interval = Interval {
+        start: started_at,
+        end: observed,
+    };
+    if let Some(worker_id) = task.row.activity.poll_worker_id {
+        task.workers.insert(worker_id);
+        task.executed.insert(Some(worker_id));
+        task.metrics.entry(Some(worker_id)).or_default().polls.push(interval);
+    } else {
+        task.unassigned_poll = Some(interval);
+    }
+    true
+}
+
+fn apply_ready_activity(task: &mut TaskBuilder, activity: TaskActivity) -> bool {
+    if activity.poll_started_at.is_some() || activity.poll_worker_id.is_some() {
+        return false;
+    }
+    if activity.ready_since.is_none() && activity.queued_since.is_none() {
+        task.row.activity = TaskActivitySummary {
+            state: "Ready".into(),
+            ..TaskActivitySummary::default()
+        };
+        return true;
+    }
+    let (Some(ready_at), Some(queued_at)) = (
+        activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks),
+        activity.queued_since.map(seismograph::recorder::event::EventTimestamp::ticks),
+    ) else {
+        return false;
+    };
+    let observed = activity.observed_at.ticks();
+    if ready_at > queued_at || queued_at > observed {
+        return false;
+    }
+    task.row.activity = TaskActivitySummary {
+        state: "Ready".into(),
+        ready_for: Some(observed - queued_at),
+        ..TaskActivitySummary::default()
+    };
+    task.ready.push(Interval {
+        start: queued_at,
+        end: observed,
+    });
+    true
 }
 
 fn worker_state(state: WorkerState, collection: TaskCollection) -> String {
@@ -687,6 +687,49 @@ mod tests {
     }
 
     #[test]
+    fn native_running_state_does_not_invent_execution_intervals() {
+        for poll_worker_id in [None, WorkerId::from_raw(1)] {
+            let native = source(Some(TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Running,
+                ready_since: None,
+                poll_started_at: None,
+                poll_worker_id,
+                queued_since: None,
+            }));
+
+            let captured = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&native), &[]);
+            let task = &captured.workers[0].tasks[0];
+
+            assert_eq!(
+                (task.state.as_str(), task.activity.clone(), task.metrics.polls.as_slice()),
+                (
+                    "Running",
+                    TaskActivitySummary {
+                        state: "Running".into(),
+                        poll_worker_id: poll_worker_id.map(WorkerId::get),
+                        ..TaskActivitySummary::default()
+                    },
+                    &[][..]
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn retired_workers_remain_explicitly_stopped() {
+        let mut native = source(None);
+        native.runtimes[0].tasks.clear();
+        native.runtimes[0].workers[0].state = WorkerState::Stopped;
+        native.runtimes[0].workers[0].task_collection = TaskCollection::Stopped;
+        native.runtimes[0].workers[0].current_task = None;
+
+        let captured = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&native), &[]);
+
+        assert_eq!(captured.workers[0].state, "Stopped (tasks stopped)");
+    }
+
+    #[test]
     fn unavailable_native_tasks_are_visible_in_worker_status() {
         let mut native = source(None);
         native.runtimes[0].tasks.clear();
@@ -787,7 +830,7 @@ mod tests {
                 ready_since: None,
                 poll_started_at: None,
                 poll_worker_id: WorkerId::from_raw(1),
-                queued_since: None,
+                queued_since: Some(EventTimestamp::from_ticks(90)),
             },
             TaskActivity {
                 observed_at: EventTimestamp::from_ticks(100),

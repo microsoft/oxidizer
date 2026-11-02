@@ -119,7 +119,7 @@ impl Condvar {
         // Registration precedes mutex release. Sequential consistency also
         // orders notifications that do not hold the associated mutex.
         self.waiters
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |waiters| waiters.checked_add(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |waiters| waiters.checked_add(1))
             .expect("simultaneous condition-variable waits must not exceed u32::MAX");
         ConditionRegistration { waiters: &self.waiters }
     }

@@ -27,6 +27,12 @@ allowed_external_types = ["seismograph::*"]
 
 [dependencies]
 seismograph.workspace = true
+tick.workspace = true
+
+[dev-dependencies]
+mutants.workspace = true
+static_assertions.workspace = true
+tick = { path = "../tick", features = ["test-util"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]

@@ -195,8 +195,13 @@ impl WorkerHandle {
     /// Starts a task poll and associates the task with this worker.
     #[inline]
     pub fn task_poll_started(&self, task_id: TaskId) -> TaskPoll {
+        self.poll_started_with(task_id, EventTimestamp::now)
+    }
+
+    pub(crate) fn poll_started_with(&self, task_id: TaskId, now: impl FnOnce() -> EventTimestamp) -> TaskPoll {
+        // Acquire pairs with the observer's Release publication of the active window.
         let window = self.runtime.control.timing_window.load(Ordering::Acquire);
-        let started_at = (window != 0 || is_enabled(EventClass::RuntimeTask)).then(EventTimestamp::now);
+        let started_at = (window != 0 || is_enabled(EventClass::RuntimeTask)).then(now);
         self.worker.current_task.store(task_id.get(), Ordering::Release);
         if let Some(at) = started_at {
             self.record_at(at, EventKind::TaskPollStarted, task_id.get(), 0, 0, 0, BacktraceCapture::Never);
@@ -218,16 +223,22 @@ impl WorkerHandle {
     ///
     /// Panics if the token belongs to another worker.
     #[inline]
-    pub fn task_poll_finished(&self, mut poll: TaskPoll) {
+    pub fn task_poll_finished(&self, poll: TaskPoll) {
+        self.poll_finished_with(poll, EventTimestamp::now);
+    }
+
+    pub(crate) fn poll_finished_with(&self, mut poll: TaskPoll, now: impl FnOnce() -> EventTimestamp) {
         assert_eq!(poll.worker.id, self.id(), "finish a poll on the worker that started it");
         poll.active = false;
         self.worker.current_task.store(0, Ordering::Release);
         let Some(started_at) = poll.started_at else { return };
-        let finished_at = EventTimestamp::now();
+        let finished_at = now();
         let elapsed = duration_nanos(finished_at, started_at);
         if poll.window != 0 && self.runtime.control.timing_window.load(Ordering::Acquire) == poll.window {
             without_recording(|| {
                 let mut measurements = lock(&self.worker.measurements);
+                // The last observer publishes zero before clearing under this lock.
+                // Recheck here so a concurrent finish cannot refill a retired window.
                 if self.runtime.control.timing_window.load(Ordering::Acquire) == poll.window {
                     measurements.add(poll.window, poll.task, started_at, elapsed);
                 }
@@ -300,12 +311,15 @@ impl WorkerHandle {
     }
 
     pub(crate) fn stop(&self) {
+        drop(self.detach_provider());
+    }
+
+    pub(crate) fn detach_provider(&self) -> Option<crate::TaskProvider> {
         let mut slot = lock(&self.worker.provider);
         self.worker.current_task.store(0, Ordering::Relaxed);
         let previous = self.worker.state.swap(WorkerState::Stopped.wire_value(), Ordering::AcqRel);
         let provider = slot.take();
         drop(slot);
-        drop(provider);
         if previous != WorkerState::Stopped.wire_value() {
             self.record(
                 EventKind::WorkerStopped,
@@ -316,6 +330,7 @@ impl WorkerHandle {
                 self.runtime.control.lifecycle_backtraces,
             );
         }
+        provider
     }
 
     #[inline]

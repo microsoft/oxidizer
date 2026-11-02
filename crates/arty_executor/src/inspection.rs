@@ -69,6 +69,7 @@ pub trait PollObserver: std::fmt::Debug {
     fn inspection_failed(&self, error: InspectionError);
 }
 
+/// Builds a temporary description while the native future is borrowed on its owner.
 pub(crate) trait Inspector<F>: 'static {
     #[cfg(feature = "inspection")]
     fn inspect(&self, future: &F, state: TaskState, visitor: &mut dyn FnMut(&dyn Any));
@@ -80,6 +81,7 @@ impl<F> Inspector<F> for () {
 }
 
 #[cfg(feature = "inspection")]
+/// Stores the description closure inline with its native task.
 pub(crate) struct InspectWith<I, D> {
     inspect: I,
     _description: PhantomData<fn() -> D>,

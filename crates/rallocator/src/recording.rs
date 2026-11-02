@@ -43,6 +43,10 @@ fn allocate_core(layout: Layout, zeroed: bool) -> *mut u8 {
 
 #[inline(never)]
 fn allocate_recorded(layout: Layout, zeroed: bool) -> *mut u8 {
+    allocate_recorded_with(layout, zeroed, emit)
+}
+
+fn allocate_recorded_with(layout: Layout, zeroed: bool, emit: impl FnOnce(*mut u8, usize, usize, bool)) -> *mut u8 {
     let address = allocate_core(layout, zeroed);
     if !address.is_null() {
         emit(address, layout.size(), layout.align(), false);
@@ -182,6 +186,68 @@ fn capture(_context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seism
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sampled_out_allocation_still_publishes_the_requested_native_round() {
+        use seismograph::recorder::{Configuration, EventSampling, Policy};
+        struct Restore(bool);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                seismograph::recorder(Configuration::default());
+                seismograph_rallocator::native::set_publication_enabled(self.0);
+            }
+        }
+        let _restore = Restore(seismograph_rallocator::native::publication_enabled());
+        seismograph_rallocator::native::set_publication_enabled(true);
+        seismograph::recorder(Configuration {
+            allocations: Policy {
+                event_sampling: EventSampling::one_in(2).unwrap(),
+                ..Policy::all(false)
+            },
+            ..Configuration::default()
+        });
+        seismograph_rallocator::native::request_observation();
+        let requested = seismograph_rallocator::native::observation_round();
+        let layout = Layout::from_size_align(64, 16).unwrap();
+
+        // Fix only the sampling identity. The native operation and publication
+        // use the production bridge, without depending on the allocator's address.
+        let pointer = allocate_recorded_with(layout, false, |address, size, alignment, _freed| {
+            seismograph::record(EventClass::Allocation, || {
+                Some(Record::allocation(Allocation {
+                    allocation_id: AllocationId::new(1),
+                    event_thread_id: EventThreadId::new(0),
+                    heap_id: HeapId::new(0),
+                    heap_kind: HeapKind::General,
+                    freed_after_heap_release: false,
+                    address: Address::from_ptr(address),
+                    size: size as u64,
+                    alignment: alignment as u64,
+                }))
+            });
+        });
+        assert!(!pointer.is_null());
+        let mut published = None;
+        crate::thread::observe_current(|owner| {
+            published = owner.observation().published().1.map(|observation| observation.round);
+        });
+        let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        let events = decoded
+            .events
+            .events
+            .iter()
+            .filter(|event| {
+                event
+                    .allocation()
+                    .is_some_and(|allocation| allocation.address.get() == pointer.addr() as u64)
+            })
+            .count();
+        // SAFETY: The test uniquely owns the live allocation with its original layout.
+        unsafe { deallocate(pointer, layout) };
+
+        assert_eq!((events, published), (0, Some(requested)));
+    }
 
     #[test]
     fn moved_realloc_records_free_before_cross_thread_address_reuse() {

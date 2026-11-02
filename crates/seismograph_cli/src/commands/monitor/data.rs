@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Instant, SystemTime};
 
 use seismograph::recorder::event::{Event, EventKind};
@@ -976,11 +976,14 @@ pub(super) struct ThreadSnapshot {
 
 impl ThreadSnapshot {
     fn from_events(decoded: &seismograph::recorder::event::Events, addresses: &[seismograph_rallocator::callers::AddressLookup]) -> Self {
-        let operations_by_kind = ThreadOperationKind::ALL
-            .into_iter()
-            .enumerate()
-            .map(|(index, kind)| (kind.event_kind(), index))
-            .collect::<HashMap<_, _>>();
+        static OPERATIONS: LazyLock<HashMap<EventKind, usize>> = LazyLock::new(|| {
+            ThreadOperationKind::ALL
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| (kind.event_kind(), index))
+                .collect()
+        });
+        let operations_by_kind = &*OPERATIONS;
         let mut threads = decoded
             .threads
             .iter()
@@ -1016,7 +1019,7 @@ impl ThreadSnapshot {
                 .then_with(|| operations_by_kind[&left.event.kind].cmp(&operations_by_kind[&right.event.kind]))
         });
         let mut stacks = ThreadStacks::new(addresses);
-        let relations = accumulate_thread_objects(&objects, &mut threads, &operations_by_kind, &mut stacks);
+        let relations = accumulate_thread_objects(&objects, &mut threads, operations_by_kind, &mut stacks);
         for ((thread_id, operation, _), mut participant) in relations {
             participant.objects.sort_unstable_by(|left, right| {
                 right

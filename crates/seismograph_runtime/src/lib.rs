@@ -165,6 +165,10 @@ impl RuntimeHandle {
     ///
     /// Panics if the runtime already stopped or process worker identities are exhausted.
     #[must_use]
+    #[expect(
+        clippy::panic,
+        reason = "registering a worker after runtime retirement violates the documented caller contract"
+    )]
     pub fn register_worker(&self, metadata: worker::WorkerMetadata) -> worker::WorkerRegistration {
         let worker = without_recording(|| {
             let worker = Arc::new(WorkerControl {
@@ -179,11 +183,10 @@ impl RuntimeHandle {
                 measurements: Mutex::new(collection::Measurements::default()),
             });
             let mut workers = lock(&self.control.workers);
-            assert_ne!(
-                self.control.state.load(Ordering::Acquire),
-                RuntimeState::Stopped.wire_value(),
-                "register workers before stopping their runtime"
-            );
+            if self.control.state.load(Ordering::Acquire) == RuntimeState::Stopped.wire_value() {
+                drop(workers);
+                panic!("register workers before stopping their runtime");
+            }
             workers.push(Arc::clone(&worker));
             worker
         });
@@ -256,9 +259,11 @@ impl RuntimeHandle {
         }
         self.control.state.store(RuntimeState::Stopped.wire_value(), Ordering::Release);
         let workers = lock(&self.control.workers).clone();
-        for worker in workers {
-            worker::WorkerHandle::new(self.clone(), worker).stop();
-        }
+        // Detach every callback before user-owned captures can run destructors.
+        let providers = workers
+            .into_iter()
+            .filter_map(|worker| worker::WorkerHandle::new(self.clone(), worker).detach_provider())
+            .collect::<Vec<_>>();
         record_at(
             &self.control,
             at,
@@ -270,6 +275,7 @@ impl RuntimeHandle {
             0,
             self.control.lifecycle_backtraces,
         );
+        drop(providers);
     }
 }
 
@@ -365,7 +371,7 @@ pub(crate) struct WorkerControl {
 
 impl std::fmt::Debug for WorkerControl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WorkerControl")
+        f.debug_struct(std::any::type_name::<Self>())
             .field("id", &self.id)
             .field("role", &self.role)
             .finish_non_exhaustive()
@@ -470,7 +476,7 @@ pub(crate) fn record_at(
 
 fn next_id(counter: &AtomicU64) -> NonZeroU64 {
     let value = counter
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| value.checked_add(1))
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |value| value.checked_add(1))
         .expect("a process cannot exhaust u64 telemetry identities");
     NonZeroU64::new(value).expect("identity counters start at one")
 }
@@ -485,4 +491,17 @@ pub(crate) fn duration_nanos(end: EventTimestamp, start: EventTimestamp) -> u64 
 
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().expect("diagnostic state is never locked across user callbacks")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_durations_preserve_nanoseconds_and_saturate_backwards_time() {
+        let durations = [(97, 40), (40, 97), (u64::MAX, 0)]
+            .map(|(end, start)| duration_nanos(EventTimestamp::from_ticks(end), EventTimestamp::from_ticks(start)));
+
+        assert_eq!(durations, [57, 0, u64::MAX]);
+    }
 }

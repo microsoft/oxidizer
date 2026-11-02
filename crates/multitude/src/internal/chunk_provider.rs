@@ -468,12 +468,12 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
 
     /// Speculative-add reservation against the byte budget.
     fn reserve_bytes(&self, n: usize) -> Result<(), AllocError> {
-        // `fetch_update` hides the CAS retry loop, so the contention
+        // `try_update` hides the CAS retry loop, so the contention
         // path doesn't surface as an explicit uncoverable `Err` arm in
         // single-threaded test runs.
         if self
             .bytes_outstanding
-            .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |cur| {
+            .try_update(Ordering::AcqRel, Ordering::Relaxed, |cur| {
                 let new = cur.checked_add(n)?;
                 if new > self.config.byte_budget {
                     return None;
@@ -539,7 +539,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
             // owned chunk (single popper); we read its cache-link via
             // `Chunk::cache_link` and on success the resulting
             // pointer is exclusively ours.
-            let updated = self.cache.fetch_update(Ordering::AcqRel, Ordering::Acquire, |cur| {
+            let updated = self.cache.try_update(Ordering::AcqRel, Ordering::Acquire, |cur| {
                 if cur.is_null() {
                     return None;
                 }
@@ -699,7 +699,7 @@ impl<A: Allocator + Clone> Chunk<A> {
         // then `release` routes it to the cache (no drops were committed
         // since this is a fresh acquisition).
         unsafe {
-            let last = chunk.as_ref().dec_ref();
+            let last = Self::dec_ref(chunk);
             debug_assert!(last, "preallocate chunk refcount should reach zero");
             provider.release(chunk);
         }
@@ -773,7 +773,7 @@ mod tests {
         unsafe {
             provider.advance_cache_floor(SizeClass::new(3));
             let chunk = provider.allocate_fresh(SizeClass::ZERO).expect("fresh class-0 chunk");
-            assert!(chunk.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
+            assert!(Chunk::dec_ref(chunk), "fresh chunk drops to refcount 0");
             provider.push(chunk);
             assert!(provider.pop().is_none());
         }
@@ -801,15 +801,15 @@ mod tests {
         // stack stays valid and the provider's drain frees all three.
         unsafe {
             let c = provider.allocate_fresh(SizeClass::ZERO).expect("chunk c");
-            assert!(c.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
+            assert!(Chunk::dec_ref(c), "fresh chunk drops to refcount 0");
             provider.push(c);
 
             let d = provider.allocate_fresh(SizeClass::ZERO).expect("chunk d");
-            assert!(d.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
+            assert!(Chunk::dec_ref(d), "fresh chunk drops to refcount 0");
             INJECT_PUSH_RACE.with(|slot| slot.set(d.cast::<u8>().as_ptr()));
 
             let b = provider.allocate_fresh(SizeClass::ZERO).expect("chunk b");
-            assert!(b.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
+            assert!(Chunk::dec_ref(b), "fresh chunk drops to refcount 0");
             provider.push(b);
         }
         // Weak compare-exchange may also fail spuriously, so only a lower
@@ -828,7 +828,7 @@ mod tests {
         // before being cached.
         unsafe {
             let chunk = provider.allocate_fresh(SizeClass::ZERO).expect("fresh chunk");
-            assert!(chunk.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
+            assert!(Chunk::dec_ref(chunk), "fresh chunk drops to refcount 0");
             provider.push(chunk);
         }
 

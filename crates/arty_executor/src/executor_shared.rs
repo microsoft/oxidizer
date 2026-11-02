@@ -4,6 +4,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::mem;
+#[cfg(feature = "inspection")]
+use std::ops::ControlFlow;
 use std::rc::Rc;
 use std::task::Waker;
 use std::thread::ThreadId;
@@ -58,10 +60,10 @@ impl ExecutorShared {
     }
 
     #[cfg(feature = "inspection")]
-    pub(crate) fn inspect_new_tasks(&self, mut visit: impl FnMut(&TaskHandle) -> bool) -> Result<(), crate::InspectionError> {
+    pub(crate) fn inspect_new_tasks(&self, mut visit: impl FnMut(&TaskHandle) -> ControlFlow<()>) -> Result<(), crate::InspectionError> {
         let tasks = self.inner.new_tasks.try_borrow().map_err(|_borrow| crate::InspectionError::Busy)?;
         for task in tasks.iter() {
-            if !visit(task) {
+            if visit(task).is_break() {
                 break;
             }
         }
@@ -202,5 +204,23 @@ mod tests {
         assert!(!shared.shutdown_complete());
         shared.shutdown().trigger(ShutdownCause::default());
         assert!(shared.shutdown_complete());
+    }
+
+    #[cfg(feature = "inspection")]
+    #[test]
+    fn borrowed_submission_storage_reports_busy_and_recovers_after_release() {
+        let shared = ExecutorShared::new(
+            Waker::noop().clone(),
+            Sink::noop(),
+            std::thread::current().id(),
+            PanicPolicy::default(),
+        );
+        let borrowed = shared.inner.new_tasks.borrow_mut();
+
+        let busy = shared.inspect_new_tasks(|_| ControlFlow::Continue(()));
+        drop(borrowed);
+        let released = shared.inspect_new_tasks(|_| ControlFlow::Continue(()));
+
+        assert_eq!((busy, released), (Err(crate::InspectionError::Busy), Ok(())));
     }
 }

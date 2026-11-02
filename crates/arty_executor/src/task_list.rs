@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 use std::marker::PhantomData;
+#[cfg(feature = "inspection")]
+use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use crate::{TaskHandle, TaskPtr};
@@ -16,13 +18,13 @@ pub(crate) struct TaskList {
 
 impl TaskList {
     #[cfg(feature = "inspection")]
-    pub(crate) fn inspect_until(&self, mut visit: impl FnMut(TaskPtr) -> bool) {
+    pub(crate) fn inspect_until(&self, mut visit: impl FnMut(TaskPtr) -> ControlFlow<()>) {
         let mut next = self.head;
         while let Some(task) = next {
             // SAFETY: The list owns these live tasks. Inspection cannot mutate the
             // list, and a cycle cannot run while its owner borrows it for inspection.
             next = unsafe { task.as_task() }.links().next.get();
-            if !visit(task) {
+            if visit(task).is_break() {
                 break;
             }
         }
@@ -102,7 +104,6 @@ impl Drop for TaskList {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use plurality::MultiPool;
     use static_assertions::assert_not_impl_any;

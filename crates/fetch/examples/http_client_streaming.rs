@@ -16,7 +16,7 @@ async fn main() -> Result<(), ohno::AppError> {
     let body = client.get("https://example.com").fetch().await?.into_body();
     let mut stream = body.into_stream();
 
-    let mut file = BufWriter::new(std::fs::File::create("output.txt")?);
+    let mut file = BufWriter::new(tempfile::tempfile()?);
 
     while let Some(mut chunk) = stream.try_next().await? {
         let size = chunk.len();
@@ -28,8 +28,6 @@ async fn main() -> Result<(), ohno::AppError> {
 
     file.flush()?;
     println!("File download is complete.");
-
-    std::fs::remove_file("output.txt")?; // Clean up the file after use.
 
     Ok(())
 }

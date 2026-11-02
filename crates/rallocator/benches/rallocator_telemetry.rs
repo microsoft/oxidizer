@@ -14,6 +14,7 @@ use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
 // Keep the same measured call boundary in both recording modes.
 #[inline(never)]
 fn allocation_pair() {
+    // A small fixed class isolates ordinary per-owner allocation and free work.
     let layout = Layout::new::<[u8; 64]>();
     // SAFETY: The allocator receives a valid nonzero layout.
     let address = unsafe { rallocator::Rallocator.alloc(layout) };
@@ -30,6 +31,7 @@ fn benchmark(criterion: &mut Criterion) {
     for (name, enabled) in [("events_off", false), ("events_on", true)] {
         seismograph::recorder(Configuration {
             allocations: if enabled { Policy::all(false) } else { Policy::default() },
+            // The minimum ring reaches steady-state overwrites during warmup.
             event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Default::default()
         });

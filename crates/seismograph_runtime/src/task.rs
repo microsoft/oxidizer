@@ -109,8 +109,9 @@ impl EventContext {
 
 /// An owned request that a provider moves to its worker and answers once.
 ///
-/// Dropping an unanswered request releases the worker's request slot. No
-/// references to native task storage can escape in the response.
+/// Dropping an unanswered request reports collection failure and releases the
+/// worker's request slot. Canceled requests do not send a response.
+/// No references to native task storage can escape in the response.
 #[derive(Debug)]
 pub struct TaskRequest {
     pub(crate) worker: Arc<WorkerControl>,
@@ -118,6 +119,7 @@ pub struct TaskRequest {
     pub(crate) canceled: Arc<AtomicBool>,
     pub(crate) limit: usize,
     pub(crate) window: u64,
+    pub(crate) answered: bool,
 }
 
 impl TaskRequest {
@@ -130,6 +132,7 @@ impl TaskRequest {
     /// Whether the diagnostic caller stopped waiting for this request.
     #[must_use]
     pub fn is_canceled(&self) -> bool {
+        // Acquire observes the collector's Release when it stops receiving.
         self.canceled.load(Ordering::Acquire)
     }
 
@@ -138,7 +141,7 @@ impl TaskRequest {
     /// Excess descriptions are truncated and marked incomplete. A canceled
     /// request discards its response. Measurement data comes from observed polls,
     /// not from values supplied by the provider.
-    pub fn respond(self, mut tasks: Vec<Task>, mut collection: TaskCollection) {
+    pub fn respond(mut self, mut tasks: Vec<Task>, mut collection: TaskCollection) {
         if self.is_canceled() {
             return;
         }
@@ -160,11 +163,16 @@ impl TaskRequest {
             }
         }
         drop(measurements);
-        match self.sender.try_send(collection::Batch {
+        self.answered = true;
+        self.send(collection::Batch {
             worker: self.worker.id,
             tasks,
             collection,
-        }) {
+        });
+    }
+
+    fn send(&self, batch: collection::Batch) {
+        match self.sender.try_send(batch) {
             Ok(()) | Err(mpsc::TrySendError::Disconnected(_)) => {}
             Err(mpsc::TrySendError::Full(_)) => unreachable!("one response per worker fits the collection channel"),
         }
@@ -173,13 +181,21 @@ impl TaskRequest {
 
 impl Drop for TaskRequest {
     fn drop(&mut self) {
+        if !self.answered && !self.is_canceled() {
+            self.send(collection::Batch {
+                worker: self.worker.id,
+                tasks: Vec::new(),
+                collection: TaskCollection::Failed,
+            });
+        }
+        // Release transfers this single pending slot to the next dispatch.
         self.worker.request_pending.store(false, Ordering::Release);
     }
 }
 
 /// Token pairing a poll observed by one worker.
 ///
-/// Its timing-window identity is private and is unrelated to recorder epochs.
+/// Event-recording changes do not reset requested poll measurements.
 /// Dropping an unfinished token clears its worker slot without publishing a duration.
 #[derive(Debug)]
 #[must_use = "finish the observed poll with WorkerHandle::task_poll_finished, or drop it to cancel observation"]

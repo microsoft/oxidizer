@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(feature = "inspection")]
+use std::any::Any;
 use std::cell::{Cell, OnceCell, UnsafeCell};
 use std::fmt::Debug;
 use std::marker::PhantomPinned;
@@ -12,6 +14,8 @@ use observed::Sink;
 use pin_project::{pin_project, pinned_drop};
 use plurality::MultiPool;
 
+#[cfg(feature = "inspection")]
+use crate::TaskState;
 use crate::inspection::Inspector;
 use crate::{
     ExecutorShared, ShutdownCause, TaskCreatedReporter, TaskHandle, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal,
@@ -192,7 +196,7 @@ where
     I: Inspector<F>,
 {
     #[cfg(feature = "inspection")]
-    fn inspect(&self, state: crate::TaskState, visitor: &mut dyn FnMut(&dyn std::any::Any)) {
+    fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
         // SAFETY: Inspection runs on the owner between cycles or immediately before polling.
         // The shared future reference ends before a poll or retirement can borrow its payload.
         let payload = unsafe { &*self.payload.get() };
@@ -535,14 +539,13 @@ pub(crate) trait TypeErasedTask: Send + Sync {
 
     // Keep optional diagnostics last so they do not shift ordinary hot-path vtable entries.
     #[cfg(feature = "inspection")]
-    fn inspect(&self, state: crate::TaskState, visitor: &mut dyn FnMut(&dyn std::any::Any));
+    fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any));
 
     #[cfg(feature = "inspection")]
     fn is_notified(&self) -> bool;
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::pin::pin;
     use std::sync::Arc;

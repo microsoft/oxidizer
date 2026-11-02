@@ -339,7 +339,7 @@ impl Default for Policy {
 #[must_use]
 #[expect(
     clippy::inline_always,
-    reason = "keep category checks inline at allocator and runtime hook call sites"
+    reason = "force the disabled allocator/runtime gate into callers rather than leave an optional out-of-line call"
 )]
 #[inline(always)]
 pub fn is_enabled(class: EventClass) -> bool {
@@ -672,10 +672,15 @@ pub fn thread_id() -> ThreadId {
         // SAFETY: Published recorders remain allocated for the process lifetime.
         return unsafe { &*recorder }.thread_id;
     }
+    cached_thread_id()
+}
+
+fn cached_thread_id() -> ThreadId {
     let cached = RECORDER_THREAD_ID.get();
     if cached != 0 {
         return ThreadId::new(cached);
     }
+    // This counter allocates identities only. It publishes no associated data.
     let id = NEXT_THREAD_ID.fetch_add(1, Ordering::Relaxed);
     RECORDER_THREAD_ID.set(id);
     ThreadId::new(id)
@@ -1485,7 +1490,7 @@ fn initialize_local_recorder(local: &LocalRecorder) -> *const ThreadRecorder {
     // SAFETY: allocated is properly aligned writable storage for one value.
     unsafe { allocated.write(recorder) };
     RECORDERS
-        .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
+        .try_update(Ordering::Release, Ordering::Acquire, |head| {
             // SAFETY: allocated points to the initialized recorder owned by this
             // thread until this atomic update publishes it.
             unsafe { (*allocated).next.store(head, Ordering::Relaxed) };
@@ -2664,6 +2669,14 @@ mod tests {
     }
 
     #[test]
+    fn identity_without_a_live_recorder_is_allocated_once_and_stays_unique() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let (first, second) = std::thread::spawn(|| (cached_thread_id(), cached_thread_id())).join().unwrap();
+
+        assert_eq!((first, first != thread_id(), first.get() != 0), (second, true, true));
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore = "statistical sampling stress test requires native execution")]
     fn object_sampling_selects_approximately_one_in_x_objects() {
         let sampling = EventSampling::one_in(100).unwrap();
@@ -3063,7 +3076,7 @@ mod tests {
                 // Release publishes this initialized header to acquiring traversals;
                 // next can be relaxed while the header is still unpublished.
                 RECORDERS
-                    .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
+                    .try_update(Ordering::Release, Ordering::Acquire, |head| {
                         recorder.next.store(head, Ordering::Relaxed);
                         Some(ptr::from_ref(recorder).cast_mut())
                     })

@@ -18,7 +18,7 @@ mod attribution;
 mod stacks;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use seismograph::recorder::event::{Event, EventKind, EventPayload, Events};
 use seismograph_rallocator::callers::AddressLookup;
@@ -188,12 +188,11 @@ struct ObjectKey {
 
 impl TaskEventsSnapshot {
     pub(super) fn from_events(events: &Events, addresses: &[AddressLookup], source: Option<&Snapshot>) -> Self {
+        static OPERATIONS: LazyLock<HashMap<EventKind, ThreadOperationKind>> =
+            LazyLock::new(|| ThreadOperationKind::ALL.into_iter().map(|kind| (kind.event_kind(), kind)).collect());
         let evidence = attribution::infer(events, source);
         let mut stacks = stacks::Cache::new(addresses);
-        let operations = ThreadOperationKind::ALL
-            .into_iter()
-            .map(|kind| (kind.event_kind(), kind))
-            .collect::<HashMap<_, _>>();
+        let operations = &*OPERATIONS;
         let mut objects = BTreeMap::<ObjectKey, Vec<TaskEvent>>::new();
         for (index, event) in events.events.iter().enumerate() {
             let Some(&operation) = operations.get(&event.kind) else {
