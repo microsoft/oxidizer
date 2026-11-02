@@ -566,8 +566,10 @@ mod tests {
 
     #[rstest]
     // Flushing must export pending measurements.
+    #[cfg_attr(miri, ignore = "opentelemetry_sdk metric aggregation reads the realtime clock, unavailable under Miri isolation; native and cargo careful runs retain this coverage")]
     #[case::force_flush(SdkMeterProvider::force_flush)]
     // Shutdown must export pending measurements without a prior flush.
+    #[cfg_attr(miri, ignore = "opentelemetry_sdk metric aggregation reads the realtime clock, unavailable under Miri isolation; native and cargo careful runs retain this coverage")]
     #[case::shutdown(SdkMeterProvider::shutdown)]
     fn metric_destination_exports_recorded_metrics(#[case] export: fn(&SdkMeterProvider) -> OTelSdkResult) {
         let exporter = InMemoryMetricExporter::default();
