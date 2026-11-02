@@ -98,6 +98,15 @@ even when runtime startup fails. On Windows, releasing the last pool handle
 from thread-local storage can join another thread while the loader lock is
 held. That join can prevent the test process from finishing.
 
+Runtime fixtures first check that the worker waker retains a notification.
+They must not start threads when this prerequisite fails. Signal tests use
+the underlying notification for cleanup, independently of the waker under test.
+
+Tests that order ready tasks pause the worker before waking both tasks from
+the test thread. Tests that stop or drop a runtime from a blocking callback
+retain its owner on the test thread until the callback starts. Dropping a
+rejected callback must not destroy the runtime while its pool lock is held.
+
 The host configurations exclude known mutation candidates that are inactive on
 the active platform. Without those exclusions, cargo-mutants can mutate
 inactive source, produce an unchanged test binary, and report the surviving

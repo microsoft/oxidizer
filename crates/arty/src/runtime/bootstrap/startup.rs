@@ -25,6 +25,9 @@ fn build_with_processors(
     thread_builder: &ThreadBuilder,
     available: &ProcessorSet,
 ) -> Result<Runtime, Error> {
+    #[cfg(test)]
+    asynchronous::Signal::assert_fixture_ready();
+
     let processors = processor_config.workers_policy.select(available)?;
 
     let mut workers = Vec::with_capacity(processors.len());

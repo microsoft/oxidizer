@@ -454,6 +454,7 @@ mod tests {
         signal: Arc<Signal>,
         monitor_options: MonitorOptions,
     ) -> Worker {
+        Signal::assert_fixture_ready();
         let (blocking_worker, shutdown) = blocking;
         let thread = ThreadBuilder::default().build(thread::current().id());
         let endpoint = WorkerEndpoint {

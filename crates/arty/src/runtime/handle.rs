@@ -234,7 +234,10 @@ mod tests {
     use std::task::{Poll, Waker};
     use std::thread;
 
+    use performables::arc::Arc;
     use performables::sync::channel;
+    use performables::sync::mutex::Mutex;
+    use testing_aids::TEST_TIMEOUT;
     use thread_aware::ThreadBuilder;
 
     use super::*;
@@ -343,13 +346,7 @@ mod tests {
         let stopper_waker = stopper_waker.recv().unwrap();
         let later_waker = later_waker.recv().unwrap();
 
-        scheduler
-            .spawn(move |_| async move {
-                stopper_waker.wake_by_ref();
-                later_waker.wake_by_ref();
-            })
-            .join()
-            .unwrap();
+        wake_tasks_together(&scheduler, &stopper_waker, &later_waker);
 
         assert_programming_error(stopper.join().unwrap_err(), "Runtime::stop");
         assert!(later.join().unwrap_err().is_shutdown());
@@ -397,13 +394,7 @@ mod tests {
         let stopper_waker = stopper_waker.recv().unwrap();
         let later_waker = later_waker.recv().unwrap();
 
-        scheduler
-            .spawn(move |_| async move {
-                stopper_waker.wake_by_ref();
-                later_waker.wake_by_ref();
-            })
-            .join()
-            .unwrap();
+        wake_tasks_together(&scheduler, &stopper_waker, &later_waker);
 
         assert_programming_error(stopper.join().unwrap_err(), "Runtime drop");
         assert!(later.join().unwrap_err().is_shutdown());
@@ -417,8 +408,13 @@ mod tests {
         let runtime = single_worker_runtime();
         let joiner = runtime.worker_joiner.clone_for_test();
         let scheduler = worker_scheduler(&runtime);
+        let owner = Arc::new(Mutex::<Option<Runtime>>::new(Some(runtime)));
+        let callback_owner = Arc::clone(&owner);
 
-        let error = scheduler.spawn_blocking(move || runtime.stop()).join().unwrap_err();
+        let error = scheduler
+            .spawn_blocking(move || callback_owner.lock_result().unwrap().take().unwrap().stop())
+            .join()
+            .unwrap_err();
 
         assert_programming_error(error, "Runtime::stop");
         joiner.join().unwrap();
@@ -443,8 +439,13 @@ mod tests {
         let runtime = single_worker_runtime();
         let joiner = runtime.worker_joiner.clone_for_test();
         let scheduler = worker_scheduler(&runtime);
+        let owner = Arc::new(Mutex::<Option<Runtime>>::new(Some(runtime)));
+        let callback_owner = Arc::clone(&owner);
 
-        let error = scheduler.spawn_blocking(move || drop(runtime)).join().unwrap_err();
+        let error = scheduler
+            .spawn_blocking(move || drop(callback_owner.lock_result().unwrap().take().unwrap()))
+            .join()
+            .unwrap_err();
 
         assert_programming_error(error, "Runtime drop");
         joiner.join().unwrap();
@@ -487,6 +488,22 @@ mod tests {
             .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
             .join()
             .unwrap()
+    }
+
+    fn wake_tasks_together(scheduler: &crate::task::Scheduler, first: &Waker, second: &Waker) {
+        let (entered, entry) = channel::unbounded();
+        let (release, released) = channel::unbounded();
+        let gate = scheduler.spawn(move |_| async move {
+            entered.send(()).unwrap();
+            // Hold the worker so both remote wakes arrive before its next cycle.
+            released.recv().unwrap();
+        });
+        entry.recv_timeout(TEST_TIMEOUT).unwrap();
+
+        first.wake_by_ref();
+        second.wake_by_ref();
+        release.send(()).unwrap();
+        gate.join().unwrap();
     }
 
     fn single_worker_runtime() -> Runtime {

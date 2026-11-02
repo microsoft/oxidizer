@@ -31,6 +31,16 @@ pub(crate) enum WaitEvent {
 
 impl Signal {
     #[cfg(test)]
+    pub(crate) fn assert_fixture_ready() {
+        let signal = Arc::new(Self::default());
+        Self::waker(&signal).wake_by_ref();
+        assert!(
+            signal.is_notified(),
+            "a runtime fixture requires wake_by_ref to retain a notification"
+        );
+    }
+
+    #[cfg(test)]
     pub(crate) fn with_wait_observer(wait_observer: std::sync::mpsc::Sender<WaitEvent>) -> Self {
         Self {
             wait_observer: Some(wait_observer),
@@ -169,10 +179,13 @@ mod tests {
         wait_entry.recv_timeout(TEST_TIMEOUT).unwrap();
         let before_wake = done_rx.try_recv();
         Signal::waker(&signal).wake_by_ref();
-        done_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+        let notified = done_rx.recv_timeout(TEST_TIMEOUT);
+        if notified.is_err() {
+            signal.ready.notify_one();
+        }
         worker.join().unwrap();
 
-        assert_eq!(before_wake, Err(mpsc::TryRecvError::Empty));
+        assert_eq!((before_wake, notified), (Err(mpsc::TryRecvError::Empty), Ok(())));
     }
 
     #[test]
@@ -188,7 +201,7 @@ mod tests {
 
         let first = observations.recv_timeout(TEST_TIMEOUT).unwrap();
         if first == WaitEvent::Waiting {
-            Signal::waker(&signal).wake_by_ref();
+            signal.ready.notify_one();
         }
         worker.join().unwrap();
 
