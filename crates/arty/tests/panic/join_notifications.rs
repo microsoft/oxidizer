@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
 use thread_aware::Unaware;
 
 use crate::runtime_support::runtime;
@@ -41,12 +40,7 @@ fn remote_panicking_join_waker_preserves_published_panic() {
 fn assert_remote_notification_preserves_outcome(panics: bool) {
     let succeeded = Arc::new(AtomicUsize::new(0));
     let panicked = Arc::new(AtomicUsize::new(0));
-    let runtime = Runtime::builder()
-        .workers(WorkersPolicy::exactly(1))
-        .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .panic(PanicPolicy::ignore())
-        .build()
-        .unwrap();
+    let runtime = runtime();
     let (release, gate) = events_once::Event::boxed();
     let join = runtime.scheduler().spawn_anywhere(
         Unaware((gate, panics, Arc::clone(&succeeded), Arc::clone(&panicked))),
