@@ -63,10 +63,12 @@ The three backend families split two to one on how they satisfy this:
 Brotli's zero-fill is a real cost that the other two do not pay, so it is done
 with a bulk `fill` rather than per element.
 
-`Pump::pull` enforces the contract for every engine. Before it advances state,
-it rejects a step that reports `consumed > supplied` or
+`Pump::pull` enforces byte-count bounds for every engine. Before it advances
+state, it rejects a step that reports `consumed > supplied` or
 `produced > provided_output`. The pump then enters the failed state. This check
-prevents an engine from marking uninitialized output as initialized.
+prevents an engine from reporting bytes outside the supplied slices. It does not
+prove that the adapter initialized the bytes it reports. Each `Codec`
+implementation must satisfy that separate unsafe obligation.
 `WriteBuf::filled_until` has a different purpose. It records how much of the
 buffer zstd can read back.
 
