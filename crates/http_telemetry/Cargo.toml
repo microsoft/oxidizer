@@ -38,7 +38,7 @@ allowed_external_types = [
 all-features = true
 
 [dependencies]
-futures = { workspace = true }
+futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http_extensions = { workspace = true }
 layered = { workspace = true }

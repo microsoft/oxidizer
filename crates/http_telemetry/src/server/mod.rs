@@ -6,8 +6,11 @@
 mod drop_guard;
 mod events;
 
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+
 use drop_guard::{RequestEnd, TelemetryDropGuard};
-use events::{RequestAbandoned, RequestComplete};
+use events::{RequestAbandoned, RequestComplete, RequestError};
+use futures::FutureExt;
 use futures::future::Either;
 use http::Version;
 use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
@@ -26,9 +29,13 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
     fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
         let layer = &self.layer;
 
-        let interested = [RequestComplete::DESCRIPTION, RequestAbandoned::DESCRIPTION]
-            .iter()
-            .any(|description| layer.sink.is_interested(description));
+        let interested = [
+            RequestComplete::DESCRIPTION,
+            RequestError::DESCRIPTION,
+            RequestAbandoned::DESCRIPTION,
+        ]
+        .iter()
+        .any(|description| layer.sink.is_interested(description));
         if !interested {
             return Either::Left(self.inner.execute(input));
         }
@@ -49,17 +56,29 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
             protocol_version,
             finished: false,
         };
-        let response = self.inner.execute(input);
+        // The middleware resumes each panic that it catches and never polls the handler again, so the
+        // handler does not need to be unwind safe. The handler can panic in the call too, because
+        // `Execute` runs the handler closure in `execute`.
+        let response = match catch_unwind(AssertUnwindSafe(|| self.inner.execute(input))) {
+            Ok(response) => response,
+            Err(payload) => {
+                guard.emit(RequestEnd::Panic);
+                resume_unwind(payload)
+            }
+        };
         Either::Right(async move {
-            match response.await {
-                Ok(response) => {
+            match AssertUnwindSafe(response).catch_unwind().await {
+                Ok(Ok(response)) => {
                     guard.emit(RequestEnd::Complete(response.status()));
                     Ok(response)
                 }
-                Err(error) => {
-                    guard.finished = true;
-                    drop(guard);
+                Ok(Err(error)) => {
+                    guard.emit(RequestEnd::Error(&error));
                     Err(error)
+                }
+                Err(payload) => {
+                    guard.emit(RequestEnd::Panic);
+                    resume_unwind(payload)
                 }
             }
         })

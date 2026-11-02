@@ -11,35 +11,14 @@ mod common;
 use std::collections::HashSet;
 use std::time::Duration;
 
-use common::{Captured, Measurement, Probe};
+use common::{ABANDONED, COMPLETE, Captured, DURATION, ERROR, Probe, duration, server};
 use future_assert::{FutureTestExt, poll_once};
 use http::{Method, StatusCode, Version};
-use http_telemetry::{Telemetry, TelemetryLayer};
 use layered::{Layer, Service};
 use observed::enrichment::EnrichFnExt;
-use observed::metadata::{EventDescription, InstrumentKind};
-use observed::{Enrichment, Severity, Sink, Value};
-use tick::{ClockControl, SimpleClock};
-
-const COMPLETE: &str = "http.server.request.complete";
-const ABANDONED: &str = "http.server.request.abandoned";
-const DURATION: &str = "http.server.request.duration";
-
-/// A server layer over `sink` with a frozen clock. If a test does not set its own clock, each
-/// duration is `0`.
-fn server(sink: Sink) -> TelemetryLayer {
-    Telemetry::server(sink).clock(SimpleClock::new_frozen())
-}
-
-fn duration(value: u64) -> Measurement {
-    Measurement {
-        instrument: DURATION,
-        kind: InstrumentKind::Histogram,
-        description: "Duration of HTTP server requests.",
-        unit: "ms",
-        value: Value::U64(value),
-    }
-}
+use observed::metadata::EventDescription;
+use observed::{Enrichment, Severity, Value};
+use tick::ClockControl;
 
 #[derive(Enrichment)]
 struct Tenant {
@@ -142,7 +121,7 @@ fn each_event_has_own_type_id() {
     let mut names: Vec<_> = asked.iter().map(EventDescription::name).collect();
     names.sort_unstable();
     let type_ids: HashSet<_> = asked.iter().map(|description| description.type_id().unwrap()).collect();
-    assert_eq!((names, type_ids.len()), (vec![ABANDONED, COMPLETE], 2));
+    assert_eq!((names, type_ids.len()), (vec![ABANDONED, COMPLETE, ERROR], 3));
 }
 
 #[test]

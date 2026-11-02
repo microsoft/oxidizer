@@ -8,6 +8,7 @@
 
 use std::borrow::Cow;
 use std::future::{pending, ready};
+use std::io::{self, ErrorKind};
 use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,11 +16,23 @@ use std::time::{Duration, SystemTime};
 
 use http::{Method, Request, StatusCode, Version};
 use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
+use http_telemetry::{Telemetry, TelemetryLayer};
 use layered::{Execute, Service};
 use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind};
 use observed::processing::{EventProcessor, EventView, FieldValueFn};
 use observed::{FlushError, Severity, Sink, SinkId, Value};
 use tick::{ClockControl, SimpleClock};
+
+pub(crate) const COMPLETE: &str = "http.server.request.complete";
+pub(crate) const ERROR: &str = "http.server.request.error";
+pub(crate) const ABANDONED: &str = "http.server.request.abandoned";
+pub(crate) const DURATION: &str = "http.server.request.duration";
+
+/// A server layer over `sink` with a frozen clock. If a test does not set its own clock, each
+/// duration is `0`.
+pub(crate) fn server(sink: Sink) -> TelemetryLayer {
+    Telemetry::server(sink).clock(SimpleClock::new_frozen())
+}
 
 /// The time of the frozen clock of [`capture_sink`].
 pub(crate) fn sink_time() -> SystemTime {
@@ -34,6 +47,17 @@ pub(crate) struct Measurement {
     pub(crate) description: &'static str,
     pub(crate) unit: &'static str,
     pub(crate) value: Value,
+}
+
+/// The value of the duration metric for `value` milliseconds.
+pub(crate) fn duration(value: u64) -> Measurement {
+    Measurement {
+        instrument: DURATION,
+        kind: InstrumentKind::Histogram,
+        description: "Duration of HTTP server requests.",
+        unit: "ms",
+        value: Value::U64(value),
+    }
 }
 
 /// One event, as a processor saw it.
@@ -251,3 +275,20 @@ impl Service<HttpRequest> for NeverResponding {
         pending()
     }
 }
+
+/// Returns the error that its function makes, a new one for each request.
+pub(crate) struct Failing(fn() -> HttpError);
+
+impl Service<HttpRequest> for Failing {
+    type Out = http_extensions::Result<HttpResponse>;
+
+    fn execute(&self, _request: HttpRequest) -> impl Future<Output = Self::Out> + Send {
+        ready(Err((self.0)()))
+    }
+}
+
+/// A handler that returns `HttpError::validation`, an error without a source.
+pub(crate) const FAILING: Failing = Failing(|| HttpError::validation("the review has no text"));
+
+/// A handler that returns an `HttpError` around a refused connection.
+pub(crate) const FAILING_CHAINED: Failing = Failing(|| HttpError::from(io::Error::from(ErrorKind::ConnectionRefused)));

@@ -6,17 +6,37 @@
 use std::sync::Arc;
 
 use http::{Method, StatusCode};
+use http_extensions::{HttpError, collect_error_labels};
 use observed::context::Transfer;
 use observed::{Sink, Text, emit};
 use tick::Stopwatch;
 
 use super::OTHER;
-use super::events::{RequestAbandoned, RequestComplete};
+use super::events::{RequestAbandoned, RequestComplete, RequestError};
+
+/// The texts of the statuses 500 to 599, three digits each. `StatusCode::as_str` returns a text that
+/// borrows the status, so the `error.type` of a complete event comes from here.
+const SERVER_ERROR_STATUSES: &str = concat!(
+    "500501502503504505506507508509",
+    "510511512513514515516517518519",
+    "520521522523524525526527528529",
+    "530531532533534535536537538539",
+    "540541542543544545546547548549",
+    "550551552553554555556557558559",
+    "560561562563564565566567568569",
+    "570571572573574575576577578579",
+    "580581582583584585586587588589",
+    "590591592593594595596597598599",
+);
 
 #[derive(Clone, Copy)]
-pub(crate) enum RequestEnd {
+pub(crate) enum RequestEnd<'a> {
     /// The handler returned a response with this status.
     Complete(StatusCode),
+    /// The handler returned this error.
+    Error(&'a HttpError),
+    /// The handler panicked.
+    Panic,
     /// The caller dropped the request future before the handler returned.
     Abandoned,
 }
@@ -38,7 +58,7 @@ pub(crate) struct TelemetryDropGuard<'a> {
 }
 
 impl TelemetryDropGuard<'_> {
-    pub(crate) fn emit(&mut self, end: RequestEnd) {
+    pub(crate) fn emit(&mut self, end: RequestEnd<'_>) {
         self.finished = true;
         #[expect(
             clippy::cast_possible_truncation,
@@ -50,13 +70,40 @@ impl TelemetryDropGuard<'_> {
         let method_original = (method == OTHER).then(|| Text::from(Arc::<str>::from(self.method.as_str())));
         let protocol_version = self.protocol_version;
         match end {
-            RequestEnd::Complete(status_code) => emit!(
+            RequestEnd::Complete(status_code) => {
+                let error_type = status_code.as_u16().checked_sub(500).and_then(|index| {
+                    let start = usize::from(index) * 3;
+                    SERVER_ERROR_STATUSES.get(start..start + 3)
+                });
+                emit!(
+                    self.sink,
+                    RequestComplete {
+                        method,
+                        method_original,
+                        protocol_version,
+                        status_code: i64::from(status_code.as_u16()),
+                        error_type,
+                        duration_ms,
+                    }
+                );
+            }
+            RequestEnd::Error(error) => emit!(
                 self.sink,
-                RequestComplete {
+                RequestError {
                     method,
                     method_original,
                     protocol_version,
-                    status_code: i64::from(status_code.as_u16()),
+                    error_type: Text::from(collect_error_labels(error).into_cow()),
+                    duration_ms,
+                }
+            ),
+            RequestEnd::Panic => emit!(
+                self.sink,
+                RequestError {
+                    method,
+                    method_original,
+                    protocol_version,
+                    error_type: Text::from("panic"),
                     duration_ms,
                 }
             ),

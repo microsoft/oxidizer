@@ -45,9 +45,12 @@ in the cases listed under
 |Event|Severity|Message|When|
 |-----|--------|-------|----|
 |`http.server.request.complete`|Info|`HTTP server request completed`|The handler returned a response, with any status.|
+|`http.server.request.error`|Error|`HTTP server request failed`|The handler returned an error or panicked.|
 |`http.server.request.abandoned`|Warn|`HTTP server request abandoned`|The caller dropped the request future before the handler returned.|
 
-Both events carry the [attributes](#metric-httpserverrequestduration) of the metric
+The middleware returns the error of the handler unchanged.
+
+Each event carries the [attributes](#metric-httpserverrequestduration) of the metric
 `http.server.request.duration`, and these fields:
 
 |Field|Type|Description|Examples|Presence|
@@ -68,13 +71,19 @@ Both events carry the [attributes](#metric-httpserverrequestduration) of the met
 |`http.request.method`|string|HTTP request method. `_OTHER` for any method other than `CONNECT`, `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT` and `TRACE`.|`GET`; `POST`; `_OTHER`|Always|
 |`network.protocol.version`|string|Version of the HTTP protocol. `_OTHER` for a version other than 1.0, 1.1, 2 and 3.|`1.1`; `2`|Always|
 |`http.response.status_code`|int|HTTP response status code.|`200`|If the handler returned a response.|
-|`error.type`|string|Describes a class of error the request ended with.|`abandoned`|If the caller dropped the request future before the handler returned.|
+|`error.type`|string|Describes a class of error the request ended with. A handler error gives the labels of the error and its sources, joined with dots ([`collect_error_labels`][__link5]). A handler panic gives `panic`. A status from 500 to 599 gives the status code. A dropped request future gives `abandoned`.|`validation`; `io.connection_refused`; `panic`; `503`; `abandoned`|If the handler returned an error or panicked, the status is from 500 to 599, or the caller dropped the request future before the handler returned.|
 
 ## When the middleware emits no event
 
-* The handler returns an error or panics. The error or the panic reaches the caller unchanged.
 * The request future is dropped while its thread panics.
 * There is no destination interested in processing the event further.
+
+## Panics
+
+If the handler panics, the middleware emits the error event and then resumes the panic with its
+payload. If a processor panics while the middleware emits an event, the processor panic reaches
+the caller, and the processors after it do not get the event. If this happens while the
+middleware reports a handler panic, the processor panic replaces the handler panic.
 
 ## Enrichment with custom dimensions
 
@@ -109,9 +118,10 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb5jhta0JV0rUbwjoBka9dQDwbHwIZlDkmysEbluWAwmzhzEthZIOCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy44gmhvYnNlcnZlZGYwLjI5LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTnEs9Xys8nUbye7HSE2DSKkbkuGijTR9vqgbOlnB-pPBR69hZISCb2h0dHBfZXh0ZW5zaW9uc2YwLjEzLjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy44gmhvYnNlcnZlZGYwLjI5LjA
  [__link0]: https://crates.io/crates/observed/0.29.0
  [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
  [__link2]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry
  [__link3]: https://docs.rs/layered/0.3.8/layered/?search=Layer
  [__link4]: https://docs.rs/observed/0.29.0/observed/?search=Sink
+ [__link5]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=collect_error_labels

@@ -17,11 +17,11 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
-use common::{NeverResponding, Responding};
+use common::{Failing, NeverResponding, Responding};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::RedactionEngine;
 use http::{Method, StatusCode, Version};
-use http_extensions::{HttpRequest, HttpResponse, RequestHandler};
+use http_extensions::{HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::Telemetry;
 use layered::Layer;
 use observed::context::Transfer;
@@ -114,14 +114,14 @@ fn long_extension_method() -> HttpRequest {
     common::request(method, Version::HTTP_11)
 }
 
-/// Sends `request` to `handler`, which responds at the first poll.
-fn send(handler: &impl RequestHandler, request: HttpRequest) -> HttpResponse {
+/// Sends `request` to `handler`, which responds or returns an error at the first poll.
+fn send(handler: &impl RequestHandler, request: HttpRequest) -> Result<HttpResponse, HttpError> {
     // Pin on the stack, because `Box::pin` allocates and so changes the measurement.
     let future = pin!(handler.execute(request));
-    let Poll::Ready(response) = future.poll(&mut Context::from_waker(Waker::noop())) else {
-        unreachable!("the handler responds at the first poll, and the layer does not wait");
+    let Poll::Ready(result) = future.poll(&mut Context::from_waker(Waker::noop())) else {
+        unreachable!("the handler finishes at the first poll, and the layer does not wait");
     };
-    response.expect("the handler returns no error")
+    result
 }
 
 /// Sends `request` to `handler`, which never responds. Then polls the future once and drops it.
@@ -150,6 +150,15 @@ fn never_responding_stack(sink: Sink) -> Telemetry<NeverResponding> {
     stack
 }
 
+/// The server middleware in front of `handler`, over a sink with two processors that read every
+/// field, so the allocation count shows that the error event builds `error.type` once. The stack
+/// already got one request.
+fn failing_stack(handler: Failing) -> Telemetry<Failing> {
+    let stack = Telemetry::server(reading_sink(2)).layer(handler);
+    drop(send(&stack, common::get()));
+    stack
+}
+
 /// The server middleware in front of [`Responding`], over a sink that combines three sinks, and
 /// an enrichment for that sink. The stack already got one request.
 fn enriched_stack() -> (Telemetry<Responding>, Transfer) {
@@ -160,19 +169,19 @@ fn enriched_stack() -> (Telemetry<Responding>, Transfer) {
 
 #[metabench::benchmark(INNER_ONLY, GROUP, "inner_only")]
 #[bench::get(Box::new(common::responding(StatusCode::OK)), common::get())]
-fn inner_only<S: Borrow<Responding>>(handler: S, request: HttpRequest) -> (HttpResponse, S) {
+fn inner_only<S: Borrow<Responding>>(handler: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(handler.borrow(), request), handler)
 }
 
 #[metabench::benchmark(UNINTERESTED_SINK, GROUP, "uninterested_sink")]
 #[bench::get(Box::new(responding_stack(Sink::noop())), common::get())]
-fn uninterested_sink<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (HttpResponse, S) {
+fn uninterested_sink<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
 
 #[metabench::benchmark(COMPLETE_EMPTY_BODY, GROUP, "complete_empty_body")]
 #[bench::get(Box::new(responding_stack(reading_sink(1))), common::get())]
-fn complete_empty_body<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (HttpResponse, S) {
+fn complete_empty_body<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
 
@@ -185,25 +194,42 @@ fn abandoned<S: Borrow<Telemetry<NeverResponding>>>(stack: S, request: HttpReque
 
 #[metabench::benchmark(METHOD_ORIGINAL_READ, GROUP, "method_original_read")]
 #[bench::purge(Box::new(responding_stack(reading_sink(2))), purge())]
-fn method_original_read<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (HttpResponse, S) {
+fn method_original_read<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
 
 #[metabench::benchmark(LONG_METHOD, GROUP, "long_method")]
 #[bench::long_extension_method(Box::new(responding_stack(interested_sink())), long_extension_method())]
-fn long_method<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (HttpResponse, S) {
+fn long_method<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
 
 #[metabench::benchmark(ENRICHED_THREE_SINKS, GROUP, "enriched_three_sinks")]
 #[bench::get(Box::new(enriched_stack()), common::get())]
-fn enriched_three_sinks<S: Borrow<(Telemetry<Responding>, Transfer)>>(setup: S, request: HttpRequest) -> (HttpResponse, S) {
+fn enriched_three_sinks<S: Borrow<(Telemetry<Responding>, Transfer)>>(
+    setup: S,
+    request: HttpRequest,
+) -> (Result<HttpResponse, HttpError>, S) {
     let response = {
         let (stack, enrichment) = setup.borrow();
         let _enrichment = enrichment.apply_current_thread();
         send(stack, request)
     };
     (response, setup)
+}
+
+#[metabench::benchmark(INNER_ERROR, GROUP, "inner_error")]
+#[bench::validation(Box::new(common::FAILING), common::get())]
+#[bench::connection_refused(Box::new(common::FAILING_CHAINED), common::get())]
+fn inner_error<S: Borrow<Failing>>(handler: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
+    (send(handler.borrow(), request), handler)
+}
+
+#[metabench::benchmark(HANDLER_ERROR, GROUP, "handler_error")]
+#[bench::validation(Box::new(failing_stack(common::FAILING)), common::get())]
+#[bench::connection_refused(Box::new(failing_stack(common::FAILING_CHAINED)), common::get())]
+fn handler_error<S: Borrow<Telemetry<Failing>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
+    (send(stack.borrow(), request), stack)
 }
 
 fn criterion_benchmarks(criterion: &mut Criterion) {
@@ -244,6 +270,15 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+    for (case, handler) in [("validation", common::FAILING), ("connection_refused", common::FAILING_CHAINED)] {
+        group.bench_function(BenchmarkId::new(INNER_ERROR.benchmark_name(), case), |bencher| {
+            bencher.iter_batched(common::get, |request| inner_error(&handler, request).0, BatchSize::SmallInput);
+        });
+        let stack = failing_stack(handler);
+        group.bench_function(BenchmarkId::new(HANDLER_ERROR.benchmark_name(), case), |bencher| {
+            bencher.iter_batched(common::get, |request| handler_error(&stack, request).0, BatchSize::SmallInput);
+        });
+    }
     group.finish();
 }
 
@@ -257,5 +292,7 @@ metabench::main!(
         METHOD_ORIGINAL_READ,
         LONG_METHOD,
         ENRICHED_THREE_SINKS,
+        INNER_ERROR,
+        HANDLER_ERROR,
     ],
 );

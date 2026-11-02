@@ -1,11 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Sends two requests through the server middleware, and prints the events that it emits.
+//! Sends three requests through the server middleware, and prints the events that it emits.
 //!
 //! The handler responds to `GET /books/1`, so the middleware emits the complete event. The
 //! example drops `GET /books/2` before the handler responds, as a server does when the client
-//! disconnects. So the middleware emits the abandoned event.
+//! disconnects. So the middleware emits the abandoned event. The handler returns an error for
+//! `POST /books/1/reviews`, so the middleware emits the error event.
 //!
 //! Run the example with this command:
 //! ```sh
@@ -19,7 +20,7 @@ use std::sync::Arc;
 use data_privacy::RedactionEngine;
 use futures::FutureExt;
 use futures::executor::block_on;
-use http::Request;
+use http::{Method, Request};
 use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
 use http_telemetry::Telemetry;
 use layered::{Execute, Service, Stack};
@@ -82,10 +83,14 @@ fn main() {
 
     let bodies = body_builder.clone();
     let handler = Execute::new(move |request: HttpRequest| {
-        let response = (request.uri().path() == "/books/1").then(|| HttpResponse::new(bodies.empty()));
+        let result = match (request.method(), request.uri().path()) {
+            (&Method::GET, "/books/1") => Some(Ok(HttpResponse::new(bodies.empty()))),
+            (&Method::POST, "/books/1/reviews") => Some(Err(HttpError::validation("the review has no text"))),
+            _ => None,
+        };
         async move {
-            match response {
-                Some(response) => Ok::<_, HttpError>(response),
+            match result {
+                Some(result) => result,
                 None => pending().await,
             }
         }
@@ -99,5 +104,12 @@ fn main() {
     println!("GET /books/2");
     let response = service.execute(get(&body_builder, "/books/2")).now_or_never();
     assert!(response.is_none(), "the handler does not respond to /books/2");
-    println!("The example dropped the request before the handler responded.");
+    println!("The example dropped the request before the handler responded.\n");
+
+    println!("POST /books/1/reviews");
+    let review = Request::post("/books/1/reviews")
+        .body(body_builder.empty())
+        .expect("the example paths are valid URIs");
+    let error = block_on(service.execute(review)).expect_err("the handler rejects /books/1/reviews");
+    println!("The request returned the error: {error}");
 }
