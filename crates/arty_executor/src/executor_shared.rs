@@ -6,7 +6,6 @@ use std::collections::VecDeque;
 use std::mem;
 use std::rc::Rc;
 use std::task::Waker;
-use std::thread::ThreadId;
 
 use observed::Sink;
 use performables::sync::channel;
@@ -35,9 +34,9 @@ struct ExecutorSharedInner {
 }
 
 impl ExecutorShared {
-    pub(crate) fn new(owner_waker: Waker, sink: Sink, thread_id: ThreadId, panic_policy: PanicPolicy) -> Self {
+    pub(crate) fn new(owner_waker: Waker, sink: Sink, panic_policy: PanicPolicy) -> Self {
         let shutdown = Shutdown::new(owner_waker.clone());
-        let (wake, remote_wakes) = WakeShared::new(owner_waker, thread_id);
+        let (wake, remote_wakes) = WakeShared::new(owner_waker);
         Self {
             inner: Rc::new(ExecutorSharedInner {
                 new_tasks: RefCell::new(VecDeque::new()),
@@ -159,12 +158,7 @@ mod tests {
 
     #[test]
     fn shutdown_completion_requires_a_shutdown_request() {
-        let shared = ExecutorShared::new(
-            Waker::noop().clone(),
-            Sink::noop(),
-            std::thread::current().id(),
-            PanicPolicy::default(),
-        );
+        let shared = ExecutorShared::new(Waker::noop().clone(), Sink::noop(), PanicPolicy::default());
 
         assert!(!shared.shutdown_complete());
         shared.shutdown().trigger(ShutdownCause::default());

@@ -74,15 +74,14 @@ impl ExecutorBuilder {
     #[must_use]
     pub fn build(self) -> Executor {
         let current_thread_id = std::thread::current().id();
-        let thread_id = self.thread.map_or(current_thread_id, |thread| {
+        if let Some(thread) = self.thread {
             assert_eq!(
                 thread.id(),
                 current_thread_id,
                 "Executor thread coordinate must identify the current OS thread"
             );
-            thread.id()
-        });
-        Executor::new(self.owner_waker, self.sink, thread_id, self.panic_policy)
+        }
+        Executor::new(self.owner_waker, self.sink, self.panic_policy)
     }
 }
 
