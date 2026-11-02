@@ -127,8 +127,8 @@ duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
 either-or-both = { version = "0.3", default-features = false }
 events_once = { version = "0.5.32", default-features = false }
-fakeable = { path = "crates/fakeable", default-features = false, version = "0.2.2" }
-fakeable_impl = { path = "crates/fakeable_impl", default-features = false, version = "=0.2.2" }
+fakeable = { path = "crates/fakeable", default-features = false, version = "0.2.3" }
+fakeable_impl = { path = "crates/fakeable_impl", default-features = false, version = "=0.2.3" }
 fastrand = { version = "2.3.0", default-features = false, features = ["std"] }
 fetch = { path = "crates/fetch", default-features = false, version = "0.20.0" }
 fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.10.0" }

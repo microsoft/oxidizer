@@ -9,31 +9,25 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 
 use uniflight::Merger;
 
 #[tokio::main]
 async fn main() {
-    let merger = Arc::new(Merger::<String, String>::new());
+    let merger = Merger::<String, String>::new();
     let execution_count = Arc::new(AtomicUsize::new(0));
 
-    // Spawn 5 concurrent requests for the same key
-    let handles: Vec<_> = (0..5)
-        .map(|_| {
-            let merger = Arc::clone(&merger);
-            let counter = Arc::clone(&execution_count);
-            tokio::spawn(async move {
-                merger
-                    .execute("user:123", || async {
-                        counter.fetch_add(1, Ordering::SeqCst);
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                        "UserData { name: Alice }".to_string()
-                    })
-                    .await
-            })
+    // Register every caller before spawning so scheduler delays cannot create
+    // separate operations for the same key.
+    let operations: [_; 5] = std::array::from_fn(|_| {
+        let counter = Arc::clone(&execution_count);
+        merger.execute("user:123", move || async move {
+            counter.fetch_add(1, Ordering::SeqCst);
+            tokio::task::yield_now().await;
+            "UserData { name: Alice }".to_string()
         })
-        .collect();
+    });
+    let handles = operations.map(tokio::spawn);
 
     // All requests complete with the same result
     for handle in handles {

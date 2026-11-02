@@ -142,7 +142,7 @@ unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         {
             let _guard = lock_counters();
-            let _ = COUNTERS.live_bytes.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
+            let _ = COUNTERS.live_bytes.try_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
                 Some(live.saturating_sub(layout.size()))
             });
         }
@@ -180,7 +180,7 @@ fn record_reallocation(replacement: *mut u8, old_size: usize, new_size: usize) -
         let _guard = lock_counters();
         let _ = COUNTERS
             .live_bytes
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |live| Some(live.saturating_sub(shrink)));
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |live| Some(live.saturating_sub(shrink)));
     }
     replacement
 }

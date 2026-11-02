@@ -284,7 +284,6 @@ fn signal_from_raw(ptr: *const ()) -> &'static WakeSignal {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::pin::pin;
     use std::sync::atomic::{AtomicUsize, Ordering};

@@ -89,7 +89,6 @@ impl Drop for TaskList {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use plurality::MultiPool;
     use static_assertions::assert_not_impl_any;

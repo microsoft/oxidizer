@@ -288,8 +288,7 @@ impl<A: Allocator + Clone> Chunk<A> {
         // observes the previous refcount; if it returns true the
         // caller holds the unique remaining reference and we route
         // through `teardown_and_release`.
-        let chunk_ref = chunk.as_ref();
-        if chunk_ref.dec_ref() {
+        if Self::dec_ref(chunk) {
             Self::teardown_and_release(chunk);
         }
     }
@@ -343,7 +342,7 @@ impl<A: Allocator + Clone> Chunk<A> {
     /// reference on this chunk. After this call those references no longer
     /// exist.
     #[inline]
-    pub(crate) unsafe fn refund_refs_and_release_one(&self, n: usize) -> bool {
+    pub(crate) unsafe fn refund_refs_and_release_one(chunk: NonNull<Self>, n: usize) -> bool {
         #[cfg_attr(coverage_nightly, coverage(off))]
         #[inline(never)]
         #[cold]
@@ -353,7 +352,7 @@ impl<A: Allocator + Clone> Chunk<A> {
         let Some(released) = n.checked_add(1) else {
             overflow();
         };
-        let prev = self.ref_count.fetch_sub(released, Ordering::Release);
+        let prev = (*chunk.as_ptr()).ref_count.fetch_sub(released, Ordering::Release);
         debug_assert!(prev >= released, "combined ref release underflow: prev={prev} released={released}");
         if prev == released {
             fence(Ordering::Acquire);
@@ -390,9 +389,16 @@ impl<A: Allocator + Clone> Chunk<A> {
     /// Decrements the chunk's strong reference count by one. Returns `true`
     /// if the count reached zero, signaling the caller must tear the chunk
     /// down.
+    ///
+    /// # Safety
+    ///
+    /// Caller must own the strong reference being released and must not
+    /// access `chunk` afterward unless this returns `true`.
     #[inline]
-    pub(crate) fn dec_ref(&self) -> bool {
-        let prev = self.ref_count.fetch_sub(1, Ordering::Release);
+    pub(crate) unsafe fn dec_ref(chunk: NonNull<Self>) -> bool {
+        // Borrow only the atomic: another releaser can destroy the header
+        // before this call returns after a non-final decrement.
+        let prev = (*chunk.as_ptr()).ref_count.fetch_sub(1, Ordering::Release);
         if prev == 1 {
             fence(Ordering::Acquire);
             true
@@ -635,7 +641,7 @@ mod tests {
         unsafe {
             let chunk = Chunk::<Global>::allocate(Arc::new(Global), Weak::new(), 64).expect("allocate chunk");
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = chunk.as_ref().refund_refs_and_release_one(usize::MAX);
+                let _ = Chunk::refund_refs_and_release_one(chunk, usize::MAX);
             }));
             chunk.as_ref().set_ref_count_for_test(0);
             Chunk::destroy(chunk);
