@@ -705,7 +705,7 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         // SAFETY: guaranteed by the caller; this mutator owns the additional
         // +1 released by the same atomic operation.
         unsafe {
-            if chunk.as_ref().refund_refs_and_release_one(refund) {
+            if Chunk::<A>::refund_refs_and_release_one(chunk, refund) {
                 Chunk::<A>::teardown_and_release(chunk);
             }
         }
@@ -726,8 +726,7 @@ impl<A: Allocator + Clone> Drop for ChunkMutator<A> {
                 let wasted = self.wasted_tail_for_stats();
                 Chunk::<A>::record_retire(chunk, wasted);
             }
-            let chunk_ref = chunk.as_ref();
-            if chunk_ref.dec_ref() {
+            if Chunk::<A>::dec_ref(chunk) {
                 Chunk::<A>::teardown_and_release(chunk);
             }
         }

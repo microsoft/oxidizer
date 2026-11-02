@@ -200,7 +200,7 @@ fn registered_work_and_timers_progress_while_producers_keep_submitting() {
                 started.send(()).unwrap();
                 while running.load(Ordering::Acquire) {
                     if in_flight
-                        .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |count| (count < capacity).then_some(count + 1))
+                        .try_update(Ordering::AcqRel, Ordering::Relaxed, |count| (count < capacity).then_some(count + 1))
                         .is_err()
                     {
                         thread::yield_now();

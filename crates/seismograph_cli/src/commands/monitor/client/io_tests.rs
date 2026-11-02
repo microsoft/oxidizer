@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::io::Write as _;
 use std::path::Path;
 use std::thread::{self, JoinHandle};
 

@@ -121,7 +121,7 @@ impl<A: Allocator + Clone> RetiredLocalChunks<A> {
         // SAFETY: caller hands over the list's `+1`. Release the `+1`; if it
         // was the last reference, route through teardown to recycle.
         unsafe {
-            if chunk.as_ref().dec_ref() {
+            if Chunk::dec_ref(chunk) {
                 Chunk::teardown_and_release(chunk);
             }
         }
