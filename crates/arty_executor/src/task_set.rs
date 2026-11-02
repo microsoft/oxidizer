@@ -30,16 +30,61 @@ impl TaskSet {
     {
         self.shared.add_task(future, options, completion);
     }
+
+    /// Returns whether this task set's executor is running a cycle on this thread.
+    #[must_use]
+    pub fn is_executing(&self) -> bool {
+        crate::executor_context::is_executing(self.shared.wake().thread_id())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
     use static_assertions::assert_not_impl_any;
 
     use super::*;
+    use crate::{Executor, ShutdownCause, TaskPanicPayload, discard_task_panic_payload};
+
+    #[derive(Debug)]
+    struct DiscardCompletion;
+
+    impl TaskCompletion<()> for DiscardCompletion {
+        fn completed(self, (): ()) {}
+
+        fn panicked(self, panic: TaskPanicPayload, _cause: Option<ShutdownCause>) {
+            discard_task_panic_payload(panic);
+        }
+
+        fn cancelled(self, _cause: ShutdownCause) {}
+    }
 
     #[test]
     fn thread_safety() {
         assert_not_impl_any!(TaskSet: Send, Sync);
+    }
+
+    #[test]
+    fn execution_state_follows_the_owner_cycle() {
+        let mut executor = Executor::builder().build();
+        let tasks = executor.tasks();
+        let observed = Rc::new(Cell::new(false));
+        let task_observed = Rc::clone(&observed);
+        let task_tasks = tasks.clone();
+        assert!(!tasks.is_executing());
+        tasks.add(
+            async move {
+                task_observed.set(task_tasks.is_executing());
+            },
+            TaskOptions::default(),
+            DiscardCompletion,
+        );
+
+        _ = executor.execute_cycle();
+
+        assert!(observed.get());
+        assert!(!tasks.is_executing());
     }
 }
