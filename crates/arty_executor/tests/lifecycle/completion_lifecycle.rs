@@ -31,6 +31,7 @@ thread_local! {
     static THREAD_LOCAL_EXECUTOR: RefCell<Option<Executor>> = const { RefCell::new(None) };
     static REENTRANT_TELEMETRY_SUBMISSION: RefCell<Option<(TaskSet, Rc<Cell<bool>>)>> = const { RefCell::new(None) };
     static OWNER_DROP_TELEMETRY: RefCell<Option<OwnerDropState>> = const { RefCell::new(None) };
+    static RETAINED_DURING_TEARDOWN: RefCell<Option<TeardownProbe>> = const { RefCell::new(None) };
 }
 
 struct ReentrantSubmissionProcessor;
@@ -64,6 +65,73 @@ struct OwnerDropState {
     owner: Executor,
     tasks: TaskSet,
     nested: Rc<RefCell<Option<CompletionHandle<usize>>>>,
+}
+
+struct TeardownProbe(TaskSet);
+
+impl Drop for TeardownProbe {
+    fn drop(&mut self) {
+        assert!(!self.0.is_executing());
+    }
+}
+
+#[test]
+fn task_set_execution_state_follows_the_owner_cycle() {
+    let mut executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let observed = Rc::new(Cell::new(false));
+    let task_observed = Rc::clone(&observed);
+    let task_tasks = tasks.clone();
+    assert!(!tasks.is_executing());
+    let _completion = tasks.add_test(
+        async move {
+            task_observed.set(task_tasks.is_executing());
+        },
+        TaskOptions::default(),
+    );
+
+    _ = executor.execute_cycle();
+
+    assert!(observed.get());
+    assert!(!tasks.is_executing());
+}
+
+#[test]
+fn retained_task_set_does_not_observe_a_replacement_executor_cycle() {
+    let first = Executor::builder().build();
+    let retained = first.tasks();
+    drop(first);
+
+    let mut replacement = Executor::builder().build();
+    let replacement_tasks = replacement.tasks();
+    let observed = Rc::new(Cell::new((false, false)));
+    let task_observed = Rc::clone(&observed);
+    let task_retained = retained.clone();
+    let task_replacement = replacement_tasks.clone();
+    let _completion = replacement_tasks.add_test(
+        async move {
+            task_observed.set((task_retained.is_executing(), task_replacement.is_executing()));
+        },
+        TaskOptions::default(),
+    );
+
+    _ = replacement.execute_cycle();
+
+    assert_eq!(observed.get(), (false, true));
+}
+
+#[test]
+fn retained_task_set_returns_false_after_executor_context_tls_destruction() {
+    std::thread::spawn(|| {
+        RETAINED_DURING_TEARDOWN.with(|_| {});
+        let executor = Executor::builder().build();
+        RETAINED_DURING_TEARDOWN.with_borrow_mut(|retained| {
+            *retained = Some(TeardownProbe(executor.tasks()));
+        });
+        drop(executor);
+    })
+    .join()
+    .unwrap();
 }
 
 impl EventProcessor for ReentrantSubmissionProcessor {

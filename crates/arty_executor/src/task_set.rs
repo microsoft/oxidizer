@@ -43,102 +43,12 @@ impl TaskSet {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell};
-    use std::rc::Rc;
-
     use static_assertions::assert_not_impl_any;
 
     use super::*;
-    use crate::{Executor, ShutdownCause, TaskPanicPayload, discard_task_panic_payload};
-
-    #[derive(Debug)]
-    struct DiscardCompletion;
-
-    thread_local! {
-        static RETAINED_DURING_TEARDOWN: RefCell<Option<TeardownProbe>> = const { RefCell::new(None) };
-    }
-
-    struct TeardownProbe(TaskSet);
-
-    impl Drop for TeardownProbe {
-        fn drop(&mut self) {
-            assert!(!self.0.is_executing());
-        }
-    }
-
-    impl TaskCompletion<()> for DiscardCompletion {
-        fn completed(self, (): ()) {}
-
-        fn panicked(self, panic: TaskPanicPayload, _cause: Option<ShutdownCause>) {
-            discard_task_panic_payload(panic);
-        }
-
-        fn cancelled(self, _cause: ShutdownCause) {}
-    }
 
     #[test]
     fn thread_safety() {
         assert_not_impl_any!(TaskSet: Send, Sync);
-    }
-
-    #[test]
-    fn execution_state_follows_the_owner_cycle() {
-        let mut executor = Executor::builder().build();
-        let tasks = executor.tasks();
-        let observed = Rc::new(Cell::new(false));
-        let task_observed = Rc::clone(&observed);
-        let task_tasks = tasks.clone();
-        assert!(!tasks.is_executing());
-        tasks.add(
-            async move {
-                task_observed.set(task_tasks.is_executing());
-            },
-            TaskOptions::default(),
-            DiscardCompletion,
-        );
-
-        _ = executor.execute_cycle();
-
-        assert!(observed.get());
-        assert!(!tasks.is_executing());
-    }
-
-    #[test]
-    fn retained_task_set_does_not_observe_a_replacement_executor_cycle() {
-        let first = Executor::builder().build();
-        let retained = first.tasks();
-        drop(first);
-
-        let mut replacement = Executor::builder().build();
-        let replacement_tasks = replacement.tasks();
-        let observed = Rc::new(Cell::new((false, false)));
-        let task_observed = Rc::clone(&observed);
-        let task_retained = retained.clone();
-        let task_replacement = replacement_tasks.clone();
-        replacement_tasks.add(
-            async move {
-                task_observed.set((task_retained.is_executing(), task_replacement.is_executing()));
-            },
-            TaskOptions::default(),
-            DiscardCompletion,
-        );
-
-        _ = replacement.execute_cycle();
-
-        assert_eq!(observed.get(), (false, true));
-    }
-
-    #[test]
-    fn retained_task_set_returns_false_after_executor_context_tls_destruction() {
-        std::thread::spawn(|| {
-            RETAINED_DURING_TEARDOWN.with(|_| {});
-            let executor = Executor::builder().build();
-            RETAINED_DURING_TEARDOWN.with_borrow_mut(|retained| {
-                *retained = Some(TeardownProbe(executor.tasks()));
-            });
-            drop(executor);
-        })
-        .join()
-        .unwrap();
     }
 }
