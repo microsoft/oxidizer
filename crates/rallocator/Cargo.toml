@@ -3,7 +3,7 @@
 
 [package]
 name = "rallocator"
-version = "0.3.0"
+version = "0.3.1"
 description = "Windows, Linux and macOS x64/ARM64 owner-return allocator with Seismograph allocation events."
 readme = "README.md"
 keywords = ["allocator", "memory", "performance", "telemetry"]
