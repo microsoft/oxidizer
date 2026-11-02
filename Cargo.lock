@@ -3950,12 +3950,15 @@ name = "observed_destination_stdout"
 version = "0.1.0"
 dependencies = [
  "bon",
+ "derive_more",
  "log",
  "observed_destination_core",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "performables",
+ "rstest",
+ "static_assertions",
 ]
 
 [[package]]
