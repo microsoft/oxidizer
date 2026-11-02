@@ -64,7 +64,7 @@ compressors = { path = "../compressors", features = [
 futures = { workspace = true, features = ["executor"] }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }
 mutants = { workspace = true }
-ohno = { path = "../ohno", features = ["test-util"] }
+ohno = { workspace = true, features = ["test-util"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "rt"] }
 
 # >>> anvil-managed: anvil-lints

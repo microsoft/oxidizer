@@ -49,7 +49,7 @@ futures = { workspace = true, features = ["executor"] }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }
 layered = { path = "../layered" }
 mutants = { workspace = true }
-ohno = { path = "../ohno" }
+ohno = { workspace = true }
 templated_uri = { path = "../templated_uri" }
 tick = { path = "../tick", features = ["test-util"] }
 

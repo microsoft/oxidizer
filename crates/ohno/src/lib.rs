@@ -416,12 +416,16 @@
 //! Example usage:
 //!
 //! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "app-err")] {
 //! use ohno::AppError;
 //!
 //! fn process() -> Result<(), AppError> {
 //!     std::fs::read_to_string("file.txt")?; // Automatically converts errors
 //!     Ok(())
 //! }
+//! # }
+//! # }
 //! ```
 //!
 //! # Error Labeling

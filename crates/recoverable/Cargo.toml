@@ -24,7 +24,7 @@ all-features = true
 
 [dev-dependencies]
 insta = { workspace = true }
-ohno = { path = "../ohno" }
+ohno = { workspace = true }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 
