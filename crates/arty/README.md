@@ -127,13 +127,12 @@ it is not part of the public API available to applications.
 
 The default feature set enables `rt`, `macros`, and `monitor`.
 
-* **`rt`** - Enables the runtime, task, and I/O APIs, and implies `time`.
+* **`rt`** - Enables the runtime, task, and I/O APIs.
 * **`macros`** - Enables [`main`][__link23] and [`test`][__link24], and implies `rt`.
 * **`monitor`** - Enables the Seismograph monitor dependency. It forwards
   `performables` telemetry support when `performables` is enabled. It does
-  not start monitoring.
-* **`time`** - Enables clocks, timers, and timeouts.
-* **`test-util`** - Enables testing utilities, including [`ClockControl`][__link25] with `time`.
+  not start monitoring or emit new telemetry.
+* **`test-util`** - Enables testing utilities, including [`ClockControl`][__link25].
   Enable it in dev-dependencies, not production dependencies.
 
 
@@ -142,7 +141,7 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbYgvrzzCJ6-IbSK27HMf6gocbT5GiK2Oe1D8bpyHo2e5nQQ5hZIKCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbb9gLAPu0wEUbRgsMhNCavQAbL6d1rcFTj9IbGMX3l1SbCwxhZIKCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
  [__link10]: https://docs.rs/arty/0.5.0/arty/?search=time::Clock
