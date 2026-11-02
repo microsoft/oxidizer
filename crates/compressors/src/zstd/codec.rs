@@ -140,7 +140,8 @@ fn decompression_failed(code: usize) -> Error {
 /// this crate's own invariants: the bounds are queried from `zstd_safe` at run time, so a future
 /// zstd can narrow them or add validation that `set_parameter` does not perform today. Therefore,
 /// this function reports an error instead of asserting. A caller can handle a dependency build
-/// failure, but a panic terminates the process for an upstream change.
+/// failure normally. An assertion introduces a panic that can unwind or abort, depending on the
+/// build configuration.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)]
 #[cold]
