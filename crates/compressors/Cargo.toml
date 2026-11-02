@@ -16,13 +16,12 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/compressors"
 
-# Miri cannot run all of this crate's backends. `zstd-safe` binds the native zstd library, and Miri
-# cannot call foreign functions; `flate2`'s `zlib-rs` backend has an open soundness bug that trips
+# Miri cannot run all of this crate's backends. `zstd-safe` binds the native zstd library. Miri
+# cannot call foreign functions. The `flate2` `zlib-rs` backend has an open soundness bug that trips
 # Stacked Borrows whenever a Deflate or Inflate is dropped
-# (https://github.com/trifectatechfoundation/zlib-rs/issues/491). Brotli is pure Rust and would run;
-# excluding the whole crate rather than maintaining a brotli-only Miri configuration is a separate
-# decision, taken because the per-format `cfg(miri)` scaffolding the rest would need costs more than
-# the remaining coverage is worth.
+# (https://github.com/trifectatechfoundation/zlib-rs/issues/491). Brotli is pure Rust and can run
+# under Miri. The crate is excluded because a brotli-only Miri configuration requires extensive
+# per-format `cfg(miri)` branches for limited additional coverage.
 [package.metadata.anvil.miri]
 exclude = true
 
@@ -30,7 +29,7 @@ exclude = true
 all-features = true
 
 # `cfg_aliases` is used only by `build.rs`. cargo-machete does not scan build
-# scripts, so it reports a false positive; ignore it here.
+# scripts, so it reports a false positive. Ignore it here.
 [package.metadata.cargo-machete]
 ignored = ["cfg_aliases"]
 
@@ -44,9 +43,9 @@ allowed_external_types = [
 
 [features]
 brotli = ["dep:brotli"]
-# No format is enabled by default: a dependent names the ones it actually speaks, so a build that
-# only needs brotli never compiles flate2, and vice versa. A build with no format at all still gets
-# the shared contract and builders, which is what a crate that only re-exports them needs.
+# No format is enabled by default. A dependent selects the formats that it uses. A build that only
+# needs brotli does not compile flate2. A build with no format still gets the shared contract and
+# builders.
 default = []
 deflate = ["dep:flate2"]
 futures-stream = ["dep:futures-core", "dep:pin-project-lite"]
@@ -57,9 +56,9 @@ zstd = ["dep:zstd-safe"]
 [dependencies]
 brotli = { workspace = true, features = ["std"], optional = true }
 bytesbuf = { workspace = true, features = ["std"] }
-# `zlib-rs` rather than flate2's default `miniz_oxide`: it is the fastest of flate2's backends and,
-# unlike the `zlib`/`zlib-ng` bindings, is pure Rust, so the deflate family stays free of C on a path
-# that parses untrusted input. The cost is recorded above -- it is what keeps this crate out of Miri.
+# Use `zlib-rs` instead of the flate2 default, `miniz_oxide`. It is the fastest flate2 backend.
+# Unlike the `zlib` and `zlib-ng` bindings, it is pure Rust. The soundness issue above prevents
+# Miri validation.
 flate2 = { workspace = true, features = ["zlib-rs"], optional = true }
 foldhash = { workspace = true }
 futures-core = { workspace = true, optional = true }

@@ -1,22 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The builders every format shares.
+//! Shared compressor and decompressor builders.
 //!
-//! [`CompressorBuilder`] and [`DecompressorBuilder`] hold the settings that mean the same thing
-//! whichever format ends up being used: the level, the output chunk size, the decompression limits
-//! and the trailing-data policy. The type parameter records whether a format has been chosen yet.
+//! [`CompressorBuilder`] and [`DecompressorBuilder`] store settings that apply to every format.
+//! These settings include the level, output chunk size, decompression limits, and trailing-data
+//! policy. The type parameter records the selected format.
 //!
-//! What an engine is built *with* -- memory and an engine pool -- is not a setting, so it lives in
-//! [`Resources`][crate::Resources] and is supplied to `build` instead.
+//! [`Resources`][crate::Resources] supplies memory and an engine pool to `build`.
 //!
-//! `CompressorBuilder<()>` has not chosen one. It is the builder to hold when the format is a
-//! runtime decision: each enabled format's module adds a `build_gzip`-style method to it, beside
-//! `build_format` for a `Format` value.
+//! `CompressorBuilder<()>` has no selected format. Each enabled format adds a `build_gzip`-style
+//! method. `build_format` accepts a `Format` value at run time.
 //!
-//! `CompressorBuilder<Gzip>` has. Committing to a format -- which `gzip::Compressor::builder()`
-//! does -- adds the settings only that format has, along with a `build` method returning that
-//! format's own compressor rather than a boxed one.
+//! `CompressorBuilder<Gzip>` selects gzip. A format-specific builder adds its format settings and a
+//! `build` method that returns the concrete compressor.
 
 use std::num::NonZeroUsize;
 
@@ -26,24 +23,21 @@ use crate::trailing::TrailingData;
 
 /// How much output a single `pull` produces before handing control back.
 ///
-/// This bounds pending output only: a caller streaming hundreds of gigabytes never accumulates
-/// more than one chunk of it. Pending input and the engine's own window and tables are additional,
-/// and their size depends on the format and its configuration.
+/// This bounds pending output only. The adapter retains at most one output chunk. The caller can
+/// retain more chunks after it receives them. Pending input and the engine's own window and tables
+/// are additional, and their size depends on the format and its configuration.
 ///
-/// 64 KiB is chosen to sit above the point where per-call overhead dominates while staying small
-/// enough that a chunk is cheap to hold and to hand on -- the `chunk_size` benchmark group is what
-/// this trade is measured with. It is a default for the common case, not a tuned optimum for any
-/// particular one; a caller with a different latency or memory budget sets its own with
-/// [`output_chunk_size`][CompressorBuilder::output_chunk_size].
+/// The 64 KiB default balances per-call overhead, output latency, and retained memory. The
+/// `chunk_size` benchmark group measures overhead and buffer churn. A caller with a different
+/// latency or memory budget can use [`output_chunk_size`][CompressorBuilder::output_chunk_size].
 pub(crate) const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 
 /// Configures a compressor.
 ///
-/// The type parameter selects the format, and defaults to `()` for a builder that has not chosen
-/// one yet: it carries only the settings every format shares, and gains a `build_gzip`-style method
-/// per enabled format plus [`build_format`][CompressorBuilder::build_format]. Committing to a
-/// format -- which `gzip::Compressor::builder` does -- adds that
-/// format's own settings and a `build` returning its concrete compressor.
+/// The type parameter selects the format. Its default is `()`, which means that no format is
+/// selected. This shared builder provides one `build_gzip`-style method for each enabled format and
+/// [`build_format`][CompressorBuilder::build_format]. A format-specific builder also provides its
+/// format settings and a `build` method for its concrete compressor.
 ///
 /// # Examples
 ///
@@ -53,7 +47,7 @@ pub(crate) const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 /// use compressors::format::Format;
 /// use compressors::{CompressorBuilder, Level, Resources};
 ///
-/// // Settings that say nothing about the format, applied to one chosen at runtime.
+/// // Apply shared settings to a format selected at run time.
 /// let settings = CompressorBuilder::new().level(Level::HIGH);
 /// let compressor = settings.build_format(Format::Gzip, Resources::global())?;
 /// # let _ = compressor;
@@ -64,10 +58,9 @@ pub(crate) const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 pub struct CompressorBuilder<T = ()> {
     pub(crate) level: Level,
     pub(crate) chunk_size: NonZeroUsize,
-    /// The chosen format's own settings, and `()` until a format is chosen.
+    /// The selected format settings, or `()` before format selection.
     ///
-    /// The shared builder never reads this beyond handing it to the engine; the format's own module
-    /// adds the setters that populate it.
+    /// The shared builder passes this value to the engine. The format module defines its setters.
     #[cfg_attr(
         not(any(test, any_format)),
         expect(dead_code, reason = "only a format module's build method reads the settings it owns")
@@ -78,8 +71,8 @@ pub struct CompressorBuilder<T = ()> {
 impl<T> CompressorBuilder<T> {
     /// Starts from the shared defaults, with one format's settings already chosen.
     ///
-    /// Each format's module wraps this in its own [`Default`] implementation, which is why the
-    /// marker types need no public constructor.
+    /// Each format module calls this from its [`Default`] implementation. Marker types therefore
+    /// do not need public constructors.
     pub(crate) fn with_format(format: T) -> Self {
         Self {
             level: Level::DEFAULT,
@@ -97,9 +90,9 @@ impl<T> CompressorBuilder<T> {
 
     /// Sets how much output a single `pull` produces before returning.
     ///
-    /// This bounds how much output is buffered before `pull` returns it -- not total memory, which
-    /// also covers pending input and the engine's own state. Larger chunks reduce per-call
-    /// overhead; smaller chunks reduce peak output buffering and latency.
+    /// This bounds output that waits for `pull` to return. It does not bound pending input or engine
+    /// state. Larger chunks reduce per-call overhead. Smaller chunks reduce output latency and
+    /// retained output memory.
     #[must_use]
     pub const fn output_chunk_size(mut self, bytes: NonZeroUsize) -> Self {
         self.chunk_size = bytes;
@@ -138,32 +131,29 @@ impl Default for CompressorBuilder<()> {
 
 /// Configures a decompressor.
 ///
-/// The type parameter selects the format, and defaults to `()` for a builder that has not chosen
-/// one yet: it carries only the settings every format shares, and gains a `build_gzip`-style method
-/// per enabled format plus [`build_format`][DecompressorBuilder::build_format]. Committing to a
-/// format -- which `gzip::Decompressor::builder` does -- adds
-/// that format's own settings and a `build` returning its concrete decompressor.
+/// The type parameter selects the format. Its default is `()`, which means that no format is
+/// selected. This shared builder provides one `build_gzip`-style method for each enabled format and
+/// [`build_format`][DecompressorBuilder::build_format]. A format-specific builder also provides its
+/// format settings and a `build` method for its concrete decompressor.
 ///
 /// # Security
 ///
-/// Compressed data can expand by orders of magnitude, so a decompressor pointed at untrusted input
-/// is a memory-exhaustion vector. What bounds that exposure is how much decompressed output is
-/// *retained*, not how much passes through: consumed through `CompressionStream` a decompressor
-/// hands back one bounded chunk at a time, so a consumer that processes and drops each chunk stays
-/// bounded however long the stream is.
+/// Compressed data can expand by orders of magnitude. Untrusted input can therefore exhaust memory.
+/// The risk depends on retained output, not throughput. `CompressionStream` returns one bounded
+/// chunk at a time. A consumer stays bounded if it processes and drops each chunk.
 ///
 /// Set [`limits`][DecompressorBuilder::limits] with
 /// [`max_output_len`][DecompressorLimits::max_output_len] to what you can afford whenever
-/// decompressed output is accumulated -- by the buffering conveniences, or by a consumer that keeps
-/// the chunks it is handed. Applying a cumulative cap to a pipeline that retains nothing only
-/// rejects legitimately long streams.
+/// decompressed output is accumulated. This includes whole-buffer functions and consumers that
+/// retain stream chunks. A cumulative cap on a pipeline that retains nothing can reject valid long
+/// streams.
 #[derive(Debug, Clone)]
 pub struct DecompressorBuilder<T = ()> {
     pub(crate) limits: DecompressorLimits,
     pub(crate) chunk_size: NonZeroUsize,
     pub(crate) multi_stream: Option<bool>,
     pub(crate) trailing_data: TrailingData,
-    /// The chosen format's own settings, and `()` until a format is chosen.
+    /// The selected format settings, or `()` before format selection.
     #[cfg_attr(
         not(any(test, any_format)),
         expect(dead_code, reason = "only a format module's build method reads the settings it owns")
@@ -174,8 +164,8 @@ pub struct DecompressorBuilder<T = ()> {
 impl<T> DecompressorBuilder<T> {
     /// Starts from the shared defaults, with one format's settings already chosen.
     ///
-    /// Each format's module wraps this in its own [`Default`] implementation, which is why the
-    /// marker types need no public constructor.
+    /// Each format module calls this from its [`Default`] implementation. Marker types therefore
+    /// do not need public constructors.
     pub(crate) fn with_format(format: T) -> Self {
         Self {
             limits: DecompressorLimits::new(),
@@ -186,19 +176,18 @@ impl<T> DecompressorBuilder<T> {
         }
     }
 
-    /// Overrides the bounds on how much data decompression may produce.
+    /// Overrides the bounds on how much data decompression can produce.
     ///
-    /// Bounds left unset on the passed value keep the chosen format's own defaults. For most
-    /// formats that is a ratio and nothing else; brotli has no structural ceiling to derive one
-    /// from, so it defaults to no ratio bound either. The conveniences that buffer a whole result
-    /// add their own output and stream caps on top; see [`DecompressorLimits`].
+    /// Unset bounds keep the selected format defaults. Most formats define only a ratio default.
+    /// Brotli has no structural expansion ceiling, so it defines no ratio default. Whole-buffer
+    /// functions add output and stream fallbacks. See [`DecompressorLimits`].
     ///
     /// # Security
     ///
     /// Set [`max_output_len`][DecompressorLimits::max_output_len] to match your memory
-    /// budget whenever decompressed output is accumulated, rather than whenever the input is
-    /// untrusted -- retained output is what a cumulative cap protects. Do not rely on the format
-    /// default for brotli, which has none.
+    /// budget whenever you accumulate decompressed output. A cumulative cap protects retained
+    /// output. No format defines a default for this bound. Whole-buffer functions add a 64 MiB
+    /// fallback when the bound is unset.
     #[must_use]
     pub const fn limits(mut self, limits: DecompressorLimits) -> Self {
         self.limits = limits;
@@ -214,9 +203,8 @@ impl<T> DecompressorBuilder<T> {
 
     /// Sets whether consecutive streams decompress as one logical stream.
     ///
-    /// Left unset, each format keeps its own default: enabled for gzip and zstd, matching `gzip(1)`
-    /// and the `zstd` command line tool, and disabled for the rest, where concatenation is not an
-    /// established convention.
+    /// If left unset, each format keeps its default. Gzip and zstd enable concatenation to match
+    /// `gzip(1)` and the `zstd` command-line tool. The other formats disable concatenation.
     ///
     /// When enabled, bytes after a complete stream must begin another valid stream, so trailing
     /// padding is reported as corrupt data. When disabled,
@@ -229,10 +217,9 @@ impl<T> DecompressorBuilder<T> {
 
     /// Sets how a single-stream decompressor handles bytes after the compressed stream.
     ///
-    /// Defaults to [`TrailingData::Reject`], so a stream that does not end exactly at end of input
-    /// is an error rather than a silent truncation of what the caller was given. Pass
-    /// [`TrailingData::Ignore`] for a container whose framing legitimately puts other data after
-    /// the compressed stream.
+    /// The default is [`TrailingData::Reject`]. A stream that does not end with the input returns an
+    /// error. Use [`TrailingData::Ignore`] for a container that places other data after the
+    /// compressed stream.
     ///
     /// In multi-stream mode, subsequent bytes are interpreted as another compressed stream
     /// regardless of this setting.
@@ -275,8 +262,8 @@ impl Default for DecompressorBuilder<()> {
 }
 
 const fn default_chunk_size() -> NonZeroUsize {
-    // Evaluated by the compiler: if `DEFAULT_CHUNK_SIZE` were ever zero, this constant would fail
-    // to build rather than panicking at runtime, so there is no runtime branch to cover here.
+    // The compiler evaluates this expression. A zero `DEFAULT_CHUNK_SIZE` fails the build, so no
+    // runtime branch exists.
     const CHUNK_SIZE: NonZeroUsize = match NonZeroUsize::new(DEFAULT_CHUNK_SIZE) {
         Some(size) => size,
         None => panic!("DEFAULT_CHUNK_SIZE must not be zero"),
