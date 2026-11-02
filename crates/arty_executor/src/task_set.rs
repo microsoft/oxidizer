@@ -32,6 +32,7 @@ impl TaskSet {
     }
 
     /// Returns whether this task set's executor is running a cycle on this thread.
+    #[inline]
     #[must_use]
     pub fn is_executing(&self) -> bool {
         crate::executor_context::is_executing(self.shared.wake().thread_id())
