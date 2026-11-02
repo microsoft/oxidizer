@@ -62,8 +62,13 @@ rustls = [
     "dep:rustls-platform-verifier",
     "fetch_hyper?/rustls",
     "fetch_tls/rustls",
+    "http_extensions/rustls",
 ]
-native-tls = ["dep:native-tls", "fetch_hyper?/native-tls", "fetch_tls/native-tls"]
+native-tls = [
+    "fetch_hyper?/native-tls",
+    "fetch_tls/native-tls",
+    "http_extensions/native-tls",
+]
 json = ["http_extensions/json"]
 seismograph = [
     "anyspawn?/seismograph",
@@ -125,8 +130,6 @@ layered = { workspace = true, features = [
     "intercept",
 ] }
 
-# TLS related crates
-native-tls = { workspace = true, features = ["alpn"], optional = true }
 ohno.workspace = true
 opentelemetry = { workspace = true, features = ["futures", "metrics"] }
 opentelemetry-semantic-conventions = { workspace = true, features = [
@@ -176,7 +179,6 @@ http_extensions = { path = "../http_extensions", features = ["test-util", "json"
 hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
 mutants = { workspace = true }
-native-tls = { workspace = true, features = ["alpn"] }
 ohno = { path = "../ohno", features = ["test-util", "app-err"] }
 opentelemetry-stdout = { workspace = true, features = [
     "metrics",

@@ -5,13 +5,12 @@ use std::fmt::Debug;
 
 use data_privacy::{RedactedToString, RedactionEngine};
 use http::uri::Authority;
-use http_extensions::UriTemplateLabel;
+use http_extensions::{UriTemplateLabel, collect_error_labels};
 use layered::{Layer, Service};
 use ohno::ErrorExt;
 use tick::SimpleClock;
 use tracing::{Level, event};
 
-use crate::error_labels::collect_error_labels;
 use crate::{HttpRequest, HttpResponse, RequestExt, RequestHandler, Result};
 
 /// Records HTTP requests, responses, and durations.

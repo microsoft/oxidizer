@@ -351,14 +351,13 @@ pub(super) enum HttpClientPipeline {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http::{Request, StatusCode, Uri};
-    use http_extensions::FakeHandler;
+    use http_extensions::{FakeHandler, collect_error_labels};
     use ohno::ErrorExt;
     use seatbelt::{Recovery, RecoveryKind};
     use static_assertions::assert_impl_all;
 
     use super::*;
     use crate::HttpResponseBuilder;
-    use crate::error_labels::collect_error_labels;
     use crate::fake::FakeDeps;
 
     #[cfg_attr(miri, ignore)]

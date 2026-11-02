@@ -47,8 +47,18 @@ all-features = true
 ignored = ["ctor"]
 
 [features]
-rustls = ["dep:rustls", "dep:hyper-rustls", "fetch_tls/rustls"]
-native-tls = ["dep:native-tls", "dep:tokio-native-tls", "fetch_tls/native-tls"]
+rustls = [
+    "dep:rustls",
+    "dep:hyper-rustls",
+    "fetch_tls/rustls",
+    "http_extensions/rustls",
+]
+native-tls = [
+    "dep:native-tls",
+    "dep:tokio-native-tls",
+    "fetch_tls/native-tls",
+    "http_extensions/native-tls",
+]
 
 [dependencies]
 # internal

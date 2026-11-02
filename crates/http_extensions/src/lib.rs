@@ -185,6 +185,9 @@
 //! # Features
 //!
 //! - `json` enables JSON serialization and deserialization through [`Json`].
+//! - `native-tls` makes [`collect_error_labels`] label an I/O error that wraps a `native-tls` error
+//!   as `tls`.
+//! - `rustls` makes [`collect_error_labels`] label an I/O error that wraps a `rustls` error as `tls`.
 //! - `test-util` enables test implementations.
 //!
 //! # Memory Management
@@ -208,6 +211,9 @@ pub type HttpResponse = Response<HttpBody>;
 
 mod error;
 pub use error::{HttpError, Result};
+
+mod collect_error_labels;
+pub use collect_error_labels::collect_error_labels;
 
 mod error_labels;
 

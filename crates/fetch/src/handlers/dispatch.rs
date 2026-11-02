@@ -166,13 +166,12 @@ fn is_allowed(filter: &RequestFilter, scheme: &Scheme) -> bool {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http::{Request, StatusCode, Uri};
-    use http_extensions::FakeHandler;
+    use http_extensions::{FakeHandler, collect_error_labels};
     use ohno::ErrorExt;
     use seatbelt::{Recovery, RecoveryKind};
 
     use super::*;
     use crate::HttpBodyBuilder;
-    use crate::error_labels::collect_error_labels;
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]

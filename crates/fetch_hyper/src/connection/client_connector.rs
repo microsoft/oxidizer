@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use fetch_options::{ConnectionInfo, ConnectionLifetime, PoolIndex};
 use http::Version;
-use http_extensions::{HttpError, Result};
+use http_extensions::{HttpError, Result, collect_error_labels};
 use hyper_util::client::legacy::connect::{Connected, Connection};
 use ohno::ErrorLabel;
 use opentelemetry::metrics::{Histogram, Meter};
@@ -23,7 +23,7 @@ use tracing::{Level, event};
 use crate::connection::connect::Connect;
 use crate::connection::io::HyperIo;
 use crate::connection::tracked_stream::TrackedStream;
-use crate::error_labels::{LABEL_CONNECT, LABEL_HTTP_VERSION_UNSUPPORTED, collect_error_labels};
+use crate::error_labels::{LABEL_CONNECT, LABEL_HTTP_VERSION_UNSUPPORTED};
 use crate::telemetry::{create_connection_attributes, create_connection_failure_attributes};
 
 /// A connector service that applies connect-timeout, version verification,

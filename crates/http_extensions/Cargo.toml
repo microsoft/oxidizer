@@ -59,6 +59,8 @@ all-features = true
 [features]
 default = []
 json = ["dep:serde_core", "dep:serde_json"]
+native-tls = ["dep:native-tls"]
+rustls = ["dep:rustls"]
 test-util = ["tick/test-util"]
 
 [dependencies]
@@ -69,9 +71,11 @@ http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
 layered = { workspace = true }
+native-tls = { workspace = true, optional = true }
 ohno = { workspace = true }
 pin-project = { workspace = true }
 recoverable = { workspace = true }
+rustls = { workspace = true, features = ["std"], optional = true }
 serde_core = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"], optional = true }
 templated_uri = { workspace = true }
@@ -89,7 +93,9 @@ hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
 layered = { path = "../layered", features = ["intercept", "dynamic-service"] }
 mutants = { workspace = true }
+native-tls = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util", "app-err"] }
+rustls = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["derive"] }
 serde_core = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
