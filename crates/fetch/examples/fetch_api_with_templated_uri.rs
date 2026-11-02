@@ -88,14 +88,14 @@ mod api {
         }
     }
 
-    // See http_client_telemetry.rs for classified URI components.
+    // See fetch_telemetry.rs for classified URI components.
     #[templated(template = "/api/v1/crates/{crate_name}", unredacted)]
     #[derive(Clone)]
     struct CrateUrl {
         crate_name: EscapedString,
     }
 
-    // See http_client_telemetry.rs for classified URI components.
+    // See fetch_telemetry.rs for classified URI components.
     #[templated(template = "/api/v1/crates{?q}", unredacted)]
     #[derive(Clone)]
     struct CrateSearchUrl {
