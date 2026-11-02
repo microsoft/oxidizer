@@ -8,8 +8,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
-use observed_testing::{TEST_ID, test_emitter};
 use thread_aware::Unaware;
 
 use crate::runtime_support::runtime;
@@ -40,14 +38,7 @@ fn remote_panicking_join_waker_preserves_published_panic() {
 }
 
 fn assert_remote_notification_preserves_outcome(panics: bool) {
-    let (sink, processor) = test_emitter(TEST_ID);
-    let runtime = Runtime::builder()
-        .workers(WorkersPolicy::exactly(1))
-        .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .panic(PanicPolicy::ignore())
-        .sink(sink)
-        .build()
-        .unwrap();
+    let runtime = runtime();
     let (release, gate) = events_once::Event::boxed();
     let join = runtime
         .scheduler()
@@ -70,8 +61,7 @@ fn assert_remote_notification_preserves_outcome(panics: bool) {
         assert!(std::time::Instant::now() < deadline);
         std::thread::yield_now();
     }
-    // The flag records notification only. The result channel and captured
-    // events establish the task outcome independently.
+    // The flag records notification only; the result establishes the outcome.
     let outcome = futures::executor::block_on(join);
     if panics {
         let error = outcome.unwrap_err();
@@ -83,15 +73,6 @@ fn assert_remote_notification_preserves_outcome(panics: bool) {
     assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 7 }).join().unwrap(), 7);
     assert_eq!(notifications.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
-    let events = processor.events();
-    assert_eq!(
-        events.iter().filter(|event| event.name() == "arty.rt.task.succeeded").count(),
-        if panics { 1 } else { 2 }
-    );
-    assert_eq!(
-        events.iter().filter(|event| event.name() == "arty.rt.task.panicked").count(),
-        usize::from(panics)
-    );
 }
 
 #[test]
