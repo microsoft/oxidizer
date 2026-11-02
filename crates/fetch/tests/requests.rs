@@ -149,16 +149,14 @@ async fn json_borrowed() {
     assert_eq!(person.surname, "Doe");
 }
 
-/// Verifies two related guarantees of the real network pipeline:
+/// Tests two guarantees of the network pipeline:
 ///
 /// 1. Every response served by a real connection carries a [`ConnectionInfo`]
 ///    extension whose configured `pool_index` and `max_age` match the client.
-/// 2. Once the connection's age exceeds the configured maximum lifetime, the
-///    handler poisons it so the pool drops it; subsequent requests are then
-///    served by a freshly established connection.
+/// 2. After the connection exceeds its maximum lifetime, the handler poisons it. The pool drops it,
+///    and a new connection serves later requests.
 ///
-/// Time is driven by a [`ClockControl`] so the test does not need to sleep for
-/// real wall-clock durations.
+/// [`ClockControl`] advances time without a wall-clock delay.
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn connection_info_attached_and_recreated_after_max_lifetime() {
@@ -172,8 +170,7 @@ async fn connection_info_attached_and_recreated_after_max_lifetime() {
     let server = serve(Bytes::from_static(b"hello")).await;
     let url = server.uri() + "/hello-world";
 
-    // Fresh connection: `ConnectionInfo` must be attached, carry the configured
-    // pool index, and report a non-poisoned, brand-new connection.
+    // A new connection reports the configured pool index and is not poisoned.
     let response = client.get(url.clone()).fetch().await.unwrap();
     let info = response
         .extensions()
@@ -182,9 +179,8 @@ async fn connection_info_attached_and_recreated_after_max_lifetime() {
     assert_eq!(info.pool_index(), PoolIndex::new(0));
     assert!(!info.is_poisoned());
 
-    // Drive the controlled clock past the configured max lifetime. The next
-    // request reuses the pooled connection one final time; the handler observes
-    // the age overflow and poisons the connection so the pool drops it.
+    // Advance past the maximum lifetime. The next request reuses and poisons the old connection,
+    // then the pool drops it.
     control.advance(max_age + Duration::from_secs(1));
 
     let response = client.get(url.clone()).fetch().await.unwrap();
@@ -197,8 +193,7 @@ async fn connection_info_attached_and_recreated_after_max_lifetime() {
         "expected the connection to be poisoned once its age exceeded max_age",
     );
 
-    // Subsequent requests must be served by a freshly established connection
-    // whose `ConnectionInfo` is not poisoned.
+    // A new, non-poisoned connection serves the next request.
     let response = client.get(url).fetch().await.unwrap();
     let fresh_info = response
         .extensions()

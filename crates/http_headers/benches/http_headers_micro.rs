@@ -1796,10 +1796,10 @@ macro_rules! list_scan_case {
                 [<$dispatched:upper>],
                 "list_scanning",
                 $dispatched_name,
-                gungraun_setup = $setup,
                 gungraun_teardown = drop_it,
             )]
-            #[bench::$bench()]
+            // Keep the outer expression in this macro's hygiene context for Gungraun.
+            #[bench::$bench(std::hint::black_box($setup()))]
             fn $dispatched(bytes: Vec<u8>) -> (usize, Vec<u8>) {
                 let scan = http_headers_simd::scan_token_list(
                     &bytes,
@@ -1813,10 +1813,9 @@ macro_rules! list_scan_case {
                 [<$reference:upper>],
                 "list_scanning",
                 $reference_name,
-                gungraun_setup = $setup,
                 gungraun_teardown = drop_it,
             )]
-            #[bench::$bench()]
+            #[bench::$bench(std::hint::black_box($setup()))]
             fn $reference(bytes: Vec<u8>) -> (usize, Vec<u8>) {
                 let scan = http_headers_simd::benchmarking::scan_token_list_scalar(
                     &bytes,
@@ -1919,10 +1918,10 @@ macro_rules! uri_path_case {
                 [<$dispatched:upper>],
                 "uri_scanning",
                 $dispatched_name,
-                gungraun_setup = $setup,
                 gungraun_teardown = drop_it,
             )]
-            #[bench::$bench()]
+            // Keep the outer expression in this macro's hygiene context for Gungraun.
+            #[bench::$bench(std::hint::black_box($setup()))]
             fn $dispatched(bytes: Vec<u8>) -> (usize, Vec<u8>) {
                 let answer =
                     uri_path_answer(http_headers_simd::is_simple_uri_path(&bytes), bytes.len());
@@ -1933,10 +1932,9 @@ macro_rules! uri_path_case {
                 [<$reference:upper>],
                 "uri_scanning",
                 $reference_name,
-                gungraun_setup = $setup,
                 gungraun_teardown = drop_it,
             )]
-            #[bench::$bench()]
+            #[bench::$bench(std::hint::black_box($setup()))]
             fn $reference(bytes: Vec<u8>) -> (usize, Vec<u8>) {
                 let answer = uri_path_answer(
                     http_headers_simd::benchmarking::is_simple_uri_path_scalar(&bytes),

@@ -16,6 +16,7 @@
 )]
 
 use std::hint::black_box;
+use std::ops::DerefMut;
 
 use criterion::{BenchmarkId, Criterion};
 use performables::arc::{Arc, PerNuma, PerThread};
@@ -55,27 +56,35 @@ fn per_numa() -> WarmRelocation<Arc<u64, PerNuma>> {
 }
 
 #[metabench::benchmark(RELOCATE_SAME, WARM, "same")]
-#[bench::per_thread(&mut per_thread())]
-#[bench::per_numa(&mut per_numa())]
-fn relocate_same<T: ThreadAware>(input: &mut WarmRelocation<T>) {
-    black_box(&mut input.value).relocate(Some(black_box(&input.source)), black_box(&input.source));
+#[bench::per_thread(Box::new(per_thread()))]
+#[bench::per_numa(Box::new(per_numa()))]
+fn relocate_same<T: ThreadAware, S: DerefMut<Target = WarmRelocation<T>>>(mut owned_input: S) -> ((), S) {
+    {
+        let input = &mut *owned_input;
+        black_box(&mut input.value).relocate(Some(black_box(&input.source)), black_box(&input.source));
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(RELOCATE_ROUNDTRIP, WARM, "roundtrip")]
-#[bench::per_thread(&mut per_thread())]
-#[bench::per_numa(&mut per_numa())]
-fn relocate_roundtrip<T: ThreadAware>(input: &mut WarmRelocation<T>) {
-    black_box(&mut input.value).relocate(Some(black_box(&input.source)), black_box(&input.destination));
-    black_box(&mut input.value).relocate(Some(black_box(&input.destination)), black_box(&input.source));
+#[bench::per_thread(Box::new(per_thread()))]
+#[bench::per_numa(Box::new(per_numa()))]
+fn relocate_roundtrip<T: ThreadAware, S: DerefMut<Target = WarmRelocation<T>>>(mut owned_input: S) -> ((), S) {
+    {
+        let input = &mut *owned_input;
+        black_box(&mut input.value).relocate(Some(black_box(&input.source)), black_box(&input.destination));
+        black_box(&mut input.value).relocate(Some(black_box(&input.destination)), black_box(&input.source));
+    }
+    ((), owned_input)
 }
 
 fn measure<T: ThreadAware>(c: &mut Criterion, name: &str, mut input: WarmRelocation<T>) {
     let mut group = c.benchmark_group(WARM);
     group.bench_function(BenchmarkId::new(RELOCATE_SAME.benchmark_name(), name), |b| {
-        b.iter(|| relocate_same(&mut input));
+        b.iter(|| relocate_same(&mut input).0);
     });
     group.bench_function(BenchmarkId::new(RELOCATE_ROUNDTRIP.benchmark_name(), name), |b| {
-        b.iter(|| relocate_roundtrip(&mut input));
+        b.iter(|| relocate_roundtrip(&mut input).0);
     });
     group.finish();
 }

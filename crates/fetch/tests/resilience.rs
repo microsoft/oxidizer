@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests for HTTP resilience middleware (retry & circuit breaker).
+//! Integration tests for HTTP retry and circuit-breaker middleware.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
@@ -29,7 +29,7 @@ const ALL_HTTP_METHODS: &[Method] = &[
     Method::PATCH,
 ];
 
-// ── Retry integration tests ──────────────────────────────────────
+// Retry integration tests.
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
@@ -75,7 +75,7 @@ async fn retry_defaults_restore_requests() {
         })
         .build();
 
-    // Send non-cloneable body, so we rely on restoring the request from error
+    // Send a non-cloneable body and restore the request from the error.
     let error = client
         .get("https://example.com")
         .stream(futures::stream::empty::<Result<bytesbuf::BytesView, fetch::HttpError>>())
@@ -112,7 +112,7 @@ fn create_retry_client(status: StatusCode) -> HttpClient {
         .build()
 }
 
-// ── Breaker integration tests ────────────────────────────────────
+// Circuit-breaker integration tests.
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]

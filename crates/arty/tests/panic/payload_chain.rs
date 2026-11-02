@@ -23,7 +23,7 @@ impl Drop for DropChain {
     fn drop(&mut self) {
         assert!(
             !std::thread::panicking(),
-            "each unwind is caught before another payload may be disposed"
+            "each unwind is caught before disposal of another payload"
         );
         if self.depth == 0 {
             self.result_drops.fetch_add(1, Ordering::SeqCst);

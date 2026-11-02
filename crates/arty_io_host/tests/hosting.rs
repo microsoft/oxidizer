@@ -749,24 +749,28 @@ fn driver_initialization_failure_keeps_existing_drivers_until_host_drop() {
 }
 
 #[test]
-fn panicking_driver_initialization_keeps_the_registered_context() {
+fn panicking_driver_initialization_preserves_existing_drivers_for_shutdown() {
     let host = host(&test_runtime());
     let state = Arc::new(State::default());
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
     state.panic_initialization.store(true, Ordering::SeqCst);
 
+    // Providers do not need to support initialization retries. Catch only to inspect teardown.
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = host.context::<Context<false>>(Arc::clone(&state));
+        let _ = host.context::<Context<true>>(Arc::clone(&state));
     }));
-    assert!(panicked.is_err());
+    assert_eq!(*panicked.unwrap_err().downcast::<&str>().unwrap(), "driver initialization panicked");
 
-    state.panic_initialization.store(false, Ordering::SeqCst);
-    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
-
-    assert_eq!(state.context_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(state.context_calls.load(Ordering::SeqCst), 2);
     assert_eq!(
-        state.roles.lock().unwrap().iter().map(|(_, role)| *role).collect::<Vec<_>>(),
-        [DriverRole::Primary, DriverRole::Primary]
+        state.roles.lock().unwrap().as_slice(),
+        [(Kind::First, DriverRole::Primary), (Kind::Second, DriverRole::Secondary)]
     );
+    assert!(state.shutdown_order.lock().unwrap().is_empty());
+
+    drop(host);
+
+    assert_eq!(state.shutdown_order.lock().unwrap().as_slice(), [Kind::First]);
 }
 
 #[test]
@@ -808,19 +812,25 @@ fn failure_formatting_can_reenter_context_retrieval() {
 }
 
 #[test]
-fn context_construction_panics_do_not_poison_the_registry() {
+fn context_construction_panics_preserve_existing_drivers_for_shutdown() {
     let host = host(&test_runtime());
     let state = Arc::new(State::default());
+    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
     state.panic_context.store(true, Ordering::SeqCst);
 
+    // Providers do not need to support initialization retries. Catch only to inspect teardown.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = host.context::<Context<false>>(Arc::clone(&state));
+        let _ = host.context::<Context<true>>(Arc::clone(&state));
     }));
-    assert!(result.is_err());
+    assert_eq!(*result.unwrap_err().downcast::<&str>().unwrap(), "context construction failed");
 
-    state.panic_context.store(false, Ordering::SeqCst);
-    let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
-    assert_eq!(state.roles.lock().unwrap().last().unwrap().1, DriverRole::Primary);
+    assert_eq!(state.context_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(state.roles.lock().unwrap().as_slice(), [(Kind::First, DriverRole::Primary)]);
+    assert!(state.shutdown_order.lock().unwrap().is_empty());
+
+    drop(host);
+
+    assert_eq!(state.shutdown_order.lock().unwrap().as_slice(), [Kind::First]);
 }
 
 #[test]

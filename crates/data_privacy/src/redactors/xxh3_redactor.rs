@@ -12,7 +12,7 @@ use crate::{DataClass, Redactor};
 /// The length of the redacted output in hex digits.
 pub const REDACTED_LEN: usize = 16;
 
-/// A redactor that replaces the original string with the xxH3 hash of the string.
+/// A redactor that replaces text with an `xxH3` hash for correlation.
 #[expect(
     non_camel_case_types,
     reason = "Just following the naming conventions of xxHash, silly as they are"

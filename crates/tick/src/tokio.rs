@@ -55,7 +55,7 @@ async fn run_driver(
 }
 
 impl Clock {
-    /// Creates a new clock driven by the Tokio runtime.
+    /// Creates a clock that the Tokio runtime drives.
     ///
     /// # Panics
     ///

@@ -24,18 +24,15 @@ use crate::telemetry::{
 };
 use crate::{HttpError, HttpRequest, HttpResponse, RequestExt, RequestHandler, Result};
 
-/// Instrument name used when [`MetricsLayer::report_total_duration`] is
-/// enabled.
+/// Instrument name used when [`MetricsLayer::report_total_duration`] is enabled.
 ///
-/// This is a **proprietary Oxidizer metric**, not part of the official
-/// OpenTelemetry HTTP semantic conventions. Oxidizer defines it inside the
-/// OpenTelemetry-owned `http.client.*` namespace to distinguish the total
-/// request duration (including all retries and hedged attempts) from the
-/// per-attempt duration.
+/// This proprietary Oxidizer metric is not part of the OpenTelemetry HTTP semantic conventions.
+/// Oxidizer defines it in the OpenTelemetry `http.client.*` namespace. It separates the duration
+/// of a logical request, including retries and hedged attempts, from the duration of one attempt.
 const HTTP_CLIENT_REQUEST_TOTAL_DURATION: &str = "http.client.request.total_duration";
 
-/// Boundaries cover common service response times from 5 ms to 10 s while keeping
-/// bucket continuity stable for dashboards when client implementations change.
+/// These boundaries cover response times from 5 ms to 10 s and keep dashboard buckets stable
+/// across client implementations.
 const HTTP_DURATION_BUCKETS_SECONDS: &[f64] = &[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0];
 
 type CallbackFn = dyn Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync;
@@ -45,8 +42,7 @@ type RequestEnricherFn = Arc<RequestEnricherCall>;
 type ResponseEnricherCall = dyn Fn(&mut TelemetryAttributes, &Result<HttpResponse>) + Send + Sync;
 type ResponseEnricherFn = Arc<ResponseEnricherCall>;
 
-/// Callback invoked after metric attributes have been collected, allowing
-/// callers to observe the reported attributes alongside the request result.
+/// Receives the collected metric attributes and request result.
 #[derive(Clone)]
 struct OnRecordCallback(CallbackType);
 
@@ -63,8 +59,7 @@ impl Debug for OnRecordCallback {
     }
 }
 
-/// Callback that adds caller-provided attributes derived from the inbound
-/// [`HttpRequest`] before the request is dispatched.
+/// Adds attributes from the [`HttpRequest`] before dispatch.
 #[derive(Clone)]
 struct RequestEnricher(RequestEnricherFn);
 
@@ -81,8 +76,7 @@ impl Debug for RequestEnricher {
     }
 }
 
-/// Callback that adds caller-provided attributes derived from the request
-/// outcome before metrics are recorded.
+/// Adds attributes from the request result before metrics are recorded.
 #[derive(Clone)]
 struct ResponseEnricher(ResponseEnricherFn);
 
@@ -99,20 +93,21 @@ impl Debug for ResponseEnricher {
     }
 }
 
-/// Request handler that automatically collects HTTP metrics.
+/// Records HTTP metrics for requests.
 ///
-/// Simply drop this handler in front of any existing [`RequestHandler`] to
-/// automatically gather OpenTelemetry-compatible metrics for all HTTP requests.
+/// Place this handler before another [`RequestHandler`] to record OpenTelemetry-compatible
+/// metrics.
 ///
 /// # Metrics Collected
 ///
-/// * **Meter name**: `fetch`
-/// * **Duration**: [`http.client.request.duration`](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpclientrequestduration) - How long requests take in seconds
+/// - Meter name: `fetch`.
+/// - Duration:
+///   [`http.client.request.duration`](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpclientrequestduration),
+///   in seconds.
 ///
-/// When [`MetricsLayer::report_total_duration`] is enabled, the histogram is
-/// recorded under the name `http.client.request.total_duration` instead,
-/// distinguishing measurements that cover an entire logical request (including
-/// retries and hedged attempts) from per-attempt measurements.
+/// If [`MetricsLayer::report_total_duration`] is enabled, the histogram uses
+/// `http.client.request.total_duration`. The layer always measures its direct inner handler. Place
+/// it outside retry or hedging to measure the logical request.
 #[derive(Debug)]
 pub struct Metrics<T> {
     inner: T,
@@ -125,10 +120,8 @@ pub struct Metrics<T> {
 
 /// Layer that wraps a service with [`Metrics`].
 ///
-/// Use [`MetricsLayer::on_record`] to register a callback that is
-/// invoked every time a metric is recorded. This lets callers observe the
-/// final set of attributes alongside the request result without needing to
-/// instrument the histogram themselves.
+/// [`MetricsLayer::on_record`] registers a callback for each recorded metric. The callback receives
+/// the final attributes and request result.
 #[derive(Debug)]
 pub struct MetricsLayer {
     clock: Option<SimpleClock>,
@@ -142,18 +135,15 @@ pub struct MetricsLayer {
 impl MetricsLayer {
     /// Sets the clock used to measure request duration.
     ///
-    /// When no clock is configured, a system clock ([`SimpleClock::new_system`])
-    /// is used. Supplying a controlled clock (for example
-    /// [`SimpleClock::new_frozen`]) is primarily useful for deterministic timing
-    /// in tests.
+    /// The default is [`SimpleClock::new_system`]. Use a controlled clock such as
+    /// [`SimpleClock::new_frozen`] for deterministic tests.
     #[must_use]
     pub fn clock(mut self, clock: impl Into<SimpleClock>) -> Self {
         self.clock = Some(clock.into());
         self
     }
 
-    /// Sets the [`Meter`] used to create the request-duration histogram when the
-    /// layer is built.
+    /// Sets the [`Meter`] that creates the request-duration histogram.
     ///
     /// When no meter is configured, the global meter provider is used.
     #[must_use]
@@ -162,9 +152,7 @@ impl MetricsLayer {
         self
     }
 
-    /// Sets the meter from the given [`MeterProvider`], creating the `fetch`
-    /// meter used to record the request-duration histogram when the layer is
-    /// built.
+    /// Creates the `fetch` meter from the given [`MeterProvider`].
     ///
     /// When no meter is configured, the global meter provider is used.
     #[must_use]
@@ -173,35 +161,29 @@ impl MetricsLayer {
         self
     }
 
-    /// Registers a callback that is invoked each time a request metric is
-    /// recorded, receiving the request duration, the result, and the
-    /// collected [`KeyValue`] attributes.
+    /// Registers a callback for each request metric.
+    ///
+    /// The callback receives the duration, result, and collected [`KeyValue`] attributes.
     #[must_use]
     pub fn on_record(mut self, callback: impl Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync + 'static) -> Self {
         self.on_record = Some(OnRecordCallback::new(callback));
         self
     }
 
-    /// Registers a closure that enriches the metric [`TelemetryAttributes`]
-    /// using information from the outgoing [`HttpRequest`].
+    /// Registers a closure that adds [`TelemetryAttributes`] from the outgoing [`HttpRequest`].
     ///
-    /// The closure is invoked once per request, after the built-in request
-    /// attributes have been collected and before the request is dispatched.
-    /// Any attributes pushed to the provided `TelemetryAttributes` are merged
-    /// into the final set of metric attributes for that request.
+    /// The closure runs once after collection of the built-in request attributes and before
+    /// dispatch. Its attributes join the final metric attributes.
     #[must_use]
     pub fn enrich_from_request(mut self, enricher: impl Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync + 'static) -> Self {
         self.enrich_from_request = Some(RequestEnricher::new(enricher));
         self
     }
 
-    /// Registers a closure that enriches the metric [`TelemetryAttributes`]
-    /// using information from the request outcome.
+    /// Registers a closure that adds [`TelemetryAttributes`] from the request result.
     ///
-    /// The closure is invoked once per request, after the built-in response
-    /// or error attributes have been collected and before the histogram is
-    /// recorded. Any attributes pushed to the provided `TelemetryAttributes`
-    /// are merged into the final set of metric attributes for that request.
+    /// The closure runs after collection of the built-in response or error attributes and before
+    /// the histogram is recorded. Its attributes join the final metric attributes.
     #[must_use]
     pub fn enrich_from_response(
         mut self,
@@ -211,16 +193,12 @@ impl MetricsLayer {
         self
     }
 
-    /// Toggles whether the request duration histogram is recorded under the
-    /// alternative `http.client.request.total_duration` instrument name.
+    /// Selects the `http.client.request.total_duration` instrument name.
     ///
-    /// When enabled, the layer publishes its measurements to a histogram named
-    /// `http.client.request.total_duration` instead of the default
-    /// [`http.client.request.duration`][HTTP_CLIENT_REQUEST_DURATION]. This is
-    /// intended for layers that measure the entire request/response cycle
-    /// (including retries and hedged attempts), so that downstream consumers can
-    /// distinguish total and per-attempt durations without attribute
-    /// disambiguation.
+    /// If enabled, the layer uses `http.client.request.total_duration` instead of
+    /// [`http.client.request.duration`][HTTP_CLIENT_REQUEST_DURATION]. This setting changes only
+    /// the instrument name. The layer measures its direct inner handler. Place it outside retry or
+    /// hedging to measure the logical request. Later body reads are not included.
     #[must_use]
     pub fn report_total_duration(mut self, enabled: bool) -> Self {
         self.report_total_duration = enabled;
@@ -233,7 +211,7 @@ impl<S> Layer<S> for MetricsLayer {
 
     /// Wraps the given service with a [`Metrics`] handler.
     ///
-    /// The resulting handler records request metrics against the configured meter.
+    /// The handler records request metrics with the configured meter.
     fn layer(&self, inner: S) -> Self::Service {
         let meter = self
             .meter
@@ -253,12 +231,9 @@ impl<S> Layer<S> for MetricsLayer {
 impl Metrics<()> {
     /// Creates a [`Layer`] that records request metrics.
     ///
-    /// By default the global meter provider is used to create the request-duration
-    /// histogram when the layer is built, and timing uses a system clock
-    /// ([`SimpleClock::new_system`]). Use [`MetricsLayer::meter`] or
-    /// [`MetricsLayer::meter_provider`] to record metrics against a custom meter,
-    /// and [`MetricsLayer::clock`] to supply a custom clock (primarily useful for
-    /// deterministic timing in tests).
+    /// By default, the layer uses the global meter provider and [`SimpleClock::new_system`]. Use
+    /// [`MetricsLayer::meter`] or [`MetricsLayer::meter_provider`] for another meter. Use
+    /// [`MetricsLayer::clock`] for a controlled test clock.
     #[must_use]
     pub fn layer() -> MetricsLayer {
         MetricsLayer {
@@ -274,10 +249,9 @@ impl Metrics<()> {
 
 /// Builds the request-duration histogram recorded by [`Metrics`].
 ///
-/// When `report_total_duration` is `true`, the histogram is registered under
-/// the `http.client.request.total_duration` instrument name; otherwise it uses
-/// the standard [`http.client.request.duration`][HTTP_CLIENT_REQUEST_DURATION]
-/// name.
+/// If `report_total_duration` is `true`, the histogram uses
+/// `http.client.request.total_duration`. Otherwise, it uses
+/// [`http.client.request.duration`][HTTP_CLIENT_REQUEST_DURATION].
 fn build_request_duration(meter: &Meter, report_total_duration: bool) -> Histogram<f64> {
     let (name, description) = if report_total_duration {
         (
@@ -361,8 +335,7 @@ fn fill_error_attributes(attributes: &mut TelemetryAttributes, error: &HttpError
     attributes.push(KeyValue::new(ERROR_TYPE, collect_error_labels(error).into_cow()));
 }
 
-/// Drop guard that ensures metrics are recorded even when the request future
-/// is cancelled.
+/// Records metrics if the request future is cancelled.
 struct MetricsDropGuard<'a> {
     watch: tick::Stopwatch,
     attributes: TelemetryAttributes,
@@ -403,7 +376,7 @@ impl Drop for MetricsDropGuard<'_> {
         }
 
         self.record(&Err(HttpError::other(
-            "the future has been dropped",
+            "the future was dropped",
             RecoveryInfo::never(),
             LABEL_ABANDONED,
         )));
@@ -437,10 +410,9 @@ mod tests {
             .unwrap()
     }
 
-    /// Collects attributes into a deterministic, snapshot-friendly representation.
+    /// Collects attributes in a stable form for snapshots.
     ///
-    /// The result is sorted by key so the snapshot output is stable regardless of
-    /// the underlying insertion order.
+    /// The key sort removes differences in insertion order.
     #[mutants::skip]
     fn sorted_attrs(attributes: &[KeyValue]) -> Vec<(String, String)> {
         let mut pairs: Vec<(String, String)> = attributes
@@ -656,7 +628,7 @@ mod tests {
         // Poll the future once so the guard is created, then drop it.
         let mut future = Box::pin(Service::execute(&handler, test_request()));
 
-        // Should be pending because the inner handler never resolves.
+        // The inner handler never resolves, so the future is pending.
         let waker = futures::task::noop_waker();
         let mut cx = std::task::Context::from_waker(&waker);
         assert!(matches!(future.as_mut().poll(&mut cx), Poll::Pending));
@@ -730,7 +702,7 @@ mod tests {
         );
         assert!(
             !names.contains(&"http.client.request.duration"),
-            "default instrument should not be present when toggle is on, found: {names:?}"
+            "the total-duration setting must omit the default instrument, found: {names:?}"
         );
     }
 

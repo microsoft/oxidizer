@@ -1,21 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Re-exports the [`seatbelt_http`] crate which provides HTTP-specific
-//! extensions for [`seatbelt`] resilience middleware.
+//! Re-exports the HTTP-specific [`seatbelt_http`] extensions for [`seatbelt`].
 //!
-//! These extensions simplify the configuration of HTTP-related resilience
-//! functionality by specializing the generic [`seatbelt`] middleware types
-//! for [`HttpRequest`][http_extensions::HttpRequest] /
-//! [`Result<HttpResponse>`][http_extensions::Result] and exposing HTTP-aware
-//! builder methods (all prefixed with `http_`).
+//! The extensions specialize generic middleware for
+//! [`HttpRequest`][http_extensions::HttpRequest] and
+//! [`Result<HttpResponse>`][http_extensions::Result]. HTTP-specific builder methods start with
+//! `http_`.
 //!
 //! # Configuring the standard pipeline
 //!
-//! The easiest way to add resilience is through
-//! [`HttpClientBuilder::standard_pipeline`][crate::HttpClientBuilder::standard_pipeline],
-//! which gives you a pre-built [`StandardRequestPipeline`][crate::pipeline::StandardRequestPipeline]
-//! whose individual layers you can tweak:
+//! [`HttpClientBuilder::standard_pipeline`][crate::HttpClientBuilder::standard_pipeline] provides a
+//! [`StandardRequestPipeline`][crate::pipeline::StandardRequestPipeline]. Change its individual
+//! layers in the closure:
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -27,8 +24,7 @@
 //! # fn example(builder: HttpClientBuilder) {
 //! let client = builder
 //!     .standard_pipeline(|pipeline, _context| {
-//!         // Allow retrying idempotent methods (GET, PUT, DELETE, …)
-//!         // instead of only safe methods (GET, HEAD).
+//!         // Retry idempotent methods instead of only safe methods.
 //!         pipeline.retry(|retry| retry.http_clone(HttpClone::idempotent()))
 //!     })
 //!     .build();
@@ -37,8 +33,7 @@
 //!
 //! ## Switching to hedging
 //!
-//! The standard pipeline supports two recovery strategies. By default it uses
-//! sequential retries, but you can switch to concurrent hedging for lower
+//! The standard pipeline uses sequential retries by default. Select concurrent hedging to reduce
 //! tail latency:
 //!
 //! ```rust
@@ -53,10 +48,8 @@
 //!
 //! # Configuring a custom pipeline
 //!
-//! For full control you can replace the entire pipeline via
-//! [`HttpClientBuilder::custom_pipeline`][crate::HttpClientBuilder::custom_pipeline].
-//! Build any combination of [`seatbelt_http`] layers and stack them on top of
-//! the dispatch handler:
+//! [`HttpClientBuilder::custom_pipeline`][crate::HttpClientBuilder::custom_pipeline] replaces the
+//! pipeline. Stack [`seatbelt_http`] layers above the dispatch handler:
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -78,7 +71,7 @@
 //!             .http_timeout_error()
 //!             .timeout(Duration::from_secs(5));
 //!
-//!         // Outermost layer is listed first.
+//!         // List the outermost layer first.
 //!         (retry, timeout, dispatch).into_service()
 //!     })
 //!     .build();

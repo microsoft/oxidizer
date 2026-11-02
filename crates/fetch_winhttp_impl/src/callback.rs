@@ -34,7 +34,9 @@ use crate::error::WinHttpError;
 /// - `status_info` must be null or readable for `status_info_len` initialized
 ///   bytes, and must stay valid and unmodified until this function returns. A
 ///   zero `context` places no requirement on the payload, which is then never
-///   examined.
+///   examined. `WINHTTP_CALLBACK_STATUS_READ_COMPLETE` is also exempt from
+///   readability: its payload names the read buffer and is only compared
+///   against the submitted buffer, never dereferenced.
 /// - `WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING` must be the last notification
 ///   delivered for a handle, must be delivered exactly once for a handle whose
 ///   context was installed, and must not overlap another notification for that
@@ -53,13 +55,19 @@ pub(crate) unsafe extern "system" fn status_callback(
     // publishes that provenance with `expose_provenance` before the address is
     // handed to WinHTTP, which is what makes this reconstruction address the
     // context allocation rather than carry no provenance at all.
-    let context = with_exposed_provenance_mut::<RequestContext>(context);
+    let context = match context {
+        0 => std::ptr::null_mut(),
+        value => with_exposed_provenance_mut::<RequestContext>(value),
+    };
 
     // SAFETY: dispatch_completion requires a null context or the exact
-    // plurality::Box::into_raw pointer of a live context, a payload readable
-    // for status_info_len bytes, a HANDLE_CLOSING notification that is final,
-    // exactly-once and non-overlapping, and the absence of exclusive references
-    // to an installed context. The payload and notification-ordering
+    // plurality::Box::into_raw pointer of a live context. The payload must be
+    // null or readable for status_info_len initialized bytes and remain
+    // unmodified until this call returns. A null context or
+    // WINHTTP_CALLBACK_STATUS_READ_COMPLETE removes the payload requirement
+    // because neither path dereferences it. HANDLE_CLOSING must be final,
+    // exactly-once and non-overlapping. No exclusive reference to an installed
+    // context can exist. The payload and notification-ordering
     // requirements are demanded of this function's caller unchanged. The
     // context requirement is met by the reconstruction above: this function's
     // caller supplies the address ContextInstallation::install published, and

@@ -9,15 +9,12 @@ use crate::{HttpRequest, HttpResponse, RequestHandler, Result};
 
 /// Buffers the entire HTTP response body into memory.
 ///
-/// Wraps any [`RequestHandler`] to transparently buffer response bodies.
-/// After the inner handler produces a response, this handler calls
-/// [`HttpBody::into_buffered`][crate::HttpBody::into_buffered] to load the full body into memory,
-/// freeing the underlying network connection.
+/// Wraps a [`RequestHandler`] and calls
+/// [`HttpBody::into_buffered`][crate::HttpBody::into_buffered] on each response. This loads the
+/// body in memory and releases the network connection.
 ///
-/// This is useful when downstream consumers need to read the body
-/// multiple times (e.g. for cloning, retries, or inspecting the payload)
-/// or when you want to release the connection back to the pool as early
-/// as possible.
+/// Use it when later handlers must read the body more than once, for example for cloning, retries,
+/// or inspection. It also returns the connection to the pool before later processing.
 #[derive(Debug)]
 pub struct Buffering<T> {
     inner: T,
@@ -77,7 +74,7 @@ mod tests {
         let response = handler.execute(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        // A buffered body should be cloneable.
+        // A buffered body is cloneable.
         assert!(response.body().try_clone().is_some());
     }
 

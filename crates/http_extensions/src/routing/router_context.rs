@@ -5,20 +5,17 @@ use recoverable::RecoveryInfo;
 
 use crate::HttpRequest;
 
-/// Context passed to the closure of [`Router::custom`](super::Router::custom) when resolving a [`BaseUri`](templated_uri::BaseUri).
+/// Context for a [`Router::custom`](super::Router::custom) resolver.
 ///
-/// This type is intentionally opaque so that fields can be added in the future without
-/// breaking the closure signature. Use the getters to inspect the available
-/// information about the current request attempt.
+/// The resolver uses this context to select a [`BaseUri`](templated_uri::BaseUri).
+/// The fields are private so that future versions can add data without changing the closure.
+/// Use the getter methods to read information about the current attempt.
 ///
-/// A [`RouterContext`] is built and populated by the caller driving the
-/// request (typically a resilience layer wrapping the HTTP client) and passed
-/// to [`Router::resolve_request_uri`](super::Router::resolve_request_uri) /
-/// [`Router::resolve_uri`](super::Router::resolve_uri) on every attempt. See
-/// the [module-level "Recovery Context" section](super#recovery-context) for the
-/// bigger picture: where this information comes from, who is responsible for
-/// providing it, and how resolver like [`Router::fallback`](super::Router::fallback)
-/// consume it.
+/// The caller creates and populates a context for every attempt.
+/// A recovery layer around the HTTP client usually performs this task.
+/// It passes the context to [`Router::resolve_request_uri`](super::Router::resolve_request_uri)
+/// or [`Router::resolve_uri`](super::Router::resolve_uri).
+/// See the [Recovery Context section](super#recovery-context) for the complete flow.
 #[derive(Debug, Clone)]
 pub struct RouterContext<'a> {
     attempt: u32,
@@ -57,13 +54,12 @@ impl<'a> RouterContext<'a> {
     }
 
     /// Sets the zero-based index of the current attempt and whether it is the
-    /// last one that will be performed.
+    /// last attempt.
     ///
     /// The first attempt has index `0`, the second `1`, and so on.
     ///
-    /// This is typically called by the resilience layer driving the recovery
-    /// loop. See the [module-level "Recovery Context" section](super#recovery-context)
-    /// for context.
+    /// A recovery layer usually calls this method.
+    /// See the [Recovery Context section](super#recovery-context).
     #[must_use]
     pub fn with_attempt(mut self, attempt: u32, is_last_attempt: bool) -> Self {
         self.attempt = attempt;
@@ -73,10 +69,9 @@ impl<'a> RouterContext<'a> {
 
     /// Sets the [`RecoveryInfo`] produced by the previous attempt.
     ///
-    /// This is typically called by the resilience layer driving the recovery
-    /// loop, using the [`Recovery`](recoverable::Recovery) information
-    /// attached to the error returned by the prior attempt. See the
-    /// [module-level "Recovery Context" section](super#recovery-context) for context.
+    /// A recovery layer usually calls this method with the error from the prior attempt.
+    /// The error supplies [`Recovery`](recoverable::Recovery) information.
+    /// See the [Recovery Context section](super#recovery-context).
     #[must_use]
     pub fn with_previous_recovery(mut self, previous_recovery: RecoveryInfo) -> Self {
         self.previous_recovery = Some(previous_recovery);
@@ -89,7 +84,7 @@ impl<'a> RouterContext<'a> {
         self.attempt
     }
 
-    /// Returns `true` when the current attempt is the last one that will be performed.
+    /// Returns `true` for the last attempt.
     #[must_use]
     pub fn is_last_attempt(&self) -> bool {
         self.is_last_attempt

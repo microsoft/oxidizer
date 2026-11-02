@@ -3,23 +3,23 @@
 
 use std::num::NonZeroUsize;
 
-use observed::Sink;
 use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
 use crate::runtime::bootstrap;
-use crate::runtime::config::{BlockingPoolPolicy, RuntimeConfig, WorkersPolicy};
+use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, RuntimeConfig, WorkersPolicy};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
 
-/// Configures workers, clocks, and telemetry before starting a runtime.
+/// Configures workers and clocks before starting a runtime.
 ///
-/// Obtain a builder from [`Runtime::builder`], change the settings you need,
-/// then call [`build`](Self::build) to start the workers. Setters replace earlier
-/// values for the same setting; configuring a builder does not start threads.
+/// Obtain a builder from [`Runtime::builder`]. Change its configuration, then
+/// call [`build`](Self::build) to start the workers.
+/// Each method replaces any earlier value for the same configuration.
+/// Configuring a builder does not start threads.
 ///
-/// The defaults are [`WorkersPolicy::default`], 2 MiB async-worker stacks,
-/// a shared blocking pool, a real-time clock, and a no-op telemetry sink.
+/// See the [runtime defaults](crate::runtime#defaults) for the initial
+/// configuration.
 ///
 /// # Examples
 ///
@@ -37,16 +37,55 @@ use crate::runtime::handle::Runtime;
 pub struct RuntimeBuilder {
     processor_config: RuntimeConfig,
     clock: InactiveClock,
-    sink: Sink,
 }
 
 impl RuntimeBuilder {
-    /// Sets the worker-count policy.
+    /// Sets how the runtime responds to a panic that it catches in a user task.
+    ///
+    /// The default is [`PanicPolicy::shutdown`]. Use
+    /// [`PanicPolicy::ignore`] to keep the runtime available after a panic.
+    /// With either policy, awaiting the task's [`JoinHandle`](crate::task::JoinHandle) returns an error.
+    /// This also applies to blocking functions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::{PanicPolicy, Runtime};
+    ///
+    /// let builder = Runtime::builder().panic(PanicPolicy::ignore());
+    /// ```
+    #[must_use]
+    pub const fn panic(mut self, policy: PanicPolicy) -> Self {
+        self.processor_config.panic_policy = policy;
+        self
+    }
+
+    /// Sets the runtime's monitoring configuration.
+    ///
+    /// The default is [`MonitorPolicy::enabled`]. The `monitor` Cargo feature
+    /// enables the Seismograph dependencies that monitoring needs.
+    /// This choice does not start a monitor, add task measurements, or change
+    /// which tasks run.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::{MonitorPolicy, Runtime};
+    ///
+    /// let builder = Runtime::builder().monitor(MonitorPolicy::enabled());
+    /// ```
+    #[must_use]
+    pub fn monitor(mut self, policy: MonitorPolicy) -> Self {
+        self.processor_config.monitor_options = policy.into();
+        self
+    }
+
+    /// Sets how the runtime chooses its number of async workers.
     ///
     /// The runtime assigns each async worker to one available processor.
-    /// Exact policies can assign multiple worker threads to one processor.
+    /// A fixed worker count can assign multiple worker threads to one processor.
     /// The default is [`WorkersPolicy::default`]. This does not set blocking-pool
-    /// limits; use [`blocking_pool`](Self::blocking_pool) for those.
+    /// limits. Use [`blocking_pool`](Self::blocking_pool) for those limits.
     /// A zero count is rejected by [`build`](Self::build), not by this setter.
     ///
     /// # Examples
@@ -65,8 +104,8 @@ impl RuntimeBuilder {
     /// Sets each async worker thread's stack size in bytes.
     ///
     /// The default is 2 MiB. A larger value of the `RUST_MIN_STACK` environment
-    /// variable takes precedence. This setting does not change blocking-pool
-    /// thread stacks.
+    /// variable overrides the configured size.
+    /// This configuration does not change blocking-pool thread stacks.
     ///
     /// # Panics
     ///
@@ -86,14 +125,14 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Sets whether async workers share their blocking-task pool.
+    /// Sets whether async workers share their pool for blocking functions.
     ///
     /// The default shares one pool across async workers. Use
     /// [`BlockingPoolPolicy::shared`] for one runtime-wide pool, or
     /// [`BlockingPoolPolicy::per_worker`] to give each worker its own pool.
     /// Chain [`BlockingPoolPolicy::max`] to set the thread limit.
-    /// A zero shared-pool limit is rejected by [`build`](Self::build), not by
-    /// this setter.
+    /// A zero limit for either pool type is rejected by [`build`](Self::build),
+    /// not by this setter.
     ///
     /// # Examples
     ///
@@ -112,11 +151,12 @@ impl RuntimeBuilder {
     ///
     /// The default follows real time. Pass an [`InactiveClock`] or, with
     /// `test-util` enabled, a `ClockControl` to choose a different time source.
-    /// Workers activate their own clocks and drive their timers.
+    /// Workers wake tasks when their timers expire.
+    /// With controlled time, use `ClockControl` to advance time and wake those tasks.
     ///
     /// # Examples
     ///
-    /// Enable `test-util` in dev-dependencies to test sequential delays without
+    /// Enable `test-util` in dev-dependencies to test delays that run one after another without
     /// waiting for real time:
     ///
     /// ```
@@ -137,56 +177,26 @@ impl RuntimeBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
-    /// Automatic timer advancement occurs eagerly on timer registration or time
-    /// reads. Use manual advancement when concurrent timers' relative order
-    /// matters; see the [time guide](crate::documentation::time).
+    /// Time advances automatically when a timer starts or code
+    /// reads the controlled clock. If the order of overlapping timers matters,
+    /// advance time manually. See the [`time`](crate::time) module.
     #[must_use]
     pub fn clock(mut self, clock: impl Into<InactiveClock>) -> Self {
         self.clock = clock.into();
         self
     }
 
-    /// Sets the telemetry sink for runtime events and task enrichment.
-    ///
-    /// The default is [`Sink::noop`], which disables events and enrichment.
-    /// With a regular sink configured, async tasks inherit enrichment active
-    /// at submission, including their completion events. A regular sink with
-    /// no processors preserves enrichment without dispatching events.
-    /// Retrieve the sink inside a task with
-    /// [`Builtins::sink`](crate::task::Builtins::sink).
-    ///
-    /// Configured event processors must not panic. Runtime events are emitted
-    /// synchronously; Arty does not provide telemetry-panic recovery.
-    ///
-    /// # Examples
-    ///
-    /// Pass a sink configured by the application:
-    ///
-    /// ```
-    /// use arty::runtime::{Runtime, RuntimeBuilder};
-    ///
-    /// fn app_builder(sink: observed::Sink) -> RuntimeBuilder {
-    ///     Runtime::builder().sink(sink)
-    /// }
-    /// ```
-    #[must_use]
-    pub fn sink(mut self, sink: Sink) -> Self {
-        self.sink = sink;
-        self
-    }
-
-    /// Starts the configured workers and returns their runtime owner.
+    /// Starts the configured workers and returns the runtime that owns them.
     ///
     /// Blocks the calling thread until workers are ready to receive tasks.
     ///
     /// # Errors
     ///
-    /// Returns [`Error`] if the worker count or shared blocking-pool limit is
-    /// zero.
+    /// Returns [`Error`] if the worker count or blocking-pool limit is zero.
     ///
     /// # Panics
     ///
-    /// Panics if worker-thread creation or worker initialization fails.
+    /// Panics if starting or preparing worker threads fails.
     /// These startup failures are not configuration errors returned by this method.
     ///
     /// # Examples
@@ -199,7 +209,7 @@ impl RuntimeBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build(self) -> Result<Runtime, Error> {
-        bootstrap::build(self.processor_config, &self.clock, self.sink, &ThreadBuilder::default())
+        bootstrap::build(self.processor_config, &self.clock, &ThreadBuilder::default())
     }
 }
 
@@ -207,9 +217,8 @@ impl RuntimeBuilder {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
-            clock: InactiveClock::default(),
+            clock: InactiveClock::new_isolated(),
             processor_config: RuntimeConfig::default(),
-            sink: Sink::noop(),
         }
     }
 }
@@ -242,14 +251,14 @@ mod tests {
             .workers(WorkersPolicy::exactly(2))
             .stack_size(1024 * 1024)
             .blocking_pool(BlockingPoolPolicy::shared().max(1));
-        assert_eq!(
-            builder.processor_config,
-            RuntimeConfig {
-                workers_policy: WorkersPolicy::exactly(2),
-                stack_size: NonZeroUsize::new(1024 * 1024).unwrap(),
-                blocking_pool_policy: BlockingPoolPolicy::shared().max(1),
-            }
-        );
+        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::exactly(2));
+        assert_eq!(builder.processor_config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
+        assert_eq!(builder.processor_config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
+        assert!(builder.processor_config.monitor_options.policy().is_enabled());
+        assert!(matches!(
+            builder.processor_config.panic_policy.into_executor_policy(),
+            arty_executor::PanicPolicy::Shutdown
+        ));
     }
 
     #[test]
@@ -292,14 +301,27 @@ mod tests {
             .blocking_pool(BlockingPoolPolicy::shared().max(1))
             .workers(WorkersPolicy::at_most(1))
             .workers(WorkersPolicy::exactly(2));
-        assert_eq!(
-            builder.processor_config,
-            RuntimeConfig {
-                workers_policy: WorkersPolicy::exactly(2),
-                stack_size: NonZeroUsize::new(1024 * 1024).unwrap(),
-                blocking_pool_policy: BlockingPoolPolicy::shared().max(1),
-            }
-        );
+        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::exactly(2));
+        assert_eq!(builder.processor_config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
+        assert_eq!(builder.processor_config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
+        assert!(builder.processor_config.monitor_options.policy().is_enabled());
+    }
+
+    #[test]
+    fn monitor_policy_replaces_the_default() {
+        let builder = Runtime::builder().monitor(MonitorPolicy::disabled());
+
+        assert!(!builder.processor_config.monitor_options.policy().is_enabled());
+    }
+
+    #[test]
+    fn panic_replaces_the_default() {
+        let builder = Runtime::builder().panic(PanicPolicy::ignore());
+
+        assert!(matches!(
+            builder.processor_config.panic_policy.into_executor_policy(),
+            arty_executor::PanicPolicy::Ignore
+        ));
     }
 
     #[test]

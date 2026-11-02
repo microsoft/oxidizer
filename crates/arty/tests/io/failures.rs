@@ -8,15 +8,14 @@ use crate::*;
 #[test]
 fn external_initialization_failure_is_returned_and_stops_runtime() {
     let runtime = runtime(1);
-    let builtins = runtime.scheduler().block_on(async |builtins| builtins).unwrap();
+    let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.fail_driver_at.store(1, Ordering::SeqCst);
 
     let error = {
         let scenario = scenario.clone();
         thread::spawn(move || {
-            builtins
-                .io()
+            cx.io()
                 .try_context::<TestContext<ExternalConstructionFailure>>(&scenario)
                 .unwrap_err()
                 .to_string()
@@ -33,7 +32,7 @@ fn external_initialization_failure_is_returned_and_stops_runtime() {
 
 #[test]
 fn try_context_reports_driver_construction_failure_and_stops_runtime() {
-    let (runtime, processor) = runtime_with_telemetry(1);
+    let runtime = runtime(1);
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.fail_driver_at.store(1, Ordering::SeqCst);
@@ -41,9 +40,8 @@ fn try_context_reports_driver_construction_failure_and_stops_runtime() {
     let error = worker
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
-                builtins
-                    .io()
+            async move |cx| {
+                cx.io()
                     .try_context::<TestContext<ConstructionFailure>>(&scenario)
                     .unwrap_err()
                     .to_string()
@@ -54,7 +52,58 @@ fn try_context_reports_driver_construction_failure_and_stops_runtime() {
     assert_eq!(error, "driver construction failed");
     assert_eq!(runtime.stop().unwrap_err().to_string(), "driver construction failed");
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 0);
-    assert_eq!(event_count(&processor, "arty.rt.io.driver.initialization_failed"), 1);
+}
+
+#[test]
+fn driver_failure_is_attached_to_tasks_cancelled_by_shutdown() {
+    let runtime = runtime(1);
+    let worker = worker_schedulers(&runtime, 1).pop().unwrap();
+    let scenario = Scenario::options(RolePlan::PreferPrimary);
+    scenario.fail_driver_at.store(1, Ordering::SeqCst);
+    let (started_tx, started_rx) = mpsc::channel();
+    let pending = worker.spawn(move |_| async move {
+        started_tx.send(()).unwrap();
+        std::future::pending::<()>().await;
+    });
+    started_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+
+    let failure = worker.spawn({
+        async move |cx| {
+            cx.io()
+                .try_context::<TestContext<ConstructionFailure>>(&scenario)
+                .unwrap_err()
+                .to_string()
+        }
+    });
+
+    assert_eq!(failure.join().unwrap(), "driver construction failed");
+    let cancellation = pending.join().unwrap_err();
+    let shutdown = cancellation
+        .source()
+        .unwrap()
+        .downcast_ref::<arty_executor::ShutdownError>()
+        .unwrap();
+    assert_eq!(shutdown.to_string(), "driver construction failed");
+    let mut source = Some(shutdown.inner());
+    let mut driver_error_found = false;
+    while let Some(error) = source {
+        driver_error_found |= error.downcast_ref::<DriverError>().is_some();
+        source = error.source();
+    }
+    assert!(driver_error_found);
+    assert_eq!(runtime.stop().unwrap_err().to_string(), "driver construction failed");
+}
+
+#[cfg(feature = "macros")]
+#[arty::test]
+#[should_panic(expected = "runtime is shutting down: driver construction failed")]
+async fn macro_panic_includes_the_runtime_shutdown_cause(cx: arty::task::Context) {
+    let scenario = Scenario::options(RolePlan::PreferPrimary);
+    scenario.fail_driver_at.store(1, Ordering::SeqCst);
+
+    let error = cx.io().try_context::<TestContext<ConstructionFailure>>(&scenario).unwrap_err();
+    assert_eq!(error.to_string(), "driver construction failed");
+    std::future::pending::<()>().await;
 }
 
 #[test]
@@ -66,9 +115,9 @@ fn context_panics_after_requesting_shutdown_on_initialization_failure() {
 
     let panicked = worker
         .spawn({
-            async move |builtins| {
+            async move |cx| {
                 catch_unwind(AssertUnwindSafe(|| {
-                    let _ = builtins.io().context::<TestContext<GetFailure>>(&scenario);
+                    let _ = cx.io().context::<TestContext<GetFailure>>(&scenario);
                 }))
                 .is_err()
             }
@@ -89,8 +138,8 @@ fn worker_driver_construction_failure_stops_an_already_registered_context() {
     workers[0]
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<LateConstructionFailure>>(&scenario);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<LateConstructionFailure>>(&scenario);
             }
         })
         .join()
@@ -98,9 +147,8 @@ fn worker_driver_construction_failure_stops_an_already_registered_context() {
     let error = workers[1]
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
-                builtins
-                    .io()
+            async move |cx| {
+                cx.io()
                     .try_context::<TestContext<LateConstructionFailure>>(&scenario)
                     .unwrap_err()
                     .to_string()
@@ -125,8 +173,8 @@ fn shutdown_during_first_registration_is_not_reported_as_driver_failure() {
 
     let initialization = worker.spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let outcome = builtins
+        async move |cx| {
+            let outcome = cx
                 .io()
                 .try_context::<TestContext<ShutdownDuringFirstRegistration>>(&scenario)
                 .map_or_else(|error| error.to_string(), |_| "ok".to_owned());
@@ -157,8 +205,8 @@ fn shutdown_during_late_initialization_is_observed_by_the_request() {
     workers[0]
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<ShutdownDuringLateInitialization>>(&scenario);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<ShutdownDuringLateInitialization>>(&scenario);
             }
         })
         .join()
@@ -167,8 +215,8 @@ fn shutdown_during_late_initialization_is_observed_by_the_request() {
     let (outcome_tx, outcome_rx) = mpsc::channel();
     let initialization = workers[1].spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let outcome = builtins
+        async move |cx| {
+            let outcome = cx
                 .io()
                 .try_context::<TestContext<ShutdownDuringLateInitialization>>(&scenario)
                 .map_or_else(|error| error.to_string(), |_| "ok".to_owned());
@@ -205,8 +253,8 @@ fn concurrent_worker_initialization_failure_is_reported_consistently() {
     workers[0]
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<ConcurrentLateFailure>>(&scenario);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<ConcurrentLateFailure>>(&scenario);
             }
         })
         .join()
@@ -215,9 +263,8 @@ fn concurrent_worker_initialization_failure_is_reported_consistently() {
     let (outcome_tx, outcome_rx) = mpsc::channel();
     let blocked_initialization = workers[1].spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            builtins
-                .io()
+        async move |cx| {
+            cx.io()
                 .try_context::<TestContext<ConcurrentLateFailure>>(&scenario)
                 .map_or_else(|error| error.to_string(), |_| "ok".to_owned())
         }
@@ -226,8 +273,8 @@ fn concurrent_worker_initialization_failure_is_reported_consistently() {
 
     let failed_initialization = workers[2].spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let outcome = builtins
+        async move |cx| {
+            let outcome = cx
                 .io()
                 .try_context::<TestContext<ConcurrentLateFailure>>(&scenario)
                 .map_or_else(|error| error.to_string(), |_| "ok".to_owned());
@@ -261,9 +308,8 @@ fn concurrent_failures_preserve_the_first_shutdown_cause() {
 
     let first_failure = workers[0].spawn({
         let first = first.clone();
-        async move |builtins| {
-            builtins
-                .io()
+        async move |cx| {
+            cx.io()
                 .try_context::<TestContext<ConcurrentFailureA>>(&first)
                 .unwrap_err()
                 .to_string()
@@ -272,9 +318,8 @@ fn concurrent_failures_preserve_the_first_shutdown_cause() {
     first.wait_until_driver_blocked();
     let second_failure = workers[1].spawn({
         let second = second.clone();
-        async move |builtins| {
-            builtins
-                .io()
+        async move |cx| {
+            cx.io()
                 .try_context::<TestContext<ConcurrentFailureB>>(&second)
                 .unwrap_err()
                 .to_string()
@@ -303,8 +348,8 @@ fn shutdown_does_not_couple_independent_worker_initialization() {
 
     let first = workers[0].spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let outcome = builtins
+        async move |cx| {
+            let outcome = cx
                 .io()
                 .try_context::<TestContext<ShutdownWhileWaiting>>(&scenario)
                 .map_or_else(|error| error.to_string(), |_| "ok".to_owned());
@@ -315,8 +360,8 @@ fn shutdown_does_not_couple_independent_worker_initialization() {
 
     let second = workers[1].spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let outcome = builtins
+        async move |cx| {
+            let outcome = cx
                 .io()
                 .try_context::<TestContext<ShutdownWhileWaiting>>(&scenario)
                 .map_or_else(|error| error.to_string(), |_| "ok".to_owned());

@@ -6,9 +6,9 @@ use std::str::FromStr;
 use http::HeaderMap;
 use http::header::AsHeaderName;
 
-/// Header value extraction and parsing.
+/// Methods that read and parse header values.
 ///
-/// Provides methods to extract header values as strings and parse them into typed values.
+/// These methods return strings or parsed values.
 pub trait HeaderMapExt: sealed::Sealed {
     /// Gets a header value as a string slice.
     ///
@@ -26,7 +26,7 @@ pub trait HeaderMapExt: sealed::Sealed {
     /// let server = headers.get_str_value("Server");
     /// assert_eq!(server, Some("oxidizer/1.0"));
     ///
-    /// // Non-existent header
+    /// // The header does not exist.
     /// let missing = headers.get_str_value("X-Missing");
     /// assert_eq!(missing, None);
     /// ```
@@ -45,11 +45,11 @@ pub trait HeaderMapExt: sealed::Sealed {
     /// let mut headers = HeaderMap::new();
     /// headers.insert("Content-Language", HeaderValue::from_static("en-US"));
     ///
-    /// // Existing header
+    /// // The header exists.
     /// let language = headers.get_str_value_or("Content-Language", "en");
     /// assert_eq!(language, "en-US");
     ///
-    /// // Missing header - returns default value
+    /// // A missing header returns the default value.
     /// let region = headers.get_str_value_or("X-Region", "us-west");
     /// assert_eq!(region, "us-west");
     /// ```
@@ -70,15 +70,15 @@ pub trait HeaderMapExt: sealed::Sealed {
     /// let mut headers = HeaderMap::new();
     /// headers.insert("X-Rate-Limit", HeaderValue::from(100));
     ///
-    /// // Parse to the appropriate type
+    /// // Parse the header as a u32 value.
     /// let limit: u32 = headers.get_value("X-Rate-Limit").unwrap();
     /// assert_eq!(limit, 100);
     ///
-    /// // Missing headers return None
+    /// // Missing headers return None.
     /// let missing: Option<u32> = headers.get_value("X-Missing");
     /// assert_eq!(missing, None);
     ///
-    /// // Unparsable values return None
+    /// // Values that cannot be parsed return None.
     /// headers.insert("X-Bad-Integer", "not-a-number".parse().unwrap());
     /// let bad_number: Option<i32> = headers.get_value("X-Bad-Integer");
     /// assert_eq!(bad_number, None);
@@ -99,15 +99,15 @@ pub trait HeaderMapExt: sealed::Sealed {
     /// headers.insert("X-Timeout", HeaderValue::from(30));
     /// headers.insert("X-Invalid", HeaderValue::from_static("invalid"));
     ///
-    /// // Parse value with fallback
+    /// // Parse the value with a fallback.
     /// let timeout: u32 = headers.get_value_or("X-Timeout", 60);
     /// assert_eq!(timeout, 30);
     ///
-    /// // Missing header returns default
+    /// // A missing header returns the default.
     /// let retry: u32 = headers.get_value_or("X-Retry-Count", 3);
     /// assert_eq!(retry, 3);
     ///
-    /// // Unparsable value returns default
+    /// // A value that cannot be parsed returns the default.
     /// let invalid: f32 = headers.get_value_or("X-Invalid", 1.0);
     /// assert_eq!(invalid, 1.0);
     /// ```

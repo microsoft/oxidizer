@@ -19,6 +19,7 @@ pub(crate) enum Error {
     #[cfg(any(target_os = "linux", test))]
     UnsupportedPerfArgument(OsString),
     UnsupportedVtuneArgument(OsString),
+    InvalidGungraunTestArgument(OsString),
     MissingOptionValue(&'static str),
     UnknownOption(OsString),
     AmbiguousArguments(Vec<OsString>),
@@ -111,6 +112,11 @@ impl fmt::Display for Error {
                 formatter,
                 "vtune argument {} conflicts with metabench's measurement protocol",
                 argument.to_string_lossy()
+            ),
+            Self::InvalidGungraunTestArgument(argument) => write!(
+                formatter,
+                "invalid Gungraun test argument '{}'. Use --gungraun-arg=--test=true or --gungraun-arg=--test=false.",
+                terminal_text(&argument.to_string_lossy())
             ),
             Self::MissingOptionValue(option) => write!(formatter, "{option} requires a value"),
             Self::UnknownOption(option) => write!(
@@ -223,6 +229,17 @@ mod tests {
     fn duplicate_report_diagnostics_escape_disk_supplied_identities() {
         let error = Error::DuplicateReportBenchmark("case\n\u{1b}[31m\u{202e}".into());
         assert_eq!(error.to_string(), r"report contains duplicate benchmark 'case\n\u{1b}[31m\u{202e}'");
+    }
+
+    #[test]
+    fn gungraun_test_diagnostics_escape_untrusted_values() {
+        let argument = "--test=no\n\u{1b}[31m\u{202e}";
+        let error = Error::InvalidGungraunTestArgument(argument.into());
+        assert_eq!(
+            error.to_string(),
+            r"invalid Gungraun test argument '--test=no\n\u{1b}[31m\u{202e}'. Use --gungraun-arg=--test=true or --gungraun-arg=--test=false."
+        );
+        assert!(matches!(error, Error::InvalidGungraunTestArgument(raw) if raw == argument));
     }
 
     #[test]

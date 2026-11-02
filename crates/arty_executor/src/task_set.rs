@@ -1,15 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::remote::Sender as RemoteSender;
-use crate::{ExecutorShared, JoinHandle, TaskOptions};
+use crate::{ExecutorShared, TaskCompletion, TaskOptions};
 
-/// Represents the set of tasks currently registered with an executor and allows new tasks
-/// to be registered.
+/// A handle that registers tasks with an executor.
 ///
-/// The task set acts like a handle and can be cheaply cloned and used from anywhere on the same
-/// thread as the executor, including from inside the futures of tasks running on the same executor.
-/// Every clone is functionally identical.
+/// You can clone this handle and use each clone on the executor thread. A task
+/// future can use a clone to register another task on the same executor.
 #[derive(Clone, Debug)]
 pub struct TaskSet {
     shared: ExecutorShared,
@@ -22,42 +19,16 @@ impl TaskSet {
 
     /// Registers a future and its runtime integration options as a new task.
     ///
-    /// The future will be polled until it completes, after which it will be dropped, unless the
-    /// executor is commanded to shut down, in which case the future may be dropped before it
-    /// completes. A submission after shutdown returns a join handle that resolves to
-    /// [`JoinError`](crate::JoinError). Use [`TaskOptions::default()`] when no execution context
-    /// or placement metadata is required.
-    pub fn add<F, R>(&self, future: F, options: TaskOptions) -> JoinHandle<R>
+    /// The executor polls the future until it completes. Executor shutdown can
+    /// cancel and drop the future before completion. Use [`TaskOptions::default()`]
+    /// when the task needs no observed context or placement metadata.
+    pub fn add<F, R, T>(&self, future: F, options: TaskOptions, completion: T)
     where
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
+        T: TaskCompletion<R>,
     {
-        self.shared.add_task(future, options)
-    }
-
-    /// Registers a task whose result is delivered to a cross-thread receiver.
-    ///
-    /// Arty uses this integration boundary to create a non-[`Send`] future on its destination
-    /// worker while returning a `Send` result handle to the submitting thread. Keeping the
-    /// concrete future at this call site lets the executor store it inline instead of behind a
-    /// `Pin<Box<dyn Future>>`. Obtain `result_tx` from
-    /// [`remote::Pool::channel`](crate::remote::Pool::channel).
-    pub fn add_with_remote_result<F, R>(&self, future: F, options: TaskOptions, result_tx: RemoteSender<R>)
-    where
-        F: IntoFuture<Output = R> + 'static,
-        R: Send + 'static,
-    {
-        self.shared.add_remote_task(future, options, result_tx);
-    }
-
-    /// Begins executor shutdown without borrowing executor-owned polling state.
-    pub fn begin_shutdown(&self) {
-        self.shared.request_shutdown();
-    }
-
-    #[cfg(test)]
-    pub(crate) fn task_storage_is_empty(&self) -> bool {
-        self.shared.task_storage_is_empty()
+        self.shared.add_task(future, options, completion);
     }
 }
 

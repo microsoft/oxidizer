@@ -6,42 +6,39 @@ mod tuples;
 
 #[doc(inline)]
 pub use stack::Stack;
-/// A trait for decorating a [`Service`](crate::Service) with middleware.
+/// Wraps a [`Service`](crate::Service) with middleware.
 ///
-/// A `Layer` takes an inner service and wraps it with additional behavior,
-/// producing a new service. This pattern enables building reusable middleware
-/// components that can be composed together to form a processing pipeline.
+/// A `Layer` takes an inner service and returns a service with more behavior.
+/// Multiple layers can form a processing pipeline.
 ///
-/// # Tower Ecosystem Compatibility
+/// # Tower compatibility
 ///
-/// **Important:** This trait is re-exported from [`tower_layer`](https://docs.rs/tower-layer)
-/// to ensure seamless interoperability with the Tower ecosystem.
+/// > **Note**: This crate re-exports this trait from
+/// > [`tower_layer`](https://docs.rs/tower-layer).
 ///
-/// Layers built in the Tower ecosystem or using this crate can work in both ecosystems,
-/// provided the resulting service implements either [`layered::Service`](crate::Service) or
+/// A layer can work with either service system. The resulting service must implement
+/// [`Service`](crate::Service) or
 /// [`tower_service::Service`](https://docs.rs/tower-service/latest/tower_service/trait.Service.html).
-/// Middleware authors can also choose to implement both service traits for seamless
-/// interoperability across both ecosystems.
+/// A middleware type can implement both service traits.
 ///
-/// See also the `tower-service` feature in this crate for Tower interoperability utilities.
+/// Enable the `tower-service` feature for more Tower adapters.
 ///
-/// # How It Works
+/// # Behavior
 ///
-/// The `layer` method wraps an inner service `S` and returns a new service
-/// (`Self::Service`) that adds cross-cutting behavior such as:
+/// The `layer` method wraps an inner service `S`. It returns `Self::Service`, which can add:
 ///
-/// - Logging and tracing
-/// - Timeouts and retries
-/// - Authentication and authorization
-/// - Rate limiting
-/// - Metrics collection
+/// - Logging and tracing.
+/// - Timeouts and retries.
+/// - Authentication and authorization.
+/// - Rate limits.
+/// - Metrics.
 ///
-/// # Original Documentation
+/// # Upstream documentation
 ///
-/// The documentation below is from the original [`tower_layer`](https://docs.rs/tower-layer)
-/// crate. Note that it references [`tower::Service`](https://docs.rs/tower/latest/tower/trait.Service.html),
-/// whereas this crate uses its own [`Service`](crate::Service) trait. The concepts
-/// remain the same, but the service trait definition differs.
+/// The re-export also includes documentation from
+/// [`tower_layer`](https://docs.rs/tower-layer). That documentation refers to
+/// [`tower::Service`](https://docs.rs/tower/latest/tower/trait.Service.html).
+/// This crate defines a different [`Service`](crate::Service) trait.
 ///
 /// ---
 pub use tower_layer::Layer;

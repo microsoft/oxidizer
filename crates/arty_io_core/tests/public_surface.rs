@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Public surface contract tests.
+//! Tests for the public API contract.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 

@@ -37,7 +37,7 @@ fn compress(format: Format, data: &[u8]) -> BytesView {
 fn compress_zeroes(format: Format, len: usize) -> BytesView {
     const CHUNK_SIZE: usize = 64 * 1024;
     let chunk = BytesView::copied_from_slice(&vec![0; CHUNK_SIZE], &fetch::HttpBodyBuilder::new_fake());
-    // Share input chunks so a large-output regression does not retain the entire payload.
+    // Share input chunks so a large-output regression does not retain the full payload.
     let input =
         BytesView::from_views(std::iter::repeat_n(chunk.clone(), len / CHUNK_SIZE).chain(std::iter::once(chunk.range(..len % CHUNK_SIZE))));
     let compressor = compressors::CompressorBuilder::new()
@@ -107,8 +107,8 @@ fn client_with(format_token: Option<&'static str>, body: BytesView) -> (HttpClie
 async fn a_default_client_decompresses_nothing() {
     let expected = payload();
     let compressed = compress(Format::Gzip, expected.as_bytes());
-    // No call to `decompression`: compiling the features in
-    // must not change what this client sends or what it hands back.
+    // The client does not call `decompression`. Compiled features must not change the request or
+    // response.
     let (client, seen) = build(Some("gzip"), compressed.clone(), HttpClientBuilder::build);
 
     let response = client.get(URL).fetch().await.unwrap();
@@ -139,7 +139,7 @@ async fn a_gzip_response_is_decompressed() {
 
     let response = client.get(URL).fetch().await.unwrap();
 
-    // Neither header describes the decompressed body any more.
+    // Neither header describes the decompressed body.
     assert!(response.headers().get(CONTENT_ENCODING).is_none());
     assert!(response.headers().get(CONTENT_LENGTH).is_none());
 
@@ -179,9 +179,8 @@ async fn the_advertised_order_states_the_preference() {
 
     drop(client.get(URL).fetch().await.unwrap());
 
-    // Descending quality values, so a server honours the order rather than
-    // guessing at it. `deflate` ranks last: servers disagree over whether it
-    // means the zlib-wrapped form or raw DEFLATE.
+    // Descending quality values preserve the order. `deflate` is last because servers disagree
+    // about whether it means zlib-wrapped or raw DEFLATE.
     assert_eq!(
         seen.last().get(ACCEPT_ENCODING).unwrap(),
         "zstd, br;q=0.9, gzip;q=0.8, deflate;q=0.7"
@@ -413,7 +412,7 @@ async fn a_corrupt_body_fails_when_it_is_read_without_retrying() {
         },
     );
 
-    // Decompression is lazy, so the response itself is fine and the body is not.
+    // Lazy decompression returns the response before the body reports the error.
     let response = client.get(URL).fetch().await.unwrap();
     let error = response.into_body().into_text().await.unwrap_err();
 

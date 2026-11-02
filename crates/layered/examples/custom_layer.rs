@@ -3,14 +3,14 @@
 
 //! Custom middleware layer.
 //!
-//! Shows how to define and compose custom middleware layers.
+//! This example defines and composes custom middleware layers.
 
 use layered::Execute;
 use layered::prelude::*;
 
 #[tokio::main]
 async fn main() {
-    // Stack multiple logging layers: layer-1 -> layer-2 -> core service
+    // Apply `layer-1`, then `layer-2`, before the root service.
     let stack = (
         Logging::layer("layer-1"),
         Logging::layer("layer-2"),
@@ -20,33 +20,33 @@ async fn main() {
         }),
     );
 
-    // Build and execute
+    // Build and execute the service.
     let service = stack.into_service();
     let _output = service.execute("Hello, World!".to_string()).await;
 }
 
-/// Logging middleware that wraps a service.
+/// Middleware that logs service execution.
 #[derive(Debug)]
 pub struct Logging<S> {
     inner: S,
     id: &'static str,
 }
 
-/// Layer for creating logging middleware.
+/// Creates logging middleware.
 #[derive(Debug)]
 pub struct LoggingLayer {
     id: &'static str,
 }
 
 impl Logging<()> {
-    /// Creates a logging layer with the given identifier.
+    /// Creates a logging layer with an identifier.
     #[must_use]
     pub fn layer(id: &'static str) -> LoggingLayer {
         LoggingLayer { id }
     }
 }
 
-/// Logs before and after service execution.
+/// Logs before and after the inner service runs.
 impl<S, In: Send, Out> Service<In> for Logging<S>
 where
     S: Service<In, Out = Out>,
@@ -62,7 +62,7 @@ where
     }
 }
 
-/// Wraps services with logging.
+/// Wraps a service with logging.
 impl<S> Layer<S> for LoggingLayer {
     type Service = Logging<S>;
 

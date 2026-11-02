@@ -5,12 +5,49 @@
 
 #![cfg(feature = "rt")]
 #![cfg(feature = "macros")]
+#![expect(clippy::panic, reason = "these tests inject task panics to test macro panic-policy wiring")]
 
-use arty::task::Builtins;
+use arty::task::Context;
 use arty::test;
 
+/// This compile-pass fixture selects the enabled monitoring policy.
+#[arty::main(monitor = enabled)]
+pub async fn main_with_monitoring_enabled(cx: Context) -> Result<(), arty::task::JoinError> {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+    Ok(())
+}
+
+/// This compile-pass fixture selects the disabled monitoring policy and sets
+/// the worker count.
+#[arty::main(workers = 1, monitor = disabled)]
+pub async fn main_with_monitoring_disabled(cx: Context) -> Result<(), arty::task::JoinError> {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+    Ok(())
+}
+
+/// This compile-pass fixture sets the shutdown panic policy.
+#[arty::main(panic = shutdown)]
+pub async fn main_with_panic_shutdown(cx: Context) -> Result<(), arty::task::JoinError> {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+    Ok(())
+}
+
+/// This compile-pass fixture sets the ignore panic policy and other options.
+#[arty::main(monitor = disabled, panic = ignore, workers = 1)]
+pub async fn main_with_panic_ignore(cx: Context) -> Result<(), arty::task::JoinError> {
+    assert!(
+        cx.scheduler()
+            .spawn(async |_| std::panic::panic_any("contained"))
+            .await
+            .unwrap_err()
+            .is_panic()
+    );
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+    Ok(())
+}
+
 #[test]
-async fn simple_main(cx: Builtins) {
+async fn simple_main(cx: Context) {
     println!("Hello, world!");
     cx.scheduler()
         .spawn(async move |_| {
@@ -21,7 +58,7 @@ async fn simple_main(cx: Builtins) {
 }
 
 #[test]
-async fn simple_main_returning(cx: Builtins) -> Result<(), Box<dyn std::error::Error + Send + 'static>> {
+async fn simple_main_returning(cx: Context) -> Result<(), Box<dyn std::error::Error + Send + 'static>> {
     println!("Hello, world!");
     cx.scheduler()
         .spawn(async move |_| {
@@ -32,8 +69,23 @@ async fn simple_main_returning(cx: Builtins) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
+#[test(panic = shutdown)]
+async fn explicit_shutdown_policy_compiles(_cx: Context) {}
+
+#[test(panic = ignore)]
+async fn ignore_policy_keeps_the_test_runtime_operational(cx: Context) {
+    assert!(
+        cx.scheduler()
+            .spawn(async |_| std::panic::panic_any("contained"))
+            .await
+            .unwrap_err()
+            .is_panic()
+    );
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+}
+
 #[test]
-async fn root_and_children_keep_their_worker_affinity(cx: Builtins) {
+async fn root_and_children_keep_their_worker_affinity(cx: Context) {
     let worker = std::thread::current().id();
     assert_eq!(cx.thread().id(), worker);
     let child = cx.scheduler().spawn(async |child| child.thread().id()).await.unwrap();
@@ -41,7 +93,7 @@ async fn root_and_children_keep_their_worker_affinity(cx: Builtins) {
 }
 
 #[test]
-async fn default_test_runtime_has_exactly_one_worker(cx: Builtins) {
+async fn default_test_runtime_has_exactly_one_worker(cx: Context) {
     let home = cx.thread().id();
     let tasks: Vec<_> = cx
         .control()
@@ -55,8 +107,18 @@ async fn default_test_runtime_has_exactly_one_worker(cx: Builtins) {
     }
 }
 
+#[test(monitor = enabled)]
+async fn test_can_enable_monitoring(cx: Context) {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+}
+
+#[test(monitor = disabled, workers = 1)]
+async fn test_can_disable_monitoring_explicitly(cx: Context) {
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+}
+
 #[test(workers = 3)]
-async fn worker_count_is_exact_even_when_processors_are_shared(cx: Builtins) {
+async fn worker_count_is_exact_even_when_processors_are_shared(cx: Context) {
     let tasks: Vec<_> = cx
         .control()
         .workers()
@@ -68,14 +130,29 @@ async fn worker_count_is_exact_even_when_processors_are_shared(cx: Builtins) {
     assert_eq!(workers.len(), 3);
 }
 
+#[arty::main]
+#[::core::prelude::v1::test]
+async fn default_main_runtime_has_exactly_one_worker(cx: Context) {
+    let tasks: Vec<_> = cx
+        .control()
+        .workers()
+        .into_iter()
+        .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
+        .collect();
+    assert_eq!(tasks.len(), 1);
+    for task in tasks {
+        assert_eq!(task.await.unwrap(), cx.thread().id());
+    }
+}
+
 #[test(workers = 0)]
 #[should_panic(expected = "failed to create the runtime for the entry point")]
-async fn zero_workers_fail_during_construction(_cx: Builtins) {
+async fn zero_workers_fail_during_construction(_cx: Context) {
     panic!("the test body must not run");
 }
 
 #[test(workers = 1)]
-async fn worker_configuration_keeps_owned_builtins(cx: Builtins) {
+async fn worker_configuration_keeps_owned_context(cx: Context) {
     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 }
 
@@ -84,9 +161,23 @@ mod controlled_time {
     use std::time::{Duration, UNIX_EPOCH};
 
     use arty as renamed_arty;
-    use arty::task::Builtins;
+    use arty::task::Context;
     use arty::time::ClockControl;
     use futures::FutureExt;
+
+    #[arty::test]
+    async fn controlled_test_defaults_to_one_worker(cx: Context, _control: ClockControl) {
+        let tasks: Vec<_> = cx
+            .control()
+            .workers()
+            .into_iter()
+            .map(|worker| cx.scheduler().spawn_at(worker, (), |()| async { std::thread::current().id() }))
+            .collect();
+        assert_eq!(tasks.len(), 1);
+        for task in tasks {
+            assert_eq!(task.await.unwrap(), cx.thread().id());
+        }
+    }
 
     trait TestTypes {
         type Context;
@@ -96,12 +187,12 @@ mod controlled_time {
     struct Types;
 
     impl TestTypes for Types {
-        type Context = Builtins;
+        type Context = arty::task::Context;
         type Control = ClockControl;
     }
 
     #[arty::test]
-    async fn clock_starts_frozen(cx: Builtins, control: ClockControl) {
+    async fn clock_starts_frozen(cx: Context, control: ClockControl) {
         assert_eq!(cx.clock().system_time(), UNIX_EPOCH);
         let before = cx.clock().instant();
         assert_eq!(cx.clock().instant(), before);
@@ -110,7 +201,7 @@ mod controlled_time {
     }
 
     #[arty::test]
-    async fn manual_advance_wakes_only_due_timers(cx: Builtins, control: ClockControl) {
+    async fn manual_advance_wakes_only_due_timers(cx: Context, control: ClockControl) {
         assert_eq!(cx.clock().system_time(), UNIX_EPOCH);
         let mut delay = std::pin::pin!(cx.clock().delay(Duration::from_secs(10)));
         assert!(delay.as_mut().now_or_never().is_none());
@@ -133,7 +224,7 @@ mod controlled_time {
     }
 
     #[arty::test]
-    async fn child_uses_the_same_control(cx: Builtins, control: ClockControl) {
+    async fn child_uses_the_same_control(cx: Context, control: ClockControl) {
         let child_control = control.clone();
         let now = cx
             .scheduler()
@@ -156,7 +247,7 @@ mod controlled_time {
 
     #[arty::test]
     #[should_panic(expected = "controlled test panic")]
-    async fn controlled_test_preserves_panic_payload(cx: Builtins, control: ClockControl) {
+    async fn controlled_test_preserves_panic_payload(cx: Context, control: ClockControl) {
         control.advance(Duration::from_secs(1));
         assert_eq!(cx.clock().system_time(), UNIX_EPOCH + Duration::from_secs(1));
         panic!("controlled test panic");

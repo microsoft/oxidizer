@@ -169,7 +169,7 @@ impl Barrier<Async> {
         let state = self
             .raw
             .state
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |state| {
                 let generation = (state >> 32) as u32;
                 let count = Self::count(state);
                 Some(if count + 1 == self.raw.parties {
@@ -195,7 +195,7 @@ impl Barrier<Async> {
     fn cancel(&self, generation: u32) -> bool {
         self.raw
             .state
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |state| {
                 if (state >> 32) as u32 != generation {
                     return None;
                 }

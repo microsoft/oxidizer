@@ -1,10 +1,26 @@
 # Metabench native contracts
 
 The repository-specific **Metabench native contracts (Linux)** CI job installs
-Valgrind and `gungraun-runner` 0.19.4, matching the workspace's Gungraun version.
-It runs the native listing and default-engine smoke contracts and is required
-by the stable **Required repository checks** fan-in. These are correctness
-checks, not timed performance measurements.
+Valgrind and the `gungraun-runner` version selected by `just setup-callgrind`,
+matching the workspace's Gungraun version (currently 0.20.0).
+It runs the native listing, default-engine smoke, and report-generation
+contracts and is required by the stable **Required repository checks** fan-in.
+It also runs `tests/gungraun_perf.rs` with real control pipes and generated native callbacks.
+This test checks that perf callbacks in one process run one at a time.
+It also checks nested-call rejection and rejection of later perf callbacks after a callback panics.
+The test does not need hardware counters or the `perf` executable.
+The report contract runs Callgrind and checks that schema-v7 summaries produce
+JSON and Markdown reports with instruction counts. It selects `--gungraun`
+without Cargo's `--bench` argument so explicit measurement intent is covered
+independently of Cargo's invocation. It also covers forwarded `--test=false`.
+Another case selects Gungraun through `BENCH_ENGINE=gungraun` without a CLI
+engine selector and checks both report formats.
+Smoke contracts cover forwarded `--test=true` and top-level `--test` priority.
+Each report run uses its own output directory to avoid reading an earlier result.
+These are correctness checks, not timed performance measurements.
+
+The job has a 30-minute limit, including tool installation and compilation.
+The report cases use the small checksum workload in `metabench_basic`.
 
 To run the same required tier locally on Linux:
 
@@ -12,19 +28,30 @@ To run the same required tier locally on Linux:
 mkdir -p target/metabench-contract-scratch
 export TMPDIR="$PWD/target/metabench-contract-scratch"
 export CARGO_BUILD_JOBS=2 METABENCH_REQUIRE_NATIVE_CONTRACTS=1
-cargo install --locked --version 0.19.4 gungraun-runner
+just setup-callgrind
 # Install Valgrind using your Linux distribution's package manager.
 gungraun-runner --version
 valgrind --version
-cargo test --package metabench --test spawned_benchmark --locked gungraun_listing_is_forwarded -- --exact --nocapture
-cargo test --package metabench --test spawned_benchmark --locked default_engine_smoke_checks_do_not_publish_measurements -- --exact --nocapture
+cargo test --package metabench --test gungraun_perf --locked
+cargo test --package metabench --test spawned_benchmark --locked -- --exact --nocapture \
+  gungraun_listing_is_forwarded \
+  gungraun_measurements_write_report \
+  default_engine_smoke_checks_do_not_publish_measurements
 ```
 
-`METABENCH_REQUIRE_NATIVE_CONTRACTS` makes missing prerequisites a test failure,
-not a successful skip. Without this setting, ordinary local test runs retain
-the optional skip when `gungraun-runner` is unavailable. The Linux smoke contract
-is not compiled on Windows; Windows' unsupported native-mode behavior is
+`METABENCH_REQUIRE_NATIVE_CONTRACTS` makes missing or mismatched prerequisites
+a test failure, not a successful skip. Without this setting, ordinary local
+test runs skip when `gungraun-runner` is unavailable or has a different version.
+The report contract also skips when Valgrind is unavailable.
+The Linux smoke and report contracts are
+not compiled on Windows; Windows' unsupported native-mode behavior is
 unchanged. Test output reports each executed contract by name.
+
+On hosts other than Linux, native registration reuses the probe adapters.
+This keeps the cases, configuration, and lifecycle hooks type-checked without
+compiling a second copy of Gungraun's perf harness. Linux retains separate
+native and probe adapters so collection controls stay outside native measurements.
+The unsupported-host contract confirms that this reuse does not enable Gungraun.
 
 Unit regressions also check collector activation, report boundary values,
 generated probe registration, bounded pipe draining, and exact worker cleanup

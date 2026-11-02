@@ -153,6 +153,10 @@ setup precede collection; teardown and returned-value destruction follow it.
 Calls to annotated functions during setup cannot consume the measurement.
 Collection guards stop on unwinding.
 
+On hosts other than Linux, native registration reuses the probe adapters.
+This keeps native cases and group hooks type-checked without compiling both
+adapters. Gungraun execution remains Linux-only.
+
 No new registration language or public measurement helper is required. Probes
 do not run Criterion registration or infer its arbitrary callbacks. A
 Criterion-only case without a corresponding native declaration has no probe
@@ -187,7 +191,26 @@ metabench::main!(
 ## Configure Gungraun
 
 The installed `gungraun-runner` must match the Gungraun library version
-(currently 0.19.4).
+(currently 0.20.0). Metabench reads that runner’s schema-v7 summaries.
+
+Gungraun 0.20 adds batched execution paths that retain prepared inputs until each batch finishes.
+Do not borrow a temporary in a native case, such as `#[bench::case(&prepare())]`.
+Prepare an owned input, such as a `Box`, and return its owner with the result
+to keep input destruction outside measurement.
+Criterion can continue to borrow its prepared state and select the result
+from the returned tuple.
+See [owned native inputs][__link2]
+for the migration recipe.
+
+Metabench serializes the perf-control calls in its generated Gungraun adapters within each process.
+The lock covers the whole native perf callback.
+Nested sections panic instead of waiting for their own lock.
+If a callback panics, later perf callbacks fail instead of reusing its shared state.
+A workload can still use multiple threads.
+Do not call Gungraun’s `perf_enable!` or `perf_disable!` macros directly from workloads or hooks.
+Direct calls bypass this lock and can race with generated controls.
+This restriction applies until [Gungraun fixes its shared control state][__link3].
+Callgrind, Cachegrind, DHAT, and the separate Metabench `--perf` engine do not use these controls.
 
 Benchmark-level `gungraun_config`, `gungraun_setup`, and
 `gungraun_teardown` options work with native `#[bench::...]` and
@@ -214,7 +237,7 @@ A mismatched or missing case name does not error: it silently keeps the
 engines’ rows separate (or drops one engine’s row from the merged view)
 instead of reporting them together.
 
-[`main!`][__link2] accepts suite-level Gungraun settings and named groups with their
+[`main!`][__link4] accepts suite-level Gungraun settings and named groups with their
 own configuration, setup, teardown, comparison, and parallelism:
 
 ```rust
@@ -281,6 +304,18 @@ which must be provided even when the target declares native probe cases.
 An invocation
 without arguments is also smoke mode, matching Cargo’s harness-free test
 invocation; pass an engine selector to request measurements directly.
+
+Gungraun also accepts `--test=true` and `--test=false`.
+Forward these forms with `--gungraun-arg`.
+When only Gungraun is selected, arguments after `--` accept these forms too.
+The true values are `true`, `t`, `yes`, `y`, `on`, and `1`.
+The false values are `false`, `f`, `no`, `n`, `off`, and `0`.
+Letter case does not matter.
+
+A true value selects smoke mode for the whole run.
+A false value keeps measurement mode unless another smoke request is present.
+Top-level `--test` takes priority.
+
 A measurement selection matching no cases fails and preserves existing reports.
 Failed multi-engine runs can write separate `.partial` reports but never
 replace the complete rolling baseline.
@@ -348,7 +383,7 @@ Renamed native symbols do not automatically reconnect older native histories.
 The system allocator
 is used by default; `main!(..., allocator = MyAllocator)` selects another
 underlying allocator.
-Put `allocator` after `benchmarks` or `groups` in [`main!`][__link3]. The executable
+Put `allocator` after `benchmarks` or `groups` in [`main!`][__link5]. The executable
 may define only one global allocator. Any existing `alloc_tracker`
 instrumentation must resolve to the same Cargo package source as the metabench
 tracker; a registry dependency and a separate path dependency have independent
@@ -370,5 +405,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
 
  [__link0]: https://crates.io/crates/criterion
  [__link1]: https://crates.io/crates/gungraun
- [__link2]: `main!`
- [__link3]: `main!`
+ [__link2]: https://github.com/microsoft/oxidizer/blob/main/docs/benchmarks.md#owned-native-inputs
+ [__link3]: https://github.com/gungraun/gungraun/issues/778
+ [__link4]: `main!`
+ [__link5]: `main!`

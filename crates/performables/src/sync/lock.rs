@@ -374,7 +374,7 @@ impl<T: ?Sized> RwLock<T, Async> {
         // lazy wait-queue state is published, so reject overflow before writing.
         self.raw
             .state
-            .fetch_update(Ordering::Acquire, Ordering::Relaxed, |state| {
+            .try_update(Ordering::Acquire, Ordering::Relaxed, |state| {
                 (state & WRITER == 0 && state & READERS != READERS).then(|| state + 1)
             })
             .is_ok()

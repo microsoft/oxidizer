@@ -10,36 +10,36 @@
 
 //! Shared HTTP types and extension traits for clients and servers.
 //!
-//! This crate provides common HTTP functionality built on the popular [`http`] crate,
-//! including flexible body handling, unified error types, and ergonomic extension traits
-//! for working with HTTP requests and responses.
+//! This crate provides common HTTP features that build on the [`http`] crate.
+//! It includes body handling, error types, and extension traits for HTTP requests
+//! and responses.
 //!
 //! # Core Types
 //!
-//! - [`HttpRequest`] and [`HttpResponse`] - Type aliases for requests and responses with [`HttpBody`]
-//! - [`HttpRequestBuilder`] - Builder for constructing HTTP requests with a fluent API
-//! - [`HttpResponseBuilder`] - Builder for constructing HTTP responses with a fluent API
-//! - [`HttpBody`] - Flexible body type supporting text, binary, JSON, and streaming content
-//! - [`HttpBodyBuilder`] - Builder for creating HTTP bodies with memory pool optimization
-//! - [`HttpError`] - Unified error type with automatic backtraces and recovery classification
-//! - [`RequestHandler`] - Trait for HTTP middleware and request processing pipelines
+//! - [`HttpRequest`] and [`HttpResponse`] are aliases for requests and responses with [`HttpBody`].
+//! - [`HttpRequestBuilder`] constructs HTTP requests with chained method calls.
+//! - [`HttpResponseBuilder`] constructs HTTP responses with chained method calls.
+//! - [`HttpBody`] supports text, binary, JSON, and streaming content.
+//! - [`HttpBodyBuilder`] creates HTTP bodies with a configurable memory provider.
+//! - [`HttpError`] provides backtraces and recovery information.
+//! - [`RequestHandler`] defines HTTP middleware and request pipelines.
 //!
 //! # Extension Traits
 //!
-//! The crate provides extension traits that add convenience methods to standard HTTP types:
+//! The crate provides extension traits for standard HTTP types:
 //!
-//! - [`StatusExt`] - Status code validation and recovery classification
-//! - [`RequestExt`] - Extensions for HTTP requests
-//! - [`ResponseExt`] - Response recovery classification with `Retry-After` support
-//! - [`HttpRequestExt`] - Request cloning with body support
-//! - [`HeaderMapExt`] - Header value extraction and parsing
-//! - [`HeaderValueExt`] - Construction of [`HeaderValue`][http::HeaderValue] from [`Bytes`][bytes::Bytes]
-//! - [`ExtensionsExt`] - Extensions for [`Extensions`][http::Extensions] to extract URI template labels
+//! - [`StatusExt`] classifies status codes and their recovery behavior.
+//! - [`RequestExt`] extends HTTP requests.
+//! - [`ResponseExt`] classifies response recovery behavior and supports `Retry-After`.
+//! - [`HttpRequestExt`] clones requests and their bodies.
+//! - [`HeaderMapExt`] extracts and parses header values.
+//! - [`HeaderValueExt`] constructs [`HeaderValue`][http::HeaderValue] from [`Bytes`][bytes::Bytes].
+//! - [`ExtensionsExt`] extracts URI template labels from [`Extensions`][http::Extensions].
 //!
 //! # Quick Start
 //!
-//! Here's a complete example showing how to create an HTTP client, build a request,
-//! and validate the response:
+//! The following example creates an HTTP client, builds a request, and requires
+//! a successful response:
 //!
 //! ```rust
 //! # #[cfg(not(feature = "test-util"))] fn main() {}
@@ -51,11 +51,11 @@
 //! # #[cfg(feature = "test-util")]
 //! # #[tokio::main]
 //! # async fn main() -> Result<()> {
-//! // Create a body builder for constructing request/response bodies
+//! // Create a builder for request and response bodies.
 //! let body_builder = HttpBodyBuilder::new_fake();
 //!
-//! // Create a fake handler that returns a successful response
-//! // (This uses the `test-util` feature for testing; similar workflow applies to real clients)
+//! // Create a fake handler that returns a successful response.
+//! // The `test-util` feature provides this test handler.
 //! let handler = FakeHandler::from(
 //!     HttpResponseBuilder::new(&body_builder)
 //!         .status(200)
@@ -64,7 +64,7 @@
 //!         .build()?,
 //! );
 //!
-//! // Build and send an HTTP request using the handler
+//! // Build and send an HTTP request through the handler.
 //! let response = handler
 //!     .request_builder()
 //!     .get("https://api.example.com/data")
@@ -72,7 +72,7 @@
 //!     .fetch()
 //!     .await?;
 //!
-//! // Validate that the response succeeded (returns error for `4xx/5xx` status codes)
+//! // Return an error if the response does not have a `2xx` status code.
 //! let validated_response = response.ensure_success()?;
 //!
 //! println!("response status: {}", validated_response.status());
@@ -80,31 +80,30 @@
 //! # }
 //! ```
 //!
-//! **Note**: This example uses the `test-util` feature to create a `FakeHandler` for testing.
-//! In production code, you would use a real HTTP client that implements the
-//! [`RequestHandler`] trait, but the workflow remains the same: build requests with
-//! [`HttpRequestBuilder`], send them through a handler, and validate responses with
-//! [`StatusExt::ensure_success`].
+//! This example uses the `test-util` feature to create a [`FakeHandler`].
+//! Production code uses an HTTP client that implements [`RequestHandler`].
+//! In both cases, [`HttpRequestBuilder`] builds the request and the handler sends it.
+//! [`StatusExt::ensure_success`] then requires a successful response.
 //!
 //! # Integration with the HTTP Ecosystem
 //!
-//! This crate builds on the popular [`http`] crate rather than inventing new types:
+//! This crate builds on the [`http`] crate:
 //!
-//! - Uses [`http::Request`] and [`http::Response`] as base types
-//! - Reuses [`http::Method`], [`http::StatusCode`], and [`http::HeaderMap`]
-//! - Implements standard traits like [`http_body::Body`] for ecosystem compatibility
-//! - Works seamlessly with other Rust HTTP libraries
+//! - It uses [`http::Request`] and [`http::Response`] as base types.
+//! - It reuses [`http::Method`], [`http::StatusCode`], and [`http::HeaderMap`].
+//! - It implements standard traits such as [`http_body::Body`].
+//! - It works with other Rust HTTP libraries.
 //!
 //! # Examples
 //!
-//! ## Validating Response Status
+//! ## Requiring a Successful Response
 //! ```rust
 //! # fn main() {
 //! # #[cfg(feature = "test-util")] {
 //! # (|| {
 //! # use http_extensions::{StatusExt, HttpResponse, HttpResponseBuilder, HttpError};
 //! # let response: HttpResponse = HttpResponseBuilder::new_fake().status(200).build().unwrap();
-//! // Check if the response succeeded and return an error if not
+//! // Return an error if the response was not successful.
 //! let validated_response = response.ensure_success()?;
 //! # Ok::<(), HttpError>(())
 //! # })().unwrap();
@@ -118,7 +117,7 @@
 //! # #[cfg(feature = "test-util")] {
 //! # use http_extensions::HttpBodyBuilder;
 //! # let builder = HttpBodyBuilder::new_fake();
-//! // Create different body types
+//! // Create different body types.
 //! let text_body = builder.text("Hello, world!");
 //! let binary_body = builder.slice(&[1, 2, 3, 4]);
 //! let empty_body = builder.empty();
@@ -179,20 +178,21 @@
 //!
 //! ## Testing with `FakeHandler`
 //!
-//! The `FakeHandler` type (available with the `test-util` feature) lets you mock HTTP responses
-//! for testing without making actual network requests. This is useful for unit testing code
-//! that depends on HTTP clients.
+//! The `test-util` feature provides [`FakeHandler`].
+//! It returns test responses without network requests.
+//! Use it to test code that depends on HTTP clients.
 //!
 //! # Features
 //!
-//! - `json` - Enables JSON serialization/deserialization support via `Json` type
-//! - `test-util` - Enables fake implementations for testing
+//! - `json` enables JSON serialization and deserialization through [`Json`].
+//! - `test-util` enables test implementations.
 //!
 //! # Memory Management
 //!
-//! Bodies created through [`HttpBodyBuilder`] use memory pools from [`bytesbuf`] to
-//! reduce allocation overhead. When body data is consumed, memory is automatically recycled
-//! for future requests. This makes the crate particularly efficient for high-throughput scenarios.
+//! Methods that allocate body data use the [`bytesbuf`] memory provider configured on
+//! [`HttpBodyBuilder`].
+//! Methods that wrap existing body data keep the storage supplied by the caller.
+//! A pooled provider can reuse memory after the body data is consumed.
 
 use http::{Request, Response};
 

@@ -3,9 +3,9 @@
 
 use std::time::SystemTime;
 
-/// Extension trait for [`SystemTime`] that provides formatting capabilities.
+/// Adds display formats to [`SystemTime`].
 pub trait SystemTimeExt: sealed::Sealed {
-    /// Returns a value that formats the [`SystemTime`] in ISO 8601 format.
+    /// Returns a value that displays this [`SystemTime`] in ISO 8601 format.
     ///
     /// Times outside the valid range (before year -9999 or after year 9999) are saturated
     /// to the nearest boundary.
@@ -23,7 +23,7 @@ pub trait SystemTimeExt: sealed::Sealed {
     #[cfg(any(feature = "fmt", test))]
     fn display_iso_8601(&self) -> impl std::fmt::Display;
 
-    /// Formats the [`SystemTime`] in the ECMAScript Date Time String Format.
+    /// Returns a value that displays this [`SystemTime`] in ECMAScript format.
     ///
     /// For years `0000` through `9999` the output has the fixed 24-character shape
     /// `YYYY-MM-DDTHH:MM:SS.sssZ`, truncated to millisecond precision. See

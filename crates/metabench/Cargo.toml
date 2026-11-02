@@ -4,7 +4,7 @@
 [package]
 name = "metabench"
 description = "Run Criterion, Gungraun, Linux perf, Intel VTune, and allocation benchmarks together and combine their reports."
-version = "0.2.1"
+version = "0.3.0"
 readme = "README.md"
 keywords = ["benchmark", "criterion", "callgrind", "gungraun", "oxidizer"]
 categories = ["development-tools::profiling"]
@@ -20,6 +20,18 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/metabench"
 [package.metadata.anvil.miri]
 exclude = true
 
+[package.metadata.anvil.examples]
+# These examples require native tools or fixture arguments. Build them without running them.
+no-run = [
+    "fake_vtune",
+    "instrumentation_controls",
+    "measurement_boundaries",
+    "metabench_basic",
+    "native_probe_contracts",
+    "parameterized",
+    "threaded_allocations",
+]
+
 [package.metadata.coverage-gate]
 min-lines-percent = 1
 
@@ -34,6 +46,7 @@ bench = false
 
 [dependencies]
 alloc_tracker = { workspace = true }
+clap = { workspace = true, features = ["std"] }
 command-group = { workspace = true }
 criterion = { workspace = true }
 either-or-both = { workspace = true }

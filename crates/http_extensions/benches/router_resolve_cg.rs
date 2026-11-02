@@ -1,15 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Callgrind benchmarks for [`Router::resolve_request_uri`], the per-request routing step.
+//! Callgrind benchmarks for `Router::resolve_request_uri`, the per-request routing step.
 //!
-//! For every outgoing request (and again per retry/hedge attempt) the router picks the
-//! [`BaseUri`] and materializes the request's `http::Uri`. This benchmark isolates that step
-//! on a request built through [`HttpRequestBuilder`] (so the build-time path rendering is
-//! cached and reused) for both a root and a prefixed base path.
+//! `Router::resolve_request_uri` selects the `BaseUri` and creates the request
+//! `http::Uri` when a caller invokes it.
+//! This benchmark measures initial fixed-route resolution for root and prefixed base paths.
+//! `HttpRequestBuilder` creates the request and caches its rendered path.
 //!
-//! Paired with `router_resolve.rs`, which covers the same operation under wall-clock
-//! (Criterion) measurement.
+//! `router_resolve.rs` measures the same operation with Criterion wall-clock timing.
 
 #![allow(missing_docs, reason = "no need for API documentation on benchmark code")]
 #![allow(
@@ -50,8 +49,7 @@ mod linux {
         (router, request)
     }
 
-    // Fixed endpoint, root base path (common case): the reused rendered path is returned
-    // without a re-validation scan.
+    // A fixed endpoint with a root base path returns the cached path directly without re-validation.
     #[library_benchmark]
     #[bench::root(setup("https://api.example.com"))]
     fn resolve_root(input: (Router, HttpRequest)) -> HttpRequest {
@@ -60,7 +58,7 @@ mod linux {
         request
     }
 
-    // Fixed endpoint, non-root base path: the join concatenates and re-validates.
+    // A fixed endpoint with a non-root base path requires a join and a second URI inspection.
     #[library_benchmark]
     #[bench::prefixed(setup("https://api.example.com/v1/"))]
     fn resolve_prefixed(input: (Router, HttpRequest)) -> HttpRequest {

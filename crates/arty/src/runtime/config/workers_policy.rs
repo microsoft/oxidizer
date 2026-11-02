@@ -5,21 +5,21 @@ use std::num::{NonZero, NonZeroUsize};
 
 use many_cpus::ProcessorSet;
 
-use crate::runtime::config::BlockingPoolPolicy;
+use crate::runtime::config::{BlockingPoolPolicy, MonitorOptions, PanicPolicy};
 use crate::runtime::error::Error;
 
-/// A worker-count policy for the async runtime.
+/// Selects how many async workers run and which processors they use.
 ///
 /// The runtime assigns each async worker to one available processor. More than
 /// one worker can share a processor when an exact count exceeds the available
 /// processor count. Pass a policy to
 /// [`RuntimeBuilder::workers`](crate::runtime::RuntimeBuilder::workers).
-/// [`Default`] lets Arty choose the count. Use [`at_most`](Self::at_most) for
-/// an upper bound, [`exactly`](Self::exactly) for a fixed worker count, or
+/// [`Default`] uses one worker. Use [`at_most`](Self::at_most) to set
+/// a maximum, [`exactly`](Self::exactly) for a fixed worker count, or
 /// [`all`](Self::all) to use all available processors.
 ///
-/// Counts are validated when the runtime is built. Both `at_most(0)` and
-/// `exactly(0)` produce a construction error.
+/// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) rejects a count of zero.
+/// Both `at_most(0)` and `exactly(0)` return an error when you build the runtime.
 ///
 /// # Examples
 ///
@@ -28,7 +28,7 @@ use crate::runtime::error::Error;
 ///
 /// let builder = Runtime::builder().workers(WorkersPolicy::at_most(4));
 /// ```
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkersPolicy(WorkersPolicyKind);
 
 impl WorkersPolicy {
@@ -41,7 +41,7 @@ impl WorkersPolicy {
     ///
     /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) returns
     /// [`Error`] if `count` is zero. Creating the policy does not validate the
-    /// count. Large counts can consume substantial thread and stack resources.
+    /// count. Large counts can use many threads and much memory for their stacks.
     /// Use [`at_most`](Self::at_most) if the application can work with fewer
     /// workers.
     ///
@@ -59,7 +59,7 @@ impl WorkersPolicy {
 
     /// Creates a policy using at most `count` workers.
     ///
-    /// Fewer available processors means fewer workers, not a construction error.
+    /// If fewer processors are available, Arty starts fewer workers instead of returning an error.
     /// A zero count is rejected by
     /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build), not when
     /// creating this policy.
@@ -78,8 +78,7 @@ impl WorkersPolicy {
 
     /// Creates a policy using all available processors.
     ///
-    /// This explicitly selects all processors rather than relying on the
-    /// default policy.
+    /// The default starts one worker. This starts one worker for each available processor.
     ///
     /// # Examples
     ///
@@ -101,6 +100,7 @@ impl WorkersPolicy {
                 let workers = processors.iter().cycle().take(count).cloned().collect();
                 Ok(WorkerPlacements {
                     workers,
+                    #[cfg(test)]
                     processors_used: count.min(processors.len()),
                 })
             }
@@ -113,8 +113,16 @@ impl WorkersPolicy {
                     .expect("the requested count fits in the available processor set");
                 Ok(WorkerPlacements::from_selected(&selected))
             }
-            WorkersPolicyKind::Auto | WorkersPolicyKind::All => Ok(WorkerPlacements::from_selected(available)),
+            WorkersPolicyKind::All => Ok(WorkerPlacements::from_selected(available)),
         }
+    }
+}
+
+impl Default for WorkersPolicy {
+    fn default() -> Self {
+        // Keep implicit runtime construction independent of host processor count.
+        // Applications opt into more worker threads when they need them.
+        Self::exactly(1)
     }
 }
 
@@ -127,6 +135,7 @@ fn sorted_singletons(processors: &ProcessorSet) -> Vec<ProcessorSet> {
 #[derive(Debug)]
 pub(crate) struct WorkerPlacements {
     workers: Vec<ProcessorSet>,
+    #[cfg(test)]
     processors_used: usize,
 }
 
@@ -134,6 +143,7 @@ impl WorkerPlacements {
     fn from_selected(processors: &ProcessorSet) -> Self {
         Self {
             workers: sorted_singletons(processors),
+            #[cfg(test)]
             processors_used: processors.len(),
         }
     }
@@ -142,6 +152,7 @@ impl WorkerPlacements {
         self.workers.len()
     }
 
+    #[cfg(test)]
     pub(crate) const fn processors_used(&self) -> usize {
         self.processors_used
     }
@@ -156,21 +167,21 @@ impl IntoIterator for WorkerPlacements {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkersPolicyKind {
-    #[default]
-    Auto,
     Exactly(usize),
     AtMost(usize),
     All,
 }
 
 /// Resource settings validated during runtime construction.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) struct RuntimeConfig {
     pub(crate) workers_policy: WorkersPolicy,
     pub(crate) stack_size: NonZeroUsize,
     pub(crate) blocking_pool_policy: BlockingPoolPolicy,
+    pub(crate) monitor_options: MonitorOptions,
+    pub(crate) panic_policy: PanicPolicy,
 }
 
 impl Default for RuntimeConfig {
@@ -181,6 +192,8 @@ impl Default for RuntimeConfig {
             // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.
             stack_size: NonZeroUsize::new(2 * 1024 * 1024).expect("the default stack size is nonzero"),
             blocking_pool_policy: BlockingPoolPolicy::default(),
+            monitor_options: MonitorOptions::default(),
+            panic_policy: PanicPolicy::default(),
         }
     }
 }
@@ -265,9 +278,9 @@ mod tests {
     }
 
     #[test]
-    fn automatic_count_uses_all_available_processors() {
+    fn default_count_uses_one_processor() {
         let available = fake_processors(4);
-        assert_eq!(WorkersPolicy::default().select(&available).unwrap().len(), available.len(),);
+        assert_eq!(WorkersPolicy::default().select(&available).unwrap().len(), 1);
     }
 
     #[test]

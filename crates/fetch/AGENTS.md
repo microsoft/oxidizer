@@ -1,22 +1,19 @@
-# fetch crate
+# `fetch` crate
 
 ## Conditional Compilation
 
-**A TLS backend is mandatory to create an `HttpClient` for real network use.**
-The `tokio` runtime alone is not enough — the hyper transport layer is built on top of
-TLS, so both must be enabled together. There are currently two TLS backends, `rustls`
-and `native-tls`, and more may be added. This produces the recurring cfg-guard pattern:
+A real-network `HttpClient` requires a TLS backend. The `tokio` feature alone is not
+enough because the hyper transport requires TLS. Enable `rustls` or `native-tls` with
+`tokio`. Use this conditional compilation pattern:
 
 ```rust
-// "compile when the tokio runtime is selected AND a TLS backend is enabled"
+// Compile with Tokio and at least one TLS backend.
 #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 ```
 
-When adding a new TLS backend, extend the inner `any(...)` accordingly (e.g. add the new
-feature alongside `rustls` and `native-tls`).
+If you add a TLS backend, add its feature to the inner `any(...)`.
 
-Some items are guarded by a single TLS backend plus `test`, for example the TLS error
-label resolution:
+Some items use one TLS backend or `test`. TLS error labels use this pattern:
 
 ```rust
 #[cfg(any(feature = "rustls", test))]
@@ -24,5 +21,5 @@ label resolution:
 #[cfg(any(feature = "native-tls", test))]
 ```
 
-`test-util` is the only escape hatch: it enables `FakeHandler` (canned responses, no
-network), so no TLS backend is needed.
+`test-util` enables `FakeHandler`, which returns canned responses without network I/O.
+It does not require a TLS backend.

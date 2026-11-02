@@ -14,16 +14,15 @@ use tracing::{Level, event};
 use crate::error_labels::collect_error_labels;
 use crate::{HttpRequest, HttpResponse, RequestExt, RequestHandler, Result};
 
-/// Logs HTTP requests and responses with timing information.
+/// Records HTTP requests, responses, and durations.
 ///
-/// Wraps any `RequestHandler` to add logging. It tracks how long requests take
-/// and logs details using tracing events. Successful responses appear at DEBUG level,
-/// while errors show up at WARN level.
+/// Wraps a `RequestHandler` and emits tracing events. Every returned HTTP response, including a
+/// client or server error status, uses DEBUG. Handler errors use WARN.
 ///
-/// Emits these events:
+/// It emits:
 ///
-/// - `http.response.complete`: When a response comes back successfully.
-/// - `http.response.error`: When something goes wrong during the request.
+/// - `http.response.complete` for a successful response.
+/// - `http.response.error` for an error.
 #[derive(Debug)]
 pub struct Logging<T> {
     inner: T,
@@ -34,11 +33,9 @@ pub struct Logging<T> {
 impl Logging<()> {
     /// Creates a new logging handler layer.
     ///
-    /// By default, timing uses a system clock ([`SimpleClock::new_system`]) and
-    /// path/query redaction uses a default [`RedactionEngine`]. Use
-    /// [`LoggingLayer::clock`] to supply a custom clock (primarily useful for
-    /// deterministic timing in tests) and [`LoggingLayer::redaction_engine`] to
-    /// supply a custom redaction engine.
+    /// The default layer uses [`SimpleClock::new_system`] and the default [`RedactionEngine`]. Use
+    /// [`LoggingLayer::clock`] for a controlled test clock. Use
+    /// [`LoggingLayer::redaction_engine`] for another redaction engine.
     #[must_use]
     pub fn layer() -> LoggingLayer {
         LoggingLayer {
@@ -48,7 +45,7 @@ impl Logging<()> {
     }
 }
 
-/// [`Layer`] that wraps a handler with request/response logging.
+/// [`Layer`] that adds request and response logging.
 #[derive(Debug)]
 pub struct LoggingLayer {
     clock: Option<SimpleClock>,
@@ -58,18 +55,15 @@ pub struct LoggingLayer {
 impl LoggingLayer {
     /// Sets the clock used to measure request duration.
     ///
-    /// When no clock is configured, a system clock ([`SimpleClock::new_system`])
-    /// is used. Supplying a controlled clock (for example
-    /// [`SimpleClock::new_frozen`]) is primarily useful for deterministic timing
-    /// in tests.
+    /// The default is [`SimpleClock::new_system`]. Use a controlled clock such as
+    /// [`SimpleClock::new_frozen`] for deterministic tests.
     #[must_use]
     pub fn clock(mut self, clock: impl Into<SimpleClock>) -> Self {
         self.clock = Some(clock.into());
         self
     }
 
-    /// Sets the [`RedactionEngine`] used to redact the request path and query
-    /// before it is logged.
+    /// Sets the [`RedactionEngine`] that redacts the request path and query before logging.
     ///
     /// When no engine is configured, a default [`RedactionEngine`] is used.
     #[must_use]
@@ -82,11 +76,10 @@ impl LoggingLayer {
 impl<S> Layer<S> for LoggingLayer {
     type Service = Logging<S>;
 
-    /// Creates a new layer that wraps the given service with logging.
+    /// Wraps the service with logging.
     ///
-    /// This layer will log requests and responses, using the configured clock
-    /// (or a system clock when none was set) for timing and the configured
-    /// redaction engine (or a default engine when none was set).
+    /// The layer uses the configured clock and redaction engine. It uses their defaults if they
+    /// were not set.
     fn layer(&self, inner: S) -> Self::Service {
         Logging {
             inner,
@@ -121,7 +114,7 @@ impl<T: RequestHandler> Service<HttpRequest> for Logging<T> {
                         url.path.template = template.as_deref(),
                         url.path.redacted = redacted_path_and_query,
                         http.client.request.duration = watch.elapsed().as_secs_f32(),
-                        "HTTP response received successfully",
+                        "HTTP response received",
                     );
 
                     Ok(response)
@@ -189,7 +182,7 @@ mod tests {
 
         let output = capture.output();
         assert!(output.contains("DEBUG"), "expected DEBUG level, got:\n{output}");
-        capture.assert_contains("HTTP response received successfully");
+        capture.assert_contains("HTTP response received");
         capture.assert_contains("http.request.method=\"GET\"");
         capture.assert_contains("server.address=\"example.com\"");
         capture.assert_contains("server.port=123");

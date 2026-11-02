@@ -66,9 +66,11 @@ jobs:
       - name: Upload coverage to Codecov
         # Upload from every leg except windows-11-arm (see the matching
         # comment in pr-impl-workflow.yml for the platform rationale).
-        # `always()` preserves completed reports after a later failure, while
-        # separate hashFiles predicates require both feature configurations;
-        # a multi-pattern call would accept either file by itself.
+        # cargo-coverage-gate publishes the same released-surface-filtered files
+        # it evaluates locally. `always()` preserves completed reports after a
+        # later failure, while separate hashFiles predicates require both
+        # feature configurations; a multi-pattern call would accept either file
+        # by itself.
         # Multi-flag tag combines the OS with a "scheduled" marker so
         # the Codecov UI can distinguish PR-tier uploads from scheduled
         # uploads while still tracking each platform separately.

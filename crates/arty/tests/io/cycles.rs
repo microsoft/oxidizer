@@ -10,12 +10,12 @@ use crate::*;
 
 const DRIVER_PROGRESS_TIMEOUT: Duration = Duration::from_millis(500);
 
-fn cycle_failure<M: Marker>(role_plan: RolePlan, expected_role: &'static str)
+fn cycle_failure<M: Marker>(role_plan: RolePlan)
 where
     TestContext<M>: IoContext<ContextOptions = ScenarioOptions>,
 {
     let _serial = serialize_invariant_test();
-    let (runtime, processor) = runtime_with_telemetry(1);
+    let runtime = runtime(1);
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();
     let scenario = Scenario::options(role_plan);
     let primary = Scenario::options(RolePlan::PreferPrimary);
@@ -23,71 +23,65 @@ where
     worker
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
+            async move |cx| {
                 if matches!(role_plan, RolePlan::Secondary) {
-                    let _ = builtins.io().context::<TestContext<OrderedPrimary>>(&primary);
+                    let _ = cx.io().context::<TestContext<OrderedPrimary>>(&primary);
                 }
-                let _ = builtins.io().context::<TestContext<M>>(&scenario);
+                let _ = cx.io().context::<TestContext<M>>(&scenario);
             }
         })
         .join()
         .unwrap();
+    let cancelled = worker.spawn(async |_| std::future::pending::<()>().await);
     scenario.fail_normal_cycle.store(true, Ordering::SeqCst);
     scenario.wake_owners();
-    wait_until(|| event_count(&processor, "arty.rt.io.driver.cycle_failed") == 1);
+    let cancellation = cancelled.join().unwrap_err();
 
+    assert_eq!(cancellation.source().unwrap().to_string(), "normal driver cycle failed");
     assert_eq!(runtime.stop().unwrap_err().to_string(), "normal driver cycle failed");
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
-    assert_eq!(event_count(&processor, "arty.rt.io.driver.cycle_failed"), 1);
-    let events = processor.events();
-    let event = events
-        .iter()
-        .find(|event| event.name() == "arty.rt.io.driver.cycle_failed")
-        .unwrap();
-    assert_eq!(
-        event.dimensions().into_iter().find(|(name, _)| name == "io.driver.role").unwrap().1,
-        expected_role.into()
-    );
 }
 
 #[test]
 fn primary_cycle_failure_stops_runtime() {
-    cycle_failure::<PrimaryCycleFailure>(RolePlan::PreferPrimary, "primary");
+    cycle_failure::<PrimaryCycleFailure>(RolePlan::PreferPrimary);
 }
 
 #[test]
 fn secondary_cycle_failure_stops_runtime() {
-    cycle_failure::<SecondaryCycleFailure>(RolePlan::Secondary, "secondary");
+    cycle_failure::<SecondaryCycleFailure>(RolePlan::Secondary);
 }
 
 #[test]
 fn secondary_only_worker_is_woken_for_another_cycle() {
     let _serial = serialize_invariant_test();
-    let (runtime, processor) = runtime_with_telemetry(2);
+    let runtime = runtime(2);
     let workers = worker_schedulers(&runtime, 2);
     let primary = Scenario::options(RolePlan::PreferPrimary);
     let secondary = Scenario::options(RolePlan::Secondary);
 
     workers[0]
-        .spawn(async move |builtins| {
-            let _ = builtins.io().context::<TestContext<OrderedPrimary>>(&primary);
+        .spawn(async move |cx| {
+            let _ = cx.io().context::<TestContext<OrderedPrimary>>(&primary);
         })
         .join()
         .unwrap();
     workers[1]
         .spawn({
             let secondary = secondary.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<SecondaryCycleFailure>>(&secondary);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<SecondaryCycleFailure>>(&secondary);
             }
         })
         .join()
         .unwrap();
 
+    // Use the primary worker so task admission does not wake the secondary worker under test.
+    let cancelled = workers[0].spawn(async |_| std::future::pending::<()>().await);
     secondary.fail_normal_cycle.store(true, Ordering::SeqCst);
     secondary.wake_owners();
-    wait_until(|| event_count(&processor, "arty.rt.io.driver.cycle_failed") == 1);
-
+    let cancellation = cancelled.join().unwrap_err();
+    assert_eq!(cancellation.source().unwrap().to_string(), "normal driver cycle failed");
     assert_eq!(runtime.stop().unwrap_err().to_string(), "normal driver cycle failed");
     assert_eq!(secondary.shutdowns.load(Ordering::SeqCst), 1);
 }
@@ -95,7 +89,7 @@ fn secondary_only_worker_is_woken_for_another_cycle() {
 #[test]
 fn cycle_failure_remains_primary_when_driver_shutdown_also_fails() {
     let _serial = serialize_invariant_test();
-    let (runtime, processor) = runtime_with_telemetry(1);
+    let runtime = runtime(1);
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();
     let scenario = Scenario::options(RolePlan::PreferPrimary);
     scenario.fail_shutdown.store(true, Ordering::SeqCst);
@@ -103,20 +97,20 @@ fn cycle_failure_remains_primary_when_driver_shutdown_also_fails() {
     worker
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<CycleAndShutdownFailure>>(&scenario);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<CycleAndShutdownFailure>>(&scenario);
             }
         })
         .join()
         .unwrap();
+    let cancelled = worker.spawn(async |_| std::future::pending::<()>().await);
     scenario.fail_normal_cycle.store(true, Ordering::SeqCst);
     scenario.wake_owners();
-    wait_until(|| event_count(&processor, "arty.rt.io.driver.cycle_failed") == 1);
+    let cancellation = cancelled.join().unwrap_err();
 
+    assert_eq!(cancellation.source().unwrap().to_string(), "normal driver cycle failed");
     assert_eq!(runtime.stop().unwrap_err().to_string(), "normal driver cycle failed");
     assert_eq!(scenario.shutdowns.load(Ordering::SeqCst), 1);
-    assert_eq!(event_count(&processor, "arty.rt.io.driver.cycle_failed"), 1);
-    assert_eq!(event_count(&processor, "arty.rt.io.driver.shutdown_failed"), 1);
 }
 
 #[test]
@@ -130,9 +124,9 @@ fn secondaries_execute_before_the_primary() {
 
     worker
         .spawn({
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<OrderedPrimary>>(&primary);
-                let _ = builtins.io().context::<TestContext<OrderedSecondary>>(&secondary);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<OrderedPrimary>>(&primary);
+                let _ = cx.io().context::<TestContext<OrderedSecondary>>(&secondary);
             }
         })
         .join()
@@ -163,8 +157,8 @@ fn primary_wait_is_interrupted_by_new_runtime_work() {
     worker
         .spawn({
             let scenario = scenario.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<BlockingPrimary>>(&scenario);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<BlockingPrimary>>(&scenario);
             }
         })
         .join()
@@ -195,8 +189,8 @@ fn notification_during_first_driver_construction_prevents_primary_wait() {
     scenario.block_primary_until_woken.store(true, Ordering::SeqCst);
     let initialization = worker.spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let _ = builtins.io().context::<TestContext<BlockingPrimary>>(&scenario);
+        async move |cx| {
+            let _ = cx.io().context::<TestContext<BlockingPrimary>>(&scenario);
             std::future::pending::<()>().await;
         }
     });
@@ -218,8 +212,6 @@ fn notification_during_first_driver_construction_prevents_primary_wait() {
 
 #[test]
 fn controlled_timer_fires_while_a_primary_driver_is_initialized() {
-    // `AsyncWorker::injected_time_advances_worker_timers_without_elapsed_wall_time`
-    // separately covers worker-driven ClockDriver advancement.
     let control = tick::ClockControl::new();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
@@ -231,9 +223,9 @@ fn controlled_timer_fires_while_a_primary_driver_is_initialized() {
     scenario.block_primary.store(true, Ordering::SeqCst);
     let (registered, registration) = mpsc::channel();
     let (completed, completion) = mpsc::channel();
-    let task = worker.spawn(async move |builtins| {
-        let _ = builtins.io().context::<TestContext<BlockingPrimary>>(&scenario);
-        let mut delay = Box::pin(builtins.clock().delay(Duration::from_secs(1)));
+    let task = worker.spawn(async move |cx| {
+        let _ = cx.io().context::<TestContext<BlockingPrimary>>(&scenario);
+        let mut delay = Box::pin(cx.clock().delay(Duration::from_secs(1)));
         let mut registered = Some(registered);
         std::future::poll_fn(move |cx| match delay.as_mut().poll(cx) {
             Poll::Pending => {
@@ -256,8 +248,8 @@ fn controlled_timer_fires_while_a_primary_driver_is_initialized() {
 }
 
 #[test]
-fn shutdown_failures_are_diagnostic_and_do_not_skip_other_drivers() {
-    let (runtime, processor) = runtime_with_telemetry(1);
+fn shutdown_failures_do_not_skip_other_drivers() {
+    let runtime = runtime(1);
     let worker = worker_schedulers(&runtime, 1).pop().unwrap();
     let primary = Scenario::options(RolePlan::PreferPrimary);
     let secondary = Scenario::options(RolePlan::Secondary);
@@ -268,9 +260,9 @@ fn shutdown_failures_are_diagnostic_and_do_not_skip_other_drivers() {
         .spawn({
             let primary = primary.clone();
             let secondary = secondary.clone();
-            async move |builtins| {
-                let _ = builtins.io().context::<TestContext<ShutdownPrimary>>(&primary);
-                let _ = builtins.io().context::<TestContext<ShutdownSecondary>>(&secondary);
+            async move |cx| {
+                let _ = cx.io().context::<TestContext<ShutdownPrimary>>(&primary);
+                let _ = cx.io().context::<TestContext<ShutdownSecondary>>(&secondary);
             }
         })
         .join()
@@ -281,7 +273,6 @@ fn shutdown_failures_are_diagnostic_and_do_not_skip_other_drivers() {
     assert_eq!(secondary.shutdowns.load(Ordering::SeqCst), 1);
     assert!(primary.driver_interrupts.lock().unwrap().is_empty());
     assert!(secondary.driver_interrupts.lock().unwrap().is_empty());
-    assert_eq!(event_count(&processor, "arty.rt.io.driver.shutdown_failed"), 2);
 }
 
 #[test]
@@ -305,8 +296,8 @@ fn task_cancellation_runs_before_driver_shutdown() {
     let (dropped_tx, dropped_rx) = mpsc::channel();
     let task = worker.spawn({
         let scenario = scenario.clone();
-        async move |builtins| {
-            let _ = builtins.io().context::<TestContext<ShutdownTaskCleanup>>(&scenario);
+        async move |cx| {
+            let _ = cx.io().context::<TestContext<ShutdownTaskCleanup>>(&scenario);
             let _observe = ObserveDriverOnDrop { scenario, dropped_tx };
             started_tx.send(()).unwrap();
             std::future::pending::<()>().await;

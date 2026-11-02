@@ -5,18 +5,18 @@
 
 #![cfg(feature = "test-util")]
 
+use std::error::Error as _;
+use std::future::Future as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-#[cfg(feature = "tokio")]
-use futures::StreamExt as _;
-use futures::{FutureExt as _, Stream};
+use futures::FutureExt as _;
 use thread_aware::{Relocator, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
-use tick::{Clock, ClockControl, Delay, FutureExt as _, PeriodicTimer, SimpleClock, Stopwatch};
+use tick::{Clock, ClockControl, Delay, FutureExt as _, SimpleClock, Timer};
 
 #[derive(Debug)]
 struct WakeCounter(AtomicUsize);
@@ -24,6 +24,19 @@ struct WakeCounter(AtomicUsize);
 impl Wake for WakeCounter {
     fn wake(self: Arc<Self>) {
         self.0.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+struct ReentrantTimestamp {
+    // Conversion re-enters the clock to prove that ClockControl converts before locking.
+    clock: Clock,
+    value: SystemTime,
+}
+
+impl From<ReentrantTimestamp> for SystemTime {
+    fn from(timestamp: ReentrantTimestamp) -> Self {
+        _ = timestamp.clock.system_time();
+        timestamp.value
     }
 }
 
@@ -90,6 +103,20 @@ fn set_time_moves_system_and_monotonic_time_backward_together() {
 
     assert_eq!(system_later.duration_since(clock.system_time()).unwrap(), Duration::from_secs(5));
     assert_eq!(instant_later.duration_since(clock.instant()), Duration::from_secs(5));
+}
+
+#[test]
+fn set_time_converts_input_before_locking_the_control() {
+    let control = ClockControl::new();
+    let clock = control.to_clock();
+    let target = SystemTime::UNIX_EPOCH + Duration::from_secs(5);
+
+    control.set_time(ReentrantTimestamp {
+        clock: clock.clone(),
+        value: target,
+    });
+
+    assert_eq!(clock.system_time(), target);
 }
 
 #[test]
@@ -218,17 +245,6 @@ fn simple_clock_conversions_preserve_controlled_time() {
 }
 
 #[test]
-fn stopwatch_into_duration_reports_controlled_elapsed_time() {
-    let control = ClockControl::new();
-    let watch = Stopwatch::new(control.to_simple_clock());
-    control.advance(Duration::from_secs(1));
-
-    let elapsed: Duration = watch.into();
-
-    assert_eq!(elapsed, Duration::from_secs(1));
-}
-
-#[test]
 fn delay_ignores_real_time_until_controlled_time_advances() {
     let control = ClockControl::new();
     let clock = control.to_clock();
@@ -250,6 +266,44 @@ fn delay_fires_at_its_exact_controlled_deadline() {
     control.advance(Duration::from_millis(1));
 
     assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
+}
+
+#[test]
+fn delay_replaces_the_waker_without_restarting_the_deadline() {
+    let control = ClockControl::new();
+    let clock = control.to_clock();
+    let old_count = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let new_count = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let previous_waker = Waker::from(Arc::clone(&old_count));
+    let current_waker = Waker::from(Arc::clone(&new_count));
+    let mut previous_context = Context::from_waker(&previous_waker);
+    let mut current_context = Context::from_waker(&current_waker);
+    let mut delay = clock.delay(Duration::from_millis(10));
+
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut previous_context), Poll::Pending);
+    control.advance(Duration::from_millis(4));
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut current_context), Poll::Pending);
+
+    control.advance(Duration::from_millis(6));
+
+    assert_eq!(old_count.0.load(Ordering::Relaxed), 0);
+    assert_eq!(new_count.0.load(Ordering::Relaxed), 1);
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut current_context), Poll::Ready(()));
+}
+
+#[test]
+fn fired_delay_completes_after_controlled_time_moves_backward() {
+    let control = ClockControl::new();
+    let clock = control.to_clock();
+    let waker = Waker::noop().clone();
+    let mut context = Context::from_waker(&waker);
+    let mut delay = clock.delay(Duration::from_millis(10));
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut context), Poll::Pending);
+
+    control.advance(Duration::from_millis(10));
+    control.set_time(SystemTime::UNIX_EPOCH);
+
+    assert_eq!(std::pin::Pin::new(&mut delay).poll(&mut context), Poll::Ready(()));
 }
 
 #[test]
@@ -290,38 +344,94 @@ fn manual_advance_then_evaluates_enabled_automatic_timer_advance() {
 fn periodic_timer_ignores_real_time_until_controlled_time_advances() {
     let control = ClockControl::new();
     let clock = control.to_clock();
-    let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
+    let mut timer = Timer::new(&clock, Duration::from_millis(1));
 
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(poll_timer(&mut timer).is_pending());
     control.advance(Duration::from_millis(2));
 
-    assert_eq!(poll_timer(&mut timer), Poll::Ready(Some(())));
+    let Poll::Ready(tick) = poll_timer(&mut timer) else {
+        panic!("the timer must fire after controlled time advances");
+    };
+    assert_eq!(tick.observed_at(), clock.instant());
 }
 
 #[test]
 fn periodic_timer_fires_at_its_exact_controlled_deadline() {
     let control = ClockControl::new();
     let clock = control.to_clock();
-    let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    let mut timer = Timer::new(&clock, Duration::from_millis(1));
+    assert!(poll_timer(&mut timer).is_pending());
 
     control.advance(Duration::from_millis(1));
 
-    assert_eq!(poll_timer(&mut timer), Poll::Ready(Some(())));
+    let Poll::Ready(tick) = poll_timer(&mut timer) else {
+        panic!("the timer must fire at its controlled deadline");
+    };
+    assert_eq!(tick.observed_at(), clock.instant());
+}
+
+#[test]
+fn periodic_timer_replaces_the_waker_without_restarting_the_period() {
+    let control = ClockControl::new();
+    let clock = control.to_clock();
+    let mut timer = Timer::new(&clock, Duration::from_millis(10));
+    let old_count = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let new_count = Arc::new(WakeCounter(AtomicUsize::new(0)));
+    let previous_waker = Waker::from(Arc::clone(&old_count));
+    let current_waker = Waker::from(Arc::clone(&new_count));
+    let mut previous_context = Context::from_waker(&previous_waker);
+    let mut current_context = Context::from_waker(&current_waker);
+
+    {
+        let mut first = std::pin::pin!(timer.next());
+        assert!(first.as_mut().poll(&mut previous_context).is_pending());
+    }
+
+    control.advance(Duration::from_millis(4));
+    let mut second = std::pin::pin!(timer.next());
+    assert!(second.as_mut().poll(&mut current_context).is_pending());
+
+    control.advance(Duration::from_millis(6));
+
+    assert_eq!(old_count.0.load(Ordering::Relaxed), 0);
+    assert_eq!(new_count.0.load(Ordering::Relaxed), 1);
+    let Poll::Ready(tick) = second.as_mut().poll(&mut current_context) else {
+        panic!("the timer must keep its original deadline");
+    };
+    assert_eq!(tick.observed_at(), clock.instant());
+}
+
+#[test]
+fn fired_timer_yields_after_controlled_time_moves_backward() {
+    let control = ClockControl::new();
+    let clock = control.to_clock();
+    let waker = Waker::noop().clone();
+    let mut context = Context::from_waker(&waker);
+    let mut timer = Timer::new(&clock, Duration::from_millis(10));
+    {
+        let mut next = std::pin::pin!(timer.next());
+        assert!(next.as_mut().poll(&mut context).is_pending());
+    }
+
+    control.advance(Duration::from_millis(10));
+    control.set_time(SystemTime::UNIX_EPOCH);
+
+    let mut next = std::pin::pin!(timer.next());
+    assert!(next.as_mut().poll(&mut context).is_ready());
 }
 
 #[test]
 fn zero_period_is_clamped_to_exactly_one_millisecond() {
     let control = ClockControl::new();
     let clock = control.to_clock();
-    let mut timer = PeriodicTimer::new(&clock, Duration::ZERO);
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    let mut timer = Timer::new(&clock, Duration::ZERO);
+    assert!(poll_timer(&mut timer).is_pending());
 
     control.advance(Duration::from_micros(999));
-    assert_eq!(poll_timer(&mut timer), Poll::Pending);
+    assert!(poll_timer(&mut timer).is_pending());
 
     control.advance(Duration::from_micros(1));
-    assert_eq!(poll_timer(&mut timer), Poll::Ready(Some(())));
+    assert!(poll_timer(&mut timer).is_ready());
 }
 
 #[test]
@@ -418,12 +528,14 @@ fn timeout_reports_error_with_controlled_time() {
     let Poll::Ready(Err(error)) = future.poll_unpin(&mut context) else {
         panic!("the future must time out on the second poll");
     };
-    assert_eq!(error.to_string(), "future timed out");
+    assert!(error.is_timeout());
+    let source = error.source().unwrap().downcast_ref::<std::io::Error>().unwrap();
+    assert_eq!(source.kind(), std::io::ErrorKind::TimedOut);
 }
 
 #[test]
 fn isolated_relocation_keeps_timer_deadlines_independent() {
-    let root = InactiveClock::default();
+    let root = InactiveClock::new_isolated();
     let mut inactive_1 = root.clone();
     let mut inactive_2 = root;
     let builder = ThreadBuilder::default();
@@ -569,7 +681,9 @@ async fn timeout_and_periodic_timer_cover_both_tokio_outcomes() {
     .timeout(&clock, Duration::from_millis(10))
     .await
     .unwrap_err();
-    assert_eq!(timeout.to_string(), "future timed out");
+    assert!(timeout.is_timeout());
+    let source = timeout.source().unwrap().downcast_ref::<std::io::Error>().unwrap();
+    assert_eq!(source.kind(), std::io::ErrorKind::TimedOut);
 
     let value = async {
         clock.delay(Duration::from_millis(1)).await;
@@ -580,9 +694,10 @@ async fn timeout_and_periodic_timer_cover_both_tokio_outcomes() {
     .unwrap();
     assert_eq!(value, 10);
 
-    let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
-    assert_eq!(timer.next().await, Some(()));
-    assert_eq!(timer.next().await, Some(()));
+    let mut timer = Timer::new(&clock, Duration::from_millis(1));
+    let first = timer.next().await;
+    let second = timer.next().await;
+    assert!(second.observed_at() >= first.observed_at());
 }
 
 fn poll_delay(delay: &mut Delay) -> Poll<()> {
@@ -590,7 +705,7 @@ fn poll_delay(delay: &mut Delay) -> Poll<()> {
     std::pin::pin!(delay).poll(&mut context)
 }
 
-fn poll_timer(timer: &mut PeriodicTimer) -> Poll<Option<()>> {
+fn poll_timer(timer: &mut Timer) -> Poll<tick::TimerTick> {
     let mut context = Context::from_waker(Waker::noop());
-    std::pin::pin!(timer).poll_next(&mut context)
+    std::pin::pin!(timer.next()).poll(&mut context)
 }

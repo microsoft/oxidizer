@@ -1,11 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Default response buffer limit of 2 GB. This follows the defaults in .NET:
+/// The default response buffer limit is 2 GB.
+///
+/// This value follows the .NET default:
 ///
 /// <https://learn.microsoft.com/en-us/dotnet/api/system.net.http.httpclient.maxresponsecontentbuffersize>
 ///
-/// Maybe this is too excessive and should be reduced in the future, but for now it is set to 2 GB.
+/// A future release can reduce this large limit.
 pub(crate) const DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 #[cfg(any(feature = "test-util", test))]

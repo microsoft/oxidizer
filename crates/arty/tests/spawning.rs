@@ -18,7 +18,7 @@ use arty::runtime::Runtime;
 #[cfg(not(miri))]
 use arty::runtime::WorkersPolicy;
 #[cfg(feature = "macros")]
-use arty::task::Builtins;
+use arty::task::Context;
 use arty::task::Scheduler;
 #[cfg(not(miri))]
 use many_cpus::SystemHardware;
@@ -34,8 +34,8 @@ fn assert_send_sync() {
 
 #[cfg(feature = "macros")]
 #[arty::test(workers = 2)]
-async fn spawn_some_tasks(cx: Builtins) {
-    let async_task = cx.scheduler().spawn_anywhere(cx.clone(), |cx: Builtins| async move {
+async fn spawn_some_tasks(cx: Context) {
+    let async_task = cx.scheduler().spawn_anywhere(cx.clone(), |cx: Context| async move {
         YieldFuture::default().await;
         let child1 = cx.scheduler().spawn(async |_| 1111);
         let child2 = cx.scheduler().spawn_anywhere((), |()| async { 2222 });
@@ -44,7 +44,7 @@ async fn spawn_some_tasks(cx: Builtins) {
         assert_eq!((results.0.unwrap(), results.1.unwrap(), results.2.unwrap()), (1111, 2222, 5555));
     });
 
-    let single_threaded_actions = cx.scheduler().spawn_anywhere(cx.clone(), |_: Builtins| async move {
+    let single_threaded_actions = cx.scheduler().spawn_anywhere(cx.clone(), |_: Context| async move {
         let canary = Rc::new("I am a little bird who only lives on one thread".to_owned());
         YieldFuture::default().await;
         let length = canary.len();
@@ -52,7 +52,7 @@ async fn spawn_some_tasks(cx: Builtins) {
     });
 
     cx.scheduler()
-        .spawn_anywhere(cx.clone(), |cx: Builtins| async move {
+        .spawn_anywhere(cx.clone(), |cx: Context| async move {
             YieldFuture::default().await;
             cx.scheduler()
                 .spawn(async |_| {
@@ -107,7 +107,7 @@ fn remote_factories_create_non_send_futures_on_the_worker() {
     let runtime = Runtime::new().unwrap();
     let (created, polled, associated) = runtime
         .scheduler()
-        .spawn_anywhere((), |cx: arty::task::Builtins, ()| {
+        .spawn_anywhere((), |cx: arty::task::Context, ()| {
             let value = Rc::new(thread::current().id());
             let associated = cx.thread().id();
             async move {
@@ -210,7 +210,7 @@ fn runtime_spawn_anywhere_relocates_payload_with_unknown_source() {
 
 #[cfg(feature = "macros")]
 #[arty::test]
-async fn worker_bound_spawn_results_do_not_require_thread_awareness(cx: Builtins) {
+async fn worker_bound_spawn_results_do_not_require_thread_awareness(cx: Context) {
     struct ResultValue(u32);
 
     static_assertions::assert_not_impl_any!(ResultValue: thread_aware::ThreadAware);
@@ -253,7 +253,7 @@ impl ThreadAware for DestinationProbe {
 
 #[cfg(feature = "macros")]
 #[arty::test(workers = 2)]
-async fn spawn_at_relocates_payload_to_each_selected_worker_despite_interleaving(cx: Builtins) {
+async fn spawn_at_relocates_payload_to_each_selected_worker_despite_interleaving(cx: Context) {
     let expected_workers = 2;
     let home = cx.thread().id();
     let destinations: Vec<_> = cx.control().workers().into_iter().map(Thread::id).collect();

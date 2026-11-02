@@ -2,29 +2,32 @@
   "baselines": [null, null],
   "benchmark_exe": "bench",
   "benchmark_file": "benches/bench.rs",
+  "duration_ns": 1000,
   "function_name": "metabench_adapter",
+  "group": "adapter",
   "id": "case_0",
   "kind": "LibraryBenchmark",
-  "module_path": "bench::adapter",
+  "module_path": "bench::adapter::metabench_adapter",
+  "output_dir": "target/gungraun",
   "package_dir": ".",
   "profiles": [{
-    "flamegraphs": [],
-    "log_paths": [],
-    "out_paths": [],
-    "summaries": {
+    "duration_ns": 1000,
+    "process_ns": 900,
+    "started_at": "2026-09-21T14:03:22Z",
+    "data": {
       "parts": [],
       "total": {
         "regressions": [],
-        "summary": {"Callgrind": {
-          "Ir": {"diffs": null, "metrics": {"Left": {"Int": 100}}},
-          "L1hits": {"diffs": null, "metrics": {"Left": {"Int": 80}}},
-          "RamHits": {"diffs": null, "metrics": {"Left": {"Int": 5}}}
-        }}
+        "metrics": {
+          "Ir": {"values": {"new": 100}},
+          "L1hits": {"values": {"new": 80}},
+          "RamHits": {"values": {"new": 5}}
+        }
       }
     },
     "tool": "Callgrind"
   }],
   "project_root": ".",
-  "summary_output": null,
-  "version": "6"
+  "started_at": "2026-09-21T14:03:22Z",
+  "version": "7"
 }

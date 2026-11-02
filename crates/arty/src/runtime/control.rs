@@ -3,16 +3,15 @@
 
 use crate::runtime::Workers;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::task::Scheduler;
 
-/// A handle for requesting runtime shutdown.
+/// Requests runtime shutdown from any thread.
 ///
-/// Borrow this handle through [`Builtins::control`](crate::task::Builtins::control).
-/// It can be cloned and used from any thread without keeping the runtime alive
-/// or retaining an association with the task's worker.
+/// Obtain runtime control through [`Context::control`](crate::task::Context::control).
+/// You can clone it and use it from any thread.
+/// It does not keep the runtime alive and is not tied to the task's worker.
 ///
-/// [`workers`](Self::workers) exposes the runtime's worker coordinates, and
-/// [`request_stop`](Self::request_stop) initiates shutdown without waiting.
+/// [`workers`](Self::workers) lists the runtime's workers.
+/// [`request_stop`](Self::request_stop) starts shutdown without waiting.
 #[derive(Debug, Clone)]
 pub struct RuntimeControl {
     dispatcher: DispatcherClient,
@@ -23,10 +22,10 @@ impl RuntimeControl {
         Self { dispatcher }
     }
 
-    /// Returns this runtime's worker coordinates.
+    /// Returns the details of this runtime's workers.
     ///
-    /// The coordinates remain owned by the runtime. Use them with
-    /// [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at) to target a
+    /// The runtime owns these details. Use them with
+    /// [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at) to select a
     /// specific worker.
     ///
     /// # Examples
@@ -34,7 +33,7 @@ impl RuntimeControl {
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
     /// # #[arty::main]
-    /// # async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+    /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// let tasks: Vec<_> = cx
     ///     .control()
     ///     .workers()
@@ -58,10 +57,12 @@ impl RuntimeControl {
 
     /// Requests shutdown without blocking the calling thread.
     ///
-    /// May be called repeatedly from any thread. Pending tasks are cancelled,
-    /// and new submissions receive [`JoinError`](crate::task::JoinError).
-    /// Running blocking callbacks are allowed to finish. The owner remains
-    /// responsible for waiting for shutdown when it is stopped or dropped.
+    /// You can call this method repeatedly from any thread.
+    /// Arty cancels pending async tasks and discards queued blocking functions.
+    /// New tasks receive [`JoinError`](crate::task::JoinError).
+    /// Blocking functions that already started can finish.
+    /// Call [`Runtime::stop`](crate::runtime::Runtime::stop) or drop the runtime
+    /// to wait for shutdown to finish.
     ///
     /// # Examples
     ///
@@ -78,7 +79,7 @@ impl RuntimeControl {
     /// ```
     #[cfg_attr(test, mutants::skip)] // It is impractical to test for "stuff not happening", so mutating this easily leads to timeouts.
     pub fn request_stop(&self) {
-        Scheduler::begin_current_executor_shutdown(&self.dispatcher);
-        self.dispatcher.stop();
+        let cause = self.dispatcher.stop(arty_executor::ShutdownCause::default());
+        crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(&self.dispatcher, cause);
     }
 }

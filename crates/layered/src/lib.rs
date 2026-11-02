@@ -5,28 +5,28 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
     not(all(feature = "intercept", feature = "tower-service", feature = "dynamic-service")),
-    expect(rustdoc::broken_intra_doc_links, reason = "simpler docs")
+    expect(rustdoc::broken_intra_doc_links, reason = "optional items are absent without all features")
 )]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/layered/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/layered/favicon.ico")]
 
-//! # Layered Services
+//! # Layered services
 //!
 //! Build composable async services with layered middleware.
 //!
-//! This crate provides the [`Service`] trait and a layer system for adding cross-cutting
-//! concerns like timeouts, retries, and logging.
+//! The [`Service`] trait defines an async operation. Layers wrap services to add behavior
+//! such as timeouts, retries, and logging.
 //!
 //! ## Why not Tower?
 //!
-//! [Tower](https://docs.rs/tower) predates `async fn` in traits, requiring manual `Future` types
-//! or boxing and `poll_ready` back-pressure semantics. Tower's `&mut self` also requires cloning
-//! for concurrent requests. This crate uses `async fn` with `&self`, enabling simpler middleware
-//! and natural concurrency. Tower interop is available via the `tower-service` feature.
+//! [Tower](https://docs.rs/tower) predates `async fn` in traits. Its services use explicit
+//! `Future` types and `poll_ready` for back-pressure. They also use `&mut self`, so concurrent
+//! requests can require service clones. This crate uses `async fn` with `&self`.
+//! Enable the `tower-service` feature to use the Tower service adapters.
 //!
-//! ## Quick Start
+//! ## Quick start
 //!
-//! A [`Service`] transforms an input into an output asynchronously:
+//! A [`Service`] asynchronously transforms an input into an output:
 //!
 //! ```
 //! use layered::Service;
@@ -54,25 +54,21 @@
 //! # }
 //! ```
 //!
-//! ## Key Concepts
+//! ## Key concepts
 //!
-//! - **Service**: A type implementing the [`Service`] trait that transforms inputs into outputs
-//!   asynchronously. Think of it as `async fn(&self, In) -> Out`.
-//! - **Middleware**: A service that wraps another service to add cross-cutting behavior such as
-//!   logging, timeouts, or retries. Middleware receives inputs before the inner service and can
-//!   process outputs after.
-//! - **Layer**: A type implementing the [`Layer`] trait that constructs middleware around a
-//!   service. Layers are composable and can be stacked using tuples like `(layer1, layer2, service)`.
+//! - A [`Service`] is similar to `async fn(&self, In) -> Out`.
+//! - Middleware wraps a service to add behavior before or after execution.
+//! - A [`Layer`] creates middleware around a service.
 //!
-//! ## Layers and Middleware
+//! ## Layers and middleware
 //!
-//! A [`Layer`] wraps a service with additional behavior. In this example, we create a logging
-//! middleware that prints inputs before passing them to the inner service:
+//! A [`Layer`] wraps a service with more behavior. This layer prints each input before it calls
+//! the inner service:
 //!
 //! ```
 //! use layered::{Execute, Layer, Service, Stack};
 //!
-//! // A simple logging layer
+//! // Define a layer that adds logging.
 //! struct LogLayer;
 //!
 //! impl<S> Layer<S> for LogLayer {
@@ -98,23 +94,23 @@
 //! }
 //!
 //! # async fn example() {
-//! // Stack layers with the service (layers apply outer to inner)
+//! // The first tuple element becomes the outer layer.
 //! let service = (LogLayer, Execute::new(|x: i32| async move { x * 2 })).into_service();
 //!
 //! let result = service.execute(21).await;
 //! # }
 //! ```
 //!
-//! ## Thread Safety
+//! ## Thread safety
 //!
-//! All services must implement [`Send`] and [`Sync`], and returned futures must be [`Send`].
-//! This ensures compatibility with multi-threaded async runtimes like Tokio.
+//! Each service must implement [`Send`] and [`Sync`]. Each returned future must implement
+//! [`Send`]. These bounds support multithreaded async runtimes such as Tokio.
 //!
 //! ## Features
 //!
-//! - **`intercept`**: Enables [`Intercept`] middleware
-//! - **`dynamic-service`**: Enables [`DynamicService`] for type erasure
-//! - **`tower-service`**: Enables Tower interoperability via the [`tower`] module
+//! - `intercept` enables [`Intercept`] middleware.
+//! - `dynamic-service` enables the type-erased [`DynamicService`].
+//! - `tower-service` enables Tower support through the [`tower`] module.
 
 mod service;
 pub use service::Service;

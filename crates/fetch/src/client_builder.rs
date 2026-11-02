@@ -24,22 +24,18 @@ use crate::telemetry::Metering;
 use crate::tls::TlsOptions;
 use crate::{BaseUri, RequestHandler};
 
-/// Builder for creating and configuring an HTTP client.
+/// Configures and creates an HTTP client.
 ///
-/// This builder follows the builder pattern, allowing you to customize
-/// various aspects of the [`HttpClient`](super::HttpClient) before creating it.
 /// Each configuration method returns `self` for method chaining.
 ///
-/// By default, the builder is configured to use a standard pipeline that includes
-/// resilience features and observability (logging, metrics).
-/// This behavior can be modified with methods like [`minimal_pipeline`](Self::minimal_pipeline)
-/// or [`custom_pipeline`](Self::custom_pipeline).
+/// The default standard pipeline includes resilience, logging, and metrics. Use
+/// [`minimal_pipeline`](Self::minimal_pipeline) or [`custom_pipeline`](Self::custom_pipeline) to
+/// replace it.
 ///
 /// # Construction
 ///
-/// The builder instance is created using the `HttpClient::builder_tokio` method, or
-/// the free-standing [`custom::create_builder`][crate::custom::create_builder] function
-/// for a custom transport.
+/// Use `HttpClient::builder_tokio` for the bundled transport. Use
+/// [`custom::create_builder`][crate::custom::create_builder] for a custom transport.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct HttpClientBuilder {
@@ -69,8 +65,8 @@ impl HttpClientBuilder {
 
     /// Sets the name for the HTTP client.
     ///
-    /// The name is used in logging and metrics to identify the HTTP client instance. The name should
-    /// follow the `snake_case` convention. By default, the client is named "`http_client`".
+    /// Logging and metrics use the name to identify the client. Use `snake_case`. The default name
+    /// is `http_client`.
     pub fn name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
         let name = name.into();
         self.metering = self.metering.with_client_name(name.clone());
@@ -80,12 +76,13 @@ impl HttpClientBuilder {
 
     /// Allows insecure HTTP connections.
     ///
-    /// By default, the client only permits HTTPS connections. This method enables
-    /// both HTTP and HTTPS requests. Use this for testing or internal networks only.
+    /// The client permits only HTTPS by default. This method disables the HTTPS-only scheme
+    /// filter. The bundled Tokio transport still rejects schemes other than HTTP and HTTPS. A
+    /// custom transport must reject every scheme that it does not support.
     ///
     /// # Security
     ///
-    /// HTTP connections are unencrypted and can be intercepted. Use with caution!
+    /// Do not send sensitive data over HTTP. HTTP connections are not encrypted.
     pub fn insecure_allow_http(mut self) -> Self {
         self.options.transport.request_filter = RequestFilter::HttpAndHttps;
         self
@@ -93,8 +90,9 @@ impl HttpClientBuilder {
 
     /// Sets the connection timeout duration.
     ///
-    /// This sets how long to wait for a connection to be established before giving up.
-    /// If not specified, a default value of 30 seconds will be used.
+    /// Passes this timeout to the transport. The bundled Tokio transport applies it to name
+    /// resolution and connection attempts. A custom transport must apply it. The default is 30
+    /// seconds.
     pub const fn connect_timeout(mut self, timeout: Duration) -> Self {
         self.options.transport.connect_timeout = timeout;
         self
@@ -102,8 +100,7 @@ impl HttpClientBuilder {
 
     /// Configures how HTTP connections are kept alive.
     ///
-    /// Keep-alive maintains open or idle connections, reducing latency for subsequent requests
-    /// by avoiding the overhead of establishing new TCP connections.
+    /// Keep-alive keeps active or idle connections open for later requests.
     ///
     /// By default, this value is set to [`ConnectionKeepAlive::disabled`].
     pub fn connection_keep_alive(mut self, mode: ConnectionKeepAlive) -> Self {
@@ -111,12 +108,11 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Sets the body options applied to every response produced by this client.
+    /// Sets the body options for every response from this client.
     ///
-    /// [`HttpBodyOptions`] controls body-level policies such as the buffer
-    /// limit (maximum memory used when buffering via
-    /// [`HttpBody::into_buffered`](crate::HttpBody::into_buffered)) and the
-    /// idle timeout between body frames.
+    /// [`HttpBodyOptions`] sets the buffer limit for
+    /// [`HttpBody::into_buffered`](crate::HttpBody::into_buffered) and the idle timeout between
+    /// body frames.
     ///
     /// By default, [`HttpBodyOptions::default()`] is used.
     ///
@@ -143,39 +139,36 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Configures automatic response decompression, including formats and resource limits.
+    /// Sets formats and resource limits for automatic response decompression.
     ///
-    /// Off by default: a build with none of the `compression-*` features links no
-    /// compression implementation at all, and even with them the client decompresses nothing until
-    /// [`formats`][DecompressionOptions::formats] names something. Requests then advertise the formats in
-    /// `Accept-Encoding`, most preferred first, and a matching response is
-    /// decompressed before the caller sees it, with `Content-Encoding` and
-    /// `Content-Length` removed because neither describes the decompressed body.
-    /// A response compressed with a format that is not enabled is handed back
-    /// untouched rather than failing. Decompression is lazy, so a malformed body
-    /// fails when it is read rather than when the response arrives.
+    /// Decompression is off by default. A build without a `compression-*` feature links no
+    /// compression implementation. The client decompresses only formats selected by
+    /// [`formats`][DecompressionOptions::formats].
     ///
-    /// [`DecompressionFormat::ALL`][crate::options::DecompressionFormat::ALL] asks for everything this build can decompress.
-    /// The `compression-all` feature makes all supported compression formats available.
+    /// Requests list selected formats in `Accept-Encoding`, with the most preferred format first.
+    /// Before it returns a response selected for decompression, the client removes
+    /// `Content-Encoding` and `Content-Length`. Body decoding is lazy and occurs as code reads it,
+    /// so a malformed body fails during that read. If a response uses a format that was not
+    /// selected, the client returns it without changes.
     ///
-    /// Passing a format slice or array reference uses the default decompression limits.
-    /// Pass [`DecompressionOptions`] to customize them.
+    /// [`DecompressionFormat::ALL`][crate::options::DecompressionFormat::ALL] selects every
+    /// available format. The `compression-all` feature makes all supported formats available.
+    ///
+    /// A format slice or array reference uses the default limits. Pass [`DecompressionOptions`] to
+    /// change them.
     ///
     /// # Bounds
     ///
-    /// The client inherits the safe `http_compression` defaults: decompressed
-    /// output is capped at 64 MiB, and the number of concatenated streams is
-    /// capped at 1,024 per decompression stage. `fetch` adds no default
-    /// overrides of its own. Explicit bounds configured through `options` apply
-    /// while reading the body, even without buffering it. Pass `None` to
-    /// [`max_output_len`][DecompressionOptions::max_output_len] to explicitly
-    /// remove the output-size bound.
-    /// Exceeding a decompression bound fails the body with the
-    /// `compression_limit_exceeded` error label.
+    /// The client uses the `http_compression` defaults. Decompressed output is limited to 64 MiB.
+    /// Each decompression stage accepts at most 1,024 concatenated streams. `fetch` does not
+    /// override these defaults.
     ///
-    /// The [`response_body_options`][Self::response_body_options] buffer limit remains
-    /// independent and applies when collecting the decompressed bytes into
-    /// memory; its default is 2 GiB.
+    /// Explicit limits apply while code reads the body, including a streamed body. Pass `None` to
+    /// [`max_output_len`][DecompressionOptions::max_output_len] to remove the output limit. A limit
+    /// failure uses the `compression_limit_exceeded` error label.
+    ///
+    /// The [`response_body_options`][Self::response_body_options] buffer limit is separate. It
+    /// applies when code collects decompressed bytes in memory. Its default is 2 GiB.
     ///
     /// # Example
     ///
@@ -200,30 +193,24 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Enables the minimal pipeline mode for the client.
+    /// Selects the minimal pipeline.
     ///
-    /// In this mode, the client uses only the [`Dispatch`] handler directly without any middleware,
-    /// giving you complete control but without features like logging or metrics. This is useful
-    /// when you need a streamlined client with minimal overhead.
+    /// This pipeline contains only [`Dispatch`]. It does not include logging, metrics, or other
+    /// middleware.
     pub fn minimal_pipeline(mut self) -> Self {
         self.pipeline_builder = PipelineBuilder::Minimal;
         self
     }
 
-    /// Configures the client to use a custom request pipeline instead of the default standard pipeline.
+    /// Replaces the standard pipeline with a custom request pipeline.
     ///
-    /// By default, the HTTP client uses a standard pipeline that includes common middleware
-    /// for handling requests and responses. This method allows you to replace that pipeline
-    /// with your own implementation, giving you complete control over request processing.
+    /// The factory receives:
     ///
-    /// The factory function receives:
     /// - A [`Dispatch`] handler that handles the actual HTTP communication.
-    /// - A [`PipelineContext`] with additional context information.
+    /// - A [`PipelineContext`] with the shared pipeline dependencies.
     ///
-    /// In your callback, you can provide your own stack of middleware with the dispatch handler at the bottom.
-    /// Each middleware can add functionality like logging, authentication, caching, or custom
-    /// request/response transformations. The middleware forms a chain where each one can process
-    /// the request before passing it to the next handler in the chain.
+    /// Return a middleware stack with the dispatch handler at the bottom. A layer can add logging,
+    /// authentication, caching, or request and response transformations.
     ///
     /// # Examples
     ///
@@ -256,13 +243,12 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Sets TLS options for this client.
+    /// Sets the TLS options.
     ///
-    /// Use `TlsOptions::builder_rustls()` for the rustls backend,
-    /// or `TlsOptions::builder_native_tls()` for the platform native TLS backend.
-    /// Both backends support mutual TLS (`mTLS`) via the builder's
-    /// `client_identity` method. The native TLS builder also supports
-    /// endpoint-specific certificate server name overrides.
+    /// Use `TlsOptions::builder_rustls()` for rustls. Use
+    /// `TlsOptions::builder_native_tls()` for native TLS. Both builders support mutual TLS (`mTLS`)
+    /// through `client_identity`. The native TLS builder also supports certificate server-name
+    /// overrides for individual endpoints.
     ///
     /// # Example
     ///
@@ -283,10 +269,9 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Sets the supported HTTP versions for the client.
+    /// Sets the HTTP versions that the client supports.
     ///
-    /// The default is HTTP/1.1 and HTTP/2. This method allows you to change which
-    /// HTTP protocol versions the client will use when connecting to servers.
+    /// The default versions are HTTP/1.1 and HTTP/2.
     pub fn supported_http_versions(mut self, versions: &[http::Version]) -> Self {
         self.options.transport.supported_http_versions = versions.to_vec();
         self
@@ -294,43 +279,39 @@ impl HttpClientBuilder {
 
     /// Sets a custom OpenTelemetry meter provider for the client.
     ///
-    /// The given [`MeterProvider`] is used to collect this client's metrics. By
-    /// default, the client uses the global meter provider; use this method to
-    /// override it for this client instance.
+    /// The client uses the global meter provider by default. This method sets a provider for this
+    /// client.
     ///
-    /// The provider is retained and its scoped meter is materialized when the
-    /// client is [built][Self::build], so a client [`name`][Self::name] set
-    /// either before or after this call is reflected in the recorded metrics.
+    /// The client creates the scoped meter when [`build`][Self::build] runs. A
+    /// [`name`][Self::name] set before or after this call appears in the metrics.
     ///
     /// # Performance
     ///
-    /// For thread-isolated runtimes, prefer a per-thread meter provider to avoid
-    /// the lock contention that a global meter provider can cause.
+    /// For a thread-isolated runtime, use a per-thread meter provider to avoid contention on the
+    /// global provider.
     ///
     /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
-    #[cfg_attr(test, mutants::skip)] // FIXME: mutants remove resilience context and other fields, which we can't really assert on
+    #[cfg_attr(test, mutants::skip)] // Mutants remove fields that the public behavior cannot distinguish.
     pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
-        // Update the metering at all relevant places.
+        // Use the provider for both resilience and HTTP metrics.
         self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
         self.metering = self.metering.with_provider(meter_provider);
         self
     }
 
-    /// Configures the standard pipeline with custom settings.
+    /// Changes the standard pipeline.
     ///
-    /// This method allows you to customize the standard pipeline (which includes resilience
-    /// features and observability) by providing a configuration function that receives
-    /// the current pipeline and returns a modified version.
+    /// The closure receives the current pipeline and returns the changed pipeline. The standard
+    /// pipeline includes resilience, logging, and metrics.
     ///
-    /// See [`StandardRequestPipeline`] for more details on the defaults.
+    /// See [`StandardRequestPipeline`] for the defaults.
     ///
     /// # Multiple Calls
     ///
-    /// Multiple consecutive calls to this method are additive - each call receives the
-    /// pipeline configured by the previous call. However, if you switch to a different
-    /// pipeline type (e.g., [`minimal_pipeline`](Self::minimal_pipeline)) and then call
-    /// this method again, it will receive a fresh default [`StandardRequestPipeline`] rather than
-    /// the previously configured one.
+    /// Consecutive calls are additive. Each closure receives the result of the previous call.
+    ///
+    /// If another method selects a different pipeline type, the next call starts with a new default
+    /// [`StandardRequestPipeline`].
     ///
     /// # Example
     ///
@@ -340,7 +321,7 @@ impl HttpClientBuilder {
     /// # fn configure_builder(mut builder: HttpClientBuilder) {
     /// let client = builder
     ///     .standard_pipeline(|pipeline, _context| {
-    ///         // Change the attempt timeout to 5 seconds
+    ///         // Set the attempt timeout to 5 seconds.
     ///         pipeline.attempt_timeout(|timeout| timeout.timeout(Duration::from_secs(5)))
     ///     })
     ///     .build();
@@ -358,12 +339,11 @@ impl HttpClientBuilder {
 
     /// Sets the base URI for the client.
     ///
-    /// This setting overrides any endpoint set in the [`Uri`](templated_uri::Uri) you pass to the
-    /// request methods, leading to three possible scenarios:
+    /// This setting overrides an endpoint in the request [`Uri`](templated_uri::Uri):
     ///
-    /// - `HttpClientBuilder::base_uri` is set: the [`BaseUri`] on the request's [`Uri`](templated_uri::Uri) is ignored and the client uses the provided [`BaseUri`] instead.
-    /// - `HttpClientBuilder::base_uri` is not set, but the request [`Uri`](templated_uri::Uri) has a [`BaseUri`]: the client uses the [`BaseUri`] from the request's [`Uri`](templated_uri::Uri).
-    /// - No endpoint is set on either side: the request fails with a validation [`HttpError`](crate::HttpError).
+    /// - If this method sets a [`BaseUri`], the client ignores the request [`BaseUri`].
+    /// - Otherwise, the client uses the request [`BaseUri`].
+    /// - If neither source has a base URI, validation returns [`HttpError`](crate::HttpError).
     ///
     /// ```rust
     /// # #[cfg(feature = "test-util")]
@@ -390,16 +370,15 @@ impl HttpClientBuilder {
         self.router(Router::fixed(base_uri.into()).conflict_policy(BaseUriConflict::UseRouted))
     }
 
-    /// Configures the [`Router`] used to resolve the destination [`BaseUri`] for each request.
+    /// Sets the [`Router`] that resolves a destination [`BaseUri`] for each request.
     ///
-    /// A router can expose multiple alternative endpoints (e.g. a primary and one or more
-    /// fallback endpoints). When the configured router has alternatives, the standard pipeline
-    /// automatically enables retry/hedging on connection-unavailable errors so subsequent
-    /// attempts can target a different endpoint.
+    /// A router can provide a primary endpoint and fallback endpoints. If it has alternatives, the
+    /// standard pipeline enables recovery from connection-unavailable errors, so a later attempt
+    /// can target another endpoint.
     ///
-    /// This setting and [`HttpClientBuilder::base_uri`] are mutually exclusive shortcuts for the
-    /// same underlying configuration; whichever is called last wins. Calling `base_uri(uri)` is
-    /// equivalent to `router(Router::fixed(uri))`.
+    /// This method and [`HttpClientBuilder::base_uri`] set the same configuration. The last call
+    /// wins. `base_uri(uri)` uses `Router::fixed(uri)` with
+    /// `BaseUriConflict::UseRouted`.
     ///
     /// # Examples
     ///
@@ -425,10 +404,9 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Configures HTTP/2 options for the client.
+    /// Sets the HTTP/2 options.
     ///
-    /// This method allows you to customize HTTP/2-specific settings for connections created
-    /// by the client. These settings only apply when the client negotiates HTTP/2 connections.
+    /// These options apply only to connections that negotiate HTTP/2.
     ///
     /// # Examples
     ///
@@ -446,11 +424,9 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Configures connection pool options for the client.
+    /// Sets the connection pool options.
     ///
-    /// This method allows you to configure how the client manages its connection pool.
-    /// The connection pool reuses existing connections to reduce the overhead and latency
-    /// of establishing new connections for each request.
+    /// The pool reuses connections instead of establishing a connection for each request.
     ///
     /// # Examples
     ///
@@ -475,10 +451,8 @@ impl HttpClientBuilder {
 
     /// Sets the redaction engine for the client.
     ///
-    /// The [`RedactionEngine`] is used to redact sensitive information from requests and responses.
-    /// This is particularly useful for logging and telemetry, where you want to avoid exposing
-    /// sensitive data such as authentication tokens, personal information, or other confidential
-    /// information.
+    /// Logging and telemetry use the [`RedactionEngine`] to remove sensitive request and response
+    /// data.
     pub fn redaction_engine(mut self, redaction_engine: &RedactionEngine) -> Self {
         self.options.redaction_engine = redaction_engine.clone();
         self
@@ -486,8 +460,7 @@ impl HttpClientBuilder {
 
     /// Builds the configured [`HttpClient`](crate::HttpClient).
     ///
-    /// This finalizes all configuration and returns a ready-to-use client that
-    /// reflects every setting applied to this builder.
+    /// The returned client uses every setting on this builder.
     #[must_use]
     pub fn build(self) -> crate::HttpClient {
         let clock = self.transport.clock().clone();
@@ -582,8 +555,7 @@ mod tests {
     async fn tls_options_are_stored_without_breaking_the_pipeline() {
         use crate::tls::TlsOptions;
 
-        // The fake transport ignores TLS, so a custom `TlsOptions` must be accepted and
-        // stored without affecting request handling.
+        // The fake transport ignores TLS. Storing custom options must not affect requests.
         let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
             .tls_options(TlsOptions::default())
             .build();
@@ -604,8 +576,7 @@ mod tests {
 
         let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).redaction_engine(&engine);
 
-        // The stored engine must be the configured one: a passthrough redactor leaves the
-        // path untouched.
+        // A passthrough redactor leaves the path unchanged.
         let redacted = PathAndQuery::from_static("/path").to_redacted_string(&builder.options.redaction_engine);
         assert_eq!(redacted, "/path");
     }
@@ -683,10 +654,10 @@ mod tests {
                     .connection_idle_timeout(Duration::from_mins(2)),
             );
 
-        // Verify HTTP/2 options
+        // Test the HTTP/2 options.
         assert_eq!(builder.options.transport.http_2.initial_max_send_streams, Some(200));
 
-        // Verify connection pool options
+        // Test the connection pool options.
         assert_eq!(builder.options.transport.connection_pool.max_connections, 25);
         match builder.options.transport.connection_pool.connection_idle_timeout {
             ConnectionIdleTimeout::Limited(duration) => {
@@ -698,13 +669,13 @@ mod tests {
 
     #[test]
     fn defaults_ok() {
-        // Verify that the builder can be created with default settings
+        // Create a builder with default settings.
         let _builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
     }
 
     #[test]
     fn name_ok() {
-        // Verify that the name method can be called without panic
+        // Set the client name.
         let _builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).name("custom_client");
     }
 
@@ -712,23 +683,23 @@ mod tests {
     fn test_clone_produces_isolated_instances() {
         use std::time::Duration;
 
-        // Create a base builder with some initial configuration
+        // Create a configured builder.
         let builder_1 = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
             .name("base_client")
             .connect_timeout(Duration::from_secs(10))
             .response_body_options(HttpBodyOptions::default().buffer_limit(1000));
 
-        // Clone the builder
+        // Clone the builder.
         let mut builder_2 = builder_1.clone();
 
-        // Verify initial state is the same
+        // Both builders start with the same values.
         assert_eq!(
             builder_1.options.transport.connect_timeout,
             builder_2.options.transport.connect_timeout
         );
         assert_eq!(builder_1.options.response_body_options, builder_2.options.response_body_options);
 
-        // Modify the cloned builder
+        // Change the cloned builder.
         builder_2 = builder_2
             .name("cloned_client")
             .connect_timeout(Duration::from_secs(30))
@@ -740,7 +711,7 @@ mod tests {
                     .connection_idle_timeout(Duration::from_mins(5)),
             );
 
-        // Verify that builder_1 remains unchanged
+        // The original builder does not change.
         assert_eq!(builder_1.options.transport.connect_timeout, Duration::from_secs(10));
         assert_eq!(
             builder_1.options.response_body_options,
@@ -749,7 +720,7 @@ mod tests {
         assert_eq!(builder_1.options.transport.http_2.initial_max_send_streams, None);
         assert_eq!(builder_1.options.transport.connection_pool.max_connections, usize::MAX);
 
-        // Verify that builder_2 has the new values
+        // The cloned builder has the new values.
         assert_eq!(builder_2.options.transport.connect_timeout, Duration::from_secs(30));
         assert_eq!(
             builder_2.options.response_body_options,

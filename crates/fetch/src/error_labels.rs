@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(dead_code, reason = "this code is cheap and adding build conditions just complicates it")]
+#![expect(dead_code, reason = "build conditions cost more than this small shared code")]
 
 //! Centralized [`ErrorLabel`] constants for all errors in this crate.
 
@@ -85,7 +85,7 @@ mod tests {
     fn resolves_http_error_label() {
         let err = HttpError::other("boom", RecoveryInfo::never(), LABEL_SCHEME_NOT_ALLOWED);
 
-        let label = resolve_error_label(&err).expect("HttpError should resolve to a label");
+        let label = resolve_error_label(&err).expect("HttpError must resolve to a label");
 
         assert_eq!(label, LABEL_SCHEME_NOT_ALLOWED);
     }
@@ -94,7 +94,7 @@ mod tests {
     fn resolves_io_error_kind_label() {
         let err = io::Error::from(ErrorKind::ConnectionRefused);
 
-        let label = resolve_error_label(&err).expect("io::Error should resolve to a label");
+        let label = resolve_error_label(&err).expect("io::Error must resolve to a label");
 
         assert_eq!(label, ErrorLabel::from(ErrorKind::ConnectionRefused));
     }
@@ -150,8 +150,7 @@ mod tests {
 
     #[test]
     fn detects_nested_rustls_error_as_tls_label() {
-        // A rustls error nested under multiple io::Error layers should still
-        // be detected via the recursive unwrap.
+        // Recursive unwrapping finds a rustls error under several io::Error layers.
         let rustls_err = rustls::Error::General("handshake failure".to_owned());
         let inner = io::Error::other(rustls_err);
         let outer = io::Error::other(inner);

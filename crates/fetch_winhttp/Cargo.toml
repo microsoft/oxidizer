@@ -4,7 +4,7 @@
 [package]
 name = "fetch_winhttp"
 description = "WinHTTP-based HTTP transport for the fetch client (Windows only)."
-version = "0.4.0"
+version = "0.5.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "client", "winhttp", "windows"]
 categories = ["network-programming", "web-programming::http-client"]
@@ -19,7 +19,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winht
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "bytesbuf::mem::global::GlobalPool",
+    "bytesbuf::mem::opaque_memory::OpaqueMemory",
     "fetch::client_builder::HttpClientBuilder",
     # The transport itself lives in the implementation crate and is re-exported
     # from here; this crate is the supported surface for all of it.

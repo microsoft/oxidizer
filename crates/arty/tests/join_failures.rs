@@ -13,12 +13,12 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
-use std::task::{Context, Poll, Waker};
+use std::task::{Context as PollContext, Poll, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
 use arty::task::JoinError;
 #[cfg(feature = "macros")]
-use arty::task::{Builtins, JoinHandle};
+use arty::task::{Context, JoinHandle};
 use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
@@ -36,8 +36,8 @@ fn runtime() -> Runtime {
 }
 
 #[cfg(feature = "macros")]
-#[arty::test(workers = 1)]
-async fn async_and_blocking_panics_are_join_errors(cx: Builtins) {
+#[arty::test(workers = 1, panic = ignore)]
+async fn async_and_blocking_panics_are_join_errors(cx: Context) {
     let scheduler = cx.scheduler();
     let handles: [JoinHandle<()>; 3] = [
         scheduler.spawn(|_| -> std::future::Ready<()> { panic!("factory panic") }),
@@ -75,21 +75,25 @@ fn blocking_callback_cannot_wait_for_blocking_work() {
 }
 
 #[test]
-fn blocking_callback_block_on_can_await_another_pools_blocking_task() {
+fn blocking_callback_block_on_rejects_before_factory_invocation() {
     let caller = runtime();
     let target = Arc::new(runtime());
     let captured = Arc::clone(&target);
+    let invoked = Arc::new(AtomicBool::new(false));
+    let invoked_by_factory = Arc::clone(&invoked);
     let outcome = caller
         .scheduler()
         .spawn_blocking(move || {
-            captured
-                .scheduler()
-                .block_on(async |cx| cx.scheduler().spawn_blocking(|| 7).await.unwrap())
+            captured.scheduler().block_on(move |_| {
+                invoked_by_factory.store(true, Ordering::Relaxed);
+                async { 7 }
+            })
         })
         .join()
         .unwrap();
 
-    assert_eq!(outcome.unwrap(), 7);
+    assert_eq!(outcome.unwrap_err().to_string(), "block_on cannot be called from an Arty worker");
+    assert!(!invoked.load(Ordering::Relaxed));
     caller.stop().unwrap();
     Arc::try_unwrap(target).unwrap().stop().unwrap();
 }
@@ -114,6 +118,26 @@ fn shutdown_rejects_a_direct_worker_submission_before_factory_invocation() {
     runtime.stop().unwrap();
 
     assert!(!invoked.load(Ordering::Acquire));
+}
+
+#[test]
+fn shutdown_rejects_blocking_work_before_worker_teardown() {
+    let runtime = runtime();
+
+    let result = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            cx.control().request_stop();
+            cx.scheduler().spawn_blocking(|| 42).await
+        })
+        .unwrap();
+
+    if result.is_ok() {
+        std::mem::forget(runtime);
+        panic!("blocking work must be rejected after shutdown starts");
+    }
+    runtime.stop().unwrap();
+    assert!(result.unwrap_err().is_shutdown());
 }
 
 #[test]
@@ -265,7 +289,7 @@ fn stop_rejects_remote_and_blocking_factories_immediately() {
                     42
                 }
             });
-            let mut context = Context::from_waker(Waker::noop());
+            let mut context = PollContext::from_waker(Waker::noop());
             for outcome in [pin!(remote).poll(&mut context), pin!(blocking).poll(&mut context)] {
                 let Poll::Ready(Err(error)) = outcome else {
                     panic!("rejected submissions must be immediately ready with an error");
@@ -349,7 +373,7 @@ fn blocking_callback_can_poll_rejected_blocking_join_after_shutdown() {
 
 #[test]
 fn root_execution_returns_errors_and_preserves_borrowed_storage() {
-    let runtime = runtime();
+    let runtime = runtime_builder().panic(PanicPolicy::ignore()).build().unwrap();
     assert!(
         runtime
             .scheduler()
@@ -424,7 +448,7 @@ fn cancelling_the_root_returns_a_shutdown_error() {
 #[cfg(feature = "macros")]
 #[arty::test]
 #[should_panic(expected = "runtime is shutting down")]
-async fn macro_boundary_reports_root_cancellation(cx: arty::task::Builtins) {
+async fn macro_boundary_reports_root_cancellation(cx: arty::task::Context) {
     cx.control().request_stop();
     pending::<()>().await;
 }

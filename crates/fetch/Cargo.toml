@@ -4,7 +4,7 @@
 [package]
 name = "fetch"
 description = "HTTP client with resilience, observability, and Tokio runtime support."
-version = "0.19.0"
+version = "0.20.0"
 readme = "README.md"
 keywords = ["http", "client", "async", "resilience", "observability"]
 categories = ["network-programming"]
@@ -19,7 +19,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "bytesbuf::mem::global::GlobalPool",
+    "bytesbuf::mem::opaque_memory::OpaqueMemory",
     "bytesbuf::mem::has_memory::HasMemory",
     "bytesbuf::mem::memory::Memory",
     "data_privacy::redaction_engine::RedactionEngine",
@@ -45,11 +45,14 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
-# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
-# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
-# to avoid a false positive.
+# `testing_aids::init_tracing!` expands to `#[::ctor::ctor]`. cargo-machete does not scan
+# macro expansions, so it reports `ctor` as unused.
 [package.metadata.cargo-machete]
 ignored = ["ctor"]
+
+[package.metadata.anvil.examples]
+# These examples need explicit client certificates and command-line arguments.
+no-run = ["fetch_mtls", "fetch_native_tls_mtls"]
 
 [features]
 default = []
@@ -191,6 +194,7 @@ rustls-platform-verifier = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
+tempfile = { workspace = true, features = ["getrandom"] }
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { path = "../tick", features = [
@@ -203,88 +207,89 @@ tokio = { workspace = true, features = [
     "rt",
     "net",
 ] }
+tower-service = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock = { workspace = true }
 
 [[example]]
-name = "http_client_fake"
+name = "fetch_fake"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_breaker"
+name = "fetch_breaker"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_resilience"
+name = "fetch_resilience"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_tokio"
+name = "fetch_tokio"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_native_tls"
+name = "fetch_native_tls"
 required-features = ["native-tls", "tokio"]
 
 [[example]]
-name = "http_client_custom"
+name = "fetch_custom"
 
 [[example]]
-name = "http_client_custom_pipeline"
+name = "fetch_custom_pipeline"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_telemetry"
+name = "fetch_telemetry"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_customization"
+name = "fetch_customization"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_native_tls_mtls"
+name = "fetch_native_tls_mtls"
 required-features = ["native-tls", "tokio"]
 
 [[example]]
-name = "http_client_advanced"
+name = "fetch_advanced"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_api_with_templated_uri"
+name = "fetch_api_with_templated_uri"
 required-features = ["test-util", "json"]
 
 [[example]]
-name = "http_client_app"
+name = "fetch_app"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_connection_scaling"
+name = "fetch_connection_scaling"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_decompression"
+name = "fetch_decompression"
 required-features = ["compression-gzip", "test-util"]
 
 [[example]]
-name = "http_client_json"
+name = "fetch_json"
 required-features = ["test-util", "json"]
 
 [[example]]
-name = "http_client_minimal_pipeline"
+name = "fetch_minimal_pipeline"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_mtls"
+name = "fetch_mtls"
 required-features = ["tokio", "rustls"]
 
 [[example]]
-name = "http_client_pooling"
+name = "fetch_pooling"
 required-features = ["test-util"]
 
 [[example]]
-name = "http_client_streaming"
+name = "fetch_streaming"
 required-features = ["tokio", "rustls"]
 
 [[bench]]
@@ -296,6 +301,11 @@ required-features = ["test-util"]
 harness = false
 name = "http_crate"
 required-features = ["test-util"]
+
+[[bench]]
+harness = false
+name = "fetch_memory"
+required-features = ["test-util", "json"]
 
 [[test]]
 name = "requests"

@@ -7,7 +7,7 @@ use arty::task::{JoinError, JoinHandle};
 pub(crate) fn runtime_control(runtime: &Runtime) -> RuntimeControl {
     runtime
         .scheduler()
-        .block_on(async |builtins| builtins.control().clone())
+        .block_on(async |cx| cx.control().clone())
         .expect("runtime remains active while acquiring test control")
 }
 

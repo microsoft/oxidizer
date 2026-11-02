@@ -33,33 +33,53 @@ fn input(configuration: Configuration) -> Input {
 }
 
 #[metabench::benchmark(EVENTS_OFF, ARC_DEREF, "events_off")]
-#[bench::configured(&mut input(Configuration::default()))]
-fn events_off(input: &mut Input) -> u64 {
-    dereference(input)
+#[bench::configured(Box::new(input(Configuration::default())))]
+fn events_off<S: std::borrow::BorrowMut<Input>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        dereference(input)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(EVENTS_1_IN_100, ARC_DEREF, "events_1_in_100")]
-#[bench::configured(&mut input(recording_configuration(100, false)))]
-fn events_1_in_100(input: &mut Input) -> u64 {
-    dereference(input)
+#[bench::configured(Box::new(input(recording_configuration(100, false))))]
+fn events_1_in_100<S: std::borrow::BorrowMut<Input>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        dereference(input)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(EVENTS_1_IN_20, ARC_DEREF, "events_1_in_20")]
-#[bench::configured(&mut input(recording_configuration(20, false)))]
-fn events_1_in_20(input: &mut Input) -> u64 {
-    dereference(input)
+#[bench::configured(Box::new(input(recording_configuration(20, false))))]
+fn events_1_in_20<S: std::borrow::BorrowMut<Input>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        dereference(input)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(EVENTS_1_IN_1, ARC_DEREF, "events_1_in_1")]
-#[bench::configured(&mut input(recording_configuration(1, false)))]
-fn events_1_in_1(input: &mut Input) -> u64 {
-    dereference(input)
+#[bench::configured(Box::new(input(recording_configuration(1, false))))]
+fn events_1_in_1<S: std::borrow::BorrowMut<Input>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        dereference(input)
+    };
+    (result, owned_input)
 }
 
 #[metabench::benchmark(EVENTS_1_IN_1_WITH_BACKTRACES, ARC_DEREF, "events_1_in_1_with_backtraces")]
-#[bench::configured(&mut input(recording_configuration(1, true)))]
-fn events_1_in_1_with_backtraces(input: &mut Input) -> u64 {
-    dereference(input)
+#[bench::configured(Box::new(input(recording_configuration(1, true))))]
+fn events_1_in_1_with_backtraces<S: std::borrow::BorrowMut<Input>>(mut owned_input: S) -> (u64, S) {
+    let result = {
+        let input = owned_input.borrow_mut();
+        dereference(input)
+    };
+    (result, owned_input)
 }
 
 fn dereference(input: &mut Input) -> u64 {
@@ -71,30 +91,32 @@ fn dereference(input: &mut Input) -> u64 {
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group(ARC_DEREF);
 
-    benchmark_mode(&mut group, EVENTS_OFF.benchmark_name(), input(Configuration::default()), events_off);
+    benchmark_mode(&mut group, EVENTS_OFF.benchmark_name(), input(Configuration::default()), |input| {
+        events_off(input).0
+    });
     benchmark_mode(
         &mut group,
         EVENTS_1_IN_100.benchmark_name(),
         input(recording_configuration(100, false)),
-        events_1_in_100,
+        |input| events_1_in_100(input).0,
     );
     benchmark_mode(
         &mut group,
         EVENTS_1_IN_20.benchmark_name(),
         input(recording_configuration(20, false)),
-        events_1_in_20,
+        |input| events_1_in_20(input).0,
     );
     benchmark_mode(
         &mut group,
         EVENTS_1_IN_1.benchmark_name(),
         input(recording_configuration(1, false)),
-        events_1_in_1,
+        |input| events_1_in_1(input).0,
     );
     benchmark_mode(
         &mut group,
         EVENTS_1_IN_1_WITH_BACKTRACES.benchmark_name(),
         input(recording_configuration(1, true)),
-        events_1_in_1_with_backtraces,
+        |input| events_1_in_1_with_backtraces(input).0,
     );
 
     group.finish();

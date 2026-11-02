@@ -15,7 +15,7 @@ pub trait RequestExt: sealed::Sealed {
 
     /// Returns the URI template label for this request, if available.
     ///
-    /// This method checks for a template label in the following order:
+    /// This method finds a template label in the following order:
     /// 1. From an explicit [`UriTemplateLabel`] extension attached to the request
     /// 2. From a templated URIs label (if set via `#[templated(label = "...")]`)
     /// 3. From a templated URIs template string

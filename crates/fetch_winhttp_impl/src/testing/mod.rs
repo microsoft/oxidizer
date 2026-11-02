@@ -35,7 +35,7 @@ use std::io::Read as _;
 use std::pin::Pin;
 use std::time::Duration;
 
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::{HttpBodyBuilder, HttpClient, HttpClientBuilder};
 use http::{HeaderMap, Version};
 use http_body::Body as _;
@@ -79,9 +79,9 @@ pub fn client(versions: &[Version], tls: WinHttpTlsConfig, clock: Clock) -> Test
 ///
 /// Plain HTTP is allowed so a fixture can be reached without TLS.
 pub fn client_builder(versions: &[Version], tls: WinHttpTlsConfig, clock: Clock) -> (HttpClientBuilder, HttpBodyBuilder) {
-    let global_pool = GlobalPool::new();
-    let body_builder = HttpBodyBuilder::new(global_pool.clone(), &clock);
-    let deps = WinHttpDeps::builder(clock, global_pool, Sink::noop()).tls(tls).build();
+    let memory = OpaqueMemory::new(GlobalPool::new());
+    let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
+    let deps = WinHttpDeps::builder(clock, memory, Sink::noop()).tls(tls).build();
     let mut builder = HttpClient::builder_winhttp(deps)
         .insecure_allow_http()
         .connect_timeout(Duration::MAX)

@@ -24,9 +24,9 @@ use tick::ClockControl;
 const FAILING_HOST: &str = "https://failing.example.com";
 const HEALTHY_HOST: &str = "https://healthy.example.com";
 
-// ── Helpers ──────────────────────────────────────────────────────
+// Helpers.
 
-/// Shared counter that tracks how many times the fake handler was invoked.
+/// Counts fake-handler calls.
 #[derive(Clone)]
 struct Calls(Arc<AtomicUsize>);
 
@@ -47,15 +47,14 @@ impl Calls {
     }
 }
 
-/// Sends `count` GET requests to `uri`, discarding the results.
+/// Sends `count` GET requests to `uri` and discards the results.
 async fn send_requests(client: &HttpClient, uri: &str, count: usize) {
     for _ in 0..count {
         let _ = client.get(uri).fetch().await;
     }
 }
 
-/// Creates a client using the standard pipeline with a fake handler that
-/// dispatches responses based on the request host.
+/// Creates a standard-pipeline client that selects responses by host.
 ///
 /// `failing.example.com` → 500 Internal Server Error
 /// everything else       → 200 OK
@@ -76,8 +75,7 @@ fn create_per_host_client(calls: Calls) -> HttpClient {
     HttpClient::builder_fake(handler, FakeDeps { clock })
         .standard_pipeline(|pipeline, _| {
             pipeline
-                // Large timeouts to prevent auto-advance timers from
-                // triggering them before the test logic completes.
+                // Large timeouts keep auto-advance from firing before the test completes.
                 .total_timeout(|t| t.timeout(Duration::MAX))
                 .attempt_timeout(|t| t.timeout(Duration::MAX))
                 .retry(|retry| retry.max_retry_attempts(3).base_delay(Duration::from_millis(1)))
@@ -115,7 +113,7 @@ fn create_uniform_client(status: StatusCode, calls: Calls) -> HttpClient {
         .build()
 }
 
-// ── Breaker trips on server errors ───────────────────────────────
+// Breaker opens after server errors.
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
@@ -123,14 +121,13 @@ async fn breaker_trips_after_repeated_server_errors() {
     let calls = Calls::new();
     let client = create_uniform_client(StatusCode::INTERNAL_SERVER_ERROR, calls.clone());
 
-    // Each logical request triggers 1 initial + 3 retries = 4 handler calls.
-    // With min_throughput(5) and failure_threshold(0.5), the breaker opens once
-    // enough failures are recorded.
+    // Each logical request makes one initial attempt and three retries. The configured throughput
+    // and failure threshold open the breaker after enough failures.
     send_requests(&client, "https://example.com", 10).await;
 
     let calls_before = calls.get();
 
-    // The breaker should now be open — the handler should NOT be called.
+    // The open breaker rejects the request before the handler.
     let error = client.get("https://example.com").fetch().await.unwrap_err();
 
     assert!(
@@ -140,11 +137,11 @@ async fn breaker_trips_after_repeated_server_errors() {
     );
     assert_eq!(error.recovery().kind(), RecoveryKind::Unavailable);
 
-    // No new handler calls should have occurred.
+    // The rejection does not call the handler.
     assert_eq!(calls.get(), calls_before);
 }
 
-// ── Retries are attempted before the breaker trips ───────────────
+// Retries run before the breaker opens.
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
@@ -152,7 +149,7 @@ async fn retries_happen_before_breaker_trips() {
     let calls = Calls::new();
     let client = create_uniform_client(StatusCode::INTERNAL_SERVER_ERROR, calls.clone());
 
-    // A single logical request: the retry layer should attempt 1 + 3 = 4 calls.
+    // One logical request makes one initial attempt and three retries.
     let response = client.get("https://example.com").fetch().await.unwrap();
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -161,7 +158,7 @@ async fn retries_happen_before_breaker_trips() {
     assert_eq!(calls.get(), 4);
 }
 
-// ── Success does not trip the breaker ────────────────────────────
+// Success does not open the breaker.
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
@@ -171,11 +168,11 @@ async fn success_does_not_trip_breaker() {
 
     send_requests(&client, "https://example.com", 20).await;
 
-    // One handler call per request — no retries, no rejections.
+    // Each request calls the handler once without retries or rejections.
     assert_eq!(calls.get(), 20);
 }
 
-// ── Client errors do not trip the breaker ────────────────────────
+// Client errors do not open the breaker.
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
@@ -189,7 +186,7 @@ async fn client_errors_do_not_trip_breaker() {
     assert_eq!(calls.get(), 20);
 }
 
-// ── Per-origin isolation ─────────────────────────────────────────
+// Breaker state is isolated by origin.
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
@@ -197,10 +194,10 @@ async fn breaker_is_isolated_per_origin() {
     let calls = Calls::new();
     let client = create_per_host_client(calls.clone());
 
-    // Hammer the failing host to trip its breaker.
+    // Open the breaker for the failing host.
     send_requests(&client, FAILING_HOST, 20).await;
 
-    // Verify the failing host's breaker is open.
+    // The failing host now rejects requests.
     let error = client.get(FAILING_HOST).fetch().await.unwrap_err();
     assert!(
         error.message().contains("circuit breaker"),
@@ -208,7 +205,7 @@ async fn breaker_is_isolated_per_origin() {
         error.message()
     );
 
-    // The healthy host should be completely unaffected.
+    // The healthy host still succeeds.
     let response = client.get(HEALTHY_HOST).fetch().await.unwrap();
     assert_eq!(
         response.status(),
@@ -223,21 +220,20 @@ async fn healthy_host_stays_healthy_while_failing_host_is_broken() {
     let calls = Calls::new();
     let client = create_per_host_client(calls.clone());
 
-    // Send requests to both hosts — the breaker tracks state per-origin,
-    // so the order does not matter.
+    // Send requests to both hosts. Breaker state is per origin.
     send_requests(&client, HEALTHY_HOST, 20).await;
     send_requests(&client, FAILING_HOST, 20).await;
 
-    // The failing host's breaker should be open.
+    // The failing host rejects the request.
     let error = client.get(FAILING_HOST).fetch().await.unwrap_err();
     assert!(error.message().contains("circuit breaker"));
 
-    // The healthy host should still work.
+    // The healthy host accepts the request.
     let response = client.get(HEALTHY_HOST).fetch().await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-// ── Rejected request carries the original request ────────────────
+// A rejected error contains the original request.
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
@@ -250,34 +246,31 @@ async fn breaker_rejection_attaches_request() {
     let mut error = client.get("https://example.com").fetch().await.unwrap_err();
 
     assert!(error.message().contains("circuit breaker"));
-    assert!(error.take_request().is_some(), "rejected request should be attached to the error");
+    assert!(error.take_request().is_some(), "rejected error must contain the request");
 }
 
-// ── Retry observes breaker opening mid-sequence ──────────────────
+// Retry observes a breaker that opens between request sequences.
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn retry_receives_breaker_rejection() {
-    // Use a handler where the first few calls succeed (to let the breaker
-    // accumulate failures on a *previous* batch) and then the breaker is
-    // already open when a new request arrives.
+    // Open the breaker with an earlier batch before the next request arrives.
     let calls = Calls::new();
     let client = create_uniform_client(StatusCode::INTERNAL_SERVER_ERROR, calls.clone());
 
-    // Trip the breaker first.
+    // Open the breaker.
     send_requests(&client, "https://example.com", 20).await;
 
     let calls_before = calls.get();
 
-    // Now the retry layer should see the breaker rejection immediately, without
-    // ever reaching the handler.
+    // The retry layer receives the rejection before the handler.
     let error = client.get("https://example.com").fetch().await.unwrap_err();
 
     assert!(error.message().contains("circuit breaker"));
-    assert_eq!(calls.get(), calls_before, "handler should not be called when the breaker is open");
+    assert_eq!(calls.get(), calls_before, "an open breaker must not call the handler");
 }
 
-// ── Hedging reduces tail latency ─────────────────────────────────
+// Hedging returns a later successful attempt.
 
 const HEDGING_DELAY: Duration = Duration::from_millis(100);
 
@@ -308,15 +301,15 @@ fn create_hedging_client(calls: Calls, responses: Vec<StatusCode>) -> HttpClient
 #[tokio::test]
 async fn hedging_returns_success_response() {
     let calls = Calls::new();
-    // First attempt: 500 (transient) → hedged attempt: 200 OK.
+    // The first attempt returns 500. The hedge returns 200 OK.
     let client = create_hedging_client(calls.clone(), vec![StatusCode::INTERNAL_SERVER_ERROR, StatusCode::OK]);
 
     let response = client.get("https://example.com").fetch().await.unwrap();
 
-    // The hedged attempt should have returned 200 OK.
+    // The result comes from the successful hedge.
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Both attempts should have been dispatched (original + 1 hedge).
+    // Dispatch the original request and one hedge.
     assert_eq!(calls.get(), 2);
 }
 
@@ -324,23 +317,22 @@ async fn hedging_returns_success_response() {
 #[tokio::test]
 async fn hedging_returns_first_success_immediately() {
     let calls = Calls::new();
-    // First attempt succeeds right away — no hedge needed.
+    // The first attempt succeeds, so no hedge starts.
     let client = create_hedging_client(calls.clone(), vec![StatusCode::OK, StatusCode::OK]);
 
     let response = client.get("https://example.com").fetch().await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    // Only the initial attempt should have been dispatched.
-    assert_eq!(calls.get(), 1, "no hedge should fire when the first attempt succeeds");
+    // Dispatch only the initial attempt.
+    assert_eq!(calls.get(), 1, "a successful first attempt must not start a hedge");
 }
 
-// ── Fallback router ──────────────────────────────────────────────
+// Fallback routing.
 
 const PRIMARY_HOST: &str = "primary.example.com";
 const SECONDARY_HOST: &str = "secondary.example.com";
 
-/// Tracks per-host invocations of the fake handler so the test can assert
-/// that both the primary and the fallback endpoints were exercised.
+/// Counts fake-handler calls for each host.
 #[derive(Clone, Default)]
 struct HostCalls {
     primary: Arc<AtomicUsize>,
@@ -353,9 +345,8 @@ async fn fallback_router_recovers_when_primary_is_unavailable() {
     let calls = HostCalls::default();
     let handler_calls = calls.clone();
 
-    // Primary always fails with an `unavailable` error so the retry layer in
-    // the standard pipeline (which enables `handle_unavailable` whenever the
-    // router exposes alternatives) routes the next attempt to the fallback.
+    // The primary returns unavailable. Because the router has an alternative, the retry layer
+    // routes the next attempt to the fallback.
     let handler = FakeHandler::from_fn(move |req| match req.uri().host() {
         Some(PRIMARY_HOST) => {
             handler_calls.primary.fetch_add(1, Ordering::Relaxed);
@@ -385,19 +376,18 @@ async fn fallback_router_recovers_when_primary_is_unavailable() {
     let response = client.get("/foo").fetch().await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    // One retry was needed: the initial attempt hit the primary (unavailable),
-    // the second attempt hit the fallback and succeeded.
+    // The initial attempt uses the primary. One retry uses the fallback and succeeds.
     let attempt = response.extensions().get::<Attempt>().copied().unwrap();
     assert_eq!(attempt, Attempt::new(1, false));
     assert_eq!(
         calls.primary.load(Ordering::Relaxed),
         1,
-        "primary endpoint should have been attempted exactly once"
+        "the primary endpoint must receive exactly one attempt"
     );
     assert_eq!(
         calls.secondary.load(Ordering::Relaxed),
         1,
-        "fallback endpoint should have served the request exactly once"
+        "the fallback endpoint must serve the request exactly once"
     );
 }
 
@@ -407,12 +397,11 @@ async fn hedging_does_not_clone_unsafe_methods() {
     let calls = Calls::new();
     let client = create_hedging_client(calls.clone(), vec![StatusCode::INTERNAL_SERVER_ERROR, StatusCode::OK]);
 
-    // POST is not safe — the default clone strategy refuses to clone it,
-    // so no hedged attempt is sent and we get the 500 response.
+    // The default clone strategy does not clone POST, so no hedge starts.
     let response = client.post("https://example.com").fetch().await.unwrap();
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    assert_eq!(calls.get(), 1, "unsafe method should not produce a hedged attempt");
+    assert_eq!(calls.get(), 1, "an unsafe method must not start a hedge");
 }
 
 testing_aids::init_tracing!();
