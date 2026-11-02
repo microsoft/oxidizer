@@ -19,9 +19,9 @@ use crate::error::{Error, Result};
 
 /// Bounds the amount of immediately-ready work one `poll_next` performs.
 ///
-/// A stream whose source is always ready would otherwise let one poll run until the data ends,
+/// A stream whose source is always ready can otherwise let one poll run until the data ends,
 /// starving the executor's other tasks. The rule is to yield often enough to stay fair while
-/// amortizing the wake machinery over more than a single chunk; the value is a conservative
+/// amortizing the wake machinery over more than one chunk. The value is a conservative
 /// starting point, not a measured optimum, and matches the engine's per-`pull` step budget so the
 /// two layers bound work on the same scale.
 const MAX_OPERATIONS_PER_POLL: usize = 64;
@@ -31,9 +31,9 @@ const MAX_OPERATIONS_PER_POLL: usize = 64;
 /// The source is polled only when the engine has nothing left to give, so a slow consumer never
 /// causes unbounded buffering.
 ///
-/// `finished` latches once the stream has yielded its last item. Without it, a failing engine would
-/// report the same error on every subsequent poll, and a caller that collects the stream would
-/// accumulate errors until it ran out of memory.
+/// `finished` latches after the stream yields its last item. Without it, a failing engine can
+/// report the same error on every later poll. A caller that collects the stream can
+/// accumulate errors until it runs out of memory.
 fn poll_compression<S, C, E>(
     mut source: Pin<&mut S>,
     compression: &mut C,
@@ -51,9 +51,9 @@ where
         return Poll::Ready(None);
     }
 
-    // Latches when the source has run dry and `end_input` has been signalled. A conforming engine
+    // Latches when the source runs dry and the adapter signals `end_input`. A conforming engine
     // answers the next `pull` with output or `Done`, never with another request for input, so a
-    // second `NeedInput` means the engine is not honouring the contract. Without this the loop would
+    // second `NeedInput` means that the engine does not honor the contract. Without this, the loop can
     // poll the exhausted source again, re-signal end of input, and keep waking itself: bounded per
     // poll, but a livelock across them. `process` rejects the same sequence outright.
     let mut input_ended = false;
@@ -116,7 +116,7 @@ pin_project! {
     /// Compresses or decompresses a stream of [`BytesView`] values.
     ///
     /// Construct it with [`CompressionStream::compress`] or [`CompressionStream::decompress`].
-    /// Both the source and the engine retain their concrete types; this adapter performs no boxing.
+    /// The source and engine retain their concrete types. This adapter performs no boxing.
     ///
     /// The source yields `Result<BytesView, E>` rather than bare views, for any `E` that converts
     /// into a boxed `std::error::Error + Send + Sync`. A source failure ends the stream, reported as
@@ -202,14 +202,14 @@ where
     ///
     /// # Security
     ///
-    /// This adapter adds no bounds of its own; it keeps whatever the supplied decompressor was
-    /// built with, and hands every chunk straight back rather than accumulating. A decompressor
-    /// built with its format's `new` therefore carries only that format's ratio bound. If the
-    /// consumer buffers what this yields, build the decompressor with its `builder` and set
+    /// This adapter adds no bounds. It keeps the bounds of the supplied decompressor and returns
+    /// each chunk instead of accumulating it. A decompressor built with its format's `new`
+    /// therefore carries only that format's ratio bound. If the consumer buffers these chunks,
+    /// build the decompressor with its `builder` and set
     /// [`max_output_len`][crate::DecompressorLimits::max_output_len] to what that consumer
     /// can afford.
     ///
-    /// An output cap is not the whole story for a format that joins concatenated streams -- gzip
+    /// An output cap is not sufficient for a format that joins concatenated streams. Gzip
     /// and zstd do so by default. Cumulative output is what
     /// [`max_output_len`][crate::DecompressorLimits::max_output_len] bounds, so a long run
     /// of small or empty members can keep decoding without ever reaching it. Bound the member count
@@ -217,7 +217,7 @@ where
     /// joining off with [`multi_stream(false)`][crate::DecompressorBuilder::multi_stream].
     ///
     /// Output chunks are provisional until the stream ends, because a checksum or trailer can
-    /// reject the compressed stream after earlier bytes have been returned.
+    /// reject the compressed stream after the adapter returns earlier bytes.
     ///
     /// # Examples
     ///
@@ -346,12 +346,11 @@ mod tests {
         stream::iter(chunks.into_iter().map(Ok))
     }
 
-    /// Caps the polls any test here may need.
+    /// Caps the polls that a test can use.
     ///
     /// A conforming stream terminates, so exceeding this means the code under test is spinning or
-    /// emitting endlessly. Draining without a bound would hang or exhaust memory instead, and a
-    /// hanging test reports nothing at all -- which is also what stops mutation testing from
-    /// reaching a verdict rather than a timeout.
+    /// emitting endlessly. Draining without a bound can hang or exhaust memory. A hanging test
+    /// makes mutation testing time out instead of reaching a verdict.
     const MAX_POLLS: usize = 10_000;
 
     /// A waker that records whether it was asked to wake anything.
@@ -502,7 +501,7 @@ mod tests {
         assert_eq!(
             std::error::Error::source(&error).map(ToString::to_string),
             Some("transport died".to_owned()),
-            "the original failure should remain reachable"
+            "the original failure must remain reachable"
         );
     }
 
