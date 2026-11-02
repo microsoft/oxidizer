@@ -13,30 +13,28 @@
 
 </div>
 
-Unstable I/O driver hosting utilities for the Arty runtime.
+Hosts I/O drivers for the unstable Arty runtime.
 
-This crate is implementation infrastructure for [`arty`][__link0].
-Applications and libraries should use `arty` instead of depending on this
-crate directly.
+This crate supports [`arty`][__link0]. For applications and
+libraries, use `arty` instead of depending on this crate directly.
 
-The items are public because Arty consumes them across a crate boundary.
-They do not form a standalone stability or compatibility promise.
+Arty uses these public items across a crate boundary. The items do not form
+a standalone stable API.
 
 ## Quick start
 
-Clone the runtime-wide registry for each worker, then create its driver host
-with that worker’s thread coordinate:
+Create one [`IoRuntime`][__link1] for the runtime. Clone it for each worker, then
+create a [`DriverHost`][__link2] with the worker’s thread coordinate:
 
 ```rust
-// One runtime-wide value owns the shared context registry and telemetry sink.
+// One value owns the shared context registry and telemetry sink.
 let runtime = IoRuntime::new(Sink::noop());
 let worker = ThreadBuilder::default().build(std::thread::current().id());
 
-// Each worker receives a clone and constructs its host on the thread named
-// by the worker coordinate.
+// Each worker creates its host on the thread that its coordinate identifies.
 let host = runtime.clone().driver_host(worker, Waker::noop().clone())?;
 
-// The runtime calls this from its worker loop with the available wait time.
+// The worker loop supplies the available wait time.
 host.execute_cycle(Duration::ZERO)?;
 ```
 
@@ -46,4 +44,7 @@ host.execute_cycle(Duration::ZERO)?;
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_host">source code</a>.
 </sub>
 
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbJ2aQtYLoZPIbqsQr94rGs5QbLqqiU9bMpXEb2Rsmum1bD65hZIGCbGFydHlfaW9faG9zdGUwLjIuMA
  [__link0]: https://docs.rs/arty
+ [__link1]: https://docs.rs/arty_io_host/0.2.0/arty_io_host/?search=IoRuntime
+ [__link2]: https://docs.rs/arty_io_host/0.2.0/arty_io_host/?search=DriverHost

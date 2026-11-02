@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Public behavioral coverage for the unstable Arty driver host boundary.
+//! Tests the public behavior of the unstable Arty driver host.
 
 #![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
 
@@ -37,8 +37,8 @@ struct State {
     nested_cycle_errors: Mutex<Vec<String>>,
     driver_waker: Mutex<Option<Waker>>,
     panic_shutdown: Mutex<Option<Kind>>,
-    // These test-only flags and counters use SeqCst for straightforward
-    // observations; channels and joins provide explicit cross-thread phasing.
+    // These test-only values use SeqCst for clear observations. Channels and
+    // joins control the order of work across threads.
     context_calls: AtomicUsize,
     format_calls: AtomicUsize,
     shutdowns: AtomicUsize,
@@ -95,8 +95,9 @@ impl IoContext for ReentrantContext {
     }
 }
 
-/// Retrieves its own type through a second host during driver construction,
-/// after the shared context has been published.
+/// Requests its own type from a second host during driver creation.
+///
+/// The shared context is available before this request.
 #[derive(Clone)]
 struct SameTypeReentrantContext {
     state: Arc<State>,
@@ -132,8 +133,9 @@ impl IoContext for SameTypeReentrantContext {
     }
 }
 
-/// Retrieves its own type through a second host during context construction,
-/// before the shared context has been published.
+/// Requests its own type from a second host during context creation.
+///
+/// The shared context is not available before this request.
 #[derive(Clone)]
 struct SameTypeContextReentrantContext {
     state: Arc<State>,
@@ -294,7 +296,7 @@ impl<const SECOND: bool> IoContext for Context<SECOND> {
     }
 }
 
-/// Intentionally lacks `Clone` to verify that context options are moved.
+/// Does not implement `Clone`, which proves that context options are moved.
 struct MoveOnlyOptions(Arc<State>);
 
 #[derive(Clone)]
@@ -414,30 +416,31 @@ struct CloneHostWake {
 fn clone_host_waker(host_interrupt: Waker, cloned: Arc<AtomicBool>) -> Waker {
     let state = Arc::new(CloneHostWake { host_interrupt, cloned });
     let raw = RawWaker::new(Arc::into_raw(state).cast(), &CLONE_HOST_VTABLE);
-    // SAFETY: CLONE_HOST_VTABLE maintains one Arc strong reference for every RawWaker.
+    // SAFETY: CLONE_HOST_VTABLE keeps one strong Arc reference for each RawWaker.
     unsafe { Waker::from_raw(raw) }
 }
 
 unsafe fn clone_host_waker_raw(data: *const ()) -> RawWaker {
-    // SAFETY: data was created by Arc::into_raw in clone_host_waker or this function.
+    // SAFETY: data came from Arc::into_raw in clone_host_waker. Each source or
+    // cloned RawWaker owns one strong reference, so the pointer remains valid.
     let state = unsafe { &*data.cast::<CloneHostWake>() };
     state.cloned.store(true, Ordering::SeqCst);
     state.host_interrupt.wake_by_ref();
-    // SAFETY: the source RawWaker still owns a strong reference, and the new
-    // RawWaker takes ownership of the incremented reference.
+    // SAFETY: The source RawWaker owns a strong reference. The new RawWaker
+    // owns the added reference.
     unsafe { Arc::increment_strong_count(data.cast::<CloneHostWake>()) };
     RawWaker::new(data, &CLONE_HOST_VTABLE)
 }
 
 unsafe fn wake_host_waker(data: *const ()) {
-    // SAFETY: consuming wake owns one Arc strong reference.
+    // SAFETY: A consuming wake owns one strong Arc reference.
     drop(unsafe { Arc::<CloneHostWake>::from_raw(data.cast()) });
 }
 
 unsafe fn wake_host_waker_by_ref(_data: *const ()) {}
 
 unsafe fn drop_host_waker(data: *const ()) {
-    // SAFETY: dropping the RawWaker releases its owned Arc strong reference.
+    // SAFETY: Dropping the RawWaker releases its strong Arc reference.
     drop(unsafe { Arc::<CloneHostWake>::from_raw(data.cast()) });
 }
 
@@ -755,7 +758,8 @@ fn panicking_driver_initialization_preserves_existing_drivers_for_shutdown() {
     let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
     state.panic_initialization.store(true, Ordering::SeqCst);
 
-    // Providers do not need to support initialization retries. Catch only to inspect teardown.
+    // Providers do not need to support initialization retries. Catch the panic
+    // only to inspect shutdown.
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = host.context::<Context<true>>(Arc::clone(&state));
     }));
@@ -818,7 +822,8 @@ fn context_construction_panics_preserve_existing_drivers_for_shutdown() {
     let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
     state.panic_context.store(true, Ordering::SeqCst);
 
-    // Providers do not need to support initialization retries. Catch only to inspect teardown.
+    // Providers do not need to support initialization retries. Catch the panic
+    // only to inspect shutdown.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = host.context::<Context<true>>(Arc::clone(&state));
     }));

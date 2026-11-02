@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Compile-time coverage for the approved unstable Arty host surface.
+//! Checks the approved unstable Arty host API at compile time.
 
 use std::task::Waker;
 

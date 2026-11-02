@@ -136,15 +136,14 @@ impl Registry {
     }
 }
 
-/// Shared registry of thread-neutral I/O contexts for one Arty runtime.
+/// Shares thread-neutral I/O contexts across one Arty runtime.
 ///
-/// This type is unstable Arty implementation infrastructure. Applications and
-/// libraries should use `arty` instead.
+/// This type supports the unstable Arty runtime. For applications and
+/// libraries, use `arty` instead of depending on this crate directly.
 ///
-/// The first registered context type is assigned the primary role. Later
-/// context types are assigned the secondary role. Each worker-local
-/// [`DriverHost`](crate::DriverHost) creates drivers lazily when it first
-/// accesses a registered context type.
+/// The first context type gets the primary role. Each later type gets the
+/// secondary role. A worker-local [`DriverHost`](crate::DriverHost) creates a
+/// driver when it first requests a context type.
 #[derive(Clone)]
 pub struct IoRuntime {
     registry: Arc<Mutex<Registry>>,
@@ -168,7 +167,7 @@ impl PartialEq for IoRuntime {
 impl Eq for IoRuntime {}
 
 impl IoRuntime {
-    /// Creates an empty runtime-wide I/O context registry.
+    /// Creates an empty shared I/O context registry with a telemetry sink.
     #[must_use]
     pub fn new(sink: Sink) -> Self {
         Self {
@@ -179,11 +178,11 @@ impl IoRuntime {
         }
     }
 
-    /// Creates a worker-local driver host for one Arty async worker.
+    /// Creates a driver host for the current Arty worker.
     ///
-    /// The supplied thread must identify the worker calling this method. The
-    /// runtime relocates its worker-local telemetry state to that thread before
-    /// constructing the host.
+    /// `thread` must identify the worker that calls this method. Before it
+    /// creates the host, the runtime relocates its worker-local telemetry state
+    /// to that thread.
     ///
     /// # Errors
     ///
