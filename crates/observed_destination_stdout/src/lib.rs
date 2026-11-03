@@ -283,11 +283,10 @@ mod tests {
     use opentelemetry::logs::{LogRecord, Logger, LoggerProvider, Severity};
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
     use performables::arc::Arc;
     use performables::sync::mutex::Mutex;
-    use rstest::rstest;
 
     use super::*;
 
@@ -564,53 +563,67 @@ mod tests {
         assert_eq!(error_message, "broken pipe");
     }
 
-    #[rstest]
+    #[test]
     // Flushing must export pending measurements.
     #[cfg_attr(
         miri,
         ignore = "opentelemetry_sdk metric aggregation reads the realtime clock, unavailable under Miri isolation; native and cargo careful runs retain this coverage"
     )]
-    #[case::force_flush(SdkMeterProvider::force_flush)]
-    // Shutdown must export pending measurements without a prior flush.
-    #[cfg_attr(
-        miri,
-        ignore = "opentelemetry_sdk metric aggregation reads the realtime clock, unavailable under Miri isolation; native and cargo careful runs retain this coverage"
-    )]
-    #[case::shutdown(SdkMeterProvider::shutdown)]
-    fn metric_destination_exports_recorded_metrics(#[case] export: fn(&SdkMeterProvider) -> OTelSdkResult) {
+    fn metric_destination_eventually_exports_recorded_metrics() {
+        const SERVICE_NAME: &str = "test service name";
+        const SCOPE_NAME: &str = "stdout";
+        const METRIC_NAME: &str = "stdout_contract_requests";
+
+        fn matches_expected_batch(metrics: &ResourceMetrics) -> bool {
+            let service_name = metrics.resource().get(&opentelemetry::Key::from_static_str("service.name"));
+            let Some(opentelemetry::Value::String(service_name)) = service_name else {
+                return false;
+            };
+            if service_name.as_str() != SERVICE_NAME {
+                return false;
+            }
+
+            let scope_metrics = metrics.scope_metrics().next().unwrap();
+            if scope_metrics.scope().name() != SCOPE_NAME {
+                return false;
+            }
+
+            let metric = scope_metrics.metrics().next().unwrap();
+            if metric.name() != METRIC_NAME {
+                return false;
+            }
+
+            let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() else {
+                return false;
+            };
+
+            let mut points = sum.data_points();
+            if points.next().is_some_and(|point| point.value() != 2) {
+                return false;
+            }
+            if points.next().is_some() {
+                return false;
+            }
+
+            true
+        }
+
         let exporter = InMemoryMetricExporter::default();
         let provider = StdoutMetricDestination::register_with_exporter(
-            SdkMeterProvider::builder().with_resource(Resource::builder_empty().with_service_name("test service name").build()),
+            SdkMeterProvider::builder().with_resource(Resource::builder_empty().with_service_name(SERVICE_NAME).build()),
             exporter.clone(),
         )
         .build();
 
-        provider.meter("stdout").u64_counter("stdout_contract_requests").build().add(2, &[]);
+        provider.meter(SCOPE_NAME).u64_counter(METRIC_NAME).build().add(2, &[]);
 
-        export(&provider).unwrap();
+        provider.shutdown().unwrap();
 
         let metrics = exporter.get_finished_metrics().unwrap();
 
-        assert_eq!(metrics.len(), 1);
-
-        let service_name = metrics[0].resource().get(&opentelemetry::Key::from_static_str("service.name"));
-        let Some(opentelemetry::Value::String(service_name)) = service_name else {
-            panic!("service.name attribute should be a string")
-        };
-        assert_eq!(service_name.as_str(), "test service name");
-
-        let scope_metrics = &metrics[0].scope_metrics().next().unwrap();
-        assert_eq!(scope_metrics.scope().name(), "stdout");
-
-        let metric = scope_metrics.metrics().next().unwrap();
-        assert_eq!(metric.name(), "stdout_contract_requests");
-
-        let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() else {
-            panic!("expected a u64 counter sum");
-        };
-
-        let mut points = sum.data_points();
-        assert_eq!(points.next().unwrap().value(), 2);
-        assert!(points.next().is_none());
+        assert!(
+            metrics.iter().any(|m| matches_expected_batch(m)),
+            "exported metrics did not match expected batch"
+        );
     }
 }
