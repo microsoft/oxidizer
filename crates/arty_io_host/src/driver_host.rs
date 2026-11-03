@@ -141,15 +141,15 @@ impl Wake for DriverInterrupt {
     }
 }
 
-/// Worker-local I/O driver host used by the Arty runtime.
+/// Hosts I/O drivers for one Arty worker.
 ///
-/// This type is unstable Arty implementation infrastructure. Applications and
-/// libraries should use `arty` instead.
+/// This type supports the unstable Arty runtime. For applications and
+/// libraries, use `arty` instead of depending on this crate directly.
 ///
-/// Dropping the host clears its interrupt target, then attempts to shut down
-/// every secondary driver followed by the primary. Explicit shutdown errors are
-/// emitted through the configured sink and do not skip remaining drivers.
-/// Panics from drivers or diagnostics propagate.
+/// Dropping the host clears its interrupt target. It then attempts to shut down
+/// each secondary driver before the primary driver. A returned shutdown error
+/// emits a diagnostic but does not stop the remaining shutdowns. A panic from a
+/// driver or diagnostic stops shutdown and propagates.
 pub struct DriverHost {
     runtime: IoRuntime,
     thread: Thread,
@@ -179,15 +179,15 @@ impl DriverHost {
         }
     }
 
-    /// Returns a waker that interrupts a waiting primary driver.
+    /// Creates a waker that interrupts the primary driver while it waits.
     ///
-    /// Clones remain safe after the host is dropped and become inert.
+    /// The waker and its clones become inert after the host is dropped.
     #[must_use]
     pub fn waker(&self) -> Waker {
         Waker::from(Arc::clone(&self.interrupt))
     }
 
-    /// Returns whether this worker has initialized its primary driver.
+    /// Reports whether this worker has a primary driver.
     ///
     /// # Panics
     ///
@@ -202,18 +202,20 @@ impl DriverHost {
             .is_some()
     }
 
-    /// Returns this worker's context of type `C`, creating its local driver on
-    /// first access.
+    /// Returns this worker's context of type `C`.
+    ///
+    /// The first request for this context type creates its local driver.
     ///
     /// # Errors
     ///
-    /// Returns a driver error when nested context access is attempted or driver
-    /// construction fails.
+    /// Returns a driver error if the runtime failed or access overlaps a driver
+    /// operation. It also returns an error for nested initialization or a
+    /// driver creation failure.
     ///
     /// # Panics
     ///
-    /// Panics from provider code, context cloning or relocation, diagnostics,
-    /// and violated host invariants propagate.
+    /// Panics from provider code, context cloning, context relocation,
+    /// diagnostics, and violated host invariants propagate.
     pub fn context<C>(&self, options: C::ContextOptions) -> Result<C, DriverError>
     where
         C: IoContext,
@@ -275,8 +277,7 @@ impl DriverHost {
         Ok(context)
     }
 
-    /// Consumes one driver already detached from the host and reports its
-    /// provider-controlled shutdown result.
+    /// Shuts down one driver that is already detached from the host.
     fn shutdown_local(&self, local: LocalContext) {
         let context = IoContextName(local.context_name);
         let role = IoDriverRoleLabel::from(local.role);
@@ -295,8 +296,7 @@ impl DriverHost {
         }
     }
 
-    /// Detaches all host-owned drivers and releases the `RefCell` borrow before
-    /// invoking provider shutdown callbacks.
+    /// Detaches all drivers before it calls provider shutdown callbacks.
     fn shutdown_drivers(&self) {
         self.interrupt.clear();
         let mut drivers = self.drivers.borrow_mut();
@@ -341,7 +341,7 @@ impl DriverHost {
         })
     }
 
-    /// Executes one driver cycle, running secondary drivers before the primary.
+    /// Runs one cycle of each secondary driver, then the primary driver.
     ///
     /// # Errors
     ///
@@ -351,8 +351,8 @@ impl DriverHost {
     ///
     /// Panics from drivers, diagnostics, and violated host invariants
     /// propagate.
-    // The runtime calls this exported wrapper on every worker cycle, making it
-    // a cross-crate hot path under docs/performance.md's first inline rule.
+    // The runtime calls this exported wrapper on every worker cycle. It is a
+    // cross-crate hot path under the first inline rule in docs/performance.md.
     #[inline]
     pub fn execute_cycle(&self, max_wait: Duration) -> Result<(), DriverError> {
         let mut drivers = self

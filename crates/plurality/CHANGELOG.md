@@ -5,6 +5,11 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-11-02
+
+- Update the Gungraun requirement for benchmarks. Collection APIs and behavior do not change.
+- Update the development requirement for `gungraun` from `=0.19.4` to `=0.20.0`.
+
 ## [0.2.3] - 2026-10-20
 
 - Refresh published implementation and performance material used by the executor pool migration.

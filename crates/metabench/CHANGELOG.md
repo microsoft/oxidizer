@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0] - 2026-11-02
+
+- Breaking: Replace temporary borrows with owned inputs in native benchmark cases. Gungraun and its
+  runner now use version 0.20.0.
+- Read Gungraun schema-v7 summaries and accept boolean `--test` arguments to select smoke mode,
+  which runs benchmarks without measurements.
+- Generated Gungraun native perf callbacks run one at a time in each process. Nested callbacks panic.
+- After a callback panics, later callbacks cannot reuse the shared perf controls.
+- Outside Linux, register native benchmarks with the adapters used to inspect benchmark cases.
+  Gungraun still runs only on Linux.
+- Update the requirement for `gungraun` from `=0.19.4` to `=0.20.0`.
+- Update the requirement for `gungraun-runner` from `=0.19.4` to `=0.20.0`.
+- Update the requirement for local package `metabench_macros` from `=0.2.1` to `=0.3.0`.
+- Update the requirement for local package `ohno` from `0.5.3` to `0.5.4`.
+
 ## [0.2.1] - 2026-10-20
 
 - Published local dependency requirement(s) will move: metabench_macros, ohno.

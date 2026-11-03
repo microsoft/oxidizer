@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0] - 2026-11-02
+
+- Update the Azure integration to use the new Anyspawn and tick versions. This release does not
+  change the package's source code.
+- Update the requirement for local package `anyspawn` from `0.9.2` to `0.10.0`.
+- Update the requirement for local package `tick` from `0.8.0` to `0.9.0`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
 ## [0.5.0] - 2026-10-20
 
 - The public API exposes types from `tick`; upgrading to its incompatible release changes those public type identities.

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.30.0] - 2026-11-02
+
+- Reuse enrichment nodes, which hold extra event context, and storage used to restore that context
+  across future polls. This reduces allocations.
+- Reduce the work needed to process sinks and enrichment. Event routing, enrichment behavior, and
+  accepted macro inputs do not change.
+- Update the public tick dependency. Use version 0.30.0 for all Observed packages.
+- Update the requirement for local package `data_privacy` from `0.13.1` to `0.13.2`.
+- Update the requirement for local package `observed_macros` from `=0.29.0` to `=0.30.0`.
+- Update the requirement for local package `ohno` from `0.5.3` to `0.5.4`.
+- Update the requirement for local package `performables` from `0.3.0` to `0.3.1`.
+- Update the requirement for local package `thread_aware` from `0.12.1` to `0.12.2`.
+- Update the requirement for local package `tick` from `0.8.0` to `0.9.0`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
 ## [0.29.0] - 2026-10-20
 
 - The public API exposes types from `tick`; upgrading to its incompatible release changes those public type identities.

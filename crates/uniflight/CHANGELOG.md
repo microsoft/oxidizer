@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1] - 2026-11-02
+
+- Update synchronization and published Tokio test requirements. The behavior that combines
+  concurrent requests does not change.
+- Update the requirement for local package `performables` from `0.3.0` to `0.3.1`.
+- Update the requirement for local package `thread_aware` from `0.12.1` to `0.12.2`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
 ## [0.8.0] - 2026-10-20
 
 - The public API exposes types from `performables`; upgrading to its incompatible release changes those public type identities.

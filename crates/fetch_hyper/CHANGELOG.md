@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.11.0] - 2026-11-02
+
+- Use `OpaqueMemory` to construct body builders. Keep `GlobalPool` as the default provider.
+- Update transport dependencies to use the new Anyspawn, HTTP Extensions, and tick APIs.
+- Update the requirement for local package `anyspawn` from `0.9.2` to `0.10.0`.
+- Update the requirement for local package `bytesbuf` from `0.12.0` to `0.13.0`.
+- Update the requirement for local package `fetch_tls` from `0.5.0` to `0.5.1`.
+- Update the requirement for local package `http_extensions` from `0.13.0` to `0.14.0`.
+- Update the requirement for local package `layered` from `0.3.8` to `0.3.9`.
+- Update the requirement for local package `ohno` from `0.5.3` to `0.5.4`.
+- Update the requirement for local package `seatbelt` from `0.11.0` to `0.12.0`.
+- Update the requirement for local package `templated_uri` from `0.7.0` to `0.7.1`.
+- Update the requirement for local package `tick` from `0.8.0` to `0.9.0`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
 ## [0.10.0] - 2026-10-20
 
 - Route native-TLS clients through the override-capable connector and migrate exposed Fetch TLS and Tick identities.

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.13.0] - 2026-11-02
+
+- Update dependencies to use the Seismograph 0.4.0 packages. This release does not change the buffer
+  implementation.
+- Update the requirement for local package `performables` from `0.3.0` to `0.3.1`.
+- Update the requirement for local package `plurality` from `0.2.3` to `0.2.4`.
+- Update the requirement for local package `seismograph_io` from `0.3.0` to `0.4.0`.
+- Update the requirement for local package `thread_aware` from `0.12.1` to `0.12.2`.
+- Update the development requirement for `gungraun` from `=0.19.4` to `=0.20.0`.
+
 ## [0.12.0] - 2026-10-20
 
 - The public API exposes types from `seismograph`; upgrading to its incompatible release changes those public type identities.

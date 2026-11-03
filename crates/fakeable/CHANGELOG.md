@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.3] - 2026-11-02
+
+- Update the exact implementation dependency for fixes to builds with different features. Accepted
+  macro inputs and generated public items do not change.
+- Update the requirement for local package `fakeable_impl` from `=0.2.2` to `=0.2.3`.
+
 ## [0.2.2] - 2026-10-20
 
 - Published local dependency requirement(s) will move: fakeable_impl.
