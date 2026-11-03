@@ -97,13 +97,15 @@ pub fn stdout_logs() -> StdoutLogDestinationBuilder {
 
 /// A log destination that writes records to stdout.
 #[derive(bon::Builder, Debug)]
+#[builder(derive(Debug))]
 pub struct StdoutLogDestination {
     /// Sets the minimum log level (default: `Info`).
     #[builder(default = LevelFilter::Info)]
     level: LevelFilter,
 
-    /// Sets the log format configuration controlling which fields are included
-    /// in the output (default: [`LogFormatConfig::default()`]).
+    /// Sets the log format configuration.
+    ///
+    /// Controls which fields are included in the output (default: [`LogFormatConfig::default()`]).
     #[builder(default = LogFormatConfig::default())]
     format_config: LogFormatConfig,
 }
@@ -200,8 +202,6 @@ where
     }
 }
 
-// ─── Stdout metric destination ───────────────────────────────────────────
-
 /// Creates a metric destination that writes to stdout.
 ///
 /// The underlying implementation is the `opentelemetry_stdout` crate's
@@ -209,7 +209,7 @@ where
 /// with an output format that can change.
 ///
 /// Metrics are exported periodically, every 60 seconds by default. Set
-/// `OTEL_METRIC_EXPORT_INTERVAL` to configure the interval. Recording a
+/// `OTEL_METRIC_EXPORT_INTERVAL` to configure the interval (in milliseconds). Recording a
 /// measurement does not write it immediately. Call `force_flush` to export
 /// pending measurements before exit; `shutdown` flushes pending measurements
 /// and stops the periodic reader.
@@ -244,6 +244,7 @@ pub fn stdout_metrics() -> StdoutMetricDestinationBuilder {
 
 /// A metric destination that writes to stdout via the `OTel` stdout exporter.
 #[derive(bon::Builder, Debug)]
+#[builder(derive(Debug))]
 #[expect(
     clippy::empty_structs_with_brackets,
     reason = "This exception is due to Bon's macros that don't allow empty structs to be defined without brackets."
@@ -273,6 +274,7 @@ impl<S: stdout_metric_destination_builder::IsComplete> IntoMetricDestination for
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::fmt::Write as StdFmtWrite;
     use std::io::{Error, ErrorKind, Result as IoResult, sink};
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::sync::mpsc;
@@ -294,7 +296,9 @@ mod tests {
     const TEST_TIMESTAMP_OFFSET: Duration = Duration::from_secs(1_793_353_367);
 
     static_assertions::assert_impl_all!(StdoutLogDestination: UnwindSafe, RefUnwindSafe, Send, Sync);
+    static_assertions::assert_impl_all!(StdoutLogDestinationBuilder: UnwindSafe, RefUnwindSafe, Send, Sync);
     static_assertions::assert_impl_all!(StdoutMetricDestination: UnwindSafe, RefUnwindSafe, Send, Sync);
+    static_assertions::assert_impl_all!(StdoutMetricDestinationBuilder: UnwindSafe, RefUnwindSafe, Send, Sync);
 
     #[derive(Clone, Default)]
     struct RecordingWriter(Arc<Mutex<WriterState>>);
@@ -307,13 +311,6 @@ mod tests {
         fn contents(&self) -> String {
             String::from_utf8(self.0.lock().bytes.clone()).unwrap()
         }
-    }
-
-    #[derive(Default)]
-    struct WriterState {
-        bytes: Vec<u8>,
-        flushes: usize,
-        fail_flush: bool,
     }
 
     impl Write for RecordingWriter {
@@ -332,6 +329,13 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct WriterState {
+        bytes: Vec<u8>,
+        flushes: usize,
+        fail_flush: bool,
+    }
+
     #[test]
     fn formats_processor_debug() {
         let processor = StdoutLogProcessor::new(LogFormatConfig::default(), sink);
@@ -345,8 +349,6 @@ mod tests {
         reason = "the newline is part of the contract and should be kept explicit"
     )]
     fn log_destination_filters_records() {
-        use std::fmt::Write;
-
         for (level_filter, outcomes) in [
             // Ensures that the default level filter is Info
             (
@@ -503,11 +505,13 @@ mod tests {
         let emitter_continue_rx = std::sync::Mutex::new(emitter_continue_rx);
 
         let output = RecordingWriter::default();
-        let output_clone = output.clone();
-        let mut processor = StdoutLogProcessor::new(LogFormatConfig::default(), move || {
-            emitter_started_tx.send(()).unwrap();
-            emitter_continue_rx.lock().unwrap().recv().unwrap();
-            output_clone.clone()
+        let mut processor = StdoutLogProcessor::new(LogFormatConfig::default(), {
+            let output = output.clone();
+            move || {
+                emitter_started_tx.send(()).unwrap();
+                emitter_continue_rx.lock().unwrap().recv().unwrap();
+                output.clone()
+            }
         });
         processor.set_resource(&Resource::builder_empty().build());
 
