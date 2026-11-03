@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0] - 2026-11-02
+
+- Breaking: Pass `OpaqueMemory` instead of `GlobalPool` to the re-exported `WinHttpDeps::builder`.
+- Use the selected memory provider for WinHTTP request and response bodies through the updated
+  implementation package.
+- Update the requirement for local package `fetch_winhttp_impl` from `=0.4.0` to `=0.5.0`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
 ## [0.4.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
