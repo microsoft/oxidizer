@@ -65,11 +65,11 @@ impl HttpClient {
 
     /// Converts an Azure SDK request [`Body`] into a `fetch` [`HttpBody`](fetch::HttpBody).
     ///
-    /// Empty byte bodies use a shared empty body. Non-empty byte bodies are
-    /// wrapped without a copy. Seekable streams become chunk streams.
-    // The empty-body path and the general byte path both report a zero-length
-    // body. A test cannot distinguish a mutation that removes the `is_empty()`
-    // guard.
+    /// Empty byte bodies use an empty body. Non-empty byte bodies are wrapped
+    /// without a copy. Seekable streams become chunk streams.
+    // The empty-body path and the general byte path both transmit a zero-length
+    // body. Killing a mutation that forces `is_empty()` to return `false` would
+    // require a test of the internal body representation, not transport behavior.
     #[cfg_attr(test, mutants::skip)]
     fn to_fetch_body(&self, body: &Body) -> fetch::HttpBody {
         let builder: &fetch::HttpBodyBuilder = self.client.as_ref();
