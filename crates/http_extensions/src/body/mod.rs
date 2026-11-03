@@ -529,6 +529,36 @@ impl HttpBody {
     pub fn into_stream(self) -> impl Stream<Item = Result<BytesView>> {
         self.into_data_stream()
     }
+
+    /// Wraps this body in a custom [`Body`] implementation.
+    ///
+    /// `wrapper` receives this body and returns the custom body, for example one that counts the
+    /// bytes passing through it. The result keeps the idle timeout and the buffer limit of this
+    /// body and adds no other policy, unlike [`HttpBodyBuilder::rewrap`], which fills in missing
+    /// policies from its builder.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # use http_extensions::HttpBodyBuilder;
+    /// # use http_body_util::BodyExt;
+    /// # let builder = HttpBodyBuilder::new_fake();
+    /// let body = builder.text("hello");
+    ///
+    /// // A wrapper that passes each frame on as it is.
+    /// let wrapped = body.wrap(|body| body.map_frame(|frame| frame));
+    /// # }
+    /// # }
+    /// ```
+    pub fn wrap<B>(self, wrapper: impl FnOnce(Self) -> B) -> Self
+    where
+        B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
+    {
+        let options = self.options();
+        Self::from_streaming(Box::pin(wrapper(self).map_err(Into::into)), options)
+    }
 }
 
 impl TryFrom<HttpBody> for BytesView {
@@ -639,6 +669,7 @@ fn check_size_limit(current_size: usize, additional: usize, limit: usize) -> Res
 mod tests {
     use std::pin::pin;
     use std::task::Waker;
+    use std::time::Duration;
 
     use bytes::Bytes;
     use bytesbuf::mem::GlobalPool;
@@ -1177,5 +1208,25 @@ mod tests {
         let chunks: Vec<_> = block_on(body.into_stream().try_collect()).unwrap();
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0], b"stream test");
+    }
+
+    #[test]
+    fn wrap_keeps_the_policies_of_the_body() {
+        let builder = HttpBodyBuilder::new_fake();
+        let strict = HttpBodyOptions::default().buffer_limit(7).timeout(Duration::from_secs(3));
+        let body = builder.stream(futures::stream::empty(), &strict);
+
+        assert_eq!(body.wrap(|body| body).options(), strict);
+    }
+
+    #[test]
+    fn wrap_yields_the_frames_of_the_wrapper() {
+        let builder = HttpBodyBuilder::new_fake();
+        let frame = Frame::data(BytesView::copied_from_slice(b"wrapper", &builder));
+        let body = builder
+            .text("source")
+            .wrap(|_| StreamBody::new(futures::stream::iter([Ok::<_, HttpError>(frame)])));
+
+        assert_eq!(block_on(body.into_bytes()).unwrap(), b"wrapper");
     }
 }
