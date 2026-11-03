@@ -3,7 +3,7 @@
 
 [package]
 name = "performables"
-version = "0.3.0"
+version = "0.3.1"
 description = "Performance-oriented ownership and asynchronous synchronization primitives."
 readme = "README.md"
 keywords = ["async", "concurrency", "synchronization", "telemetry"]

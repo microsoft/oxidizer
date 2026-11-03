@@ -134,22 +134,22 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVOOkiwtK_84bGyYJldq1SSMbSs5R1-8kbtkbwouPZ79D401hZIKCZGFydHllMC41LjCCa2FydHlfbWFjcm9zZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVOOkiwtK_84bGyYJldq1SSMbSs5R1-8kbtkbwouPZ79D401hZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link1]: https://docs.rs/arty/0.5.0/arty/?search=core::ThreadAware
- [__link10]: https://docs.rs/arty/0.5.0/arty/time/index.html
- [__link11]: https://docs.rs/arty/0.5.0/arty/io/index.html
- [__link12]: https://docs.rs/arty/0.5.0/arty/core/index.html
- [__link13]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
- [__link14]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
- [__link15]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
- [__link16]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=test
- [__link17]: https://docs.rs/arty/0.5.0/arty/?search=time::ClockControl
- [__link2]: https://docs.rs/arty_macros/0.5.0/arty_macros/?search=main
- [__link3]: https://docs.rs/arty/0.5.0/arty/?search=task::JoinError
- [__link4]: https://docs.rs/arty/0.5.0/arty/?search=task::Scheduler::spawn
- [__link5]: https://docs.rs/arty/0.5.0/arty/?search=task::Scheduler::spawn_anywhere
- [__link6]: https://docs.rs/arty/0.5.0/arty/?search=task::Scheduler::spawn_at
- [__link7]: https://docs.rs/arty/0.5.0/arty/?search=core::ThreadAware
- [__link8]: https://docs.rs/arty/0.5.0/arty/runtime/index.html
- [__link9]: https://docs.rs/arty/0.5.0/arty/task/index.html
+ [__link1]: https://docs.rs/arty/0.6.0/arty/?search=core::ThreadAware
+ [__link10]: https://docs.rs/arty/0.6.0/arty/time/index.html
+ [__link11]: https://docs.rs/arty/0.6.0/arty/io/index.html
+ [__link12]: https://docs.rs/arty/0.6.0/arty/core/index.html
+ [__link13]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
+ [__link14]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
+ [__link15]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
+ [__link16]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
+ [__link17]: https://docs.rs/arty/0.6.0/arty/?search=time::ClockControl
+ [__link2]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
+ [__link3]: https://docs.rs/arty/0.6.0/arty/?search=task::JoinError
+ [__link4]: https://docs.rs/arty/0.6.0/arty/?search=task::Scheduler::spawn
+ [__link5]: https://docs.rs/arty/0.6.0/arty/?search=task::Scheduler::spawn_anywhere
+ [__link6]: https://docs.rs/arty/0.6.0/arty/?search=task::Scheduler::spawn_at
+ [__link7]: https://docs.rs/arty/0.6.0/arty/?search=core::ThreadAware
+ [__link8]: https://docs.rs/arty/0.6.0/arty/runtime/index.html
+ [__link9]: https://docs.rs/arty/0.6.0/arty/task/index.html

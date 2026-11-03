@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 /// Cumulative output below this size is never rejected by the ratio guard.
 ///
 /// A container carries a fixed header and trailer, and a short stream's compressed form can easily
-/// be larger than its payload. Without a floor, a legitimate two-byte stream would look like an
+/// be larger than its payload. Without a floor, a valid two-byte stream can look like an
 /// infinitely bad expansion ratio and be rejected. 32 KiB is far below any size at which a
 /// decompression bomb becomes a memory-exhaustion risk.
 const RATIO_FLOOR_BYTES: u64 = 32 * 1024;
@@ -16,11 +16,11 @@ const RATIO_FLOOR_BYTES: u64 = 32 * 1024;
 /// The cap the buffering conveniences put on total decompressed output.
 ///
 /// A ratio bound cannot tell a bomb from legitimate highly-compressible data, so an absolute cap is
-/// what actually bounds untrusted input. It applies where the crate accumulates a whole result --
+/// what actually bounds untrusted input. It applies where the crate accumulates a complete result:
 /// each format's `decompress` and `decompress_with_limits`, and the same pair on
-/// [`Format`][crate::format::Format] -- because those are the paths where a bomb exhausts the caller's
-/// memory. A decompressor driven incrementally hands every chunk straight back, so a cumulative
-/// bound there would cut off long streams that never buffer more than one chunk.
+/// [`Format`][crate::format::Format]. These paths let a decompression bomb exhaust the caller's
+/// memory. A decompressor driven incrementally returns each chunk to the caller. A cumulative
+/// bound can reject long streams even when the caller does not retain earlier chunks.
 ///
 /// 64 MiB is a policy guardrail for the common case, not a universal safety guarantee: a server
 /// decompressing many bodies at once still has to bound its own concurrency. A caller who buffers
@@ -28,11 +28,11 @@ const RATIO_FLOOR_BYTES: u64 = 32 * 1024;
 #[cfg(not(test))]
 pub(crate) const DEFAULT_MAX_OUTPUT_LEN: u64 = SHIPPED_MAX_OUTPUT_LEN;
 
-/// The shipped cap is [`SHIPPED_MAX_OUTPUT_LEN`]; see the definition above for what it is for.
+/// The shipped cap is [`SHIPPED_MAX_OUTPUT_LEN`]. See its definition for the purpose of this cap.
 ///
 /// Lowered to 1 MiB for the crate's own tests. Every case that has to cross this bound builds a
 /// payload derived from it, so the shipped value costs the suite a 64 MiB allocation per such case
-/// -- and one brotli compression of that size -- for no added confidence. What those tests check is
+/// and one brotli compression of that size, for no added confidence. Those tests determine
 /// that the bound is applied, resolved and overridden correctly, and none of that depends on its
 /// magnitude. They state the bound through this constant rather than a literal, so they follow it
 /// down.
@@ -40,7 +40,7 @@ pub(crate) const DEFAULT_MAX_OUTPUT_LEN: u64 = SHIPPED_MAX_OUTPUT_LEN;
 pub(crate) const DEFAULT_MAX_OUTPUT_LEN: u64 = 1024 * 1024;
 
 /// What a real build caps buffered output at, named separately from [`DEFAULT_MAX_OUTPUT_LEN`] so
-/// that a test build -- which lowers that constant -- can still assert the documented figure.
+/// that a test build, which lowers that constant, can still assert the documented figure.
 pub(crate) const SHIPPED_MAX_OUTPUT_LEN: u64 = 64 * 1024 * 1024;
 
 /// The cap the buffering conveniences put on concatenated stream count.
@@ -56,7 +56,7 @@ pub(crate) const SHIPPED_MAX_OUTPUT_LEN: u64 = 64 * 1024 * 1024;
 /// is a policy guardrail chosen for that separation rather than a measured threshold.
 pub(crate) const DEFAULT_MAX_STREAMS: u64 = 1024;
 
-/// Bounds on how much data decompression may produce.
+/// Bounds on how much data decompression can produce.
 ///
 /// Compressed data can expand by orders of magnitude, so a decompressor pointed at untrusted input is a
 /// memory-exhaustion vector.
@@ -67,14 +67,15 @@ pub(crate) const DEFAULT_MAX_STREAMS: u64 = 1024;
 ///
 /// | Format | Default ratio bound | Why |
 /// |---|---|---|
-/// | `deflate`, `zlib`, `gzip` | `1100x` | deflate cannot expand further than about `1032x`; that is structural |
+/// | `deflate`, `zlib`, `gzip` | `1100x` | Deflate cannot expand beyond about `1032x`. This limit is structural. |
 /// | `brotli` | none | brotli has no structural ceiling, so any ratio bound rejects sufficiently compressible legitimate data |
 /// | `zstd` | `250 000x` | zstd has no structural ceiling either, so this is a very loose coarse backstop rather than a bound derived from the format |
 ///
 /// Total output and stream count are not bounded by default, because a decompressor hands each
 /// chunk straight back and a stream of any length passes through it in bounded memory. The
-/// conveniences that buffer a whole result -- each format's `decompress` and
-/// `decompress_with_limits`, and the same pair on [`Format`][crate::format::Format] -- add a 64 MiB output
+/// functions that buffer a complete result add fallback limits. These functions are each format's
+/// `decompress` and `decompress_with_limits`, and the same pair on [`Format`][crate::format::Format].
+/// They add a 64 MiB output
 /// cap and a 1024 stream cap to whichever of those bounds the caller left unset.
 ///
 /// Each setter accepts only a non-zero bound. Use the corresponding explicitly named `unbounded_*`
@@ -129,12 +130,12 @@ impl DecompressorLimits {
         }
     }
 
-    /// Removes every bound, overriding whatever the format would have applied.
+    /// Removes every bound and overrides all format defaults.
     ///
     /// # Security
     ///
     /// Only use this when the compressed data comes from a source you trust to the same degree you
-    /// trust your own process. It removes the caps the buffering conveniences would otherwise apply,
+    /// trust your own process. It removes the caps that whole-buffer functions apply,
     /// so a decompression bomb passed to one of those will consume memory until the allocator gives
     /// up. Driving a decompressor directly still hands back one bounded chunk at a time, and there
     /// the risk is only what the consumer chooses to keep.
@@ -166,9 +167,8 @@ impl DecompressorLimits {
 
     /// Bounds the total decompressed size, in bytes.
     ///
-    /// This is the bound that actually protects a caller which buffers the output. It takes a
-    /// [`NonZeroU64`] for the same reason the ratio and stream bounds take non-zero types: a bound
-    /// of zero rejects every stream, which is a way of not decompressing rather than a limit.
+    /// This bound protects a caller that buffers output. It takes a [`NonZeroU64`] because a zero
+    /// bound rejects every stream. Rejecting every stream is not a useful decompression limit.
     ///
     /// [`NonZeroU64::MAX`] represents an unbounded output length. Prefer
     /// [`unbounded_output_len`][Self::unbounded_output_len] when removing the bound so that intent is
@@ -188,11 +188,11 @@ impl DecompressorLimits {
         self
     }
 
-    /// Bounds how many compressed streams may be decompressed from one input.
+    /// Bounds how many compressed streams can be decompressed from one input.
     ///
     /// One independently framed compressed stream costs one count. A gzip member is one such
     /// stream, so a file of concatenated members costs one per member even though multi-stream mode
-    /// joins them into a single logical output; the same holds for concatenated zstd frames.
+    /// joins them into one logical output. The same rule applies to concatenated zstd frames.
     ///
     /// This limits work that produces little or no output, such as a file containing millions of
     /// empty gzip members.
@@ -238,8 +238,8 @@ impl DecompressorLimits {
     /// A decompressor that hands each chunk back keeps nothing, so it carries no cumulative bounds
     /// and a stream of any length passes through it. The conveniences that accumulate are a
     /// different proposition: what they produce is what the caller holds, so they apply the shared
-    /// caps. Only bounds the caller left unset are filled -- an explicit value, or an explicit
-    /// removal, is the caller's decision and survives untouched.
+    /// caps. Only unset bounds are filled. An explicit value or an explicit
+    /// removal is the caller's decision and survives untouched.
     pub(crate) const fn for_buffered_output(mut self) -> Self {
         if self.output_len.is_none() {
             self.output_len = NonZeroU64::new(DEFAULT_MAX_OUTPUT_LEN);
@@ -252,17 +252,17 @@ impl DecompressorLimits {
         self
     }
 
-    /// The bounds a caller that buffers this decompressor's whole output should apply on top.
+    /// The additional bounds for a caller that buffers all decompressor output.
     ///
     /// Each is `Some` only when the caller left that bound unset, in which case the shared default
-    /// stands in. An explicit value -- or an explicit
-    /// [`UNLIMITED`][DecompressorLimits::UNLIMITED] -- is the caller's decision, and the
+    /// stands in. An explicit value or an explicit
+    /// [`UNLIMITED`][DecompressorLimits::UNLIMITED] is the caller's decision. The
     /// decompressor already enforces it, so nothing is added on top.
     ///
     /// Both travel together in one value on purpose. They were once two separate accessors, and
     /// the entry point that retrofits them onto an already-built decompressor picked up the output
-    /// half and silently kept no stream bound at all -- which is the case the stream cap exists
-    /// for, since many tiny members cost engine setup while producing almost no output.
+    /// half and kept no stream bound. The stream cap covers many tiny members. Each member costs
+    /// engine setup while producing almost no output.
     #[cfg_attr(
         not(any(test, any_format)),
         expect(dead_code, reason = "only a decompressor's pump carries these, and no format is enabled")
@@ -319,7 +319,7 @@ pub(crate) struct BufferedFallbacks {
     pub(crate) streams: Option<NonZeroU64>,
 }
 
-/// A format's bounds after the caller's overrides have been applied.
+/// A format's bounds after applying the caller overrides.
 ///
 /// Private: formats declare their defaults as constants of this type, and the decompressors enforce it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn the_shared_defaults_are_the_documented_values() {
         // Pinned as literals rather than by reference to the constants, so moving either one is a
-        // deliberate edit here as well as there -- and so the doc table that quotes these numbers
+        // deliberate edit here and there. The documentation table that quotes these numbers
         // cannot drift away from them unnoticed. Asserted against the shipped constant because this
         // is a test build, where `DEFAULT_MAX_OUTPUT_LEN` is deliberately lowered.
         assert_eq!(SHIPPED_MAX_OUTPUT_LEN, 64 * 1024 * 1024, "the shared output cap is 64 MiB");
@@ -550,7 +550,7 @@ mod tests {
 
     #[test]
     fn ratio_guard_allows_multi_gigabyte_streams() {
-        // An absolute cap would reject this; a ratio guard must not.
+        // An absolute cap rejects this case. A ratio guard must not reject it.
         DEFAULTS.check(64 * 1024 * 1024 * 1024, 640 * 1024 * 1024 * 1024, 1).unwrap();
     }
 

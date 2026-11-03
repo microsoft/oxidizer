@@ -96,22 +96,28 @@ Attach the exclusions to the `no_std` arm alone, splitting the item into per-con
 
 ## GitHub Actions Pinning
 
-Pin GitHub Actions to full-length commit SHAs with a version comment unless
-the exact release is verified as a GitHub immutable release. For immutable
-releases, use the exact version tag instead; never use moving major/minor aliases.
+Pin every external GitHub Action to a full-length commit SHA with a version
+comment, including actions with immutable releases. Tags are not a pinning
+exception. References to local actions and reusable workflows remain local paths.
 
-CodeQL is an exception. Pin every `github/codeql-action/*` step to the same
-full-length commit SHA with a version comment, including immutable releases.
-This keeps Dependabot updates SHA-based.
+Make sure that each SHA matches the stated release. Resolve annotated tags to
+their target commits. Keep all `github/codeql-action/*` steps on the same SHA.
+Replace obsolete tag-pinning explanations with accurate version comments.
 
-Verify each new release with
-`gh api repos/OWNER/REPO/releases/tags/TAG --jq .immutable`; only `true` qualifies
-for the tag exception.
+Anvil owns pins in its generated workflows. Update the upstream templates and
+adopt a release that contains the required pins. Do not edit generated workflows
+to maintain a separate pinning policy.
 
-Preserve pinning-rationale comments when updating dependencies or addressing
-review feedback, and update their versioned links and references. Do not delete
-the rationale merely because Dependabot proposes a SHA pin: for actions other
-than CodeQL, retain the exact version tag when the new release is still immutable.
+## Upgrading Anvil
+
+Follow the upgrade procedure in [docs/design/README.md](docs/design/README.md#upgrading-anvil).
+Run generation after installing the selected release. A newer `tool_version` in
+`.anvil.lock` does not prove that every generated file matches that release.
+
+Review every preserved customization and proposed file against the new template.
+Do not silently retain old action pins or carry an entire workflow override
+through an upgrade. Keep only explicitly justified overrides that the current
+Anvil configuration cannot express.
 
 ## Required CI Checks
 

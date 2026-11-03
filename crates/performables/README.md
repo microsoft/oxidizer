@@ -73,11 +73,11 @@ No administrator setup or application changes are required.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/performables">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTxYFB4hcZ98bKVKFh3-vSkIbfAyBjpGEISwbiCQMzFomMNlhZIKCbHBlcmZvcm1hYmxlc2UwLjMuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjI
- [__link0]: https://docs.rs/performables/0.3.0/performables/?search=arc::Arc
- [__link1]: https://docs.rs/performables/0.3.0/performables/?search=sync::notify::Notify
- [__link2]: https://docs.rs/performables/0.3.0/performables/?search=arc::PerThread
- [__link3]: https://docs.rs/performables/0.3.0/performables/?search=arc::PerNuma
- [__link4]: https://docs.rs/thread_aware_core/0.1.2/thread_aware_core/?search=ThreadAware
- [__link5]: https://docs.rs/performables/0.3.0/performables/arc/index.html
- [__link6]: https://docs.rs/performables/0.3.0/performables/sync/index.html
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTxYFB4hcZ98bKVKFh3-vSkIbfAyBjpGEISwbiCQMzFomMNlhZIKCbHBlcmZvcm1hYmxlc2UwLjMuMYJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjM
+ [__link0]: https://docs.rs/performables/0.3.1/performables/?search=arc::Arc
+ [__link1]: https://docs.rs/performables/0.3.1/performables/?search=sync::notify::Notify
+ [__link2]: https://docs.rs/performables/0.3.1/performables/?search=arc::PerThread
+ [__link3]: https://docs.rs/performables/0.3.1/performables/?search=arc::PerNuma
+ [__link4]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
+ [__link5]: https://docs.rs/performables/0.3.1/performables/arc/index.html
+ [__link6]: https://docs.rs/performables/0.3.1/performables/sync/index.html
