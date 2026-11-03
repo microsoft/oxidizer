@@ -17,7 +17,7 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
-use common::{ACTIVE, Failing, NeverResponding, Responding, Tenant};
+use common::{ACTIVE, Echoing, Failing, NeverResponding, Responding, Step, Tenant};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::RedactionEngine;
 use http::{Method, StatusCode, Version};
@@ -171,6 +171,27 @@ fn failing_stack(handler: Failing) -> Telemetry<Failing> {
     stack
 }
 
+/// The server middleware over `sink`, in front of [`Echoing`]. The stack already got one request.
+fn echoing_stack(sink: Sink) -> Telemetry<Echoing> {
+    let stack = Telemetry::server(sink).layer(Echoing(StatusCode::OK));
+    drop(send(&stack, common::get()));
+    stack
+}
+
+/// A `GET` request over HTTP/1.1 whose body takes `steps`. [`Echoing`] responds with this body,
+/// so the benchmark builds the response body before the measurement.
+fn streamed(steps: impl IntoIterator<Item = Step>) -> HttpRequest {
+    common::get().map(|_| common::scripted(steps))
+}
+
+/// Sends `request` to `handler`, polls the response body `polls` times, and drops it.
+fn read_body(handler: &impl RequestHandler, request: HttpRequest, polls: usize) {
+    let mut body = send(handler, request).expect("the handler responds").into_body();
+    for _ in 0..polls {
+        drop(black_box(common::poll_frame(&mut body)));
+    }
+}
+
 /// The server middleware in front of [`Responding`], over a sink that combines three sinks, and
 /// an enrichment for that sink. The stack already got one request.
 fn enriched_stack() -> (Telemetry<Responding>, Transfer) {
@@ -249,6 +270,30 @@ fn request_events_only<S: Borrow<Telemetry<Responding>>>(stack: S, request: Http
     (send(stack.borrow(), request), stack)
 }
 
+#[metabench::benchmark(COMPLETE_STREAMED_BODY, GROUP, "complete_streamed_body")]
+#[bench::get(Box::new(echoing_stack(reading_sink(1))), streamed([common::data("chunk"), Step::End]))]
+fn complete_streamed_body<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
+    read_body(stack.borrow(), request, 2);
+    stack
+}
+
+#[metabench::benchmark(ABANDONED_BODY, GROUP, "abandoned_body")]
+#[bench::get(Box::new(echoing_stack(reading_sink(1))), streamed([common::data("chunk"), Step::Pending]))]
+fn abandoned_body<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
+    read_body(stack.borrow(), request, 1);
+    stack
+}
+
+#[metabench::benchmark(BODY_ERROR, GROUP, "body_error")]
+#[bench::get(
+    Box::new(echoing_stack(reading_sink(1))),
+    streamed([Step::Error(HttpError::validation("the page is missing"))])
+)]
+fn body_error<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
+    read_body(stack.borrow(), request, 1);
+    stack
+}
+
 #[metabench::benchmark(INNER_ERROR, GROUP, "inner_error")]
 #[bench::validation(Box::new(common::FAILING), common::get())]
 #[bench::connection_refused(Box::new(common::FAILING_CHAINED), common::get())]
@@ -315,6 +360,28 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     group.bench_function(BenchmarkId::new(REQUEST_EVENTS_ONLY.benchmark_name(), CASE), |bencher| {
         bencher.iter_batched(common::get, |request| request_events_only(&stack, request).0, BatchSize::SmallInput);
     });
+    let stack = echoing_stack(reading_sink(1));
+    group.bench_function(BenchmarkId::new(COMPLETE_STREAMED_BODY.benchmark_name(), CASE), |bencher| {
+        bencher.iter_batched(
+            || streamed([common::data("chunk"), Step::End]),
+            |request| complete_streamed_body(&stack, request),
+            BatchSize::SmallInput,
+        );
+    });
+    group.bench_function(BenchmarkId::new(ABANDONED_BODY.benchmark_name(), CASE), |bencher| {
+        bencher.iter_batched(
+            || streamed([common::data("chunk"), Step::Pending]),
+            |request| abandoned_body(&stack, request),
+            BatchSize::SmallInput,
+        );
+    });
+    group.bench_function(BenchmarkId::new(BODY_ERROR.benchmark_name(), CASE), |bencher| {
+        bencher.iter_batched(
+            || streamed([Step::Error(HttpError::validation("the page is missing"))]),
+            |request| body_error(&stack, request),
+            BatchSize::SmallInput,
+        );
+    });
     for (case, handler) in [("validation", common::FAILING), ("connection_refused", common::FAILING_CHAINED)] {
         group.bench_function(BenchmarkId::new(INNER_ERROR.benchmark_name(), case), |bencher| {
             bencher.iter_batched(common::get, |request| inner_error(&handler, request).0, BatchSize::SmallInput);
@@ -339,6 +406,9 @@ metabench::main!(
         ENRICHED_THREE_SINKS,
         ACTIVE_REQUESTS_ONLY,
         REQUEST_EVENTS_ONLY,
+        COMPLETE_STREAMED_BODY,
+        ABANDONED_BODY,
+        BODY_ERROR,
         INNER_ERROR,
         HANDLER_ERROR,
     ],

@@ -2782,17 +2782,24 @@ dependencies = [
 name = "http_telemetry"
 version = "0.1.0"
 dependencies = [
+ "bytesbuf",
  "criterion",
  "data_privacy",
  "future_assert",
  "futures",
  "http",
+ "http-body",
+ "http-body-util",
  "http_extensions",
+ "http_headers",
+ "hyper",
+ "hyper-util",
  "layered",
  "metabench",
  "observed",
  "observed_testing",
  "tick",
+ "tokio",
 ]
 
 [[package]]

@@ -41,12 +41,14 @@ let service = (layer, handler).into_service();
 When a request ends, the middleware emits one of these events to an [`observed::Sink`][__link4], except
 in the cases listed under
 [When the middleware emits no event](#when-the-middleware-emits-no-event).
+[When a request ends](#when-a-request-ends) describes the end of a request whose response has a
+body.
 
 |Event|Severity|Message|When|
 |-----|--------|-------|----|
-|`http.server.request.complete`|Info|`HTTP server request completed`|The handler returned a response, with any status.|
-|`http.server.request.error`|Error|`HTTP server request failed`|The handler returned an error or panicked.|
-|`http.server.request.abandoned`|Warn|`HTTP server request abandoned`|The caller dropped the request future before the handler returned.|
+|`http.server.request.complete`|Info|`HTTP server request completed`|The handler returned a response, with any status, and the response body ended.|
+|`http.server.request.error`|Error|`HTTP server request failed`|The handler or the response body returned an error or panicked.|
+|`http.server.request.abandoned`|Warn|`HTTP server request abandoned`|The caller dropped the request future before the handler returned, or the server dropped the response body before its end.|
 
 Each event carries the [attributes](#metric-httpserverrequestduration) of the metric
 `http.server.request.duration`, and these fields:
@@ -70,7 +72,7 @@ Each event carries the [attributes](#metric-httpserverrequestduration) of the me
 |`url.scheme`|string|The scheme of the request URI. `_OTHER` for a scheme other than `http` and `https`.|`http`; `https`; `_OTHER`|If the request URI has a scheme.|
 |`network.protocol.version`|string|Version of the HTTP protocol. `_OTHER` for a version other than 1.0, 1.1, 2 and 3.|`1.1`; `2`|Always|
 |`http.response.status_code`|int|HTTP response status code.|`200`|If the handler returned a response.|
-|`error.type`|string|Describes a class of error the request ended with. A handler error gives the labels of the error and its sources, joined with dots ([`collect_error_labels`][__link5]). A handler panic gives `panic`. A status from 500 to 599 gives the status code. A dropped request future gives `abandoned`.|`validation`; `io.connection_refused`; `panic`; `503`; `abandoned`|If the handler returned an error or panicked, the status is from 500 to 599, or the caller dropped the request future before the handler returned.|
+|`error.type`|string|Describes a class of error the request ended with. An error of the handler or of the response body gives the labels of the error and its sources, joined with dots ([`collect_error_labels`][__link5]). A panic of the handler or of the response body gives `panic`. A request future or a response body that is dropped before its end gives `abandoned`. Else, a status from 500 to 599 gives the status code.|`validation`; `io.connection_refused`; `panic`; `503`; `abandoned`|If the request ended with an error, a panic or a drop, or with a status from 500 to 599.|
 
 ### Metric: `http.server.active_requests`
 
@@ -88,20 +90,42 @@ the request ends, after the event of the request. Each change is also the event
 `http.server.active_requests` at Debug, with the message `Active HTTP server requests changed`,
 the change under the key `http.server.active_requests`, and the attributes of the metric.
 
-The counter stays one too high when the middleware cannot add the `-1`: if the request future is
-dropped while its thread panics, or if a processor panics while the middleware emits.
+The counter stays one too high when the middleware cannot add the `-1`: if the request future or
+the response body is dropped while its thread panics, or if a processor panics while the
+middleware emits.
+
+## When a request ends
+
+The middleware wraps the response body, and the request ends when the body ends. The body ends
+when one of these occurs:
+
+* A poll of the body returns no frame.
+* A poll returns trailers.
+* A poll returns data, and then [`is_end_stream`][__link6] of the body
+  returns `true`.
+* The server drops the body while `is_end_stream` returns `true`.
+* The server drops the body after the length that the response declares. A valid
+  `Content-Length` header declares the length, else the exact size hint of the body.
+
+These responses have no content, so the middleware does not wrap their body, and their request
+ends when the handler returns:
+
+* A response whose body returns `true` from `is_end_stream` when the handler returns.
+* A response to `HEAD`.
+* A response to `CONNECT` with a status from 200 to 299.
+* A response with a status from 100 to 199, 204 or 304.
 
 ## When the middleware emits no event
 
-* The request future is dropped while its thread panics.
+* The request future or the response body is dropped while its thread panics.
 * There is no destination interested in processing the event further.
 
 ## Panics
 
-If the handler panics, the middleware emits the error event and then resumes the panic with its
-payload. If a processor panics while the middleware emits an event, the processor panic reaches
-the caller, and the processors after it do not get the event. If this happens while the
-middleware reports a handler panic, the processor panic replaces the handler panic.
+If the handler or the response body panics, the middleware emits the error event and then
+resumes the panic with its payload. If a processor panics while the middleware emits an event,
+the processor panic reaches the caller, and the processors after it do not get the event. If
+this happens while the middleware reports a panic, the processor panic replaces that panic.
 
 ## Enrichment with custom dimensions
 
@@ -136,10 +160,11 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGtPA8Ea3r-kbexArcldkbPgbSstg_bEc9WobK16bxSqQYE9hZISCb2h0dHBfZXh0ZW5zaW9uc2YwLjEzLjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy44gmhvYnNlcnZlZGYwLjI5LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb5T3Ea3r0ob0bXYh-W-U7-VgbgZNy7cHYcYAb_sTtKnfTQT9hZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjEzLjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy44gmhvYnNlcnZlZGYwLjI5LjA
  [__link0]: https://crates.io/crates/observed/0.29.0
  [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
  [__link2]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry
  [__link3]: https://docs.rs/layered/0.3.8/layered/?search=Layer
  [__link4]: https://docs.rs/observed/0.29.0/observed/?search=Sink
  [__link5]: https://docs.rs/http_extensions/0.13.0/http_extensions/?search=collect_error_labels
+ [__link6]: https://docs.rs/http-body/1.1.0/http_body/?search=Body::is_end_stream

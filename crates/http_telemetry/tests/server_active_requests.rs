@@ -13,10 +13,12 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
 
-use common::{ABANDONED, ACTIVE, COMPLETE, Capture, Captured, ERROR, Measurement, Tenant, server};
+use common::{
+    ABANDONED, ACTIVE, COMPLETE, Capture, Captured, ERROR, Echoing, Measurement, Step, Tenant, data, poll_frame, scripted, server,
+};
 use future_assert::{FutureTestExt, poll_once};
 use http::{Method, StatusCode};
-use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
+use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
 use http_telemetry::TelemetryLayer;
 use layered::{Execute, Layer, Service};
 use observed::enrichment::EnrichFnExt;
@@ -33,6 +35,18 @@ fn events_of(request: impl FnOnce(TelemetryLayer)) -> Vec<(&'static str, Option<
         .into_iter()
         .map(|event| (event.name, event.log(ACTIVE).cloned()))
         .collect()
+}
+
+/// Sends a `GET` request over HTTP/1.1 through `layer` to [`Echoing`], and returns the response body,
+/// which takes `steps`.
+fn respond(layer: &TelemetryLayer, steps: impl IntoIterator<Item = Step>) -> HttpBody {
+    let request = common::get().map(|_| scripted(steps));
+    layer
+        .layer(Echoing(StatusCode::OK))
+        .execute(request)
+        .unwrap_ready()
+        .unwrap()
+        .into_body()
 }
 
 #[test]
@@ -130,6 +144,16 @@ fn every_event_pairs_active_requests() {
             assert!(poll_once(&mut future).is_pending());
         }),
         events_of(|layer| drop(layer.layer(common::NeverResponding).execute(common::get()))),
+        events_of(|layer| drop(poll_frame(&mut respond(&layer, [data("chunk")])))),
+        events_of(|layer| {
+            let mut body = respond(&layer, [Step::Error(HttpError::validation("the page is missing"))]);
+            drop(poll_frame(&mut body));
+        }),
+        events_of(|layer| {
+            let mut body = respond(&layer, [Step::Panic]);
+            drop(catch_unwind(AssertUnwindSafe(|| poll_frame(&mut body))));
+        }),
+        events_of(|layer| drop(poll_frame(&mut respond(&layer, [data("chunk"), Step::Pending])))),
     ];
 
     let paired = |name| vec![(ACTIVE, Some(Value::I64(1))), (name, None), (ACTIVE, Some(Value::I64(-1)))];
@@ -142,6 +166,10 @@ fn every_event_pairs_active_requests() {
             paired(ERROR),
             paired(ERROR),
             paired(ABANDONED),
+            paired(ABANDONED),
+            paired(COMPLETE),
+            paired(ERROR),
+            paired(ERROR),
             paired(ABANDONED)
         ]
     );

@@ -5,6 +5,7 @@
 
 mod drop_guard;
 mod events;
+mod response_body;
 
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
@@ -16,10 +17,11 @@ use http::Version;
 use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
 use layered::Service;
 use observed::Event;
+use response_body::emit_when_body_ends;
 
 use crate::telemetry::Telemetry;
 
-/// The replacement value for unknown HTTP methods, URL schema, or HTTP protocol versions. We cannot support
+/// The replacement value for unknown HTTP methods, URL schemes, or HTTP protocol versions. We cannot support
 /// arbitrary value there and must have finite lists to avoid dimension cardinality blow up.
 const OTHER: &str = "_OTHER";
 
@@ -56,7 +58,7 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
         });
 
         let mut guard = TelemetryDropGuard {
-            sink: &layer.sink,
+            sink: layer.sink.clone(),
             stopwatch: layer.clock.stopwatch(),
             enrichment: layer.sink.transfer_context(),
             method: input.method().clone(),
@@ -71,22 +73,19 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
         let response = match catch_unwind(AssertUnwindSafe(|| self.inner.execute(input))) {
             Ok(response) => response,
             Err(payload) => {
-                guard.emit(RequestEnd::Panic);
+                guard.emit(RequestEnd::Panic(None));
                 resume_unwind(payload)
             }
         };
         Either::Right(async move {
             match AssertUnwindSafe(response).catch_unwind().await {
-                Ok(Ok(response)) => {
-                    guard.emit(RequestEnd::Complete(response.status()));
-                    Ok(response)
-                }
+                Ok(Ok(response)) => Ok(emit_when_body_ends(guard, response)),
                 Ok(Err(error)) => {
-                    guard.emit(RequestEnd::Error(&error));
+                    guard.emit(RequestEnd::Error(&error, None));
                     Err(error)
                 }
                 Err(payload) => {
-                    guard.emit(RequestEnd::Panic);
+                    guard.emit(RequestEnd::Panic(None));
                     resume_unwind(payload)
                 }
             }

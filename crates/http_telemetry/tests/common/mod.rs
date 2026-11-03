@@ -1,21 +1,27 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Processors, sinks, requests and handlers that the integration tests and the benchmark share.
+//! Processors, sinks, requests, handlers and bodies that the integration tests and the benchmark
+//! share.
 
 #![allow(dead_code, reason = "each test binary and the benchmark use a different part of this module")]
 #![allow(clippy::unwrap_used, reason = "test code")]
 
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::future::{pending, ready};
 use std::io::{self, ErrorKind};
 use std::ops::ControlFlow;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 use std::time::{Duration, SystemTime};
 
-use http::{Method, Request, StatusCode, Version};
-use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
+use bytesbuf::BytesView;
+use http::{HeaderMap, Method, Request, StatusCode, Version};
+use http_body::{Body, Frame};
+use http_extensions::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::{Telemetry, TelemetryLayer};
 use layered::{Execute, Service};
 use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind};
@@ -298,6 +304,82 @@ pub(crate) fn responding_after(clock: &ClockControl, elapsed: Duration, status: 
         *response.status_mut() = status;
         async move { Ok::<_, HttpError>(response) }
     })
+}
+
+/// Responds to each request with its status, and with the headers and the body of the request. It
+/// does not allocate, so a benchmark can build the response body before the measurement.
+pub(crate) struct Echoing(pub(crate) StatusCode);
+
+impl Service<HttpRequest> for Echoing {
+    type Out = http_extensions::Result<HttpResponse>;
+
+    fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
+        let (parts, body) = input.into_parts();
+        let mut response = HttpResponse::new(body);
+        *response.status_mut() = self.0;
+        *response.headers_mut() = parts.headers;
+        ready(Ok(response))
+    }
+}
+
+/// One poll of a [`Scripted`] body.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "BytesView is intentionally large, though future optimizations may decrease size"
+)]
+pub(crate) enum Step {
+    /// Returns a data frame with these bytes.
+    Data(BytesView),
+    /// Returns a trailers frame without fields.
+    Trailers,
+    /// Returns `Poll::Pending`.
+    Pending,
+    /// Returns this error.
+    Error(HttpError),
+    /// Panics.
+    Panic,
+    /// Returns `None`.
+    End,
+}
+
+/// A data step with the bytes of `text`.
+pub(crate) fn data(text: &str) -> Step {
+    Step::Data(BytesView::copied_from_slice(text.as_bytes(), &HttpBodyBuilder::new_fake()))
+}
+
+/// A body that takes one step for each poll, and returns `None` after the last step. It is at its
+/// end when no step is left. Its length is unknown.
+pub(crate) struct Scripted(VecDeque<Step>);
+
+impl Body for Scripted {
+    type Data = BytesView;
+    type Error = HttpError;
+
+    #[expect(clippy::panic, reason = "the step `Panic` makes the body panic")]
+    fn poll_frame(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<http_extensions::Result<Frame<BytesView>>>> {
+        match self.0.pop_front() {
+            Some(Step::Data(data)) => Poll::Ready(Some(Ok(Frame::data(data)))),
+            Some(Step::Trailers) => Poll::Ready(Some(Ok(Frame::trailers(HeaderMap::new())))),
+            Some(Step::Pending) => Poll::Pending,
+            Some(Step::Error(error)) => Poll::Ready(Some(Err(error))),
+            Some(Step::Panic) => panic!("the body panicked"),
+            Some(Step::End) | None => Poll::Ready(None),
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// A streamed body that takes `steps`.
+pub(crate) fn scripted(steps: impl IntoIterator<Item = Step>) -> HttpBody {
+    HttpBodyBuilder::new_fake().body(Scripted(steps.into_iter().collect()), &HttpBodyOptions::new())
+}
+
+/// Polls `body` once, with a waker that does nothing.
+pub(crate) fn poll_frame(body: &mut HttpBody) -> Poll<Option<http_extensions::Result<Frame<BytesView>>>> {
+    Pin::new(body).poll_frame(&mut Context::from_waker(Waker::noop()))
 }
 
 /// A handler that never responds.

@@ -5,7 +5,8 @@
 
 use observed::{Text, event};
 
-/// Produces the event `http.server.request.complete` when the handler returned a response.
+/// Produces the event `http.server.request.complete` when the handler returned a response and its body
+/// ended.
 #[event("http.server.request.complete")]
 #[info("HTTP server request completed")]
 #[histogram(
@@ -31,7 +32,7 @@ pub(crate) struct RequestComplete {
     pub(crate) protocol_version: &'static str,
     #[dimension(log = "http.response.status_code", metric = "http.response.status_code")]
     #[unredacted]
-    pub(crate) status_code: i64,
+    pub(crate) status_code: u16,
     #[dimension(log = "error.type", metric = "error.type")]
     #[unredacted]
     #[if_none(drop)]
@@ -41,7 +42,8 @@ pub(crate) struct RequestComplete {
     pub(crate) duration_ms: u64,
 }
 
-/// Produces the event `http.server.request.error` when the handler returned an error or panicked.
+/// Produces the event `http.server.request.error` when the handler or the response body returned an error or
+/// panicked.
 #[event("http.server.request.error")]
 #[error("HTTP server request failed")]
 #[histogram(
@@ -65,6 +67,10 @@ pub(crate) struct RequestError {
     #[dimension(log = "network.protocol.version", metric = "network.protocol.version")]
     #[unredacted]
     pub(crate) protocol_version: &'static str,
+    #[dimension(log = "http.response.status_code", metric = "http.response.status_code")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) status_code: Option<u16>,
     #[dimension(log = "error.type", metric = "error.type")]
     #[unredacted]
     pub(crate) error_type: Text,
@@ -74,7 +80,7 @@ pub(crate) struct RequestError {
 }
 
 /// Produces the event `http.server.request.abandoned` when the caller dropped the request future before the
-/// handler returned.
+/// handler returned, or the response body before its end.
 #[event("http.server.request.abandoned")]
 #[warning("HTTP server request abandoned")]
 #[histogram(
@@ -98,6 +104,10 @@ pub(crate) struct RequestAbandoned {
     #[dimension(log = "network.protocol.version", metric = "network.protocol.version")]
     #[unredacted]
     pub(crate) protocol_version: &'static str,
+    #[dimension(log = "http.response.status_code", metric = "http.response.status_code")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) status_code: Option<u16>,
     #[dimension(log = "error.type", metric = "error.type")]
     #[unredacted]
     pub(crate) error_type: &'static str,

@@ -31,25 +31,27 @@ const SERVER_ERROR_STATUSES: &str = concat!(
 
 #[derive(Clone, Copy)]
 pub(crate) enum RequestEnd<'a> {
-    /// The handler returned a response with this status.
+    /// The handler returned a response with this status, and its body ended.
     Complete(StatusCode),
-    /// The handler returned this error.
-    Error(&'a HttpError),
-    /// The handler panicked.
-    Panic,
-    /// The caller dropped the request future before the handler returned.
-    Abandoned,
+    /// The handler or the response body returned this error.
+    Error(&'a HttpError, Option<StatusCode>),
+    /// The handler or the response body panicked.
+    Panic(Option<StatusCode>),
+    /// The caller dropped the request future before the handler returned, or the response body
+    /// before its end.
+    Abandoned(Option<StatusCode>),
 }
 
 /// Drop guard that emits the event of one request, also when the caller drops the request future.
 ///
-/// The service creates the guard in `execute`, so the duration starts at the call. [`emit`]
-/// emits the event of the request. If the caller drops the request future before that, the guard
-/// emits `http.server.request.abandoned`.
+/// The service creates the guard in `execute`, so the duration starts at the call. When the
+/// middleware wraps the response body, the guard moves into the wrapper. [`emit`] emits the event
+/// of the request, once. If the caller drops the request future before that, the guard emits
+/// `http.server.request.abandoned`.
 ///
 /// [`emit`]: Self::emit
-pub(crate) struct TelemetryDropGuard<'a> {
-    pub(crate) sink: &'a Sink,
+pub(crate) struct TelemetryDropGuard {
+    pub(crate) sink: Sink,
     pub(crate) stopwatch: Stopwatch,
     pub(crate) enrichment: Transfer,
     pub(crate) method: Method,
@@ -58,7 +60,7 @@ pub(crate) struct TelemetryDropGuard<'a> {
     pub(crate) finished: bool,
 }
 
-impl TelemetryDropGuard<'_> {
+impl TelemetryDropGuard {
     pub(crate) fn add_active_request(&self, delta: i64) {
         emit!(
             self.sink,
@@ -71,6 +73,9 @@ impl TelemetryDropGuard<'_> {
     }
 
     pub(crate) fn emit(&mut self, end: RequestEnd<'_>) {
+        if self.finished {
+            return;
+        }
         self.finished = true;
         #[expect(
             clippy::cast_possible_truncation,
@@ -94,41 +99,44 @@ impl TelemetryDropGuard<'_> {
                         method_original,
                         scheme: self.scheme,
                         protocol_version,
-                        status_code: i64::from(status_code.as_u16()),
+                        status_code: status_code.as_u16(),
                         error_type,
                         duration_ms,
                     }
                 );
             }
-            RequestEnd::Error(error) => emit!(
+            RequestEnd::Error(error, status_code) => emit!(
                 self.sink,
                 RequestError {
                     method,
                     method_original,
                     scheme: self.scheme,
                     protocol_version,
+                    status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: Text::from(collect_error_labels(error).into_cow()),
                     duration_ms,
                 }
             ),
-            RequestEnd::Panic => emit!(
+            RequestEnd::Panic(status_code) => emit!(
                 self.sink,
                 RequestError {
                     method,
                     method_original,
                     scheme: self.scheme,
                     protocol_version,
+                    status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: Text::from("panic"),
                     duration_ms,
                 }
             ),
-            RequestEnd::Abandoned => emit!(
+            RequestEnd::Abandoned(status_code) => emit!(
                 self.sink,
                 RequestAbandoned {
                     method,
                     method_original,
                     scheme: self.scheme,
                     protocol_version,
+                    status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: "abandoned",
                     duration_ms,
                 }
@@ -154,13 +162,13 @@ const fn http_method_name(method: &Method) -> &'static str {
     }
 }
 
-impl Drop for TelemetryDropGuard<'_> {
+impl Drop for TelemetryDropGuard {
     fn drop(&mut self) {
         // Emit nothing while the thread panics, because a panic in a processor now aborts the process.
         if self.finished || std::thread::panicking() {
             return;
         }
 
-        self.emit(RequestEnd::Abandoned);
+        self.emit(RequestEnd::Abandoned(None));
     }
 }

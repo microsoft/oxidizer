@@ -38,22 +38,30 @@ allowed_external_types = [
 all-features = true
 
 [dependencies]
+bytesbuf = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
+http-body = { workspace = true }
 http_extensions = { workspace = true }
+http_headers = { workspace = true, features = ["headers-content-length", "http"] }
 layered = { workspace = true }
 observed = { workspace = true }
 tick = { workspace = true }
 
 [dev-dependencies]
+bytesbuf = { path = "../bytesbuf", features = ["bytes-compat"] }
 criterion = { workspace = true }
 data_privacy = { path = "../data_privacy" }
 future_assert = { path = "../future_assert" }
 futures = { workspace = true, features = ["executor"] }
+http-body-util = { workspace = true }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
 metabench = { path = "../metabench" }
 observed_testing = { path = "../observed_testing" }
 tick = { path = "../tick", features = ["test-util"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 
 [[bench]]
 name = "http_telemetry_server"
