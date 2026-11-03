@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.9] - 2026-11-02
+
+- Simplify public documentation and clarify the documentation for optional features. Service
+  signatures, layer execution, and Tower behavior do not change.
+- Update the requirement for local package `plurality` from `0.2.3` to `0.2.4`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
 ## [0.3.8] - 2026-10-20
 
 - Refresh published documentation and inherited package metadata.
