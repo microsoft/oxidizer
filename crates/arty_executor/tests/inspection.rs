@@ -353,6 +353,71 @@ fn submissions_with_inspection_after_shutdown_report_cancellation_without_pollin
 }
 
 #[test]
+fn rejected_inspector_cleanup_panics_are_disposed_before_cancellation() {
+    use std::sync::{Arc, Mutex};
+
+    type Calls = Arc<Mutex<Vec<&'static str>>>;
+
+    #[derive(Debug)]
+    struct Canceled(Calls);
+    impl TaskCompletion<()> for Canceled {
+        fn completed(self, (): ()) {
+            panic!("a rejected task must not complete");
+        }
+        fn panicked(self, panic: TaskPanicPayload, _: Option<ShutdownCause>) {
+            arty_executor::discard_task_panic_payload(panic);
+            panic!("a rejected task must not run");
+        }
+        fn cancelled(self, _: ShutdownCause) {
+            self.0.lock().unwrap().push("cancelled");
+        }
+    }
+
+    struct Payload(Calls);
+    impl Drop for Payload {
+        fn drop(&mut self) {
+            self.0.lock().unwrap().push("payload dropped");
+            panic!("diagnostic panic payload destructor");
+        }
+    }
+    struct Capture(Calls);
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            self.0.lock().unwrap().push("capture dropped");
+            std::panic::panic_any(Payload(Arc::clone(&self.0)));
+        }
+    }
+
+    let executor = Executor::builder().build();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    executor.shutdown().trigger(ShutdownCause::default());
+
+    let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        executor.tasks().add_with_inspection(
+            std::future::pending::<()>(),
+            TaskOptions::default(),
+            Canceled(Arc::clone(&calls)),
+            {
+                let capture = Capture(Arc::clone(&calls));
+                move |_, _| {
+                    let _keep = &capture;
+                    Some(())
+                }
+            },
+        );
+    }));
+    let contained = rejected.is_ok();
+    if let Err(panic) = rejected {
+        arty_executor::discard_task_panic_payload(panic);
+    }
+
+    assert_eq!(
+        (contained, std::mem::take(&mut *calls.lock().unwrap())),
+        (true, vec!["capture dropped", "payload dropped", "cancelled"])
+    );
+}
+
+#[test]
 fn inspection_value_types_preserve_thread_and_unwind_contracts() {
     use std::panic::{RefUnwindSafe, UnwindSafe};
 

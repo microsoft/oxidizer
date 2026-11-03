@@ -6,6 +6,8 @@ use std::collections::VecDeque;
 use std::mem;
 #[cfg(feature = "inspection")]
 use std::ops::ControlFlow;
+#[cfg(feature = "inspection")]
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::task::Waker;
 use std::thread::ThreadId;
@@ -14,6 +16,8 @@ use observed::Sink;
 use performables::sync::channel;
 use plurality::MultiPool;
 
+#[cfg(feature = "inspection")]
+use crate::discard_task_panic_payload;
 use crate::wake::RemoteWake;
 use crate::{PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskOptions, WakeShared, WakeSignal, allocate_task};
 
@@ -46,6 +50,9 @@ impl ExecutorShared {
         I: crate::inspection::Inspector<F>,
     {
         if self.shutdown().is_triggered() {
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(inspector))) {
+                discard_task_panic_payload(panic);
+            }
             completion.cancelled(self.shutdown().cause());
             return;
         }
