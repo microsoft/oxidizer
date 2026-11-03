@@ -6,8 +6,8 @@
 
 //! Integration tests for [`fetch_azure::HttpClient`].
 //!
-//! These exercise the transport adapter end-to-end using `fetch`'s
-//! `FakeHandler`, so no real network access is required.
+//! The tests use `fetch::fake::FakeHandler` to exercise the complete adapter
+//! without network access.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ fn request(method: Method) -> Request {
     Request::new(Url::parse("https://example.com/path").expect("valid url"), method)
 }
 
-/// A handler that always responds with the given status code and an empty body.
+/// Returns a handler that always uses the specified status and an empty body.
 fn status_handler(status: u16) -> FakeHandler {
     FakeHandler::from_fn(move |_request| HttpResponseBuilder::new_fake().status(status).build())
 }
@@ -55,7 +55,7 @@ async fn execute_request_maps_status_headers_and_body() {
 
 #[tokio::test]
 async fn execute_request_forwards_method_and_bytes_body() {
-    // The handler echoes the request body back, but only for POST requests.
+    // The handler returns the request body only for POST requests.
     let handler = FakeHandler::from_async_fn(|request| async move {
         if request.method().as_str() != "POST" {
             return HttpResponseBuilder::new_fake().status(400u16).build();
@@ -153,8 +153,8 @@ async fn azure_http_client_converts_into_dyn_client() {
 async fn execute_request_maps_request_build_failure() {
     let client = HttpClient::new(FetchClient::new_fake(status_handler(200)));
 
-    // A header value containing a control character is rejected by the `http`
-    // crate when the fetch request is built, exercising the DataConversion path.
+    // The `http` crate rejects this control character when `fetch` builds the
+    // request. This exercises the DataConversion path.
     let mut request = request(Method::Get);
     request.insert_header("x-invalid", "bad\nvalue");
 
@@ -189,7 +189,7 @@ async fn execute_request_skips_non_utf8_response_headers() {
 #[tokio::test]
 async fn execute_request_maps_seekable_stream_read_error() {
     let handler = FakeHandler::from_async_fn(|request| async move {
-        // Reading the body drives the erroring stream, surfacing the failure.
+        // Reading the body polls the stream and returns its error.
         request.into_body().into_bytes().await?;
         HttpResponseBuilder::new_fake().status(200u16).build()
     });
@@ -226,7 +226,7 @@ async fn execute_request_maps_response_body_read_error() {
     );
 }
 
-/// A [`SeekableStream`] whose reads always fail, used to cover the request-body error path.
+/// A [`SeekableStream`] that returns an error for each read.
 #[derive(Debug, Clone)]
 struct ErroringStream;
 
@@ -247,7 +247,7 @@ impl SeekableStream for ErroringStream {
     }
 }
 
-/// Joins an error and its `source` chain into a single string for assertions.
+/// Joins an error and its `source` chain for assertions.
 fn error_chain(error: &dyn std::error::Error) -> String {
     let mut chain = error.to_string();
     let mut source = error.source();

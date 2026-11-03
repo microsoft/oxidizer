@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The [`HttpClient`] transport adapter.
+//! The Azure SDK transport adapter.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,15 +16,11 @@ use bytesbuf::BytesView;
 use futures::{StreamExt as _, TryStreamExt as _};
 use layered::Service as _;
 
-/// An [`azure_core::http::HttpClient`] implementation backed by a
-/// [`fetch::HttpClient`] transport.
+/// Uses a [`fetch::HttpClient`] as an [`azure_core::http::HttpClient`].
 ///
-/// Construct one from an existing `fetch` client with [`HttpClient::new`] (or
-/// via [`From`]), then convert it into the `Arc<dyn azure_core::http::HttpClient>`
-/// that Azure SDK clients accept as their transport. The Azure SDK shares its
-/// transport as an `Arc` to promote reuse: one client (and its connection pool)
-/// is shared across the request pipeline rather than cloned per call. The same
-/// intent underlies the `Policy` and `TokenCredential` traits.
+/// Create this adapter with [`HttpClient::new`] or [`From`]. Convert it to an
+/// `Arc<dyn azure_core::http::HttpClient>` before you pass it to an Azure SDK
+/// client.
 ///
 /// ```
 /// # use std::sync::Arc;
@@ -41,7 +37,7 @@ pub struct HttpClient {
 }
 
 impl HttpClient {
-    /// Creates a new adapter that forwards requests to the given `fetch` client.
+    /// Creates an adapter that sends requests through the specified `fetch` client.
     #[must_use]
     pub const fn new(client: fetch::HttpClient) -> Self {
         Self { client }
@@ -49,9 +45,9 @@ impl HttpClient {
 
     /// Converts an Azure SDK [`Request`] into a `fetch` request.
     fn to_fetch_request(&self, request: &Request) -> azure_core::Result<fetch::HttpRequest> {
-        // `Method::as_str` yields a canonical token (e.g. "GET") that `fetch`'s
-        // builder parses into an `http::Method`; this avoids matching on the
-        // `#[non_exhaustive]` Azure SDK `Method` enum.
+        // `Method::as_str` returns a canonical token such as "GET". The `fetch`
+        // builder parses the token as an `http::Method`. This avoids a match on
+        // the `#[non_exhaustive]` Azure SDK `Method` enum.
         let mut builder = self.client.request(request.method().as_str(), request.url().as_str());
 
         for (name, value) in request.headers().iter() {
@@ -69,11 +65,11 @@ impl HttpClient {
 
     /// Converts an Azure SDK request [`Body`] into a `fetch` [`HttpBody`](fetch::HttpBody).
     ///
-    /// Empty byte bodies reuse a shared empty body, and non-empty byte bodies are
-    /// wrapped without copying. Seekable streams are forwarded as a chunk stream.
-    // The empty-body fast path yields a body that is observationally identical to
-    // the general bytes path (both report a zero-length body), so the
-    // `is_empty()` guard is an equivalent mutant that no test can distinguish.
+    /// Empty byte bodies use a shared empty body. Non-empty byte bodies are
+    /// wrapped without a copy. Seekable streams become chunk streams.
+    // The empty-body path and the general byte path both report a zero-length
+    // body. A test cannot distinguish a mutation that removes the `is_empty()`
+    // guard.
     #[cfg_attr(test, mutants::skip)]
     fn to_fetch_body(&self, body: &Body) -> fetch::HttpBody {
         let builder: &fetch::HttpBodyBuilder = self.client.as_ref();
@@ -137,8 +133,8 @@ fn to_async_raw_response(response: fetch::HttpResponse) -> AsyncRawResponse {
 
 /// Converts an [`http::HeaderMap`] into [`Headers`].
 ///
-/// Header values that are not valid UTF-8 are skipped, mirroring the behavior
-/// of the built-in `reqwest` transport in the Azure SDK.
+/// This function skips header values that are not valid UTF-8. This matches the
+/// Azure SDK `reqwest` transport.
 fn to_headers(map: &http::HeaderMap) -> Headers {
     let headers = map
         .iter()
