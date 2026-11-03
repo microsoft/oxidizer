@@ -21,7 +21,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_de
 allowed_external_types = [
     "bon::builder_state::IsUnset",
     "log::LevelFilter",
-    "observed_destination_core::LogFormatConfig",
+    "observed_destination_core::format::LogFormatConfig",
     "observed_destination_core::IntoLogDestination",
     "observed_destination_core::IntoMetricDestination",
     "observed_destination_core::LogDestination",
