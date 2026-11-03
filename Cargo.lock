@@ -3970,7 +3970,6 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "performables",
- "rstest",
  "static_assertions",
 ]
 
