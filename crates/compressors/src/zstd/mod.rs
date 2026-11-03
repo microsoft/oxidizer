@@ -4,7 +4,7 @@
 //! Zstandard (RFC 8878): fast compression with ratios well beyond the deflate family.
 //!
 //! The format behind HTTP `Content-Encoding: zstd`, and the usual choice when both compression time
-//! and ratio matter -- though where it wins over the alternatives depends on the payload, so
+//! and ratio matter. Its result depends on the payload, so
 //! benchmark a representative corpus. Requires the `zstd` cargo feature.
 //!
 //! Unlike this crate's other formats, zstd is currently provided by a C library compiled from
@@ -38,16 +38,16 @@ use crate::zstd::codec::{ZstdCompress, ZstdDecompress};
 /// Zstd's default bounds.
 ///
 /// Zstd has no structural expansion ceiling, so like brotli it needs a far looser ratio than the
-/// deflate family. That ratio is a coarse backstop rather than real protection; what bounds
-/// untrusted zstd is the cap the buffering conveniences apply, see
+/// deflate family. That ratio is a coarse backstop rather than protection. For untrusted zstd,
+/// use the cap that the buffering functions apply. See
 /// [`DecompressorLimits`][crate::DecompressorLimits].
 ///
 /// The number itself is a policy choice, not a property of the format: any sufficiently
 /// compressible input can legitimately expand by a very large factor, so no ratio both admits
 /// legitimate data and excludes a bomb. The rule it encodes is "high enough that no realistic
 /// payload trips it, low enough to still catch an obviously degenerate stream", and it is one
-/// significant figure on purpose -- treat it as adjustable, not as a measured boundary. Anything of
-/// the same order of magnitude would serve equally well.
+/// significant figure on purpose. Treat it as adjustable, not as a measured boundary. A value of
+/// the same order of magnitude provides the same policy.
 pub(crate) const DEFAULT_LIMITS: FormatLimits = FormatLimits::new(Some(250_000), None, None);
 
 /// Selects zstd as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder], and carries
@@ -223,7 +223,7 @@ impl TryFrom<u32> for WindowLog {
 /// use compressors::Resources;
 /// use compressors::zstd::{self, CompressionLevel};
 ///
-/// // A negative fast level -- below the portable scale, so only reachable here.
+/// // Select a negative fast level that is below the portable scale.
 /// let compressor = zstd::Compressor::builder()
 ///     .compression_level(CompressionLevel::new(-3).expect("-3 is in range"))
 ///     .build(&Resources::default())?;
@@ -233,7 +233,7 @@ impl TryFrom<u32> for WindowLog {
 impl crate::CompressorBuilder<Zstd> {
     /// Sets the level on zstd's own scale, overriding any portable [`Level`][crate::Level].
     ///
-    /// Use this only when you need a level the portable scale does not reach; prefer
+    /// Use this only when you need a level outside the portable scale. Use
     /// [`level`][crate::CompressorBuilder::level] otherwise, so the same configuration keeps working if the
     /// format changes.
     #[must_use]

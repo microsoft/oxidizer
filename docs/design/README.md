@@ -8,6 +8,38 @@ Keep repository-specific automation only for capabilities outside Anvil's
 scope, such as release tooling and tests for that tooling. Generated Anvil
 files are updated with `cargo anvil`, not edited directly.
 
+## Upgrading Anvil
+
+Anvil preserves files that differ from their last generated content.
+An upgrade can therefore leave an older customized file in place.
+The version in `.anvil.lock` does not prove that all files match the new templates.
+An `.anvil-proposed` file contains proposed replacement content.
+
+1. Install the selected release with `cargo install --locked --version VERSION cargo-anvil`.
+2. Run `cargo anvil --version` to make sure that the selected release is active.
+3. Run `cargo anvil --dry-run` and review every proposed update, refusal, and preserved customization.
+4. Compare each customized file with the selected release's template. Prefer the template unless a current repository requirement needs an override.
+5. If a file must return to generated content, remove only that file after reviewing its differences. Run `cargo anvil` to recreate it.
+6. Run `cargo anvil` to apply the remaining updates.
+7. Review the generated changes and `.anvil.lock`. Run `cargo anvil --dry-run` again and explain every remaining override.
+
+Move repository requirements to supported Anvil configuration where possible.
+Do not preserve an entire generated file to retain obsolete pins or comments.
+Send general runner fixes upstream rather than maintaining permanent local copies.
+
+External GitHub Actions require full-length commit SHA pins with release-version
+comments, including actions with immutable releases.
+Local action and workflow references remain local paths.
+If an Anvil template still uses an external action tag, resolve that upstream.
+Do not claim complete SHA pinning while generated templates still contain tags.
+
+The current example-runner override builds each example before its execution
+timeout starts. This keeps compilation outside the runtime limit.
+Review this override against the selected template during each upgrade.
+The PR workflow uses the unmodified Anvil template.
+
+## Verification behavior
+
 Coverage collection uses `cargo coverage-gate run` on the pinned nightly toolchain.
 It runs both `--all-features` and `--no-default-features` configurations.
 The local gate and CI uploads use the same filtered LCOV files, which contain

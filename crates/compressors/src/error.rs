@@ -61,7 +61,7 @@ fn detect_recovery(source: &(dyn StdError + 'static)) -> RecoveryInfo {
 ///
 /// This is a single canonical error type rather than an enum, so that new failure modes do not
 /// break downstream `match` statements. Classify a failure with the `is_*` accessors, or with
-/// [`recovery`][Recovery::recovery] when what matters is whether retrying could help.
+/// [`recovery`][Recovery::recovery] when the caller needs to know if retrying can help.
 ///
 /// # Examples
 ///
@@ -149,8 +149,8 @@ impl Error {
 impl Error {
     /// Wraps a foreign error, classifying it by inspecting it.
     ///
-    /// Use this to carry a failure from something this crate drives -- a transport, a reader, an
-    /// engine binding -- through an API that returns this crate's [`Error`]. The wrapped error stays
+    /// Use this to carry a failure from a transport, reader, or engine binding through an API that
+    /// returns this crate's [`Error`]. The wrapped error stays
     /// reachable through [`source`][std::error::Error::source], and
     /// [`is_source`][Self::is_source] reports the resulting error.
     ///
@@ -187,7 +187,7 @@ impl Error {
     /// Wraps a foreign error with recovery information you supply.
     ///
     /// Identical to [`other`][Self::other] except that `recovery` is attached as given, for when the
-    /// caller knows how the failure should be handled and the heuristic cannot.
+    /// caller knows how to handle the failure and the heuristic does not.
     ///
     /// # Examples
     ///
@@ -234,15 +234,15 @@ impl Error {
     ///
     /// Input ended before the decoder reported a complete stream.
     ///
-    /// That is all this establishes. It does not say why the input ended -- a producer stopping
-    /// early and a transport truncating the body are indistinguishable from here -- and it does not
+    /// That is all this establishes. It does not identify why the input ended. A producer that stops
+    /// early and a transport that truncates the body are indistinguishable here. It does not
     /// certify the bytes already handed back: a framed decoder can emit output before the framing
-    /// or checksum that would have rejected the stream. Treat that output as provisional, exactly
+    /// or checksum that can reject the stream. Treat that output as provisional, exactly
     /// as when the operation has not reported that it is done.
     ///
     /// It is distinct from [`is_corrupt_data`][Self::is_corrupt_data] in what it licenses: corrupt
-    /// data stays corrupt, whereas fetching the body again may produce a complete one. That is
-    /// advice for whoever owns the byte source, not for a retry of this call -- decompressing the
+    /// data stays corrupt, whereas fetching the body again can produce a complete one. That is
+    /// advice for whoever owns the byte source, not for a retry of this call. Decompressing the
     /// same buffer again is deterministic and fails the same way, which is why
     /// [`recovery`][recoverable::Recovery::recovery] reports this as
     /// [`Unknown`][recoverable::RecoveryKind::Unknown] rather than asserting a retry to middleware
@@ -252,7 +252,9 @@ impl Error {
         self.kind == Kind::UnexpectedEndOfStream
     }
 
-    /// Decompression would have exceeded the configured [`DecompressorLimits`].
+    /// An applicable decompression limit stopped the operation.
+    ///
+    /// [`DecompressorLimits`] describes format defaults, caller settings, and buffering fallbacks.
     ///
     /// [`DecompressorLimits`]: crate::DecompressorLimits
     #[must_use]
@@ -281,7 +283,7 @@ impl Error {
     /// Carries whatever [`other`][Self::other] or
     /// [`other_with_recovery`][Self::other_with_recovery] was given, which the adapters behind the
     /// `futures-stream` feature use for a source stream's own error. Because those constructors
-    /// accept any foreign failure, this kind says only that the failure was foreign -- it does not
+    /// accept any foreign failure, this kind says only that the failure was foreign. It does not
     /// establish that a source stream was involved, nor that the compressed bytes seen so far were
     /// valid. The original failure is available from [`source`][std::error::Error::source], and is
     /// the only thing that can say more.
@@ -301,7 +303,7 @@ impl Error {
 }
 
 impl Recovery for Error {
-    /// Whether retrying could help, and how soon.
+    /// Whether retrying can help, and how soon.
     ///
     /// Kinds this crate raises itself are classified by what they mean. Corrupt data, an exceeded
     /// bound, misuse and a rejected setting are never worth another attempt. A truncated stream
@@ -329,7 +331,7 @@ impl StdError for Error {
 /// A [`Result`][std::result::Result] whose error is this crate's [`Error`].
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// A compressor or decompressor could not be built from the settings it was given.
+/// A compressor or decompressor was not built because an engine rejected its settings.
 ///
 /// Most formats accept any combination the builders can express, so their `build` methods do not
 /// return this at all. The exception is zstd, whose native library validates the parameters this
@@ -400,7 +402,7 @@ mod tests {
 
         assert_eq!(error.to_string(), "the engine rejected the window size");
         assert!(error.source().is_none(), "a build failure has no cause to report");
-        assert!(format!("{error:?}").contains("BuildError"), "the kind should be visible");
+        assert!(format!("{error:?}").contains("BuildError"), "the kind must be visible");
 
         let converted = Error::from(error);
         assert!(converted.is_invalid_configuration(), "got {converted}");
@@ -472,7 +474,7 @@ mod tests {
         for error in errors {
             let rendered = error.to_string();
             let first = rendered.chars().next().unwrap();
-            assert!(!first.is_uppercase(), "message should not start with a capital: {rendered}");
+            assert!(!first.is_uppercase(), "message must not start with a capital: {rendered}");
             assert!(!rendered.contains("exception"), "say 'error', not 'exception': {rendered}");
         }
     }
@@ -494,7 +496,7 @@ mod tests {
     #[test]
     fn debug_is_available_for_diagnostics() {
         let rendered = format!("{:?}", Error::output_limit_exceeded(2, 1));
-        assert!(rendered.contains("LimitExceeded"), "kind should be visible: {rendered}");
+        assert!(rendered.contains("LimitExceeded"), "kind must be visible: {rendered}");
     }
 
     #[test]
@@ -546,7 +548,7 @@ mod tests {
 
     #[test]
     fn other_finds_an_io_error_nested_inside_a_wrapper() {
-        // A transport rarely hands back a bare io::Error; the heuristic has to look through
+        // A transport rarely returns a bare `io::Error`. The heuristic must inspect
         // whatever wrapped it.
         #[derive(Debug)]
         struct Wrapper(std::io::Error);
@@ -590,7 +592,11 @@ mod tests {
         let error = Error::other_with_recovery("the backend is degraded", "a plain message", supplied.clone());
 
         assert!(error.is_source(), "got {error}");
-        assert_eq!(error.recovery(), supplied, "the supplied information should win over the heuristic");
+        assert_eq!(
+            error.recovery(),
+            supplied,
+            "the supplied information must take precedence over the heuristic"
+        );
     }
 
     #[test]

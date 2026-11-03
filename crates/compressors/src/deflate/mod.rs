@@ -3,10 +3,9 @@
 
 //! Raw deflate (RFC 1951): the compressed payload with no header and no checksum.
 //!
-//! Use this only where the surrounding format supplies its own framing and integrity check, such as
-//! inside a ZIP archive. Without a checksum, corruption is not reliably detected, so prefer `zlib`
-//! or `gzip` for data in transit. PNG is not an example of this: its `IDAT` payloads concatenate
-//! into a single zlib stream, so reach for `zlib` there.
+//! Use this format when another container supplies framing and an integrity check, such as a ZIP
+//! archive. Raw deflate cannot reliably detect corruption. Use `zlib` or `gzip` for data in
+//! transit. PNG `IDAT` payloads form one zlib stream, so use `zlib` for PNG data.
 //!
 //! # Examples
 //!
@@ -26,11 +25,11 @@ use crate::flate::codec::{FlateCompress, FlateDecompress};
 use crate::flate::{DEFAULT_LIMITS, Wrapper};
 use crate::macros::define_format;
 
-/// Selects raw deflate as the format of a [`CompressorBuilder`][crate::CompressorBuilder] or [`DecompressorBuilder`][crate::DecompressorBuilder].
+/// Selects raw deflate for a [`CompressorBuilder`][crate::CompressorBuilder] or
+/// [`DecompressorBuilder`][crate::DecompressorBuilder].
 ///
-/// Raw deflate has no settings beyond the ones every format shares, so this type carries none. It
-/// exists to name the format in the builder's type parameter, which is what gives that builder a
-/// `build` method producing this module's [`Compressor`] and [`Decompressor`].
+/// Raw deflate has no format-specific settings. This marker adds a `build` method that creates this
+/// module's [`Compressor`] or [`Decompressor`].
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Deflate;

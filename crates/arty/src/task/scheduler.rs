@@ -168,7 +168,9 @@ impl Scheduler {
             let inner = DeferredTask::new(future_factory, context);
             let options = TaskOptions::new(TaskPlacement::SameThread);
             current.tasks().add(inner, options, result_tx);
-            self.dispatcher.wake_worker(self.binding.worker_index);
+            if !current.tasks().is_executing() {
+                self.dispatcher.wake_worker(self.binding.worker_index);
+            }
             Ok(handle)
         })
     }
