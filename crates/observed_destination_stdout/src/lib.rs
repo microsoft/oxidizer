@@ -598,7 +598,7 @@ mod tests {
             };
 
             let mut points = sum.data_points();
-            if points.next().is_some_and(|point| point.value() != 2) {
+            if !points.next().is_some_and(|point| point.value() == 2) {
                 return false;
             }
             if points.next().is_some() {
