@@ -46,86 +46,71 @@ This prints `42`. [`main`][__link2] starts and stops the runtime.
 The `?` returns a [`JoinError`][__link3] if the child task fails.
 Await child tasks before returning. Shutdown cancels pending async tasks.
 
-## Execution model
+## Task scheduling
 
-Each worker is one operating-system thread with a cooperative executor.
-The worker thread polls the tasks assigned to it. When one task awaits an
-operation that is not ready, the worker can poll another assigned task.
-After a task starts, it stays on that worker thread for its entire life.
-
-Choose the initial worker for a new task:
+Choose where a new task starts with one of these methods:
 
 * [`Scheduler::spawn`][__link4] uses the worker bound
-  to the scheduler. A cloned scheduler keeps the same binding, even when
+  to the scheduler. A cloned scheduler keeps that binding, even when
   another thread calls it.
 * [`Scheduler::spawn_anywhere`][__link5] lets
-  the runtime select a worker. This initial placement is similar to Tokio
-  task placement.
+  the runtime select a worker. The runtime can select the same worker.
 * [`Scheduler::spawn_at`][__link6] uses a worker
-  that you select from the same runtime.
+  you select from the same runtime with
+  [`RuntimeControl::workers`][__link7].
 
-Unlike a Tokio task, an Arty task does not move between workers after it
-starts.
+After a task starts, it stays on its assigned worker. If it awaits an
+operation that is not ready, that worker can poll another ready task
+assigned to it.
 
-A task factory creates the task future on its destination worker. A payload
-is a separate value passed to that factory. If the factory starts, Arty
-relocates a [`ThreadAware`][__link7] payload before the factory
-uses it. Rejected tasks and tasks cancelled before their factory starts can
-drop the payload without relocation.
+For `spawn_anywhere` and `spawn_at`, pass task data separately from the
+factory. The data must implement [`ThreadAware`][__link8]. Arty
+calls its relocation method on the destination worker before the factory
+runs. The implementation can update worker-specific state or refresh an
+optimization, such as a cache. Relocation must preserve real data and
+cannot affect correctness.
 
-Cloned values can refer to the same resource while keeping separate state
-on each worker. `ThreadAware` updates that state, but it does not share
-ownership of a resource or store local state for you.
-
-This example compares fixed placement with runtime-selected placement:
+If Arty rejects a task or cancels it before the factory starts, it drops the
+data without relocating it.
 
 ```rust
-let parent_worker = cx.thread().id();
-let child_worker = cx
+let answer = cx
     .scheduler()
-    .spawn(async |child| child.thread().id())
+    .spawn_anywhere(
+        (cx.clock().clone(), 42_u32),
+        |(clock, answer)| async move {
+            clock.delay(std::time::Duration::from_millis(1)).await;
+            answer
+        },
+    )
     .await?;
-assert_eq!(child_worker, parent_worker);
-
-// `cx.clone()` is the payload. The closure is the task factory.
-cx.scheduler()
-    .spawn_anywhere(cx.clone(), |moved| async move {
-        assert_eq!(moved.thread().id(), std::thread::current().id());
-    })
-    .await?;
+assert_eq!(answer, 42);
 ```
 
-`spawn_anywhere` can select the original worker. The relocated context
-always reports the worker that runs the new task.
-
-Each runtime owns its workers and services. Arty does not use a single
-runtime shared by the whole process. Each worker tracks its own state.
-
-Arty runs tasks, provides clocks, and runs blocking functions on separate threads.
-It can also run I/O drivers, which handle input and output.
-I/O libraries connect to Arty through `arty_io_core`.
-Related I/O crates ship alongside Arty.
+Tuples implement `ThreadAware` when every element does. Here, `Clock` and
+`u32` implement it. Arty relocates the clock to the selected worker before
+the factory runs. The factory waits for 1 ms, then returns the answer.
 
 ## API overview
 
-* [`runtime`][__link8] explains how to create, configure, and stop a runtime.
-* [`task`][__link9] explains how to start tasks, choose their workers, and receive results.
-* [`time`][__link10] provides clocks, delays, timeouts, and control over time in tests.
-* [`io`][__link11] connects I/O libraries to the runtime.
-* [`core`][__link12] describes workers and how values update their state for a worker.
-* [`main`][__link13] and [`test`][__link14] start and stop a runtime for an async function or test.
+* [`runtime`][__link9] explains how to create, configure, and stop a runtime.
+* [`task`][__link10] explains how to start tasks, choose their workers, and receive results.
+* [`time`][__link11] provides clocks, delays, timeouts, and control over time in tests.
+* [`io`][__link12] connects I/O libraries to the runtime.
+* [`core`][__link13] describes workers and how values update their state for a worker.
+* [`main`][__link14] and [`test`][__link15] start and stop a runtime for an async function or test.
 
 ## Features
 
 The default feature set enables `rt`, `macros`, and `monitor`.
 
 * `rt`: Enables the runtime, task, and I/O APIs.
-* `macros`: Enables [`main`][__link15] and [`test`][__link16]. It also enables `rt`.
+* `macros`: Enables [`main`][__link16] and [`test`][__link17]. It also enables `rt`.
 * `monitor`: Enables the Seismograph monitor dependency. It forwards
   monitoring support for `performables` when `performables` is enabled. It does
   not start monitoring or emit new telemetry.
 * `test-util`: Enables testing utilities, including
-  [`ClockControl`][__link17].
+  [`ClockControl`][__link18].
   Enable it in dev-dependencies, not production dependencies.
 
 
@@ -134,22 +119,23 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVOOkiwtK_84bGyYJldq1SSMbSs5R1-8kbtkbwouPZ79D401hZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0n095s03xAIbbpfC7FNGc2Ab7jYkYxugQoobKMJKeji9Ff1hZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/0.6.0/arty/?search=core::ThreadAware
- [__link10]: https://docs.rs/arty/0.6.0/arty/time/index.html
- [__link11]: https://docs.rs/arty/0.6.0/arty/io/index.html
- [__link12]: https://docs.rs/arty/0.6.0/arty/core/index.html
- [__link13]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
- [__link14]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
- [__link15]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
- [__link16]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
- [__link17]: https://docs.rs/arty/0.6.0/arty/?search=time::ClockControl
+ [__link10]: https://docs.rs/arty/0.6.0/arty/task/index.html
+ [__link11]: https://docs.rs/arty/0.6.0/arty/time/index.html
+ [__link12]: https://docs.rs/arty/0.6.0/arty/io/index.html
+ [__link13]: https://docs.rs/arty/0.6.0/arty/core/index.html
+ [__link14]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
+ [__link15]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
+ [__link16]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
+ [__link17]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
+ [__link18]: https://docs.rs/arty/0.6.0/arty/?search=time::ClockControl
  [__link2]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
  [__link3]: https://docs.rs/arty/0.6.0/arty/?search=task::JoinError
  [__link4]: https://docs.rs/arty/0.6.0/arty/?search=task::Scheduler::spawn
  [__link5]: https://docs.rs/arty/0.6.0/arty/?search=task::Scheduler::spawn_anywhere
  [__link6]: https://docs.rs/arty/0.6.0/arty/?search=task::Scheduler::spawn_at
- [__link7]: https://docs.rs/arty/0.6.0/arty/?search=core::ThreadAware
- [__link8]: https://docs.rs/arty/0.6.0/arty/runtime/index.html
- [__link9]: https://docs.rs/arty/0.6.0/arty/task/index.html
+ [__link7]: https://docs.rs/arty/0.6.0/arty/?search=runtime::RuntimeControl::workers
+ [__link8]: https://docs.rs/arty/0.6.0/arty/?search=core::ThreadAware
+ [__link9]: https://docs.rs/arty/0.6.0/arty/runtime/index.html
