@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1] - 2026-11-02
+
+- Update cache-tier, service, and test dependencies. This release does not change the service
+  cache's source code.
+- Update the requirement for local package `cachet_tier` from `0.6.0` to `0.6.1`.
+- Update the requirement for local package `layered` from `0.3.8` to `0.3.9`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
 ## [0.6.0] - 2026-10-20
 
 - The public API exposes types from `recoverable`; upgrading to its incompatible release changes those public type identities.

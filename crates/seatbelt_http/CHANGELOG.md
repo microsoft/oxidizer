@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.0] - 2026-11-02
+
+- Update HTTP resilience dependencies to use HTTP Extensions 0.14.0, Seatbelt 0.12.0, and tick
+  0.9.0. Middleware behavior does not change.
+- Update the requirement for local package `http_extensions` from `0.13.0` to `0.14.0`.
+- Update the requirement for local package `seatbelt` from `0.11.0` to `0.12.0`.
+- Update the requirement for local package `templated_uri` from `0.7.0` to `0.7.1`.
+- Update the requirement for local package `tick` from `0.8.0` to `0.9.0`.
+
 ## [0.11.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
