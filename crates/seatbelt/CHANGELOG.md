@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.0] - 2026-11-02
+
+- Simplify public resilience documentation. Middleware signatures, serialization, and execution
+  behavior do not change.
+- Update dependencies to use the tick 0.9.0 API.
+- Update the requirement for local package `layered` from `0.3.8` to `0.3.9`.
+- Update the requirement for local package `recoverable` from `0.3.0` to `0.3.1`.
+- Update the requirement for local package `thread_aware` from `0.12.1` to `0.12.2`.
+- Update the requirement for local package `tick` from `0.8.0` to `0.9.0`.
+- Update the development requirement for `rstest` from `0.27.0` to `0.28.0`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+- Update the development requirement for `gungraun` from `=0.19.4` to `=0.20.0`.
+
 ## [0.11.0] - 2026-10-20
 
 - The public API exposes types from `recoverable`; upgrading to its incompatible release changes those public type identities.

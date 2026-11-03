@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.3] - 2026-11-02
+
+- The package compiles mockall-specific helpers and fields only when `mockall` is enabled. Macro
+  requirements and behavior do not change.
+
 ## [0.2.2] - 2026-10-20
 
 - Classify the implementation crate as private API and align it with the Fakeable package family.

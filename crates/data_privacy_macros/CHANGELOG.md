@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.13.2] - 2026-11-02
+
+- Use version 0.13.2 to match the data_privacy packages. Macro behavior does not change.
+- Update the requirement for local package `data_privacy_macros_impl` from `=0.13.1` to `=0.13.2`.
+
 ## [0.13.1] - 2026-10-20
 
 - Refresh published macro documentation and align private implementation metadata.

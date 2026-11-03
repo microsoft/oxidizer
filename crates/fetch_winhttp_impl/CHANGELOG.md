@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0] - 2026-11-02
+
+- Breaking: Pass `OpaqueMemory` instead of `GlobalPool` to `WinHttpDeps::builder`.
+- Keep the selected provider when creating clients and bodies. Borrow upload providers and body
+  builders instead of replacing them.
+- Preserve pointer provenance, the information about a pointer's origin, when recovering WinHTTP
+  request state from native callbacks.
+- Update the requirement for local package `bytesbuf` from `0.12.0` to `0.13.0`.
+- Update the requirement for local package `bytesbuf_io` from `0.12.0` to `0.13.0`.
+- Update the requirement for local package `fetch` from `0.19.0` to `0.20.0`.
+- Update the requirement for local package `http_extensions` from `0.13.0` to `0.14.0`.
+- Update the requirement for local package `layered` from `0.3.8` to `0.3.9`.
+- Update the requirement for local package `observed` from `0.29.0` to `0.30.0`.
+- Update the requirement for local package `ohno` from `0.5.3` to `0.5.4`.
+- Update the requirement for local package `plurality` from `0.2.3` to `0.2.4`.
+- Update the requirement for local package `recoverable` from `0.3.0` to `0.3.1`.
+- Update the requirement for local package `thread_aware` from `0.12.1` to `0.12.2`.
+- Update the requirement for local package `tick` from `0.8.0` to `0.9.0`.
+- Update the requirement for `tokio` from `1.48.0` to `1.53.3`.
+
 ## [0.4.0] - 2026-10-20
 
 - The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
