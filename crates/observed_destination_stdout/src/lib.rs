@@ -622,7 +622,7 @@ mod tests {
         let metrics = exporter.get_finished_metrics().unwrap();
 
         assert!(
-            metrics.iter().any(|m| matches_expected_batch(m)),
+            metrics.iter().any(matches_expected_batch),
             "exported metrics did not match expected batch"
         );
     }
