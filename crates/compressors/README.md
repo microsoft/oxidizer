@@ -191,24 +191,24 @@ See [`documentation`][__link19] for the longer form guides.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/compressors">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb6y7_UedsNgUbjtIbIb-UfQsbjmTeDR3Oi9IbqbHLaorJVi5hZIKCaGJ5dGVzYnVmZjAuMTIuMIJrY29tcHJlc3NvcnNlMC4zLjA
- [__link0]: https://crates.io/crates/bytesbuf/0.12.0
- [__link1]: https://docs.rs/compressors/0.3.0/compressors/?search=Result
- [__link10]: https://docs.rs/compressors/0.3.0/compressors/?search=format
- [__link11]: https://docs.rs/compressors/0.3.0/compressors/?search=CompressorBuilder::build_format
- [__link12]: https://docs.rs/compressors/0.3.0/compressors/?search=Resources
- [__link13]: https://docs.rs/compressors/0.3.0/compressors/?search=Resources::with_pool_capacity
- [__link14]: https://docs.rs/compressors/0.3.0/compressors/?search=DecompressorLimits::max_output_len
- [__link15]: https://docs.rs/compressors/0.3.0/compressors/?search=DecompressorLimits
- [__link16]: https://docs.rs/compressors/0.3.0/compressors/documentation/index.html
- [__link17]: https://docs.rs/compressors/0.3.0/compressors/?search=core::Compression
- [__link18]: https://docs.rs/compressors/0.3.0/compressors/?search=Resources
- [__link19]: https://docs.rs/compressors/0.3.0/compressors/documentation/index.html
- [__link2]: https://docs.rs/compressors/0.3.0/compressors/?search=Resources
- [__link3]: https://docs.rs/bytesbuf/0.12.0/bytesbuf/?search=BytesView
- [__link4]: https://docs.rs/bytesbuf/0.12.0/bytesbuf/?search=BytesBuf
- [__link5]: https://docs.rs/compressors/0.3.0/compressors/?search=Resources
- [__link6]: https://docs.rs/bytesbuf/0.12.0/bytesbuf/?search=BytesBuf
- [__link7]: https://docs.rs/compressors/0.3.0/compressors/fn.compress.html
- [__link8]: https://docs.rs/compressors/0.3.0/compressors/fn.decompress.html
- [__link9]: https://docs.rs/compressors/0.3.0/compressors/?search=core::Compression
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb6y7_UedsNgUbjtIbIb-UfQsbjmTeDR3Oi9IbqbHLaorJVi5hZIKCaGJ5dGVzYnVmZjAuMTMuMIJrY29tcHJlc3NvcnNlMC40LjA
+ [__link0]: https://crates.io/crates/bytesbuf/0.13.0
+ [__link1]: https://docs.rs/compressors/0.4.0/compressors/?search=Result
+ [__link10]: https://docs.rs/compressors/0.4.0/compressors/?search=format
+ [__link11]: https://docs.rs/compressors/0.4.0/compressors/?search=CompressorBuilder::build_format
+ [__link12]: https://docs.rs/compressors/0.4.0/compressors/?search=Resources
+ [__link13]: https://docs.rs/compressors/0.4.0/compressors/?search=Resources::with_pool_capacity
+ [__link14]: https://docs.rs/compressors/0.4.0/compressors/?search=DecompressorLimits::max_output_len
+ [__link15]: https://docs.rs/compressors/0.4.0/compressors/?search=DecompressorLimits
+ [__link16]: https://docs.rs/compressors/0.4.0/compressors/documentation/index.html
+ [__link17]: https://docs.rs/compressors/0.4.0/compressors/?search=core::Compression
+ [__link18]: https://docs.rs/compressors/0.4.0/compressors/?search=Resources
+ [__link19]: https://docs.rs/compressors/0.4.0/compressors/documentation/index.html
+ [__link2]: https://docs.rs/compressors/0.4.0/compressors/?search=Resources
+ [__link3]: https://docs.rs/bytesbuf/0.13.0/bytesbuf/?search=BytesView
+ [__link4]: https://docs.rs/bytesbuf/0.13.0/bytesbuf/?search=BytesBuf
+ [__link5]: https://docs.rs/compressors/0.4.0/compressors/?search=Resources
+ [__link6]: https://docs.rs/bytesbuf/0.13.0/bytesbuf/?search=BytesBuf
+ [__link7]: https://docs.rs/compressors/0.4.0/compressors/fn.compress.html
+ [__link8]: https://docs.rs/compressors/0.4.0/compressors/fn.decompress.html
+ [__link9]: https://docs.rs/compressors/0.4.0/compressors/?search=core::Compression

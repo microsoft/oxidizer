@@ -3,7 +3,7 @@
 
 [package]
 name = "plurality"
-version = "0.2.3"
+version = "0.2.4"
 description = "A highly efficient pooling memory allocator"
 readme = "README.md"
 keywords = ["pool", "memory", "allocator"]
