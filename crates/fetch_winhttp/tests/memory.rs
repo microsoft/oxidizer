@@ -11,6 +11,12 @@ use fetch_winhttp::{HttpClientWinHttpExt as _, WinHttpDeps};
 use observed::Sink;
 use tick::Clock;
 
+#[test]
+fn facade_accepts_a_global_pool_without_building_a_client() {
+    let deps = WinHttpDeps::builder(Clock::new_frozen(), GlobalPool::new(), Sink::noop()).build();
+    let _builder = HttpClient::builder_winhttp(deps).minimal_pipeline();
+}
+
 /// Makes sure that the facade accepts caller-selected memory without opening a session.
 ///
 /// The implementation's mock-backed builder tests cover allocations and client cloning.

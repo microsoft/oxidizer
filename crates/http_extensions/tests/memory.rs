@@ -8,11 +8,19 @@
 use std::sync::{Arc, Mutex};
 
 use bytesbuf::mem::testing::TransparentMemory;
-use bytesbuf::mem::{HasMemory, Memory, OpaqueMemory};
+use bytesbuf::mem::{GlobalPool, HasMemory, Memory, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use http_extensions::HttpBodyBuilder;
 use thread_aware::{Relocator, Thread, ThreadAware};
 use tick::Clock;
+
+#[test]
+fn body_builder_accepts_a_global_pool() {
+    let builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
+
+    assert_eq!(BytesView::try_from(builder.text("payload")).unwrap(), b"payload");
+    assert!(builder.reserve(17).capacity() >= 17);
+}
 
 /// Records which provider instance serves each body allocation.
 #[derive(Debug)]
