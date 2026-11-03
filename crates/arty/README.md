@@ -76,13 +76,10 @@ data without relocating it.
 ```rust
 let answer = cx
     .scheduler()
-    .spawn_anywhere(
-        (cx.clock().clone(), 42_u32),
-        |(clock, answer)| async move {
-            clock.delay(std::time::Duration::from_millis(1)).await;
-            answer
-        },
-    )
+    .spawn_anywhere((cx.clock().clone(), 42_u32), |(clock, answer)| async move {
+        clock.delay(std::time::Duration::from_millis(1)).await;
+        answer
+    })
     .await?;
 assert_eq!(answer, 42);
 ```
@@ -119,7 +116,7 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb0n095s03xAIbbpfC7FNGc2Ab7jYkYxugQoobKMJKeji9Ff1hZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbtgyMHn5dcrgbTWJhsP9CEYcb2cOdLOkI7oIbhh1QzkStC-FhZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/0.6.0/arty/?search=core::ThreadAware
  [__link10]: https://docs.rs/arty/0.6.0/arty/task/index.html

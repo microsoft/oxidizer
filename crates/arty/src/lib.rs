@@ -84,13 +84,10 @@
 //! # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 //! let answer = cx
 //!     .scheduler()
-//!     .spawn_anywhere(
-//!         (cx.clock().clone(), 42_u32),
-//!         |(clock, answer)| async move {
-//!             clock.delay(std::time::Duration::from_millis(1)).await;
-//!             answer
-//!         },
-//!     )
+//!     .spawn_anywhere((cx.clock().clone(), 42_u32), |(clock, answer)| async move {
+//!         clock.delay(std::time::Duration::from_millis(1)).await;
+//!         answer
+//!     })
 //!     .await?;
 //! assert_eq!(answer, 42);
 //! # Ok(())
