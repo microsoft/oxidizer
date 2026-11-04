@@ -5,6 +5,7 @@
 
 use std::any::type_name;
 use std::fmt;
+use std::sync::Arc;
 
 use layered::Layer;
 use observed::Sink;
@@ -27,6 +28,7 @@ pub struct Telemetry<T> {
 pub struct TelemetryLayer {
     pub(crate) sink: Sink,
     pub(crate) clock: SimpleClock,
+    pub(crate) excluded_paths: Arc<[Box<str>]>,
 }
 
 impl Telemetry<()> {
@@ -36,6 +38,7 @@ impl Telemetry<()> {
         TelemetryLayer {
             sink,
             clock: SimpleClock::new_system(),
+            excluded_paths: Arc::default(),
         }
     }
 }
@@ -47,6 +50,25 @@ impl TelemetryLayer {
     #[must_use]
     pub fn clock(mut self, clock: impl Into<SimpleClock>) -> Self {
         self.clock = clock.into();
+        self
+    }
+
+    /// Sets request paths to be excluded from telemetry.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use http_telemetry::Telemetry;
+    /// use observed::Sink;
+    ///
+    /// # fn build(sink: Sink) {
+    /// let layer = Telemetry::server(sink).excluded_paths(["/health", "/metrics"]);
+    /// # let _ = layer;
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn excluded_paths(mut self, paths: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        self.excluded_paths = paths.into_iter().map(|path| path.as_ref().into()).collect();
         self
     }
 }

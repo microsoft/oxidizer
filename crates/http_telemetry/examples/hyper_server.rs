@@ -3,7 +3,7 @@
 
 //! Runs a hyper server with the server middleware, and prints the events that it emits.
 //!
-//! The server takes HTTP/1.1 and HTTP/2 on one local port. A client sends four requests over each
+//! The server takes HTTP/1.1 and HTTP/2 on one local port. A client sends five requests over each
 //! protocol:
 //!
 //! - `GET /books/1`: the server responds with a short JSON body. The middleware emits the complete
@@ -14,9 +14,13 @@
 //!   reads the chunk and hangs up, so the middleware emits the abandoned event.
 //! - `GET /books/1/pages`: the server sends one chunk of the body, and then the body fails. The
 //!   middleware emits the error event.
+//! - `GET /health`: the server responds with 200. The layer excludes the path, so the middleware
+//!   emits no event for it.
 //!
 //! The middleware also emits the `1` and the `-1` of `http.server.active_requests` for each
-//! request. The client waits for the `-1` before it prints its line and sends the next request.
+//! request that it does not exclude. The client waits for that `-1` before it prints its line and
+//! sends the next request. Each event shows the host and the port of the server: from the `Host`
+//! header over HTTP/1.1, and from the URI over HTTP/2.
 //!
 //! Run the example with this command:
 //! ```sh
@@ -55,7 +59,10 @@ use tokio::net::{TcpListener, TcpStream};
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The paths that the client requests over each protocol.
-const PATHS: [&str; 4] = ["/books/1", "/missing", "/books/1/chapters", "/books/1/pages"];
+const PATHS: [&str; 5] = ["/books/1", "/missing", "/books/1/chapters", "/books/1/pages", HEALTH_PATH];
+
+/// The path that the layer excludes, so that the middleware emits no event for it.
+const HEALTH_PATH: &str = "/health";
 
 /// The path whose response the client reads in part, before it hangs up.
 const HANG_UP_PATH: &str = "/books/1/chapters";
@@ -124,7 +131,7 @@ async fn main() {
     let body_builder = HttpBodyBuilder::new_fake();
 
     // The application responds to `GET /books/{book}`, `GET /books/{book}/chapters` and
-    // `GET /books/{book}/pages` with JSON, and to any other request with 404.
+    // `GET /books/{book}/pages` with JSON, to `GET /health` with 200, and to the rest with 404.
     let bodies = body_builder.clone();
     let handler = Execute::new(move |request: HttpRequest| {
         let chunk = |text: &str| Ok::<_, HttpError>(BytesView::copied_from_slice(text.as_bytes(), &bodies));
@@ -146,12 +153,13 @@ async fn main() {
                 stream::iter([chunk(r#"{"page":1}"#), Err(HttpError::validation("the page is missing"))]),
                 &HttpBodyOptions::new(),
             )),
+            (&Method::GET, None) if request.uri().path() == HEALTH_PATH => Response::builder().body(bodies.empty()),
             _ => Response::builder().status(StatusCode::NOT_FOUND).body(bodies.empty()),
         }
         .expect("the example builds valid responses");
         async move { Ok::<_, HttpError>(response) }
     });
-    let service = Arc::new((Telemetry::server(sink), handler).into_service());
+    let service = Arc::new((Telemetry::server(sink).excluded_paths([HEALTH_PATH]), handler).into_service());
 
     // hyper serves each connection, and takes HTTP/1.1 and HTTP/2 on the same port.
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("the example can bind a local port");
@@ -199,7 +207,9 @@ async fn main() {
                 .expect("the example paths are valid URIs");
             let line = read(http1.send_request(request).await, path == HANG_UP_PATH).await;
             connection.abort();
-            request_ends.next().await.expect("the sink reports the -1 of each request");
+            if path != HEALTH_PATH {
+                request_ends.next().await.expect("the sink reports the -1 of each request");
+            }
             println!("{line}\n");
         }
 
@@ -216,7 +226,9 @@ async fn main() {
                 .body(Empty::<BytesView>::new())
                 .expect("the example paths are valid URIs");
             let line = read(http2.send_request(request).await, path == HANG_UP_PATH).await;
-            request_ends.next().await.expect("the sink reports the -1 of each request");
+            if path != HEALTH_PATH {
+                request_ends.next().await.expect("the sink reports the -1 of each request");
+            }
             println!("{line}\n");
         }
     };

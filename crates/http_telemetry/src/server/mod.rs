@@ -9,11 +9,12 @@ mod response_body;
 
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
-use drop_guard::{RequestEnd, TelemetryDropGuard};
+use drop_guard::{RequestEnd, TelemetryDropGuard, UriAuthority};
 use events::{ActiveRequests, RequestAbandoned, RequestComplete, RequestError};
 use futures::FutureExt;
 use futures::future::Either;
 use http::Version;
+use http::header::HOST;
 use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
 use layered::Service;
 use observed::Event;
@@ -30,6 +31,15 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
 
     fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
         let layer = &self.layer;
+
+        let path = input.uri().path().as_bytes();
+        let excluded = layer.excluded_paths.iter().any(|excluded_path| {
+            path.get(..excluded_path.len())
+                .is_some_and(|start| start.eq_ignore_ascii_case(excluded_path.as_bytes()))
+        });
+        if excluded {
+            return Either::Left(self.inner.execute(input));
+        }
 
         let interested = [
             RequestComplete::DESCRIPTION,
@@ -51,11 +61,12 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
             _ => OTHER,
         };
 
-        let scheme = input.uri().scheme_str().map(|scheme| match scheme {
-            "http" => "http",
-            "https" => "https",
-            _ => OTHER,
-        });
+        let (scheme, default_port) = match input.uri().scheme_str() {
+            Some("http") => (Some("http"), Some(80)),
+            Some("https") => (Some("https"), Some(443)),
+            Some(_) => (Some(OTHER), None),
+            None => (None, None),
+        };
 
         let mut guard = TelemetryDropGuard {
             sink: layer.sink.clone(),
@@ -64,6 +75,10 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
             method: input.method().clone(),
             protocol_version,
             scheme,
+            uri_authority: match input.uri().authority() {
+                Some(authority) => Some(UriAuthority::Uri(authority.clone(), default_port)),
+                None => input.headers().get(HOST).cloned().map(UriAuthority::Host),
+            },
             finished: false,
         };
         guard.add_active_request(1);

@@ -19,7 +19,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::{Duration, SystemTime};
 
 use bytesbuf::BytesView;
-use http::{HeaderMap, Method, Request, StatusCode, Version};
+use http::{HeaderMap, Method, Request, StatusCode, Uri, Version};
 use http_body::{Body, Frame};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::{Telemetry, TelemetryLayer};
@@ -256,9 +256,12 @@ pub(crate) fn get() -> HttpRequest {
     request(Method::GET, Version::HTTP_11)
 }
 
-/// A `GET` request over HTTP/1.1 to `uri`.
+/// A `GET` request over HTTP/1.1 to `uri`. The URI keeps the static text, so a clone of its
+/// authority does not allocate.
 pub(crate) fn get_to(uri: &'static str) -> HttpRequest {
-    Request::get(uri).body(HttpBodyBuilder::new_fake().empty()).unwrap()
+    Request::get(Uri::from_static(uri))
+        .body(HttpBodyBuilder::new_fake().empty())
+        .unwrap()
 }
 
 /// An enrichment with the metric dimension `tenant`.

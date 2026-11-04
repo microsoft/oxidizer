@@ -5,8 +5,11 @@
 
 use std::sync::Arc;
 
-use http::{Method, StatusCode};
+use http::uri::Authority;
+use http::{HeaderValue, Method, StatusCode};
 use http_extensions::{HttpError, collect_error_labels};
+use http_headers::SingleValueField;
+use http_headers::headers::{Host, HostView};
 use observed::context::Transfer;
 use observed::{Sink, Text, emit};
 use tick::Stopwatch;
@@ -42,6 +45,14 @@ pub(crate) enum RequestEnd<'a> {
     Abandoned(Option<StatusCode>),
 }
 
+/// The authority of the target URI
+pub(crate) enum UriAuthority {
+    /// The authority of the request URI, and the default port of its scheme.
+    Uri(Authority, Option<u16>),
+    /// The `Host` header of a request whose URI has no authority.
+    Host(HeaderValue),
+}
+
 /// Drop guard that emits the event of one request, also when the caller drops the request future.
 ///
 /// The service creates the guard in `execute`, so the duration starts at the call. When the
@@ -57,6 +68,7 @@ pub(crate) struct TelemetryDropGuard {
     pub(crate) method: Method,
     pub(crate) protocol_version: &'static str,
     pub(crate) scheme: Option<&'static str>,
+    pub(crate) uri_authority: Option<UriAuthority>,
     pub(crate) finished: bool,
 }
 
@@ -86,6 +98,23 @@ impl TelemetryDropGuard {
         let method = http_method_name(&self.method);
         let method_original = (method == OTHER).then(|| Text::from(Arc::<str>::from(self.method.as_str())));
         let protocol_version = self.protocol_version;
+        let (server_address, server_port) = match &self.uri_authority {
+            Some(UriAuthority::Uri(authority, default_port)) => (Some(authority.host()), authority.port_u16().or(*default_port)),
+            Some(UriAuthority::Host(value)) => {
+                let host = <Host as SingleValueField>::decode_view(value.into()).ok();
+                (
+                    host.as_ref().map(HostView::host),
+                    host.and_then(|host| host.network_port().ok().flatten()),
+                )
+            }
+            None => (None, None),
+        };
+        // `emit!` builds an event only for a sink that is interested in it, so the host is copied only then.
+        let server_address = || {
+            server_address
+                .filter(|host| !host.is_empty())
+                .map(|host| Text::from(Arc::<str>::from(host)))
+        };
         match end {
             RequestEnd::Complete(status_code) => {
                 let error_type = status_code.as_u16().checked_sub(500).and_then(|index| {
@@ -99,6 +128,8 @@ impl TelemetryDropGuard {
                         method_original,
                         scheme: self.scheme,
                         protocol_version,
+                        server_address: server_address(),
+                        server_port,
                         status_code: status_code.as_u16(),
                         error_type,
                         duration_ms,
@@ -112,6 +143,8 @@ impl TelemetryDropGuard {
                     method_original,
                     scheme: self.scheme,
                     protocol_version,
+                    server_address: server_address(),
+                    server_port,
                     status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: Text::from(collect_error_labels(error).into_cow()),
                     duration_ms,
@@ -124,6 +157,8 @@ impl TelemetryDropGuard {
                     method_original,
                     scheme: self.scheme,
                     protocol_version,
+                    server_address: server_address(),
+                    server_port,
                     status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: Text::from("panic"),
                     duration_ms,
@@ -136,6 +171,8 @@ impl TelemetryDropGuard {
                     method_original,
                     scheme: self.scheme,
                     protocol_version,
+                    server_address: server_address(),
+                    server_port,
                     status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: "abandoned",
                     duration_ms,

@@ -43,7 +43,7 @@ futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
 http_extensions = { workspace = true }
-http_headers = { workspace = true, features = ["headers-content-length", "http"] }
+http_headers = { workspace = true, features = ["headers-content-length", "headers-negotiation", "http"] }
 layered = { workspace = true }
 observed = { workspace = true }
 tick = { workspace = true }

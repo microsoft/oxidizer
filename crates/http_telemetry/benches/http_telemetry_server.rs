@@ -178,6 +178,16 @@ fn echoing_stack(sink: Sink) -> Telemetry<Echoing> {
     stack
 }
 
+/// The server middleware with the excluded path `/books`, over a sink with one processor
+/// that reads every field, in front of [`Responding`]. The stack already got one request.
+fn excluded_stack() -> Telemetry<Responding> {
+    let stack = Telemetry::server(reading_sink(1))
+        .excluded_paths(["/books"])
+        .layer(common::responding(StatusCode::OK));
+    drop(send(&stack, common::get()));
+    stack
+}
+
 /// A `GET` request over HTTP/1.1 whose body takes `steps`. [`Echoing`] responds with this body,
 /// so the benchmark builds the response body before the measurement.
 fn streamed(steps: impl IntoIterator<Item = Step>) -> HttpRequest {
@@ -267,6 +277,18 @@ fn active_requests_only<S: Borrow<Telemetry<Responding>>>(stack: S, request: Htt
 #[metabench::benchmark(REQUEST_EVENTS_ONLY, GROUP, "request_events_only")]
 #[bench::get(Box::new(responding_stack(filtered_sink(|name| name != ACTIVE))), common::get())]
 fn request_events_only<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
+    (send(stack.borrow(), request), stack)
+}
+
+#[metabench::benchmark(COMPLETE_WITH_SERVER_ADDRESS, GROUP, "complete_with_server_address")]
+#[bench::get(Box::new(responding_stack(reading_sink(2))), common::get_to("http://example.com/books/1"))]
+fn complete_with_server_address<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
+    (send(stack.borrow(), request), stack)
+}
+
+#[metabench::benchmark(EXCLUDED_PATH, GROUP, "excluded_path")]
+#[bench::get(Box::new(excluded_stack()), common::get())]
+fn excluded_path<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
 
@@ -360,6 +382,18 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     group.bench_function(BenchmarkId::new(REQUEST_EVENTS_ONLY.benchmark_name(), CASE), |bencher| {
         bencher.iter_batched(common::get, |request| request_events_only(&stack, request).0, BatchSize::SmallInput);
     });
+    let stack = responding_stack(reading_sink(2));
+    group.bench_function(BenchmarkId::new(COMPLETE_WITH_SERVER_ADDRESS.benchmark_name(), CASE), |bencher| {
+        bencher.iter_batched(
+            || common::get_to("http://example.com/books/1"),
+            |request| complete_with_server_address(&stack, request).0,
+            BatchSize::SmallInput,
+        );
+    });
+    let stack = excluded_stack();
+    group.bench_function(BenchmarkId::new(EXCLUDED_PATH.benchmark_name(), CASE), |bencher| {
+        bencher.iter_batched(common::get, |request| excluded_path(&stack, request).0, BatchSize::SmallInput);
+    });
     let stack = echoing_stack(reading_sink(1));
     group.bench_function(BenchmarkId::new(COMPLETE_STREAMED_BODY.benchmark_name(), CASE), |bencher| {
         bencher.iter_batched(
@@ -406,6 +440,8 @@ metabench::main!(
         ENRICHED_THREE_SINKS,
         ACTIVE_REQUESTS_ONLY,
         REQUEST_EVENTS_ONLY,
+        COMPLETE_WITH_SERVER_ADDRESS,
+        EXCLUDED_PATH,
         COMPLETE_STREAMED_BODY,
         ABANDONED_BODY,
         BODY_ERROR,

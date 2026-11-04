@@ -30,6 +30,14 @@ pub(crate) struct RequestComplete {
     #[dimension(log = "network.protocol.version", metric = "network.protocol.version")]
     #[unredacted]
     pub(crate) protocol_version: &'static str,
+    #[dimension(log = "server.address", metric = "server.address")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) server_address: Option<Text>,
+    #[dimension(log = "server.port", metric = "server.port")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) server_port: Option<u16>,
     #[dimension(log = "http.response.status_code", metric = "http.response.status_code")]
     #[unredacted]
     pub(crate) status_code: u16,
@@ -67,6 +75,14 @@ pub(crate) struct RequestError {
     #[dimension(log = "network.protocol.version", metric = "network.protocol.version")]
     #[unredacted]
     pub(crate) protocol_version: &'static str,
+    #[dimension(log = "server.address", metric = "server.address")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) server_address: Option<Text>,
+    #[dimension(log = "server.port", metric = "server.port")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) server_port: Option<u16>,
     #[dimension(log = "http.response.status_code", metric = "http.response.status_code")]
     #[unredacted]
     #[if_none(drop)]
@@ -104,6 +120,14 @@ pub(crate) struct RequestAbandoned {
     #[dimension(log = "network.protocol.version", metric = "network.protocol.version")]
     #[unredacted]
     pub(crate) protocol_version: &'static str,
+    #[dimension(log = "server.address", metric = "server.address")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) server_address: Option<Text>,
+    #[dimension(log = "server.port", metric = "server.port")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) server_port: Option<u16>,
     #[dimension(log = "http.response.status_code", metric = "http.response.status_code")]
     #[unredacted]
     #[if_none(drop)]

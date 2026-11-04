@@ -65,8 +65,13 @@
 //! | `http.request.method` | string | HTTP request method. `_OTHER` for any method other than `CONNECT`, `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT` and `TRACE`. | `GET`; `POST`; `_OTHER` | Always |
 //! | `url.scheme` | string | The scheme of the request URI. `_OTHER` for a scheme other than `http` and `https`. | `http`; `https`; `_OTHER` | If the request URI has a scheme. |
 //! | `network.protocol.version` | string | Version of the HTTP protocol. `_OTHER` for a version other than 1.0, 1.1, 2 and 3. | `1.1`; `2` | Always |
+//! | `server.address` | string | Host of the server, from the request URI, else from the `Host` header. An IPv6 address keeps its brackets. | `example.com`; `[2001:db8::1]` | If the request URI or the `Host` header names a host. |
+//! | `server.port` | int | Port of the server, from the request URI, else 80 for `http` and 443 for `https`. A request URI without a host takes the port from the `Host` header. | `443`; `8080` | If the port is known. |
 //! | `http.response.status_code` | int | HTTP response status code. | `200` | If the handler returned a response. |
 //! | `error.type` | string | Describes a class of error the request ended with. An error of the handler or of the response body gives the labels of the error and its sources, joined with dots ([`collect_error_labels`](http_extensions::collect_error_labels)). A panic of the handler or of the response body gives `panic`. A request future or a response body that is dropped before its end gives `abandoned`. Else, a status from 500 to 599 gives the status code. | `validation`; `io.connection_refused`; `panic`; `503`; `abandoned` | If the request ended with an error, a panic or a drop, or with a status from 500 to 599. |
+//!
+//! `server.address` and `server.port` come from the request, so a client that sends new host names
+//! creates new metric series.
 //!
 //! ## Metric: `http.server.active_requests`
 //!
@@ -111,6 +116,8 @@
 //!
 //! # When the middleware emits no event
 //!
+//! - The URI path of the request starts with one of the
+//!   [`excluded_paths`](TelemetryLayer::excluded_paths).
 //! - The request future or the response body is dropped while its thread panics.
 //! - There is no destination interested in processing the event further.
 //!
