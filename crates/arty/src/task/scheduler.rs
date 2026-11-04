@@ -183,9 +183,7 @@ impl Scheduler {
     /// them. The data and result must implement [`ThreadAware`] and `'static`.
     /// The future must be `'static` and does not need to implement `Send`.
     /// If you await the result on an Arty async worker, Arty relocates it to that
-    /// worker before returning it. This is normally the worker that submitted the task.
-    /// Awaiting the result on a different worker changes where Arty relocates it.
-    /// Awaiting outside an Arty async worker does not relocate the result.
+    /// worker. Awaiting outside an Arty async worker does not relocate the result.
     ///
     /// # Examples
     ///
@@ -242,8 +240,7 @@ impl Scheduler {
     /// The data and result must implement [`ThreadAware`] and `'static`.
     /// The future must be `'static` and does not need to implement `Send`.
     /// If you await the result on an Arty async worker, Arty relocates it from
-    /// `destination` to that worker before returning it.
-    /// This is normally this scheduler's worker.
+    /// `destination` to that worker.
     /// Awaiting outside an Arty async worker does not relocate the result.
     /// During shutdown, or if the destination is invalid, Arty rejects the task.
     ///

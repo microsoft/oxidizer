@@ -206,7 +206,6 @@ pub use arty_macros::main;
 /// `monitor`, and `panic` options also apply.
 /// By default, a test uses one worker, disables monitoring, and stops its
 /// runtime after Arty catches a task panic.
-/// Ordinary tests therefore keep monitoring disabled if Arty adds automatic monitoring later.
 /// To test monitoring, use `monitor = enabled`.
 ///
 /// # Simulated time
