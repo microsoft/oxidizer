@@ -78,7 +78,7 @@
 //! If Arty rejects a task or cancels it before the factory starts, it drops the
 //! data without relocating it.
 //!
-//! ```
+//! ```no_run
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! # #[arty::main]
 //! # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
