@@ -13,15 +13,14 @@
 
 </div>
 
-Adapt a [`fetch::HttpClient`][__link0] into an Azure SDK HTTP transport.
+Use a [`fetch::HttpClient`][__link0] as an Azure SDK HTTP transport.
 
-The Azure SDK abstracts its HTTP transport behind the
-[`azure_core::http::HttpClient`][__link1] trait. [`HttpClient`][__link2] implements it on top
-of a `fetch` client, so Azure SDK pipelines run over `fetch` and benefit
-from its resilience and observability.
+[`HttpClient`][__link1] implements [`azure_core::http::HttpClient`][__link2] and sends requests
+through a [`fetch::HttpClient`][__link3]. Azure SDK clients can use this adapter for
+their HTTP requests.
 
-To run the Azure SDK on an `anyspawn`-backed async runtime, see the
-`anyspawn_azure` crate.
+The `anyspawn_azure` crate lets Azure SDK clients run on an
+`anyspawn`-based async runtime.
 
 ## Example
 
@@ -29,7 +28,7 @@ To run the Azure SDK on an `anyspawn`-backed async runtime, see the
 use azure_core::http::{ClientOptions, Transport};
 use fetch_azure::HttpClient;
 
-// Wire a `fetch` client in as the transport for an Azure SDK client.
+// Use a `fetch` client as the Azure SDK transport.
 let transport = Transport::new(HttpClient::from(client).into());
 let options = ClientOptions {
     transport: Some(transport),
@@ -43,7 +42,8 @@ let options = ClientOptions {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_azure">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbbmImiFehOUcbSWj7AJ0Zo0QbEU03KDZjzxUbIR9apRz2JO5hZIOCamF6dXJlX2NvcmVlMS4xLjCCZWZldGNoZjAuMjAuMIJrZmV0Y2hfYXp1cmVmMC4xMC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb2XybXibdNpYbrG-mgnpA7W8bLT5ta1-RWA4boCOuVO_mETlhZIOCamF6dXJlX2NvcmVlMS4xLjCCZWZldGNoZjAuMjAuMIJrZmV0Y2hfYXp1cmVmMC4xMC4w
  [__link0]: https://docs.rs/fetch/0.20.0/fetch/?search=HttpClient
- [__link1]: https://docs.rs/azure_core/1.1.0/azure_core/?search=http::HttpClient
- [__link2]: https://docs.rs/fetch_azure/0.10.0/fetch_azure/?search=HttpClient
+ [__link1]: https://docs.rs/fetch_azure/0.10.0/fetch_azure/?search=HttpClient
+ [__link2]: https://docs.rs/azure_core/1.1.0/azure_core/?search=http::HttpClient
+ [__link3]: https://docs.rs/fetch/0.20.0/fetch/?search=HttpClient

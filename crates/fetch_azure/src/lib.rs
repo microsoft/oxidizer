@@ -6,15 +6,14 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_azure/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_azure/favicon.ico")]
 
-//! Adapt a [`fetch::HttpClient`] into an Azure SDK HTTP transport.
+//! Use a [`fetch::HttpClient`] as an Azure SDK HTTP transport.
 //!
-//! The Azure SDK abstracts its HTTP transport behind the
-//! [`azure_core::http::HttpClient`] trait. [`HttpClient`] implements it on top
-//! of a `fetch` client, so Azure SDK pipelines run over `fetch` and benefit
-//! from its resilience and observability.
+//! [`HttpClient`] implements [`azure_core::http::HttpClient`] and sends requests
+//! through a [`fetch::HttpClient`]. Azure SDK clients can use this adapter for
+//! their HTTP requests.
 //!
-//! To run the Azure SDK on an `anyspawn`-backed async runtime, see the
-//! `anyspawn_azure` crate.
+//! The `anyspawn_azure` crate lets Azure SDK clients run on an
+//! `anyspawn`-based async runtime.
 //!
 //! # Example
 //!
@@ -23,7 +22,7 @@
 //! use fetch_azure::HttpClient;
 //!
 //! # fn example(client: fetch::HttpClient) {
-//! // Wire a `fetch` client in as the transport for an Azure SDK client.
+//! // Use a `fetch` client as the Azure SDK transport.
 //! let transport = Transport::new(HttpClient::from(client).into());
 //! let options = ClientOptions {
 //!     transport: Some(transport),
