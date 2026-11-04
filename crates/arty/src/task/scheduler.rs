@@ -32,7 +32,6 @@ use crate::task::preparation::DeferredTask;
 ///
 /// Once shutdown starts, awaiting a new task returns
 /// [`JoinError`](crate::task::JoinError) immediately.
-/// Arty does not call the task factory.
 /// Await required results before shutdown.
 /// Dropping a [`JoinHandle`] does not cancel its task.
 ///
@@ -246,8 +245,7 @@ impl Scheduler {
     /// `destination` to that worker before returning it.
     /// This is normally this scheduler's worker.
     /// Awaiting outside an Arty async worker does not relocate the result.
-    /// During shutdown, or if the destination is invalid, Arty rejects the task
-    /// without calling `f`.
+    /// During shutdown, or if the destination is invalid, Arty rejects the task.
     ///
     /// # Examples
     ///

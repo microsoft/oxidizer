@@ -17,11 +17,9 @@
 //! operation that is not ready, that worker can poll another ready task
 //! assigned to it.
 //!
-//! A task factory is a function that creates a future.
-//! Task APIs accept these factories instead of futures you already created.
-//! Arty calls the factory on the selected worker.
-//! The future can then keep non-[`Send`] state across awaits.
-//! Values sent to a task must meet the trait requirements listed by the method.
+//! Task APIs accept a factory, a function that creates a future.
+//! Arty runs the factory on the selected worker, so the future can keep
+//! non-[`Send`] state across awaits.
 //!
 //! Relocation updates a value's state for a selected worker.
 //! [`Scheduler::spawn_anywhere`] and [`Scheduler::spawn_at`] relocate the
@@ -34,12 +32,9 @@
 //! synchronous calls that can stop an async worker from running other tasks.
 //! Blocking functions run on separate threads in
 //! pools configured by [`BlockingPoolPolicy`](crate::runtime::BlockingPoolPolicy).
-//! Each function uses one pool thread until it returns.
 //!
-//! Await [`JoinHandle`] to receive a result. [`JoinError`] reports task panic,
-//! shutdown, or an invalid destination. Dropping a `JoinHandle` does not cancel
-//! its task. Keep the [`Runtime`](crate::runtime::Runtime) alive until required
-//! tasks finish.
+//! Await [`JoinHandle`] to receive a result or [`JoinError`]. Dropping a
+//! `JoinHandle` does not cancel its task.
 //!
 //! # Examples
 //!

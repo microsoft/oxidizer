@@ -94,7 +94,6 @@ impl RuntimeScheduler {
     /// Returns an [`Error`] if the factory or future panics, or if shutdown
     /// cancels or rejects the task.
     /// Its underlying error is a [`JoinError`](crate::task::JoinError).
-    /// If Arty rejects the task, it does not call the factory.
     ///
     /// Calling this from any Arty worker returns an error. This includes task
     /// workers, blocking workers, and workers that belong to another runtime.
@@ -153,7 +152,7 @@ impl RuntimeScheduler {
     /// `ThreadAware`, see [`Unaware`](thread_aware::Unaware) and its guidance
     /// before wrapping it.
     ///
-    /// During shutdown, Arty rejects tasks without calling the factory.
+    /// During shutdown, Arty rejects tasks.
     /// Factory and future panics are reported through the returned [`JoinHandle`].
     ///
     /// # Examples
