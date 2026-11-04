@@ -74,18 +74,19 @@ impl HttpBodyBuilder {
     #[cfg(any(feature = "test-util", test))]
     #[must_use]
     pub fn new_fake() -> Self {
-        Self::new(OpaqueMemory::new(GlobalPool::new()), &Clock::new_frozen())
+        Self::new(GlobalPool::new(), &Clock::new_frozen())
     }
 
     /// Creates a new instance of [`HttpBodyBuilder`].
     ///
     /// The supplied memory provider serves body allocations.
+    /// Pass a [`bytesbuf::mem::GlobalPool`] directly or wrap a custom provider in [`OpaqueMemory`].
     /// Cloning the builder clones the provider.
     /// [`ThreadAware::relocate`] forwards relocation to the provider.
     #[must_use]
-    pub fn new(memory: OpaqueMemory, clock: &Clock) -> Self {
+    pub fn new(memory: impl Into<OpaqueMemory>, clock: &Clock) -> Self {
         Self {
-            memory,
+            memory: memory.into(),
             clock: clock.clone(),
             options: HttpBodyOptions::default(),
         }
