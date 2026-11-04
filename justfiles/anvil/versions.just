@@ -90,7 +90,7 @@ Write-Output ('+' + $msrv)
 # nightly-dependent check. Bumped on a regular cadence (monthly is a
 # reasonable default) when an adopter has time to absorb formatting /
 # lint / API-surface drift. Pin only -- do not use bare `nightly` here.
-rust_nightly := "nightly-2026-05-30"
+rust_nightly := "nightly-2026-10-31"
 
 # Pinned narrowly to the rustdoc JSON schema version that the currently
 # selected cargo-check-external-types release accepts. cargo-check-
@@ -99,30 +99,30 @@ rust_nightly := "nightly-2026-05-30"
 # with "produces JSON format version X, but this tool requires
 # format version Y" -- which is a tooling-incompat, not a real API
 # violation. Bump this alongside any cargo-check-external-types upgrade.
-rust_nightly_external_types := "nightly-2026-03-20"
+rust_nightly_external_types := "nightly-2026-06-22"
 
 # ============================================================================
 # Cargo subcommands
 # ============================================================================
 
-cargo_aprz_version := "1.2.1"
+cargo_aprz_version := "1.2.2"
 cargo_audit_version := "0.22.2"
-cargo_bolero_version := "0.13.4"
+cargo_bolero_version := "0.13.5"
 cargo_careful_version := "0.4.10"
 cargo_check_external_types_version := "0.5.0"
-cargo_coverage_gate_version := "0.7.2"
+cargo_coverage_gate_version := "0.7.4"
 cargo_delta_version := "0.5.0"
 cargo_deny_version := "0.20.2"
 cargo_doc2readme_version := "0.7.3"
-cargo_each_version := "0.6.0"
+cargo_each_version := "0.7.0"
 cargo_ensure_no_cyclic_deps_version := "0.2.0"
-cargo_ensure_no_default_features_version := "1.1.0"
+cargo_ensure_no_default_features_version := "1.1.1"
+cargo_gamma_version := "0.4.0"
 cargo_hack_version := "0.6.45"
 cargo_heather_version := "0.3.0"
-cargo_llvm_cov_version := "0.9.0"
-cargo_mutants_version := "27.1.0"
-cargo_nextest_version := "0.9.143"
-cargo_semver_checks_version := "0.50.0"
+cargo_llvm_cov_version := "0.9.1"
+cargo_nextest_version := "0.9.150"
+cargo_semver_checks_version := "0.51.0"
 cargo_sort_version := "2.1.4"
 cargo_spellcheck_version := "0.15.7"
 cargo_udeps_version := "0.1.61"

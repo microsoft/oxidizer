@@ -92,6 +92,11 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
     }
 
     $env:RUSTUP_TOOLCHAIN = '{{ rust_nightly }}'
+    if ($IsWindows) {
+        # Cargo 1.100's per-crate dependency paths exceed Windows' command limit.
+        # Pinned cargo-miri cannot read Cargo's argument-file fallback.
+        $env:__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT = '1'
+    }
     $include = (& "{{ just_executable() }}" _anvil-impact-exclude affected)
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
@@ -277,6 +282,27 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
             Write-Error "anvil miri: cargo-miri was not found under '$toolchainBin'"
             exit 1
         }
+        $targetLibdirOutput = @(& rustc $toolchain --print target-libdir)
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $targetLibdir = @(
+            $targetLibdirOutput |
+                Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+        ) | Select-Object -Last 1
+        if ([string]::IsNullOrWhiteSpace([string]$targetLibdir)) {
+            Write-Error "anvil miri: could not resolve the $toolchain target library directory"
+            exit 1
+        }
+        # Native proc-macro tests need the library search path Cargo normally supplies.
+        $libraryPathVariable = if ($IsWindows) { 'PATH' } elseif ($IsMacOS) { 'DYLD_FALLBACK_LIBRARY_PATH' } else { 'LD_LIBRARY_PATH' }
+        $inheritedLibraryPath = [Environment]::GetEnvironmentVariable($libraryPathVariable)
+        $libraryPaths = @(([string]$targetLibdir).Trim())
+        if ($inheritedLibraryPath) {
+            $libraryPaths += $inheritedLibraryPath
+        } elseif ($IsMacOS) {
+            if ($env:HOME) { $libraryPaths += Join-Path $env:HOME 'lib' }
+            $libraryPaths += '/usr/local/lib', '/usr/lib'
+        }
+        [Environment]::SetEnvironmentVariable($libraryPathVariable, ($libraryPaths -join [IO.Path]::PathSeparator))
         # Matching the recorded sentinel lets the runner suppress it before
         # launching Miri for interpretation.
         $env:MIRI_BE_RUSTC = 'host'
@@ -362,9 +388,13 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
 
 # --- pr-runtime-analysis members ---
 
-# Install prerequisites for the `anvil-miri` recipe.
+# Install prerequisites and prepare the sysroot for the `anvil-miri` recipe.
 [private]
+[script("pwsh", "-NoProfile")]
 anvil-miri-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
+    $ErrorActionPreference = 'Stop'
+    & cargo '+{{ rust_nightly }}' miri setup
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Validate prerequisites for the `anvil-miri` recipe.
 [private]
