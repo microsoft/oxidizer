@@ -123,10 +123,11 @@
 //!
 //! # Panics
 //!
-//! If the handler or the response body panics, the middleware emits the error event and then
-//! resumes the panic with its payload. If a processor panics while the middleware emits an event,
-//! the processor panic reaches the caller, and the processors after it do not get the event. If
-//! this happens while the middleware reports a panic, the processor panic replaces that panic.
+//! If the handler panics, or the response body panics while the server reads a frame from it, the
+//! middleware emits the error event and then resumes the panic with its payload. If a processor
+//! panics while the middleware emits an event, the processor panic reaches the caller, and the
+//! processors after it do not get the event. If this happens while the middleware reports a panic,
+//! the processor panic replaces that panic.
 //!
 //! # Enrichment with custom dimensions
 //!

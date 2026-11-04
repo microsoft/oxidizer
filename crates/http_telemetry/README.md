@@ -129,10 +129,11 @@ ends when the handler returns:
 
 ## Panics
 
-If the handler or the response body panics, the middleware emits the error event and then
-resumes the panic with its payload. If a processor panics while the middleware emits an event,
-the processor panic reaches the caller, and the processors after it do not get the event. If
-this happens while the middleware reports a panic, the processor panic replaces that panic.
+If the handler panics, or the response body panics while the server reads a frame from it, the
+middleware emits the error event and then resumes the panic with its payload. If a processor
+panics while the middleware emits an event, the processor panic reaches the caller, and the
+processors after it do not get the event. If this happens while the middleware reports a panic,
+the processor panic replaces that panic.
 
 ## Enrichment with custom dimensions
 
@@ -167,7 +168,7 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbxLvrs1vD_PYbf76Jv5ZzT_wbyYKsEMZk9ZMbjkHLgZPVZmRhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE0LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbNhafXznsTJ8bwJu-q9S-TCsbe3ruaYdGJ-cb-SXo6-xAJ6BhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE0LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjA
  [__link0]: https://crates.io/crates/observed/0.30.0
  [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
  [__link2]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry

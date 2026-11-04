@@ -20,6 +20,10 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
     // A server sends no content for a body at its end, nor for these responses (RFC 9110, sections
     // 9.3.2, 9.3.6, 15.2, 15.3.5 and 15.4.5), and can drop their body without a poll. So their
     // request ends when the handler returns.
+    //
+    // A panic in `is_end_stream` or `size_hint` of the body is not caught, here or in
+    // `TelemetryBody::drop`, so it emits no event. This is deliberate: such a panic is rare, and
+    // catching it would slow down every request.
     let no_content = response.body().is_end_stream()
         || guard.method == Method::HEAD
         || (guard.method == Method::CONNECT && status_code.is_success())
