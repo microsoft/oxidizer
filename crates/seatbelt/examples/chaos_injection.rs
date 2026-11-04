@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Chaos injection middleware example that injects faults with a configurable probability.
+//! This example injects faults at a configured rate.
 //!
-//! This example simulates a service where 30% of requests are intercepted and
-//! replaced with an injected error output, demonstrating how chaos injection can
-//! be used to test resilience under failure conditions.
+//! It intercepts 30% of requests and returns an error.
+//! The inner service does not run for these requests.
+//! This tests how the service responds to failures.
 
 use layered::{Execute, Service, Stack};
 use seatbelt::ResilienceContext;
@@ -17,17 +17,17 @@ async fn main() {
     let clock = Clock::new_tokio();
     let context = ResilienceContext::new(&clock);
 
-    // Define stack with injection layer
+    // Define a stack with an injection layer.
     let stack = (
         Injection::layer("my_injection", &context)
-            // Required: probability of injection (30%)
+            // Set the injection rate to 30%.
             .rate(0.3)
-            // Required: the output to inject (receives the consumed input)
+            // Create the output to inject from the consumed input.
             .output_with(|input: String, _args| format!("INJECTED_FAULT for '{input}'")),
         Execute::new(execute_operation),
     );
 
-    // Create the service from the stack
+    // Create the service from the stack.
     let service = stack.into_service();
 
     for i in 0..10 {

@@ -14,10 +14,11 @@
 # rustup component; same reasoning as fmt for the require.
 
 # Lint affected workspace packages with Clippy.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-clippy: anvil-clippy-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    $include = (& "{{ just_executable() }}" _anvil-impact-exclude affected)
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
     if ($include -eq '--skip') { Write-Host 'anvil-clippy: no affected packages; skipping'; exit 0 }
@@ -25,9 +26,9 @@ anvil-clippy: anvil-clippy-validate-prereqs anvil-impact
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-clippy` recipe.
-[group("anvil-setup")]
+[private]
 anvil-clippy-setup installer="install": anvil-component-default-clippy-install
 
 # Validate prerequisites for the `anvil-clippy` recipe.
-[group("anvil-setup")]
+[private]
 anvil-clippy-validate-prereqs: anvil-component-default-clippy-validate-prereqs

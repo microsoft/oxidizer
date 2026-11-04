@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::marker::PhantomData;
+use std::task::Waker;
 
 use thread_aware::{Thread, ThreadAware};
 
@@ -11,53 +12,78 @@ use crate::state::ClockState;
 
 /// Marker for an [`InactiveClock`] backed by per-thread isolated timer storage.
 ///
-/// This is the default mode. Clones can be relocated to different threads via
-/// [`ThreadAware::relocate`], producing independent timer storage per thread
-/// when the coordinates share one runtime owner. Suitable for runtimes with
-/// stable worker threads.
+/// This is the default mode. If coordinates share one runtime owner,
+/// [`ThreadAware::relocate`] gives each destination thread separate timer
+/// storage. Use this mode for runtimes with stable worker threads.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct Isolated;
 
 /// Marker for an [`InactiveClock`] backed by a single shared timer set.
 ///
-/// Created via [`InactiveClock::new_shared`]. The resulting `InactiveClock<Shared>`
-/// intentionally does **not** implement [`Clone`] or [`ThreadAware`]: there is exactly one
-/// shared timer set advanced by exactly one driver, so cloning or relocation would create
-/// configurations the driver could not advance correctly.
+/// [`InactiveClock::new_shared`] creates this mode. `InactiveClock<Shared>` does
+/// not implement [`Clone`] or [`ThreadAware`]. One driver must advance the one
+/// shared timer set.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Shared;
 
-/// An inactive clock that must be activated before time operations can be performed.
+/// A clock that must be activated before use.
 ///
-/// This type represents a clock in an inactive state that cannot perform any time-related
-/// operations until activated. It is parameterized by a mode marker (`S`):
+/// The mode marker `S` selects the timer-storage model:
 ///
-/// - [`Isolated`] (default): per-thread timer storage. The inactive clock can be cloned and
-///   relocated across threads, with each thread getting an independent timer set on
-///   activation.
+/// - [`Isolated`] is the default. Each relocated thread gets a separate timer
+///   set after activation.
 /// - [`Shared`]: a single shared timer set advanced by a single driver. Use
-///   [`InactiveClock::new_shared`] to construct one. Does not implement [`Clone`] or
-///   [`ThreadAware`].
+///   [`InactiveClock::new_shared`] to create it. This mode does not implement
+///   [`Clone`] or [`ThreadAware`].
 ///
-/// To begin using the clock, call [`InactiveClock::activate`] to get a working [`Clock`] instance and
-/// its associated [`ClockDriver`]. The driver is responsible for advancing timers and must
-/// be called periodically by the runtime.
+/// Call [`InactiveClock::activate`] with the runtime driver waker. It returns a
+/// [`Clock`] and its [`ClockDriver`]. For system clocks, the first timer and each
+/// newly earlier timer invoke the waker. This interrupts the current driver
+/// wait. Controlled clocks ignore the waker. See
+/// [controlled clocks](crate::runtime#controlled-clocks).
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```no_run
+/// use std::sync::Arc;
+/// use std::task::{Wake, Waker};
+/// use std::thread;
+/// use std::time::Instant;
+///
 /// use tick::runtime::InactiveClock;
 ///
-/// let inactive = InactiveClock::default();
-/// let (clock, driver) = inactive.activate();
+/// struct DriverWake(thread::Thread);
+///
+/// impl Wake for DriverWake {
+///     fn wake(self: Arc<Self>) {
+///         self.0.unpark();
+///     }
+///
+///     fn wake_by_ref(self: &Arc<Self>) {
+///         self.0.unpark();
+///     }
+/// }
+///
+/// let inactive = InactiveClock::new_isolated();
+/// let driver_waker = Waker::from(Arc::new(DriverWake(thread::current())));
+/// let (clock, mut driver) = inactive.activate(driver_waker);
 ///
 /// // Use the clock for time operations
 /// let now = clock.instant();
 ///
-/// // Driver must be advanced periodically (typically by the runtime)
-/// // driver.advance_timers(std::time::Instant::now());
+/// // A real runtime loop advances the driver, then parks until the deadline or until
+/// // registration of the first timer (or a newly earlier timer) invokes driver_waker.
+/// loop {
+///     match driver.advance_timers(Instant::now()) {
+///         Ok(Some(deadline)) => {
+///             thread::park_timeout(deadline.saturating_duration_since(Instant::now()))
+///         }
+///         Ok(None) => thread::park(),
+///         Err(_) => break,
+///     }
+/// }
 /// ```
 ///
 /// # Thread-aware isolated runtimes
@@ -84,8 +110,13 @@ impl Clone for InactiveClock<Isolated> {
     }
 }
 
-impl Default for InactiveClock<Isolated> {
-    fn default() -> Self {
+impl InactiveClock<Isolated> {
+    /// Creates an [`InactiveClock`] with timer storage that can be isolated per thread.
+    ///
+    /// Clone and relocate the inactive clock before activation when each runtime thread needs its
+    /// own timer set.
+    #[must_use]
+    pub fn new_isolated() -> Self {
         Self {
             state: ClockState::new_system(),
             _marker: PhantomData,
@@ -101,12 +132,11 @@ impl ThreadAware for InactiveClock<Isolated> {
 
 #[cfg(any(feature = "rt-shared", test))]
 impl InactiveClock<Shared> {
-    /// Creates an [`InactiveClock`] backed by a single shared timer set.
+    /// Creates an [`InactiveClock`] with one shared timer set.
     ///
-    /// The returned value is intentionally not [`Clone`] and does not implement
-    /// [`ThreadAware`]: a `Shared` clock has exactly one timer set that must be advanced by
-    /// exactly one [`ClockDriver`]. This is the construction mode used by
-    /// [`Clock::new_tokio`][crate::Clock::new_tokio].
+    /// The returned value does not implement [`Clone`] or [`ThreadAware`].
+    /// Exactly one [`ClockDriver`] must advance its timer set.
+    /// [`Clock::new_tokio`][crate::Clock::new_tokio] uses this mode.
     #[must_use]
     pub fn new_shared() -> Self {
         Self {
@@ -117,21 +147,35 @@ impl InactiveClock<Shared> {
 }
 
 impl<S> InactiveClock<S> {
-    /// Activates the clock for time operations.
+    /// Activates the clock.
     ///
-    /// Consumes this inactive clock and returns a working [`Clock`] instance along with
-    /// its [`ClockDriver`]. The driver must be called periodically to advance timers.
+    /// This method consumes the inactive clock and returns a [`Clock`] with its
+    /// [`ClockDriver`]. These events invoke `driver_waker`:
     ///
-    /// # Returns
+    /// - The first system timer is registered.
+    /// - A new timer has an earlier deadline.
+    /// - The final clock owner is dropped.
     ///
-    /// A tuple containing:
-    /// - [`Clock`] - The activated clock instance for time operations
-    /// - [`ClockDriver`] - Driver that advances timers (must be polled by caller)
+    /// Controlled clocks do not register the driver waker. Their owner advances
+    /// time and wakes ready timers. The owner must also wake each driver loop
+    /// during shutdown or owner-lifecycle changes. The loop must stop from this
+    /// external state instead of waiting only for
+    /// [`ClockGone`](crate::runtime::ClockGone).
+    ///
+    /// A driver notification can occur after
+    /// [`ClockDriver::advance_timers`] returns but before the runtime parks.
+    /// The runtime must retain pending wakes or make this transition race-free.
+    /// Otherwise, it can lose a timer registration.
+    ///
+    /// The retained waker must not own a related [`Clock`] or [`ClockDriver`],
+    /// including through another value. Such ownership creates a cycle that can
+    /// prevent final cleanup. Use a separate signal or a weak runtime handle.
     #[must_use]
-    pub fn activate(self) -> (Clock, ClockDriver) {
+    pub fn activate(self, driver_waker: Waker) -> (Clock, ClockDriver) {
+        let driver_id = self.state.register_driver(driver_waker);
         let state = self.state;
         let clock = Clock::new(state.clone());
-        let driver = ClockDriver::new(state);
+        let driver = ClockDriver::new(state, driver_id);
 
         (clock, driver)
     }
@@ -144,45 +188,5 @@ impl From<crate::ClockControl> for InactiveClock<Isolated> {
             state: ClockState::ClockControl(control),
             _marker: PhantomData,
         }
-    }
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-    use static_assertions::{assert_impl_all, assert_not_impl_any};
-
-    use super::*;
-    use crate::ClockControl;
-
-    #[test]
-    fn assert_types() {
-        assert_impl_all!(InactiveClock: Send, Sync, Clone);
-        assert_impl_all!(InactiveClock<Shared>: Send, Sync);
-        assert_not_impl_any!(InactiveClock<Shared>: Clone);
-    }
-
-    #[test]
-    fn activate_ok() {
-        let inactive_clock = InactiveClock::default();
-        let (clock, driver) = inactive_clock.activate();
-        assert!(matches!(clock.clock_state(), ClockState::System(_)));
-        assert!(matches!(&driver.state, &ClockState::System(_)));
-    }
-
-    #[test]
-    fn activate_shared_ok() {
-        let inactive_clock = InactiveClock::new_shared();
-        let (clock, driver) = inactive_clock.activate();
-        assert!(matches!(clock.clock_state(), ClockState::System(_)));
-        assert!(matches!(&driver.state, &ClockState::System(_)));
-    }
-
-    #[test]
-    fn activate_with_fake_clock_ok() {
-        let inactive_clock = InactiveClock::from(ClockControl::new());
-        let (clock, driver) = inactive_clock.activate();
-        assert!(matches!(clock.clock_state(), ClockState::ClockControl(_)));
-        assert!(matches!(&driver.state, &ClockState::ClockControl(_)));
     }
 }

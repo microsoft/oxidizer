@@ -9,9 +9,320 @@
 #![cfg(loom)]
 #![allow(clippy::unwrap_used, reason = "poisoning requires a prior model failure")]
 
-use loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use loom::sync::{Arc, Mutex};
+use std::collections::VecDeque;
+
+use loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering, fence};
+use loom::sync::{Arc, Condvar, Mutex};
 use loom::thread;
+
+// Same atomic header and queue-serialized assignment as Notify. Queue storage
+// is preinitialized here; OnceLock publication is supplied by the standard library.
+struct RetainedNotify {
+    state: AtomicUsize,
+    queue: Mutex<VecDeque<Arc<AtomicBool>>>,
+}
+
+impl RetainedNotify {
+    fn new() -> Self {
+        Self {
+            state: AtomicUsize::new(0),
+            queue: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    fn take(&self) -> bool {
+        self.state.compare_exchange(1, 0, Ordering::Acquire, Ordering::Relaxed).is_ok()
+    }
+
+    fn register(&self, waiter: &Arc<AtomicBool>) {
+        let mut queue = self.queue.lock().unwrap();
+        loop {
+            if self.take() {
+                waiter.store(true, Ordering::Release);
+                return;
+            }
+            match self.state.compare_exchange(0, 2, Ordering::AcqRel, Ordering::Relaxed) {
+                Ok(_) | Err(2) => {
+                    queue.push_back(Arc::clone(waiter));
+                    return;
+                }
+                Err(_) => {}
+            }
+        }
+    }
+
+    fn notify(&self) {
+        let mut state = self.state.load(Ordering::Relaxed);
+        loop {
+            if state == 2 {
+                fence(Ordering::Acquire);
+                let mut queue = self.queue.lock().unwrap();
+                if let Some(waiter) = queue.pop_front() {
+                    if queue.is_empty() {
+                        self.state.store(0, Ordering::Release);
+                    }
+                    waiter.store(true, Ordering::Release);
+                    return;
+                }
+                drop(queue);
+                state = self.state.load(Ordering::Relaxed);
+                continue;
+            }
+            match self.state.compare_exchange_weak(state, 1, Ordering::Release, Ordering::Relaxed) {
+                Ok(_) => return,
+                Err(current) => state = current,
+            }
+        }
+    }
+
+    fn cancel(&self, waiter: &Arc<AtomicBool>) {
+        let mut queue = self.queue.lock().unwrap();
+        if let Some(index) = queue.iter().position(|queued| Arc::ptr_eq(queued, waiter)) {
+            queue.remove(index);
+            if queue.is_empty() {
+                self.state.store(0, Ordering::Release);
+            }
+        }
+        let received = waiter.load(Ordering::Acquire);
+        drop(queue);
+        if received {
+            self.notify();
+        }
+    }
+}
+
+#[test]
+fn retained_notify_registration_cannot_lose_a_notification() {
+    loom::model(|| {
+        let notify = Arc::new(RetainedNotify::new());
+        let received = Arc::new(AtomicBool::new(false));
+        let worker = {
+            let notify = Arc::clone(&notify);
+            let received = Arc::clone(&received);
+            thread::spawn(move || notify.register(&received))
+        };
+        notify.notify();
+        worker.join().unwrap();
+        assert!(received.load(Ordering::Acquire));
+        assert!(!notify.take());
+    });
+}
+
+#[test]
+fn retained_notify_cancel_racing_delivery_passes_the_permit_on() {
+    loom::model(|| {
+        let notify = Arc::new(RetainedNotify::new());
+        let first = Arc::new(AtomicBool::new(false));
+        let second = Arc::new(AtomicBool::new(false));
+        notify.register(&first);
+        notify.register(&second);
+        let worker = {
+            let notify = Arc::clone(&notify);
+            thread::spawn(move || notify.notify())
+        };
+        notify.cancel(&first);
+        worker.join().unwrap();
+        assert!(second.load(Ordering::Acquire));
+        assert!(!notify.take());
+    });
+}
+
+#[test]
+fn retained_notify_two_registered_waiters_receive_distinct_notifications() {
+    loom::model(|| {
+        let notify = Arc::new(RetainedNotify::new());
+        let first = Arc::new(AtomicBool::new(false));
+        let second = Arc::new(AtomicBool::new(false));
+        notify.register(&first);
+        notify.register(&second);
+        let worker = {
+            let notify = Arc::clone(&notify);
+            thread::spawn(move || notify.notify())
+        };
+        notify.notify();
+        worker.join().unwrap();
+        assert!(first.load(Ordering::Acquire));
+        assert!(second.load(Ordering::Acquire));
+        assert!(!notify.take());
+    });
+}
+
+#[test]
+fn retained_notify_waiting_header_publishes_queue_initialization() {
+    loom::model(|| {
+        let header = Arc::new(AtomicUsize::new(0));
+        let initialized = Arc::new(AtomicBool::new(false));
+        let worker = {
+            let header = Arc::clone(&header);
+            let initialized = Arc::clone(&initialized);
+            thread::spawn(move || {
+                initialized.store(true, Ordering::Relaxed);
+                header.store(2, Ordering::Release);
+            })
+        };
+        while header.load(Ordering::Relaxed) != 2 {
+            thread::yield_now();
+        }
+        loom::sync::atomic::fence(Ordering::Acquire);
+        assert!(initialized.load(Ordering::Relaxed));
+        worker.join().unwrap();
+    });
+}
+
+// Same per-shard publication handshake as Broadcast. Slot storage and waker
+// callbacks are tested through public native/Miri tests; this isolates ordering.
+struct WatchBroadcast {
+    version: AtomicUsize,
+    pending: AtomicBool,
+    waiters: Mutex<Vec<usize>>,
+    received: AtomicUsize,
+}
+
+impl WatchBroadcast {
+    fn new() -> Self {
+        Self {
+            version: AtomicUsize::new(0),
+            pending: AtomicBool::new(false),
+            waiters: Mutex::new(Vec::new()),
+            received: AtomicUsize::new(0),
+        }
+    }
+
+    fn register(&self, id: usize) {
+        let mut waiters = self.waiters.lock().unwrap();
+        waiters.push(id);
+        self.pending.store(true, Ordering::Relaxed);
+        loom::sync::atomic::fence(Ordering::SeqCst);
+        if self.version.load(Ordering::Acquire) != 0 {
+            waiters.retain(|waiter| *waiter != id);
+            self.received.fetch_or(1 << id, Ordering::Release);
+            if waiters.is_empty() {
+                self.pending.store(false, Ordering::Release);
+            }
+        }
+    }
+
+    fn cancel(&self, id: usize) {
+        if !self.pending.load(Ordering::Acquire) {
+            return;
+        }
+        let mut waiters = self.waiters.lock().unwrap();
+        waiters.retain(|waiter| *waiter != id);
+        if waiters.is_empty() {
+            self.pending.store(false, Ordering::Release);
+        }
+    }
+
+    fn publish(&self) {
+        self.version.fetch_add(1, Ordering::Release);
+        loom::sync::atomic::fence(Ordering::SeqCst);
+        if self.pending.load(Ordering::Acquire) {
+            let mut waiters = self.waiters.lock().unwrap();
+            for id in waiters.drain(..) {
+                self.received.fetch_or(1 << id, Ordering::Release);
+            }
+            self.pending.store(false, Ordering::Release);
+        }
+    }
+}
+
+#[test]
+fn watch_broadcast_cannot_miss_a_registration_or_published_version() {
+    loom::model(|| {
+        let watch = Arc::new(WatchBroadcast::new());
+        let worker = {
+            let watch = Arc::clone(&watch);
+            thread::spawn(move || watch.register(0))
+        };
+        watch.publish();
+        worker.join().unwrap();
+        assert_eq!(watch.received.load(Ordering::Acquire), 1);
+        assert!(watch.waiters.lock().unwrap().is_empty());
+    });
+}
+
+#[test]
+fn watch_cancel_cannot_clear_another_registration_during_broadcast() {
+    loom::model(|| {
+        let watch = Arc::new(WatchBroadcast::new());
+        watch.register(0);
+        let cancellation = {
+            let watch = Arc::clone(&watch);
+            thread::spawn(move || watch.cancel(0))
+        };
+        let registration = {
+            let watch = Arc::clone(&watch);
+            thread::spawn(move || watch.register(1))
+        };
+        watch.publish();
+        cancellation.join().unwrap();
+        registration.join().unwrap();
+        assert_eq!(watch.received.load(Ordering::Acquire) & 2, 2);
+        assert!(watch.waiters.lock().unwrap().is_empty());
+    });
+}
+
+#[test]
+fn watch_last_sender_closure_includes_the_final_published_value() {
+    loom::model(|| {
+        let status = Arc::new(AtomicUsize::new(0));
+        let value = Arc::new(AtomicUsize::new(0));
+        let senders = Arc::new(AtomicUsize::new(2));
+        let publisher = {
+            let status = Arc::clone(&status);
+            let value = Arc::clone(&value);
+            let senders = Arc::clone(&senders);
+            thread::spawn(move || {
+                value.store(7, Ordering::Relaxed);
+                status.fetch_add(2, Ordering::Release);
+                if senders.fetch_sub(1, Ordering::AcqRel) == 1 {
+                    status.fetch_or(1, Ordering::Release);
+                }
+            })
+        };
+        if senders.fetch_sub(1, Ordering::AcqRel) == 1 {
+            status.fetch_or(1, Ordering::Release);
+        }
+        let observed = status.load(Ordering::Acquire);
+        if observed & 1 != 0 {
+            assert_eq!(observed, 3);
+            assert_eq!(value.load(Ordering::Relaxed), 7);
+        }
+        publisher.join().unwrap();
+        assert_eq!(status.load(Ordering::Acquire), 3);
+    });
+}
+
+#[test]
+fn concurrent_watch_observers_claim_one_receiver_version_once() {
+    loom::model(|| {
+        let observed = Arc::new(AtomicUsize::new(0));
+        let completed = Arc::new(AtomicUsize::new(0));
+        let claim = |observed: &AtomicUsize, completed: &AtomicUsize| {
+            let mut previous = observed.load(Ordering::Acquire);
+            loop {
+                if previous == 2 {
+                    return;
+                }
+                match observed.compare_exchange_weak(previous, 2, Ordering::AcqRel, Ordering::Acquire) {
+                    Ok(_) => {
+                        completed.fetch_add(1, Ordering::Relaxed);
+                        return;
+                    }
+                    Err(current) => previous = current,
+                }
+            }
+        };
+        let worker = {
+            let observed = Arc::clone(&observed);
+            let completed = Arc::clone(&completed);
+            thread::spawn(move || claim(&observed, &completed))
+        };
+        claim(&observed, &completed);
+        worker.join().unwrap();
+        assert_eq!(completed.load(Ordering::Relaxed), 1);
+    });
+}
 
 #[derive(Debug)]
 struct Registration {
@@ -200,6 +511,388 @@ fn mutex_never_admits_two_owners() {
 
 const MUTEX_LOCKED: usize = 1;
 const MUTEX_WAITERS: usize = 2;
+
+// Reduced owner cardinality keeps overflow distinct from writer ownership
+// while modeling the same registration bit and expected-value parking protocol.
+const NATIVE_WAITERS: usize = 1 << 3;
+const NATIVE_OWNERS: usize = NATIVE_WAITERS - 1;
+const NATIVE_WRITER: usize = NATIVE_OWNERS;
+const NATIVE_MAX_READERS: usize = NATIVE_WRITER - 1;
+
+struct NativeRwLock {
+    state: AtomicUsize,
+    parking: Mutex<()>,
+    changed: Condvar,
+}
+
+impl NativeRwLock {
+    fn new() -> Self {
+        Self {
+            state: AtomicUsize::new(0),
+            parking: Mutex::new(()),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn try_read(&self) -> bool {
+        let mut state = self.state.load(Ordering::Relaxed);
+        while state < NATIVE_MAX_READERS {
+            match self
+                .state
+                .compare_exchange_weak(state, state + 1, Ordering::Acquire, Ordering::Relaxed)
+            {
+                Ok(_) => return true,
+                Err(current) => state = current,
+            }
+        }
+        false
+    }
+
+    fn read(&self) {
+        loop {
+            if self.try_read() {
+                return;
+            }
+            let state = self.state.load(Ordering::Relaxed);
+            assert_ne!(state & NATIVE_OWNERS, NATIVE_MAX_READERS);
+            if state >= NATIVE_MAX_READERS
+                && self
+                    .state
+                    .compare_exchange(state, state | NATIVE_WAITERS, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+            {
+                self.wait(state | NATIVE_WAITERS);
+            }
+        }
+    }
+
+    fn write(&self) {
+        if self
+            .state
+            .compare_exchange(0, NATIVE_WRITER, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            return;
+        }
+        let mut state = self.state.load(Ordering::Relaxed);
+        loop {
+            if state & NATIVE_OWNERS == 0 {
+                match self
+                    .state
+                    .compare_exchange_weak(state, NATIVE_WRITER | NATIVE_WAITERS, Ordering::Acquire, Ordering::Relaxed)
+                {
+                    Ok(_) => return,
+                    Err(current) => state = current,
+                }
+            } else {
+                match self
+                    .state
+                    .compare_exchange(state, state | NATIVE_WAITERS, Ordering::Relaxed, Ordering::Relaxed)
+                {
+                    Ok(_) => {
+                        self.wait(state | NATIVE_WAITERS);
+                        state = self.state.load(Ordering::Relaxed);
+                    }
+                    Err(current) => state = current,
+                }
+            }
+        }
+    }
+
+    fn read_unlock(&self) {
+        if self.state.fetch_sub(1, Ordering::Release) == NATIVE_WAITERS + 1
+            && self
+                .state
+                .compare_exchange(NATIVE_WAITERS, 0, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+        {
+            self.wake_all();
+        }
+    }
+
+    fn write_unlock(&self) {
+        if self.state.swap(0, Ordering::Release) & NATIVE_WAITERS != 0 {
+            self.wake_all();
+        }
+    }
+
+    fn wait(&self, expected: usize) {
+        // Model the OS's atomic value comparison and wait registration.
+        let parking = self.parking.lock().unwrap();
+        if self.state.load(Ordering::Relaxed) == expected {
+            drop(self.changed.wait(parking).unwrap());
+        }
+    }
+
+    fn wake_all(&self) {
+        let _parking = self.parking.lock().unwrap();
+        self.changed.notify_all();
+    }
+}
+
+#[test]
+fn native_rwlock_writer_excludes_readers_and_publishes_updates() {
+    loom::model(|| {
+        let lock = Arc::new(NativeRwLock::new());
+        let fields = Arc::new((AtomicUsize::new(0), AtomicUsize::new(0)));
+        let writer = {
+            let lock = Arc::clone(&lock);
+            let fields = Arc::clone(&fields);
+            thread::spawn(move || {
+                lock.write();
+                fields.0.store(1, Ordering::Relaxed);
+                thread::yield_now();
+                fields.1.store(1, Ordering::Relaxed);
+                lock.write_unlock();
+            })
+        };
+        lock.read();
+        let first = fields.0.load(Ordering::Relaxed);
+        thread::yield_now();
+        let second = fields.1.load(Ordering::Relaxed);
+        assert_eq!(first, second);
+        lock.read_unlock();
+        writer.join().unwrap();
+        assert_eq!(lock.state.load(Ordering::Relaxed), 0);
+    });
+}
+
+#[test]
+fn native_rwlock_last_reader_cannot_lose_a_waiting_writer() {
+    loom::model(|| {
+        let lock = Arc::new(NativeRwLock::new());
+        lock.read();
+        lock.read();
+        let writer = {
+            let lock = Arc::clone(&lock);
+            thread::spawn(move || {
+                lock.write();
+                lock.write_unlock();
+            })
+        };
+        lock.read_unlock();
+        thread::yield_now();
+        lock.read_unlock();
+        writer.join().unwrap();
+        assert_eq!(lock.state.load(Ordering::Relaxed), 0);
+    });
+}
+
+#[test]
+fn native_rwlock_two_writers_never_overlap() {
+    loom::model(|| {
+        let lock = Arc::new(NativeRwLock::new());
+        let owners = Arc::new(AtomicUsize::new(0));
+        let writer = {
+            let lock = Arc::clone(&lock);
+            let owners = Arc::clone(&owners);
+            thread::spawn(move || {
+                lock.write();
+                assert_eq!(owners.fetch_add(1, Ordering::SeqCst), 0);
+                thread::yield_now();
+                assert_eq!(owners.fetch_sub(1, Ordering::SeqCst), 1);
+                lock.write_unlock();
+            })
+        };
+        lock.write();
+        assert_eq!(owners.fetch_add(1, Ordering::SeqCst), 0);
+        thread::yield_now();
+        assert_eq!(owners.fetch_sub(1, Ordering::SeqCst), 1);
+        lock.write_unlock();
+        writer.join().unwrap();
+        assert_eq!(lock.state.load(Ordering::Relaxed), 0);
+    });
+}
+
+#[test]
+fn native_rwlock_mixed_waiters_all_complete_after_writer_release() {
+    // The three-thread case bounds preemptions; two-party exclusion,
+    // publication and last-reader registration above remain exhaustive.
+    let mut model = loom::model::Builder::new();
+    model.preemption_bound = Some(2);
+    model.check(|| {
+        let lock = Arc::new(NativeRwLock::new());
+        lock.write();
+        let reader = {
+            let lock = Arc::clone(&lock);
+            thread::spawn(move || {
+                lock.read();
+                lock.read_unlock();
+            })
+        };
+        let writer = {
+            let lock = Arc::clone(&lock);
+            thread::spawn(move || {
+                lock.write();
+                lock.write_unlock();
+            })
+        };
+        lock.write_unlock();
+        reader.join().unwrap();
+        writer.join().unwrap();
+        assert_eq!(lock.state.load(Ordering::Relaxed), 0);
+    });
+}
+
+struct NativeCondition {
+    generation: AtomicUsize,
+    waiters: AtomicUsize,
+    parking: Mutex<()>,
+    changed: Condvar,
+}
+
+impl NativeCondition {
+    fn new() -> Self {
+        Self {
+            generation: AtomicUsize::new(0),
+            waiters: AtomicUsize::new(0),
+            parking: Mutex::new(()),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn wait<'a>(&self, mutex: &'a Mutex<usize>, guard: loom::sync::MutexGuard<'a, usize>) -> loom::sync::MutexGuard<'a, usize> {
+        let generation = self.generation.load(Ordering::SeqCst);
+        self.waiters.fetch_add(1, Ordering::SeqCst);
+        drop(guard);
+        let parking = self.parking.lock().unwrap();
+        // The parking lock models the OS's atomic expected-value check and park.
+        if self.generation.load(Ordering::Relaxed) == generation {
+            drop(self.changed.wait(parking).unwrap());
+        } else {
+            drop(parking);
+        }
+        assert!(self.waiters.fetch_sub(1, Ordering::SeqCst) > 0);
+        mutex.lock().unwrap()
+    }
+
+    fn notify(&self, all: bool) {
+        if self.waiters.load(Ordering::SeqCst) != 0 {
+            self.generation.fetch_add(1, Ordering::SeqCst);
+            let _parking = self.parking.lock().unwrap();
+            if all {
+                self.changed.notify_all();
+            } else {
+                self.changed.notify_one();
+            }
+        }
+    }
+}
+
+#[test]
+fn native_condvar_notification_cannot_miss_a_registering_waiter() {
+    loom::model(|| {
+        let condition = Arc::new(NativeCondition::new());
+        let predicate = Arc::new(Mutex::new(0));
+        condition.notify(false);
+        assert_eq!(condition.generation.load(Ordering::SeqCst), 0);
+        let waiter = {
+            let condition = Arc::clone(&condition);
+            let predicate = Arc::clone(&predicate);
+            thread::spawn(move || {
+                let mut guard = predicate.lock().unwrap();
+                while *guard == 0 {
+                    guard = condition.wait(&predicate, guard);
+                }
+                assert_eq!(*guard, 7);
+            })
+        };
+        *predicate.lock().unwrap() = 7;
+        condition.notify(false);
+        waiter.join().unwrap();
+        assert_eq!(condition.waiters.load(Ordering::SeqCst), 0);
+    });
+}
+
+#[test]
+fn native_condvar_notify_all_releases_registered_and_arriving_waiters() {
+    // Bound only this three-thread case; the two-party registration model above
+    // explores the default exhaustive state space.
+    let mut model = loom::model::Builder::new();
+    model.preemption_bound = Some(2);
+    model.check(|| {
+        let condition = Arc::new(NativeCondition::new());
+        let predicate = Arc::new(Mutex::new(0));
+        let waiters = (0..2)
+            .map(|_| {
+                let condition = Arc::clone(&condition);
+                let predicate = Arc::clone(&predicate);
+                thread::spawn(move || {
+                    let mut guard = predicate.lock().unwrap();
+                    while *guard == 0 {
+                        guard = condition.wait(&predicate, guard);
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        *predicate.lock().unwrap() = 1;
+        condition.notify(true);
+        for waiter in waiters {
+            waiter.join().unwrap();
+        }
+        assert_eq!(condition.waiters.load(Ordering::SeqCst), 0);
+    });
+}
+
+#[test]
+fn address_mutex_never_admits_two_owners() {
+    loom::model(|| {
+        let state = Arc::new(AtomicUsize::new(0));
+        let owners = Arc::new(AtomicUsize::new(0));
+        let workers = (0..2)
+            .map(|_| {
+                let state = Arc::clone(&state);
+                let owners = Arc::clone(&owners);
+                thread::spawn(move || {
+                    if state.compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed).is_err() {
+                        while state.swap(2, Ordering::Acquire) != 0 {
+                            thread::yield_now();
+                        }
+                    }
+                    assert_eq!(owners.fetch_add(1, Ordering::SeqCst), 0);
+                    thread::yield_now();
+                    assert_eq!(owners.fetch_sub(1, Ordering::SeqCst), 1);
+                    state.swap(0, Ordering::Release);
+                })
+            })
+            .collect::<Vec<_>>();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!((state.load(Ordering::Relaxed), owners.load(Ordering::Relaxed)), (0, 0));
+    });
+}
+
+#[test]
+fn address_mutex_registration_cannot_lose_release() {
+    loom::model(|| {
+        let state = Arc::new(AtomicUsize::new(1));
+        let registration = Arc::new(Registration::new());
+        let waiter = {
+            let state = Arc::clone(&state);
+            let registration = Arc::clone(&registration);
+            thread::spawn(move || {
+                if state.swap(2, Ordering::Acquire) == 0 {
+                    false
+                } else {
+                    registration.park_if_not_ready(|| state.load(Ordering::Relaxed) != 2)
+                }
+            })
+        };
+        let releaser = {
+            let state = Arc::clone(&state);
+            let registration = Arc::clone(&registration);
+            thread::spawn(move || {
+                if state.swap(0, Ordering::Release) == 2 {
+                    registration.wake();
+                }
+            })
+        };
+        let parked = waiter.join().unwrap();
+        releaser.join().unwrap();
+        assert!(!parked || registration.was_woken());
+    });
+}
 
 fn try_acquire_mutex(state: &AtomicUsize) -> bool {
     let mut current = state.load(Ordering::Relaxed);

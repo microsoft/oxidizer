@@ -1,11 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates loading resilience pipeline configuration from a JSON file.
+//! This example loads resilience pipeline configuration from a JSON file.
 //!
-//! This example shows how to deserialize [`RetryConfig`], [`BreakerConfig`], and
-//! [`TimeoutConfig`] from an external JSON file and apply them to a
-//! retry → circuit breaker → timeout pipeline using the `.config()` builder method.
+//! It deserializes [`RetryConfig`], [`BreakerConfig`], and [`TimeoutConfig`].
+//! It applies them to a retry → circuit breaker → timeout pipeline with `.config()`.
 
 use layered::{Execute, Service, Stack};
 use seatbelt::breaker::{Breaker, BreakerConfig};
@@ -15,7 +14,7 @@ use seatbelt::{RecoveryInfo, ResilienceContext};
 use serde::Deserialize;
 use tick::Clock;
 
-/// Top-level configuration that maps to the JSON file structure.
+/// Configuration that matches the top level of the JSON file.
 #[derive(Debug, Deserialize)]
 struct PipelineConfig {
     retry: RetryConfig,
@@ -25,7 +24,7 @@ struct PipelineConfig {
 
 #[tokio::main]
 async fn main() {
-    // Load pipeline configuration from an external JSON file.
+    // Load the pipeline configuration from a JSON file.
     let config: PipelineConfig =
         serde_json::from_str(include_str!("config.json")).expect("config.json should be valid JSON matching PipelineConfig");
 
@@ -34,10 +33,9 @@ async fn main() {
     let clock = Clock::new_tokio();
     let context = ResilienceContext::new(&clock);
 
-    // Build the pipeline: retry → circuit breaker → timeout → operation.
+    // Build the retry → circuit breaker → timeout → operation pipeline.
     //
-    // The `.config()` method on each layer applies every field from the
-    // deserialized config struct (enabled flag, durations, thresholds, etc.).
+    // The `.config()` method applies every field from each deserialized value.
     let stack = (
         Retry::layer("my_retry", &context)
             .config(&config.retry)

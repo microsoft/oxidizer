@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(missing_docs, reason = "Benchmarks don't require documentation")]
+#![allow(missing_docs, reason = "benchmarks do not need documentation")]
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;

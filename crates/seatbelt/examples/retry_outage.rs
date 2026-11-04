@@ -3,13 +3,12 @@
 
 #![expect(clippy::unwrap_used, reason = "sample code")]
 
-//! Demonstrates advanced retry patterns with input restoration from errors.
+//! This example restores retry input from errors.
 //!
-//! This example showcases how to handle outage scenarios where:
-//! - The original input cannot be cloned (expensive request bodies)
-//! - Input must be restored from error information using `restore_input_on_error()`
-//! - Failed requests are automatically retried with a fallback endpoint
-//! - Outage detection and recovery are handled seamlessly
+//! It handles these outage conditions:
+//! - The request body is too expensive to clone.
+//! - `restore_input_on_error()` restores input from an error.
+//! - A failed request retries against a fallback endpoint.
 
 use std::time::Duration;
 
@@ -34,58 +33,56 @@ async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
     let context = ResilienceContext::new(&clock).use_metrics(&meter_provider);
 
-    // Configure retry layer for outage handling with input restoration
+    // Configure retry middleware to restore input after an outage.
     let stack = (
         Retry::layer("outage_retry", &context)
-            // Disable input cloning - we'll restore from error instead
+            // Do not clone input. Restore it from the error.
             .clone_input_with(|_, _| None)
-            // Configure recovery based on an error type
+            // Use the error type to classify recovery.
             .recovery_with(|output: &Result<_, HttpError>, _| match output {
-                Ok(_) => RecoveryInfo::never(), // Don't retry successful responses
-                Err(error) => error.recovery(), // Use error's recovery strategy
+                Ok(_) => RecoveryInfo::never(), // Do not retry successful responses.
+                Err(error) => error.recovery(), // Use the recovery rule from the error.
             })
-            // Enable unavailable detection and handling
+            // Retry unavailable output.
             .handle_unavailable(true)
-            // Restore input from error when retrying (key feature!)
+            // Restore input from the error before a retry.
             .restore_input_from_error(|error: &mut HttpError, _| {
-                // Extract the original request and modify it for fallback endpoint
+                // Extract the request and select the fallback endpoint.
                 error.try_restore_request()
             }),
         Execute::new(send_request),
     );
 
-    // Create the service from the stack
+    // Create the service from the stack.
     let service = stack.into_service();
 
-    // Create a request that will initially fail but can be restored
+    // Create a request that fails first and can be restored.
     let request = Request::builder()
         .uri(ENDPOINT_WITH_OUTAGE)
         .body("important request data".to_string())?;
 
     println!("Sending request to: {}", request.uri());
 
-    // The service will:
-    // 1. Try the original endpoint (fails with outage)
-    // 2. Restore input from the error with fallback endpoint
-    // 3. Retry with the modified request (succeeds)
+    // The service first calls the unavailable endpoint.
+    // It restores the request, selects the fallback endpoint, and retries.
     let response = service.execute(request).await?;
 
     println!("Final response: {}", response.body());
 
-    // Flush metrics to stdout before exiting
+    // Flush metrics to standard output before the program exits.
     meter_provider.force_flush()?;
 
     Ok(())
 }
 
-/// Simulates a service that has outages on the primary endpoint but works on fallback.
+/// Simulates a failed primary endpoint and a working fallback endpoint.
 ///
-/// This demonstrates the input restoration pattern where the original request is preserved
-/// in the error so it can be modified and retried against a different endpoint.
+/// The error stores the original request.
+/// The retry callback changes its endpoint before the next call.
 async fn send_request(input: Request<String>) -> Result<Response<String>, HttpError> {
     if input.uri() == ENDPOINT_WITH_OUTAGE {
         println!("Request to {} failed - simulating outage", input.uri());
-        // Store the original request in the error for later restoration
+        // Store the request in the error for restoration.
         Err(HttpError::outage(input))
     } else {
         println!("Request to {} succeeded", input.uri());
@@ -93,20 +90,19 @@ async fn send_request(input: Request<String>) -> Result<Response<String>, HttpEr
     }
 }
 
-/// Custom error type that preserves the original request for restoration.
+/// Stores the failed request so that retry middleware can restore it.
 ///
-/// This pattern allows failed requests to be modified and retried against different
-/// endpoints without requiring the original input to be cloneable.
+/// The request can use another endpoint without implementing `Clone`.
 #[ohno::error]
 struct HttpError {
-    /// The original request that failed, preserved for input restoration
+    /// The failed request for input restoration.
     rejected_request: Option<Box<Request<String>>>,
-    /// Recovery strategy (retry vs. never) for this error type
+    /// The recovery rule for this error.
     recovery: RecoveryInfo,
 }
 
 impl HttpError {
-    /// Creates an outage error that preserves the original request for retry.
+    /// Creates an outage error that stores the request.
     fn outage(rejected_request: Request<String>) -> Self {
         Self::caused_by(
             Some(Box::new(rejected_request)),
@@ -115,17 +111,15 @@ impl HttpError {
         )
     }
 
-    /// Restores the original request with a modified endpoint for retry.
+    /// Restores the request and selects the fallback endpoint.
     ///
-    /// This is called by `restore_input_on_error()` to extract and modify the
-    /// original request. It changes the URI to the fallback endpoint and returns
-    /// the modified request for the next retry attempt.
+    /// `restore_input_on_error()` calls this method before a retry.
     fn try_restore_request(&mut self) -> Option<Request<String>> {
         self.rejected_request
-            .take() // Extract the stored request
-            .map(|boxed_request| *boxed_request) // Unbox it
+            .take() // Take the stored request.
+            .map(|boxed_request| *boxed_request) // Remove the box.
             .map(|mut request| {
-                // Modify the request to use the fallback endpoint
+                // Select the fallback endpoint.
                 *request.uri_mut() = ENDPOINT_ALIVE.parse().unwrap();
                 println!("Restored request with fallback endpoint: {}", request.uri());
                 request
@@ -140,7 +134,7 @@ impl Recovery for HttpError {
 }
 
 fn configure_telemetry() -> SdkMeterProvider {
-    // Set up tracing subscriber for logs to console
+    // Send tracing logs to the console.
     tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()

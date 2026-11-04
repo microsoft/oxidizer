@@ -11,23 +11,21 @@ use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
 use crate::{ResilienceContext, TelemetryString};
 
-/// Builder for configuring fallback resilience middleware.
+/// Configures fallback middleware.
 ///
-/// This type is created by calling [`Fallback::layer`](crate::fallback::Fallback::layer)
-/// and uses the type-state pattern to enforce that required properties are configured
-/// before the layer can be built:
+/// [`Fallback::layer`](crate::fallback::Fallback::layer) creates this builder.
+/// Its type state makes these properties required:
 ///
-/// - [`should_fallback`][FallbackLayer::should_fallback]: Required predicate that decides
-///   whether the inner service output needs a replacement
+/// - [`should_fallback`][FallbackLayer::should_fallback] decides whether to replace output.
 /// - [`fallback`][FallbackLayer::fallback] or [`fallback_async`][FallbackLayer::fallback_async]:
-///   Required function that produces the replacement output
+///   creates the replacement output.
 ///
-/// For comprehensive examples, see the [fallback module][crate::fallback] documentation.
+/// See the [fallback module][crate::fallback] for examples.
 ///
-/// # Type State
+/// # Type state
 ///
-/// - `S1`: Tracks whether [`should_fallback`][FallbackLayer::should_fallback] has been set
-/// - `S2`: Tracks whether [`fallback`][FallbackLayer::fallback] has been set
+/// - `S1` records whether [`should_fallback`][FallbackLayer::should_fallback] is set.
+/// - `S2` records whether [`fallback`][FallbackLayer::fallback] is set.
 #[derive(Debug)]
 pub struct FallbackLayer<In, Out, S1 = Set, S2 = Set> {
     should_fallback: Option<ShouldFallback<Out>>,
@@ -51,26 +49,23 @@ impl<In, Out> FallbackLayer<In, Out, NotSet, NotSet> {
 }
 
 impl<In, Out, S1, S2> FallbackLayer<In, Out, S1, S2> {
-    /// Sets the predicate that decides whether the fallback should be invoked.
+    /// Sets the predicate that decides whether to use a fallback.
     ///
-    /// The `predicate` receives a reference to the output produced by the inner
-    /// service and returns `true` when the output is not considered valid and the
-    /// fallback action should produce a replacement. This call replaces any
-    /// previous predicate.
+    /// The predicate receives output from the inner service.
+    /// Return `true` to replace the output.
+    /// This call replaces the previous predicate.
     #[must_use]
     pub fn should_fallback(mut self, predicate: impl Fn(&Out) -> bool + Send + Sync + 'static) -> FallbackLayer<In, Out, Set, S2> {
         self.should_fallback = Some(ShouldFallback::new(predicate));
         self.into_state::<Set, S2>()
     }
 
-    /// Optionally enables the fallback middleware based on a condition.
+    /// Enables fallback middleware when a condition is true.
     ///
-    /// When disabled, the inner service output is returned as-is regardless of
-    /// the [`should_fallback`][FallbackLayer::should_fallback] predicate. The
-    /// `is_enabled` function receives a reference to the input and returns
-    /// `true` when fallback protection should be active for this request.
+    /// If the condition is false, the middleware returns the inner service output.
+    /// The `is_enabled` function receives the input.
     ///
-    /// **Default**: Always enabled
+    /// Default: Enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
         self.enable_if = EnableIf::custom(is_enabled);
@@ -79,29 +74,26 @@ impl<In, Out, S1, S2> FallbackLayer<In, Out, S1, S2> {
 
     /// Enables or disables the fallback middleware.
     ///
-    /// When disabled, requests pass through without fallback protection.
-    /// This call replaces any previous condition.
+    /// If disabled, requests run without fallback middleware.
+    /// This call replaces the previous condition.
     #[must_use]
     fn enable(mut self, enabled: bool) -> Self {
         self.enable_if = EnableIf::new(enabled);
         self
     }
 
-    /// Enables the fallback middleware unconditionally.
+    /// Enables fallback middleware for all requests.
     ///
-    /// All requests will have fallback protection applied.
-    /// This call replaces any previous condition.
-    ///
-    /// **Note**: This is the default behavior.
+    /// This call replaces the previous condition.
+    /// Fallback middleware is enabled by default.
     #[must_use]
     pub fn enable_always(self) -> Self {
         self.enable(true)
     }
 
-    /// Disables the fallback middleware completely.
+    /// Disables fallback middleware for all requests.
     ///
-    /// All requests will pass through without fallback protection.
-    /// This call replaces any previous condition.
+    /// This call replaces the previous condition.
     #[must_use]
     pub fn disable(self) -> Self {
         self.enable(false)
@@ -111,9 +103,9 @@ impl<In, Out, S1, S2> FallbackLayer<In, Out, S1, S2> {
 impl<In, Out: Send + 'static, S1, S2> FallbackLayer<In, Out, S1, S2> {
     /// Sets a synchronous fallback action.
     ///
-    /// The `action` receives the original (invalid) output and [`FallbackActionArgs`]
-    /// with additional context, and returns a replacement output. This call replaces
-    /// any previous fallback action.
+    /// The action receives invalid output and [`FallbackActionArgs`].
+    /// It returns replacement output.
+    /// This call replaces the previous fallback action.
     #[must_use]
     pub fn fallback(mut self, action: impl Fn(Out, FallbackActionArgs) -> Out + Send + Sync + 'static) -> FallbackLayer<In, Out, S1, Set> {
         self.fallback_action = Some(FallbackAction::new_sync(action));
@@ -122,11 +114,10 @@ impl<In, Out: Send + 'static, S1, S2> FallbackLayer<In, Out, S1, S2> {
 
     /// Sets a fixed fallback value that is cloned on every invocation.
     ///
-    /// This is a convenience shorthand for [`fallback`][FallbackLayer::fallback]
-    /// when the replacement output is always the same value. The original
-    /// (invalid) output is discarded and `value` is cloned in its place.
+    /// Use this method when the replacement output is always the same.
+    /// It discards the invalid output and clones `value`.
     ///
-    /// This call replaces any previous fallback action.
+    /// This call replaces the previous fallback action.
     #[must_use]
     pub fn fallback_output(self, value: Out) -> FallbackLayer<In, Out, S1, Set>
     where
@@ -137,9 +128,9 @@ impl<In, Out: Send + 'static, S1, S2> FallbackLayer<In, Out, S1, S2> {
 
     /// Sets an asynchronous fallback action.
     ///
-    /// The `action` receives the original (invalid) output and [`FallbackActionArgs`]
-    /// with additional context, and returns a future that resolves to the replacement
-    /// output. This call replaces any previous fallback action.
+    /// The action receives invalid output and [`FallbackActionArgs`].
+    /// Its future returns replacement output.
+    /// This call replaces the previous fallback action.
     #[must_use]
     pub fn fallback_async<F, Fut>(mut self, action: F) -> FallbackLayer<In, Out, S1, Set>
     where

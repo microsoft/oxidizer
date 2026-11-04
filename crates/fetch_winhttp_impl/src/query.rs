@@ -231,7 +231,6 @@ fn query_header_bytes(bindings: &BindingsFacade, request: RawHandle, info_level:
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::error::Error as _;
-    use std::ffi::c_void;
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::sync::Arc;
 
@@ -248,7 +247,7 @@ mod tests {
     };
     use crate::bindings::{BindingsFacade, MockBindings};
     use crate::error::{WinHttpError, WinHttpOperation};
-    use crate::handle::RawHandle;
+    use crate::mocks::raw_handle;
 
     // The routing enumeration wraps errors that retain user-erased source state.
     assert_not_impl_any!(QueryError: UnwindSafe, RefUnwindSafe);
@@ -674,9 +673,5 @@ mod tests {
                 *byte_len = 4;
                 Ok(())
             });
-    }
-
-    fn raw_handle(value: usize) -> RawHandle {
-        RawHandle::new(value as *mut c_void).unwrap()
     }
 }

@@ -25,10 +25,11 @@
 # of {unused dep, unused dev-dep, dep that should be a dev-dep}.
 
 # Check required workspace packages for unused dependencies.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-udeps: anvil-udeps-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    $include = (& "{{ just_executable() }}" _anvil-impact-include required)
+    $include = (& "{{ just_executable() }}" _anvil-impact-exclude required)
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
     if ($include -eq '--skip') { Write-Host 'anvil-udeps: no affected packages; skipping'; exit 0 }
@@ -42,9 +43,9 @@ anvil-udeps: anvil-udeps-validate-prereqs anvil-impact
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-udeps` recipe.
-[group("anvil-setup")]
+[private]
 anvil-udeps-setup installer="install": anvil-toolchain-nightly-install (anvil-tool-cargo-udeps-install installer)
 
 # Validate prerequisites for the `anvil-udeps` recipe.
-[group("anvil-setup")]
+[private]
 anvil-udeps-validate-prereqs: anvil-toolchain-nightly-validate-prereqs anvil-tool-cargo-udeps-validate-prereqs

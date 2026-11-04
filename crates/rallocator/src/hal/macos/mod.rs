@@ -174,12 +174,21 @@ fn check_wait_result(result: libc::c_int) {
 
 /// Wakes by numeric address without accessing a possibly departed stack node.
 pub(crate) fn wake_one(address: *const u32) {
+    wake_one_with(address, |address, size, flags| {
+        // SAFETY: The wake API uses the numeric address as its wait-table key,
+        // without dereferencing or forming a Rust reference to the departed word.
+        if unsafe { os_sync_wake_by_address_any(address, size, flags) } == -1 {
+            Err(std::io::Error::last_os_error().raw_os_error())
+        } else {
+            Ok(())
+        }
+    });
+}
+
+fn wake_one_with(address: *const u32, call: impl FnOnce(*mut libc::c_void, usize, u32) -> Result<(), Option<i32>>) {
     crate::abort::require(!address.is_null() && address.is_aligned());
-    // SAFETY: The wake API uses the numeric address as its wait-table key,
-    // without dereferencing or forming a Rust reference to the departed word.
-    let result = unsafe { os_sync_wake_by_address_any(address.cast_mut().cast(), std::mem::size_of::<u32>(), 0) };
-    if result == -1 {
-        check_wake_error(std::io::Error::last_os_error().raw_os_error());
+    if let Err(error) = call(address.cast_mut().cast(), std::mem::size_of::<u32>(), 0) {
+        check_wake_error(error);
     }
 }
 
@@ -191,8 +200,9 @@ fn check_wait_error(error: Option<i32>) {
 
 fn check_wake_error(error: Option<i32>) {
     // The original waiter may have departed and its address may now belong to
-    // a different ulock opcode. ENOENT and EDOM both denote a stale wake key.
-    crate::abort::require(matches!(error, Some(libc::ENOENT | libc::EDOM)));
+    // incompatible kernel state. The checked address, fixed four-byte size and
+    // zero flags rule out argument errors, so EINVAL also denotes a stale key.
+    crate::abort::require(matches!(error, Some(libc::ENOENT | libc::EDOM | libc::EINVAL)));
 }
 
 #[cfg(test)]
@@ -303,66 +313,23 @@ mod tests {
         assert!(unsafe { os_sync_wait_on_address(word.as_ptr().cast(), 0, 4, 0) } >= 0);
         wait(&word, 0);
         wake_one(word.as_ptr());
-        check_wake_error(Some(libc::ENOENT));
-        check_wake_error(Some(libc::EDOM));
         for error in [libc::EINTR, libc::ENOMEM, libc::EFAULT] {
             check_wait_error(Some(error));
         }
     }
 
     #[test]
-    fn stale_wake_tolerates_an_address_reused_by_an_eight_byte_waiter() {
-        use std::sync::atomic::AtomicU64;
-        use std::time::{Duration, Instant};
-
-        let word = AtomicU64::new(0);
-        let error = std::thread::scope(|scope| {
-            let waiter = scope.spawn(|| {
-                while word.load(Ordering::Acquire) == 0 {
-                    // SAFETY: The aligned eight-byte atomic remains live until
-                    // this thread joins. The timeout bounds a failed protocol.
-                    let result = unsafe {
-                        os_sync_wait_on_address_with_timeout(
-                            word.as_ptr().cast(),
-                            0,
-                            std::mem::size_of::<u64>(),
-                            0,
-                            OS_CLOCK_MACH_ABSOLUTE_TIME,
-                            WAIT_TIMEOUT_NANOS,
-                        )
-                    };
-                    check_wait_result(result);
-                }
+    fn successful_and_stale_wakes_use_a_single_fixed_four_byte_call() {
+        let address = std::ptr::without_provenance::<u32>(RESERVE_MIN);
+        for result in [Ok(()), Err(Some(libc::ENOENT)), Err(Some(libc::EDOM)), Err(Some(libc::EINVAL))] {
+            let mut calls = 0;
+            wake_one_with(address, |key, size, flags| {
+                calls += 1;
+                assert_eq!((key, size, flags), (address.cast_mut().cast(), std::mem::size_of::<u32>(), 0));
+                result
             });
-            let deadline = Instant::now() + Duration::from_secs(10);
-            let error = loop {
-                // SAFETY: Probe the numeric wait key with the allocator's
-                // four-byte opcode; wake does not access the atomic contents.
-                let result = unsafe { os_sync_wake_by_address_any(word.as_ptr().cast(), std::mem::size_of::<u32>(), 0) };
-                let error = if result == -1 {
-                    std::io::Error::last_os_error().raw_os_error()
-                } else {
-                    None
-                };
-                if error != Some(libc::ENOENT) || Instant::now() >= deadline {
-                    break error;
-                }
-                std::thread::yield_now();
-            };
-            if error == Some(libc::EDOM) {
-                wake_one(word.as_ptr().cast());
-            }
-            word.store(1, Ordering::Release);
-            // SAFETY: The live atomic's own eight-byte opcode releases its
-            // waiter even if the mismatched probe did not observe EDOM.
-            let result = unsafe { os_sync_wake_by_address_any(word.as_ptr().cast(), std::mem::size_of::<u64>(), 0) };
-            if result == -1 {
-                check_wake_error(std::io::Error::last_os_error().raw_os_error());
-            }
-            waiter.join().unwrap();
-            error
-        });
-        assert_eq!(error, Some(libc::EDOM));
+            assert_eq!(calls, 1, "wake result {result:?} must not retry");
+        }
     }
 
     #[test]
@@ -419,7 +386,31 @@ mod tests {
     fn unexpected_wake_errors_abort_instead_of_losing_notifications() {
         crate::abort::assert_aborts(
             "hal::macos::tests::unexpected_wake_errors_abort_instead_of_losing_notifications",
-            || check_wake_error(Some(libc::EINVAL)),
+            || wake_one_with(std::ptr::without_provenance(RESERVE_MIN), |_, _, _| Err(Some(libc::EFAULT))),
         );
+    }
+
+    #[test]
+    fn missing_wake_errno_aborts_instead_of_losing_notifications() {
+        crate::abort::assert_aborts(
+            "hal::macos::tests::missing_wake_errno_aborts_instead_of_losing_notifications",
+            || wake_one_with(std::ptr::without_provenance(RESERVE_MIN), |_, _, _| Err(None)),
+        );
+    }
+
+    #[test]
+    fn null_wake_addresses_abort_before_the_syscall() {
+        crate::abort::assert_aborts("hal::macos::tests::null_wake_addresses_abort_before_the_syscall", || {
+            wake_one_with(std::ptr::null(), |_, _, _| panic!("null wake address must not reach the syscall"));
+        });
+    }
+
+    #[test]
+    fn misaligned_wake_addresses_abort_before_the_syscall() {
+        crate::abort::assert_aborts("hal::macos::tests::misaligned_wake_addresses_abort_before_the_syscall", || {
+            wake_one_with(std::ptr::without_provenance(1), |_, _, _| {
+                panic!("misaligned wake address must not reach the syscall")
+            });
+        });
     }
 }

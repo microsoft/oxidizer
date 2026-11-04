@@ -11,12 +11,12 @@ use performables::arc::{Arc as PerformableArc, PerProcess};
 use tick::SimpleClock;
 
 use crate::context::Transfer;
-use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, Slot};
+use crate::enrichment::{EnrichmentEntry, EnrichmentTransfer, Guard, PushState, Slot};
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
 use crate::processing::{EventProcessor, EventView, IntermediateEvent};
 use crate::sampling::{EventSampler, EventSamplingContext, EventSamplingDecision};
-use crate::{Event, FlushError, SinkFlushError, SinkId};
+use crate::{Event, FlushError, SinkBuilder, SinkFlushError, SinkId};
 
 /// The no-op sink's id returned by [`Sink::noop`]'s `id()` accessor
 /// - surfaces in `Debug` output and in error messages.
@@ -33,7 +33,7 @@ const MAX_PROCESSORS: usize = u64::BITS as usize;
 
 /// Dispatches events to one or more [`EventProcessor`]s.
 ///
-/// Construct via [`Sink::new`]. Clone is cheap (`Arc` internals).
+/// Construct via [`Sink::builder`]. Clone is cheap (`Arc` internals).
 ///
 /// Sinks can be combined with [`Sink::composite`] so a single [`emit!`](crate::emit!)
 /// fans out through several underlying emitters. Each sink owns its own
@@ -70,61 +70,43 @@ impl std::fmt::Debug for Sink {
                 .field("variant", &"Composite")
                 .field("children", &children.len())
                 .finish(),
-            SinkInner::Noop { .. } => f.debug_struct(type_name::<Self>()).field("variant", &"Noop").finish(),
+            SinkInner::Noop => f.debug_struct(type_name::<Self>()).field("variant", &"Noop").finish(),
         }
     }
 }
 
 impl Sink {
-    /// Constructs a sink with the given [`SinkId`], processor list, and clock.
+    /// Starts building a [`Sink`].
     ///
-    /// `id` accepts a [`SinkId`] or a `&'static str`; it is the identity
-    /// token targeted by `enrich_for(ID, …)`.
+    /// `id` accepts a [`SinkId`] or a `&'static str`.
+    /// [`enrich_for`](crate::enrichment::EnrichFutureExt::enrich_for) addresses
+    /// entries to a sink by this id.
     ///
-    /// `clock` stamps the timestamp on every event this sink dispatches. It
-    /// accepts anything that is `AsRef<SimpleClock>` - both
-    /// [`tick::SimpleClock`] and [`tick::Clock`]. In production pass the
-    /// application's clock (e.g. `SimpleClock::new_system()`); in tests pass a
-    /// frozen clock (`SimpleClock::new_frozen()`) for deterministic, Miri-safe
-    /// timestamps.
+    /// All other settings are optional; see [`SinkBuilder`].
     ///
-    /// The sink receives both untargeted and targeted enrichments.
-    /// For a sink that ignores untargeted entries (the library-isolation
-    /// pattern), use [`Sink::new_isolated`].
+    /// # Examples
     ///
-    /// This is the fundamental primitive: supply the [`EventProcessor`]s that
-    /// the sink fans each event out to.
-    /// Standard `Arc`s are wrapped in `performables::arc::Arc` internally without
-    /// copying their values, preserving compatibility with existing processors.
+    /// ```
+    /// use observed::Sink;
+    ///
+    /// let sink = Sink::builder("service").build();
+    /// ```
+    #[must_use]
+    pub fn builder(id: impl Into<SinkId>) -> SinkBuilder {
+        SinkBuilder::new(id.into())
+    }
+
+    /// Constructs a sink from the settings collected by [`SinkBuilder`].
     ///
     /// # Panics
     ///
     /// Panics if `processors` holds more than 64 processors.
-    #[must_use]
-    pub fn new(id: impl Into<SinkId>, processors: Vec<Arc<dyn EventProcessor>>, clock: impl AsRef<SimpleClock>) -> Self {
-        Self::build_single(id.into(), false, processors, clock)
-    }
-
-    /// Like [`Sink::new`], but configures the sink to ignore untargeted
-    /// enrichments. Only entries explicitly targeted at this
-    /// sink's id (via `enrich_for(ID, …)`) are visible.
-    ///
-    /// Useful for library emitters that must not inherit application-level
-    /// context.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `processors` holds more than 64 processors.
-    #[must_use]
-    pub fn new_isolated(id: impl Into<SinkId>, processors: Vec<Arc<dyn EventProcessor>>, clock: impl AsRef<SimpleClock>) -> Self {
-        Self::build_single(id.into(), true, processors, clock)
-    }
-
-    fn build_single(
+    pub(crate) fn new(
         id: SinkId,
-        isolated_enrichment: bool,
         processors: Vec<Arc<dyn EventProcessor>>,
-        clock: impl AsRef<SimpleClock>,
+        clock: SimpleClock,
+        isolated_enrichment: bool,
+        sampler: Option<PerformableArc<dyn EventSampler>>,
     ) -> Self {
         assert_within_processor_limit(processors.len());
         Self {
@@ -133,8 +115,8 @@ impl Sink {
                 processors: processors.into_iter().map(PerformableArc::from_std).collect(),
                 isolated_enrichment,
                 enrichment: Slot::new(),
-                clock: clock.as_ref().clone(),
-                sampler: None,
+                clock,
+                sampler,
             })),
         }
     }
@@ -199,7 +181,7 @@ impl Sink {
                         push(&mut states, child.clone());
                     }
                 }
-                SinkInner::Noop { .. } => {}
+                SinkInner::Noop => {}
             }
         }
         assert_within_processor_limit(states.iter().map(|state| state.processors.len()).sum());
@@ -213,85 +195,12 @@ impl Sink {
 
     /// Creates a no-op sink that silently drops all events.
     ///
-    /// A dedicated `noop()` sink carrying only an enrichment slot - useful as
-    /// a test fixture for `.enrich()` semantics - it just doesn't dispatch
-    /// anywhere when `emit!` fires.
-    // TODO: consider dropping enrichment slot for no-op sinks
+    /// Enrichment and context transfer are also no-ops because this sink can
+    /// never dispatch an event that observes them.
     #[must_use]
     pub fn noop() -> Self {
         Self {
-            inner: PerformableArc::from_unaware(SinkInner::Noop { enrichment: Slot::new() }),
-        }
-    }
-
-    /// Attaches one [`EventSampler`] to this sink, replacing any sampler
-    /// already attached.
-    ///
-    /// Takes the sampler itself or a `Box<dyn EventSampler>`, for example a
-    /// sampler chosen at runtime. A boxed sampler must already have the type
-    /// `Box<dyn EventSampler>`; a `Box<MySampler>` is not accepted, so pass
-    /// `MySampler` itself instead.
-    ///
-    /// For a composite, the new sampler replaces every sampler previously
-    /// attached to its leaves, and each leaf with processors calls it once per
-    /// event. A [`Sink::noop`] value is returned unchanged.
-    ///
-    /// See [`EventSampler::sample`] for the invocation and decision contract.
-    ///
-    /// # Sharing
-    ///
-    /// Clones made from the returned sink share its sampler configuration.
-    /// Existing clones keep their prior configuration and remain subject to
-    /// [`Sink::composite`]'s normal duplicate-sink restriction.
-    ///
-    /// # Examples
-    ///
-    /// A sampler chosen at runtime:
-    ///
-    /// ```
-    /// # use observed::{EventSamplingContext, EventSamplingDecision};
-    /// use observed::{EventSampler, Sink};
-    /// # struct DropAll;
-    /// # impl EventSampler for DropAll {
-    /// #     fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
-    /// #         EventSamplingDecision::Drop
-    /// #     }
-    /// # }
-    /// # struct KeepAll;
-    /// # impl EventSampler for KeepAll {
-    /// #     fn sample(&self, _context: &EventSamplingContext<'_>) -> EventSamplingDecision {
-    /// #         EventSamplingDecision::Continue
-    /// #     }
-    /// # }
-    ///
-    /// let drop_all = false; // for example, read from configuration
-    /// let sampler: Box<dyn EventSampler> = if drop_all {
-    ///     Box::new(DropAll)
-    /// } else {
-    ///     Box::new(KeepAll)
-    /// };
-    /// let sink = Sink::new("service", Vec::new(), tick::SimpleClock::new_system())
-    ///     .with_event_sampler(sampler);
-    /// ```
-    #[must_use]
-    pub fn with_event_sampler(self, sampler: impl Into<Box<dyn EventSampler>>) -> Self {
-        let inner = match &*self.inner {
-            SinkInner::Single(state) => SinkInner::Single(state.clone().with_sampler(PerformableArc::from(sampler.into()))),
-            SinkInner::Composite { children } => {
-                let sampler: PerformableArc<dyn EventSampler> = PerformableArc::from(sampler.into());
-                SinkInner::Composite {
-                    children: children
-                        .iter()
-                        .cloned()
-                        .map(|state| state.with_sampler(PerformableArc::clone(&sampler)))
-                        .collect(),
-                }
-            }
-            SinkInner::Noop { .. } => return self,
-        };
-
-        Self {
-            inner: PerformableArc::from_unaware(inner),
+            inner: PerformableArc::from_unaware(SinkInner::Noop),
         }
     }
 
@@ -304,7 +213,7 @@ impl Sink {
         match &*self.inner {
             SinkInner::Single(state) => state.id,
             SinkInner::Composite { .. } => COMPOSITE_ID,
-            SinkInner::Noop { .. } => NOOP_ID,
+            SinkInner::Noop => NOOP_ID,
         }
     }
 
@@ -317,8 +226,42 @@ impl Sink {
         match &*self.inner {
             SinkInner::Single(state) => state.processors.is_empty(),
             SinkInner::Composite { children } => children.iter().all(|c| c.processors.is_empty()),
-            SinkInner::Noop { .. } => true,
+            SinkInner::Noop => true,
         }
+    }
+
+    pub(crate) fn supports_enrichment(&self) -> bool {
+        !matches!(&*self.inner, SinkInner::Noop)
+    }
+
+    /// Returns whether any processor currently wants the described event.
+    ///
+    /// Calls [`EventProcessor::is_interested`] until a processor accepts,
+    /// including across composite children. No-op and empty sinks return `false`.
+    /// The query does not construct or dispatch events, flush processors,
+    /// invoke samplers, or read timestamps or enrichments.
+    ///
+    /// Use this before collecting fields from an external event source.
+    /// This is an independent probe, not a delivery guarantee or a recipient
+    /// reservation. Emission performs its own sampling and interest checks.
+    /// Query each candidate event rather than caching an answer for the sink's
+    /// lifetime; processor answers may change between the query and emission.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use observed::Sink;
+    /// use observed::metadata::EventDescription;
+    ///
+    /// let description = EventDescription::new("request.completed", None, None, None, false, false);
+    /// assert!(!Sink::noop().is_interested(&description));
+    /// ```
+    #[must_use]
+    // External sources call this on their hot path; allow cross-crate inlining.
+    #[inline]
+    pub fn is_interested(&self, description: &EventDescription) -> bool {
+        self.active_sinks()
+            .any(|sink| sink.processors.iter().any(|processor| processor.is_interested(description)))
     }
 
     /// Forces buffered telemetry out by calling
@@ -338,7 +281,7 @@ impl Sink {
         let failures = match &*self.inner {
             SinkInner::Single(state) => flush_failures(state.processors.iter()),
             SinkInner::Composite { children } => flush_failures(children.iter().flat_map(|c| c.processors.iter())),
-            SinkInner::Noop { .. } => Vec::new(),
+            SinkInner::Noop => Vec::new(),
         };
 
         if failures.is_empty() {
@@ -350,6 +293,8 @@ impl Sink {
 
     /// Captures the current enrichment context for transfer to another thread.
     ///
+    /// For a [`noop`](Self::noop) sink, this returns an empty transfer.
+    ///
     /// For a [`composite`](Self::composite), every child's enrichment is
     /// captured independently, so each child's context round-trips with its
     /// own chain - including enrichments pushed directly on a child rather
@@ -358,7 +303,7 @@ impl Sink {
         let mut transfer = EnrichmentTransfer::default();
         match &*self.inner {
             SinkInner::Single(state) => transfer.add_slot(&state.enrichment),
-            SinkInner::Noop { enrichment } => transfer.add_slot(enrichment),
+            SinkInner::Noop => {}
             SinkInner::Composite { children } => {
                 for child in children {
                     transfer.add_slot(&child.enrichment);
@@ -390,7 +335,15 @@ impl Sink {
         match &*self.inner {
             SinkInner::Single(state) => state.enrichment.push(entries),
             SinkInner::Composite { children } => Guard::merge(children.iter().map(|c| c.enrichment.push(PerformableArc::clone(&entries)))),
-            SinkInner::Noop { enrichment } => enrichment.push(entries),
+            SinkInner::Noop => Guard::empty(),
+        }
+    }
+
+    pub(crate) fn enrichment_push_state(&self, entries: PerformableArc<[EnrichmentEntry]>) -> PushState {
+        match &*self.inner {
+            SinkInner::Single(state) => PushState::new(entries, [state.enrichment.clone()]),
+            SinkInner::Composite { children } => PushState::new(entries, children.iter().map(|child| child.enrichment.clone())),
+            SinkInner::Noop => PushState::new(entries, std::iter::empty()),
         }
     }
 
@@ -409,19 +362,31 @@ impl Sink {
     ///
     /// It's automatically called by the `emit!` macro expansion, and can be called directly for
     /// [`DynEvent`s](DynEvent)
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "sink construction limits the processor count to the 64-bit dispatch mask"
+    )]
     pub(crate) fn emit_impl<'a, T: Event, F: FnOnce() -> T + 'a>(&self, state: IntermediateEvent<'a, F>) {
         if self.is_noop() {
             return;
         }
+        let sinks = self.sinks();
 
         let description = state.description();
         let bitmask = {
             let Some(_guard) = super::try_acquire_reentrancy_guard() else {
                 return;
             };
-            self.sinks_with_shift().fold(0, |bitmask, (sink, shift)| {
-                bitmask | sink.sample_and_ask_processors(&description) << shift
-            })
+            let mut bitmask = 0;
+            let mut shift = 0;
+            for sink in sinks {
+                if sink.processors.is_empty() {
+                    continue;
+                }
+                bitmask |= sink.sample_and_ask_processors(&description) << shift;
+                shift += sink.processors.len();
+            }
+            bitmask
         };
         if bitmask == 0 {
             return;
@@ -430,22 +395,26 @@ impl Sink {
         let event = state.evaluate();
 
         let _guard = super::try_acquire_reentrancy_guard().expect("the reentrancy slot should be free again once the event is built");
-        for (sink, shift) in self.sinks_with_shift() {
-            sink.dispatch(&event, bitmask >> shift);
+        let mut remaining_bitmask = bitmask;
+        for sink in sinks {
+            if sink.processors.is_empty() {
+                continue;
+            }
+            sink.dispatch(&event, remaining_bitmask);
+            remaining_bitmask = remaining_bitmask.checked_shr(sink.processors.len() as u32).unwrap_or(0);
         }
     }
 
-    fn sinks_with_shift(&self) -> impl Iterator<Item = (&SingleSinkState, usize)> {
-        let sinks = match &*self.inner {
+    fn sinks(&self) -> &[SingleSinkState] {
+        match &*self.inner {
             SinkInner::Single(state) => slice::from_ref(state),
-            SinkInner::Composite { children } => children.as_slice(),
-            SinkInner::Noop { .. } => &[],
-        };
-        sinks.iter().filter(|sink| !sink.processors.is_empty()).scan(0, |next_shift, sink| {
-            let shift = *next_shift;
-            *next_shift += sink.processors.len();
-            Some((sink, shift))
-        })
+            SinkInner::Composite { children } => children,
+            SinkInner::Noop => &[],
+        }
+    }
+
+    fn active_sinks(&self) -> impl Iterator<Item = &SingleSinkState> {
+        self.sinks().iter().filter(|sink| !sink.processors.is_empty())
     }
 
     /// Returns a `Vec` of all enrichment entries from outermost to innermost scope.
@@ -460,10 +429,9 @@ impl Sink {
         let slot = match &*self.inner {
             SinkInner::Single(state) => &state.enrichment,
             // For a composite, return an empty vector since it has no enrichment of its own.
-            SinkInner::Composite { .. } => {
+            SinkInner::Composite { .. } | SinkInner::Noop => {
                 return Vec::new();
             }
-            SinkInner::Noop { enrichment } => enrichment,
         };
 
         let head = slot.current();
@@ -485,12 +453,11 @@ impl Sink {
 
 /// Inner state held behind a [`performables::arc::Arc`]. Each variant carries
 /// only the fields that variant needs - Single carries one leaf's full
-/// state; Composite carries a flattened list of leaf states (built at
-/// construction time); Noop carries only an enrichment slot.
+/// state and Composite carries a flattened list of leaf states (built at
+/// construction time).
 ///
-/// `Sink::noop()` is the dedicated `Noop` variant: it owns no processors
-/// and never dispatches, but keeps a working enrichment slot so noop sinks
-/// remain useful as enrichment-API test fixtures.
+/// `Sink::noop()` is the dedicated data-free `Noop` variant: it owns no
+/// processors or enrichment slot and never dispatches.
 #[derive(Clone)]
 enum SinkInner {
     /// A leaf sink with its own processors, id, and enrichment slot.
@@ -503,9 +470,8 @@ enum SinkInner {
     /// each sharing its enrichment slot (`Arc`-backed) with the originating
     /// sink.
     Composite { children: Vec<SingleSinkState> },
-    /// A sink that drops every event. Carries only an enrichment slot so it
-    /// can still be used as an `.enrich()` test fixture.
-    Noop { enrichment: Slot },
+    /// A sink that drops every event and ignores enrichment.
+    Noop,
 }
 
 /// Flushes every processor, collecting all failures rather than stopping at the
@@ -535,11 +501,6 @@ struct SingleSinkState {
 }
 
 impl SingleSinkState {
-    fn with_sampler(mut self, sampler: PerformableArc<dyn EventSampler>) -> Self {
-        self.sampler = Some(sampler);
-        self
-    }
-
     fn sample_and_ask_processors(&self, description: &EventDescription) -> u64 {
         let context = EventSamplingContext::new(description, &self.processors);
         if let Some(sampler) = &self.sampler
@@ -583,13 +544,40 @@ mod tests {
     use ohno::assert_error_message;
 
     use super::*;
+    use crate::enrichment::Enrichment;
+    use crate::typestates::Set;
 
     // These atomics are observation counters only. Assertions read them after the
     // synchronous emission, so no ordering relative to other memory is required.
 
     #[test]
     fn noop_sink_is_noop() {
-        assert!(Sink::noop().is_noop());
+        struct UnreachableEnrichment;
+
+        impl Enrichment for UnreachableEnrichment {
+            fn into_entries(self) -> Vec<EnrichmentEntry> {
+                panic!("a no-op sink transfer must not materialize enrichment entries")
+            }
+        }
+
+        let sink = Sink::noop();
+        let _guard = sink.push_enrichment(PerformableArc::from(vec![EnrichmentEntry::unclassified("ignored", 1_i64)]));
+        let transfer = sink.transfer_context().with_enrichment(UnreachableEnrichment);
+
+        assert!(sink.is_noop());
+        assert!(sink.current_enrichments().is_empty());
+        drop(transfer.apply_current_thread());
+    }
+
+    #[test]
+    fn noop_sink_enrichment_push_state_applies_nothing() {
+        let sink = Sink::noop();
+        let entries = PerformableArc::from(vec![EnrichmentEntry::unclassified("ignored", 1_i64)]);
+        let mut state = sink.enrichment_push_state(entries);
+
+        let _guard = state.apply();
+
+        assert!(sink.current_enrichments().is_empty());
     }
 
     struct DummyDyn;
@@ -618,6 +606,55 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct DescriptionCountingDyn {
+        description_calls: AtomicUsize,
+    }
+
+    impl crate::interop::DynEvent for DescriptionCountingDyn {
+        fn name(&self) -> &'static str {
+            "description-counting"
+        }
+        fn body(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_file(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_line(&self) -> Option<u32> {
+            None
+        }
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn visit_fields(&self, _visitor: &mut crate::processing::FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+        fn description(&self) -> EventDescription {
+            self.description_calls.fetch_add(1, Ordering::Relaxed);
+            EventDescription::new("description-counting", None, None, None, false, false)
+        }
+    }
+
+    #[test]
+    fn processor_free_sinks_do_not_read_dynamic_event_metadata() {
+        let event = DescriptionCountingDyn::default();
+        let sinks = [
+            Sink::noop(),
+            Sink::builder("single").clock(SimpleClock::new_frozen()).build(),
+            Sink::composite([
+                Sink::builder("first").clock(SimpleClock::new_frozen()).build(),
+                Sink::builder("second").clock(SimpleClock::new_frozen()).build(),
+            ]),
+        ];
+
+        for sink in &sinks {
+            crate::interop::emit_dyn_event(sink, &event);
+        }
+
+        assert_eq!(event.description_calls.load(Ordering::Relaxed), 0);
+    }
+
     #[test]
     fn current_enrichments_on_composite_is_empty() {
         // A composite carries no enrichment of its own, so the accessor short-circuits.
@@ -631,7 +668,7 @@ mod tests {
         // by calling the pipeline hooks directly.
         let noop = Sink::noop();
 
-        assert_eq!(noop.sinks_with_shift().count(), 0);
+        assert_eq!(noop.active_sinks().count(), 0);
         noop.flush().expect("noop flush should succeed");
     }
 
@@ -652,17 +689,19 @@ mod tests {
     }
 
     fn failing_sink(id: &'static str) -> Sink {
-        Sink::new(
-            id,
-            vec![Arc::new(FailingFlushProcessor) as Arc<dyn EventProcessor>],
-            SimpleClock::new_frozen(),
-        )
+        Sink::builder(id)
+            .clock(SimpleClock::new_frozen())
+            .processors(vec![Arc::new(FailingFlushProcessor) as Arc<dyn EventProcessor>])
+            .build()
     }
 
     #[test]
     fn standard_processor_pointer_is_wrapped_without_copying() {
         let processor: Arc<dyn EventProcessor> = Arc::new(FailingFlushProcessor);
-        let sink = Sink::new("shared", vec![Arc::clone(&processor)], SimpleClock::new_frozen());
+        let sink = Sink::builder("shared")
+            .clock(SimpleClock::new_frozen())
+            .processors(vec![Arc::clone(&processor)])
+            .build();
         let SinkInner::Single(state) = &*sink.inner else {
             panic!("expected a single sink");
         };
@@ -767,12 +806,11 @@ mod tests {
     #[test]
     fn always_off_sampler_always_drops() {
         let processor = Arc::new(AlwaysInterestedProcessor::default());
-        let sink = Sink::new(
-            "sampled",
-            vec![Arc::clone(&processor) as Arc<dyn EventProcessor>],
-            SimpleClock::new_frozen(),
-        )
-        .with_event_sampler(AlwaysOffSampler);
+        let sink = Sink::builder("sampled")
+            .clock(SimpleClock::new_frozen())
+            .processors(vec![Arc::clone(&processor) as Arc<dyn EventProcessor>])
+            .event_sampler(AlwaysOffSampler)
+            .build();
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
@@ -786,14 +824,13 @@ mod tests {
     fn uninterested_processor_is_skipped_despite_interested_peer() {
         let interested = Arc::new(AlwaysInterestedProcessor::default());
         let uninterested = Arc::new(NeverInterestedProcessor::default());
-        let sink = Sink::new(
-            "mixed",
-            vec![
+        let sink = Sink::builder("mixed")
+            .clock(SimpleClock::new_frozen())
+            .processors(vec![
                 Arc::clone(&uninterested) as Arc<dyn EventProcessor>,
                 Arc::clone(&interested) as Arc<dyn EventProcessor>,
-            ],
-            SimpleClock::new_frozen(),
-        );
+            ])
+            .build();
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
@@ -864,14 +901,12 @@ mod tests {
         }
     }
 
-    fn counting_leaf(id: &'static str, processors: &[&Arc<CountingProcessor>]) -> Sink {
-        Sink::new(
-            id,
+    fn counting_leaf(id: &'static str, processors: &[&Arc<CountingProcessor>]) -> SinkBuilder<Set, Set> {
+        Sink::builder(id).clock(SimpleClock::new_frozen()).processors(
             processors
                 .iter()
                 .map(|processor| Arc::clone(processor) as Arc<dyn EventProcessor>)
                 .collect(),
-            SimpleClock::new_frozen(),
         )
     }
 
@@ -882,8 +917,8 @@ mod tests {
         let (drop_sampler, drop_calls) = fixed_sampler(EventSamplingDecision::Drop);
         let (keep_sampler, keep_calls) = fixed_sampler(EventSamplingDecision::Continue);
         let sink = Sink::composite([
-            counting_leaf("dropped", &[&dropped]).with_event_sampler(drop_sampler),
-            counting_leaf("kept", &[&kept]).with_event_sampler(keep_sampler),
+            counting_leaf("dropped", &[&dropped]).event_sampler(drop_sampler).build(),
+            counting_leaf("kept", &[&kept]).event_sampler(keep_sampler).build(),
         ]);
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
@@ -895,14 +930,13 @@ mod tests {
     }
 
     #[test]
-    fn composite_sampler_delivers_to_leaf_beside_processorless_leaf() {
+    fn leaf_sampler_delivers_beside_processorless_leaf() {
         let processor = CountingProcessor::new(true);
         let (sampler, calls) = fixed_sampler(EventSamplingDecision::Continue);
         let sink = Sink::composite([
-            Sink::new("processorless", Vec::new(), SimpleClock::new_frozen()),
-            counting_leaf("full", &[&processor]),
-        ])
-        .with_event_sampler(sampler);
+            Sink::builder("processorless").clock(SimpleClock::new_frozen()).build(),
+            counting_leaf("full", &[&processor]).event_sampler(sampler).build(),
+        ]);
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
@@ -915,8 +949,11 @@ mod tests {
         let processor = CountingProcessor::new(true);
         let (sampler, calls) = fixed_sampler(EventSamplingDecision::Continue);
         let sink = Sink::composite([
-            Sink::new("processorless", Vec::new(), SimpleClock::new_frozen()).with_event_sampler(sampler),
-            counting_leaf("full", &[&processor]),
+            Sink::builder("processorless")
+                .clock(SimpleClock::new_frozen())
+                .event_sampler(sampler)
+                .build(),
+            counting_leaf("full", &[&processor]).build(),
         ]);
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
@@ -929,7 +966,7 @@ mod tests {
     fn continue_without_asking_asks_each_processor_once() {
         let processors = [false, true, false, true].map(CountingProcessor::new);
         let (sampler, calls) = fixed_sampler(EventSamplingDecision::Continue);
-        let sink = counting_leaf("mixed", &processors.each_ref()).with_event_sampler(sampler);
+        let sink = counting_leaf("mixed", &processors.each_ref()).event_sampler(sampler).build();
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
@@ -951,7 +988,9 @@ mod tests {
         }
 
         let processors = [false, true, false, true].map(CountingProcessor::new);
-        let sink = counting_leaf("mixed", &processors.each_ref()).with_event_sampler(AskTwiceSampler);
+        let sink = counting_leaf("mixed", &processors.each_ref())
+            .event_sampler(AskTwiceSampler)
+            .build();
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
@@ -973,7 +1012,7 @@ mod tests {
 
         let uninterested = CountingProcessor::new(false);
         let (sampler, calls) = fixed_sampler(EventSamplingDecision::Continue);
-        let sink = counting_leaf("uninterested", &[&uninterested]).with_event_sampler(sampler);
+        let sink = counting_leaf("uninterested", &[&uninterested]).event_sampler(sampler).build();
         let built = Cell::new(false);
 
         sink.emit(
@@ -991,10 +1030,10 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "at most 64 processors")]
-    fn new_panics_past_64_processors() {
+    fn build_panics_past_64_processors() {
         let processors: [_; 65] = std::array::from_fn(|_| CountingProcessor::new(true));
 
-        let _sink = counting_leaf("crowded", &processors.each_ref());
+        let _sink = counting_leaf("crowded", &processors.each_ref()).build();
     }
 
     #[test]
@@ -1004,15 +1043,15 @@ mod tests {
         let second: [_; 33] = std::array::from_fn(|_| CountingProcessor::new(true));
 
         let _sink = Sink::composite([
-            counting_leaf("first", &first.each_ref()),
-            counting_leaf("second", &second.each_ref()),
+            counting_leaf("first", &first.each_ref()).build(),
+            counting_leaf("second", &second.each_ref()).build(),
         ]);
     }
 
     #[test]
     fn last_of_64_processors_receives_event() {
         let processors: [_; 64] = std::array::from_fn(|index| CountingProcessor::new(index == 63));
-        let sink = counting_leaf("full", &processors.each_ref());
+        let sink = counting_leaf("full", &processors.each_ref()).build();
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
 
@@ -1025,8 +1064,8 @@ mod tests {
         let first = [false, true].map(CountingProcessor::new);
         let second = [true, false].map(CountingProcessor::new);
         let sink = Sink::composite([
-            counting_leaf("first", &first.each_ref()),
-            counting_leaf("second", &second.each_ref()),
+            counting_leaf("first", &first.each_ref()).build(),
+            counting_leaf("second", &second.each_ref()).build(),
         ]);
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
@@ -1040,9 +1079,9 @@ mod tests {
         let declining: [_; 63] = std::array::from_fn(|_| CountingProcessor::new(false));
         let accepting = CountingProcessor::new(true);
         let sink = Sink::composite([
-            counting_leaf("declining", &declining.each_ref()),
-            counting_leaf("accepting", &[&accepting]),
-            Sink::new("processorless", Vec::new(), SimpleClock::new_frozen()),
+            counting_leaf("declining", &declining.each_ref()).build(),
+            counting_leaf("accepting", &[&accepting]).build(),
+            Sink::builder("processorless").clock(SimpleClock::new_frozen()).build(),
         ]);
 
         crate::interop::emit_dyn_event(&sink, &DummyDyn);
@@ -1053,7 +1092,7 @@ mod tests {
 
     #[test]
     fn current_enrichments_reports_the_pushed_entries() {
-        let sink = Sink::noop();
+        let sink = Sink::builder("test").clock(SimpleClock::new_frozen()).build();
         let _guard = sink.push_enrichment(PerformableArc::from(vec![
             EnrichmentEntry::unclassified("outer", 1_i64),
             EnrichmentEntry::unclassified("inner", 2_i64),

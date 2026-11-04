@@ -220,3 +220,5 @@ async fn fallback_output_returns_fixed_value(#[case] use_tower: bool) {
     assert_eq!(output1, Ok("fixed_default".to_string()));
     assert_eq!(output2, Ok("fixed_default".to_string()));
 }
+
+testing_aids::init_tracing!();

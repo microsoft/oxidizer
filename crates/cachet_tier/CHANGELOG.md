@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.1] - 2026-11-02
+
+- Update synchronization, recovery, and test dependencies. This release does not change the cache
+  tier's source code.
+- Update the requirement for local package `ohno` from `0.5.3` to `0.5.4`.
+- Update the requirement for local package `recoverable` from `0.3.0` to `0.3.1`.
+- Update the requirement for `parking_lot` from `0.12.5` to `0.13.0`.
+- Update the development requirement for `parking_lot` from `0.12.5` to `0.13.0`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
+## [0.6.0] - 2026-10-20
+
+- The public API exposes types from `recoverable`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: ohno ^0.5.2 -> 0.5.3; recoverable ^0.2.0 -> 0.3.0.
+
 ## [0.5.1] - 2026-09-10
 
 ### Maintenance

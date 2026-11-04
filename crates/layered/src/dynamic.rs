@@ -10,10 +10,10 @@ use plurality::Pool;
 
 use crate::Service;
 
-/// Extension trait for converting services to [`DynamicService`].
+/// Converts services into [`DynamicService`].
 ///
-/// Provides type erasure for services, useful when working with complex service
-/// compositions or storing services of different types.
+/// Type erasure hides the concrete service type. It can simplify nested service types and
+/// collections that contain different services.
 pub trait DynamicServiceExt<In, Out>: Sized {
     /// Converts this service into a type-erased [`DynamicService`].
     fn into_dynamic(self) -> DynamicService<In, Out>;
@@ -28,14 +28,12 @@ where
     }
 }
 
-/// Type-erased wrapper for [`Service`] that hides the concrete type.
+/// A type-erased [`Service`].
 ///
-/// Use `DynamicService` when working with complex service compositions where the
-/// concrete type becomes unwieldy, or when storing services of different types in
-/// collections.
+/// Use `DynamicService` to hide a nested service type or to store different service types
+/// in one collection.
 ///
-/// Type erasure adds some overhead, but it's typically negligible compared to the
-/// actual service work (network calls, database queries, etc.).
+/// Type erasure adds overhead. Network calls and database queries usually cost more.
 ///
 /// # Examples
 ///
@@ -43,13 +41,13 @@ where
 /// use layered::{DynamicService, DynamicServiceExt, Execute, Service};
 ///
 /// async fn example() {
-///     // Create a concrete service that doubles an integer and uses a closure.
+///     // Create a service that doubles an integer.
 ///     let service = Execute::new(|v: i32| async move { v * 2 });
 ///
-///     // Create a type-erased service
+///     // Hide the concrete service type.
 ///     let service: DynamicService<i32, i32> = service.into_dynamic();
 ///
-///     // Use it like any other service
+///     // Execute the type-erased service.
 ///     let result = service.execute(42).await;
 ///     println!("Result: {}", result);
 /// }
@@ -66,23 +64,23 @@ impl<In: Send + 'static, Out: Send + 'static> DynamicService<In, Out> {
     where
         T: Service<In, Out = Out> + Send + Sync + 'static,
     {
-        // Each concrete `T` produces a single future type, so one typed pool
-        // suffices. The pool is `Send + !Sync`, so a mutex guards it — expected
-        // to be uncontended in the thread-isolated common case. The erased
-        // handle owns its slot, so it stays valid after the lock is released.
+        // Each concrete `T` produces one future type, so one typed pool is enough.
+        // The pool is `Send + !Sync`, so a mutex protects it. Thread-isolated use
+        // does not contend for this mutex. The erased handle owns its slot, so the
+        // slot stays valid after the mutex guard is released.
         let pool = Mutex::new(Pool::new());
         let service = Arc::new(strategy);
-        // Wrap each service execution in a future, pool it, and hand back a
-        // type-erased handle so `DynamicService` need not carry the future type.
+        // Put each service future in the pool and return a type-erased handle.
+        // `DynamicService` therefore does not store the concrete future type.
         let exec = move |input: In| {
             let cloned = Arc::clone(&service);
             let fut = async move { cloned.execute(input).await };
             let boxed = pool
                 .lock()
-                // Poisoned only if a prior holder panicked under this guard. No user
-                // code runs here: `alloc_box` just moves the already-constructed
-                // `fut` into a pool slot (the future is polled later, outside the
-                // lock), so a poisoned guard indicates a fatal prior failure.
+                // The mutex is poisoned only if an earlier holder panicked while it
+                // held this guard. `alloc_box` only moves the existing `fut` into a
+                // pool slot. The future runs later, outside the lock. A poisoned
+                // guard therefore means that an earlier pool operation failed.
                 .expect("dynamic-service pool mutex poisoned by a prior panic under this guard")
                 .alloc_box(fut);
             plurality::Box::unsize::<dyn SendFuture<Out>>(boxed, plurality::coerce!(<Out> dyn SendFuture<Out>))
@@ -141,7 +139,7 @@ mod tests {
     fn assert_types() {
         assert_impl_all!(DynamicService<(), ()>: Send, Sync, Clone, Debug);
 
-        // If non-clonable types are used, ensure the DynamicService is still cloneable
+        // `DynamicService` stays cloneable when its input and output are not cloneable.
         assert_impl_all!(DynamicService<Mutex<()>, Mutex<()>>: Send, Sync, Clone, Debug);
     }
 

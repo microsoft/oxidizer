@@ -14,12 +14,14 @@ use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+#[cfg(feature = "std")]
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::Arc;
 #[cfg(feature = "std")]
 use std::thread;
 
-use static_assertions::{assert_impl_all, assert_not_impl_any};
+use static_assertions::{assert_impl_all, assert_not_impl_any, assert_obj_safe};
 #[cfg(feature = "std")]
 use thread_aware_core::__private::v1::new_thread;
 use thread_aware_core::__private::v1::{new_numa_node, new_owner};
@@ -27,9 +29,10 @@ use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 
 assert_impl_all!(Thread: Clone, Eq, Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
 assert_not_impl_any!(Thread: Copy);
-assert_impl_all!(Owner: Clone, Eq, Send, Sync);
-assert_impl_all!(NumaNode: Clone, Eq, Send, Sync);
+assert_impl_all!(Owner: Clone, Eq, Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
+assert_impl_all!(NumaNode: Clone, Eq, Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
 assert_not_impl_any!(NumaNode: Copy);
+assert_obj_safe!(ThreadAware);
 assert_impl_all!(&'static str: ThreadAware);
 assert_not_impl_any!(&'static i32: ThreadAware);
 assert_not_impl_any!(BTreeSet<i32>: ThreadAware);
@@ -37,6 +40,12 @@ assert_not_impl_any!(Cow<'static, str>: ThreadAware);
 assert_not_impl_any!(Arc<i32>: ThreadAware);
 #[cfg(feature = "std")]
 assert_not_impl_any!(HashSet<i32>: ThreadAware);
+#[cfg(feature = "std")]
+assert_impl_all!(SocketAddr: ThreadAware);
+#[cfg(feature = "std")]
+assert_impl_all!(SocketAddrV4: ThreadAware);
+#[cfg(feature = "std")]
+assert_impl_all!(SocketAddrV6: ThreadAware);
 
 fn hash_of<T>(value: &T) -> u64
 where
@@ -47,6 +56,29 @@ where
     hasher.finish()
 }
 
+#[cfg(feature = "std")]
+fn sample_threads() -> [Thread; 2] {
+    let owner = new_owner();
+    let id = thread::current().id();
+
+    [
+        new_thread(owner.clone(), id, new_numa_node(0)),
+        new_thread(owner, id, new_numa_node(1)),
+    ]
+}
+
+#[cfg(feature = "std")]
+fn assert_relocation_is_noop<T>(mut value: T, source: Option<&Thread>, destination: &Thread)
+where
+    T: ThreadAware + Clone + PartialEq + std::fmt::Debug,
+{
+    let original = value.clone();
+
+    value.relocate(source, destination);
+
+    assert_eq!(value, original);
+}
+
 #[test]
 fn owners_keep_their_identity() {
     let first = new_owner();
@@ -54,6 +86,7 @@ fn owners_keep_their_identity() {
 
     assert_ne!(first, second, "each owner takes its own identity");
     assert_eq!(first, first, "an owner equals itself");
+    assert_eq!(first, first.clone(), "a clone keeps the same identity");
     assert_ne!(hash_of(&first), hash_of(&second), "distinct owners must hash apart");
 }
 
@@ -93,6 +126,10 @@ fn with_std_every_component_takes_part_in_equality() {
     let numa_node = new_numa_node(0);
     let mine = new_thread(owner.clone(), id, numa_node.clone());
 
+    assert_eq!(mine.owner(), &owner);
+    assert_eq!(mine.id(), id);
+    assert_eq!(mine.numa_node(), &numa_node);
+    assert_eq!(mine.clone(), mine);
     assert_eq!(mine, new_thread(owner.clone(), id, numa_node.clone()));
     assert_eq!(hash_of(&mine), hash_of(&new_thread(owner.clone(), id, numa_node.clone())));
 
@@ -104,4 +141,19 @@ fn with_std_every_component_takes_part_in_equality() {
         .unwrap();
 
     assert_ne!(mine, elsewhere, "the thread id counts");
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn socket_address_types_are_unchanged_by_relocation() {
+    let threads = sample_threads();
+    let source = &threads[0];
+    let destination = &threads[1];
+    let ipv4 = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 443);
+    let ipv6 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8443, 7, 11);
+
+    assert_relocation_is_noop(ipv4, Some(source), destination);
+    assert_relocation_is_noop(SocketAddr::V4(ipv4), Some(source), destination);
+    assert_relocation_is_noop(ipv6, Some(source), destination);
+    assert_relocation_is_noop(SocketAddr::V6(ipv6), Some(source), destination);
 }

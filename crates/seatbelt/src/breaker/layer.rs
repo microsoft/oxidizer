@@ -14,21 +14,20 @@ use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
 use crate::{Recovery, RecoveryInfo, ResilienceContext, TelemetryString};
 
-/// Builder for configuring circuit breaker resilience middleware.
+/// Configures circuit breaker middleware.
 ///
-/// This type is created by calling [`Breaker::layer`] and uses the
-/// type-state pattern to enforce that required properties are configured before the circuit breaker
-/// middleware can be built:
+/// [`Breaker::layer`] creates this builder.
+/// Its type state makes these properties required:
 ///
-/// - [`recovery`][BreakerLayer::recovery]: Required to determine if an output represents a failure
-/// - [`rejected_input`][BreakerLayer::rejected_input]: Required to specify the output when the circuit is open and inputs are rejected
+/// - [`recovery`][BreakerLayer::recovery] decides whether output is a failure.
+/// - [`rejected_input`][BreakerLayer::rejected_input] provides output when an open circuit rejects input.
 ///
-/// For comprehensive documentation and examples, see the [`breaker` module][crate::breaker] documentation.
+/// See the [`breaker` module][crate::breaker] for examples.
 ///
-/// # Type State
+/// # Type state
 ///
-/// - `S1`: Tracks whether [`recovery`][BreakerLayer::recovery] has been set
-/// - `S2`: Tracks whether [`rejected_input`][BreakerLayer::rejected_input] has been set
+/// - `S1` records whether [`recovery`][BreakerLayer::recovery] is set.
+/// - `S2` records whether [`rejected_input`][BreakerLayer::rejected_input] is set.
 #[derive(Debug)]
 pub struct BreakerLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
@@ -74,15 +73,12 @@ impl<In, Out> BreakerLayer<In, Out, NotSet, NotSet> {
 }
 
 impl<In, Out, E, S1, S2> BreakerLayer<In, Result<Out, E>, S1, S2> {
-    /// Sets the error to return when the circuit breaker is open for Result-returning services.
+    /// Sets the error to return from a `Result` service while the circuit is open.
     ///
-    /// When the circuit is open, inputs are immediately rejected and the `error_producer`
-    /// function is called to generate the error that should be returned to the caller.
-    /// The error is automatically wrapped in a `Result::Err`.
+    /// When the circuit is open, the `error_producer` function receives rejected input.
+    /// The middleware wraps its error in `Result::Err`.
     ///
-    /// This is a convenience method for Result-returning services that allows you to
-    /// provide a meaningful error when the circuit breaker prevents an input from
-    /// reaching the underlying service.
+    /// Use this method to describe why the input did not reach the service.
     #[must_use]
     pub fn rejected_input_error(
         self,
@@ -97,11 +93,8 @@ impl<In, Out, E, S1, S2> BreakerLayer<In, Result<Out, E>, S1, S2> {
 impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// Sets the recovery classification function.
     ///
-    /// This function determines whether a specific output represents a failure
-    /// by examining the output and returning a [`RecoveryInfo`] classification.
-    /// The `recover_fn` receives a reference to the output and
-    /// [`RecoveryArgs`][crate::breaker::RecoveryArgs] with context about the circuit
-    /// breaker state, and returns a [`RecoveryInfo`] decision.
+    /// The function receives the output and [`RecoveryArgs`][crate::breaker::RecoveryArgs].
+    /// It returns the [`RecoveryInfo`] classification for the output.
     #[must_use]
     pub fn recovery_with(
         mut self,
@@ -111,19 +104,14 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
         self.into_state::<Set, S2>()
     }
 
-    /// Automatically sets the recovery classification function for types that implement [`Recovery`].
+    /// Uses [`Recovery`] to classify output.
     ///
-    /// This is a convenience method that uses the [`Recovery`] trait to determine
-    /// whether an output represents a failure. For types that implement [`Recovery`],
-    /// this provides a simple way to enable circuit breaker behavior without manually
-    /// implementing a recovery classification function.
-    ///
-    /// This is equivalent to calling [`recovery_with`][BreakerLayer::recovery_with] with
+    /// This method is equivalent to [`recovery_with`][BreakerLayer::recovery_with] with
     /// `|output, _args| output.recovery()`.
     ///
-    /// # Type Requirements
+    /// # Type requirements
     ///
-    /// This method is only available when the output type `Out` implements [`Recovery`].
+    /// The output type `Out` must implement [`Recovery`].
     #[must_use]
     pub fn recovery(self) -> BreakerLayer<In, Out, Set, S2>
     where
@@ -134,11 +122,8 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Sets the output to return when the circuit breaker is open.
     ///
-    /// When the circuit is open, inputs are immediately rejected and the `rejected_fn`
-    /// is called to generate the output that should be returned to the caller.
-    ///
-    /// This allows you to provide a meaningful error message or fallback value
-    /// when the circuit breaker prevents an input from reaching the underlying service.
+    /// When the circuit is open, `rejected_fn` receives rejected input.
+    /// It returns an error or fallback value without calling the service.
     #[must_use]
     pub fn rejected_input(
         mut self,
@@ -150,11 +135,12 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Sets the failure threshold for the circuit breaker.
     ///
-    /// The circuit breaker will open when the failure rate exceeds the `threshold`
-    /// over the sampling duration. The value should be between 0.0 and 1.0, where
-    /// 0.1 represents a `10%` failure threshold. Values outside this range are clamped.
+    /// The circuit opens when the failure rate reaches `threshold`.
+    /// The value must be between 0.0 and 1.0.
+    /// A value of 0.1 means 1 failure in 10 executions.
+    /// Values outside this range are clamped.
     ///
-    /// **Default**: 0.1 (`10%` failure rate)
+    /// Default: 0.1
     #[must_use]
     pub fn failure_threshold(mut self, threshold: f32) -> Self {
         self.failure_threshold = threshold.clamp(0.0, 1.0);
@@ -163,11 +149,11 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Sets the minimum throughput required before the circuit breaker can open.
     ///
-    /// The circuit breaker will only consider opening if at least `throughput` executions
-    /// have been processed during the sampling duration. This prevents the circuit
-    /// from opening due to a small number of failures when overall traffic is low.
+    /// The circuit can open only after it records `throughput` executions
+    /// during the configured sampling duration.
+    /// This prevents a small sample from opening the circuit.
     ///
-    /// **Default**: 100 executions
+    /// Default: 100 executions
     #[must_use]
     pub fn min_throughput(mut self, throughput: u32) -> Self {
         self.min_throughput = throughput;
@@ -176,27 +162,22 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Sets the sampling duration for calculating failure rates.
     ///
-    /// The circuit breaker calculates failure rates over the specified `duration`
-    /// time window. Only executions within this duration are considered when
-    /// determining whether the failure rate exceeds the threshold.
+    /// The breaker calculates the failure rate over this time window.
     ///
-    /// **Default**: 30 seconds
+    /// Default: 30 seconds
     ///
-    /// > **Note**: The sampling duration cannot be lower than 1 second. If value is less
-    /// > than 1 second, it will be clamped to 1 second.
+    /// Values below 1 second become 1 second.
     #[must_use]
     pub fn sampling_duration(mut self, duration: Duration) -> Self {
         self.sampling_duration = duration;
         self
     }
 
-    /// Sets the break duration for how long the circuit stays open.
+    /// Sets how long the circuit stays open.
     ///
-    /// When the circuit breaker opens due to failures, it will remain open
-    /// for the specified `duration` before transitioning to half-open state
-    /// to test if the underlying service has recovered.
+    /// After this duration, the circuit becomes half-open and tests the service.
     ///
-    /// **Default**: 5 seconds
+    /// Default: 5 seconds
     #[must_use]
     pub fn break_duration(mut self, duration: Duration) -> Self {
         self.break_duration = duration;
@@ -205,8 +186,8 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Applies all settings from a [`BreakerConfig`] to this layer.
     ///
-    /// This is a convenience method for applying configuration loaded from external sources
-    /// (e.g., configuration files) without calling individual builder methods.
+    /// Use this method to apply configuration from an external source.
+    /// You do not need to call each builder method.
     #[must_use]
     pub fn config(self, config: &BreakerConfig) -> Self {
         self.failure_threshold(config.failure_threshold)
@@ -218,44 +199,36 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
             .enable(config.enabled)
     }
 
-    /// Sets the callback to be invoked when the circuit breaker opens.
+    /// Sets a callback that runs when the circuit opens.
     ///
-    /// This `callback` is called whenever the circuit breaker transitions from
-    /// closed to open state due to exceeding the failure threshold. It receives an
-    /// optional reference to the output and [`OnOpenedArgs`] containing circuit breaker context.
+    /// The callback receives optional output and [`OnOpenedArgs`].
     ///
-    /// The output is `None` when the circuit was opened by an *abandoned* execution — one that was
-    /// accepted by the circuit breaker but never completed (e.g. a dropped or cancelled future) and
-    /// therefore produced no output.
+    /// Output is `None` when an abandoned execution opens the circuit.
+    /// An abandoned execution does not produce output.
     ///
-    /// **Default**: No callback
+    /// Default: No callback
     #[must_use]
     pub fn on_opened(mut self, callback: impl Fn(Option<&Out>, OnOpenedArgs) + Send + Sync + 'static) -> Self {
         self.on_opened = Some(OnOpened::new(callback));
         self
     }
 
-    /// Sets the callback to be invoked when the circuit breaker closes.
+    /// Sets a callback that runs when the circuit closes.
     ///
-    /// This `callback` is called whenever the circuit breaker transitions from
-    /// half-open state to closed state after successful recovery. It receives
-    /// a reference to the output and [`OnClosedArgs`] containing circuit breaker context.
+    /// The callback receives the probe output that closed the circuit and [`OnClosedArgs`].
     ///
-    /// **Default**: No callback
+    /// Default: No callback
     #[must_use]
     pub fn on_closed(mut self, callback: impl Fn(&Out, OnClosedArgs) + Send + Sync + 'static) -> Self {
         self.on_closed = Some(OnClosed::new(callback));
         self
     }
 
-    /// Sets the callback to be invoked when the circuit breaker is probing.
+    /// Sets a callback that runs before a probe.
     ///
-    /// This `callback` is called when the circuit breaker is in half-open state
-    /// and is testing whether the underlying service has recovered. It receives
-    /// a mutable reference to the input and [`OnProbingArgs`] containing circuit
-    /// breaker context.
+    /// The callback receives probe input and [`OnProbingArgs`].
     ///
-    /// **Default**: No callback
+    /// Default: No callback
     #[must_use]
     pub fn on_probing(mut self, callback: impl Fn(&mut In, OnProbingArgs) + Send + Sync + 'static) -> Self {
         self.on_probing = Some(OnProbing::new(callback));
@@ -264,19 +237,17 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Sets the breaker ID provider function.
     ///
-    /// Each unique [`BreakerId`] maintains its own independent circuit breaker state.
-    /// A typical use case is HTTP requests where the breaker ID is derived from scheme,
-    /// host, and port to isolate failures per backend service. The `id_provider`
-    /// function receives a reference to the input and returns a [`BreakerId`]
-    /// identifying the circuit breaker instance to use.
+    /// Each unique [`BreakerId`] has separate circuit state.
+    /// For HTTP requests, derive an ID from the scheme, host, and port.
+    /// The `id_provider` function receives the input and returns its ID.
     ///
-    /// **Default**: Shared circuit - all inputs share the same circuit breaker state
+    /// Default: All input shares one circuit.
     ///
     /// # Example
     ///
     /// ```rust
     /// # use seatbelt::breaker::{BreakerLayer, BreakerId};
-    /// // Example HTTP request structure
+    /// // Define the parts of an HTTP request that identify a backend.
     /// struct HttpRequest {
     ///     scheme: String,
     ///     host: String,
@@ -290,19 +261,14 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     ///     BreakerId::from(id)
     /// });
     ///
-    /// // This ensures that:
-    /// // - Inputs targeting https://api.service1.com share one circuit breaker instance
-    /// // - Inputs targeting https://api.service2.com:8080 share another circuit breaker instance
-    /// // - Inputs targeting http://localhost:3000 share yet another circuit breaker instance
+    /// // Each endpoint now has a separate circuit.
     /// # }
     /// ```
     ///
     /// # Telemetry
     ///
-    /// The values used to create breaker IDs are included in telemetry data (logs and metrics)
-    /// for observability purposes. **Important**: Ensure that the values from which breaker IDs
-    /// are created do not contain any sensitive data such as authentication tokens, personal
-    /// identifiable information (PII), or other confidential data.
+    /// Logs and metrics include the values used to create breaker IDs.
+    /// Do not use authentication tokens, personal data, or confidential data.
     #[must_use]
     pub fn breaker_id(mut self, id_provider: impl Fn(&In) -> BreakerId + Send + Sync + 'static) -> Self {
         self.breaker_id = Some(BreakerIdProvider::new(id_provider));
@@ -311,38 +277,35 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Sets the half-open mode for the circuit breaker.
     ///
-    /// This determines how the circuit breaker behaves when transitioning from half-open
-    /// to a closed state.
+    /// This mode controls how a half-open circuit tests the service.
     ///
-    /// **Default**: [`HalfOpenMode::progressive`]
+    /// Default: [`HalfOpenMode::progressive`]
     #[must_use]
     pub fn half_open_mode(mut self, mode: HalfOpenMode) -> Self {
         self.half_open_mode = mode;
         self
     }
 
-    /// Sets how *abandoned* executions are treated by the health calculation.
+    /// Sets how abandoned executions affect circuit health.
     ///
-    /// An execution is abandoned when it is accepted by the circuit breaker but its future is dropped
-    /// before completing (e.g. a cancelled request). Abandoned executions are always counted towards
-    /// the reported throughput; this `policy` only governs whether and how they affect the open/close
-    /// decision. See [`AbandonedPolicy`] for the available policies.
+    /// An execution is abandoned when its future is dropped before it finishes.
+    /// Telemetry always includes it in throughput.
+    /// This policy controls its effect on the health decision.
     ///
-    /// **Default**: [`AbandonedPolicy::rate_threshold`] with a threshold of `1.0`
+    /// Default: [`AbandonedPolicy::rate_threshold`] with `1.0`
     #[must_use]
     pub fn abandoned_policy(mut self, policy: AbandonedPolicy) -> Self {
         self.abandoned_policy = policy;
         self
     }
 
-    /// Optionally enables the circuit breaker middleware based on a condition.
+    /// Enables circuit breaker middleware when a condition is true.
     ///
-    /// When disabled, inputs pass through without circuit breaker protection.
-    /// This call replaces any previous condition. The `is_enabled` function
-    /// receives a reference to the input and returns `true` if circuit breaker
-    /// protection should be enabled for this input.
+    /// If the condition is false, input reaches the service without circuit breaker protection.
+    /// The `is_enabled` function receives the input.
+    /// This call replaces the previous condition.
     ///
-    /// **Default**: Always enabled
+    /// Default: Enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
         self.enable_if = EnableIf::custom(is_enabled);
@@ -351,31 +314,27 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Enables or disables the circuit breaker middleware.
     ///
-    /// When disabled, inputs pass through without circuit breaker protection.
-    /// This call replaces any previous condition.
+    /// If disabled, input reaches the service without circuit breaker protection.
+    /// This call replaces the previous condition.
     #[must_use]
     fn enable(mut self, enabled: bool) -> Self {
         self.enable_if = EnableIf::new(enabled);
         self
     }
 
-    /// Enables the circuit breaker middleware unconditionally.
+    /// Enables circuit breaker middleware for all input.
     ///
-    /// All inputs will have circuit breaker protection applied.
-    /// This call replaces any previous condition.
-    ///
-    /// **Note**: This is the default behavior - circuit breaker is enabled by default.
+    /// This call replaces the previous condition.
+    /// Circuit breaker middleware is enabled by default.
     #[must_use]
     pub fn enable_always(self) -> Self {
         self.enable(true)
     }
 
-    /// Disables the circuit breaker middleware completely.
+    /// Disables circuit breaker middleware for all input.
     ///
-    /// All inputs will pass through without circuit breaker protection.
-    /// This call replaces any previous condition.
-    ///
-    /// **Note**: This overrides the default enabled behavior.
+    /// Input reaches the service without circuit breaker protection.
+    /// This call replaces the previous condition.
     #[must_use]
     pub fn disable(self) -> Self {
         self.enable(false)
@@ -676,7 +635,7 @@ mod tests {
             .half_open_mode(HalfOpenMode::progressive(None))
             .probes_options();
 
-        // access the last probe which should be the health probe
+        // Access the last probe. It is the health probe.
         let probe = probes.probes().last().unwrap();
 
         match probe {

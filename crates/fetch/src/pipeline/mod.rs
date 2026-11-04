@@ -1,19 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Request-processing pipelines that wire handlers together for an [`HttpClient`](crate::HttpClient).
+//! Request pipelines for [`HttpClient`](crate::HttpClient).
 //!
-//! A pipeline determines which handlers a request passes through, and in what
-//! order. The client supports three flavors:
+//! A pipeline defines its handlers and their order. The client supports three types:
 //!
-//! - **standard**: a production-ready stack with timeouts, retries, logging, and
-//!   metrics, configured via [`StandardRequestPipeline`][crate::pipeline::StandardRequestPipeline].
-//! - **custom**: a fully user-defined stack of layers over the dispatch handler.
-//! - **minimal**: only the dispatch handler, with no middleware.
+//! - Standard includes timeouts, retries, logging, and metrics. Configure it through
+//!   [`StandardRequestPipeline`][crate::pipeline::StandardRequestPipeline].
+//! - Custom uses a caller-defined stack above the dispatch handler.
+//! - Minimal contains only the dispatch handler.
 //!
-//! [`PipelineContext`][crate::pipeline::PipelineContext] carries the shared dependencies (clock, meter, router, and
-//! so on) handed to pipeline factories. See
-//! [`HttpClientBuilder`](crate::HttpClientBuilder) for how each flavor is selected.
+//! [`PipelineContext`][crate::pipeline::PipelineContext] gives pipeline factories the clock, meter,
+//! router, and other shared dependencies. [`HttpClientBuilder`](crate::HttpClientBuilder) selects
+//! the pipeline type.
 
 mod builder;
 mod custom;

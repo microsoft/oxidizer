@@ -247,6 +247,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "real custom-item limits are runtime stress covered natively and by cargo careful; compact quote and delimiter iteration remains interpreted"
+    )]
     fn validated_iteration_keeps_quote_errors_and_custom_item_limits() {
         let split_quotes = [
             FieldValueRef::new(b"alpha,\"unterminated"),

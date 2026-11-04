@@ -25,8 +25,6 @@ use layered::{Layer, Service};
 use ohno::{ErrorLabel, Labeled as _};
 use seatbelt::RecoveryInfo;
 
-testing_aids::init_tracing!();
-
 const FORMATS: &[Format] = &[Format::Gzip, Format::Brotli, Format::Zstd, Format::Zlib];
 
 struct ChannelBody(UnboundedReceiver<Result<Frame<BytesView>>>);

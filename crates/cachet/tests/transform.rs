@@ -350,3 +350,5 @@ fn try_map_value_without_metadata() {
     assert_eq!(mapped.cached_at(), None);
     assert_eq!(mapped.ttl(), None);
 }
+
+testing_aids::init_tracing!();

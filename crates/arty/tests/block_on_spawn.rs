@@ -5,8 +5,6 @@
 
 #![cfg(feature = "rt")]
 
-testing_aids::init_tracing!();
-
 use arty::runtime::Runtime;
 
 #[test]

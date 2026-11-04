@@ -23,6 +23,7 @@
 # formatting command does not mix stable and nightly toolchains.
 
 # Check Rust source formatting.
+[group("anvil")]
 [arg("fix", long, value="true")]
 [script("pwsh", "-NoProfile")]
 anvil-fmt fix="false": anvil-fmt-validate-prereqs anvil-impact
@@ -50,9 +51,9 @@ anvil-fmt fix="false": anvil-fmt-validate-prereqs anvil-impact
 # --- pr-fast members ---
 
 # Install prerequisites for the `anvil-fmt` recipe.
-[group("anvil-setup")]
+[private]
 anvil-fmt-setup installer="install": anvil-component-nightly-rustfmt-install (anvil-tool-cargo-each-install installer)
 
 # Validate prerequisites for the `anvil-fmt` recipe.
-[group("anvil-setup")]
+[private]
 anvil-fmt-validate-prereqs: anvil-component-nightly-rustfmt-validate-prereqs anvil-tool-cargo-each-validate-prereqs

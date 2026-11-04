@@ -141,6 +141,10 @@ fn assert_precedence<F: Field>(good: &str, invalid_token: &[u8]) {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "real source-limit precedence is covered natively and by cargo careful; compact malformed-source cases retain parser dependency coverage under Miri"
+)]
 fn source_and_member_error_precedence_is_unchanged() {
     assert_precedence::<Accept>("text/plain", b"text/pl ain");
     assert_precedence::<AcceptEncoding>("gzip", b"bad coding");
@@ -149,6 +153,10 @@ fn source_and_member_error_precedence_is_unchanged() {
 
 #[cfg(feature = "http")]
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "the retained HTTP adapter's real 64-KiB and 1,024-item exemptions are runtime-limit stress covered natively and by cargo careful"
+)]
 fn http_views_still_exempt_the_retained_adapter_from_all_custom_budgets() {
     macro_rules! unlimited {
         ($header:ty, $http_name:expr, $member:expr) => {{

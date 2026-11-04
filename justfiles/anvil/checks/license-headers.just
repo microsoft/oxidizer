@@ -9,6 +9,7 @@
 # Modified tier.
 
 # Check source files for required license headers.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-license-headers: anvil-license-headers-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -20,9 +21,9 @@ anvil-license-headers: anvil-license-headers-validate-prereqs anvil-impact
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-license-headers` recipe.
-[group("anvil-setup")]
+[private]
 anvil-license-headers-setup installer="install": (anvil-tool-cargo-heather-install installer)
 
 # Validate prerequisites for the `anvil-license-headers` recipe.
-[group("anvil-setup")]
+[private]
 anvil-license-headers-validate-prereqs: anvil-tool-cargo-heather-validate-prereqs

@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::{env, panic};
 
-use gungraun::__internal::{InternalLibFunctionKind, InternalMacroLibBench};
+use gungraun::__internal::{InternalBenchRunMode, InternalLibFunctionKind, InternalMacroLibBench};
 use serde::{Deserialize, Serialize};
 
 use crate::BenchmarkIdentity;
@@ -85,15 +85,15 @@ fn with_lifecycle(
 fn execute_case(case: &InternalMacroLibBench, iteration: Option<usize>) -> Result<(), ProbeError> {
     match (case.func, iteration) {
         (InternalLibFunctionKind::Default(run), None) => {
-            run();
+            run(InternalBenchRunMode::Default);
             Ok(())
         }
         (InternalLibFunctionKind::Iter(run), Some(index)) => {
-            let count = run(None);
+            let count = run(InternalBenchRunMode::Default, None);
             if index >= count {
                 return Err(ProbeIndexOutOfBounds::new("iterator", index, count).into());
             }
-            run(Some(index));
+            run(InternalBenchRunMode::Default, Some(index));
             Ok(())
         }
         _ => Err(ProbeSelectionMismatch::new(matches!(case.func, InternalLibFunctionKind::Iter(_)), iteration).into()),
@@ -111,7 +111,7 @@ fn discover_targets(groups: &[ProbeGroup]) -> Result<Vec<ProbeTarget>, ProbeErro
                     let (count, iterator) = match case.func {
                         InternalLibFunctionKind::Default(_) => (1, false),
                         InternalLibFunctionKind::Iter(count) => {
-                            let count = count(None);
+                            let count = count(InternalBenchRunMode::Default, None);
                             if count > MAX_PROBE_CASES.saturating_sub(targets.len()) {
                                 return Err(ProbeCaseLimit::new(MAX_PROBE_CASES).into());
                             }
@@ -225,11 +225,13 @@ mod tests {
         static EXECUTIONS: RefCell<Vec<Option<usize>>> = const { RefCell::new(Vec::new()) };
     }
 
-    fn default_case() {
+    fn default_case(mode: InternalBenchRunMode) {
+        assert_eq!(mode, InternalBenchRunMode::Default);
         EXECUTIONS.with_borrow_mut(|calls| calls.push(None));
     }
 
-    fn iterator_case(index: Option<usize>) -> usize {
+    fn iterator_case(mode: InternalBenchRunMode, index: Option<usize>) -> usize {
+        assert_eq!(mode, InternalBenchRunMode::Default);
         match index {
             None => COUNT_CALLS.set(COUNT_CALLS.get() + 1),
             Some(index) => EXECUTIONS.with_borrow_mut(|calls| calls.push(Some(index))),

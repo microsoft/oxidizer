@@ -28,3 +28,5 @@ async fn response_timeout() {
     assert_eq!(err.recovery(), RecoveryInfo::retry());
     assert_eq!(err.label(), "response_timeout");
 }
+
+testing_aids::init_tracing!();

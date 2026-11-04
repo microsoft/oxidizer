@@ -1,86 +1,41 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::{LockResult, RwLockReadGuard as NativeReadGuard, RwLockWriteGuard as NativeWriteGuard, TryLockError, TryLockResult};
-
 use super::*;
 
 impl<T: ?Sized> RwLock<T, Sync> {
     pub(in crate::sync) fn read_result_native(&self) -> Result<RwLockReadGuard<'_, T>, Error<RwLockReadGuard<'_, T>>> {
-        self.read_result_from_native(self.raw.try_read())
+        let raw = if let Some(raw) = self.raw.inner.try_read() {
+            raw
+        } else {
+            self.read_contended_native()
+        };
+        self.acquired_read_native(raw)
     }
 
-    pub(in crate::sync) fn read_result_from_native<'a>(
-        &'a self,
-        result: TryLockResult<NativeReadGuard<'a, ()>>,
-    ) -> Result<RwLockReadGuard<'a, T>, Error<RwLockReadGuard<'a, T>>> {
-        match result {
-            Ok(raw) => self.acquired_read_native(Ok(raw)),
-            Err(TryLockError::Poisoned(error)) => self.acquired_read_native(Err(error)),
-            Err(TryLockError::WouldBlock) => self.wait_for_read_native(),
-        }
-    }
-
-    pub(in crate::sync) fn wait_for_read_native(&self) -> Result<RwLockReadGuard<'_, T>, Error<RwLockReadGuard<'_, T>>> {
+    #[cold]
+    fn read_contended_native(&self) -> hal::ReadGuard<'_> {
         self.record(EventKind::RwLockReadContention);
-        self.acquired_read_native(self.raw.read())
+        self.raw.inner.read()
     }
 
     pub(in crate::sync) fn try_read_result_native(&self) -> Result<Option<RwLockReadGuard<'_, T>>, Error<RwLockReadGuard<'_, T>>> {
-        match self.raw.try_read() {
-            Ok(raw) => self.acquired_read_native(Ok(raw)).map(Some),
-            Err(TryLockError::Poisoned(error)) => self.acquired_read_native(Err(error)).map(Some),
-            Err(TryLockError::WouldBlock) => {
-                self.record(EventKind::RwLockReadContention);
-                Ok(None)
-            }
+        if let Some(raw) = self.raw.inner.try_read() {
+            self.acquired_read_native(raw).map(Some)
+        } else {
+            self.record(EventKind::RwLockReadContention);
+            Ok(None)
         }
     }
 
-    pub(in crate::sync) fn write_result_native(&self) -> Result<RwLockWriteGuard<'_, T>, Error<RwLockWriteGuard<'_, T>>> {
-        self.write_result_from_native(self.raw.try_write())
-    }
-
-    pub(in crate::sync) fn write_result_from_native<'a>(
-        &'a self,
-        result: TryLockResult<NativeWriteGuard<'a, ()>>,
-    ) -> Result<RwLockWriteGuard<'a, T>, Error<RwLockWriteGuard<'a, T>>> {
-        match result {
-            Ok(raw) => self.acquired_write_native(Ok(raw)),
-            Err(TryLockError::Poisoned(error)) => self.acquired_write_native(Err(error)),
-            Err(TryLockError::WouldBlock) => {
-                self.record(EventKind::RwLockWriteContention);
-                self.acquired_write_native(self.raw.write())
-            }
-        }
-    }
-
-    pub(in crate::sync) fn try_write_result_native(&self) -> Result<Option<RwLockWriteGuard<'_, T>>, Error<RwLockWriteGuard<'_, T>>> {
-        match self.raw.try_write() {
-            Ok(raw) => self.acquired_write_native(Ok(raw)).map(Some),
-            Err(TryLockError::Poisoned(error)) => self.acquired_write_native(Err(error)).map(Some),
-            Err(TryLockError::WouldBlock) => {
-                self.record(EventKind::RwLockWriteContention);
-                Ok(None)
-            }
-        }
-    }
-
-    fn acquired_read_native<'a>(
-        &'a self,
-        result: LockResult<NativeReadGuard<'a, ()>>,
-    ) -> Result<RwLockReadGuard<'a, T>, Error<RwLockReadGuard<'a, T>>> {
-        let (raw, poisoned) = match result {
-            Ok(raw) => (raw, false),
-            Err(error) => (error.into_inner(), true),
-        };
+    fn acquired_read_native<'a>(&'a self, raw: hal::ReadGuard<'a>) -> Result<RwLockReadGuard<'a, T>, Error<RwLockReadGuard<'a, T>>> {
         let guard = RwLockReadGuard {
             lock: self,
-            raw: Some(raw),
+            raw: ReadGuardSync { inner: raw },
             marker: PhantomData,
         };
         self.record(EventKind::RwLockReadAccess);
-        if poisoned {
+        if self.raw.inner.is_poisoned() {
             self.record(EventKind::LockPoisonObserved);
             Err(Error::poisoned(guard))
         } else {
@@ -88,22 +43,39 @@ impl<T: ?Sized> RwLock<T, Sync> {
         }
     }
 
-    fn acquired_write_native<'a>(
-        &'a self,
-        result: LockResult<NativeWriteGuard<'a, ()>>,
-    ) -> Result<RwLockWriteGuard<'a, T>, Error<RwLockWriteGuard<'a, T>>> {
-        let (raw, poisoned) = match result {
-            Ok(raw) => (raw, false),
-            Err(error) => (error.into_inner(), true),
+    pub(in crate::sync) fn write_result_native(&self) -> Result<RwLockWriteGuard<'_, T>, Error<RwLockWriteGuard<'_, T>>> {
+        let raw = if let Some(raw) = self.raw.inner.try_write() {
+            raw
+        } else {
+            self.write_contended_native()
         };
+        self.acquired_write_native(raw)
+    }
+
+    #[cold]
+    fn write_contended_native(&self) -> hal::WriteGuard<'_> {
+        self.record(EventKind::RwLockWriteContention);
+        self.raw.inner.write()
+    }
+
+    pub(in crate::sync) fn try_write_result_native(&self) -> Result<Option<RwLockWriteGuard<'_, T>>, Error<RwLockWriteGuard<'_, T>>> {
+        if let Some(raw) = self.raw.inner.try_write() {
+            self.acquired_write_native(raw).map(Some)
+        } else {
+            self.record(EventKind::RwLockWriteContention);
+            Ok(None)
+        }
+    }
+
+    fn acquired_write_native<'a>(&'a self, raw: hal::WriteGuard<'a>) -> Result<RwLockWriteGuard<'a, T>, Error<RwLockWriteGuard<'a, T>>> {
         let guard = RwLockWriteGuard {
             lock: self,
-            raw: Some(raw),
+            raw: WriteGuardSync { inner: raw },
             panicking_at_acquisition: std::thread::panicking(),
             marker: PhantomData,
         };
         self.record(EventKind::RwLockWriteAccess);
-        if poisoned {
+        if self.raw.inner.is_poisoned() {
             self.record(EventKind::LockPoisonObserved);
             Err(Error::poisoned(guard))
         } else {
@@ -112,36 +84,42 @@ impl<T: ?Sized> RwLock<T, Sync> {
     }
 
     pub(in crate::sync) fn is_poisoned_native(&self) -> bool {
-        self.raw.is_poisoned()
+        self.raw.inner.is_poisoned()
     }
 
     pub(in crate::sync) fn clear_poison_native(&self) {
-        let was_poisoned = self.raw.is_poisoned();
-        self.raw.clear_poison();
-        if was_poisoned {
+        if self.raw.inner.clear_poison() {
             self.record(EventKind::LockPoisonCleared);
         }
+    }
+
+    #[cold]
+    fn release_panicking_native<'a>(&'a self, raw: &mut hal::WriteGuard<'a>) {
+        let unlock = hal::WriteUnlock::new(&self.raw.inner, raw);
+        if self.raw.inner.prepare_poison() {
+            self.record(EventKind::LockPoisoned);
+        }
+        drop(unlock);
     }
 }
 
 impl<T: ?Sized> RwLockReadGuard<'_, T, Sync> {
     pub(in crate::sync) fn release_native(&mut self) {
-        if let Some(raw) = self.raw.take() {
-            drop(raw);
-            self.lock.record(EventKind::RwLockReadRelease);
-        }
+        // The sealed destructor releases once. Native markers need no active
+        // flag; the portable adapter consumes its own owning std guard.
+        self.lock.raw.inner.read_unlock(&mut self.raw.inner);
+        self.lock.record(EventKind::RwLockReadRelease);
     }
 }
 
 impl<T: ?Sized> RwLockWriteGuard<'_, T, Sync> {
-    #[cfg_attr(test, mutants::skip)] // Panic-state transitions are process-global and cannot be injected deterministically.
     pub(in crate::sync) fn release_native(&mut self) {
-        if let Some(raw) = self.raw.take() {
-            if !self.panicking_at_acquisition && std::thread::panicking() && !self.lock.raw.is_poisoned() {
-                self.lock.record(EventKind::LockPoisoned);
-            }
-            drop(raw);
-            self.lock.record(EventKind::RwLockWriteRelease);
+        let lock = self.lock;
+        if !self.panicking_at_acquisition && std::thread::panicking() {
+            lock.release_panicking_native(&mut self.raw.inner);
+        } else {
+            lock.raw.inner.write_unlock(&mut self.raw.inner);
         }
+        lock.record(EventKind::RwLockWriteRelease);
     }
 }

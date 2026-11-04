@@ -1,15 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Circuit breaker example that simulates a major service outage and tripping of the
-//! circuit breaker by leveraging the [`Injection`] chaos middleware to inject failures
-//! with a dynamic rate:
+//! This example simulates a major service outage.
+//! It uses the [`Injection`] chaos middleware to change the failure rate:
 //!
-//! 1. Early requests (input ≤ 15) fail at 80% to quickly trip the breaker
-//! 2. Mid-range requests (input 16–100) fail at 40%, simulating a degraded service
-//! 3. Later requests (input > 100) never fail, simulating full recovery
-//! 4. The circuit breaker monitors failure rates, opens when thresholds are exceeded,
-//!    probes the service to detect recovery, and closes automatically
+//! 1. Early requests (input ≤ 15) fail at an 80% rate. This opens the circuit quickly.
+//! 2. Mid-range requests (input 16–100) fail at a 40% rate. This represents a degraded service.
+//! 3. Later requests (input > 100) do not fail. This represents full recovery.
+//! 4. The circuit breaker opens when the failure rate exceeds the threshold.
+//!    It probes the service and closes when the service recovers.
 
 use std::time::Duration;
 
@@ -31,22 +30,20 @@ async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
     let context = ResilienceContext::new(&clock).use_metrics(&meter_provider);
 
-    // Define stack with circuit breaker + chaos injection layers.
+    // Define a stack with circuit breaker and chaos injection layers.
     //
-    // The Injection layer sits inside the breaker so that from the breaker's
-    // perspective the inner service is "failing" — exactly as a real downstream
-    // outage would look.
+    // The Injection layer is inside the breaker. The breaker sees the inner
+    // service fail in the same way that it sees a real downstream outage.
     let stack = (
         Breaker::layer("my_breaker", &context)
-            // Required: classify the recoverability of outputs
+            // Classify the output.
             .recovery_with(|output, _args| match output {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            // Required: provide output when circuit is open
+            // Provide output while the circuit is open.
             .rejected_input_error(|input, _args| format!("rejecting execution of '{input}' because circuit is open"))
-            // Decrease the following values to see the circuit breaker trip faster
-            // and speed-up the example
+            // Decrease these values to open the circuit sooner.
             .sampling_duration(Duration::from_secs(2))
             .min_throughput(5)
             .break_duration(Duration::from_secs(2))
@@ -58,18 +55,17 @@ async fn main() -> Result<(), AppError> {
                     args.open_duration().as_secs()
                 );
             }),
-        // Chaos injection layer: simulate failures with a dynamic rate that
-        // decreases over time so the service eventually "recovers".
+        // Simulate failures at a rate that decreases over time.
         Injection::layer("simulated_outage", &context)
             .rate_with(|input: &u32, _args| {
                 if *input > 100 {
-                    // Service has fully recovered — no injected failures
+                    // The service recovered. Do not inject failures.
                     0.0
                 } else if *input > 15 {
-                    // Degraded service — moderate failure rate
+                    // The service is degraded. Use a moderate failure rate.
                     0.4
                 } else {
-                    // Initial burst of failures — high rate to trip the breaker quickly
+                    // Use a high initial failure rate to open the circuit quickly.
                     0.8
                 }
             })
@@ -77,12 +73,11 @@ async fn main() -> Result<(), AppError> {
         Execute::new(execute_operation),
     );
 
-    // Create the service from the stack
+    // Create the service from the stack.
     let service = stack.into_service();
 
-    // Execute multiple attempts, the circuit breaker will eventually open because the
-    // failure rate exceeds the threshold. You can play with this value and increase it
-    // to 300 to see how the circuit breaker eventually closes when the service recovers.
+    // Run several calls. The circuit opens when the failure rate exceeds the threshold.
+    // Increase this value to 300 to see the circuit close after the service recovers.
     for attempt in 0..30 {
         clock.delay(Duration::from_millis(50)).await;
 
@@ -92,19 +87,19 @@ async fn main() -> Result<(), AppError> {
         }
     }
 
-    // Flush metrics to stdout before exiting
+    // Flush metrics to standard output before the program exits.
     meter_provider.force_flush()?;
 
     Ok(())
 }
 
-// The inner service always succeeds — failures are injected by the Injection layer.
+// The inner service always succeeds. The Injection layer adds failures.
 async fn execute_operation(input: u32) -> Result<String, String> {
     Ok(format!("output-{input}"))
 }
 
 fn configure_telemetry() -> SdkMeterProvider {
-    // Set up tracing subscriber for logs to console
+    // Send tracing logs to the console.
     tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()

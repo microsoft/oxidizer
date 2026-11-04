@@ -3,80 +3,78 @@
 
 //! Recipes and patterns for common HTTP workloads.
 //!
-//! A cookbook of practical examples for using [`http_extensions`](crate) effectively.
+//! This guide gives examples for common uses of [`http_extensions`](crate).
 //!
 //! # Use dedicated types
 //!
-//! Prefer the purpose-built types over plain `String` for URIs, headers, and
-//! bodies. They enforce correctness at construction time and enable
-//! zero-allocation patterns that `String` cannot.
+//! Use the dedicated URI, header, and body types instead of plain `String`.
+//! Types that enforce format rules, such as [`Uri`], [`HeaderName`], and
+//! [`HeaderValue`], reject invalid values when you construct them.
+//! Body types can store arbitrary bytes.
+//! They also support operations that do not allocate memory.
 //!
-//! This is just a specialization of [`M-STRONG-TYPES`](https://microsoft.github.io/rust-guidelines/guidelines/libs/resilience/index.html?highlight=strong#M-STRONG-TYPES)
-//! rule for HTTP-related types.
+//! This guidance applies the [`M-STRONG-TYPES`](https://microsoft.github.io/rust-guidelines/guidelines/libs/resilience/index.html?highlight=strong#M-STRONG-TYPES)
+//! rule to HTTP types.
 //!
 //! ## URI family
 //!
 //! | Type | Represents | Example |
 //! |------|-----------|---------|
-//! | [`Origin`] | scheme + authority (host & port) | `https://api.example.com:443` |
-//! | [`BasePath`] | a path prefix that starts and ends with `/` | `/v2/` |
-//! | [`BaseUri`] | [`Origin`] + [`BasePath`] | `https://api.example.com/v2/` |
-//! | [`Uri`] | full request target (optional base + path + query) | `https://api.example.com/v2/users?page=1` |
+//! | [`Origin`] | A scheme and authority (host and port) | `https://api.example.com:443` |
+//! | [`BasePath`] | A path prefix that starts and ends with `/` | `/v2/` |
+//! | [`BaseUri`] | An [`Origin`] and a [`BasePath`] | `https://api.example.com/v2/` |
+//! | [`Uri`] | A full request target with an optional base, path, and query | `https://api.example.com/v2/users?page=1` |
 //!
-//! Each level composes into the next, so you can build a [`Uri`] from
-//! reusable pieces without string concatenation:
+//! Each type can form part of the next type.
+//! You can build a [`Uri`] from reusable parts without joining strings.
 //!
 //! ## Header family ([`http::header`])
 //!
 //! | Type | Represents |
 //! |------|-----------|
-//! | [`HeaderName`] | a header name — ~90 standard names are interned as zero-cost enum variants |
-//! | [`HeaderValue`] | a header value — supports static, borrowed, and owned sources |
-//! | [`HeaderMap`] | an optimised multimap of headers with Robin Hood hashing |
+//! | [`HeaderName`] | A header name. About 90 standard names use enum variants without allocation. |
+//! | [`HeaderValue`] | A header value from a static, borrowed, or owned source |
+//! | [`HeaderMap`] | An optimized multimap of headers that uses Robin Hood hashing |
 //!
 //! See [Prefer `HeaderMap` over `HashMap<String, String>`](#prefer-headermap-over-hashmapstring-string)
-//! below for details on zero-allocation patterns.
+//! for patterns that do not allocate memory.
 //!
 //! ## Body family
 //!
 //! | Type | Represents |
 //! |------|-----------|
-//! | [`HttpBody`] | an HTTP body — text, binary, JSON, or streaming content |
-//! | [`BytesView`](bytesbuf::BytesView) | a non-contiguous byte buffer with pooled memory and zero-copy slicing |
+//! | [`HttpBody`] | An HTTP body with text, binary, JSON, or streaming content |
+//! | [`BytesView`](bytesbuf::BytesView) | A non-contiguous byte buffer backed by a memory provider, with slices that do not copy data |
 //!
-//! [`HttpBody`] is the body type used throughout `http_extensions` requests and
-//! responses. It is created via [`HttpBodyBuilder`] and can be converted
-//! into a [`BytesView`](bytesbuf::BytesView) for efficient downstream
-//! processing without copying.
+//! `http_extensions` uses [`HttpBody`] for request and response bodies.
+//! [`HttpBodyBuilder`] creates a body.
+//! You can convert the body into a [`BytesView`](bytesbuf::BytesView) without copying its data.
 //!
-//! [`BytesView`](bytesbuf::BytesView) is useful when you need to pass raw
-//! data around outside the HTTP layer. It stores non-contiguous chunks
-//! backed by a memory pool, so buffers are recycled rather than
-//! individually allocated and freed.
+//! Use [`BytesView`](bytesbuf::BytesView) to pass raw data outside the HTTP layer.
+//! It stores non-contiguous chunks through a configured memory provider.
+//! A pooled provider can reuse buffers instead of allocating and freeing each one.
 //!
 //! # Prefer `HeaderMap` over `HashMap<String, String>`
 //!
-//! [`http::HeaderMap`] is purpose-built for HTTP headers. Unlike
-//! `HashMap<String, String>`, it can represent headers with **zero
-//! allocations** by interning about 90 standard names as enum variants and
-//! wrapping static strings via [`HeaderName::from_static`] /
-//! [`HeaderValue::from_static`]. Owned `String` and `Vec<u8>` values
-//! are reused without copying through `TryFrom`.
+//! [`http::HeaderMap`] is designed for HTTP headers.
+//! It stores about 90 standard names as enum variants instead of separate name strings.
+//! [`HeaderName::from_static`] and [`HeaderValue::from_static`] wrap static strings.
+//! `HeaderValue::try_from` reuses owned `String` and `Vec<u8>` values without copying them.
 //!
 //! ```
 //! use http::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 //!
-//! let mut headers = HeaderMap::with_capacity(10); // if you know ahead of time
-//! // Standard name constant + static value = 0 allocations
+//! let mut headers = HeaderMap::with_capacity(10); // Use this when you know the capacity.
+//! // A standard name and a static value do not allocate memory.
 //! headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 //! headers.insert(ACCEPT, HeaderValue::from_static("text/html"));
 //! ```
 //!
 //! # Header Names
 //!
-//! Prefer using predefined header names from the [`http::header`] module when possible, for example
-//! [`http::header::CONTENT_TYPE`]. For custom header names, use [`HeaderName::from_static`] with a
-//! static string literal and define them as constants.
+//! Use predefined header names from [`http::header`] when they are available.
+//! For example, use [`http::header::CONTENT_TYPE`].
+//! For custom names, define constants with [`HeaderName::from_static`] and static string literals.
 //!
 //! ```
 //! use http::header::HeaderName;
@@ -86,13 +84,14 @@
 //!
 //! # Header Values
 //!
-//! Prefer using [`HeaderValue::from_static`] for static values and [`HeaderValueExt::from_shared`] for
-//! potentially large values. The latter takes an `impl Into<Bytes>` value, which can be constructed from
-//! multiple sources, giving you the flexibility to share data without copying.
+//! Use [`HeaderValue::from_static`] for static values.
+//! Use [`HeaderValueExt::from_shared`] for values that can be large.
+//! It accepts `impl Into<Bytes>` from several source types.
+//! The conversion can share one contiguous buffer without copying it.
 //!
-//! When you already have a [`BytesView`](bytesbuf::BytesView) (e.g. from a response body or a
-//! memory pool), use [`HeaderValueExt::from_shared`] to convert it into a
-//! [`HeaderValue`] without extra allocations.
+//! If you have a [`BytesView`](bytesbuf::BytesView), convert it with
+//! [`HeaderValueExt::from_shared`].
+//! For example, the view can come from a response body or a memory pool.
 //!
 //! ```
 //! use bytes::Bytes;
@@ -101,13 +100,13 @@
 //! use http::header::HeaderValue;
 //! use http_extensions::HeaderValueExt;
 //!
-//! // Static value — zero allocations
+//! // This static value does not allocate memory.
 //! let value = HeaderValue::from_static("application/json");
 //!
-//! // From bytes::Bytes — zero allocations for static data
+//! // Static data in bytes::Bytes does not allocate memory.
 //! let large_value = HeaderValue::from_shared(Bytes::from_static(b"my large value")).unwrap();
 //!
-//! // From a BytesView — zero-copy when backed by a single contiguous slice
+//! // A single contiguous BytesView slice does not copy data.
 //! # let pool = GlobalPool::new();
 //! let view = BytesView::copied_from_slice(b"pooled-header-data", &pool);
 //! let pooled_value = HeaderValue::from_shared(view.to_bytes()).unwrap();
@@ -116,11 +115,11 @@
 //!
 //! # Keep URIs Around
 //!
-//! When you access the same resource repeatedly, parse the [`Uri`] once and
-//! reuse it. Passing a `&str` each time re-parses and re-allocates on every
-//! call; [`Uri::clone`] is cheap by comparison.
+//! If you access the same resource repeatedly, parse the [`Uri`] once and reuse it.
+//! A `&str` causes parsing and allocation on every call.
+//! [`Uri::clone`] costs less.
 //!
-//! **Avoid** parsing the same string on every request:
+//! Do not parse the same string for every request:
 //!
 //! ```
 //! # fn main() {
@@ -140,7 +139,7 @@
 //! # }
 //! ```
 //!
-//! **Prefer** to parse once, clone per request:
+//! Parse once and clone the value for each request:
 //!
 //! ```
 //! # fn main() {
@@ -161,18 +160,20 @@
 //!
 //! # Use Templated URIs
 //!
-//! Prefer [`templated`] URI types over raw `format!` strings.
-//! Templated URIs are **stricter** ([`EscapedString`] rejects
-//! reserved characters), **RFC 6570 compliant**, and **faster** (fewer allocations
-//! than `format!`-based construction). They also **enhance telemetry**: the template string is
-//! automatically attached to every request so logging and metrics handlers can group
-//! traffic by route instead of by unique URL.
+//! Use [`templated`] URI types instead of raw `format!` strings.
+//! [`EscapedString::escape`] percent-encodes characters that are unsafe in a template value.
+//! Templated URIs follow RFC 6570.
+//! Each request stores the template string.
+//! Logging and metrics handlers can then group traffic by route instead of by unique URL.
 //!
 //! [`HttpRequestBuilder`] methods like [`get`](HttpRequestBuilder::get),
 //! [`post`](HttpRequestBuilder::post), and [`uri`](HttpRequestBuilder::uri) accept
-//! any `impl TryInto<Uri>`, which includes `#[templated]` structs out of the box.
+//! any `impl TryInto<Uri>`.
+//! This includes `#[templated]` structs.
 //!
-//! **Avoid** raw string formatting, which loses the template and bypasses validation:
+//! Do not use raw string formatting.
+//! The builder still validates the formatted URI when it converts the string.
+//! Raw formatting does not escape dynamic values or preserve template metadata.
 //!
 //! ```
 //! # fn main() {
@@ -190,7 +191,8 @@
 //! # }
 //! ```
 //!
-//! **Prefer** a templated URI struct that is validated, low-allocation, and telemetry-ready:
+//! Use a templated URI struct.
+//! It escapes field values and provides template metadata for telemetry.
 //!
 //! ```
 //! # fn main() {
@@ -216,23 +218,24 @@
 //! # }
 //! ```
 //!
-//! Templated paths are relative; set a base URI on the client so the final
-//! request URL is complete.
+//! Templated paths are relative.
+//! Set a base URI on the client to create the complete request URL.
 //!
-//! > **Note:** Real HTTP clients that implement [`RequestHandler`] follow the
-//! > same pattern via [`HttpRequestBuilderExt::request_builder`], which returns an
-//! > [`HttpRequestBuilder`] already wired up for sending. The builder API
-//! > (including `.get()`, `.post()`, `.fetch()`, etc.) is identical.
+//! > Note:
+//! > HTTP clients that implement [`RequestHandler`] use the same pattern.
+//! > [`HttpRequestBuilderExt::request_builder`] returns a builder that can send requests.
+//! > The builder provides methods such as `.get()`, `.post()`, and `.fetch()`.
 //!
 //! # Authorization Tokens
 //!
 //! Bearer tokens and JSON Web Tokens are often over 1 KB. Building a [`HeaderValue`]
-//! from `&str` on every request copies the entire token each time.
-//! **Build once, clone many.** Construct a [`HeaderValue`] via
-//! [`HeaderValueExt::from_shared`] and `.clone()` it per request
-//! (clone is a ref-count bump, zero copy).
+//! from `&str` copies the complete token for every request.
+//! Build the value once with [`HeaderValueExt::from_shared`].
+//! Clone it for each request.
+//! A clone increments a reference count and does not copy the token data.
 //!
-//! **Avoid** combining `format!` and `from_str`, which allocates and copies on every call:
+//! Do not combine `format!` and `from_str`.
+//! This combination allocates and copies memory for every call.
 //!
 //! ```
 //! use http::header::HeaderValue;
@@ -242,7 +245,7 @@
 //! let value = HeaderValue::from_str(&format!("Bearer {token}")).unwrap();
 //! ```
 //!
-//! **Prefer** to build once from [`Bytes`](bytes::Bytes), then clone cheaply:
+//! Build the value once from [`Bytes`](bytes::Bytes), then clone it:
 //!
 //! ```
 //! use bytes::Bytes;
@@ -253,7 +256,7 @@
 //! let token = "eyJhbGciOi...long_token";
 //! let auth = HeaderValue::from_shared(Bytes::from(format!("Bearer {token}"))).unwrap();
 //!
-//! // Each .clone() is a ref-count bump — no data copied.
+//! // Each .clone() increments a reference count and does not copy data.
 //! let mut headers = HeaderMap::new();
 //! headers.insert(AUTHORIZATION, auth.clone());
 //! ```

@@ -761,16 +761,24 @@ fn all_existing_thread_operations_have_task_history_and_measurements() {
         }
         raw.push(event);
     }
-    raw.push(finish(1, 36, 36, (1, 1), 35));
+    let finish_sequence = u64::try_from(ThreadOperationKind::ALL.len()).unwrap() + 2;
+    raw.push(finish(1, finish_sequence, finish_sequence, (1, 1), finish_sequence - 1));
     let snapshot = summarize(raw);
     let task = &snapshot.tasks[&(1, 1)];
     assert_eq!(
         (
             task.inferred_events,
             task.operations.iter().map(|operation| operation.kind).collect::<Vec<_>>(),
-            task.operations[30].objects[0].history[0].detail.clone()
+            task.operations
+                .iter()
+                .find(|operation| operation.kind == ThreadOperationKind::ChannelHighWatermark)
+                .unwrap()
+                .objects[0]
+                .history[0]
+                .detail
+                .clone()
         ),
-        (34, ThreadOperationKind::ALL.to_vec(), "ChannelHighWatermark; value=32".into()),
+        (37, ThreadOperationKind::ALL.to_vec(), "ChannelHighWatermark; value=32".into()),
     );
 }
 

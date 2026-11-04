@@ -3,7 +3,7 @@
 
 use crate::breaker::{CircuitEngine, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
 
-/// Fake engine to be used in tests.
+/// Provides a fake engine for tests.
 #[derive(Debug)]
 pub(crate) struct EngineFake {
     enter_result: EnterCircuitResult,

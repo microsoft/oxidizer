@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.1] - 2026-10-20
+
+- Refresh published macro documentation and private implementation metadata.
+- Update local dependency requirements: fundle_macros_impl =0.4.0 -> 0.4.1.
+
 ## [0.4.0] - 2026-09-10
 
 ### Maintenance

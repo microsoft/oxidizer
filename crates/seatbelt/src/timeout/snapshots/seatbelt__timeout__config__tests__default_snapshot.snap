@@ -1,8 +1,0 @@
----
-source: crates/seatbelt/src/timeout/config.rs
-expression: config
----
-{
-  "enabled": true,
-  "timeout": "30s"
-}

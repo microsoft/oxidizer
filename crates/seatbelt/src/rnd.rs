@@ -3,15 +3,13 @@
 
 use std::fmt::Debug;
 
-/// Non-cryptographic random number generator used in this crate.
+/// Generates random numbers for non-security uses in this crate.
 ///
-/// This random generator is **NOT cryptography secure** and should only be used for
-/// non-security-critical purposes such as load balancing, jitter, sampling,
-/// and other scenarios where cryptography guarantees are not required.
+/// Do not use this generator for cryptography.
+/// Use it for load balancing, jitter, sampling, and other non-security tasks.
 ///
-/// The `seatbelt` crate does not require cryptography security for its
-/// random number generation needs, so this type is provided as a lightweight
-/// alternative to more complex `RNG` implementations.
+/// Seatbelt does not need cryptographically secure random numbers.
+/// This type is a small alternative to more complex `RNG` implementations.
 #[derive(Clone, Default)]
 pub(crate) enum Rnd {
     #[default]

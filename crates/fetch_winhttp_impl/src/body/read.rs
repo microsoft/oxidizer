@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use std::{fmt, mem};
 
 use bytesbuf::BytesBuf;
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::OpaqueMemory;
 use fetch::HttpError;
 use http::HeaderMap;
 use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, TRANSFER_ENCODING};
@@ -26,7 +26,7 @@ use crate::response_headers::parse_response_trailers;
 // across related projects when no better figure is known. It is an upper bound
 // on the reservation only; what a single call submits is separately bounded by
 // the buffer's first contiguous unfilled region, so this value takes no
-// dependency on how `GlobalPool` sizes the blocks it hands out. Revisit it if
+// dependency on how the memory provider sizes its blocks. Revisit it if
 // the measured throughput-to-memory trade-off changes.
 const DESIRED_READ_SIZE: usize = 256 * 1024;
 
@@ -49,14 +49,14 @@ const DESIRED_READ_SIZE: usize = 256 * 1024;
 pub(crate) struct WinHttpBodyReader {
     guard: Option<RequestGuard>,
     bindings: BindingsFacade,
-    memory: GlobalPool,
+    memory: OpaqueMemory,
     trailers: Option<HeaderMap>,
     eof: bool,
     remaining: Option<u64>,
 }
 
 impl WinHttpBodyReader {
-    pub(crate) const fn new(guard: RequestGuard, bindings: BindingsFacade, memory: GlobalPool, declared_length: Option<u64>) -> Self {
+    pub(crate) const fn new(guard: RequestGuard, bindings: BindingsFacade, memory: OpaqueMemory, declared_length: Option<u64>) -> Self {
         Self {
             guard: Some(guard),
             bindings,
@@ -453,17 +453,18 @@ mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::pin::Pin;
     use std::ptr::NonNull;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Waker};
 
     use bytesbuf::BytesBuf;
-    use bytesbuf::mem::GlobalPool;
+    use bytesbuf::mem::{CallbackMemory, GlobalPool, OpaqueMemory};
     use http::{HeaderMap, HeaderValue};
     use http_body::Body as _;
     use ohno::Labeled as _;
     use plurality::Pool;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
+    use thread_aware::unaware;
     use windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
     use windows::Win32::Networking::WinHttp::{ERROR_WINHTTP_HEADER_NOT_FOUND, WINHTTP_CALLBACK_STATUS_READ_COMPLETE};
 
@@ -548,16 +549,9 @@ mod tests {
         trailer_queries: AtomicUsize,
         requested: Mutex<Vec<u32>>,
         fill_flags: Mutex<Vec<bool>>,
-        /// Addresses of the regions the reader lent to each read, recorded with
-        /// their provenance exposed.
-        ///
-        /// One test rebuilds a pointer from an entry to write the byte a real
-        /// WinHTTP would have delivered, and `with_exposed_provenance_mut` can
-        /// only carry provenance that something exposed. `addr()` is the strict
-        /// accessor and deliberately exposes nothing, so recording through it
-        /// would leave that reconstruction with no provenance for the region it
-        /// addresses. The remaining tests only compare entries, which is
-        /// unaffected by how the address was taken.
+        /// Retains the latest lent pointer so a deferred read can fill it.
+        lent_buffer: AtomicPtr<u8>,
+        /// Addresses used only to assert buffer reuse across reads.
         lent_addresses: Mutex<Vec<usize>>,
         session_closes: AtomicUsize,
         connect_closes: AtomicUsize,
@@ -566,7 +560,7 @@ mod tests {
 
     struct ReaderHarness {
         reader: WinHttpBodyReader,
-        memory: GlobalPool,
+        memory: OpaqueMemory,
         context: *mut RequestContext,
         record: Arc<Record>,
     }
@@ -718,6 +712,41 @@ mod tests {
         let contiguous = probe.first_unfilled_slice().len().min(DESIRED_READ_SIZE);
         assert_eq!(harness.record.requested.lock().unwrap()[0], u32::try_from(contiguous).unwrap());
         assert!(data.capacity() >= DESIRED_READ_SIZE);
+        harness.finish();
+    }
+
+    /// Exercises partial contiguous capacity and reuse through the selected provider.
+    #[test]
+    fn a_custom_provider_can_supply_a_short_first_region_and_keep_spare_capacity() {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let mut harness = reader(
+            [ReadBehavior::data(b"abc".to_vec()), ReadBehavior::data(b"def".to_vec())],
+            TrailerBehavior::None,
+        );
+        harness.reader.memory = OpaqueMemory::new(CallbackMemory::new(unaware(Arc::clone(&requests)), |requests, min_bytes| {
+            requests.lock().unwrap().push(min_bytes);
+            let pool = GlobalPool::new();
+            let mut buffer = pool.reserve(min_bytes);
+            // Leave a prefix-sized first region while preserving the requested total capacity.
+            let prefix = buffer.first_unfilled_slice().len() - b"abc".len();
+            buffer.put_byte_repeated(0, prefix);
+            drop(buffer.consume_all());
+            buffer.reserve(min_bytes, &pool);
+            buffer
+        }));
+
+        let (read, into) = drive(harness.reader.read_into(BytesBuf::new())).unwrap();
+        assert_eq!(read, 3);
+        assert_eq!(into.peek(), b"abc");
+        let (read, mut into) = drive(harness.reader.read_into(into)).unwrap();
+        assert_eq!(read, 3);
+        assert_eq!(into.consume_all(), b"abcdef");
+        assert_eq!(*requests.lock().unwrap(), [DESIRED_READ_SIZE]);
+        let requested = harness.record.requested.lock().unwrap();
+        assert_eq!(requested[0], 3);
+        assert!(requested[1] > requested[0]);
+        assert!(requested.iter().all(|&len| len as usize <= DESIRED_READ_SIZE));
+        drop(requested);
         harness.finish();
     }
 
@@ -1008,12 +1037,10 @@ mod tests {
         assert!(!body.is_end_stream());
         assert_eq!(record.read_calls.load(Ordering::SeqCst), 1);
 
-        let lent = record.lent_addresses.lock().unwrap()[0];
-        let lent = std::ptr::with_exposed_provenance_mut::<u8>(lent);
-        // SAFETY: the mock recorded this address with its provenance exposed, so
-        // the reconstruction above carries provenance for the lent region rather
-        // than none at all. That region belongs to the buffer the outstanding
-        // read operation owns, so it stays allocated and unaliased until that
+        let lent = record.lent_buffer.load(Ordering::SeqCst);
+        // SAFETY: the mock retained the pointer lent to the outstanding read,
+        // preserving its provenance. That region belongs to the buffer the
+        // outstanding read operation owns, so it stays allocated and unaliased until that
         // read completes, which is what this write and the completion below do.
         unsafe {
             lent.write(b'q');
@@ -1179,7 +1206,8 @@ mod tests {
             read_record.read_calls.fetch_add(1, Ordering::SeqCst);
             read_record.requested.lock().unwrap().push(len);
             read_record.fill_flags.lock().unwrap().push(fill_buffer);
-            read_record.lent_addresses.lock().unwrap().push(buffer.as_ptr().expose_provenance());
+            read_record.lent_buffer.store(buffer.as_ptr(), Ordering::SeqCst);
+            read_record.lent_addresses.lock().unwrap().push(buffer.as_ptr().addr());
             let step = read_steps.lock().unwrap().pop_front().unwrap();
             let context = recorded_context(&read_record);
 
@@ -1331,7 +1359,7 @@ mod tests {
         .unwrap();
         let context = installed_context(&guard);
         drop((session, contexts));
-        let memory = GlobalPool::new();
+        let memory = OpaqueMemory::new(GlobalPool::new());
 
         ReaderHarness {
             reader: WinHttpBodyReader::new(guard, facade, memory.clone(), declared_length),

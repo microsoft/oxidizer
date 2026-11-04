@@ -7,13 +7,10 @@
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Run affected-package tests under the declared MSRV.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-msrv-test: anvil-msrv-test-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
-    $impactExit = $LASTEXITCODE
-    if ($impactExit -ne 0) { exit $impactExit }
-    if ($include -eq '--skip') { Write-Host 'anvil-msrv-test: no affected packages; skipping'; exit 0 }
     $toolchainOutput = & "{{ just_executable() }}" _anvil-resolve-stable msrv | Out-String
     $resolverExit = $LASTEXITCODE
     if ($resolverExit -ne 0) { exit $resolverExit }
@@ -22,11 +19,16 @@ anvil-msrv-test: anvil-msrv-test-validate-prereqs anvil-impact
         Write-Host 'anvil-msrv-test: no root MSRV declared; skipping'
         exit 0
     }
+    $env:RUSTUP_TOOLCHAIN = $toolchain
+    $include = (& "{{ just_executable() }}" _anvil-impact-exclude affected)
+    $impactExit = $LASTEXITCODE
+    if ($impactExit -ne 0) { exit $impactExit }
+    if ($include -eq '--skip') { Write-Host 'anvil-msrv-test: no affected packages; skipping'; exit 0 }
     $pkg = @(if ($include) { -split $include } else { '--workspace' })
     # `--tests` = lib/bin unit tests + integration tests. NOT `--all-targets`,
     # which adds `--benches`: `cargo test` EXECUTES bench harnesses, and a
     # `harness = false` bench needs a driver binary this group never installs.
-    # Benches/examples stay compile-only (`anvil-bench`, `anvil-examples`).
+    # Bench compilation and example execution belong to `anvil-bench` and `anvil-examples`.
     # `--tests` over `--lib --bins --tests`: `--lib` fails on bin-only packages.
     & cargo "+$toolchain" test @pkg --tests --all-features --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -34,14 +36,14 @@ anvil-msrv-test: anvil-msrv-test-validate-prereqs anvil-impact
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install the declared MSRV toolchain only when this check is required.
-[group("anvil-setup")]
+[private]
 [script("pwsh", "-NoProfile")]
 anvil-msrv-test-setup installer="install":
     & "{{ just_executable() }}" _anvil-resolve-stable install-msrv
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Validate the MSRV prerequisite.
-[group("anvil-setup")]
+[private]
 [script("pwsh", "-NoProfile")]
 anvil-msrv-test-validate-prereqs:
     $toolchainOutput = & "{{ just_executable() }}" _anvil-resolve-stable msrv | Out-String

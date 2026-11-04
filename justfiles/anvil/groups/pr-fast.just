@@ -33,7 +33,7 @@ anvil-pr-fast: anvil-pr-fast-validate-prereqs \
 # validate-prereqs recipes take no parameters.
 
 # Install prerequisites for the `anvil-pr-fast` recipe.
-[group("anvil-setup")]
+[private]
 anvil-pr-fast-setup installer="install": \
     (anvil-tool-cargo-delta-install installer) \
     (anvil-fmt-setup installer) \
@@ -54,7 +54,7 @@ anvil-pr-fast-setup installer="install": \
     (anvil-external-types-setup installer)
 
 # Validate prerequisites for the `anvil-pr-fast` recipe.
-[group("anvil-setup")]
+[private]
 anvil-pr-fast-validate-prereqs: \
     anvil-tool-cargo-delta-validate-prereqs \
     anvil-fmt-validate-prereqs \

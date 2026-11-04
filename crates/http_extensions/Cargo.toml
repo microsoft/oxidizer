@@ -4,7 +4,7 @@
 [package]
 name = "http_extensions"
 description = "Shared HTTP types and extension traits for clients and servers."
-version = "0.12.0"
+version = "0.14.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "extensions", "client", "server"]
 categories = ["network-programming"]
@@ -16,8 +16,8 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions"
 
-# `uuid` is used only by a doctest in `src/documentation/recipes.rs`, which
-# cargo-machete does not scan; ignore it to avoid a false positive.
+# A doctest in `src/documentation/recipes.rs` uses `uuid`.
+# cargo-machete does not scan doctests, so it reports a false positive.
 [package.metadata.cargo-machete]
 ignored = ["uuid"]
 
@@ -25,7 +25,7 @@ ignored = ["uuid"]
 allowed_external_types = [
     "futures_core::stream::Stream",
     "bytes::bytes::Bytes",
-    "bytesbuf::mem::global::GlobalPool",
+    "bytesbuf::mem::opaque_memory::OpaqueMemory",
     "bytesbuf::mem::has_memory::HasMemory",
     "bytesbuf::mem::memory::Memory",
     "bytesbuf::mem::memory_shared::MemoryShared",
@@ -80,6 +80,7 @@ tick = { workspace = true, features = ["fmt"] }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+argh = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 bytesbuf = { path = "../bytesbuf", features = ["bytes-compat", "test-util"] }
 criterion = { workspace = true }

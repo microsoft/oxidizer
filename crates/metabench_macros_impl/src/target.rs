@@ -233,46 +233,7 @@ fn expand_target(target: Target, metabench: &TokenStream2) -> TokenStream2 {
         CriterionRegistration::Default(benchmarks) => quote!(#benchmarks),
         CriterionRegistration::Configured(configuration) => quote!({ #configuration }),
     };
-    let group_declarations = groups.iter().map(|group| {
-        let name = &group.name;
-        let logical_group = name.to_string();
-        let group_name = native_ident("group", &logical_group);
-        let group_module = support_ident("group_module", &logical_group);
-        let adapter_names = group
-            .benchmarks
-            .iter()
-            .map(|identity| native_ident("benchmark", &identity.to_string()))
-            .collect::<Vec<_>>();
-        let adapter_imports = group.benchmarks.iter().zip(&adapter_names).map(|(identity, adapter_name)| {
-            let adapter_module = support_ident("native", &identity.to_string());
-            quote!(use super::#adapter_module::#adapter_name;)
-        });
-        let config = group.config.as_ref().map(|value| quote!(config = #value;));
-        let compare_by_id = group.compare_by_id.as_ref().map(|value| quote!(compare_by_id = #value;));
-        let max_parallel = group.max_parallel.as_ref().map(|value| quote!(max_parallel = #value;));
-        let setup = group.setup.as_ref().map(|value| quote!(setup = #value;));
-        let teardown = group.teardown.as_ref().map(|value| quote!(teardown = #value;));
-
-        quote! {
-            mod #group_module {
-                use super::*;
-                use #metabench::__private::gungraun;
-                #(#adapter_imports)*
-
-                #metabench::__private::gungraun::library_benchmark_group!(
-                    name = #group_name;
-                    #config
-                    #compare_by_id
-                    #max_parallel
-                    #setup
-                    #teardown
-                    benchmarks = #(#adapter_names),*
-                );
-            }
-
-            use #group_module::#group_name;
-        }
-    });
+    let group_declarations = groups.iter().map(|group| expand_native_group(group, metabench));
     let group_names = groups.iter().map(|group| native_ident("group", &group.name.to_string()));
     let identities = groups.iter().flat_map(|group| {
         let native_group = native_ident("group", &group.name.to_string());
@@ -323,6 +284,71 @@ fn expand_target(target: Target, metabench: &TokenStream2) -> TokenStream2 {
         fn main() {
             #target_module::run();
         }
+    }
+}
+
+fn expand_native_group(group: &Group, metabench: &TokenStream2) -> TokenStream2 {
+    let name = &group.name;
+    let logical_group = name.to_string();
+    let group_name = native_ident("group", &logical_group);
+    let raw_group_name = support_ident("unguarded_group", &logical_group);
+    let group_module = support_ident("group_module", &logical_group);
+    let adapter_names = group
+        .benchmarks
+        .iter()
+        .map(|identity| native_ident("benchmark", &identity.to_string()))
+        .collect::<Vec<_>>();
+    let adapter_imports = group.benchmarks.iter().zip(&adapter_names).map(|(identity, adapter_name)| {
+        let adapter_module = support_ident("native", &identity.to_string());
+        let probe_module = support_ident("probe", &identity.to_string());
+        // Gungraun only runs on Linux. Other hosts can type-check its registration
+        // through the probe adapter without compiling a second perf harness.
+        quote! {
+            #[cfg(target_os = "linux")]
+            use super::#adapter_module::#adapter_name;
+            #[cfg(not(target_os = "linux"))]
+            use super::#probe_module::#adapter_name;
+        }
+    });
+    let config = group.config.as_ref().map(|value| quote!(config = #value;));
+    let compare_by_id = group.compare_by_id.as_ref().map(|value| quote!(compare_by_id = #value;));
+    let max_parallel = group.max_parallel.as_ref().map(|value| quote!(max_parallel = #value;));
+    let setup = group.setup.as_ref().map(|value| quote!(setup = #value;));
+    let teardown = group.teardown.as_ref().map(|value| quote!(teardown = #value;));
+
+    quote! {
+        mod #group_module {
+            use super::*;
+            use #metabench::__private::gungraun;
+            #(#adapter_imports)*
+
+            #metabench::__private::gungraun::library_benchmark_group!(
+                name = #raw_group_name;
+                #config
+                #compare_by_id
+                #max_parallel
+                #setup
+                #teardown
+                benchmarks = #(#adapter_names),*
+            );
+
+            pub mod #group_name {
+                pub use super::#raw_group_name::*;
+
+                pub fn __run(
+                    mode: #metabench::__private::gungraun::__internal::InternalBenchRunMode,
+                    group_index: usize,
+                    bench_index: usize,
+                    iter_index: ::core::option::Option<usize>,
+                ) {
+                    #metabench::__private::run_gungraun_perf(mode, || {
+                        super::#raw_group_name::__run(mode, group_index, bench_index, iter_index);
+                    });
+                }
+            }
+        }
+
+        use #group_module::#group_name;
     }
 }
 
@@ -422,6 +448,33 @@ mod tests {
         assert!(output.contains("use::metabench::__private::gungraun"));
         assert!(output.contains("::metabench::__private::gungraun::library_benchmark_group!"));
         assert!(!output.contains("::metabench::gungraun"));
+    }
+
+    #[test]
+    fn native_groups_reuse_probe_adapters_on_unsupported_hosts() {
+        let output = expand(quote!(criterion = benches, groups = { GROUP { benchmarks = [ONE, TWO] } })).unwrap();
+        for identity in ["ONE", "TWO"] {
+            let native = super::support_ident("native", identity);
+            let probe = super::support_ident("probe", identity);
+            let benchmark = super::native_ident("benchmark", identity);
+            assert!(output.contains(&format!("#[cfg(target_os=\"linux\")]usesuper::{native}::{benchmark};")));
+            assert!(output.contains(&format!("#[cfg(not(target_os=\"linux\"))]usesuper::{probe}::{benchmark};")));
+        }
+    }
+
+    #[test]
+    fn native_groups_dispatch_through_the_perf_guard_without_renaming_identities() {
+        let output = expand(quote!(criterion = benches, groups = { GROUP { benchmarks = [ONE] } })).unwrap();
+        let group = super::native_ident("group", "GROUP");
+        let raw_group = super::support_ident("unguarded_group", "GROUP");
+
+        assert!(output.contains(&format!("name={raw_group};")));
+        assert!(output.contains(&format!("pubmod{group}")));
+        assert!(output.contains(&format!(
+            "::metabench::__private::run_gungraun_perf(mode,||{{super::{raw_group}::__run(mode,group_index,bench_index,iter_index);"
+        )));
+        assert!(output.contains(&format!("library_benchmark_groups={group}")));
+        assert!(output.contains(&format!("ONE.__in_gungraun_group(stringify!({group}))")));
     }
 
     #[test]

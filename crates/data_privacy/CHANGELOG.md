@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.2] - 2026-11-02
+
+- Clarify that xxH3 hashes let applications match related values but do not protect the original
+  data. Hashing behavior and public APIs do not change.
+- Update the requirement for local package `data_privacy_macros` from `=0.13.1` to `=0.13.2`.
+
+## [0.13.1] - 2026-10-20
+
+- Refresh published documentation and package metadata for the current macro family.
+- Update local dependency requirements: data_privacy_core ^0.1.2 -> 0.1.3; data_privacy_macros =0.13.0 -> 0.13.1.
+
 ## [0.13.0] - 2026-09-10
 
 ### Changed

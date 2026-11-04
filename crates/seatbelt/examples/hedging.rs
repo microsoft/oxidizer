@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Hedging middleware example demonstrating how a slow primary request is hedged
-//! with a faster secondary request that completes first.
+//! This example starts hedge requests when the original request is slow.
+//! The second hedge is faster and completes first.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -18,7 +18,7 @@ static CALL_COUNT: AtomicU32 = AtomicU32::new(0);
 
 #[tokio::main]
 async fn main() {
-    // Set up tracing subscriber for logs to console
+    // Send tracing logs to the console.
     tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     let clock = Clock::new_tokio();
@@ -26,8 +26,8 @@ async fn main() {
 
     let op_clock = clock.clone();
 
-    // Configure hedging: if the original request hasn't completed after 200ms,
-    // launch a hedging request. The first successful response wins.
+    // If the original request does not finish in 200 milliseconds, start a hedge.
+    // Return the first successful response.
     let stack = (
         Hedging::layer("my_hedging", &context)
             .clone_input()
@@ -56,19 +56,20 @@ async fn main() {
     println!("[main] result: {output} (took {:?})", start.elapsed());
 }
 
-/// Simulates a service where the first two calls are slow (500ms) and subsequent
-/// calls (the second hedging attempt onwards) are fast (50ms). The fast hedging
-/// attempt completes before the slow ones, demonstrating how hedging reduces tail latency.
+/// Simulates two slow calls of 500 milliseconds.
+///
+/// Later calls take 50 milliseconds. The fast hedge finishes before the slow calls
+/// and reduces tail latency.
 async fn slow_then_fast_operation(input: String, clock: &Clock) -> String {
     let call = CALL_COUNT.fetch_add(1, Ordering::Relaxed);
 
     if call < 2 {
-        // Original request and first hedge: simulate a slow response
+        // Make the original request and first hedge slow.
         println!("[service] attempt {call}: slow path (500ms)");
         clock.delay(Duration::from_millis(500)).await;
         format!("{input} - slow response")
     } else {
-        // Second hedging request: simulate a fast response
+        // Make the second hedge fast.
         println!("[service] attempt {call}: fast path (50ms)");
         clock.delay(Duration::from_millis(50)).await;
         format!("{input} - fast response")

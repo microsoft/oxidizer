@@ -2962,8 +2962,11 @@ mod from_coverage_extras_utf16 {
 
     #[test]
     fn alloc_utf16_str_box_oversized_routes_via_oversized_local() {
+        #[cfg(miri)]
+        let arena = Arena::builder().max_normal_alloc(4096).build();
+        #[cfg(not(miri))]
         let arena = Arena::new();
-        let len_u16 = 16 * 1024;
+        let len_u16 = if cfg!(miri) { 2049 } else { 16 * 1024 };
         // `vec![value; n]` is a single allocation + bulk fill.
         let buf: Vec<u16> = vec![u16::from(b'a'); len_u16];
         let src = widestring::Utf16Str::from_slice(&buf).unwrap();
@@ -2973,8 +2976,11 @@ mod from_coverage_extras_utf16 {
 
     #[test]
     fn alloc_utf16_str_arc_oversized_routes_via_oversized_shared() {
+        #[cfg(miri)]
+        let arena = Arena::builder().max_normal_alloc(4096).build();
+        #[cfg(not(miri))]
         let arena = Arena::new();
-        let len_u16 = 16 * 1024;
+        let len_u16 = if cfg!(miri) { 2049 } else { 16 * 1024 };
         let buf: Vec<u16> = vec![u16::from(b'a'); len_u16];
         let src = widestring::Utf16Str::from_slice(&buf).unwrap();
         let arc = arena.alloc_utf16_str_arc(src);
@@ -2983,7 +2989,7 @@ mod from_coverage_extras_utf16 {
 
     #[test]
     fn alloc_utf16_str_arc_from_str_oversized_routes_via_oversized_shared() {
-        let len = 4096;
+        let len = if cfg!(miri) { 2049 } else { 4096 };
         let src = "a".repeat(len);
 
         let arena = Arena::new();
@@ -3000,7 +3006,7 @@ mod from_coverage_extras_utf16 {
 
     #[test]
     fn alloc_utf16_str_box_from_str_oversized_routes_via_oversized_shared() {
-        let len = 4096;
+        let len = if cfg!(miri) { 2049 } else { 4096 };
         let src = "a".repeat(len);
 
         let arena = Arena::new();
@@ -3163,7 +3169,8 @@ mod from_mutants_extras_utf16_scattered {
     fn prefixed_shared_alloc_boundary_terminates_for_mixed_u8_u16() {
         // Sweep around even and odd routing boundaries; sentinel checks keep
         // the Miri workload bounded.
-        for &mna in &[4096_usize, 4097, 6144] {
+        let boundaries: &[usize] = if cfg!(miri) { &[4096, 4097] } else { &[4096, 4097, 6144] };
+        for &mna in boundaries {
             let arena = Arena::builder().max_normal_alloc(mna).build();
             let center = mna / 2;
             for chars in center.saturating_sub(1)..=(center + 1).min(mna) {

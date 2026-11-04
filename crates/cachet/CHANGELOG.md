@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.17.0] - 2026-11-02
+
+- Breaking: Pass `bytesbuf::mem::OpaqueMemory` to `CacheBuilder::serialize` and
+  `FallbackBuilder::serialize` to select the memory provider.
+- Use the selected provider to encode keys and values. The postcard payload and serialization format
+  version do not change.
+- Update the requirement for local package `anyspawn` from `0.9.2` to `0.10.0`.
+- Update the requirement for local package `bytesbuf` from `0.12.0` to `0.13.0`.
+- Update the requirement for local package `cachet_memory` from `0.9.0` to `0.9.1`.
+- Update the requirement for local package `cachet_service` from `0.6.0` to `0.6.1`.
+- Update the requirement for local package `cachet_tier` from `0.6.0` to `0.6.1`.
+- Update the requirement for local package `layered` from `0.3.8` to `0.3.9`.
+- Update the requirement for local package `seismograph` from `0.3.0` to `0.4.0`.
+- Update the requirement for local package `tick` from `0.8.0` to `0.9.0`.
+- Update the requirement for local package `uniflight` from `0.8.0` to `0.8.1`.
+- Update the requirement for `parking_lot` from `0.12.5` to `0.13.0`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
+## [0.16.0] - 2026-10-20
+
+- Update exposed Bytesbuf, Recoverable, Seismograph, and Tick identities to their breaking releases.
+- Update local dependency requirements: anyspawn ^0.9.1 -> 0.9.2; bytesbuf ^0.11.0 -> 0.12.0; cachet_memory ^0.8.1 -> 0.9.0; cachet_service ^0.5.1 -> 0.6.0; cachet_tier ^0.5.1 -> 0.6.0; layered ^0.3.7 -> 0.3.8; seismograph ^0.2.0 -> 0.3.0; tick ^0.7.1 -> 0.8.0; uniflight ^0.7.0 -> 0.8.0.
+
 ## [0.15.0] - 2026-10-05
 
 - ⚠️ Breaking

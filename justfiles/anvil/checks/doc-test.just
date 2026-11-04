@@ -19,6 +19,7 @@
 # explicit crate types such as rlib/cdylib and proc macros remain eligible.
 
 # Run documentation tests for affected workspace packages.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-doc-test: anvil-doc-test-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -34,7 +35,7 @@ anvil-doc-test: anvil-doc-test-validate-prereqs anvil-impact
         [System.StringComparer]::Ordinal
     )
     foreach ($spec in @(-split "$capableText")) { if ($spec) { $docPackages[$spec] = $true } }
-    $specs = if ($selection -contains '--workspace') {
+    $specs = @(if ($selection -contains '--workspace') {
         $workspaceSpecs = [string[]]@($docPackages.Keys)
         [Array]::Sort($workspaceSpecs, [System.StringComparer]::Ordinal)
         $workspaceSpecs
@@ -47,25 +48,25 @@ anvil-doc-test: anvil-doc-test-validate-prereqs anvil-impact
                 }
             }
         )
-    }
+    })
     if ($specs.Count -eq 0) {
         Write-Host 'anvil-doc-test: no affected doctest-capable packages; skipping'
         exit 0
     }
-    $docSelection = [System.Collections.Generic.List[string]]::new()
-    foreach ($spec in $specs) {
-        $docSelection.Add('--package')
-        $docSelection.Add($spec)
-    }
+    # Workspace-exclude selection stays unambiguous when a registry
+    # dependency shares a member's name and version.
+    $docSelectionText = (& "{{ just_executable() }}" _anvil-workspace-exclude @specs)
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $docSelection = @(-split $docSelectionText)
     & cargo {{_anvil_stable_toolchain_args}} test --doc @docSelection --all-features --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & cargo {{_anvil_stable_toolchain_args}} test --doc @docSelection --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-doc-test` recipe.
-[group("anvil-setup")]
+[private]
 anvil-doc-test-setup installer="install": anvil-toolchain-stable-install
 
 # Validate prerequisites for the `anvil-doc-test` recipe.
-[group("anvil-setup")]
+[private]
 anvil-doc-test-validate-prereqs: anvil-tool-rustc-validate-prereqs

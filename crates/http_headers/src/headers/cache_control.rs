@@ -1160,6 +1160,10 @@ mod tests {
     /// The quote-free split is a shortcut around the general item walk, so
     /// both have to reach the same summary and the same diagnostic.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native and cargo-careful runs retain the exhaustive directive split matrix; compact directive tests preserve parser-path coverage under Miri"
+    )]
     fn the_unquoted_directive_split_agrees_with_the_general_walk() {
         let alphabet = b"m,\"=a1 \\";
         let mut line = Vec::with_capacity(4);

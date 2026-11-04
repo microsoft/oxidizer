@@ -11,10 +11,11 @@
 # is the right scope.
 
 # Check feature combinations for required workspace packages.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-cargo-hack: anvil-cargo-hack-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    $include = (& "{{ just_executable() }}" _anvil-impact-include required)
+    $include = (& "{{ just_executable() }}" _anvil-impact-exclude required)
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
     if ($include -eq '--skip') { Write-Host 'anvil-cargo-hack: no affected packages; skipping'; exit 0 }
@@ -22,9 +23,9 @@ anvil-cargo-hack: anvil-cargo-hack-validate-prereqs anvil-impact
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-cargo-hack` recipe.
-[group("anvil-setup")]
+[private]
 anvil-cargo-hack-setup installer="install": (anvil-tool-cargo-hack-install installer)
 
 # Validate prerequisites for the `anvil-cargo-hack` recipe.
-[group("anvil-setup")]
+[private]
 anvil-cargo-hack-validate-prereqs: anvil-tool-cargo-hack-validate-prereqs

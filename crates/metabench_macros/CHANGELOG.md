@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0] - 2026-11-02
+
+- Breaking: Replace temporary borrows with owned native inputs. The macros generate adapters for
+  Gungraun 0.20.
+- Update the exact implementation requirement to protect native perf callbacks with a lock and reuse
+  adapters outside Linux.
+- Update the requirement for local package `metabench_macros_impl` from `=0.2.1` to `=0.3.0`.
+
+## [0.2.1] - 2026-10-20
+
+- Classify the procedural macro as private API and align it with Metabench 0.2.1.
+- Update local dependency requirements: metabench_macros_impl =0.2.0 -> 0.2.1.
+
 ## [0.2.0] - 2026-10-13
 
 - 🔧 Maintenance

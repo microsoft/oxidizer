@@ -10,10 +10,9 @@ use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 
 use crate::{Recovery, RecoveryInfo};
 
-/// A tower service whose `poll_ready` always returns an error.
+/// A Tower service whose `poll_ready` always returns an error.
 ///
-/// Useful for testing that resilience middleware correctly propagates
-/// inner service readiness failures.
+/// Tests whether middleware returns readiness failures from the inner service.
 #[derive(Clone, Debug)]
 pub(crate) struct FailReadyService;
 

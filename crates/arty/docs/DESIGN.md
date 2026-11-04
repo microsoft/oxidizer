@@ -1,107 +1,77 @@
 # Design
 
-Arty runs async tasks on dedicated workers, with separate pools for blocking
-work. Tasks receive `Builtins` with their worker's scheduler, clock, and
-telemetry sink.
+This document describes Arty's parts and the rules they follow.
+The crate and module documentation describe how to use the public API.
 
-This document describes the application-facing design. Maintainers should also
-read the [runtime implementation map](INTERNALS.md) for bootstrap, ownership,
-readiness, shutdown, and scoped-borrowing invariants.
+## Separate runtimes
 
-## Workers and isolation
+Each `Runtime` owns its workers and shutdown state. There is no single runtime
+shared by the whole process. Stopping one runtime does not stop another runtime.
 
-Each runtime owns its workers and shutdown. There is no process-global runtime.
-Stopping one does not request shutdown of another, but application data can
-still be shared. This is scheduling isolation, not a security boundary.
+Schedulers, `JoinHandle`, and `Context` do not keep the runtime alive.
+The `Runtime` value waits for workers to stop and reports runtime failures.
 
-An async task stays on the worker that creates its future, including across
-awaits. Arty does not move running tasks to balance load. This lets futures
-keep thread-local and non-`Send` state.
+## Worker model
 
-Tasks on a worker take turns. Blocking that worker, or running without giving
-control back, holds up its other tasks and timers. Other workers can continue
-independently.
+Each async worker runs tasks on one operating-system thread.
+A task stays on the worker that creates its future. Arty does not move a running
+task to balance load.
 
-## Placing new work
+A future on that worker can keep thread-local and non-`Send` state.
+Such state does not need to be sent between threads.
+Tasks take turns when they await operations that are not ready.
+A task that blocks the thread or does not give up control also delays other
+tasks and timers on that worker. Other workers can continue.
 
-`Runtime::scheduler()` lets the runtime place new work.
-`Builtins::scheduler()` submits ordinary child tasks to its worker, even when
-cloned or used from another thread.
+Keeping tasks on separate workers controls where they run.
+It does not protect one worker's data from another worker.
+Workers can share application data.
 
-Ordinary task factories and results must be `Send`, but their futures need not
-be. Create worker-local, non-`Send` state inside the task future after it reaches
-the destination worker.
+## Choosing workers and updating state
 
-`spawn_anywhere` lets the runtime choose a worker;
-`Scheduler::spawn_everywhere` starts one task per worker. Submission order
-does not guarantee completion order. See the
-[scheduling guide](../src/documentation/scheduling.rs) for examples.
+`RuntimeScheduler` lets the runtime choose a worker for new tasks.
+`Scheduler` sends tasks to one worker.
+A task factory is a function that creates a future.
+Factories and values sent between threads must meet the trait requirements
+of the scheduling method.
 
-## Thread-aware values
+Relocation updates a value's state for a selected worker.
+`ThreadAware` provides the method that makes this update.
+Relocation does not move a running task or change which runtime an Arty scheduler
+or context belongs to.
+Waiting for a task's result outside an Arty async worker does not relocate that result.
 
-`ThreadAware` lets a value adapt its worker-bound state during relocation.
-It includes `Send`, so moving the value must be safe even without relocation.
-Moving or cloning alone does not change its worker association.
+A waker tells a worker that a task is ready to run again.
+A cloned waker sends this request to the task's assigned worker.
+It does not move the task or run it on the calling thread.
+Keeping a clone does not keep the task or runtime alive.
+After the task completes, panics, or is cancelled, calling or cloning the waker
+is safe and has no effect. The same applies after runtime shutdown.
 
-`spawn_anywhere` and `spawn_everywhere` relocate their explicit input to the
-destination worker before starting the task. On a worker's `Scheduler`,
-their results must also be `ThreadAware`. Runtime-wide `spawn_anywhere` accepts
-any `Send` result. Joining does not relocate results; ordinary `spawn` and
-`block_on` do not relocate captures or results either.
+## Supporting services
 
-Relocation does not transfer Arty's worker-bound handles to another runtime.
-See the
-[thread-awareness guide](../src/documentation/thread_awareness.rs).
+The runtime has three supporting service groups:
 
-## Blocking work and I/O
+- Blocking pools run blocking functions outside async workers. The runtime can
+  use one shared pool or one pool per worker. A running function can delay
+  shutdown until it returns.
+- I/O contexts provide access to I/O libraries. Their drivers process I/O
+  requests. Arty creates contexts once per runtime and drivers once per worker.
+  The [I/O guide](IO.md) describes driver roles, access rules, failures, and
+  shutdown.
+- Worker clocks wake tasks when their timers expire.
 
-`spawn_blocking` runs a synchronous callback away from async workers. Captures
-and results must be `Send`. Workers share one blocking pool by default; the
-per-worker policy separates their blocking workloads into one pool per worker,
-potentially using more threads.
+## Shutdown and failure
 
-Arty provides timers, but not async network or file I/O drivers. An async I/O
-library still needs its own runtime support. See [I/O](IO.md).
+The first shutdown request records why the runtime stops. Later requests do not
+replace that reason. Shutdown rejects new tasks, cancels pending async tasks, and discards
+queued blocking functions.
 
-## Runtime lifetime and shutdown
+Worker code requests shutdown without waiting.
+Calling `Runtime::stop` or dropping the `Runtime` value waits for workers to stop.
+If a runtime failure caused shutdown, runtime and task errors retain it.
+Use `Error::source` to read that underlying failure.
 
-Schedulers, joins, and `Builtins` do not keep the runtime running. Dropping a
-join handle neither cancels its task nor waits for it.
-
-`RuntimeOperations::request_stop` requests shutdown without waiting.
-`Runtime::stop` consumes the owner, normally waits, and reports shutdown errors.
-Dropping the owner also requests shutdown and normally waits, but cannot return
-errors. Neither waits when called from an async Arty worker or the runtime's own
-blocking callback; `stop` returns an error in those contexts.
-
-Shutdown rejects new submissions and cancels unfinished async tasks on their
-worker. Rejected factories and queued blocking callbacks do not run.
-Already-running callbacks finish before shutdown completes; one that never
-returns can prevent it.
-
-Await required work before requesting shutdown or returning from an
-`#[arty::main]` or `#[arty::test]` body. See the
-[shutdown guide](../src/documentation/shutdown.rs) and
-[critical-task guidance](CRITICAL_TASKS.md).
-
-### Cloned task wakers
-
-A task remains assigned to one worker. Calling a clone of its waker from another
-thread asks that worker to poll the task again; it never moves or polls the task
-on the calling thread.
-
-A cloned waker may outlive both its task and the runtime. Completion and
-cancellation disconnect every clone from the task before the task's resources
-are reclaimed. Later calls are safe no-ops, and keeping a clone does not delay
-shutdown. This lifetime separation is both a memory-safety invariant and part of
-the runtime's shutdown contract.
-
-## Failure handling
-
-Application errors remain task results. A caught panic becomes `JoinError`;
-that alone does not stop the runtime or repair shared state. Worker isolation
-does not make every panic recoverable: some failures must stop the process.
-
-Runtime telemetry uses a no-op sink by default. Configured telemetry processors
-must not panic. See [panic handling](PANICS.md) for how task, shutdown, and
-telemetry failures are handled.
+Arty catches panics only from the user operations listed in its documentation.
+Other panics can stop progress or abort the process. See [panic handling](PANICS.md)
+for the full policy.

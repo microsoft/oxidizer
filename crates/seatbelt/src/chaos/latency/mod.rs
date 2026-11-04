@@ -1,16 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Chaos latency middleware for services, applications, and libraries.
+//! Latency injection middleware for services, applications, and libraries.
 //!
-//! This module provides a latency injection mechanism that adds an artificial
-//! delay before the inner service call at a configurable probability. The
-//! primary types are [`Latency`] and [`LatencyLayer`]:
+//! This module adds a delay before the inner service call at a configured rate.
+//! It provides these main types:
 //!
-//! - [`Latency`] is the middleware that wraps an inner service and injects delay
-//! - [`LatencyLayer`] is used to configure and construct the latency middleware
+//! - [`Latency`] wraps an inner service and adds delay.
+//! - [`LatencyLayer`] configures and creates the latency middleware.
 //!
-//! # Quick Start
+//! # Quick start
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -23,7 +22,7 @@
 //!
 //! let stack = (
 //!     Latency::layer("latency", &context)
-//!         .rate(0.1) // 10% of requests get delayed
+//!         .rate(0.1) // Delay 10% of requests.
 //!         .latency(Duration::from_millis(200)),
 //!     Execute::new(my_operation),
 //! );
@@ -36,58 +35,53 @@
 //!
 //! # Configuration
 //!
-//! The [`LatencyLayer`] uses a type-state pattern to enforce that all required
-//! properties are configured before the layer can be built. This compile-time
-//! safety ensures that you cannot accidentally create a latency layer without
-//! properly specifying the rate and the delay duration:
+//! [`LatencyLayer`] uses the type state pattern.
+//! A type state records builder state in the type system.
+//! The layer cannot build until you set these properties:
 //!
 //! - [`rate`][LatencyLayer::rate] or [`rate_with`][LatencyLayer::rate_with]:
-//!   Required probability of latency injection in `[0.0, 1.0]`
+//!   sets the injection rate in `[0.0, 1.0]`.
 //! - [`latency`][LatencyLayer::latency], [`latency_with`][LatencyLayer::latency_with],
 //!   or [`latency_range`][LatencyLayer::latency_range]:
-//!   Required delay duration
+//!   sets the delay.
 //!
-//! Each latency layer requires an identifier for telemetry purposes. This
-//! identifier should use `snake_case` naming convention to maintain consistency
-//! across the codebase.
+//! Each latency layer requires an identifier for telemetry.
+//! Use `snake_case` for this identifier.
 //!
-//! # Latency Duration
+//! # Latency duration
 //!
 //! The injected delay can be configured in three ways:
 //!
-//! - [`latency`][LatencyLayer::latency]: Fixed duration applied on every injection.
-//! - [`latency_with`][LatencyLayer::latency_with]: Callback - the closure receives
-//!   a reference to the input and [`LatencyDurationArgs`], and returns the delay.
-//! - [`latency_range`][LatencyLayer::latency_range]: Uniform random duration chosen
-//!   from a [`Range<Duration>`][std::ops::Range].
+//! - [`latency`][LatencyLayer::latency] uses a fixed duration.
+//! - [`latency_with`][LatencyLayer::latency_with] calculates the delay from the input.
+//! - [`latency_range`][LatencyLayer::latency_range] selects a uniform random duration.
 //!
 //! # Defaults
 //!
-//! | Parameter | Default Value | Description | Configured By |
+//! | Parameter | Default value | Description | Set by |
 //! |-----------|---------------|-------------|---------------|
 //! | Rate | `None` (required) | Probability of latency injection | [`rate`][LatencyLayer::rate], [`rate_with`][LatencyLayer::rate_with] |
 //! | Latency | `None` (required) | Delay duration to inject | [`latency`][LatencyLayer::latency], [`latency_with`][LatencyLayer::latency_with], [`latency_range`][LatencyLayer::latency_range] |
 //! | Enable condition | Always enabled | Latency is applied to all requests | [`enable_if`][LatencyLayer::enable_if], [`enable`][LatencyLayer::enable] |
 //!
-//! # Thread Safety
+//! # Thread safety
 //!
-//! The [`Latency`] type is thread-safe and implements both `Send` and `Sync` as
-//! enforced by the `Service` trait it implements.
+//! [`Latency`] implements `Send` and `Sync` as required by its `Service` implementation.
 //!
 //! # Telemetry
 //!
 //! ## Metrics
 //!
-//! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted when latency is injected
-//! - **Attributes**:
+//! - Metric: `resilience.event` (counter)
+//! - Emission: When the middleware adds latency
+//! - Attributes:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Latency identifier from [`Latency::layer`]
-//!   - `resilience.event.name`: Always `chaos_latency`
+//!   - `resilience.event.name`: `chaos_latency`
 //!
 //! # Examples
 //!
-//! ## Basic Usage
+//! ## Basic use
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -100,7 +94,7 @@
 //!
 //! let stack = (
 //!     Latency::layer("my_latency", &context)
-//!         .rate(0.05) // 5% injection rate
+//!         .rate(0.05) // Delay 5% of requests.
 //!         .latency(Duration::from_millis(100)),
 //!     Execute::new(execute_operation),
 //! );
@@ -111,7 +105,7 @@
 //! # async fn execute_operation(input: String) -> String { input }
 //! ```
 //!
-//! ## From Configuration
+//! ## Configuration
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -136,7 +130,7 @@
 //! # async fn execute_operation(input: String) -> String { input }
 //! ```
 //!
-//! ## With Random Range
+//! ## Random range
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -160,7 +154,7 @@
 //! # async fn execute_operation(input: String) -> String { input }
 //! ```
 //!
-//! ## With Conditional Enable
+//! ## Conditional latency
 //!
 //! ```rust
 //! # use std::time::Duration;

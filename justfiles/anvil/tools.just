@@ -9,7 +9,7 @@
 # System-level prerequisites (libclang, etc.)
 # ============================================================================
 
-# Public: probe for system-level prerequisites that catalog tools need
+# Internal: probe for system-level prerequisites that catalog tools need
 # to BUILD from source. The `binstall` install path downloads pre-built
 # binaries and does not need these. The installer invokes this check only
 # immediately before a source build, including fallback after binstall fails.
@@ -35,7 +35,7 @@
 # package-manager choice stay with the user.
 
 # Check cargo-spellcheck source-build prerequisites.
-[group("anvil-setup")]
+[private]
 [script("pwsh", "-NoProfile")]
 anvil-tool-cargo-spellcheck-source-deps-check:
     $ErrorActionPreference = 'Stop'
@@ -136,7 +136,7 @@ anvil-tool-cargo-spellcheck-source-deps-check:
 # are read-only and only surface a friendly error if a prerequisite is absent.
 
 # Validate that rustc is available and workspace MSRVs are compatible.
-[group("anvil-setup")]
+[private]
 [script("pwsh", "-NoProfile")]
 anvil-tool-rustc-validate-prereqs:
     if (-not (Get-Command rustc -ErrorAction SilentlyContinue)) {
@@ -149,7 +149,7 @@ anvil-tool-rustc-validate-prereqs:
     }
 
 # Validate that PowerShell Core is available.
-[group("anvil-setup")]
+[private]
 [script("pwsh", "-NoProfile")]
 anvil-tool-pwsh-validate-prereqs:
     if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
@@ -404,7 +404,7 @@ _anvil-resolve-stable action="install":
 # dependency, which Just deduplicates within one setup invocation.
 
 # Ensure the selected stable toolchain is available while preserving native repository toolchain-file behavior.
-[group("anvil-setup")]
+[private]
 anvil-toolchain-stable-install: (_anvil-resolve-stable "install")
 
 # _install-tool-core: install a cargo subcommand at the catalog version,
@@ -436,7 +436,8 @@ _install-tool-core name version installer source_prereq="":
     # every post-restore run would try to re-install on top of the
     # cached binaries and fail with "binary already exists in destination".
     $installed = $null
-    $pattern = '^' + [regex]::Escape($name) + ' v(\S+):'
+    # Path and git installs append their source: `name vX.Y.Z (source):`.
+    $pattern = '^' + [regex]::Escape($name) + ' v(\S+?)(?: \(.*\))?:$'
     foreach ($line in (& cargo {{_anvil_stable_toolchain_args}} install --list 2>$null)) {
         if ($line -match $pattern) { $installed = $Matches[1]; break }
     }
@@ -495,7 +496,8 @@ _check-tool name version:
     $version = '{{version}}'
 
     $installed = $null
-    $pattern = '^' + [regex]::Escape($name) + ' v(\S+):'
+    # Path and git installs append their source: `name vX.Y.Z (source):`.
+    $pattern = '^' + [regex]::Escape($name) + ' v(\S+?)(?: \(.*\))?:$'
     $previousAutoInstall = $env:RUSTUP_AUTO_INSTALL
     try {
         # Validation must not let the rustup proxy provision a missing selection.
@@ -781,19 +783,19 @@ _check-component toolchain component:
 # ============================================================================
 
 # Install the pinned nightly Rust toolchain.
-[group("anvil-setup")]
+[private]
 anvil-toolchain-nightly-install: (_install-toolchain rust_nightly)
 
 # Validate that the pinned nightly Rust toolchain is available.
-[group("anvil-setup")]
+[private]
 anvil-toolchain-nightly-validate-prereqs: (_check-toolchain rust_nightly)
 
 # Install the pinned nightly Rust toolchain for external-type checks.
-[group("anvil-setup")]
+[private]
 anvil-toolchain-nightly-external-types-install: (_install-toolchain rust_nightly_external_types)
 
 # Validate that the pinned nightly Rust toolchain for external-type checks is available.
-[group("anvil-setup")]
+[private]
 anvil-toolchain-nightly-external-types-validate-prereqs: (_check-toolchain rust_nightly_external_types)
 
 # ============================================================================
@@ -805,43 +807,43 @@ anvil-toolchain-nightly-external-types-validate-prereqs: (_check-toolchain rust_
 # relevant anvil-<toolchain>-install recipe) and then add the component.
 
 # Install the pinned `clippy` component for the default toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-default-clippy-install: anvil-toolchain-stable-install (_install-component "default" "clippy")
 
 # Validate that the pinned `clippy` component is available for the default toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-default-clippy-validate-prereqs: (_check-component "default" "clippy")
 
 # Install the pinned `rustfmt` component for the default toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-default-rustfmt-install: anvil-toolchain-stable-install (_install-component "default" "rustfmt")
 
 # Validate that the pinned `rustfmt` component is available for the default toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-default-rustfmt-validate-prereqs: (_check-component "default" "rustfmt")
 
 # Install the pinned `rustfmt` component for the nightly toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-nightly-rustfmt-install: anvil-toolchain-nightly-install (_install-component rust_nightly "rustfmt")
 
 # Validate that the pinned `rustfmt` component is available for the nightly toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-nightly-rustfmt-validate-prereqs: anvil-toolchain-nightly-validate-prereqs (_check-component rust_nightly "rustfmt")
 
 # Install the pinned `miri` component for the nightly toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-nightly-miri-install: anvil-toolchain-nightly-install (_install-component rust_nightly "miri")
 
 # Validate that the pinned `miri` component is available for the nightly toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-nightly-miri-validate-prereqs: anvil-toolchain-nightly-validate-prereqs (_check-component rust_nightly "miri")
 
 # Install the pinned `rust-src` component for the nightly toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-nightly-rust-src-install: anvil-toolchain-nightly-install (_install-component rust_nightly "rust-src")
 
 # Validate that the pinned `rust-src` component is available for the nightly toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-nightly-rust-src-validate-prereqs: anvil-toolchain-nightly-validate-prereqs (_check-component rust_nightly "rust-src")
 
 # llvm-tools ships the llvm-profdata / llvm-cov binaries that
@@ -855,11 +857,11 @@ anvil-component-nightly-rust-src-validate-prereqs: anvil-toolchain-nightly-valid
 # `rustup component add` install path.
 
 # Install the pinned `llvm-tools` component for the nightly toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-nightly-llvm-tools-install: anvil-toolchain-nightly-install (_install-component rust_nightly "llvm-tools")
 
 # Validate that the pinned `llvm-tools` component is available for the nightly toolchain.
-[group("anvil-setup")]
+[private]
 anvil-component-nightly-llvm-tools-validate-prereqs: anvil-toolchain-nightly-validate-prereqs (_check-component rust_nightly "llvm-tools")
 
 # ============================================================================
@@ -872,19 +874,19 @@ anvil-component-nightly-llvm-tools-validate-prereqs: anvil-toolchain-nightly-val
 # parameter; the validate-prereqs recipes do not (they only read state).
 
 # Install the pinned `cargo-aprz` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-aprz-install installer="install": (_install-tool "cargo-aprz" cargo_aprz_version installer)
 
 # Validate that the pinned `cargo-aprz` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-aprz-validate-prereqs: (_check-tool "cargo-aprz" cargo_aprz_version)
 
 # Install the pinned `cargo-audit` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-audit-install installer="install": (_install-tool "cargo-audit" cargo_audit_version installer)
 
 # Validate that the pinned `cargo-audit` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-audit-validate-prereqs: (_check-tool "cargo-audit" cargo_audit_version)
 
 # cargo-bolero is Linux-only: its `bolero-afl` build dependency
@@ -899,121 +901,121 @@ anvil-tool-cargo-audit-validate-prereqs: (_check-tool "cargo-audit" cargo_audit_
 # treat bolero as a no-op rather than a setup failure.
 
 # Install the pinned `cargo-bolero` tool.
-[group("anvil-setup")]
+[private]
 [script("pwsh", "-NoProfile")]
 anvil-tool-cargo-bolero-install installer="install": anvil-toolchain-stable-install
     if (-not $IsLinux) {
         Write-Host 'anvil-tool-cargo-bolero-install: non-Linux host -- skipping (cargo-bolero/libfuzzer is Linux-only)'
         exit 0
     }
-    & just _install-tool-core cargo-bolero {{cargo_bolero_version}} {{installer}}
+    & "{{ just_executable() }}" _install-tool-core cargo-bolero {{cargo_bolero_version}} {{installer}}
     exit $LASTEXITCODE
 
 # Validate that the pinned `cargo-bolero` tool is available.
-[group("anvil-setup")]
+[private]
 [script("pwsh", "-NoProfile")]
 anvil-tool-cargo-bolero-validate-prereqs:
     if (-not $IsLinux) {
         Write-Host 'anvil-tool-cargo-bolero-validate-prereqs: non-Linux host -- skipping (cargo-bolero/libfuzzer is Linux-only)'
         exit 0
     }
-    & just _check-tool cargo-bolero {{cargo_bolero_version}}
+    & "{{ just_executable() }}" _check-tool cargo-bolero {{cargo_bolero_version}}
     exit $LASTEXITCODE
 
 # Install the pinned `cargo-careful` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-careful-install installer="install": (_install-tool "cargo-careful" cargo_careful_version installer)
 
 # Validate that the pinned `cargo-careful` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-careful-validate-prereqs: (_check-tool "cargo-careful" cargo_careful_version)
 
 # Install the pinned `cargo-check-external-types` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-check-external-types-install installer="install": (_install-tool "cargo-check-external-types" cargo_check_external_types_version installer)
 
 # Validate that the pinned `cargo-check-external-types` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-check-external-types-validate-prereqs: (_check-tool "cargo-check-external-types" cargo_check_external_types_version)
 
 # Install the pinned `cargo-coverage-gate` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-coverage-gate-install installer="install": (_install-tool "cargo-coverage-gate" cargo_coverage_gate_version installer)
 
 # Validate that the pinned `cargo-coverage-gate` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-coverage-gate-validate-prereqs: (_check-tool "cargo-coverage-gate" cargo_coverage_gate_version)
 
 # Install the pinned `cargo-delta` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-delta-install installer="install": (_install-tool "cargo-delta" cargo_delta_version installer)
 
 # Validate that the pinned `cargo-delta` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-delta-validate-prereqs: (_check-tool "cargo-delta" cargo_delta_version)
 
 # Install the pinned `cargo-deny` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-deny-install installer="install": (_install-tool "cargo-deny" cargo_deny_version installer)
 
 # Validate that the pinned `cargo-deny` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-deny-validate-prereqs: (_check-tool "cargo-deny" cargo_deny_version)
 
 # Install the pinned `cargo-doc2readme` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-doc2readme-install installer="install": (_install-tool "cargo-doc2readme" cargo_doc2readme_version installer)
 
 # Validate that the pinned `cargo-doc2readme` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-doc2readme-validate-prereqs: (_check-tool "cargo-doc2readme" cargo_doc2readme_version)
 
 # Install the pinned `cargo-each` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-each-install installer="install": (_install-tool "cargo-each" cargo_each_version installer)
 
 # Validate that the pinned `cargo-each` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-each-validate-prereqs: (_check-tool "cargo-each" cargo_each_version)
 
 # Install the pinned `cargo-ensure-no-cyclic-deps` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-ensure-no-cyclic-deps-install installer="install": (_install-tool "cargo-ensure-no-cyclic-deps" cargo_ensure_no_cyclic_deps_version installer)
 
 # Validate that the pinned `cargo-ensure-no-cyclic-deps` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-ensure-no-cyclic-deps-validate-prereqs: (_check-tool "cargo-ensure-no-cyclic-deps" cargo_ensure_no_cyclic_deps_version)
 
 # Install the pinned `cargo-ensure-no-default-features` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-ensure-no-default-features-install installer="install": (_install-tool "cargo-ensure-no-default-features" cargo_ensure_no_default_features_version installer)
 
 # Validate that the pinned `cargo-ensure-no-default-features` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-ensure-no-default-features-validate-prereqs: (_check-tool "cargo-ensure-no-default-features" cargo_ensure_no_default_features_version)
 
 # Install the pinned `cargo-hack` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-hack-install installer="install": (_install-tool "cargo-hack" cargo_hack_version installer)
 
 # Validate that the pinned `cargo-hack` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-hack-validate-prereqs: (_check-tool "cargo-hack" cargo_hack_version)
 
 # Install the pinned `cargo-heather` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-heather-install installer="install": (_install-tool "cargo-heather" cargo_heather_version installer)
 
 # Validate that the pinned `cargo-heather` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-heather-validate-prereqs: (_check-tool "cargo-heather" cargo_heather_version)
 
 # Install the pinned `cargo-llvm-cov` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-llvm-cov-install installer="install": (_install-tool "cargo-llvm-cov" cargo_llvm_cov_version installer)
 
 # Validate that the pinned `cargo-llvm-cov` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-llvm-cov-validate-prereqs: (_check-tool "cargo-llvm-cov" cargo_llvm_cov_version)
 
 # cargo-mutants doesn't build on aarch64-pc-windows-msvc (upstream
@@ -1024,63 +1026,63 @@ anvil-tool-cargo-llvm-cov-validate-prereqs: (_check-tool "cargo-llvm-cov" cargo_
 # target, so the check is effectively a no-op end-to-end there.
 
 # Install the pinned `cargo-mutants` tool.
-[group("anvil-setup")]
+[private]
 [script("pwsh", "-NoProfile")]
 anvil-tool-cargo-mutants-install installer="install": anvil-toolchain-stable-install
     if ($IsWindows -and ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64')) {
         Write-Host 'anvil-tool-cargo-mutants-install: aarch64-pc-windows-msvc -- skipping (winapi build incompat)'
         exit 0
     }
-    & just _install-tool-core cargo-mutants {{cargo_mutants_version}} {{installer}}
+    & "{{ just_executable() }}" _install-tool-core cargo-mutants {{cargo_mutants_version}} {{installer}}
     exit $LASTEXITCODE
 
 # Validate that the pinned `cargo-mutants` tool is available.
-[group("anvil-setup")]
+[private]
 [script("pwsh", "-NoProfile")]
 anvil-tool-cargo-mutants-validate-prereqs:
     if ($IsWindows -and ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64')) {
         Write-Host 'anvil-tool-cargo-mutants-validate-prereqs: aarch64-pc-windows-msvc -- skipping (winapi build incompat)'
         exit 0
     }
-    & just _check-tool cargo-mutants {{cargo_mutants_version}}
+    & "{{ just_executable() }}" _check-tool cargo-mutants {{cargo_mutants_version}}
     exit $LASTEXITCODE
 
 # Install the pinned `cargo-nextest` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-nextest-install installer="install": (_install-tool "cargo-nextest" cargo_nextest_version installer)
 
 # Validate that the pinned `cargo-nextest` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-nextest-validate-prereqs: (_check-tool "cargo-nextest" cargo_nextest_version)
 
 # Install the pinned `cargo-semver-checks` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-semver-checks-install installer="install": (_install-tool "cargo-semver-checks" cargo_semver_checks_version installer)
 
 # Validate that the pinned `cargo-semver-checks` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-semver-checks-validate-prereqs: (_check-tool "cargo-semver-checks" cargo_semver_checks_version)
 
 # Install the pinned `cargo-sort` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-sort-install installer="install": (_install-tool "cargo-sort" cargo_sort_version installer)
 
 # Validate that the pinned `cargo-sort` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-sort-validate-prereqs: (_check-tool "cargo-sort" cargo_sort_version)
 
 # Install the pinned `cargo-spellcheck` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-spellcheck-install installer="install": (_install-tool "cargo-spellcheck" cargo_spellcheck_version installer "anvil-tool-cargo-spellcheck-source-deps-check")
 
 # Validate that the pinned `cargo-spellcheck` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-spellcheck-validate-prereqs: (_check-tool "cargo-spellcheck" cargo_spellcheck_version)
 
 # Install the pinned `cargo-udeps` tool.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-udeps-install installer="install": (_install-tool "cargo-udeps" cargo_udeps_version installer)
 
 # Validate that the pinned `cargo-udeps` tool is available.
-[group("anvil-setup")]
+[private]
 anvil-tool-cargo-udeps-validate-prereqs: (_check-tool "cargo-udeps" cargo_udeps_version)

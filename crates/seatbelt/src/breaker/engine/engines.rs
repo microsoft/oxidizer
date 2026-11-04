@@ -10,7 +10,7 @@ use crate::breaker::constants::ERR_POISONED_LOCK;
 use crate::breaker::{BreakerId, Engine, EngineCore, EngineOptions, EngineTelemetry};
 use crate::utils::TelemetryHelper;
 
-/// Manages circuit breaker engines for different breaker IDs.
+/// Stores a circuit breaker engine for each breaker ID.
 #[derive(Debug)]
 pub(crate) struct Engines {
     default_engine: Arc<Engine>,
@@ -33,17 +33,14 @@ impl Engines {
     }
 
     pub(crate) fn get_engine(&self, key: &BreakerId) -> Arc<Engine> {
-        // Fast path: the default breaker (the common single-breaker configuration, used
-        // whenever no ID provider is configured) is served by a pre-created engine. This
-        // avoids a lock and the map lookup entirely on every call.
+        // A pre-created engine serves the default breaker.
+        // This path does not use a lock or map lookup.
         if key.is_default() {
             return Arc::clone(&self.default_engine);
         }
 
-        // Read-lock path for existing engines (common case). The map is a `BTreeMap`, so a
-        // lookup is a handful of key comparisons rather than a hash of `key`; partitioned
-        // breakers are low-cardinality by design, so this stays cheap and, unlike a hash
-        // map, is not exposed to hash-flooding via request-derived IDs.
+        // Use a read lock for an existing engine.
+        // The `BTreeMap` compares keys and does not hash request-derived IDs.
         {
             let map = self.map.read().expect(ERR_POISONED_LOCK);
             if let Some(engine) = map.get(key) {
@@ -51,7 +48,7 @@ impl Engines {
             }
         }
 
-        // Slow path: acquire write lock to insert a new engine.
+        // Use a write lock to insert a new engine.
         let mut map = self.map.write().expect(ERR_POISONED_LOCK);
         let engine = map
             .entry(key.clone())

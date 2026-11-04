@@ -1,11 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// A macro to generate `Fn` like wrapper types with consistent patterns.
+/// Generates wrapper types for `Fn` values.
 ///
-/// This macro generates a type that wraps a function in an `Arc<dyn Fn...>`,
-/// providing `Clone`, `Debug`, and convenient constructor methods. We need this to allow storing
-/// user-provided functions (e.g., predicates) in a thread-safe, clonable way.
+/// The generated type stores a function in `Arc<dyn Fn...>`.
+/// It implements `Clone` and `Debug` and provides constructor methods.
 ///
 /// # Syntax
 ///
@@ -19,7 +18,7 @@
 /// define_fn_wrapper!(ShouldRetry<Res>(Fn(&Res, ShouldRetryArgs) -> Recovery));
 /// ```
 ///
-/// This generates a `ShouldRetry<Res>` struct with methods:
+/// This invocation generates `ShouldRetry<Res>` with these methods:
 /// - `new<F>(predicate: F) -> Self` where `F: Fn(...) + Send + Sync + 'static`
 /// - `call(&self, args...) -> ReturnType` to invoke the wrapped function
 /// - `Clone` and `Debug` implementations

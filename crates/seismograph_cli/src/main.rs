@@ -52,6 +52,22 @@
 //! Run `seismograph monitor` to capture a running application, or
 //! `seismograph view "C:\captures\capture.seismograph"` to inspect a native
 //! snapshot in the same interactive tabs without connecting to a process.
+//! Live monitoring uses OS-authorized Unix sockets or local Windows named pipes,
+//! not TCP ports or authentication tokens. Regular users can connect to their
+//! own processes; root/elevated administrators can discover and connect across
+//! accessible per-user registries.
+//!
+//! Applications create their registry automatically, without administrator setup.
+//! Unix prefers `$XDG_RUNTIME_DIR/seismograph` and otherwise creates a private,
+//! randomized directory directly under `/tmp`. Windows uses
+//! `%LOCALAPPDATA%\Seismograph\monitor`. Discovery aggregates user registries;
+//! Linux also reads the Unix-socket table in the current network namespace to
+//! locate custom XDG paths. Elevated Windows discovery enumerates registered
+//! user profiles.
+//! Invalid discovery entries are reported as warnings without hiding reachable
+//! applications belonging to other users.
+//! Rebuild both applications and the CLI for monitor protocol version 8; the
+//! former TCP/token protocol is not supported. Offline snapshot files are unchanged.
 //! The offline viewer is read-only: use `Tab` or `1` through `8` to select tabs,
 //! the usual arrow/Enter/Backspace navigation within tabs, and `q` or `Esc` to quit.
 //! Large files load on a worker thread while the terminal remains responsive.

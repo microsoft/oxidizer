@@ -1,79 +1,41 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::rc::{Rc, Weak};
+use crate::{ExecutorShared, TaskCompletion, TaskOptions};
 
-use crate::remote::Sender as RemoteSender;
-use crate::{ExecutorCore, JoinEventLake, JoinHandle, TaskOptions};
-
-/// Represents the set of tasks currently registered with an executor and allows new tasks
-/// to be registered.
+/// A handle that registers tasks with an executor.
 ///
-/// The task set acts like a handle and can be cheaply cloned and used from anywhere on the same
-/// thread as the executor, including from inside the futures of tasks running on the same executor.
-/// Every clone is functionally identical.
+/// You can clone this handle and use each clone on the executor thread. A task
+/// future can use a clone to register another task on the same executor.
 #[derive(Clone, Debug)]
 pub struct TaskSet {
-    // We only keep a weak reference, so even if the owner of this type does something odd, we do
-    // not extend the lifetime of the `Executor`, which is governed by the `Executor` owner.
-    core: Weak<ExecutorCore>,
-
-    // Retained independently so submissions after executor drop can still produce a valid
-    // disconnected join handle.
-    join_events: JoinEventLake,
+    shared: ExecutorShared,
 }
 
 impl TaskSet {
-    pub(crate) fn new(core: &Rc<ExecutorCore>) -> Self {
-        Self {
-            core: Rc::downgrade(core),
-            join_events: core.join_event_lake(),
-        }
+    pub(crate) fn new(core: &ExecutorShared) -> Self {
+        Self { shared: core.clone() }
     }
 
     /// Registers a future and its runtime integration options as a new task.
     ///
-    /// The future will be polled until it completes, after which it will be dropped, unless the
-    /// executor is commanded to shut down, in which case the future may be dropped before it
-    /// completes. A submission after shutdown returns a join handle that resolves to
-    /// [`JoinError`](crate::JoinError). Use [`TaskOptions::default()`] when no execution context
-    /// or placement metadata is required.
-    pub fn add<F, R>(&self, future: F, options: TaskOptions) -> JoinHandle<R>
+    /// The executor polls the future until it completes. Executor shutdown can
+    /// cancel and drop the future before completion. Use [`TaskOptions::default()`]
+    /// when the task needs no observed context or placement metadata.
+    pub fn add<F, R, T>(&self, future: F, options: TaskOptions, completion: T)
     where
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
+        T: TaskCompletion<R>,
     {
-        let Some(core) = self.core.upgrade() else {
-            return self.join_events.disconnected();
-        };
-
-        core.add_task(future, options)
+        self.shared.add_task(future, options, completion);
     }
 
-    /// Registers a task whose result is delivered to a cross-thread receiver.
-    ///
-    /// Arty uses this integration boundary to create a non-[`Send`] future on its destination
-    /// worker while returning a `Send` result handle to the submitting thread. Keeping the
-    /// concrete future at this call site lets the executor store it inline instead of behind a
-    /// `Pin<Box<dyn Future>>`. Obtain `result_tx` from
-    /// [`remote::Pool::channel`](crate::remote::Pool::channel).
-    pub fn add_with_remote_result<F, R>(&self, future: F, options: TaskOptions, result_tx: RemoteSender<R>)
-    where
-        F: IntoFuture<Output = R> + 'static,
-        R: Send + 'static,
-    {
-        let Some(core) = self.core.upgrade() else {
-            return;
-        };
-
-        core.add_remote_task(future, options, result_tx);
-    }
-
-    /// Begins executor shutdown without borrowing executor-owned polling state.
-    pub fn begin_shutdown(&self) {
-        if let Some(core) = self.core.upgrade() {
-            core.request_shutdown();
-        }
+    /// Returns whether this task set's executor is running a cycle on this thread.
+    #[inline]
+    #[must_use]
+    pub fn is_executing(&self) -> bool {
+        crate::executor_context::is_executing(self.shared.wake().thread_id())
     }
 }
 

@@ -23,7 +23,7 @@ _anvil-scheduled-advisories: anvil-scheduled-advisories-validate-prereqs \
     anvil-clippy
 
 # Install prerequisites for the `anvil-scheduled-advisories` recipe.
-[group("anvil-setup")]
+[private]
 anvil-scheduled-advisories-setup installer="install": \
     (anvil-deny-setup installer) \
     (anvil-audit-setup installer) \
@@ -31,7 +31,7 @@ anvil-scheduled-advisories-setup installer="install": \
     (anvil-clippy-setup installer)
 
 # Validate prerequisites for the `anvil-scheduled-advisories` recipe.
-[group("anvil-setup")]
+[private]
 anvil-scheduled-advisories-validate-prereqs: \
     anvil-deny-validate-prereqs \
     anvil-audit-validate-prereqs \

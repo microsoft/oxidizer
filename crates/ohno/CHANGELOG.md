@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.4] - 2026-11-02
+
+- Update the published Tokio test requirement. Use version 0.5.4 for all Ohno packages. Error
+  behavior does not change.
+- Update the requirement for local package `ohno_macros` from `=0.5.3` to `=0.5.4`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
+## [0.5.3] - 2026-10-20
+
+- Refresh published documentation and runtime-analysis annotations without changing the supported API.
+- Update local dependency requirements: ohno_macros =0.5.2 -> 0.5.3.
+
 ## [0.5.2] - 2026-09-10
 
 ### Compatibility

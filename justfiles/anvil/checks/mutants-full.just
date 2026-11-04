@@ -10,6 +10,7 @@
 # workspace regardless of diff.
 
 # Run exhaustive mutation testing across the workspace.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-mutants-full: anvil-mutants-full-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -24,9 +25,9 @@ anvil-mutants-full: anvil-mutants-full-validate-prereqs
 #     cargo-hack and bench are dedicated tools) ---
 
 # Install prerequisites for the `anvil-mutants-full` recipe.
-[group("anvil-setup")]
+[private]
 anvil-mutants-full-setup installer="install": (anvil-tool-cargo-mutants-install installer)
 
 # Validate prerequisites for the `anvil-mutants-full` recipe.
-[group("anvil-setup")]
+[private]
 anvil-mutants-full-validate-prereqs: anvil-tool-cargo-mutants-validate-prereqs

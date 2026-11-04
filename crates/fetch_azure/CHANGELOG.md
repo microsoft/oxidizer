@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.0] - 2026-11-02
+
+- Update the Azure client integration to use Fetch 0.20.0 and Bytesbuf 0.13.0. This release does not
+  change the transport implementation.
+- Update the requirement for local package `bytesbuf` from `0.12.0` to `0.13.0`.
+- Update the requirement for local package `fetch` from `0.19.0` to `0.20.0`.
+- Update the requirement for local package `layered` from `0.3.8` to `0.3.9`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
+## [0.9.0] - 2026-10-20
+
+- The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: bytesbuf ^0.11.0 -> 0.12.0; fetch ^0.18.0 -> 0.19.0; layered ^0.3.7 -> 0.3.8.
+
 ## [0.8.0] - 2026-10-05
 
 - ⚠️ Breaking

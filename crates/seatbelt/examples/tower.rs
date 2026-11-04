@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to combine multiple resilience middleware
-//! using the `seatbelt` crate with Tower's `ServiceBuilder` to create a robust
-//! execution pipeline compatible with the Tower ecosystem.
+//! This example combines Seatbelt middleware with Tower `ServiceBuilder`.
 
 use std::future::poll_fn;
 use std::time::Duration;
@@ -18,12 +16,12 @@ use tower_service::Service;
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    // Shared context for resilience middleware
+    // Create shared context for the middleware.
     let context = ResilienceContext::new(Clock::new_tokio()).name("tower_pipeline");
 
-    // Build a Tower service with retry and timeout middleware using ServiceBuilder.
-    // Layers are applied bottom-to-top: timeout wraps the inner service first,
-    // then retry wraps the timeout layer.
+    // Build a Tower service with retry and timeout middleware.
+    // Tower applies the layers from bottom to top. Timeout wraps the inner
+    // service first. Retry then wraps the timeout layer.
     let mut service = ServiceBuilder::new()
         .layer(
             Retry::layer("my_retry", &context)
@@ -39,16 +37,15 @@ async fn main() -> Result<(), ohno::AppError> {
                 .timeout_error(|_args| app_err!("timeout")),
         )
         .service_fn(|request| async move {
-            // Threshold deliberately set so the random check can never fire,
-            // keeping the example deterministic for CI while preserving the
-            // shape of a realistic "occasionally fails" inner service.
+            // This threshold prevents a random failure.
+            // It keeps the example deterministic in CI.
             if fastrand::i16(0..10) > 10 {
                 bail!("random failure")
             }
             Ok(request)
         });
 
-    // Execute the service using Tower's Service trait
+    // Execute the service through the Tower `Service` trait.
     poll_fn(|cx| service.poll_ready(cx)).await?;
     let output = service.call("value".to_string()).await?;
 

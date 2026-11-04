@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.1] - 2026-11-02
+
+- Update error and test dependencies. This release does not change the TLS source code.
+- Update the requirement for local package `ohno` from `0.5.3` to `0.5.4`.
+- Update the development requirement for `rstest` from `0.27.0` to `0.28.0`.
+
+## [0.5.0] - 2026-10-20
+
+- Add native-TLS endpoint-to-server-name mappings and replace the `TlsBackend::NativeTls` payload with `NativeTlsBackend`.
+- Update local dependency requirements: ohno ^0.5.2 -> 0.5.3.
+
 ## [0.4.1] - 2026-09-10
 
 ### Maintenance

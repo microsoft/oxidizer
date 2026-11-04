@@ -5,32 +5,26 @@ use std::time::Duration;
 
 use crate::retry::Backoff;
 
-/// Default backoff strategy: exponential backoff.
+/// Uses exponential backoff by default.
 ///
-/// Exponential backoff quickly reduces request pressure after failures and
-/// naturally spaces out subsequent attempts. This is the commonly recommended
-/// choice for transient faults in distributed systems and pairs well with jitter
-/// to avoid thundering herds.
+/// Exponential backoff reduces request pressure after failures.
+/// Jitter prevents many clients from retrying at the same time.
 pub(super) const DEFAULT_BACKOFF: Backoff = Backoff::Exponential;
 
-/// Base delay for the backoff schedule; 10 milliseconds by default.
+/// Sets the default base delay to 10 milliseconds.
 ///
-/// This default is optimized for **service-to-service** communication where low
-/// latency is critical and transient failures are typically short-lived.
+/// This value is for low-latency service-to-service calls with short failures.
 ///
-/// For **client-to-service** scenarios (e.g., mobile apps, web frontend), consider
-/// increasing the base delay to 1-2 seconds to reduce load on potentially struggling
-/// services and improve overall system stability.
+/// For client-to-service calls, use 1 to 2 seconds to reduce load on a failing service.
 pub(super) const DEFAULT_BASE_DELAY: Duration = Duration::from_millis(10);
 
-/// Enable jitter by default to de-synchronize clients and reduce contention.
+/// Enables jitter by default so clients retry at different times.
 ///
-/// Randomizing retry delays mitigates correlated bursts and improves tail
-/// latency under contention. See [Exponential Backoff and Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter) for details.
+/// Random retry delays reduce simultaneous retry bursts.
+/// See [Exponential Backoff and Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter).
 pub(super) const DEFAULT_USE_JITTER: bool = true;
 
-/// Default maximum retry attempts: 3.
+/// Sets the default maximum to three retry attempts.
 ///
-/// Three retry attempts is a widely used default in resilience libraries,
-/// providing a balance between recovery opportunity and avoiding excessive delays.
+/// Three retries provide time to recover without a long delay.
 pub(super) const DEFAULT_RETRY_ATTEMPTS: u32 = 3;

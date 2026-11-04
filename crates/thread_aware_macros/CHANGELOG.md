@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.12.2] - 2026-11-02
+
+- Use version 0.12.2 to match the Thread Aware packages. Derive macro behavior does not change.
+- Update the requirement for local package `thread_aware_macros_impl` from `=0.12.1` to `=0.12.2`.
+
+## [0.12.1] - 2026-10-20
+
+- Refresh published macro documentation and classify the macro crate as private API.
+- Update local dependency requirements: thread_aware_macros_impl =0.12.0 -> 0.12.1.
+
 ## [0.12.0] - 2026-09-10
 
 ### Maintenance

@@ -1,13 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Building the handler at the bottom of the pipeline.
+//! Builds the handler at the end of the pipeline.
 //!
-//! [`Dispatch`] owns the transports and whatever is wrapped around them.
-//! Wrapping there rather than at the pipeline is what keeps a wrapper out of
-//! the way: it runs inside retries, so each attempt gets a fresh one, and inside
-//! the attempt logs and metrics, so those record timing and status without lazy
-//! decompression work. They observe the response after its encoding metadata is removed.
+//! [`Dispatch`] owns the transports and their wrappers. It wraps each transport once when it builds
+//! the dispatch pool. The wrapper runs inside retries, so it processes the response from every
+//! attempt. It also runs inside attempt logging and metrics. Those layers receive the response
+//! after removal of its encoding metadata, and their timing excludes lazy decompression work.
 
 use http_extensions::HttpBodyBuilder;
 use opentelemetry::metrics::Meter;
@@ -25,8 +24,7 @@ pub(crate) fn create_dispatch_handler(
 ) -> Dispatch {
     let decompression = decompression::layer(&options, body_builder);
 
-    // Each pooled transport is wrapped in turn, so no pool member is left
-    // behaving differently from the rest.
+    // Apply the same wrapper to every transport in the pool.
     let mut create = |index: usize| {
         let handler = transport.create_transport_handler(options.clone(), meter.clone(), PoolIndex::new(index));
 
@@ -43,10 +41,9 @@ pub(crate) fn create_dispatch_handler(
     Dispatch::new(mode, options.transport.request_filter)
 }
 
-/// Decompressing response bodies when a compression implementation is compiled in.
+/// Decompresses response bodies when the build includes a compression implementation.
 ///
-/// The two halves keep the conditional compilation in one place, so the builder
-/// above reads the same either way.
+/// The two implementations keep conditional compilation out of the builder.
 #[cfg(any(
     test,
     feature = "compression-gzip",
@@ -84,7 +81,7 @@ mod decompression {
     }
 }
 
-/// The same two halves for a build that links no compression implementation.
+/// Decompression support for a build without a compression implementation.
 #[cfg(not(any(
     test,
     feature = "compression-gzip",
@@ -96,7 +93,7 @@ mod decompression {
     use super::{ClientOptions, HttpBodyBuilder};
     use crate::handlers::TransportHandler;
 
-    /// There is nothing to configure, so there is nothing to carry.
+    /// Returns an empty layer because this build cannot decompress responses.
     pub(super) type Layer = std::convert::Infallible;
 
     #[cfg_attr(test, mutants::skip)] // Trivial adapter, inactive in the all-features mutation suite.

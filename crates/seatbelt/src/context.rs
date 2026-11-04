@@ -10,10 +10,10 @@ use crate::TelemetryString;
 
 pub(crate) const DEFAULT_CONTEXT_NAME: &str = "default";
 
-/// Shared configuration and dependencies for a pipeline of resilience middleware.
+/// Holds shared data for a resilience pipeline.
 ///
-/// Pass a single `ResilienceContext` to all middleware in a pipeline (retry, timeout,
-/// circuit breaker, etc.) to share a clock and telemetry configuration.
+/// Pass one `ResilienceContext` to all middleware in a pipeline.
+/// The middleware then shares one clock and one telemetry configuration.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ResilienceContext<In, Out> {
@@ -36,7 +36,7 @@ impl<In, Out> ThreadAware for ResilienceContext<In, Out> {
 }
 
 impl<In, Out> ResilienceContext<In, Out> {
-    /// Create a context with a clock. Initializes with `name = "default"`.
+    /// Creates a context with a clock and the name `default`.
     pub fn new(clock: impl AsRef<Clock>) -> Self {
         Self {
             clock: clock.as_ref().clone(),
@@ -49,7 +49,7 @@ impl<In, Out> ResilienceContext<In, Out> {
         }
     }
 
-    /// Get the configured clock for timing operations.
+    /// Returns the clock for timing operations.
     #[must_use]
     #[cfg(any(
         feature = "retry",
@@ -63,14 +63,16 @@ impl<In, Out> ResilienceContext<In, Out> {
         &self.clock
     }
 
-    /// Set the pipeline name for telemetry correlation. Prefer `snake_case`.
+    /// Sets the pipeline name for telemetry.
+    ///
+    /// Use `snake_case` for the name.
     #[must_use]
     pub fn name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
         self.name = name.into();
         self
     }
 
-    /// Enable metrics reporting with the given OpenTelemetry meter provider.
+    /// Enables metrics through the specified OpenTelemetry meter provider.
     #[must_use]
     #[cfg(any(feature = "metrics", test))]
     pub fn use_metrics(self, provider: &dyn opentelemetry::metrics::MeterProvider) -> Self {
@@ -80,7 +82,7 @@ impl<In, Out> ResilienceContext<In, Out> {
         }
     }
 
-    /// Enable structured logging for resilience events.
+    /// Enables structured logs for resilience events.
     #[must_use]
     #[cfg(any(feature = "logs", test))]
     pub fn use_logs(self) -> Self {
@@ -141,11 +143,7 @@ impl<In, Out> Clone for ResilienceContext<In, Out> {
 #[cfg(test)]
 mod tests {
 
-    use std::fmt::Debug;
-
     use super::*;
-
-    static_assertions::assert_impl_all!(ResilienceContext<(), ()>: Send, Sync, ThreadAware, Debug, Clone);
 
     #[test]
     fn context_can_be_relocated_between_numa_nodes() {
@@ -162,7 +160,7 @@ mod tests {
         let ctx = ResilienceContext::<(), ()>::new(clock);
         let telemetry = ctx.create_telemetry("test".into());
         assert_eq!(telemetry.pipeline_name.as_ref(), DEFAULT_CONTEXT_NAME);
-        // Ensure clock reference behaves (timestamp monotonic relative behaviour not required, just accessible)
+        // Make sure that the clock is accessible. Relative timestamps do not need to be monotonic.
         let _ = ctx.get_clock().system_time();
     }
 

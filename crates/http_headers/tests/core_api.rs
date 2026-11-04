@@ -538,13 +538,14 @@ fn content_length_decodes_single_repeated_and_missing_lines() {
 #[cfg(feature = "http")]
 #[test]
 fn publicly_constructible_names_convert_without_panicking() {
+    let longest_sample = if cfg!(miri) { 64 } else { (1 << 16) - 1 };
     let names = FieldName::ALL_KNOWN
         .iter()
         .cloned()
         .chain([
             FieldName::from_static("x-trace-id"),
             FieldName::try_from_bytes(b"X-Vendor-Field").expect("valid name"),
-            FieldName::try_from_bytes(vec![b'a'; (1 << 16) - 1]).expect("valid name"),
+            FieldName::try_from_bytes(vec![b'a'; longest_sample]).expect("valid name"),
             FieldName::from(&HeaderName::from_lowercase(b"x\"y").expect("http admits `\"`")),
         ])
         .collect::<Vec<_>>();
@@ -575,6 +576,10 @@ fn http_names_holding_a_quote_convert_without_panicking() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "the 64-KiB public length contract is covered natively and by cargo careful; compact custom names retain conversion coverage under Miri"
+)]
 fn field_names_respect_the_http_length_limit() {
     const MAX: usize = (1 << 16) - 1;
     static OVER_LONG: [u8; MAX + 1] = [b'a'; MAX + 1];

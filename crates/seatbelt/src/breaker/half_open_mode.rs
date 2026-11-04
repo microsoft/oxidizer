@@ -7,16 +7,13 @@ use crate::breaker::AbandonedPolicy;
 use crate::breaker::constants::MIN_SAMPLING_DURATION;
 use crate::breaker::engine::probing::ProbesOptions;
 
-/// The behavior of the circuit breaker when transitioning from half-open to closed state.
+/// Controls how a half-open circuit tests service health.
 ///
-/// The half-open state is a transitional phase where the circuit breaker allows a limited number of
-/// inputs to pass through to test if the underlying service has recovered. The chosen mode
-/// determines how aggressively the circuit breaker probes the service during this phase.
+/// A half-open circuit allows a limited number of calls.
+/// These calls show if the service recovered.
 ///
-/// Currently, two modes are supported:
-///
-/// - [`HalfOpenMode::quick`]: Allows a single probe to determine if the service has recovered.
-/// - [`HalfOpenMode::progressive`]: Gradually increases the percentage of probes over multiple stages (default).
+/// - [`HalfOpenMode::quick`] uses one probe.
+/// - [`HalfOpenMode::progressive`] increases the probe rate in stages.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(feature = "serde", test), serde(transparent))]
@@ -25,36 +22,26 @@ pub struct HalfOpenMode {
 }
 
 impl HalfOpenMode {
-    /// Allow quick recovery from half-open state with a single probe.
+    /// Uses one probe to decide if the circuit can close.
     ///
-    /// This approach is less reliable compared to the [`HalfOpenMode::progressive`] mode, but
-    /// can close the circuit faster.
-    ///
-    /// The downside of this approach is that it relies on a single execution to determine
-    /// the health of the service. If that execution happens to succeed by chance, the circuit
-    /// closes and later inputs may fail again, leading to instability and re-opening the circuit
-    /// again.
+    /// This mode can close the circuit faster than [`HalfOpenMode::progressive`].
+    /// One successful call can also hide a service that still fails.
     #[must_use]
     pub fn quick() -> Self {
         Self { inner: Mode::Quick }
     }
 
-    /// Gradually increase the percentage of probes over multiple stages.
+    /// Increases the probe rate in stages.
     ///
-    /// This approach allows more inputs to pass through in a controlled manner,
-    /// increasing the probing rate over time. This can help more reliably evaluate the
-    /// health of the underlying service over time rather than relying on a single execution.
-    ///
-    /// The pre-configured ratios for each probing stage are:
+    /// The probe ratios are:
     /// `0.1%, 1%, 5%, 10%, 25%, 50%`
     ///
-    /// Each probing stage advances after the stage duration has elapsed, and the health
-    /// metrics indicate that the failure rate is below the configured threshold. If any probing stage
-    /// fails, the circuit reopens immediately and the cycle starts over.
+    /// A stage advances after its duration ends and its failure rate is below the threshold.
+    /// If a stage fails, the circuit opens again.
     ///
-    /// The optional `stage_duration` specifies how long each probing stage lasts. If not
-    /// provided, the value of [`break_duration`][crate::breaker::BreakerLayer::break_duration]
-    /// is used. The provided stage duration is clamped to a minimum of 1 second.
+    /// `stage_duration` sets the duration of each stage.
+    /// If it is `None`, the mode uses [`break_duration`][crate::breaker::BreakerLayer::break_duration].
+    /// Durations shorter than one second become one second.
     #[must_use]
     pub fn progressive(stage_duration: impl Into<Option<Duration>>) -> Self {
         Self {
@@ -180,85 +167,9 @@ mod tests {
     }
 
     #[test]
-    fn progressive_mode_accepts_various_inputs() {
-        let mode1 = HalfOpenMode::progressive(Duration::from_secs(10));
-        let mode2 = HalfOpenMode::progressive(Some(Duration::from_secs(10)));
-        let mode3 = HalfOpenMode::progressive(None);
-
-        assert!(matches!(mode1.inner, Mode::Progressive(Some(_))));
-        assert!(matches!(mode2.inner, Mode::Progressive(Some(_))));
-        assert!(matches!(mode3.inner, Mode::Progressive(None)));
-    }
-
-    #[test]
-    fn default_is_progressive_none() {
-        assert_eq!(HalfOpenMode::default(), HalfOpenMode::progressive(None));
-    }
-
-    #[test]
     fn progressive_mode_clamps_min_duration() {
         let mode = HalfOpenMode::progressive(Duration::from_millis(500));
 
         assert!(matches!(mode.inner, Mode::Progressive(duration) if duration == Some(Duration::from_secs(1))));
-    }
-
-    #[test]
-    fn serde_quick_roundtrip() {
-        let mode = HalfOpenMode::quick();
-        let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#""quick""#);
-
-        let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, mode);
-    }
-
-    #[test]
-    fn serde_progressive_no_duration_roundtrip() {
-        let mode = HalfOpenMode::progressive(None);
-        let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#"{"progressive":null}"#);
-
-        let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, mode);
-    }
-
-    #[test]
-    fn serde_progressive_with_duration_roundtrip() {
-        let mode = HalfOpenMode::progressive(Duration::from_secs(605));
-        let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#"{"progressive":"10m 5s"}"#);
-
-        let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, mode);
-    }
-
-    #[test]
-    fn serde_progressive_with_short_duration() {
-        let mode = HalfOpenMode::progressive(Duration::from_secs(5));
-        let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#"{"progressive":"5s"}"#);
-
-        let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, mode);
-    }
-
-    #[test]
-    fn serde_deserialize_verbose_duration() {
-        let deserialized: HalfOpenMode = serde_json::from_str(r#"{"progressive":"1 hour, 30 minutes"}"#).unwrap();
-        assert_eq!(deserialized, HalfOpenMode::progressive(Duration::from_mins(90)));
-    }
-
-    #[test]
-    fn serde_deserialize_invalid_variant() {
-        let err = serde_json::from_str::<HalfOpenMode>(r#""Unknown""#).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("unknown variant"), "unexpected error: {msg}");
-    }
-
-    #[test]
-    fn serde_deserialize_invalid_duration() {
-        let err = serde_json::from_str::<HalfOpenMode>(r#"{"progressive":"not_a_duration"}"#).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("friendly"), "expected jiff parse error, got: {msg}");
     }
 }

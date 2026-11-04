@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Runtime telemetry for Rust applications.
 //!
@@ -35,17 +36,46 @@
 //! ```
 //!
 //! Inspect saved snapshots with `seismograph view` from the
-//! [Seismograph CLI](https://crates.io/crates/seismograph_cli). For live access,
-//! enable the `monitor` feature and start a
-//! [`Monitor`](https://docs.rs/seismograph/latest/seismograph/monitor/struct.Monitor.html),
-//! keeping it alive while the application runs, then connect with
-//! `seismograph monitor`.
+//! [Seismograph CLI](https://crates.io/crates/seismograph_cli).
+//!
+//! # Live monitoring
+//!
+//! Applications built with the `monitor` feature can publish an OS-authorized local
+//! endpoint for the `seismograph monitor` TUI. Keep the returned monitor alive
+//! for as long as local control should remain available. The owning user and
+//! root/elevated administrators can connect without a token. Startup creates
+//! the user's private registry automatically; no administrator setup is needed.
+//! Unix prefers `$XDG_RUNTIME_DIR/seismograph`, with a private randomized `/tmp`
+//! fallback. Windows uses the user's local application-data directory.
+//! Pass a `seismograph_protocol::io::MonitorIo` to `Builder::io` to select
+//! the monitor's identity, transport, discovery, persistence, and clock
+//! capability. Omitting it preserves native I/O; `seismograph_protocol`'s
+//! `test-util` feature provides an isolated in-memory implementation for
+//! application tests without host registry setup.
+//!
+//! ```no_run
+//! # #[cfg(feature = "monitor")]
+//! # {
+//! let _monitor = seismograph::monitor::Monitor::builder()
+//!     .name("worker")
+//!     .instance("west-europe")
+//!     .start()
+//!     .unwrap();
+//! # }
+//! ```
+//!
+//! # Features
+//!
+//! - **`monitor`**: Enables the OS-authorized local monitor server.
+//! - **`test-util`**: Enables `monitor`, the protocol's mock I/O controls, and
+//!   `monitor::Builder::isolated` for native tests using a temporary registry.
 
 use std::fmt;
 use std::path::PathBuf;
 
-/// Localhost monitor server.
+/// OS-authorized local monitor server.
 #[cfg(feature = "monitor")]
+#[cfg_attr(docsrs, doc(cfg(feature = "monitor")))]
 pub mod monitor;
 /// Event types.
 pub mod recorder;

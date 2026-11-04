@@ -4,7 +4,7 @@
 [package]
 name = "fetch_winhttp_impl"
 description = "Implementation of the fetch_winhttp WinHTTP transport (Windows only)."
-version = "0.3.0"
+version = "0.5.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "client", "winhttp", "windows"]
 categories = ["network-programming", "web-programming::http-client"]
@@ -16,6 +16,9 @@ license.workspace = true
 homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp_impl"
+
+[package.metadata.release-plan]
+private-api = true
 
 [package.metadata.cargo_check_external_types]
 # Implementation crate. Its public surface exists only so that the `fetch_winhttp`
@@ -110,6 +113,7 @@ futures = { workspace = true, features = ["std"] }
 mockall = { workspace = true }
 mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }
+performables = { path = "../performables" }
 static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
 tick = { path = "../tick", features = ["test-util"] }

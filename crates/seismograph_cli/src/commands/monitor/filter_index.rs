@@ -601,6 +601,7 @@ mod tests {
                 unknown: 0,
             }
         );
+        assert_eq!(filtered.allocations.as_ref().unwrap().retained_events, 1);
         assert_eq!(
             filtered
                 .allocations

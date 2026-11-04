@@ -3,12 +3,12 @@
 
 //! Type state markers for builder patterns.
 
-/// A flag indicating that the required property is set.
+/// Marks a required property as set.
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct Set;
 
-/// A flag indicating that the required property has not been set.
+/// Marks a required property as not set.
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct NotSet;

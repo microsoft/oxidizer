@@ -18,20 +18,19 @@ use crate::typestates::NotSet;
 use crate::utils::EnableIf;
 use crate::{RecoveryInfo, RecoveryKind};
 
-/// Applies retry logic to service execution for transient error handling.
+/// Retries service calls after recoverable output.
 ///
-/// `Retry` wraps an inner [`Service`] and automatically retries failed operations
-/// based on configurable recovery classification, backoff strategies, and delay generation.
-/// This middleware is designed to be used across services, applications, and libraries
-/// to handle transient failures gracefully.
+/// `Retry` wraps an inner [`Service`].
+/// Recovery classification decides whether the middleware retries an output.
+/// Backoff configuration sets the delay before each retry.
 ///
-/// This middleware requires input cloning capabilities and recovery classification to determine
-/// retry eligibility.
+/// The middleware requires a way to create input for retries.
+/// It also requires recovery classification.
 ///
-/// Retry is configured by calling [`Retry::layer`] and using the
-/// builder methods on the returned [`RetryLayer`][crate::retry::RetryLayer] instance.
+/// Call [`Retry::layer`] to create a [`RetryLayer`][crate::retry::RetryLayer].
+/// Use its builder methods to configure retries.
 ///
-/// For comprehensive examples and usage patterns, see the [retry module][crate::retry] documentation.
+/// See the [retry module][crate::retry] for examples.
 #[derive(Debug)]
 pub struct Retry<In, Out, S> {
     pub(super) shared: Arc<RetryShared<In, Out>>,
@@ -40,7 +39,7 @@ pub struct Retry<In, Out, S> {
 
 /// Shared configuration for [`Retry`] middleware.
 ///
-/// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+/// An `Arc` stores this value so that cloning the service is inexpensive.
 #[derive(Debug)]
 pub(crate) struct RetryShared<In, Out> {
     pub(crate) clock: Clock,
@@ -66,10 +65,10 @@ impl<In, Out, S: Clone> Clone for Retry<In, Out, S> {
 }
 
 impl<In, Out> Retry<In, Out, ()> {
-    /// Creates a new retry layer with the specified name and options.
+    /// Creates a retry layer with the specified name and context.
     ///
-    /// Returns a [`RetryLayer`][crate::retry::RetryLayer] that must be configured with required parameters
-    /// before it can be used to build a retry service.
+    /// Set the required properties on the returned [`RetryLayer`][crate::retry::RetryLayer]
+    /// before you build a retry service.
     pub fn layer(
         name: impl Into<std::borrow::Cow<'static, str>>,
         context: &crate::ResilienceContext<In, Out>,

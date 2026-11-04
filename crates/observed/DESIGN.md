@@ -198,6 +198,10 @@ Rust services and libraries need structured telemetry that is:
 
 ### Sink
 
+External sources can call `Sink::is_interested` with an event description before collecting fields.
+This independent probe aggregates processor interest without sampling, construction, timestamps, or enrichment lookup.
+Its answer is not a delivery guarantee: emission makes its own decisions, and callers must not cache query results across events.
+
 A **Sink** is a composable event dispatcher identified by a `SinkId`. It is the unit of telemetry configuration - each sink owns:
 
 - One or more **processors** (`EventProcessor`), each targeting one destination and owning its own `RedactionEngine` and any OTel providers it needs.
@@ -206,7 +210,7 @@ A **Sink** is a composable event dispatcher identified by a `SinkId`. It is the 
 - An optional **event sampler**, which decides whether that Sink's processors receive the event before they are asked. Either way, a processor
   receives only the events it is interested in.
 
-Sinks are plain values: construct one with `Sink::new`, clone it cheaply, and pass it around. `emit!()` always takes a sink as its first argument and
+Sinks are plain values: construct one with `Sink::builder(id).build()`, clone it cheaply, and pass it around. `emit!()` always takes a sink as its first argument and
 dispatches through that sink alone. To fan one `emit!()` out to several destinations, combine
 sinks with `Sink::composite`, which flattens to a list of leaves and dispatches through each in turn.
 
@@ -295,7 +299,7 @@ Field-level attributes control routing and redaction. By default, every field is
 #### SinkId
 
 A `SinkId` is a lightweight, `Copy` identifier for a sink. It wraps a `&'static str` label and can be defined as a `const` / `static` item.
-Two ids are equal when their labels are equal, comparing the string contents. A sink built as `Sink::new("app", …)` is therefore targetable by an
+Two ids are equal when their labels are equal, comparing the string contents. A sink built with `Sink::builder("app")` is therefore targetable by an
 independently declared `static APP: SinkId = SinkId::new("app")`, which is what makes `enrich_for(&sink, APP, …)` usable across crate boundaries.
 
 #### Sink

@@ -189,3 +189,5 @@ async fn clone_service_works_independently(#[case] use_tower: bool) {
     assert_eq!(result1, Ok("processed:original".to_string()));
     assert_eq!(result2, Ok("processed:cloned".to_string()));
 }
+
+testing_aids::init_tracing!();

@@ -1,16 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Timeout resilience middleware for services, applications, and libraries.
+//! Timeout middleware for services, applications, and libraries.
 //!
-//! This module provides timeout functionality to cancel long-running operations and prevent
-//! services from hanging indefinitely when processing requests. The primary types are
-//! [`Timeout`] and [`TimeoutLayer`]:
+//! This module cancels operations that take too long.
+//! It provides these main types:
 //!
-//! - [`Timeout`] is the middleware that wraps an inner service and enforces timeout behavior
-//! - [`TimeoutLayer`] is used to configure and construct the timeout middleware
+//! - [`Timeout`] wraps an inner service and applies the timeout.
+//! - [`TimeoutLayer`] configures and creates the timeout middleware.
 //!
-//! # Quick Start
+//! # Quick start
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -38,57 +37,55 @@
 //!
 //! # Configuration
 //!
-//! The [`TimeoutLayer`] uses a type state pattern to enforce that all required properties are
-//! configured before the layer can be built. This compile-time safety ensures that you cannot
-//! accidentally create a timeout layer without properly specifying the timeout duration
-//! and the timeout output generator:
+//! [`TimeoutLayer`] uses the type state pattern.
+//! A type state records builder state in the type system.
+//! The layer cannot build until you set these required properties:
 //!
-//! - [`timeout_output`][TimeoutLayer::timeout_output] or [`timeout_error`][TimeoutLayer::timeout_error]: Required function to generate output when timeout occurs
-//! - [`timeout`][TimeoutLayer::timeout]: Required timeout duration for operations
+//! - [`timeout_output`][TimeoutLayer::timeout_output] or [`timeout_error`][TimeoutLayer::timeout_error] creates output after a timeout.
+//! - [`timeout`][TimeoutLayer::timeout] sets the time limit.
 //!
-//! Each timeout layer requires an identifier for telemetry purposes. This identifier should use
-//! `snake_case` naming convention to maintain consistency across the codebase.
+//! Each timeout layer requires an identifier for telemetry.
+//! Use `snake_case` for this identifier.
 //!
-//! The default timeout is configured via [`TimeoutLayer::timeout`]. You can override that
-//! per request with [`TimeoutLayer::timeout_override`].
+//! Set the default timeout with [`TimeoutLayer::timeout`].
+//! Override it for one request with [`TimeoutLayer::timeout_override`].
 //!
 //! # Defaults
 //!
-//! The timeout middleware uses the following default values when optional configuration is not provided:
+//! The timeout middleware uses these values when you do not provide optional configuration:
 //!
-//! | Parameter | Default Value | Description | Configured By |
+//! | Parameter | Default value | Description | Set by |
 //! |-----------|---------------|-------------|---------------|
-//! | Timeout duration | `None` (required) | Maximum duration to wait for operation completion | [`timeout`][TimeoutLayer::timeout] |
-//! | Timeout output | `None` (required) | Output value to return when timeout occurs | [`timeout_output`][TimeoutLayer::timeout_output], [`timeout_error`][TimeoutLayer::timeout_error] |
-//! | Timeout override | `None` | Uses default timeout for all requests | [`timeout_override`][TimeoutLayer::timeout_override] |
-//! | On timeout callback | `None` | No observability by default | [`on_timeout`][TimeoutLayer::on_timeout] |
-//! | Enable condition | Always enabled | Timeout protection is applied to all requests | [`enable_if`][TimeoutLayer::enable_if], [`enable_always`][TimeoutLayer::enable_always], [`disable`][TimeoutLayer::disable] |
+//! | Timeout duration | `None` (required) | Longest time to wait for an operation | [`timeout`][TimeoutLayer::timeout] |
+//! | Timeout output | `None` (required) | Output to return after a timeout | [`timeout_output`][TimeoutLayer::timeout_output], [`timeout_error`][TimeoutLayer::timeout_error] |
+//! | Timeout override | `None` | Uses the default timeout for all requests | [`timeout_override`][TimeoutLayer::timeout_override] |
+//! | Timeout callback | `None` | Does not run a callback | [`on_timeout`][TimeoutLayer::on_timeout] |
+//! | Enable condition | Always enabled | Applies a timeout to all requests | [`enable_if`][TimeoutLayer::enable_if], [`enable_always`][TimeoutLayer::enable_always], [`disable`][TimeoutLayer::disable] |
 //!
-//! Unlike other middleware, timeout requires explicit configuration of both the timeout duration
-//! and the output generator function, as there are no reasonable universal defaults for these values.
+//! You must set the timeout duration and output function.
+//! These values do not have defaults that work for all services.
 //!
-//! # Thread Safety
+//! # Thread safety
 //!
-//! The [`Timeout`] type is thread-safe and implements both `Send` and `Sync` as enforced by
-//! the `Service` trait it implements. This allows timeout middleware to be safely shared
-//! across multiple threads and used in concurrent environments.
+//! [`Timeout`] implements `Send` and `Sync` as required by its `Service` implementation.
+//! You can share the middleware across threads.
 //!
 //! # Telemetry
 //!
 //! ## Metrics
 //!
-//! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted when the inner service does not complete within the configured timeout duration
-//! - **Attributes**:
+//! - Metric: `resilience.event` (counter)
+//! - Emission: When the inner service does not finish before the timeout
+//! - Attributes:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Timeout identifier from [`Timeout::layer`]
-//!   - `resilience.event.name`: Always `timeout`
+//!   - `resilience.event.name`: `timeout`
 //!
 //! # Examples
 //!
-//! ## Basic Usage
+//! ## Basic use
 //!
-//! This example demonstrates the basic usage of configuring and using timeout middleware.
+//! This example configures and uses timeout middleware.
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -97,25 +94,24 @@
 //! # use seatbelt::ResilienceContext;
 //! # use seatbelt::timeout::Timeout;
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//! // Define common options for resilience middleware. The clock is runtime-specific and
-//! // must be provided. See its documentation for details.
+//! // Create shared middleware configuration with a clock for the runtime.
 //! let context = ResilienceContext::new(&clock);
 //!
 //! let stack = (
 //!     Timeout::layer("my_timeout", &context)
-//!         // Required: timeout middleware needs to know what output to return when timeout occurs
+//!         // Create the output to return after a timeout.
 //!         .timeout_output(|args| {
 //!             format!("timeout error, duration: {}ms", args.timeout().as_millis())
 //!         })
-//!         // Required: timeout duration must be set
+//!         // Set the timeout duration.
 //!         .timeout(Duration::from_secs(30)),
 //!     Execute::new(execute_unreliable_operation),
 //! );
 //!
-//! // Build the service
+//! // Build the service.
 //! let service = stack.into_service();
 //!
-//! // Execute the service
+//! // Execute the service.
 //! let result = service.execute("quick".to_string()).await;
 //! # let _result = result;
 //! # Ok(())
@@ -124,10 +120,9 @@
 //! # async fn execute_unreliable_operation(input: String) -> String { input }
 //! ```
 //!
-//! ## Advanced Usage
+//! ## Advanced use
 //!
-//! This example demonstrates advanced usage of the timeout middleware, including working with
-//! Result-based outputs, custom configurations, and timeout overrides.
+//! This example uses `Result` output, custom configuration, and timeout overrides.
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -137,33 +132,33 @@
 //! # use seatbelt::ResilienceContext;
 //! # use seatbelt::timeout::Timeout;
 //! # async fn example(clock: Clock) -> Result<(), io::Error> {
-//! // Define common options for resilience middleware.
+//! // Create shared middleware configuration.
 //! let context = ResilienceContext::new(&clock);
 //!
 //! let stack = (
 //!     Timeout::layer("my_timeout", &context)
-//!         // Return an error for Result outputs on timeout
+//!         // Return an error after a timeout.
 //!         .timeout_error(|args| io::Error::new(io::ErrorKind::TimedOut, "request timed out"))
-//!         // Default timeout
+//!         // Set the default timeout.
 //!         .timeout(Duration::from_secs(30))
-//!         // Callback for when a timeout occurs
+//!         // Run a callback after a timeout.
 //!         .on_timeout(|_output: &Result<String, io::Error>, args| {
 //!             println!("timeout occurred after {}ms", args.timeout().as_millis());
 //!         })
-//!         // Provide per-input timeout overrides (fallback to default on None)
+//!         // Override the timeout for selected input. Use the default for `None`.
 //!         .timeout_override(|input: &String, args| {
 //!             match input.as_str() {
-//!                 "quick" => Some(Duration::from_secs(5)), // override
+//!                 "quick" => Some(Duration::from_secs(5)), // Use a shorter timeout.
 //!                 "slow" => Some(Duration::from_secs(60)),
-//!                 _ => None, // use default (args.default_timeout())!
+//!                 _ => None, // Use the default from `args.default_timeout()`.
 //!             }
 //!         })
-//!         // Optionally disable timeouts for some inputs
+//!         // Disable timeouts for selected input.
 //!         .enable_if(|input: &String| !input.starts_with("bypass_")),
 //!     Execute::new(execute_unreliable_operation),
 //! );
 //!
-//! // Build and execute the service
+//! // Build and execute the service.
 //! let service = stack.into_service();
 //! let result = service.execute("quick".to_string()).await?;
 //! # let _result = result;

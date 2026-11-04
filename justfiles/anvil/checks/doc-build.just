@@ -11,11 +11,12 @@
 # crate that wasn't itself modified.
 
 # Build documentation for required workspace packages.
+[group("anvil")]
 [arg("open", long, value="true")]
 [script("pwsh", "-NoProfile")]
 anvil-doc-build open="false": anvil-doc-build-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
-    $include = (& "{{ just_executable() }}" _anvil-impact-include required)
+    $include = (& "{{ just_executable() }}" _anvil-impact-exclude required)
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
     if ($include -eq '--skip') { Write-Host 'anvil-doc-build: no affected packages; skipping'; exit 0 }
@@ -29,9 +30,9 @@ anvil-doc-build open="false": anvil-doc-build-validate-prereqs anvil-impact
 # rely on it being present everywhere anvil runs.
 
 # Install prerequisites for the `anvil-doc-build` recipe.
-[group("anvil-setup")]
+[private]
 anvil-doc-build-setup installer="install": anvil-toolchain-stable-install
 
 # Validate prerequisites for the `anvil-doc-build` recipe.
-[group("anvil-setup")]
+[private]
 anvil-doc-build-validate-prereqs: anvil-tool-rustc-validate-prereqs

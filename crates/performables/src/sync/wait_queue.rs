@@ -1,15 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::collections::VecDeque;
 use std::pin::pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll, Wake, Waker};
+use std::thread::{Thread, current, park, park_timeout};
 use std::time::{Duration, Instant};
 
+use crate::sync::raw_mutex::{RawMutex as Mutex, RawMutexGuard};
+use crate::sync::slot_list::SlotList;
+
 #[derive(Debug)]
-struct ThreadWaker(std::thread::Thread);
+struct ThreadWaker(Thread);
 
 impl Wake for ThreadWaker {
     fn wake(self: Arc<Self>) {
@@ -18,42 +21,92 @@ impl Wake for ThreadWaker {
 }
 
 pub(super) fn block_on<F: Future>(future: F) -> F::Output {
-    let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
+    let waker = Waker::from(Arc::new(ThreadWaker(current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
     #[cfg(test)]
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = test_deadline();
     loop {
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return output,
             Poll::Pending => {
                 #[cfg(not(test))]
-                std::thread::park();
+                park();
                 #[cfg(test)]
-                {
-                    let remaining = deadline
-                        .checked_duration_since(Instant::now())
-                        .expect("test future must make progress before the deadline");
-                    std::thread::park_timeout(remaining);
-                }
+                test_park(deadline);
             }
         }
     }
 }
 
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn test_deadline() -> Option<Instant> {
+    (!testing_aids::is_mutation_testing()).then(|| Instant::now() + Duration::from_secs(2))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test watchdog; mutation runs deliberately park without a deadline.
+fn test_park(deadline: Option<Instant>) {
+    if let Some(deadline) = deadline {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .expect("test future must make progress before the deadline");
+        park_timeout(remaining);
+    } else {
+        park();
+    }
+}
+
 pub(super) fn block_on_timeout<F: Future>(future: F, timeout: Duration) -> Option<F::Output> {
-    let Some(deadline) = Instant::now().checked_add(timeout) else {
-        return Some(block_on(future));
-    };
-    let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
+    block_on_until(future, Timeout::new(timeout))
+}
+
+/// An elapsed-time budget that does not overflow when the duration exceeds Instant's range.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Timeout {
+    started: Instant,
+    duration: Duration,
+}
+
+impl Timeout {
+    pub(super) fn new(duration: Duration) -> Self {
+        Self {
+            started: Instant::now(),
+            duration,
+        }
+    }
+
+    pub(super) fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+
+    pub(super) fn remaining_after(&self, elapsed: Duration) -> Option<Duration> {
+        let remaining = self.duration.saturating_sub(elapsed);
+        // Windows reserves u32::MAX milliseconds for infinity; keep every park finite.
+        let maximum_park = Duration::from_millis(u64::from(u32::MAX - 1));
+        (!remaining.is_zero()).then_some(remaining.min(maximum_park))
+    }
+
+    fn remaining(&self) -> Option<Duration> {
+        self.remaining_after(self.elapsed())
+    }
+}
+
+/// Keeps readiness probes inside the original finite budget; readiness wins at expiry.
+pub(super) fn block_on_until<F: Future>(future: F, timeout: Timeout) -> Option<F::Output> {
+    block_on_until_with(future, || timeout.remaining())
+}
+
+fn block_on_until_with<F: Future>(future: F, mut remaining: impl FnMut() -> Option<Duration>) -> Option<F::Output> {
+    let waker = Waker::from(Arc::new(ThreadWaker(current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
     loop {
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return Some(output),
             Poll::Pending => {
-                let remaining = deadline.checked_duration_since(Instant::now())?;
-                std::thread::park_timeout(remaining);
+                park_timeout(remaining()?);
             }
         }
     }
@@ -63,6 +116,7 @@ pub(super) fn block_on_timeout<F: Future>(future: F, timeout: Duration) -> Optio
 pub(super) struct Waiter {
     active: AtomicBool,
     queued: AtomicBool,
+    position: AtomicUsize,
     waker: Mutex<Option<Waker>>,
 }
 
@@ -71,15 +125,16 @@ impl Waiter {
         Self {
             active: AtomicBool::new(true),
             queued: AtomicBool::new(false),
+            position: AtomicUsize::new(usize::MAX),
             waker: Mutex::new(None),
         }
     }
 
     pub(super) fn register(&self, waker: &Waker) {
-        let mut registered = self.waker.lock().unwrap_or_else(PoisonError::into_inner);
-        if registered.as_ref().is_none_or(|registered| !registered.will_wake(waker)) {
-            *registered = Some(waker.clone());
-        }
+        // Custom clone/drop hooks may re-enter the primitive being awaited.
+        let replacement = waker.clone();
+        let previous = self.waker.lock().replace(replacement);
+        drop(previous);
     }
 
     pub(super) fn deactivate(&self) {
@@ -87,7 +142,7 @@ impl Waiter {
     }
 
     fn take_waker(&self) -> Option<Waker> {
-        self.waker.lock().unwrap_or_else(PoisonError::into_inner).take()
+        self.waker.lock().take()
     }
 }
 
@@ -111,7 +166,7 @@ impl WaitQueue {
         }
         // Empty notifications and first registration share this lock, so a
         // notification cannot miss publication while registration misses it.
-        let _initialization = self.initialization.lock().unwrap_or_else(PoisonError::into_inner);
+        let _initialization = self.initialization.lock();
         self.state.get_or_init(|| Box::new(EagerWaitQueue::new()))
     }
 
@@ -119,13 +174,13 @@ impl WaitQueue {
         if let Some(state) = self.state.get() {
             return operation(Some(state));
         }
-        let initialization = self.initialization.lock().unwrap_or_else(PoisonError::into_inner);
+        let initialization = self.initialization.lock();
         self.with_existing_state_after_initialization(initialization, operation)
     }
 
     fn with_existing_state_after_initialization<R>(
         &self,
-        initialization: std::sync::MutexGuard<'_, ()>,
+        initialization: RawMutexGuard<'_, ()>,
         operation: impl FnOnce(Option<&EagerWaitQueue>) -> R,
     ) -> R {
         if let Some(state) = self.state.get() {
@@ -203,15 +258,20 @@ impl WaitQueue {
 #[derive(Debug)]
 pub(super) struct EagerWaitQueue {
     has_waiters: AtomicBool,
-    waiters: Mutex<VecDeque<Arc<Waiter>>>,
+    waiters: Mutex<SlotList<Arc<Waiter>>>,
 }
 
 impl EagerWaitQueue {
     pub(super) const fn new() -> Self {
         Self {
             has_waiters: AtomicBool::new(false),
-            waiters: Mutex::new(VecDeque::new()),
+            waiters: Mutex::new(SlotList::new()),
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn has_waiters(&self) -> bool {
+        self.has_waiters.load(Ordering::Acquire)
     }
 
     pub(super) fn enqueue_if_needed(&self, waiter: &Arc<Waiter>, retry: impl FnOnce() -> bool) -> bool {
@@ -225,25 +285,27 @@ impl EagerWaitQueue {
         retry: impl FnOnce() -> bool,
         clear_waiting: impl FnOnce(),
     ) -> bool {
-        let mut waiters = self.waiters.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut waiters = self.waiters.lock();
         self.has_waiters.store(true, Ordering::Release);
         mark_waiting();
         if retry() {
             waiter.deactivate();
-            if waiter.queued.swap(false, Ordering::AcqRel)
-                && let Some(index) = waiters.iter().position(|queued| Arc::ptr_eq(queued, waiter))
-            {
-                waiters.remove(index);
+            if waiter.queued.swap(false, Ordering::AcqRel) {
+                let index = waiter.position.swap(usize::MAX, Ordering::Relaxed);
+                waiters.remove_index_if(index, |queued| Arc::ptr_eq(queued, waiter));
             }
-            drop(waiter.take_waker());
+            let discarded = waiter.take_waker();
             if waiters.is_empty() {
                 self.has_waiters.store(false, Ordering::Release);
                 clear_waiting();
             }
+            drop(waiters);
+            drop(discarded);
             return true;
         }
         if !waiter.queued.swap(true, Ordering::AcqRel) {
-            waiters.push_back(Arc::clone(waiter));
+            let key = waiters.push_back(Arc::clone(waiter));
+            waiter.position.store(key.index, Ordering::Relaxed);
         }
         false
     }
@@ -257,12 +319,13 @@ impl EagerWaitQueue {
 
     pub(super) fn wake_one_marked(&self, clear_waiting: impl FnOnce()) {
         let waker = {
-            let mut waiters = self.waiters.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut waiters = self.waiters.lock();
             let waker = loop {
                 let Some(waiter) = waiters.pop_front() else {
                     break None;
                 };
                 waiter.queued.store(false, Ordering::Release);
+                waiter.position.store(usize::MAX, Ordering::Relaxed);
                 if waiter.active.load(Ordering::Acquire) {
                     break waiter.take_waker();
                 }
@@ -285,12 +348,9 @@ impl EagerWaitQueue {
     pub(super) fn cancel_marked(&self, waiter: &Arc<Waiter>, clear_waiting: impl FnOnce()) -> bool {
         waiter.deactivate();
         let removed = {
-            let mut waiters = self.waiters.lock().unwrap_or_else(PoisonError::into_inner);
-            let removed = waiters
-                .iter()
-                .position(|queued| Arc::ptr_eq(queued, waiter))
-                .and_then(|index| waiters.remove(index))
-                .is_some();
+            let mut waiters = self.waiters.lock();
+            let index = waiter.position.swap(usize::MAX, Ordering::Relaxed);
+            let removed = waiters.remove_index_if(index, |queued| Arc::ptr_eq(queued, waiter)).is_some();
             if removed {
                 waiter.queued.store(false, Ordering::Release);
             }
@@ -310,14 +370,17 @@ impl EagerWaitQueue {
 
     pub(super) fn wake_all_marked(&self, clear_waiting: impl FnOnce()) {
         let wakers = {
-            let mut waiters = self.waiters.lock().unwrap_or_else(PoisonError::into_inner);
-            let wakers = waiters
-                .drain(..)
-                .filter_map(|waiter| {
-                    waiter.queued.store(false, Ordering::Release);
-                    waiter.active.load(Ordering::Acquire).then(|| waiter.take_waker()).flatten()
-                })
-                .collect::<Vec<_>>();
+            let mut waiters = self.waiters.lock();
+            let mut wakers = Vec::with_capacity(waiters.len());
+            while let Some(waiter) = waiters.pop_front() {
+                waiter.queued.store(false, Ordering::Release);
+                waiter.position.store(usize::MAX, Ordering::Relaxed);
+                if waiter.active.load(Ordering::Acquire)
+                    && let Some(waker) = waiter.take_waker()
+                {
+                    wakers.push(waker);
+                }
+            }
             self.has_waiters.store(false, Ordering::Release);
             clear_waiting();
             wakers
@@ -329,6 +392,7 @@ impl EagerWaitQueue {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::pin::Pin;
     use std::sync::Arc;
@@ -336,7 +400,7 @@ mod tests {
     use std::task::{Context, Poll, Wake, Waker};
     use std::time::{Duration, Instant};
 
-    use super::{WaitQueue, Waiter, block_on, block_on_timeout};
+    use super::{Timeout, WaitQueue, Waiter, block_on, block_on_timeout, block_on_until, block_on_until_with};
 
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
@@ -369,6 +433,34 @@ mod tests {
     }
 
     #[test]
+    fn an_expired_deadline_still_checks_readiness_without_restarting_the_budget() {
+        let deadline = Timeout::new(Duration::ZERO);
+        assert_eq!(block_on_until(std::future::ready(7), deadline), Some(7));
+        assert_eq!(block_on_until(std::future::pending::<usize>(), deadline), None);
+        assert_eq!(
+            block_on_until_with(std::future::ready(11), || panic!("readiness must precede expiry")),
+            Some(11)
+        );
+    }
+
+    #[test]
+    fn overflowing_budgets_stay_finite_and_expire_using_elapsed_time() {
+        let timeout = Timeout::new(Duration::MAX);
+        assert!(
+            timeout
+                .remaining_after(Duration::ZERO)
+                .is_some_and(|wait| !wait.is_zero() && wait.as_millis() < u128::from(u32::MAX))
+        );
+        assert_eq!(timeout.remaining_after(Duration::MAX), None);
+        let mut probes = 0;
+        let result = block_on_until_with(std::future::pending::<()>(), || {
+            probes += 1;
+            (probes == 1).then_some(Duration::ZERO)
+        });
+        assert_eq!((result, probes), (None, 2));
+    }
+
+    #[test]
     fn retry_removes_an_already_queued_waiter() {
         let queue = WaitQueue::new();
         let waiter = Arc::new(Waiter::new());
@@ -377,7 +469,7 @@ mod tests {
 
         assert!(queue.enqueue_if_needed(&waiter, || true));
         assert!(!queue.state().has_waiters.load(Ordering::Acquire));
-        assert!(queue.state().waiters.lock().unwrap().is_empty());
+        assert!(queue.state().waiters.lock().is_empty());
         assert!(!queue.cancel(&waiter));
     }
 
@@ -431,7 +523,7 @@ mod tests {
         assert!(!queue.enqueue_if_needed(&waiter, || false));
         assert!(!queue.enqueue_if_needed(&waiter, || false));
 
-        assert_eq!(queue.state().waiters.lock().unwrap().len(), 1);
+        assert_eq!(queue.state().waiters.lock().len(), 1);
     }
 
     #[test]
@@ -475,16 +567,16 @@ mod tests {
         let queue = WaitQueue::new();
         let clears = AtomicUsize::new(0);
         queue.wake_one_marked(|| {
-            queue.initialization.try_lock().unwrap_err();
+            assert!(queue.initialization.try_lock().is_none());
             clears.fetch_add(1, Ordering::Relaxed);
         });
         queue.wake_all_marked(|| {
-            queue.initialization.try_lock().unwrap_err();
+            assert!(queue.initialization.try_lock().is_none());
             clears.fetch_add(1, Ordering::Relaxed);
         });
         let waiter = Arc::new(Waiter::new());
         assert!(!queue.cancel_marked(&waiter, || {
-            queue.initialization.try_lock().unwrap_err();
+            assert!(queue.initialization.try_lock().is_none());
             clears.fetch_add(1, Ordering::Relaxed);
         }));
 
@@ -495,7 +587,7 @@ mod tests {
     #[test]
     fn publication_after_an_empty_operation_starts_is_observed() {
         let queue = WaitQueue::new();
-        let initialization = queue.initialization.lock().unwrap();
+        let initialization = queue.initialization.lock();
         queue.state.set(Box::new(super::EagerWaitQueue::new())).unwrap();
 
         assert!(queue.with_existing_state_after_initialization(initialization, |state| state.is_some()));

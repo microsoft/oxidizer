@@ -427,6 +427,11 @@ fn render_runtime_events(html: &mut String, snapshot: &Snapshot) {
         RuntimeEventKind::CondvarContention,
         RuntimeEventKind::CondvarNotify,
     ];
+    let notify_kinds = [
+        RuntimeEventKind::NotifyAccess,
+        RuntimeEventKind::NotifyContention,
+        RuntimeEventKind::NotifySignal,
+    ];
     let once_kinds = [
         RuntimeEventKind::OnceAccess,
         RuntimeEventKind::OnceContention,
@@ -489,6 +494,14 @@ fn render_runtime_events(html: &mut String, snapshot: &Snapshot) {
         &once_kinds,
         &[RuntimeEventKind::OnceAccess],
     );
+    let notify_metrics = runtime_object_metrics(
+        "notify",
+        "Notify",
+        &runtime_events.events,
+        &notify_kinds,
+        &notify_kinds,
+        &[RuntimeEventKind::NotifyAccess],
+    );
     let channel_metrics = runtime_object_metrics(
         "channel",
         "Channel",
@@ -531,6 +544,12 @@ fn render_runtime_events(html: &mut String, snapshot: &Snapshot) {
     );
     render_runtime_cluster(
         html,
+        "Notify",
+        &format!("{} observed objects, ranked by completed waits.", notify_metrics.len()),
+        &notify_metrics,
+    );
+    render_runtime_cluster(
+        html,
         "OnceLock / LazyLock",
         &format!("{} observed objects, ranked by accesses.", once_metrics.len()),
         &once_metrics,
@@ -548,6 +567,7 @@ fn render_runtime_events(html: &mut String, snapshot: &Snapshot) {
         .chain(rw_lock_metrics.iter())
         .chain(barrier_metrics.iter())
         .chain(condvar_metrics.iter())
+        .chain(notify_metrics.iter())
         .chain(once_metrics.iter())
         .chain(channel_metrics.iter())
     {
@@ -772,6 +792,12 @@ fn runtime_object_detail(id_prefix: &str, events: &[&seismograph::recorder::even
             format_count(count(RuntimeEventKind::CondvarAccess)),
             format_count(count(RuntimeEventKind::CondvarContention)),
             format_count(count(RuntimeEventKind::CondvarNotify)),
+        ),
+        "notify" => format!(
+            "{} waits · {} permit misses · {} notifications · {threads}",
+            format_count(count(RuntimeEventKind::NotifyAccess)),
+            format_count(count(RuntimeEventKind::NotifyContention)),
+            format_count(count(RuntimeEventKind::NotifySignal)),
         ),
         "once" => format!(
             "{} accesses · {} initializations · {} contentions · {threads}",
@@ -2256,6 +2282,7 @@ mod tests {
     use seismograph_rallocator::callers::AddressLookupFields;
 
     use super::*;
+    use crate::allocator_topology::Segment;
     use crate::allocator_view::Version;
 
     #[test]
@@ -2503,6 +2530,9 @@ mod tests {
             "orphan free",
             "unmatched allocation evidence",
             "&lt;producer&gt;",
+            "Allocation sizes by thread",
+            "data-histogram=\"thread-log-7-allocation-sizes\"",
+            "title=\"Allocated: 2 · Retained unmatched: 0\"",
             "<path class=\"thread-flow-link local\" data-source=\"1\" data-destination=\"1\"",
             "<path class=\"thread-flow-link cross\" data-source=\"1\" data-destination=\"2\"",
             "320 B across 2 allocations",
@@ -2732,6 +2762,34 @@ mod tests {
     }
 
     #[test]
+    fn reporting_counts_tracked_and_untracked_segments_separately() {
+        let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+        snapshot.topology.push(TopologyRegion {
+            region_bytes: 64,
+            slice_bytes: 64,
+            used_bitmap: vec![1],
+            slices: vec![Slice {
+                kind: SliceKind::Small,
+                // Unequal totals reveal swapped classifications as well as lost counts.
+                segments: [true, false, true]
+                    .into_iter()
+                    .map(|utilization_tracked| Segment {
+                        utilization_tracked,
+                        ..Segment::default()
+                    })
+                    .collect(),
+                ..Slice::default()
+            }],
+            ..TopologyRegion::default()
+        });
+        let mut html = String::new();
+
+        render_physical_topology(&mut html, &snapshot);
+
+        assert!(html.contains("Slab utilization: 2 tracked segments; 1 unavailable"));
+    }
+
+    #[test]
     fn reporting_untracked_utilization_is_not_rendered_as_empty_or_full() {
         let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
         snapshot.topology.push(TopologyRegion {
@@ -2892,21 +2950,24 @@ mod tests {
             runtime_event(1, 25, RuntimeEventKind::ChannelReceiveContention, 1, &[]),
             runtime_event(1, 26, RuntimeEventKind::ChannelHighWatermark, 1, &[]),
             runtime_event(1, 27, RuntimeEventKind::ChannelClose, 1, &[]),
+            runtime_event(1, 28, RuntimeEventKind::NotifyAccess, 1, &[]),
+            runtime_event(1, 29, RuntimeEventKind::NotifyContention, 1, &[]),
+            runtime_event(1, 30, RuntimeEventKind::NotifySignal, 1, &[]),
         ];
         let event_refs = events.iter().collect::<Vec<_>>();
 
         assert_eq!(
-            ["arc", "mutex", "rwlock", "barrier", "condvar", "once", "channel", "unknown",].map(|prefix| runtime_object_detail(
-                prefix,
-                &event_refs,
-                2
-            )),
+            [
+                "arc", "mutex", "rwlock", "barrier", "condvar", "notify", "once", "channel", "unknown",
+            ]
+            .map(|prefix| runtime_object_detail(prefix, &event_refs, 2)),
             [
                 "1 derefs · 1 clones · 1 relocations · 2 threads",
                 "1 locks · 1 contentions · 1 poisonings · 1 observations · 1 clears · 2 threads",
                 "1 reads · 1 writes · 2 contentions · 1 poisonings · 1 observations · 1 clears · 2 threads",
                 "1 waits · 1 blocked · 1 releases · 2 threads",
                 "1 waits · 1 blocked · 1 notifications · 2 threads",
+                "1 waits · 1 permit misses · 1 notifications · 2 threads",
                 "1 accesses · 1 initializations · 1 contentions · 2 threads",
                 "1 sends · 1 receives · 1 send contentions · 1 receive waits (empty) · high watermark 0 · 1 closes · 2 threads",
                 "2 threads",

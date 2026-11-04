@@ -3,13 +3,21 @@
 
 //! Consumer-level checks for synchronization and affinity type-system contracts.
 
+use std::panic::{RefUnwindSafe, UnwindSafe};
+
 use performables::sync::lock::{RwLockReadGuard, RwLockWriteGuard};
 use performables::sync::mutex::MutexGuard;
-use static_assertions::assert_not_impl_any;
+use performables::sync::notify::{Notify, NotifyWait};
+use performables::sync::{Async, Sync};
+use static_assertions::{assert_impl_all, assert_not_impl_any};
 
 assert_not_impl_any!(MutexGuard<'static, u64>: Send);
 assert_not_impl_any!(RwLockReadGuard<'static, u64>: Send);
 assert_not_impl_any!(RwLockWriteGuard<'static, u64>: Send);
+
+assert_impl_all!(Notify<Sync>: UnwindSafe, RefUnwindSafe);
+assert_impl_all!(Notify<Async>: UnwindSafe, RefUnwindSafe);
+assert_impl_all!(NotifyWait<'static>: UnwindSafe, RefUnwindSafe);
 
 #[test]
 #[cfg_attr(

@@ -34,9 +34,8 @@ fn main() {
     let http_log: Arc<Mutex<Vec<String>>> = Arc::default();
     let name_log: Arc<Mutex<Vec<String>>> = Arc::default();
 
-    let sink = Sink::new(
-        "event_type_matching",
-        vec![
+    let sink = Sink::builder("event_type_matching")
+        .processors(vec![
             Arc::new(TypeRoutingProcessor::new(Arc::clone(&routing_log))) as Arc<dyn EventProcessor>,
             Arc::new(HttpOnlyProcessor {
                 log: Arc::clone(&http_log),
@@ -47,9 +46,8 @@ fn main() {
                 &["http.request", "http.error"],
                 Arc::clone(&name_log),
             )),
-        ],
-        tick::SimpleClock::new_system(),
-    );
+        ])
+        .build();
 
     emit!(sink, HttpRequest { status: 200 });
     let msg = String::from("hello");

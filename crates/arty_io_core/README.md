@@ -13,23 +13,21 @@
 
 </div>
 
-Stable contracts for integrating I/O drivers into thread-aware runtimes.
+Contracts between I/O drivers and thread-aware runtimes.
 
-Drivers provide I/O; runtimes provide scheduling. This crate defines
-the interfaces between them, but provides neither a runtime nor an I/O implementation.
+Drivers provide I/O. Runtimes provide scheduling. This crate defines the interfaces between
+them. It does not provide a runtime or an I/O implementation.
 
 ## How drivers work
 
-Applications access I/O through an [`IoContext`][__link0]. The runtime creates one worker-local
-[`Driver`][__link1] for that context on each async worker. The driver submits I/O and processes
-completed operations in [`Driver::execute_cycle`][__link2].
+Applications access I/O through an [`IoContext`][__link0]. On each async worker, the runtime creates
+one local [`Driver`][__link1] for that context. The driver submits I/O and processes completed
+operations in [`Driver::execute_cycle`][__link2].
 
 ```rust
 use std::task::Waker;
 
-use arty_io_core::{
-    Cycle, Driver, DriverError, DriverInstance, DriverOptions, DriverRole, IoContext,
-};
+use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, DriverRole, IoContext};
 use thread_aware_core::{Thread, ThreadAware};
 
 #[derive(Clone)]
@@ -49,16 +47,9 @@ impl IoContext for Context {
         Self
     }
 
-    fn driver(
-        &mut self,
-        options: DriverOptions,
-    ) -> Result<DriverInstance<Self::Driver>, DriverError> {
-        let role = options
-            .allowed_roles()
-            .first()
-            .copied()
-            .ok_or_else(|| DriverError::from_message("no supported driver role"))?;
-        Ok(DriverInstance::new(ExampleDriver, role))
+    fn driver(&mut self, options: DriverOptions) -> Result<Self::Driver, DriverError> {
+        let _role = options.role();
+        Ok(ExampleDriver)
     }
 }
 
@@ -81,38 +72,43 @@ impl Driver for ExampleDriver {
 ### Primary and secondary drivers
 
 An async worker has at most one [`Primary`][__link3] driver. [`DriverOptions`][__link4]
-lists the roles available during creation, and [`DriverInstance`][__link5] returns the selected role.
-A primary may wait for I/O for up to [`Cycle::max_wait`][__link6].
+contains the assigned role. A primary can wait for I/O for up to
+[`Cycle::max_wait`][__link5].
 
-The runtime calls [`Secondary`][__link7] drivers with
-`Cycle::max_wait() == Duration::ZERO`. A secondary processes completions that are already ready
-or returns immediately if another thread handles its notifications. A secondary must wake its
-async worker when another cycle is needed.
+The runtime calls [`Secondary`][__link6] drivers with
+`Cycle::max_wait() == Duration::ZERO`. A secondary either processes ready completions or
+returns immediately if another thread handles its notifications. It must wake its async worker
+when another cycle is necessary.
 
 ## Runtime responsibilities
 
-The runtime clones and relocates contexts to its async workers and supplies the acceptable
-roles through [`DriverOptions`][__link8]. The context selects one role and returns it in a
-[`DriverInstance`][__link9]. Driver creation completes all setup before the context is published.
+The runtime registers each concrete context type once. When a worker first retrieves a context,
+the runtime clones it. The runtime then calls
+[`ThreadAware::relocate`][__link7] and
+[`IoContext::driver`][__link8]. The relocation destination and [`DriverOptions::thread`][__link9] identify the
+same worker. [`DriverOptions`][__link10] also contains the assigned role.
+
+The runtime calls `driver` at most once per registration and async worker, not once per clone.
+Application operations require successful initialization. Implementations can reject duplicate
+driver creation. They can also reject operations on uninitialized contexts. Clones of
+initialized contexts remain usable without another driver call. Later relocation is optional
+under [`ThreadAware`][__link11].
 
 The runtime invokes secondaries before the primary. If there is no primary, the runtime waits
-for work itself. The owner waker in [`DriverOptions`][__link10] wakes the async worker, while
-[`Driver::waker`][__link11] makes a waiting driver return promptly.
+for work itself. The owner waker in [`DriverOptions`][__link12] wakes the async worker.
+[`Driver::waker`][__link13] makes a waiting driver return promptly.
 
-A driver creation or cycle error is fatal. The runtime starts shutdown on every async worker
-and calls `shutdown` on every driver that was created successfully, including the driver whose
-cycle failed.
+A driver creation or cycle error is fatal. The runtime starts shutdown on every async worker.
+It calls `shutdown` on every driver that was created successfully, including the driver whose
+cycle failed. Shutdown closes each context to new operations. Contexts returned by other workers
+must then reject new operations.
 
 ## Shutdown
 
-When an async worker shuts down, the runtime stops calling `execute_cycle` and synchronously
-calls [`Driver::shutdown`][__link12] for every driver owned by that worker. Each driver rejects new
-operations and may cancel or disrupt operations still in flight. Cleanup uses a finite limit
-chosen by the driver. Shutdown is best effort: the runtime reports a returned [`DriverError`][__link13]
-and attempts the remaining drivers, but this contract does not convert panics from driver
-teardown, custom wakers, diagnostics, cleanup hooks, poisoned state, or failed invariants into
-errors or promise recovery from them. Contexts remain valid as closed handles after normal
-shutdown control flow.
+When an async worker shuts down, the runtime stops calling `execute_cycle`. It synchronously
+calls [`Driver::shutdown`][__link14] for every driver that the worker owns. Each driver rejects new
+operations and uses a finite shutdown limit. A returned [`DriverError`][__link15] does not stop the
+runtime from attempting to shut down the remaining drivers.
 
 
 <hr/>
@@ -120,18 +116,20 @@ shutdown control flow.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbEHFjfuMY2oQbAfwxPVZIyxEbnTtJTtlPtfgblSjcX2P8h1hhZIGCbGFydHlfaW9fY29yZWUwLjIuMA
- [__link0]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=IoContext
- [__link1]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver
- [__link10]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
- [__link11]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::waker
- [__link12]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::shutdown
- [__link13]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverError
- [__link2]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Driver::execute_cycle
- [__link3]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Primary
- [__link4]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
- [__link5]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverInstance
- [__link6]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=Cycle::max_wait
- [__link7]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverRole::Secondary
- [__link8]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverOptions
- [__link9]: https://docs.rs/arty_io_core/0.2.0/arty_io_core/?search=DriverInstance
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbq3wfiIjrbZkbFC4kg-Vxd30b0g54DQtqtFIb-3RcROqvnEFhZIKCbGFydHlfaW9fY29yZWUwLjQuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjM
+ [__link0]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=IoContext
+ [__link1]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=Driver
+ [__link10]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverOptions
+ [__link11]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
+ [__link12]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverOptions
+ [__link13]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=Driver::waker
+ [__link14]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=Driver::shutdown
+ [__link15]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverError
+ [__link2]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=Driver::execute_cycle
+ [__link3]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverRole::Primary
+ [__link4]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverOptions
+ [__link5]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=Cycle::max_wait
+ [__link6]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverRole::Secondary
+ [__link7]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware::relocate
+ [__link8]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=IoContext::driver
+ [__link9]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverOptions::thread

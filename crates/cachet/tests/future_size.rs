@@ -75,3 +75,5 @@ fn loading_methods_future_size() {
         "optionally_get_or_insert future size is too large: {optionally_get_or_insert_size}"
     );
 }
+
+testing_aids::init_tracing!();

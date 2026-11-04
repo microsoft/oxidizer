@@ -734,17 +734,19 @@ pub(super) enum PrimitiveKind {
     RwLock,
     Barrier,
     Condvar,
+    Notify,
     Once,
     Channel,
 }
 
 impl PrimitiveKind {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Arc,
         Self::Mutex,
         Self::RwLock,
         Self::Barrier,
         Self::Condvar,
+        Self::Notify,
         Self::Once,
         Self::Channel,
     ];
@@ -756,6 +758,7 @@ impl PrimitiveKind {
             Self::RwLock => "RwLock",
             Self::Barrier => "Barrier",
             Self::Condvar => "Condvar",
+            Self::Notify => "Notify",
             Self::Once => "OnceLock / LazyLock",
             Self::Channel => "Channel",
         }
@@ -768,6 +771,7 @@ impl PrimitiveKind {
             Self::RwLock => &PrimitiveOperationKind::RW_LOCK,
             Self::Barrier => &PrimitiveOperationKind::BARRIER,
             Self::Condvar => &PrimitiveOperationKind::CONDVAR,
+            Self::Notify => &PrimitiveOperationKind::NOTIFY,
             Self::Once => &PrimitiveOperationKind::ONCE,
             Self::Channel => &PrimitiveOperationKind::CHANNEL,
         }
@@ -804,6 +808,9 @@ pub(super) enum PrimitiveOperationKind {
     CondvarAccess,
     CondvarContention,
     CondvarNotify,
+    NotifyAccess,
+    NotifyContention,
+    NotifySignal,
     OnceAccess,
     OnceContention,
     OnceInitialize,
@@ -841,6 +848,7 @@ impl PrimitiveOperationKind {
     ];
     const BARRIER: [Self; 3] = [Self::BarrierAccess, Self::BarrierContention, Self::BarrierRelease];
     const CONDVAR: [Self; 3] = [Self::CondvarAccess, Self::CondvarContention, Self::CondvarNotify];
+    const NOTIFY: [Self; 3] = [Self::NotifyAccess, Self::NotifyContention, Self::NotifySignal];
     const ONCE: [Self; 3] = [Self::OnceAccess, Self::OnceContention, Self::OnceInitialize];
     const CHANNEL: [Self; 6] = [
         Self::ChannelSend,
@@ -867,10 +875,11 @@ impl PrimitiveOperationKind {
             Self::RwLockWriteAccess => "Write acquisition",
             Self::RwLockWriteContention => "Write contention",
             Self::RwLockWriteRelease => "Write release",
-            Self::BarrierAccess | Self::CondvarAccess => "Completed wait",
+            Self::BarrierAccess | Self::CondvarAccess | Self::NotifyAccess => "Completed wait",
             Self::BarrierContention | Self::CondvarContention => "Blocked wait",
+            Self::NotifyContention => "No immediate permit",
             Self::BarrierRelease => "Generation release",
-            Self::CondvarNotify => "Notification",
+            Self::CondvarNotify | Self::NotifySignal => "Notification",
             Self::OnceAccess => "Access",
             Self::OnceInitialize => "Initialization",
             Self::ChannelSend => "Send",
@@ -908,6 +917,9 @@ impl PrimitiveOperationKind {
             Self::CondvarAccess => EventKind::CondvarAccess,
             Self::CondvarContention => EventKind::CondvarContention,
             Self::CondvarNotify => EventKind::CondvarNotify,
+            Self::NotifyAccess => EventKind::NotifyAccess,
+            Self::NotifyContention => EventKind::NotifyContention,
+            Self::NotifySignal => EventKind::NotifySignal,
             Self::OnceAccess => EventKind::OnceAccess,
             Self::OnceContention => EventKind::OnceContention,
             Self::OnceInitialize => EventKind::OnceInitialize,
@@ -935,6 +947,7 @@ impl PrimitiveOperationKind {
                 | Self::RwLockWriteContention
                 | Self::BarrierContention
                 | Self::CondvarContention
+                | Self::NotifyContention
                 | Self::OnceContention
                 | Self::ChannelSendContention
         )
@@ -1473,6 +1486,9 @@ pub(super) enum ThreadOperationKind {
     CondvarAccess,
     CondvarContention,
     CondvarNotify,
+    NotifyAccess,
+    NotifyContention,
+    NotifySignal,
     OnceAccess,
     OnceContention,
     OnceInitialize,
@@ -1488,7 +1504,7 @@ pub(super) enum ThreadOperationKind {
 }
 
 impl ThreadOperationKind {
-    pub(super) const ALL: [Self; 34] = [
+    pub(super) const ALL: [Self; 37] = [
         Self::Allocation,
         Self::Deallocation,
         Self::ArcCreate,
@@ -1511,6 +1527,9 @@ impl ThreadOperationKind {
         Self::CondvarAccess,
         Self::CondvarContention,
         Self::CondvarNotify,
+        Self::NotifyAccess,
+        Self::NotifyContention,
+        Self::NotifySignal,
         Self::OnceAccess,
         Self::OnceContention,
         Self::OnceInitialize,
@@ -1549,6 +1568,9 @@ impl ThreadOperationKind {
             Self::CondvarAccess => "Condvar completed wait",
             Self::CondvarContention => "Condvar blocked wait",
             Self::CondvarNotify => "Condvar notification",
+            Self::NotifyAccess => "Notify completed wait",
+            Self::NotifyContention => "Notify no immediate permit",
+            Self::NotifySignal => "Notify notification",
             Self::OnceAccess => "Once value access",
             Self::OnceContention => "Once initialization contention",
             Self::OnceInitialize => "Once initialization",
@@ -1584,6 +1606,9 @@ impl ThreadOperationKind {
             Self::CondvarAccess | Self::CondvarContention | Self::CondvarNotify => {
                 "Threads (including self) observed on the same Condvar objects"
             }
+            Self::NotifyAccess | Self::NotifyContention | Self::NotifySignal => {
+                "Threads (including self) observed on the same Notify objects"
+            }
             Self::OnceAccess | Self::OnceContention | Self::OnceInitialize => {
                 "Threads (including self) observed on the same once-initialized objects"
             }
@@ -1607,6 +1632,7 @@ impl ThreadOperationKind {
                 | Self::RwLockWriteContention
                 | Self::BarrierContention
                 | Self::CondvarContention
+                | Self::NotifyContention
                 | Self::OnceContention
                 | Self::ChannelSendContention
         )
@@ -1641,6 +1667,9 @@ impl ThreadOperationKind {
             Self::CondvarAccess => EventKind::CondvarAccess,
             Self::CondvarContention => EventKind::CondvarContention,
             Self::CondvarNotify => EventKind::CondvarNotify,
+            Self::NotifyAccess => EventKind::NotifyAccess,
+            Self::NotifyContention => EventKind::NotifyContention,
+            Self::NotifySignal => EventKind::NotifySignal,
             Self::OnceAccess => EventKind::OnceAccess,
             Self::OnceContention => EventKind::OnceContention,
             Self::OnceInitialize => EventKind::OnceInitialize,
@@ -1701,6 +1730,12 @@ impl ThreadOperationKind {
                 kind,
                 EventKind::CondvarAccess | EventKind::CondvarContention | EventKind::CondvarNotify
             ),
+            Self::NotifyAccess | Self::NotifyContention | Self::NotifySignal => {
+                matches!(
+                    kind,
+                    EventKind::NotifyAccess | EventKind::NotifyContention | EventKind::NotifySignal
+                )
+            }
             Self::OnceAccess | Self::OnceContention | Self::OnceInitialize => {
                 matches!(kind, EventKind::OnceAccess | EventKind::OnceContention | EventKind::OnceInitialize)
             }
@@ -2472,6 +2507,7 @@ mod tests {
                 ("RwLock", 9),
                 ("Barrier", 3),
                 ("Condvar", 3),
+                ("Notify", 3),
                 ("OnceLock / LazyLock", 3),
                 ("Channel", 6),
             ]
@@ -2597,6 +2633,9 @@ mod tests {
             PrimitiveOperationKind::CondvarAccess,
             PrimitiveOperationKind::CondvarContention,
             PrimitiveOperationKind::CondvarNotify,
+            PrimitiveOperationKind::NotifyAccess,
+            PrimitiveOperationKind::NotifyContention,
+            PrimitiveOperationKind::NotifySignal,
             PrimitiveOperationKind::OnceAccess,
             PrimitiveOperationKind::OnceContention,
             PrimitiveOperationKind::OnceInitialize,
@@ -2633,6 +2672,9 @@ mod tests {
                 "Generation release",
                 "Completed wait",
                 "Blocked wait",
+                "Notification",
+                "Completed wait",
+                "No immediate permit",
                 "Notification",
                 "Access",
                 "Contention",
@@ -4034,7 +4076,7 @@ mod tests {
 
         assert_eq!(
             snapshot.groups.iter().map(|group| group.contentions).collect::<Vec<_>>(),
-            vec![0, 2, 2, 0, 0, 0, 0]
+            vec![0, 2, 2, 0, 0, 0, 0, 0]
         );
     }
 

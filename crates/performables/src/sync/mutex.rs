@@ -4,6 +4,7 @@
 use std::cell::UnsafeCell;
 use std::fmt;
 use std::marker::PhantomData;
+use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{Async, Mode, Sync};
 
+pub(in crate::sync) mod hal;
 mod native;
 
 use super::panic_poisoned;
@@ -35,17 +37,38 @@ enum Acquisition {
 ///
 /// The default [`Sync`] mode uses a compact native blocking mutex. Select
 /// [`Async`] to additionally use [`lock_async`](Mutex::lock_async).
+/// Windows and Linux synchronous locks use address-based waiting; other targets
+/// retain the standard library's blocking backend.
 ///
 /// The uncontended path uses atomic operations and does not allocate.
 /// The lock is poisoned when an exclusive guard is dropped during an unwind
 /// that began after the guard was acquired.
 pub struct Mutex<T: ?Sized, M: Mode = Sync> {
-    // A native Mutex<T> would require calling a non-const strategy constructor
-    // or ambiguous per-mode inherent constructors. Keeping T in one UnsafeCell
-    // permits a single const constructor; Sync still retains a real native
-    // MutexGuard<()> for ownership, poisoning, and Condvar interoperability.
+    // Separate payload storage permits one const constructor for both modes.
+    // Only the sealed strategy can construct ownership evidence for this cell.
     raw: M::MutexState,
     value: UnsafeCell<T>,
+}
+
+/// Internal synchronous mutex storage.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct StateSync {
+    inner: hal::Mutex,
+}
+
+impl StateSync {
+    pub(super) const fn new() -> Self {
+        Self { inner: hal::Mutex::new() }
+    }
+}
+
+/// Internal evidence of synchronous mutex ownership.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct GuardSync<'a> {
+    // The sealed guard destructor releases or transfers this evidence once.
+    pub(in crate::sync) inner: ManuallyDrop<hal::Guard<'a>>,
 }
 
 /// Internal asynchronous mutex ownership state.
@@ -92,6 +115,7 @@ impl<T: ?Sized, M: Mode> Mutex<T, M> {
     /// # Panics
     ///
     /// Panics after acquisition if the mutex is poisoned.
+    /// Panics if a native blocking operation fails.
     pub fn lock(&self) -> MutexGuard<'_, T, M> {
         match self.lock_result() {
             Ok(guard) => guard,
@@ -504,6 +528,7 @@ impl<T: ?Sized + fmt::Display, M: Mode> fmt::Display for MutexGuard<'_, T, M> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::sync::Arc as StdArc;
     use std::sync::atomic::AtomicUsize;
@@ -513,6 +538,17 @@ mod tests {
 
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
+
+    #[test]
+    fn synchronous_state_provides_reusable_exclusive_ownership() {
+        let state = StateSync::new();
+        let first = state.inner.lock();
+        let blocked = state.inner.try_lock().is_none();
+        state.inner.unlock(first);
+        let next = state.inner.try_lock().unwrap();
+        state.inner.unlock(next);
+        assert_eq!((blocked, state.inner.is_poisoned()), (true, false));
+    }
 
     impl Wake for WakeCounter {
         fn wake(self: StdArc<Self>) {

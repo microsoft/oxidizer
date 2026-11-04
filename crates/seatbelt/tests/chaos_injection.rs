@@ -331,3 +331,5 @@ async fn rate_with_clamps_above_one(#[case] use_tower: bool) {
 
     assert_eq!(output, Ok("injected".to_string()));
 }
+
+testing_aids::init_tracing!();

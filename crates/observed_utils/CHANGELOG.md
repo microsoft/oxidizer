@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0] - 2026-11-02
+
+- Update dependencies to use Observed 0.30.0 and its public tick types. This release does not change
+  the package's source code.
+- Update the requirement for local package `data_privacy` from `0.13.1` to `0.13.2`.
+- Update the requirement for local package `observed` from `0.29.0` to `0.30.0`.
+
+## [0.5.0] - 2026-10-20
+
+- The public API exposes types from `observed`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: data_privacy ^0.13.0 -> 0.13.1; observed ^0.28.0 -> 0.29.0.
+
 ## [0.4.0] - 2026-10-05
 
 - ⚠️ Breaking

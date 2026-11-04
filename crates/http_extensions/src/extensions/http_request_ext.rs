@@ -3,15 +3,15 @@
 
 use crate::HttpRequest;
 
-/// Request cloning with body support.
+/// Methods that clone an HTTP request and its body.
 ///
-/// Provides methods to clone HTTP requests including their bodies when possible.
+/// A streaming body can prevent cloning.
 pub trait HttpRequestExt: sealed::Sealed {
-    /// Tries to clone the entire request, including its body.
+    /// Tries to clone the complete request and its body.
     ///
-    /// Returns `Some(HttpRequest)` if the body supports cloning/replay, or
-    /// `None` if the body cannot be cloned. On success, the clone preserves the
-    /// method, URI, HTTP version, headers, and extensions of the source.
+    /// Returns `Some(HttpRequest)` if the body supports replay.
+    /// Returns `None` if the body cannot be cloned.
+    /// A successful clone keeps the method, URI, version, headers, and extensions.
     fn try_clone(&self) -> Option<Self>
     where
         Self: Sized;

@@ -239,3 +239,5 @@ async fn zero_lifetime_poisons_connection_after_request() {
     let info = response.extensions().get::<ConnectionInfo>().unwrap();
     assert!(info.is_poisoned(), "connection should have been poisoned by zero lifetime");
 }
+
+testing_aids::init_tracing!();

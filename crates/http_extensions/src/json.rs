@@ -3,9 +3,9 @@
 
 //! Lazy JSON parsing utilities for HTTP responses.
 //!
-//! This module provides the [`Json`] type for efficiently parsing JSON data from HTTP
-//! responses. The parser is lazy, meaning data is only parsed when you actually need it,
-//! and supports both borrowed and owned deserialization patterns.
+//! [`Json`] stores response data without parsing it.
+//! It parses the data when you request a value.
+//! It supports borrowed and owned deserialization.
 
 use std::marker::PhantomData;
 
@@ -19,10 +19,9 @@ use serde_core::de::DeserializeOwned;
 use crate::HttpError;
 use crate::error_labels::{LABEL_JSON, LABEL_JSON_DESERIALIZATION, LABEL_JSON_SERIALIZATION};
 
-/// Error type for JSON serialization and deserialization operations.
+/// An error from JSON serialization or deserialization.
 ///
-/// This error is returned when JSON operations fail, such as when parsing
-/// invalid JSON data or when serialization encounters issues.
+/// Parsing invalid JSON and failed serialization return this error.
 #[derive(ohno::Error)]
 #[no_constructors]
 #[display("{message}")]
@@ -70,23 +69,20 @@ impl Recovery for JsonError {
     }
 }
 
-/// A lazy JSON parser that defers deserialization until requested.
+/// A JSON parser that delays deserialization until a read method is called.
 ///
 /// `Json<T>` holds JSON data in its raw form and only parses it when you call
 /// [`read`](Self::read) or [`read_owned`](Self::read_owned).
 ///
-/// The type supports two parsing modes:
+/// The type supports two modes:
 ///
-/// - **Lifetime-aware parsing** via [`read`](Self::read): Can borrow from the buffer when possible.
-///   Multiple read calls can be made, and the returned value, if it contains a lifetime, is tied to the lifetime
-///   of the parser.
-///
-/// - **Owned parsing** via [`read_owned`](Self::read_owned): For types that own their data, the parser consumes itself
-///   and returns an owned deserialized value.
+/// - [`read`](Self::read) can borrow from the buffer.
+///   You can call it more than once.
+///   A returned lifetime is tied to the parser lifetime.
+/// - [`read_owned`](Self::read_owned) consumes the parser and returns owned data.
 ///
 /// See the [`HttpBody::into_json_ref`](crate::HttpBody::into_json_ref) and
-/// [`HttpBody::into_json`](crate::HttpBody::into_json) methods for more details and
-/// examples on how to use this type.
+/// [`HttpBody::into_json`](crate::HttpBody::into_json) methods for more examples.
 #[derive(Debug)]
 pub struct Json<T> {
     state: JsonState,
@@ -105,13 +101,13 @@ impl<T> Json<T> {
 impl<'a, T: Deserialize<'a>> Json<T> {
     /// Parses the JSON data using lifetime-aware deserialization.
     ///
-    /// This method can deserialize both borrowed and owned data. When deserializing
-    /// strings and byte arrays, it can borrow directly from the JSON buffer for
-    /// better performance. For other types like numbers, Boolean values, and owned
-    /// containers, it creates new values as needed.
+    /// This method deserializes borrowed and owned data.
+    /// Strings and byte arrays can borrow directly from the JSON buffer.
+    /// Numbers, Boolean values, and owned containers create new values.
     ///
-    /// The returned value is tied to the lifetime of this parser, but that doesn't
-    /// mean all fields must be borrowed - you can mix borrowed and owned fields.
+    /// The returned value is tied to the lifetime of this parser, but that does not
+    /// require all fields to borrow data.
+    /// A value can contain borrowed and owned fields.
     ///
     /// # Examples
     ///
@@ -123,7 +119,7 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     ///
     /// #[derive(Deserialize)]
     /// struct Person<'a> {
-    ///     #[serde(borrow)] // You need to tell serde to borrow this field
+    ///     #[serde(borrow)] // Tell serde to borrow this field.
     ///     name: Cow<'a, str>,
     ///     age: u32,
     /// }
@@ -146,23 +142,23 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     ///
     /// Returns an error if the JSON deserialization fails.
     pub fn read(&'a mut self) -> Result<T, JsonError> {
-        // Convert a sequence to bytes if we haven't already
+        // Convert a sequence to bytes if it is not already converted.
         if let JsonState::BytesView(bytes) = &mut self.state {
             let bytes = std::mem::take(bytes).to_bytes();
             self.state = JsonState::Bytes(bytes);
         }
 
-        // Now we can safely borrow from the bytes
+        // The parser can now borrow from the bytes.
         serde_json::from_slice(self.state.as_bytes()).map_err(JsonError::deserialization)
     }
 }
 
 impl<T: DeserializeOwned> Json<T> {
-    /// Parses the JSON data into owned values, consuming the parser.
+    /// Parses the JSON data into owned values and consumes the parser.
     ///
-    /// This method creates owned strings and collections, making the returned value
-    /// independent of the parser lifetime. Use this when you need to store the
-    /// parsed data beyond the scope of the JSON parser.
+    /// This method creates owned strings and collections.
+    /// The returned value does not depend on the parser lifetime.
+    /// Use it to store parsed data after the parser goes out of scope.
     ///
     /// This method consumes the parser, so you can only call it once.
     ///

@@ -3,56 +3,52 @@
 
 //! Telemetry emitted by the [`fetch`](crate) crate.
 //!
-//! All metrics are recorded under the **`fetch`** OpenTelemetry
-//! [`Meter`](opentelemetry::metrics::Meter). The meter is obtained from either
-//! the global [`MeterProvider`](opentelemetry::metrics::MeterProvider) or from
-//! a custom provider supplied via
+//! All metrics use the `fetch` OpenTelemetry [`Meter`](opentelemetry::metrics::Meter). The client
+//! gets the meter from the global [`MeterProvider`](opentelemetry::metrics::MeterProvider) or a
+//! custom provider set through
 //! [`HttpClientBuilder::meter_provider`](crate::HttpClientBuilder::meter_provider).
 //!
 //! # Instrumentation scope
 //!
-//! Every client carries attributes on the **instrumentation scope** of its
-//! `fetch` meter, so they apply to *all* metrics the client emits (both request
-//! and connection metrics):
+//! Every client adds attributes to the instrumentation scope of its `fetch` meter. The attributes
+//! apply to request and connection metrics:
 //!
 //! | Scope attribute | Description | Sample value |
 //! |-----------------|-------------|--------------|
 //! | `fetch.runtime` | Identifies the async runtime the client is built for | `"tokio"` |
 //! | `fetch.transport` | Identifies the transport handler the client dispatches through | `"hyper"` |
-//! | `http.client.name` | Name of the client, set via [`HttpClientBuilder::name`](crate::HttpClientBuilder::name) (defaults to `"http_client"`); lets callers correlate all of a client's metrics with a specific named client | `"crates_api_client"` |
+//! | `http.client.name` | Identifies the client. [`HttpClientBuilder::name`](crate::HttpClientBuilder::name) sets it. The default is `"http_client"`. | `"crates_api_client"` |
 //!
-//! The bundled transports report fixed values — `"tokio"` runtime and
-//! `"hyper"` transport for the default Tokio + hyper transport, and `"fake"`
-//! for both the runtime and transport of fake HTTP clients. A custom transport
-//! reports the `runtime` and `transport` names passed to
+//! The default Tokio and hyper transport reports `"tokio"` and `"hyper"`. A fake client reports
+//! `"fake"` for both attributes. A custom transport reports the names passed to
 //! [`custom::create_builder`](crate::custom::create_builder).
 //!
 //! # Metrics
 //!
 //! | Metric | Instrument | Unit | Emitted when |
 //! |--------|-----------|------|--------------|
-//! | [`http.client.request.duration`](#httpclientrequestduration) | `Histogram<f64>` | `s` | Every HTTP request attempt completes (success **or** failure) |
-//! | [`http.client.request.total_duration`](#httpclientrequesttotal_duration) | `Histogram<f64>` | `s` | An entire logical request completes, including all retries and hedged attempts (enabled by the standard pipeline's outermost metrics layer) |
-//! | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) | `Histogram<f64>` | `s` | A TCP/TLS connection attempt finishes (success **or** failure) |
+//! | [`http.client.request.duration`](#httpclientrequestduration) | `Histogram<f64>` | `s` | An HTTP request attempt returns or its future is dropped |
+//! | [`http.client.request.total_duration`](#httpclientrequesttotal_duration) | `Histogram<f64>` | `s` | A logical request returns or its future is dropped, including all retries and hedged attempts |
+//! | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) | `Histogram<f64>` | `s` | Name resolution and TCP setup finish, with a TLS handshake for HTTPS |
 //! | [`http.client.connection.duration`](#httpclientconnectionduration) | `Histogram<f64>` | `s` | A connection is closed (the underlying stream is dropped) |
 //!
 //! ---
 //!
 //! ## `http.client.request.duration`
 //!
-//! Measures the total wall-clock time of a single HTTP request attempt from the
-//! moment the request enters [`Metrics`](crate::handlers::Metrics)
-//! until a response (or error) is returned. Follows the
+//! Measures one HTTP request attempt from entry into [`Metrics`](crate::handlers::Metrics) until a
+//! response or error returns. It follows the
 //! [OpenTelemetry `http.client.request.duration`](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpclientrequestduration)
 //! semantic convention.
 //!
-//! In the [standard pipeline](crate::pipeline::StandardRequestPipeline) this is
-//! recorded per attempt, so a request that is retried or hedged produces one
-//! measurement per attempt. See
-//! [`http.client.request.total_duration`](#httpclientrequesttotal_duration)
-//! for a single measurement covering the whole logical request.
+//! The [standard pipeline](crate::pipeline::StandardRequestPipeline) records one measurement for
+//! the initial attempt and each retry or hedged attempt. See
+//! [`http.client.request.total_duration`](#httpclientrequesttotal_duration) for one measurement of
+//! the logical request.
 //!
-//! **Histogram boundaries (seconds):** `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0`
+//! If the caller drops an attempt future, the metric uses `error.type=abandoned`.
+//!
+//! Histogram boundaries in seconds: `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0`.
 //!
 //! ### Attributes
 //!
@@ -68,36 +64,28 @@
 //! | `http.response.status_code` | on success | HTTP status code of the response | `200` |
 //! | `error.type` | on failure | A short, metrics-friendly label classifying the error | `"io"` |
 //!
-//! > **Custom attributes.** Any [`TelemetryAttributes`](crate::telemetry::TelemetryAttributes)
-//! > attached to the request or response extensions are merged into the
-//! > attribute set. This allows callers to inject domain-specific dimensions.
+//! > **Note**: The metric includes [`TelemetryAttributes`](crate::telemetry::TelemetryAttributes)
+//! > from request and response extensions.
 //!
 //! ---
 //!
 //! ## `http.client.request.total_duration`
 //!
-//! A **proprietary Oxidizer metric**. It is *not* part of the official
-//! OpenTelemetry HTTP semantic conventions — Oxidizer adds it inside the
-//! OpenTelemetry-owned `http.client.*` namespace as a vendor-specific
-//! instrument. Measures the wall-clock time of an entire *logical* request —
-//! including every retry and hedged attempt — as opposed to
-//! [`http.client.request.duration`](#httpclientrequestduration), which measures
-//! a single attempt.
+//! This proprietary Oxidizer metric is not part of the OpenTelemetry HTTP semantic conventions.
+//! Oxidizer defines it in the OpenTelemetry `http.client.*` namespace. It measures the logical
+//! request, including every retry and hedged attempt.
 //!
-//! This is simply the execution duration of the inner service wrapped by the
-//! outermost metrics layer: timing starts when the logical request enters the
-//! layer and ends when the first accepted response (or terminal error) is
-//! returned. Concurrent hedged attempts do **not** duplicate the counted time —
-//! running two attempts in parallel does not inflate the recorded duration.
+//! Timing starts when the request enters the outermost metrics layer. It stops when the first
+//! accepted response or terminal error returns. Concurrent hedged attempts do not add duplicate
+//! time.
 //!
-//! This instrument is recorded by a [`Metrics`](crate::handlers::Metrics)
-//! handler with [`report_total_duration`](crate::handlers::MetricsLayer::report_total_duration)
-//! enabled. In the [standard pipeline](crate::pipeline::StandardRequestPipeline)
-//! it is emitted by the outermost `total_metrics` layer, which wraps the total
-//! timeout, retry/hedging, circuit breaker, and per-attempt layers — so a single
-//! measurement covers the whole request regardless of how many attempts it took.
+//! A [`Metrics`](crate::handlers::Metrics) handler records this instrument when
+//! [`report_total_duration`](crate::handlers::MetricsLayer::report_total_duration) is enabled. In
+//! the [standard pipeline](crate::pipeline::StandardRequestPipeline), the outermost `total_metrics`
+//! layer wraps the total timeout, recovery, circuit breaker, and per-attempt layers.
+//! If the caller drops the logical request future, the metric uses `error.type=abandoned`.
 //!
-//! **Histogram boundaries (seconds):** `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0`
+//! Histogram boundaries in seconds: `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0`.
 //!
 //! ### Attributes
 //!
@@ -107,14 +95,13 @@
 //!
 //! ## `http.client.connection.setup.duration`
 //!
-//! Measures the time it takes to establish a new connection (TCP + TLS
-//! handshake). Recorded once per connection attempt — on both success and
-//! failure.
+//! Measures name resolution and TCP connection setup. For HTTPS, it also measures the TLS
+//! handshake. It records success and failure.
 //!
 //! This metric is only available when the Hyper-based transport is in use
 //! (the default for the Tokio runtime).
 //!
-//! **Histogram boundaries (seconds):** `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0, 25.0, 50.0`
+//! Histogram boundaries in seconds: `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0, 25.0, 50.0`.
 //!
 //! ### Attributes
 //!
@@ -130,13 +117,12 @@
 //!
 //! ## `http.client.connection.duration`
 //!
-//! Measures the total lifetime of a connection — from the moment it was
-//! successfully established until the underlying stream is dropped (closed).
-//! Useful for understanding connection reuse and pool behavior.
+//! Measures a connection from successful establishment until the underlying stream is dropped.
+//! Use it to inspect connection reuse and pool behavior.
 //!
 //! This metric is only available when the Hyper-based transport is in use.
 //!
-//! **Histogram boundaries (seconds):** `0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0`
+//! Histogram boundaries in seconds: `0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0`.
 //!
 //! ### Attributes
 //!
@@ -151,9 +137,8 @@
 //!
 //! # Error labels
 //!
-//! The `error.type` attribute is a dot-separated label chain built by walking
-//! the error's `source()` chain outermost-first, pinpointing *where* the
-//! failure occurred:
+//! The `error.type` attribute is a dot-separated label chain. It reads the error `source()` chain
+//! from the outer error to the inner error:
 //!
 //! ```text
 //! "request_hyper.connect.timed_out"
@@ -165,11 +150,11 @@
 //!
 //! | `error.type` | What happened |
 //! |--------------|---------------|
-//! | `request_hyper.connect.timed_out` | TCP/TLS handshake timed out |
+//! | `request_hyper.connect.timed_out` | Name resolution, TCP connection, or TLS setup timed out |
 //! | `request_hyper.connect.connection_refused` | Server refused the connection |
 //! | `request_hyper.connect.other` | TLS or unclassified connection error |
-//! | `scheme_not_allowed` | HTTP scheme blocked before reaching the network |
+//! | `scheme_not_allowed` | URI scheme rejected by the client policy or transport before network I/O |
 //! | `compression_invalid` | Response body was malformed for its declared compression format |
-//! | `compression_limit_exceeded` | Decompression would have exceeded the configured limits |
+//! | `compression_limit_exceeded` | A configured limit stopped further decompression |
 //! | `compression_unsupported` | Response used a compression format that is not enabled |
-//! | `abandoned` | Caller dropped the future (e.g. outer timeout) |
+//! | `abandoned` | Caller dropped the future, for example because of an outer timeout |

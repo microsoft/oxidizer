@@ -6,24 +6,21 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/recoverable/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/recoverable/favicon.ico")]
 
-//! Recovery information and classification for resilience patterns.
+//! Recovery classifications for operations.
 //!
-//! This crate provides types for classifying conditions based on their **recoverability state**,
-//! enabling consistent recovery behavior across different error types and resilience middleware.
+//! This crate reports whether a recovery attempt can change an outcome.
+//! Error types and resilience middleware can share this information.
+//! Use [`RecoveryInfo::never`] for successful operations and permanent failures.
 //!
-//! Recovery information describes whether retrying an operation might help, not whether the
-//! operation succeeded or failed. Both successful operations and permanent failures should use
-//! [`RecoveryInfo::never`] since recovery is not necessary or desirable.
+//! # Core types
 //!
-//! # Core Types
-//!
-//! - [`RecoveryInfo`]: Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
-//! - [`Recovery`]: A trait for types that can provide their own recovery information.
-//! - [`RecoveryKind`]: An enum representing the kind of recovery that can be attempted.
+//! - [`RecoveryInfo`] contains a recovery classification and an optional delay.
+//! - [`Recovery`] lets a type provide its recovery information.
+//! - [`RecoveryKind`] identifies the recovery classification.
 //!
 //! # Examples
 //!
-//! ## Classifying Errors
+//! ## Classify errors
 //!
 //! ```rust
 //! use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
@@ -38,9 +35,9 @@
 //! impl Recovery for DatabaseError {
 //!     fn recovery(&self) -> RecoveryInfo {
 //!         match self {
-//!             // Transient failure - might succeed if retried
+//!             // A retry can recover from this transient failure.
 //!             DatabaseError::ConnectionTimeout => RecoveryInfo::retry(),
-//!             // Permanent failures - retrying won't help
+//!             // A retry cannot recover from these permanent failures.
 //!             DatabaseError::InvalidCredentials => RecoveryInfo::never(),
 //!             DatabaseError::TableNotFound => RecoveryInfo::never(),
 //!         }
@@ -50,25 +47,25 @@
 //! let error = DatabaseError::ConnectionTimeout;
 //! assert_eq!(error.recovery().kind(), RecoveryKind::Retry);
 //!
-//! // Successful operations also use never() since retry is unnecessary
+//! // Successful operations also use never() because they need no recovery.
 //! let success_result: Result<(), DatabaseError> = Ok(());
 //! ```
 //!
-//! ## Retry Delay
+//! ## Set a retry delay
 //!
-//! You can specify when to retry an operation using the `delay` method:
+//! Use [`RecoveryInfo::delay`] to specify when to retry an operation.
 //!
 //! ```rust
 //! use std::time::Duration;
 //!
 //! use recoverable::{RecoveryInfo, RecoveryKind};
 //!
-//! // Retry with a 30-second delay (e.g., from a Retry-After header)
+//! // Retry after 30 seconds, as specified by a Retry-After header.
 //! let recovery = RecoveryInfo::retry().delay(Duration::from_secs(30));
 //! assert_eq!(recovery.kind(), RecoveryKind::Retry);
 //! assert_eq!(recovery.get_delay(), Some(Duration::from_secs(30)));
 //!
-//! // Immediate retry
+//! // Retry immediately.
 //! let immediate = RecoveryInfo::retry().delay(Duration::ZERO);
 //! assert_eq!(immediate.get_delay(), Some(Duration::ZERO));
 //! ```
@@ -81,19 +78,17 @@ mod io;
 #[cfg(any(doc, test))]
 pub mod documentation;
 
-// Naming Convention for Get/Set:
+// Naming convention for accessors:
 //
-// This type uses an unconventional naming pattern where setters use plain names (e.g., `delay()`)
-// and getters use the `get_` prefix (e.g., `get_delay()`). This deviates from standard Rust
-// conventions because setters are used much more frequently than getters in typical usage patterns.
-// The `get_` prefix on getters helps distinguish them from their corresponding setters.
+// Setters use plain names such as `delay()`. Getters use the `get_` prefix, such
+// as `get_delay()`. Callers use setters more often, and the prefix distinguishes
+// each getter from its setter.
 
-/// Recovery information associated with an operation or condition.
+/// Contains the recovery classification and optional delay for an operation or condition.
 ///
-/// Describes how an operation can be recovered from, if at all. Construct instances via the
-/// named constructors [`unknown`](Self::unknown), [`never`](Self::never),
-/// [`retry`](Self::retry), and [`unavailable`](Self::unavailable), and optionally attach a
-/// delay hint with [`delay`](Self::delay).
+/// Create a value with [`unknown`](Self::unknown), [`never`](Self::never),
+/// [`retry`](Self::retry), or [`unavailable`](Self::unavailable).
+/// Use [`delay`](Self::delay) to set a delay.
 ///
 /// # Examples
 ///
@@ -109,15 +104,16 @@ pub struct RecoveryInfo {
     delay: Option<Duration>,
 }
 
-/// Kind of recovery that can be attempted.
+/// Classifies recovery for an operation or condition.
 ///
-/// Retrieve the recovery kind from a [`RecoveryInfo`] instance via [`RecoveryInfo::kind`].
+/// Use [`RecoveryInfo::kind`] to get this value from [`RecoveryInfo`].
 ///
-/// # Handling Unknown Variants
+/// # Handle unknown variants
 ///
-/// This enum is `#[non_exhaustive]`, so new variants may be added in future versions without
-/// a major version bump. When matching on `RecoveryKind`, always include a wildcard arm that
-/// treats unrecognized variants the same as [`RecoveryKind::Unknown`]:
+/// This enum is `#[non_exhaustive]`.
+/// A future version can add variants without a major version change. When you
+/// match on `RecoveryKind`, include a wildcard arm.
+/// Treat unrecognized variants in the same way as [`RecoveryKind::Unknown`].
 ///
 /// ```rust
 /// use recoverable::{RecoveryInfo, RecoveryKind};
@@ -127,7 +123,7 @@ pub struct RecoveryInfo {
 ///         RecoveryKind::Retry => true,
 ///         RecoveryKind::Never => false,
 ///         RecoveryKind::Unavailable => false,
-///         // Treat unknown (and any future variants) conservatively
+///         // Treat unknown and future variants conservatively.
 ///         RecoveryKind::Unknown | _ => false,
 ///     }
 /// }
@@ -144,35 +140,33 @@ pub struct RecoveryInfo {
 #[derive(Debug, PartialEq, Clone, Eq, Copy, Hash)]
 #[non_exhaustive]
 pub enum RecoveryKind {
-    /// The recoverability of the condition is unknown.
+    /// The application has no known recovery classification.
     ///
-    /// Handling should be determined on a case-by-case basis. For example,
-    /// unclassified network errors might warrant retrying. Consider an
-    /// optimistic or pessimistic approach based on your application's requirements.
+    /// Risk requirements determine how the application interprets this classification.
     Unknown,
 
-    /// The condition is transient and may resolve with recovery.
+    /// A recovery attempt can resolve this transient condition.
     ///
-    /// Retry the operation with backoff, respecting any [`RecoveryInfo::delay`] hint.
+    /// Repeated attempts can resolve the condition.
+    /// A value from [`RecoveryInfo::get_delay`] specifies the wait before an attempt.
     Retry,
 
-    /// The condition is permanent and recovery won't help.
+    /// The outcome needs no recovery attempt, or no attempt can change it.
     ///
-    /// Do not retry; propagate the error as a terminal failure.
+    /// This classification covers successful operations and permanent failures.
     Never,
 
-    /// Service-wide unavailability or significant degradation.
+    /// The condition is unlikely to recover soon, or its recovery time is uncertain.
     ///
-    /// Retrying has a low chance of success. Consider circuit-breaker patterns,
-    /// failing fast, or falling back to cached data.
+    /// Several recovery attempts can fail before the condition changes.
     Unavailable,
 }
 
 impl RecoveryInfo {
-    /// Creates recovery info for an unknown condition.
+    /// Creates recovery information for an unknown condition.
     ///
-    /// Use when it is unclear whether recovery would help. Consider treating
-    /// unknown conditions conservatively based on your application's requirements.
+    /// If the correct recovery classification is not known, use this value.
+    /// If the application requires a conservative policy, choose one.
     ///
     /// # Examples
     ///
@@ -190,28 +184,28 @@ impl RecoveryInfo {
         }
     }
 
-    /// Creates recovery info for a permanent, non-recoverable condition.
+    /// Creates recovery information for an outcome that needs no recovery.
     ///
-    /// Use for both successful operations and permanent failures:
+    /// Use this value for these outcomes:
     ///
-    /// - **Successful operations**: The operation completed successfully; no recovery needed.
-    /// - **Permanent failures**: Malformed requests, authentication failures, resource not found,
-    ///   or other errors that require user intervention or code changes to resolve.
+    /// - Successful operations that need no recovery.
+    /// - Permanent failures that need user action or a code change.
     ///
-    /// Recovery information describes **recoverability state**, not success/failure status.
-    /// If recovery would not change the outcome, use `never()` regardless of whether the
-    /// original operation succeeded or failed.
+    /// Permanent failures include malformed requests, authentication failures,
+    /// and missing resources. Recovery information describes recoverability,
+    /// not success or failure.
+    /// If recovery cannot change the outcome, use `never()`.
     ///
     /// # Examples
     ///
     /// ```rust
     /// use recoverable::{RecoveryInfo, RecoveryKind};
     ///
-    /// // Permanent failure - authentication failed
+    /// // An authentication failure is permanent.
     /// let auth_failure = RecoveryInfo::never();
     /// assert_eq!(auth_failure.kind(), RecoveryKind::Never);
     ///
-    /// // Successful operation - also uses never() since recovery is unnecessary
+    /// // A successful operation needs no recovery.
     /// let success = RecoveryInfo::never();
     /// assert_eq!(success.kind(), RecoveryKind::Never);
     /// assert_eq!(success.get_delay(), None);
@@ -224,16 +218,14 @@ impl RecoveryInfo {
         }
     }
 
-    /// Creates recovery info for a transient, likely recoverable condition.
+    /// Creates recovery information for a transient condition.
     ///
-    /// Use for transient failures that are expected to resolve relatively quickly,
-    /// such as network timeouts, brief resource contention, or rate limiting.
-    /// These conditions typically resolve within seconds to minutes without any
-    /// specific timing guidance from the service.
+    /// Use this value for failures that usually resolve within seconds or minutes.
+    /// Examples include network timeouts, brief resource contention, and rate limits.
+    /// This value does not include a wait before the next attempt.
     ///
-    /// For service-wide unavailability that may take much longer to resolve,
-    /// use [`RecoveryInfo::unavailable`] instead. For cases where the service provides
-    /// explicit timing guidance, chain the [`delay`](Self::delay) method.
+    /// Use [`RecoveryInfo::unavailable`] for service-wide failures that can last longer.
+    /// If the service specifies a wait, add it with [`delay`](Self::delay).
     ///
     /// # Examples
     ///
@@ -252,21 +244,12 @@ impl RecoveryInfo {
         }
     }
 
-    /// Creates recovery info for service-wide unavailability or significant degradation.
+    /// Creates recovery information for a condition with slow or uncertain recovery.
     ///
-    /// Use when the failure is due to a service-wide issue that affects many users and may
-    /// take an extended period to resolve (minutes to hours). Unlike [`RecoveryInfo::retry`],
-    /// which suggests quick resolution, unavailability indicates uncertainty about recovery
-    /// timing and suggests that multiple recovery attempts may fail before the service recovers.
-    ///
-    /// To attach a recovery delay hint, chain the [`delay`](Self::delay) method:
-    /// ```rust
-    /// use std::time::Duration;
-    ///
-    /// use recoverable::RecoveryInfo;
-    ///
-    /// let recovery = RecoveryInfo::unavailable().delay(Duration::from_secs(300));
-    /// ```
+    /// If several recovery attempts can fail before the condition changes, use
+    /// this value. Examples include service-wide outages and local resource
+    /// failures. [`RecoveryInfo::retry`] indicates that the condition will
+    /// usually resolve quickly.
     ///
     /// # Examples
     ///
@@ -283,18 +266,19 @@ impl RecoveryInfo {
         }
     }
 
-    /// Attaches a delay hint to this recovery information.
+    /// Adds a delay to this recovery information.
     ///
-    /// The delay indicates when a recovery attempt should be made. Its meaning depends on
-    /// the recovery kind:
+    /// The delay specifies when to try recovery.
+    /// Its meaning depends on the recovery kind:
     ///
-    /// - For [`RecoveryInfo::retry`]: High-confidence timing guidance (e.g., from a
-    ///   `Retry-After` header) indicating when the recovery attempt is likely to succeed.
-    /// - For [`RecoveryInfo::unavailable`]: Low-confidence estimate for the earliest time
-    ///   when recovery attempts might succeed. Attempts before this time are expected to fail.
-    /// - For other recovery kinds: Generally not applicable, but the delay will be preserved.
+    /// - For [`RecoveryInfo::retry`], it is the wait before the next attempt.
+    ///   For example, the value can come from a `Retry-After` header.
+    /// - For [`RecoveryInfo::unavailable`], it is an estimate of the earliest recovery time.
+    ///   An attempt before this time will usually fail.
+    /// - For other recovery kinds, the delay has no defined meaning, but this
+    ///   value preserves it.
     ///
-    /// If the duration is zero, it's a hint to attempt recovery immediately.
+    /// A zero duration specifies an immediate recovery attempt.
     ///
     /// # Examples
     ///
@@ -303,28 +287,28 @@ impl RecoveryInfo {
     ///
     /// use recoverable::{RecoveryInfo, RecoveryKind};
     ///
-    /// // Service indicates to retry after 30 seconds
+    /// // The service specifies a retry after 30 seconds.
     /// let recovery = RecoveryInfo::retry().delay(Duration::from_secs(30));
     /// assert_eq!(recovery.kind(), RecoveryKind::Retry);
     /// assert_eq!(recovery.get_delay(), Some(Duration::from_secs(30)));
     ///
-    /// // Unavailability with recovery estimate
+    /// // The service provides an estimated recovery time.
     /// let recovery = RecoveryInfo::unavailable().delay(Duration::from_secs(300));
     /// assert_eq!(recovery.kind(), RecoveryKind::Unavailable);
     /// assert_eq!(recovery.get_delay(), Some(Duration::from_secs(300)));
     /// ```
     #[must_use]
     pub const fn delay(self, delay: Duration) -> Self {
-        // See file-level "Naming Convention" comment for why this uses a plain name.
+        // See the file-level naming comment for the plain setter name.
         Self {
             kind: self.kind,
             delay: Some(delay),
         }
     }
 
-    /// Returns the recovery kind for this instance.
+    /// Returns the recovery kind.
     ///
-    /// Use this to determine the appropriate recovery strategy.
+    /// Use this classification to choose a recovery policy.
     ///
     /// # Examples
     ///
@@ -342,15 +326,15 @@ impl RecoveryInfo {
         self.kind
     }
 
-    /// Returns the delay hint, if one was set via [`delay`](Self::delay).
+    /// Returns the delay set by [`delay`](Self::delay).
     ///
-    /// Use together with [`kind`](Self::kind) to determine both whether a condition is
-    /// recoverable and whether an explicit delay is provided. Returns `Some(duration)` when
-    /// a delay has been set, and `None` otherwise.
+    /// Use this value with [`kind`](Self::kind). This method returns
+    /// `Some(duration)` when a delay is present and `None` otherwise.
     ///
     /// The meaning of the returned delay depends on the recovery kind:
-    /// - For [`RecoveryInfo::retry`]: High-confidence timing guidance indicating when recovery will likely succeed.
-    /// - For [`RecoveryInfo::unavailable`]: Low-confidence estimate for the earliest time when recovery might succeed.
+    ///
+    /// - For [`RecoveryInfo::retry`], it is the wait before the next attempt.
+    /// - For [`RecoveryInfo::unavailable`], it is an estimate of the earliest recovery time.
     ///
     /// # Examples
     ///
@@ -359,48 +343,36 @@ impl RecoveryInfo {
     ///
     /// use recoverable::RecoveryInfo;
     ///
-    /// // Specific delay requested with high confidence of success
+    /// // The service specifies a wait before the next attempt.
     /// let delay = RecoveryInfo::retry().delay(Duration::from_secs(30));
     /// assert_eq!(delay.get_delay(), Some(Duration::from_secs(30)));
     ///
-    /// // No delay specified
-    /// let immediate = RecoveryInfo::retry();
-    /// assert_eq!(immediate.get_delay(), None);
-    ///
-    /// // Unavailability with no recovery estimate
-    /// let unavailable = RecoveryInfo::unavailable();
-    /// assert_eq!(unavailable.get_delay(), None);
-    ///
-    /// // Unavailability with low-confidence recovery estimate
+    /// // The service provides an estimated recovery time.
     /// let unavailable_with_time = RecoveryInfo::unavailable().delay(Duration::from_secs(300));
     /// assert_eq!(
     ///     unavailable_with_time.get_delay(),
     ///     Some(Duration::from_secs(300))
     /// );
-    ///
-    /// // Non-recoverable
-    /// let never = RecoveryInfo::never();
-    /// assert_eq!(never.get_delay(), None);
+    /// // The value has no delay.
+    /// let no_delay = RecoveryInfo::retry();
+    /// assert_eq!(no_delay.get_delay(), None);
     /// ```
     #[must_use]
     pub const fn get_delay(&self) -> Option<Duration> {
-        // See file-level "Naming Convention" comment for why this uses the `get_` prefix.
+        // See the file-level naming comment for the `get_` prefix.
         self.delay
     }
 }
 
-/// Enables types to provide their own recovery information.
+/// Provides recovery information for a value.
 ///
-/// Implement this trait for errors or any type that can indicate the recoverability of
-/// its state. This allows consistent handling of recoverable conditions across various
-/// types in resilience middleware.
-///
-/// Typical implementers are error types whose variants can be classified as transient or
-/// permanent, depending on the specific error condition.
+/// Implement this trait for an error or another type that can classify its
+/// state. Resilience middleware can then handle different types in the same way.
+/// An error usually implements this trait when its variants have different classifications.
 ///
 /// # Examples
 ///
-/// Basic implementation for a simple error type:
+/// This example implements the trait for an error type.
 ///
 /// ```rust
 /// use recoverable::{Recovery, RecoveryInfo};
@@ -423,10 +395,9 @@ impl RecoveryInfo {
 /// }
 /// ```
 pub trait Recovery {
-    /// Returns recovery information for this instance.
+    /// Returns recovery information for this value.
     ///
-    /// Implementations should return appropriate recovery information based on the
-    /// internal state of the type.
+    /// The implementation classifies the current state of the value.
     ///
     /// # Examples
     ///
@@ -471,7 +442,7 @@ impl Display for RecoveryInfo {
 }
 
 impl RecoveryKind {
-    /// Returns a string representation of this recovery kind.
+    /// Returns the name of this recovery kind.
     ///
     /// # Examples
     ///
@@ -510,7 +481,7 @@ mod tests {
     assert_impl_all!(RecoveryInfo: Debug, PartialEq, Clone, Send, Sync, Eq, PartialEq);
     assert_impl_all!(RecoveryKind: Debug, PartialEq, Clone, Eq, Copy, std::hash::Hash);
 
-    // cannot be Copy because in the future we may want to add more fields that are not Copy
+    // Keep this type extensible for fields that do not implement Copy.
     assert_not_impl_all!(RecoveryInfo: Copy);
 
     #[test]
@@ -562,16 +533,16 @@ mod tests {
         assert_eq!(recovery.get_delay(), Some(thirty_seconds));
         assert_eq!(recovery.kind(), RecoveryKind::Retry);
 
-        // Zero duration
+        // A zero duration is preserved.
         let zero_duration = RecoveryInfo::retry().delay(Duration::ZERO);
         assert_eq!(zero_duration.get_delay(), Some(Duration::ZERO));
 
-        // Delay can be applied to any recovery kind
+        // A delay can apply to any recovery kind.
         let unavailable = RecoveryInfo::unavailable().delay(Duration::from_mins(5));
         assert_eq!(unavailable.get_delay(), Some(Duration::from_mins(5)));
         assert_eq!(unavailable.kind(), RecoveryKind::Unavailable);
 
-        // Applying delay multiple times replaces the previous delay
+        // A new delay replaces the previous delay.
         let updated = RecoveryInfo::retry().delay(Duration::from_secs(10)).delay(Duration::from_secs(20));
         assert_eq!(updated.get_delay(), Some(Duration::from_secs(20)));
     }
@@ -622,7 +593,7 @@ mod tests {
         );
     }
 
-    // Result implements Recovery
+    // Result implements Recovery when both variants implement it.
     #[derive(Debug)]
     struct TestType;
     impl Recovery for TestType {

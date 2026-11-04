@@ -16,6 +16,7 @@ pub(crate) fn report_created(sink: &Sink, placement: TaskPlacement) {
     let placement = match placement {
         TaskPlacement::Any => "any",
         TaskPlacement::SameThread => "same_thread",
+        TaskPlacement::SpecificThread => "specific_thread",
     };
     emit!(
         sink,
@@ -58,7 +59,6 @@ struct TaskPanicked {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use observed_testing::{TEST_ID, test_emitter};
 
@@ -78,5 +78,17 @@ mod tests {
         assert_eq!(events[1].field_metrics()[0].field_key(), "polls");
         assert_eq!(events[1].field_metrics()[0].metric().unit(), "{poll}");
         assert!((events[1].field_metrics()[0].value() - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn specific_thread_placement_has_a_distinct_label() {
+        let (sink, processor) = test_emitter(TEST_ID);
+
+        report_created(&sink, TaskPlacement::SpecificThread);
+
+        assert_eq!(
+            processor.events()[0].dimensions()[0],
+            ("placement".to_owned(), "specific_thread".into())
+        );
     }
 }

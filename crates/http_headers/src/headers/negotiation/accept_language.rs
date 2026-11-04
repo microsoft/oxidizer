@@ -204,6 +204,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native and cargo-careful runs retain the fragment Cartesian product; realistic and short lines preserve consumer coverage of the accelerated recognizer"
+    )]
     fn recognized_fragment_lines_satisfy_the_member_grammar() {
         const FRAGMENTS: &[&str] = &[
             "en",

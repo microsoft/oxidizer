@@ -1,17 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! A simple HTTP server using `http_extensions` and `hyper` with a custom execution stack.
+//! This example defines an HTTP server with `http_extensions` and `hyper`.
 //!
-//! This example demonstrates how to set up a basic HTTP server that listens on `http://localhost:8080`
-//! and responds with "Hello, World!" to any incoming request. It also includes middleware using
-//! `layered` to log incoming requests and outgoing responses.
+//! The server uses an OS-assigned local port by default. Use `--port PORT` to select a port.
+//! It prints the selected address and returns "Hello, World!" for each request.
+//! Middleware from `layered` logs requests and responses.
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use argh::FromArgs;
 use bytesbuf::BytesView;
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use futures::TryStreamExt;
 use http::Request;
 use http_body_util::BodyExt;
@@ -26,15 +27,24 @@ use tokio::net::TcpListener;
 
 const SERVER_LIFETIME: Duration = Duration::from_secs(2);
 
+/// Command-line options for the server example.
+#[derive(FromArgs)]
+struct ServerOptions {
+    /// local TCP port; the operating system selects a port when this is zero
+    #[argh(option, default = "0")]
+    port: u16,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
+    let options: ServerOptions = argh::from_env();
     let clock = Clock::new_tokio();
 
-    // In a real application, the application framework would provide the global memory pool.
-    let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
+    // An application framework normally provides the global memory pool.
+    let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
     let body_builder_clone = body_builder.clone();
 
-    // Define an execution stack of middleware
+    // Define the middleware stack.
     let stack = (
         Intercept::layer()
             .on_input(|req: &HttpRequest| println!("received request, uri: {}", req.uri()))
@@ -45,13 +55,13 @@ async fn main() -> Result<(), ohno::AppError> {
         Execute::new(move |_req: HttpRequest| {
             let clone = body_builder.clone();
             async move {
-                // create a response builder and produce a response
+                // Build the response.
                 HttpResponseBuilder::new(&clone).text("Hello, World!").build()
             }
         }),
     );
 
-    let Ok(res) = serve_with_hyper(stack.into_service(), body_builder_clone)
+    let Ok(res) = serve_with_hyper(stack.into_service(), body_builder_clone, options.port)
         .timeout(&clock, SERVER_LIFETIME)
         .await
     else {
@@ -62,9 +72,10 @@ async fn main() -> Result<(), ohno::AppError> {
     res
 }
 
-/// Maps a hyper [`Incoming`] body to an [`HttpBody`][http_extensions::HttpBody]
-/// using [`HttpBodyBuilder::stream`], which wraps the incoming byte stream
-/// without requiring the `hyper` feature on `http_extensions`.
+/// Maps a hyper [`Incoming`] body to an [`HttpBody`][http_extensions::HttpBody].
+///
+/// [`HttpBodyBuilder::stream`] wraps the byte stream.
+/// This crate does not need the `hyper` feature for this operation.
 fn map_incoming_to_http_body(incoming: Incoming, body_builder: &HttpBodyBuilder) -> http_extensions::HttpBody {
     let stream = incoming
         .into_data_stream()
@@ -74,9 +85,9 @@ fn map_incoming_to_http_body(incoming: Incoming, body_builder: &HttpBodyBuilder)
     body_builder.stream(stream, &HttpBodyOptions::default())
 }
 
-async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder: HttpBodyBuilder) -> Result<(), ohno::AppError> {
+async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder: HttpBodyBuilder, port: u16) -> Result<(), ohno::AppError> {
     let service = Arc::new(service);
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    let listener = TcpListener::bind(("127.0.0.1", port)).await?;
 
     println!("Listening on: {}", listener.local_addr()?);
 
@@ -93,11 +104,11 @@ async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder:
                 async move { service_cloned.execute(request).await }
             });
 
-            // Configure the hyper server connection
+            // Set the hyper server connection configuration.
             let builder = server::conn::auto::Builder::new(TokioExecutor::new());
 
             let socket = TokioIo::new(socket);
-            // Serve the connection with upgrades
+            // Serve the connection and support protocol upgrades.
             if let Err(e) = builder.serve_connection_with_upgrades(socket, hyper_service).await {
                 eprintln!("failed to serve connection: {e}");
             }

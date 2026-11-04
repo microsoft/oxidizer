@@ -71,7 +71,7 @@ pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
     #[cfg(not(test))]
     let _ = args;
 
-    run_terminal(app::App::new(), None)
+    run_terminal(app::App::with_io(seismograph_protocol::io::MonitorIo::new_native()), None)
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -106,7 +106,7 @@ fn run_terminal(mut app: app::App, mut loader: Option<offline::Loader>) -> Resul
         terminal.draw(|frame| app.draw(frame)).map_err(Error::Io)?;
         let wait = app
             .next_refresh()
-            .saturating_duration_since(Instant::now())
+            .saturating_duration_since(app.io.instant())
             .min(Duration::from_millis(200));
         if event::poll(wait).map_err(Error::Io)? {
             match event::read().map_err(Error::Io)? {
@@ -118,7 +118,7 @@ fn run_terminal(mut app: app::App, mut loader: Option<offline::Loader>) -> Resul
                 _ => {}
             }
         }
-        if refresh_is_due(Instant::now(), app.next_refresh()) {
+        if refresh_is_due(app.io.instant(), app.next_refresh()) {
             app.refresh();
         }
     }

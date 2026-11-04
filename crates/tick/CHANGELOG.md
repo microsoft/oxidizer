@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.9.0] - 2026-11-02
+
+- Breaking: Replace `PeriodicTimer` with `Timer`. Await `Timer::next` for a `TimerTick`, then use
+  `observed_at` to read when the tick completed.
+- Breaking: If your application needs a stream, adapt `Timer::next` in application code. The timer
+  no longer implements `Stream`.
+- Breaking: Replace `InactiveClock::default` with `InactiveClock::new_isolated` and use `Timeout<F>`
+  instead of `Timeout<F, D>`.
+- Breaking: Use `Result<T, tick::Error>` instead of the removed `tick::Result`.
+- Add `Error::is_timeout`, `Error::is_out_of_range`, and captured backtraces, which show the calls
+  that led to an error.
+- Identify unsupported timestamp ranges without matching error text.
+- Timers keep their deadlines when callers cancel waits. When the waiting task changes, the timer
+  replaces its registered waker, the callback that requests task execution.
+- Handle races between replacing a waker and timer completion.
+- Wake tasks and drop replaced wakers after releasing clock locks. Their callbacks can then call
+  clock operations without deadlocking.
+- Advance system timers in batches stored on the stack, without heap allocation. Set controlled time
+  under one lock.
+- Update the requirement for local package `performables` from `0.3.0` to `0.3.1`.
+- Update the requirement for local package `thread_aware` from `0.12.1` to `0.12.2`.
+- Update the requirement for `tokio` from `1.48.0` to `1.53.3`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
+## [0.8.0] - 2026-10-20
+
+- Make timer drivers deadline-driven and require an owner `Waker` when activating an inactive clock.
+- Update local dependency requirements: performables ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1.
+
 ## [0.7.1] - 2026-10-05
 
 - 🔧 Maintenance

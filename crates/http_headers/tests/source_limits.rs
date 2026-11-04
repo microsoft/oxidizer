@@ -94,6 +94,10 @@ fn padded_value(value: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "real 64-KiB source limits are runtime stress covered natively and by cargo careful; compact source validation remains interpreted"
+)]
 fn custom_source_total_byte_limit_accepts_boundary_and_rejects_overflow() {
     let half = 65_536 / 2;
     let boundary = ValuesSource {
@@ -185,6 +189,10 @@ fn custom_source_line_limit_accepts_boundary_and_rejects_overflow() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "real 1,024-item source limits are runtime stress covered natively and by cargo careful; compact list parsing remains interpreted"
+)]
 fn custom_source_list_item_limit_accepts_boundary_and_rejects_overflow() {
     let boundary = SingleSource {
         name: &FieldName::ReferrerPolicy,
@@ -254,6 +262,10 @@ fn custom_source_list_item_limit_accepts_boundary_and_rejects_overflow() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "the aggregate real-limit matrix is covered natively and by cargo careful; compact raw and validated sources remain interpreted"
+)]
 fn raw_and_validated_list_sources_share_the_aggregate_item_budget() {
     let first = comma_list("origin", 512);
     for count in [512, 513] {
@@ -279,6 +291,10 @@ fn raw_and_validated_list_sources_share_the_aggregate_item_budget() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "real 1,024-item singleton limits are runtime stress covered natively and by cargo careful; direct grammar tests retain dependency coverage"
+)]
 fn singleton_list_item_limit_accepts_boundary_and_rejects_overflow() {
     let range_boundary = SingleSource {
         name: &FieldName::Range,
@@ -497,6 +513,10 @@ fn appending_to_an_over_limit_custom_sink_returns_insert_error() {
 
 #[cfg(feature = "http")]
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "validated HTTP maps intentionally exceed custom-source limits; native and cargo-careful runs retain the real-limit contract"
+)]
 fn validated_http_map_values_are_not_subject_to_custom_source_limits() {
     let mut map = http::HeaderMap::new();
     map.insert(

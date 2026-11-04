@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(clippy::missing_panics_doc, reason = "improves readability in benchmarks")]
+#![allow(clippy::missing_panics_doc, reason = "benchmark readability")]
 #![allow(clippy::unwrap_used, reason = "benchmark code")]
-#![expect(missing_docs, reason = "Benchmark code")]
+#![expect(missing_docs, reason = "benchmark code")]
 
 use alloc_tracker::{Allocator, Session};
 use benchmarking::time_sample;

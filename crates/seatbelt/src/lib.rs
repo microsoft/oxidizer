@@ -23,12 +23,13 @@
     )
 )]
 
-//! Resilience and recovery mechanisms for fallible operations.
+//! Resilience middleware for operations that can fail.
 //!
-//! # Quick Start
+//! # Quick start
 //!
-//! Add resilience to fallible operations, such as RPC calls over the network, with just a few lines of code.
-//! **Retry** handles transient failures and **Timeout** prevents operations from hanging indefinitely:
+//! Use retry and timeout middleware to protect a network operation.
+//! Retry repeats an operation after a temporary failure.
+//! Timeout stops an operation when it takes too long.
 //!
 //! ```rust
 //! # #[cfg(all(feature = "retry", feature = "timeout"))]
@@ -43,7 +44,7 @@
 //! # async fn main(clock: Clock) {
 //! let context = ResilienceContext::new(&clock);
 //! let service = (
-//!     // Retry middleware: Automatically retries failed operations
+//!     // Retry temporary failures.
 //!     Retry::layer("retry", &context)
 //!         .clone_input()
 //!         .recovery_with(|output: &String, _| match output.as_str() {
@@ -51,11 +52,11 @@
 //!             "operation timed out" => RecoveryInfo::retry(),
 //!             _ => RecoveryInfo::never(),
 //!         }),
-//!     // Timeout middleware: Cancels operations that take too long
+//!     // Apply the time limit to each retry attempt.
 //!     Timeout::layer("timeout", &context)
 //!         .timeout_output(|_| "operation timed out".to_string())
 //!         .timeout(Duration::from_secs(30)),
-//!     // Your core business logic
+//!     // Run the operation.
 //!     Execute::new(my_string_operation),
 //! )
 //!     .into_service();
@@ -63,89 +64,73 @@
 //! let result = service.execute("input data".to_string()).await;
 //! # }
 //! # async fn my_string_operation(input: String) -> String {
-//! #     // Simulate processing that transforms the input string
+//! #     // Transform the input string.
 //! #     format!("processed: {}", input)
 //! # }
 //! # }
 //! ```
 //!
-//! # Why?
+//! # Purpose
 //!
-//! Communicating over a network is inherently fraught with problems. The network can go down at any time,
-//! sometimes for a millisecond or two. The endpoint you're connecting to may crash or be rebooted,
-//! network configuration may change from under you, etc. To deliver a robust experience to users, and to
-//! achieve `5` or more `9s` of availability, it is imperative to implement robust resilience patterns to
-//! mask these transient failures.
-//!
-//! This crate provides production-ready resilience middleware with excellent telemetry for building
-//! robust distributed systems that can automatically handle timeouts, retries, and other failure
-//! scenarios.
-//!
-//! - **Production-ready** - Battle-tested middleware with sensible defaults and comprehensive
-//!   configuration options.
-//! - **Excellent telemetry** - Built-in support for metrics and structured logging to monitor
-//!   resilience behavior in production.
-//! - **Runtime agnostic** - Works seamlessly across any async runtime. Use the same resilience
-//!   patterns across different projects and migrate between runtimes without changes.
+//! Network operations can fail for a short time.
+//! A server can restart, a connection can close, or a response can take too long.
+//! Seatbelt provides middleware that handles these failures in a consistent way.
+//! It also provides metrics and structured logs for resilience events.
+//! The middleware does not depend on a specific async runtime.
 //!
 //! # Overview
 //!
-//! This crate uses the [`layered`] crate for composing middleware. The middleware layers
-//! can be stacked together using tuples and built into a service using the [`Stack`][layered::Stack] trait.
+//! This crate uses [`layered`] to combine middleware.
+//! Put the layers in a tuple, then use [`Stack`][layered::Stack] to make a service.
 //!
-//! Resilience middleware also requires [`Clock`][tick::Clock] from the [`tick`] crate for timing
-//! operations like delays, timeouts, and backoff calculations. The clock is passed through
-//! [`ResilienceContext`] when creating middleware layers.
+//! The middleware uses [`Clock`][tick::Clock] from [`tick`] for delays and timeouts.
+//! Pass the clock to each layer through [`ResilienceContext`].
 //!
-//! ## Core Types
+//! ## Core types
 //!
-//! - [`ResilienceContext`] - Holds shared state for resilience middleware, including the clock.
-//! - [`RecoveryInfo`] - Classifies errors as recoverable (transient) or non-recoverable (permanent).
-//! - [`Recovery`] - A trait for types that can determine their recoverability.
+//! - [`ResilienceContext`] holds the shared clock and telemetry configuration.
+//! - [`RecoveryInfo`] states if an output permits another attempt.
+//! - [`Recovery`] lets an output type provide its own recovery classification.
 //!
-//! ## Built-in Middleware
+//! ## Middleware
 //!
-//! This crate provides built-in resilience middleware that you can use out of the box. See the documentation
-//! for each module for details on how to use them.
+//! - [`timeout`] stops an operation after a time limit.
+//! - [`retry`] repeats an operation after a recoverable output.
+//! - [`hedging`] starts more attempts when an operation is slow.
+//! - [`breaker`] blocks calls to a service that is failing.
+//! - [`fallback`] replaces an invalid output with another value.
 //!
-//! - [`timeout`] - Middleware that cancels long-running operations.
-//! - [`retry`] - Middleware that automatically retries failed operations.
-//! - [`hedging`] - Middleware that reduces tail latency via additional concurrent execution.
-//! - [`breaker`] - Middleware that prevents cascading failures.
-//! - [`fallback`] - Middleware that replaces invalid output with a user-defined alternative.
+//! ## Chaos testing
 //!
-//! ## Chaos Testing
+//! The [`chaos`] module adds controlled faults to a service pipeline.
+//! Use it to test how the pipeline responds to failures.
 //!
-//! The [`chaos`] module provides middleware for deliberately injecting faults into a service
-//! pipeline, enabling teams to verify that their systems handle failures gracefully.
+//! - [`chaos::injection`] replaces service output at a configured rate.
+//! - [`chaos::latency`] adds a delay before the inner service call.
 //!
-//! - [`chaos::injection`] - Middleware that replaces service output with a user-provided value
-//!   at a configurable probability.
-//! - [`chaos::latency`] - Middleware that injects artificial delay before the inner service
-//!   call at a configurable probability.
+//! # Middleware order
 //!
-//! # Middleware Ordering
-//!
-//! The order in which resilience middleware is composed **matters**. Layers apply outer to inner
-//! (the first layer in the tuple is outermost). A recommended ordering:
+//! Layers run from the outside to the inside.
+//! The first layer in the tuple is the outer layer.
+//! Use this order for a common service pipeline:
 //!
 //! ```text
 //! Request → [Fallback → [Retry → [Breaker → [Timeout → Operation]]]]
 //! ```
 //!
-//! - **Fallback** (outermost): guarantees a usable response even if every retry is exhausted.
-//! - **Retry**: retries the entire inner stack; each attempt gets its own timeout.
-//! - **Breaker**: short-circuits failing calls so retry can back off until the breaker resets.
-//! - **Timeout** (innermost): bounds each individual attempt.
+//! - `Fallback` supplies a value after the other layers cannot recover.
+//! - `Retry` repeats the inner stack.
+//! - `Breaker` blocks calls while the service is unhealthy.
+//! - `Timeout` limits one attempt.
 //!
-//! Keep `Timeout` **inside** `Retry` so that a timed-out attempt is aborted and retried
-//! correctly. If `Timeout` were outside, a single timeout would govern all attempts combined
-//! and could cancel everything with no chance to recover.
+//! Put `Timeout` inside `Retry`.
+//! Each retry attempt then gets its own time limit.
+//! If `Timeout` is outside, one time limit covers all attempts.
 //!
-//! # Tower Compatibility
+//! # Tower compatibility
 //!
-//! All resilience middleware are compatible with the Tower ecosystem when the `tower-service`
-//! feature is enabled. This allows you to use `tower::ServiceBuilder` to compose middleware stacks:
+//! Enable `tower-service` to use Seatbelt middleware with Tower.
+//! You can then use `tower::ServiceBuilder` to combine the layers.
 //!
 //! ```rust
 //! # fn main() {
@@ -182,45 +167,36 @@
 //!
 //! # Examples
 //!
-//! Examples covering each middleware and common composition patterns:
-//!
-//! - [`timeout`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout.rs): Basic timeout that cancels long-running operations.
-//! - [`timeout_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout_advanced.rs): Dynamic timeout duration and timeout callbacks.
-//! - [`retry`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry.rs): Automatic retry with input cloning and recovery classification.
-//! - [`retry_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_advanced.rs): Custom input cloning with attempt metadata injection.
-//! - [`retry_outage`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_outage.rs): Input restoration from errors when cloning is not possible.
-//! - [`breaker`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/breaker.rs): Circuit breaker that monitors failure rates.
-//! - [`hedging`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/hedging.rs): Hedging slow requests with parallel attempts to reduce tail latency.
-//! - [`fallback`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/fallback.rs): Substitutes default values for invalid outputs.
-//! - [`resilience_pipeline`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/resilience_pipeline.rs): Composing retry and timeout with metrics.
-//! - [`tower`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/tower.rs): Tower `ServiceBuilder` integration.
-//! - [`config`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.rs): Loading settings from a [JSON file](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json).
-//! - [`chaos_injection`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection.rs): Fault injection with configurable probability.
-//! - [`chaos_injection_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection_advanced.rs): Simulating an extended outage with dynamic injection rates.
-//! - [`chaos_latency`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_latency.rs): Injecting artificial delay with configurable probability.
+//! - [`timeout`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout.rs) limits the duration of an operation.
+//! - [`timeout_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout_advanced.rs) uses dynamic durations and callbacks.
+//! - [`retry`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry.rs) retries recoverable output.
+//! - [`retry_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_advanced.rs) clones input and adds attempt data.
+//! - [`retry_outage`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_outage.rs) restores input from an error.
+//! - [`breaker`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/breaker.rs) opens a circuit after repeated failures.
+//! - [`hedging`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/hedging.rs) starts parallel attempts for slow operations.
+//! - [`fallback`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/fallback.rs) replaces invalid output.
+//! - [`resilience_pipeline`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/resilience_pipeline.rs) combines retry, timeout, and metrics.
+//! - [`tower`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/tower.rs) uses Tower `ServiceBuilder`.
+//! - [`config`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.rs) loads a [JSON file](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json).
+//! - [`chaos_injection`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection.rs) replaces output at a configured rate.
+//! - [`chaos_injection_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection_advanced.rs) simulates a longer outage.
+//! - [`chaos_latency`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_latency.rs) adds artificial delay.
 //!
 //! # Features
 //!
-//! This crate provides several optional features that can be enabled in your `Cargo.toml`:
+//! Enable the features that the service needs:
 //!
-//! - **`timeout`** - Enables the [`timeout`] middleware for canceling long-running operations.
-//! - **`retry`** - Enables the [`retry`] middleware for automatically retrying failed operations with
-//!   configurable backoff strategies, jitter, and recovery classification.
-//! - **`hedging`** - Enables the [`hedging`] middleware for reducing tail latency via additional
-//!   concurrent requests with configurable delay modes.
-//! - **`breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
-//! - **`fallback`** - Enables the [`fallback`] middleware for replacing invalid output with a
-//!   user-defined alternative.
-//! - **`chaos-injection`** - Enables the [`chaos::injection`] middleware for injecting faults
-//!   with a configurable probability.
-//! - **`chaos-latency`** - Enables the [`chaos::latency`] middleware for injecting artificial
-//!   delay with a configurable probability.
-//! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
-//! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
-//! - **`serde`** - Enables `serde::Serialize` and `serde::Deserialize` implementations for
-//!   configuration types.
-//! - **`tower-service`** - Enables [`tower_service::Service`] trait implementations for all
-//!   resilience middleware.
+//! - `timeout` enables [`timeout`].
+//! - `retry` enables [`retry`].
+//! - `hedging` enables [`hedging`].
+//! - `breaker` enables [`breaker`].
+//! - `fallback` enables [`fallback`].
+//! - `chaos-injection` enables [`chaos::injection`].
+//! - `chaos-latency` enables [`chaos::latency`].
+//! - `metrics` enables the OpenTelemetry metrics API.
+//! - `logs` enables structured logs through `tracing`.
+//! - `serde` adds serialization for configuration types.
+//! - `tower-service` adds [`tower_service::Service`] implementations.
 
 #[doc(inline)]
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};

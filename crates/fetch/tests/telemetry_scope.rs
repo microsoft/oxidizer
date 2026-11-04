@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests verifying that the `fetch.runtime` and `fetch.transport`
-//! instrumentation-scope attributes are attached to the meter of every HTTP
-//! client and therefore land on the metrics that client emits.
+//! Integration tests for the `fetch.runtime` and `fetch.transport` instrumentation-scope
+//! attributes on client metrics.
 
 use bytes::Bytes;
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
 use fetch::tokio::TokioDeps;
 use fetch::{HttpClient, HttpRequest, HttpResponse, HttpResponseBuilder};
@@ -19,8 +19,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const RUNTIME_ATTRIBUTE: &str = "fetch.runtime";
 const TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
 
-/// Returns the value of scope attribute `attribute_key` on the scope that
-/// recorded `metric_name`, if any.
+/// Returns `attribute_key` from the scope that recorded `metric_name`.
 fn scope_attribute_for_metric(exporter: &InMemoryMetricExporter, metric_name: &str, attribute_key: &str) -> Option<String> {
     let resource_metrics = exporter.get_finished_metrics().expect("finished metrics must be retrievable");
 
@@ -40,8 +39,7 @@ fn scope_attribute_for_metric(exporter: &InMemoryMetricExporter, metric_name: &s
     None
 }
 
-/// Returns the `(fetch.runtime, fetch.transport)` scope attributes of the scope
-/// that recorded `metric_name`.
+/// Returns the `fetch.runtime` and `fetch.transport` values for `metric_name`.
 fn runtime_and_transport_for_metric(exporter: &InMemoryMetricExporter, metric_name: &str) -> (Option<String>, Option<String>) {
     (
         scope_attribute_for_metric(exporter, metric_name, RUNTIME_ATTRIBUTE),
@@ -94,7 +92,7 @@ async fn custom_transport_scope_attribute() {
 
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        global_pool: bytesbuf::mem::GlobalPool::new(),
+        memory: OpaqueMemory::new(GlobalPool::new()),
         extras: (),
     };
 
@@ -128,12 +126,11 @@ async fn custom_transport_instrument_inherits_scope() {
 
     let deps = CustomDeps {
         clock: Clock::new_frozen(),
-        global_pool: bytesbuf::mem::GlobalPool::new(),
+        memory: OpaqueMemory::new(GlobalPool::new()),
         extras: (),
     };
 
-    // The transport records its own instrument against `cx.meter`; it must
-    // inherit the same runtime/transport scope as the built-in fetch metrics.
+    // A transport metric recorded through cx.meter uses the same scope as built-in metrics.
     let client = create_builder(
         "instrumented-runtime",
         "instrumented",
@@ -213,8 +210,8 @@ async fn client_name_set_before_meter_provider_is_reported() {
 async fn client_name_set_after_meter_provider_is_reported() {
     let (exporter, provider) = exporter_and_provider();
 
-    // Setting the meter provider *before* the name exercises the deferred-scope path: the
-    // custom meter is only materialized at build time, so the later name still applies.
+    // Set the provider before the name. The client creates the scope at build time, so the later
+    // name still applies.
     let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen())
         .insecure_allow_http()
         .meter_provider(provider.clone())
@@ -231,7 +228,7 @@ async fn client_name_set_after_meter_provider_is_reported() {
     );
 }
 
-/// Transport handler that returns a canned `200 OK`.
+/// Returns a canned `200 OK`.
 struct OkHandler {
     body_builder: http_extensions::HttpBodyBuilder,
 }
@@ -243,3 +240,5 @@ impl Service<HttpRequest> for OkHandler {
         std::future::ready(HttpResponseBuilder::new(&self.body_builder).status(StatusCode::OK).build())
     }
 }
+
+testing_aids::init_tracing!();

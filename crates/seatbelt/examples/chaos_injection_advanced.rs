@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Advanced chaos injection example that simulates an extended outage using dynamic injection rates.
+//! This example uses a changing injection rate to simulate an extended outage.
 //!
-//! This example uses [`rate_with`][seatbelt::chaos::injection::InjectionLayer::rate_with] to
-//! vary the injection probability over time: during a simulated outage window every request
-//! is injected (rate 1.0), while outside the window the service operates normally (rate 0.0).
+//! It uses [`rate_with`][seatbelt::chaos::injection::InjectionLayer::rate_with] to
+//! change the injection rate over time. During the outage, it injects every request
+//! at rate 1.0. Outside the outage, the service operates normally at rate 0.0.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,15 +22,13 @@ async fn main() {
     let clock = Clock::new_tokio();
     let context = ResilienceContext::new(&clock);
 
-    // Create the stopwatch once so the rate callback can track how much time
-    // has passed since the outage started.
+    // Create one stopwatch so the callback can measure the outage duration.
     let stopwatch = Arc::new(clock.stopwatch());
 
     let stack = (
         Injection::layer("outage_injection", &context)
-            // Dynamically compute the injection rate based on elapsed time:
-            // for the first 3 seconds every request fails; afterwards the
-            // service operates normally.
+            // For the first 3 seconds, make every request fail.
+            // After 3 seconds, let the service operate normally.
             .rate_with(move |_input, _args| {
                 if stopwatch.elapsed() < OUTAGE_DURATION {
                     1.0 // full outage

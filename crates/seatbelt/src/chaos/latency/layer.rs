@@ -14,24 +14,23 @@ use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
 use crate::{ResilienceContext, TelemetryString};
 
-/// Builder for configuring chaos latency middleware.
+/// Configures latency injection middleware.
 ///
-/// This type is created by calling [`Latency::layer`](crate::chaos::latency::Latency::layer)
-/// and uses the type-state pattern to enforce that required properties are configured
-/// before the layer can be built:
+/// [`Latency::layer`](crate::chaos::latency::Latency::layer) creates this builder.
+/// Its type state makes these properties required:
 ///
 /// - [`rate`][LatencyLayer::rate] or [`rate_with`][LatencyLayer::rate_with]:
-///   Required probability of latency injection
+///   sets the injection rate.
 /// - [`latency`][LatencyLayer::latency], [`latency_with`][LatencyLayer::latency_with], or
 ///   [`latency_range`][LatencyLayer::latency_range]:
-///   Required latency duration
+///   sets the delay.
 ///
-/// For comprehensive examples, see the [latency module][crate::chaos::latency] documentation.
+/// See the [latency module][crate::chaos::latency] for examples.
 ///
-/// # Type State
+/// # Type state
 ///
-/// - `S1`: Tracks whether [`rate`][LatencyLayer::rate] or [`rate_with`][LatencyLayer::rate_with] has been set
-/// - `S2`: Tracks whether [`latency`][LatencyLayer::latency] or [`latency_with`][LatencyLayer::latency_with] has been set
+/// - `S1` records whether the injection rate is set.
+/// - `S2` records whether the delay is set.
 #[derive(Debug)]
 pub struct LatencyLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
@@ -59,39 +58,32 @@ impl<In, Out> LatencyLayer<In, Out, NotSet, NotSet> {
 }
 
 impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
-    /// Sets a callback that dynamically computes the injection rate for each
-    /// request.
+    /// Sets a callback that calculates the injection rate for each request.
     ///
-    /// The `rate_fn` receives a reference to the input and
-    /// [`LatencyRateArgs`], and returns a probability in `[0.0, 1.0]` where
-    /// `0.0` means never inject latency and `1.0` means always inject. The
-    /// returned value is clamped to this range.
+    /// The function receives the input and [`LatencyRateArgs`].
+    /// It returns a value in `[0.0, 1.0]`.
+    /// Values outside the range are clamped.
     ///
-    /// This allows the injection rate to vary per request based on request
-    /// properties or external state.
+    /// The rate can depend on the request or external state.
     #[must_use]
     pub fn rate_with(mut self, rate_fn: impl Fn(&In, LatencyRateArgs) -> f64 + Send + Sync + 'static) -> LatencyLayer<In, Out, Set, S2> {
         self.rate = Some(LatencyRate::new(rate_fn));
         self.into_state::<Set, S2>()
     }
 
-    /// Sets the probability of injecting latency before calling the inner
-    /// service.
+    /// Sets the rate for adding latency before the inner service call.
     ///
-    /// The `rate` is clamped to the range `[0.0, 1.0]` where `0.0` means never
-    /// inject and `1.0` means always inject.
+    /// The value is clamped to `[0.0, 1.0]`.
     #[must_use]
     pub fn rate(self, rate: f64) -> LatencyLayer<In, Out, Set, S2> {
         let clamped = rate.clamp(0.0, 1.0);
         self.rate_with(move |_, _| clamped)
     }
 
-    /// Sets a callback that dynamically computes the latency duration for each
-    /// request.
+    /// Sets a callback that calculates the delay for each request.
     ///
-    /// The `latency_fn` receives a reference to the input and
-    /// [`LatencyDurationArgs`], and returns the [`Duration`] to delay before
-    /// forwarding the request to the inner service.
+    /// The function receives the input and [`LatencyDurationArgs`].
+    /// It returns the delay before the inner service call.
     #[must_use]
     pub fn latency_with(
         mut self,
@@ -101,19 +93,16 @@ impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
         self.into_state::<S1, Set>()
     }
 
-    /// Sets a fixed latency duration to inject before calling the inner
-    /// service.
+    /// Sets a fixed delay before the inner service call.
     #[must_use]
     pub fn latency(self, duration: Duration) -> LatencyLayer<In, Out, S1, Set> {
         self.latency_with(move |_, _| duration)
     }
 
-    /// Sets a random latency duration chosen uniformly from the given range
-    /// before calling the inner service.
+    /// Selects a uniform random delay from the given range.
     ///
-    /// On each injection, a duration is picked uniformly at random from
-    /// `[range.start, range.end)`. If `range.start == range.end`, this
-    /// behaves identically to [`latency(range.start)`][LatencyLayer::latency].
+    /// The range is `[range.start, range.end)`.
+    /// Equal bounds act like [`latency(range.start)`][LatencyLayer::latency].
     ///
     /// # Panics
     ///
@@ -132,21 +121,17 @@ impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
         self.into_state::<S1, Set>()
     }
 
-    /// Applies configuration from a [`LatencyConfig`] struct.
+    /// Applies a [`LatencyConfig`] to this layer.
     ///
     /// This sets the [`rate`][LatencyLayer::rate],
     /// [`latency`][LatencyLayer::latency] (or
     /// [`latency_range`][LatencyLayer::latency_range] when
     /// [`max_latency`][LatencyConfig::max_latency] is set), and
-    /// [`enable`][LatencyLayer::enable] properties from the config.
+    /// [`enable`][LatencyLayer::enable] properties from the configuration.
     ///
-    /// When `max_latency` is `Some` but less than or equal to `latency`, the
-    /// range is treated as a fixed latency of `config.latency` instead of
-    /// panicking. This keeps config-file-driven setup non-panicking even when
-    /// the values are misconfigured.
+    /// If `max_latency` is not greater than `latency`, the layer uses a fixed delay.
     ///
-    /// This transitions both type-state parameters to [`Set`], so a single
-    /// `config()` call is sufficient to produce a buildable layer.
+    /// One `config()` call sets both type state parameters to [`Set`].
     #[cfg_attr(test, mutants::skip)] // produces unkillable mutants
     #[must_use]
     pub fn config(self, config: &LatencyConfig) -> LatencyLayer<In, Out, Set, Set> {
@@ -157,13 +142,12 @@ impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
         }
     }
 
-    /// Optionally enables the latency middleware based on a condition.
+    /// Enables latency middleware when a condition is true.
     ///
-    /// When disabled, the inner service output is returned as-is. The
-    /// `is_enabled` function receives a reference to the input and returns
-    /// `true` when latency injection should be active for this request.
+    /// If the condition is false, the request runs without added latency.
+    /// The `is_enabled` function receives the input.
     ///
-    /// **Default**: Always enabled
+    /// Default: Enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
         self.enable_if = EnableIf::custom(is_enabled);
@@ -172,8 +156,8 @@ impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
 
     /// Enables or disables the latency middleware.
     ///
-    /// When disabled, requests pass through without latency injection.
-    /// This call replaces any previous condition.
+    /// If disabled, requests run without added latency.
+    /// This call replaces the previous condition.
     #[must_use]
     pub fn enable(mut self, enabled: bool) -> Self {
         self.enable_if = EnableIf::new(enabled);

@@ -65,9 +65,9 @@ impl<T> Debug for SyncHolder<T> {
     }
 }
 
-// NOTE: Do not add any methods that would expose &T or &mut T references.
+// Do not add methods that expose &T or &mut T references.
 // The only way to get the inner T is to consume the `SyncHolder<T>` itself.
-// This is important to ensure that `SyncHolder<T>` is Sync and no invariants are violated.
+// This restriction keeps `SyncHolder<T>` safe to share between threads.
 impl<T> SyncHolder<T> {
     pub(crate) fn new(value: T) -> Self {
         Self { value }
@@ -100,7 +100,7 @@ mod tests {
         let header_ref = request.headers().get(http::header::CONTENT_LENGTH).unwrap();
         assert_eq!(header_ref, &CONTENT_LENGTH_ZERO);
         assert_eq!(header_ref.as_bytes(), CONTENT_LENGTH_ZERO.as_bytes());
-        // We only assert value equality; header values are not required to share the same underlying storage.
+        // Compare the values. The header values can use different storage.
     }
 
     #[test]

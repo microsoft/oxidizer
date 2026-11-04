@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 
 use crate::SimpleClock;
 
-/// A stopwatch that facilitates the measurement of elapsed time.
+/// A stopwatch that measures elapsed time.
 ///
-/// An instance of `Stopwatch` is created by calling [`Clock::stopwatch()`][crate::Clock::stopwatch],
-/// [`SimpleClock::stopwatch()`], or by passing any clock to the [`Stopwatch::new()`] constructor.
+/// Create a `Stopwatch` from [`Clock::stopwatch()`][crate::Clock::stopwatch],
+/// [`SimpleClock::stopwatch()`], or [`Stopwatch::new()`].
 ///
 /// # Examples
 ///
@@ -30,15 +30,14 @@ pub struct Stopwatch {
 }
 
 impl Stopwatch {
-    /// Creates a stopwatch that measures elapsed time using the supplied clock's precision.
+    /// Creates a stopwatch with the precision of the supplied clock.
     ///
-    /// The stopwatch accepts any source that can be referenced as a [`SimpleClock`], including a
-    /// [`Clock`][crate::Clock] and a [`SimpleClock`]. It measures time using the source's clock, so
-    /// stopwatches created from a controlled clock respect the controlled passage of time, while
-    /// stopwatches created from a fast-configured clock use its lower-precision instant source.
+    /// The source can be a [`Clock`][crate::Clock] or a [`SimpleClock`].
+    /// A controlled source follows controlled time. A fast source uses its
+    /// lower-precision instant source.
     ///
-    /// > **Note**: Consider using [`Clock::stopwatch()`][crate::Clock::stopwatch] or
-    /// > [`SimpleClock::stopwatch()`] as a shortcut for creating stopwatches.
+    /// You can use [`Clock::stopwatch()`][crate::Clock::stopwatch] or
+    /// [`SimpleClock::stopwatch()`] as a shorter form.
     ///
     /// # Examples
     ///
@@ -64,89 +63,5 @@ impl Stopwatch {
     #[must_use]
     pub fn elapsed(&self) -> Duration {
         self.clock.instant().saturating_duration_since(self.start)
-    }
-}
-
-impl From<Stopwatch> for Instant {
-    fn from(stopwatch: Stopwatch) -> Self {
-        stopwatch.start
-    }
-}
-
-impl From<Stopwatch> for Duration {
-    fn from(stopwatch: Stopwatch) -> Self {
-        stopwatch.elapsed()
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::thread::sleep;
-
-    use super::*;
-    use crate::Clock;
-    use crate::clock_control::ClockControl;
-
-    #[test]
-    fn assert_types() {
-        static_assertions::assert_impl_all!(Stopwatch: Send, Sync);
-    }
-
-    #[test]
-    fn new_accepts_any_time_source() {
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-        let simple_clock = control.to_simple_clock();
-
-        // `Stopwatch::new` accepts a `Clock`, a `SimpleClock`, and references to either,
-        // since all of them are `AsRef<SimpleClock>`.
-        let _ = Stopwatch::new(&clock);
-        let _ = Stopwatch::new(clock);
-        let _ = Stopwatch::new(&simple_clock);
-        let _ = Stopwatch::new(simple_clock);
-    }
-
-    #[test]
-    fn test_stopwatch() {
-        let clock = Clock::new_system_frozen();
-        let watch = clock.stopwatch();
-
-        sleep(Duration::from_millis(1));
-
-        let elapsed = watch.elapsed();
-        assert!(elapsed >= Duration::from_millis(1));
-    }
-
-    #[test]
-    fn test_stopwatch_with_control() {
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-
-        let watch = clock.stopwatch();
-        sleep(Duration::from_millis(1));
-        assert_eq!(watch.elapsed(), Duration::ZERO);
-
-        control.advance(Duration::from_secs(1));
-        assert_eq!(watch.elapsed(), Duration::from_secs(1));
-    }
-
-    #[test]
-    fn test_stopwatch_into_instance() {
-        let clock = Clock::new_frozen();
-        let watch = clock.stopwatch();
-
-        let instant: Instant = watch.into();
-        assert_eq!(instant, clock.instant());
-    }
-
-    #[test]
-    fn test_stopwatch_into_duration() {
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-        let watch = clock.stopwatch();
-        control.advance(Duration::from_secs(1));
-
-        let duration: Duration = watch.into();
-        assert_eq!(duration, Duration::from_secs(1));
     }
 }

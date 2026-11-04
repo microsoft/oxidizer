@@ -40,7 +40,10 @@ const DEFAULT_EVENT_CAPACITY_PER_THREAD: usize = 65_536;
 const MIN_EVENT_CAPACITY_PER_THREAD: usize = 64;
 const MAX_EVENT_CAPACITY_PER_THREAD: usize = 1_048_576;
 const MAX_EVENT_SAMPLING_ONE_IN: usize = 1_048_576;
+#[cfg(not(miri))]
 const RECORDER_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(miri)]
+const RECORDER_WAIT_TIMEOUT: Duration = Duration::from_millis(250);
 #[cfg(not(test))]
 const RETIRED_RING_BUDGET_BYTES: usize = 268_435_456;
 #[cfg(test)]
@@ -609,7 +612,17 @@ pub(crate) fn record(class: EventClass, event: impl FnOnce() -> Option<Record>) 
 #[inline]
 pub(crate) fn record_session(class: EventClass, event: impl FnOnce() -> Option<Record>) -> Option<RecordingSession> {
     let policy = policy_atomic(class).load(Ordering::Relaxed);
-    if !policy_enabled(policy) || is_suppressed() {
+    if !policy_enabled(policy) {
+        return None;
+    }
+    record_session_enabled(class, event, policy)
+}
+
+// Keep TLS access and event construction out of disabled callers, even under LTO.
+#[cold]
+#[inline(never)]
+fn record_session_enabled(class: EventClass, event: impl FnOnce() -> Option<Record>, policy: u64) -> Option<RecordingSession> {
+    if is_suppressed() {
         return None;
     }
     let session = ACTIVE_SESSION.load(Ordering::Relaxed);
@@ -1046,7 +1059,7 @@ impl ThreadRecorder {
         true
     }
 
-    fn retire(&self) {
+    fn retire(&'static self) {
         self.retired.store(true, Ordering::Release);
         let ring_bytes = self
             .ring_capacity
@@ -1124,7 +1137,7 @@ const fn class_index(class: EventClass) -> usize {
 }
 
 struct RetiredRings {
-    rings: VecDeque<(usize, usize)>,
+    rings: VecDeque<(&'static ThreadRecorder, usize)>,
     allocated_bytes: usize,
 }
 
@@ -1132,12 +1145,11 @@ fn retired_rings() -> std::sync::MutexGuard<'static, RetiredRings> {
     RETIRED_RINGS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn register_retired_ring(recorder: &ThreadRecorder, ring_bytes: usize) {
-    let address = ptr::from_ref(recorder) as usize;
+fn register_retired_ring(recorder: &'static ThreadRecorder, ring_bytes: usize) {
     let limit = RETIRED_RING_BUDGET_BYTES.max(ring_bytes);
     {
         let mut retired = retired_rings();
-        retired.rings.push_back((address, ring_bytes));
+        retired.rings.push_back((recorder, ring_bytes));
         retired.allocated_bytes = retired.allocated_bytes.saturating_add(ring_bytes);
     }
 
@@ -1147,27 +1159,25 @@ fn register_retired_ring(recorder: &ThreadRecorder, ring_bytes: usize) {
             if retired.allocated_bytes <= limit {
                 None
             } else {
-                retired.rings.pop_front().map(|(address, bytes)| {
+                retired.rings.pop_front().map(|(recorder, bytes)| {
                     retired.allocated_bytes = retired.allocated_bytes.saturating_sub(bytes);
-                    address
+                    recorder
                 })
             }
         };
         let Some(evicted) = evicted else {
             break;
         };
-        // SAFETY: published recorders are retained for process lifetime.
-        unsafe { &*(evicted as *const ThreadRecorder) }.release_retired_ring();
+        evicted.release_retired_ring();
     }
 }
 
 fn forget_retired_ring(recorder: &ThreadRecorder) {
-    let address = ptr::from_ref(recorder) as usize;
     let mut retired = retired_rings();
     if let Some(index) = retired
         .rings
         .iter()
-        .position(|(candidate, _)| retired_ring_matches(*candidate, address))
+        .position(|(candidate, _)| retired_ring_matches(candidate, recorder))
         && let Some((_, bytes)) = retired.rings.remove(index)
     {
         retired.allocated_bytes = retired.allocated_bytes.saturating_sub(bytes);
@@ -1175,8 +1185,8 @@ fn forget_retired_ring(recorder: &ThreadRecorder) {
 }
 
 #[cfg_attr(test, mutants::skip)] // Inverting identity releases another recorder's allocation.
-const fn retired_ring_matches(candidate: usize, address: usize) -> bool {
-    candidate == address
+fn retired_ring_matches(candidate: &ThreadRecorder, recorder: &ThreadRecorder) -> bool {
+    ptr::eq(candidate, recorder)
 }
 
 struct Ring {
@@ -1307,8 +1317,9 @@ impl Drop for LocalRecorder {
         if recorder.is_null() {
             return;
         }
-        // SAFETY: this TLS owner is the recorder's only writer, and TLS
-        // destruction begins only after that thread has stopped recording.
+        // SAFETY: published recorders remain allocated for process lifetime,
+        // and this TLS owner is the recorder's only writer. TLS destruction
+        // begins only after that thread has stopped recording.
         unsafe { &*recorder }.retire();
     }
 }
@@ -1625,7 +1636,7 @@ fn initialize_local_recorder(local: &LocalRecorder) -> *const ThreadRecorder {
     // SAFETY: allocated is properly aligned writable storage for one value.
     unsafe { allocated.write(ThreadRecorder::new()) };
     RECORDERS
-        .fetch_update(Ordering::Release, Ordering::Acquire, |head| {
+        .try_update(Ordering::Release, Ordering::Acquire, |head| {
             // SAFETY: allocated points to the initialized recorder owned by this
             // thread until this atomic update publishes it.
             unsafe { (*allocated).next.store(head, Ordering::Relaxed) };
@@ -2342,21 +2353,23 @@ mod tests {
     }
 
     #[cfg(feature = "monitor")]
-    fn monitor_connection() -> (crate::monitor::Monitor, std::net::TcpStream) {
+    fn monitor_connection() -> (crate::monitor::Monitor, seismograph_protocol::transport::Connection) {
         use seismograph_protocol::message::{Request, Response};
 
-        let monitor = crate::monitor::Monitor::builder().name("recorder-timeout").start().unwrap();
-        let mut stream = std::net::TcpStream::connect(monitor.descriptor().socket_address()).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-        stream.set_write_timeout(Some(Duration::from_secs(10))).unwrap();
-        seismograph_protocol::write_request(
-            &mut stream,
-            1,
-            &Request::Hello {
-                authentication: monitor.descriptor().authentication,
-            },
+        let monitor = crate::monitor::Monitor::builder()
+            .isolated()
+            .name("recorder-timeout")
+            .start()
+            .unwrap();
+        let mut stream = seismograph_protocol::transport::Connection::connect(
+            &seismograph_protocol::io::MonitorIo::new_native(),
+            monitor.descriptor(),
+            Duration::from_secs(2),
         )
         .unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        stream.set_write_timeout(Some(Duration::from_secs(10))).unwrap();
+        seismograph_protocol::write_request(&mut stream, 1, &Request::Hello).unwrap();
         assert!(matches!(
             seismograph_protocol::read_response(&mut stream).unwrap(),
             (1, Response::Hello { .. })
@@ -2587,6 +2600,41 @@ mod tests {
     }
 
     #[test]
+    fn recording_switches_preserve_lazy_event_construction() {
+        let _test = TEST_LOCK.lock().unwrap();
+        configure(Configuration::default());
+        clear_event_buffers().unwrap();
+        let constructed = Cell::new(0);
+        let event = || {
+            constructed.set(constructed.get() + 1);
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(42)))
+        };
+
+        assert!(record_session(EventClass::General, event).is_none());
+        configure(Configuration {
+            general_events: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap(),
+            ..Default::default()
+        });
+        let session = active_recording_session().unwrap();
+        assert_eq!(record_session(EventClass::General, event), Some(session));
+        {
+            let _suppression = SuppressionGuard::enter();
+            assert!(record_session(EventClass::General, event).is_none());
+        }
+        assert_eq!(record_session(EventClass::General, event), Some(session));
+        configure(Configuration::default());
+        assert!(record_session(EventClass::General, event).is_none());
+
+        let captured = snapshot(crate::snapshot::EventBufferDisposition::Release).unwrap();
+        assert_eq!(constructed.get(), 2);
+        assert_eq!(
+            captured.events.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            [EventKind::MutexAccess, EventKind::MutexAccess]
+        );
+    }
+
+    #[test]
     fn event_classes_are_enabled_independently_before_record_construction() {
         let _test = TEST_LOCK.lock().unwrap();
         configure(Configuration {
@@ -2663,7 +2711,7 @@ mod tests {
                 enabled: true,
                 ..Default::default()
             },
-            ..Default::default()
+            ..test_configuration()
         });
         drop(LateTelemetryUser);
 
@@ -3206,6 +3254,25 @@ mod tests {
 
     #[test]
     fn standalone_clear_reuses_rings_and_preserves_enabled_and_disabled_policies() {
+        fn install_recorder() -> &'static ThreadRecorder {
+            LOCAL_RECORDER.with(|local| {
+                assert!(local.recorder.get().is_null());
+                // Recorder headers outlive their threads and stay linked until process exit.
+                let recorder: &'static ThreadRecorder = Box::leak(Box::new(ThreadRecorder::new()));
+                // Acquire reads/retries retain visibility of the existing chain.
+                // Release publishes this initialized header to acquiring traversals;
+                // next can be relaxed while the header is still unpublished.
+                RECORDERS
+                    .try_update(Ordering::Release, Ordering::Acquire, |head| {
+                        recorder.next.store(head, Ordering::Relaxed);
+                        Some(ptr::from_ref(recorder).cast_mut())
+                    })
+                    .unwrap();
+                local.recorder.set(ptr::from_ref(recorder));
+                recorder
+            })
+        }
+
         let _test = TEST_LOCK.lock().unwrap();
         let enabled = Configuration {
             allocations: RecordingPolicy {
@@ -3221,23 +3288,43 @@ mod tests {
             ..timeout_configuration()
         };
         configure(enabled);
+        let recorder = install_recorder();
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
-        let before = statistics().allocated_bytes;
+        let retired = std::thread::spawn(|| {
+            let recorder = install_recorder();
+            record(EventClass::General, || {
+                Some(Record::object(EventKind::MutexAccess, ObjectId::new(3)))
+            });
+            recorder
+        })
+        .join()
+        .unwrap();
+        assert!(retired.retired.load(Ordering::Acquire));
+        let active_storage = || {
+            let ring = recorder.ring().unwrap();
+            (ring.slots.as_ptr(), ring.capacity())
+        };
+        let before = active_storage();
         clear_event_buffers().unwrap();
         assert_eq!(
-            (configuration(), statistics().retained_events, statistics().allocated_bytes),
+            (configuration(), try_statistics().unwrap().retained_events, active_storage()),
             (enabled, 0, before)
         );
+        {
+            let _ring = retired.ring_lock();
+            assert!(retired.ring().is_none());
+            assert_eq!(retired.ring_capacity.load(Ordering::Acquire), 0);
+        }
         record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(2)))
         });
-        assert_eq!(statistics().retained_events, 1);
+        assert_eq!(try_statistics().unwrap().retained_events, 1);
         configure(Configuration::default());
         clear_event_buffers().unwrap();
         assert_eq!(
-            (configuration(), statistics().retained_events, statistics().allocated_bytes),
+            (configuration(), try_statistics().unwrap().retained_events, active_storage()),
             (Configuration::default(), 0, before)
         );
     }
@@ -3708,7 +3795,8 @@ mod tests {
 
     #[test]
     fn evicted_retired_ring_is_released_after_an_existing_reader() {
-        let recorder = ThreadRecorder::new();
+        static RECORDER: std::sync::LazyLock<ThreadRecorder> = std::sync::LazyLock::new(ThreadRecorder::new);
+        let recorder = &*RECORDER;
         recorder.begin_session(1, EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD).unwrap());
         let ring = recorder.ring_lock();
 
@@ -3781,7 +3869,7 @@ mod tests {
 
         configure(Configuration {
             general_events: RecordingPolicy::all(false),
-            ..Default::default()
+            ..test_configuration()
         });
         assert!(recording_enabled());
         assert!(recording_enabled_for(EventClass::General));

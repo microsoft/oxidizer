@@ -1,19 +1,18 @@
 # Design
 
 `arty_io_core` lets independent I/O libraries run on the same runtime. The
-runtime schedules work. Each I/O library keeps control of its operating-system
-I/O implementation.
+runtime schedules work. Each I/O library controls its operating-system I/O.
 
 ## Terms
 
 This document uses the following terms:
 
-- An **async worker** is a runtime-owned thread that executes application tasks
-  and I/O drivers.
+- An **async worker** is a runtime-owned thread. It runs application tasks and
+  I/O drivers.
 - An **I/O context** is the cloneable handle that application code uses to start
   I/O operations.
-- A **driver** is the worker-local object that submits I/O and receives
-  completions for one I/O context type.
+- A **driver** is a worker-local object. It submits I/O and receives completions
+  for one I/O context type.
 - **Context retrieval** is a request to the runtime for a concrete
   `IoContext` type.
 - A **registration** is the runtime state created by the first retrieval of one
@@ -22,66 +21,70 @@ This document uses the following terms:
 
 ## Context retrieval
 
-The runtime identifies a registration by the concrete `IoContext` type. The
-first retrieval performs these steps:
+The concrete `IoContext` type identifies a context registration. When a worker
+first retrieves a context, the runtime clones the registered context. It calls
+`ThreadAware::relocate` with `None` as the source and the worker as the
+destination. It then calls `IoContext::driver`. `DriverOptions::thread`
+identifies the same worker. Driver creation finishes all local setup before the
+runtime returns the initialized context clone.
 
-1. Call `IoContext::context` once.
-2. Clone and relocate the context to every async worker.
-3. Call `IoContext::driver` on each async worker.
-4. Publish the context only after every worker has created its driver.
+The runtime does not register the same concrete context type twice. Libraries must use two distinct context types for two independent registrations.
 
-Later retrievals return a clone of the existing context. The runtime does not
-register the same concrete context type twice. Libraries that need two
-independent registrations use two distinct context types.
+For each registration, the runtime calls `driver` at most once per async
+worker, not once per context clone. Implementations can reject repeated calls for the same registration and worker.
+If driver creation returns an error, the runtime does not retry it. The runtime
+starts shutdown on every async worker.
 
-`IoContext::driver` completes driver setup before the context is published. A
-driver must not wait for another async worker to run during creation. If driver
-creation fails, the runtime treats the failure as fatal and starts runtime
-shutdown instead of retrying the registration.
+Application operations require successful initial relocation and driver
+creation. Implementations can reject these operations on contexts that did not
+finish the sequence. Clones of initialized contexts remain usable without
+another `driver` call.
+
+This requirement applies only to initial context and driver setup. After
+initialization, contexts and their clones follow the usual `ThreadAware`
+contract. They remain usable after movement without another `relocate` call.
+Later relocation affects performance only.
 
 ## Driver roles
 
 Each context registration uses one driver role on every async worker:
 
-- A **primary** driver may wait inside `execute_cycle`.
+- A **primary** driver can wait inside `execute_cycle`.
 - A **secondary** driver must return from `execute_cycle` without waiting.
 
-The runtime passes the roles still available through
-`DriverOptions::allowed_roles`. The context selects one of them and returns it
-in `DriverInstance`. A registration must use the same role on every async
-worker. Once one registration uses the primary role, later registrations can
-only use the secondary role.
+The runtime gives the primary role to the first context type. It gives the
+secondary role to later context types. It passes the role through
+`DriverOptions::role`.
 
 An async worker invokes secondary drivers first with
-`Cycle::max_wait() == Duration::ZERO`. A secondary either processes completions
-that are ready now or returns immediately when another thread handles its
-notifications. If the secondary needs another `execute_cycle` call after it
-returns, it arranges for the owner waker to be called when work becomes ready.
+`Cycle::max_wait() == Duration::ZERO`. A secondary either processes ready
+completions or returns immediately when another thread handles its
+notifications. If it needs another `execute_cycle` call, it arranges an owner
+wake when work becomes ready.
 
-The worker invokes the primary driver last. The primary may wait for I/O for up
+The worker invokes the primary driver last. The primary can wait for I/O for up
 to `Cycle::max_wait()`. If no primary driver exists, the runtime waits for work
 without calling a driver.
 
 ## Waking the async worker
 
-`DriverOptions::owner_waker` wakes the async worker that owns the driver. A
-driver calls this waker before returning if more completed operations are
-already ready. A secondary also arranges for the waker to be called when a
-later notification requires another `execute_cycle` call. A primary does not
-need a separate wake for later completions because its next `execute_cycle`
-call performs the worker's I/O wait.
+`DriverOptions::owner_waker` wakes the worker that owns the driver. A driver
+calls this waker before it returns if more completed operations are ready. A
+secondary also arranges a wake when a later notification requires another
+`execute_cycle` call. A primary does not need this wake. Its next
+`execute_cycle` call performs the worker's I/O wait.
 
-`Driver::waker` serves the opposite direction. The runtime calls it to make a
-waiting `execute_cycle` return promptly. Any wake before or during a wait applies
-to that wait. If no wait is active, the wake remains latched for the next wait,
-regardless of how much time passes before the wait starts. The driver may process
-ready completions after waking; the requirement is that it stop waiting promptly.
+`Driver::waker` wakes a driver instead. The runtime calls it to make a waiting
+`execute_cycle` return promptly. A wake before or during a wait applies to that
+wait. If no wait is active, the wake remains latched for the next wait. Elapsed
+time does not change this rule. The driver can process ready completions after
+the wake, but it must stop waiting promptly.
 
 ## Processing completions
 
-`execute_cycle` processes completed I/O operations. It must return rather than
-loop indefinitely, so other drivers and application tasks get time on the async
-worker. The contract does not require a fixed number of completions per call.
+`execute_cycle` processes completed I/O operations. It must return and must not
+loop indefinitely. This rule gives other drivers and application tasks time on
+the worker. The contract does not set a fixed completion count for each call.
 
 An error from `execute_cycle` means the driver cannot continue. The runtime
 starts shutdown on every async worker. Errors for individual application I/O
@@ -93,28 +96,14 @@ When the runtime shuts down an async worker, it stops calling
 `execute_cycle` and synchronously calls `Driver::shutdown` for every driver
 owned by that worker.
 
-Each driver closes its context to new operations. Operations still in flight are
-no longer assumed to be valuable and may be cancelled or disrupted instead of
-being drained. Any remaining cleanup must use the driver's own means of making
-progress; it cannot require another driver on the same async worker to run. The
-driver chooses a finite time limit and returns an error instead of waiting
-forever.
+Each driver closes its context to new operations. It can cancel or disrupt
+in-flight operations. Cleanup must make progress independently and use a finite
+limit. The runtime reports returned errors. It also attempts to shut down the
+remaining drivers.
 
-Shutdown is best effort. When a driver returns a shutdown error, the runtime
-reports it and attempts `shutdown` on the remaining drivers. This includes the
-driver whose `execute_cycle` failed and every driver of an unpublished
-registration that was created successfully, including drivers that finish
-creation after another worker reports the failure. A failed `IoContext::driver`
-call returns no driver; that implementation cleans up its own partial
-construction.
-
-This contract does not convert panics from driver teardown, custom wakers,
-diagnostics, cleanup hooks, poisoned state, or failed invariants into
-`DriverError`, and it does not promise that shutdown continues after such a
-panic. Driver implementations must not panic from those paths. Panic conversion
-is a runtime policy for runtime-owned user execution bodies, not a driver
-lifecycle guarantee. Context values may outlive their drivers, but they remain
-closed and reject new operations after normal shutdown control flow.
+Contexts and their clones can outlive their driver and host. They must reject
+new operations after the driver closes them. These live contexts must not
+prevent runtime shutdown.
 
 ## Scope
 

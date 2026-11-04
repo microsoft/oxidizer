@@ -12,6 +12,7 @@
 # defaults disabled, without linking or executing their test binaries.
 
 # Check all targets of affected packages independently.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-check-all-targets: anvil-check-all-targets-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -27,14 +28,14 @@ anvil-check-all-targets: anvil-check-all-targets-validate-prereqs anvil-impact
     foreach ($cfg in $configs) {
         Write-Host "anvil-check-all-targets: checking $($cfg.name) features"
         $featureArgs = $cfg.flags
-        & cargo {{_anvil_stable_toolchain_args}} each @pkg --keep-going '--' cargo {{_anvil_stable_toolchain_args}} check --package '{spec}' --all-targets @featureArgs --locked
+        & cargo {{_anvil_stable_toolchain_args}} each @pkg --keep-going '--' cargo {{_anvil_stable_toolchain_args}} check --package '{cargo-spec}' --all-targets @featureArgs --locked
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
 # Install prerequisites for the `anvil-check-all-targets` recipe.
-[group("anvil-setup")]
+[private]
 anvil-check-all-targets-setup installer="install": anvil-toolchain-stable-install (anvil-tool-cargo-each-install installer)
 
 # Validate prerequisites for the `anvil-check-all-targets` recipe.
-[group("anvil-setup")]
+[private]
 anvil-check-all-targets-validate-prereqs: anvil-tool-rustc-validate-prereqs anvil-tool-cargo-each-validate-prereqs

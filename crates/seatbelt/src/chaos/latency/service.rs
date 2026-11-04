@@ -18,20 +18,16 @@ use crate::rnd::Rnd;
 use crate::typestates::NotSet;
 use crate::utils::EnableIf;
 
-/// Injects artificial latency with a configurable probability before calling
-/// the inner service.
+/// Adds latency at a configured rate before calling the inner service.
 ///
-/// `Latency` wraps an inner [`Service`] and, on each request, rolls a random
-/// number against the configured [`rate`][LatencyLayer::rate] (or the
-/// dynamically computed rate from [`rate_with`][LatencyLayer::rate_with]).
-/// When the roll triggers, a delay of the configured duration is applied
-/// before forwarding the request to the inner service.
+/// `Latency` compares a random number with the configured [`rate`][LatencyLayer::rate].
+/// [`rate_with`][LatencyLayer::rate_with] can calculate the rate for each request.
+/// When injection occurs, the middleware waits before it calls the inner service.
 ///
-/// Latency is configured by calling [`Latency::layer`] and using the builder
-/// methods on the returned [`LatencyLayer`] instance.
+/// Call [`Latency::layer`] to create a [`LatencyLayer`].
+/// Use its builder methods to configure latency.
 ///
-/// For comprehensive examples and usage patterns, see the [latency module]
-/// documentation.
+/// See the [latency module] for examples.
 ///
 /// [latency module]: crate::chaos::latency
 #[derive(Debug)]
@@ -42,7 +38,7 @@ pub struct Latency<In, Out, S> {
 
 /// Shared configuration for [`Latency`] middleware.
 ///
-/// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+/// An `Arc` stores this value so that cloning the service is inexpensive.
 #[derive(Debug)]
 pub(crate) struct LatencyShared<In, Out> {
     pub(crate) clock: tick::Clock,
@@ -65,19 +61,17 @@ impl<In, Out, S: Clone> Clone for Latency<In, Out, S> {
 }
 
 impl<In, Out> Latency<In, Out, ()> {
-    /// Creates a [`LatencyLayer`] used to configure the chaos latency middleware.
+    /// Creates a [`LatencyLayer`] that configures latency injection.
     ///
-    /// The instance returned by this call is a builder and cannot be used to
-    /// build a service until the required properties are set:
+    /// Set these required properties before you build a service:
     /// [`rate`][LatencyLayer::rate] / [`rate_with`][LatencyLayer::rate_with]
     /// and one of
     /// [`latency`][LatencyLayer::latency] /
     /// [`latency_with`][LatencyLayer::latency_with] /
     /// [`latency_range`][LatencyLayer::latency_range].
     ///
-    /// The `name` identifies the latency strategy in telemetry, while
-    /// `context` provides configuration shared across multiple resilience
-    /// middleware.
+    /// The `name` identifies the latency strategy in telemetry.
+    /// The `context` provides configuration that middleware can share.
     ///
     /// # Example
     ///
@@ -95,7 +89,7 @@ impl<In, Out> Latency<In, Out, ()> {
     /// # }
     /// ```
     ///
-    /// For comprehensive examples, see the [latency module] documentation.
+    /// See the [latency module] for more examples.
     ///
     /// [latency module]: crate::chaos::latency
     pub fn layer(name: impl Into<Cow<'static, str>>, context: &ResilienceContext<In, Out>) -> LatencyLayer<In, Out, NotSet, NotSet> {
@@ -238,7 +232,7 @@ impl<In: Send + 'static, Out: Send + 'static> LatencyShared<In, Out> {
     }
 }
 
-/// Creates a new [`LatencyShared`] instance. Used by [`LatencyLayer::layer`].
+/// Creates [`LatencyShared`] for [`LatencyLayer::layer`].
 impl<In, Out> LatencyShared<In, Out> {
     pub(super) fn new(
         clock: tick::Clock,

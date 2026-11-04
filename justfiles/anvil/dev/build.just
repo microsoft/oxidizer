@@ -5,6 +5,7 @@
 # Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
 
 # Build all targets and features for local development.
+[group("anvil")]
 [arg("package", long, pattern='(?:[A-Za-z0-9_.-]+)?')]
 [arg("profile", long, pattern='(?:[A-Za-z0-9_.-]+)?')]
 [script("pwsh", "-NoProfile")]
@@ -14,9 +15,9 @@ anvil-build package="" profile="": anvil-build-validate-prereqs
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-build` recipe.
-[group("anvil-setup")]
+[private]
 anvil-build-setup installer="install": anvil-toolchain-stable-install
 
 # Validate prerequisites for the `anvil-build` recipe.
-[group("anvil-setup")]
+[private]
 anvil-build-validate-prereqs: anvil-tool-rustc-validate-prereqs

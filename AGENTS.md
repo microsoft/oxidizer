@@ -2,9 +2,18 @@
 
 Code in this repository should follow the guidelines specified in the [Microsoft Rust Guidelines](https://microsoft.github.io/rust-guidelines/agents/all.txt).
 
+## Documentation language
+
+Use the project `simple-english` skill for crate documentation and other
+human-facing documentation.
+
 ## README Files
 
 Crate README files are auto-generated via `just anvil-readme --fix`. Do not manually update them. Because they are generated, do not edit them by hand and do not raise their formatting, wording, or casing (for example the title-cased crate name) as issues in code review - such content is not authored here and is regenerated from the crate's doc comments.
+
+## Writing tests
+
+Use the project `writing-tests` skill when you add or change tests.
 
 ## Executing `just` commands
 
@@ -90,6 +99,31 @@ fn capture() -> Self {
 
 Attach the exclusions to the `no_std` arm alone, splitting the item into per-configuration definitions where the two arms share one function. The `std` arm keeps its full coverage and mutation obligations. The exemption covers only code that a `no_std` build selects *instead of* a `std` build; ungated code that merely also compiles under `no_std` is tested normally.
 
+## GitHub Actions Pinning
+
+Pin every external GitHub Action to a full-length commit SHA with a version
+comment, including actions with immutable releases. Tags are not a pinning
+exception. References to local actions and reusable workflows remain local paths.
+
+Make sure that each SHA matches the stated release. Resolve annotated tags to
+their target commits. Keep all `github/codeql-action/*` steps on the same SHA.
+Replace obsolete tag-pinning explanations with accurate version comments.
+
+Anvil owns pins in its generated workflows. Update the upstream templates and
+adopt a release that contains the required pins. Do not edit generated workflows
+to maintain a separate pinning policy.
+
+## Upgrading Anvil
+
+Follow the upgrade procedure in [docs/design/README.md](docs/design/README.md#upgrading-anvil).
+Run generation after installing the selected release. A newer `tool_version` in
+`.anvil.lock` does not prove that every generated file matches that release.
+
+Review every preserved customization and proposed file against the new template.
+Do not silently retain old action pins or carry an entire workflow override
+through an upgrade. Keep only explicitly justified overrides that the current
+Anvil configuration cannot express.
+
 ## Required CI Checks
 
 The generated Anvil workflow publishes the `Required Anvil checks` fan-in.
@@ -114,15 +148,19 @@ In example code, prefer `.expect()` unless it gets too verbose - `.unwrap()` is 
 
 # [Testing tracing events](docs/tracing-tests.md)
 
-How to test `tracing` output without cross-test pollution. Key rule: every test
-binary that emits or inspects `tracing` must invoke `testing_aids::init_tracing!()`
-at module scope, or trace-event lines may be reported as uncovered even though
-they run.
+How to test `tracing` output without cross-test pollution. In packages that declare
+a direct normal or dev-dependency on `tracing`, every Cargo unit-test and
+integration-test executable must invoke `testing_aids::init_tracing!()` before tests run.
+Also initialize specific targets that explicitly test or capture tracing through a
+dependency. Build-only and procedural-macro host dependencies do not qualify a consumer.
+Apply the rule across declared features and platforms. Transitive presence alone
+does not qualify. Each integration target needs its own initializer.
+The guide defines isolated exceptions for disabled tracing and custom subscribers.
 
 **Open this when**: writing or moving any test that inspects `tracing` output;
-adding a log/event emission that needs coverage; adding a crate whose tests emit
-`tracing` events (it needs the ctor initialization); tempted to install a global
-subscriber in a unit test.
+adding a log/event emission that needs coverage; adding a test target or changing
+dependencies that can introduce tracing; tempted to install a global subscriber
+in a unit test.
 
 # [Benchmarks](docs/benchmarks.md)
 

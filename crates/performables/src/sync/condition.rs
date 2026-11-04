@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use super::mutex::{MutexGuard, MutexLock};
+use super::mutex::{self, MutexGuard, MutexLock};
 use super::wait_queue::{WaitQueue, Waiter, block_on, block_on_timeout};
 use super::{Async, Mode, Sync, panic_poisoned};
 use crate::telemetry::{self, EventKind};
@@ -16,9 +16,27 @@ use crate::telemetry::{self, EventKind};
 ///
 /// The default [`Sync`] mode uses the native condition-variable protocol.
 /// Select [`Async`] to also support executor-independent asynchronous waits.
+///
+/// Notifications are not stored as permits for later waits. Keep the shared
+/// predicate under the associated mutex and recheck it after waking.
 #[derive(Debug)]
 pub struct Condvar<M: Mode = Sync> {
     raw: M::CondvarState,
+}
+
+/// Internal synchronous condition-variable storage.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct StateSync {
+    inner: mutex::hal::Condvar,
+}
+
+impl StateSync {
+    pub(super) const fn new() -> Self {
+        Self {
+            inner: mutex::hal::Condvar::new(),
+        }
+    }
 }
 
 /// Internal asynchronous condition-variable state.
@@ -60,13 +78,14 @@ impl Condvar<Sync> {
     ///
     /// # Panics
     ///
-    /// Panics if the reacquired mutex is poisoned, or the native backend rejects
-    /// use with more than one mutex.
+    /// Panics if the reacquired mutex is poisoned, a native wait fails, or the
+    /// native backend rejects use with more than one mutex.
     pub fn wait<'mutex, T: ?Sized>(&self, guard: MutexGuard<'mutex, T>) -> MutexGuard<'mutex, T> {
         let mutex = guard.mutex();
         self.record(EventKind::CondvarContention);
-        let result = self.raw.wait(guard.into_native());
-        let guard = match mutex.acquired_native(result) {
+        let (raw, panicking_at_acquisition) = guard.into_native();
+        let (raw, _) = self.raw.inner.wait(mutex.native_state(), raw, None);
+        let guard = match mutex.acquired_native(raw, panicking_at_acquisition) {
             Ok(guard) => guard,
             Err(error) => panic_poisoned(&error),
         };
@@ -105,40 +124,30 @@ impl Condvar<Sync> {
     ) -> (MutexGuard<'mutex, T>, WaitTimeoutOutcome) {
         let mutex = guard.mutex();
         self.record(EventKind::CondvarContention);
-        let (result, outcome) = match self.raw.wait_timeout(guard.into_native(), timeout) {
-            Ok((raw, outcome)) => (Ok(raw), outcome),
-            Err(error) => {
-                let (raw, outcome) = error.into_inner();
-                (Err(std::sync::PoisonError::new(raw)), outcome)
-            }
-        };
-        let guard = match mutex.acquired_native(result) {
+        let (raw, panicking_at_acquisition) = guard.into_native();
+        let (raw, timed_out) = self.raw.inner.wait(mutex.native_state(), raw, Some(timeout));
+        let guard = match mutex.acquired_native(raw, panicking_at_acquisition) {
             Ok(guard) => guard,
             Err(error) => panic_poisoned(&error),
         };
-        if !outcome.timed_out() {
+        if !timed_out {
             self.record(EventKind::CondvarAccess);
         }
-        (
-            guard,
-            WaitTimeoutOutcome {
-                timed_out: outcome.timed_out(),
-            },
-        )
+        (guard, WaitTimeoutOutcome { timed_out })
     }
 
     /// Wakes one waiting thread.
     #[inline]
     pub fn notify_one(&self) {
         self.record(EventKind::CondvarNotify);
-        self.raw.notify_one();
+        self.raw.inner.notify_one();
     }
 
     /// Wakes all waiting threads.
     #[inline]
     pub fn notify_all(&self) {
         self.record(EventKind::CondvarNotify);
-        self.raw.notify_all();
+        self.raw.inner.notify_all();
     }
 }
 
@@ -315,6 +324,7 @@ impl WaitTimeoutOutcome {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::sync::Arc as StdArc;
     use std::sync::atomic::AtomicUsize;
@@ -325,6 +335,18 @@ mod tests {
 
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
+
+    #[test]
+    fn synchronous_state_reacquires_ownership_after_timeout() {
+        let state = StateSync::new();
+        let mutex = Mutex::<u64>::new(7);
+        let (raw, panicking_at_acquisition) = mutex.lock().into_native();
+        let (raw, timed_out) = state.inner.wait(mutex.native_state(), raw, Some(Duration::ZERO));
+        let mut guard = mutex.acquired_native(raw, panicking_at_acquisition).unwrap();
+        *guard += 1;
+        drop(guard);
+        assert_eq!((timed_out, *mutex.lock()), (true, 8));
+    }
 
     impl Wake for WakeCounter {
         fn wake(self: StdArc<Self>) {

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.0] - 2026-11-02
+
+- Release arena chunk references through raw pointers. The final deallocation no longer leaves a
+  live reference to freed storage.
+- Update Bytesbuf and benchmark requirements. Use version 0.13.0 for all Multitude packages.
+- Update the requirement for local package `bytesbuf` from `0.12.0` to `0.13.0`.
+- Update the requirement for local package `multitude_macros` from `=0.12.0` to `=0.13.0`.
+- Update the development requirement for `gungraun` from `=0.19.4` to `=0.20.0`.
+
+## [0.12.0] - 2026-10-20
+
+- The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: bytesbuf ^0.11.0 -> 0.12.0; multitude_macros =0.11.1 -> 0.12.0.
+
 ## [0.11.0] - 2026-10-05
 
 - ⚠️ Breaking

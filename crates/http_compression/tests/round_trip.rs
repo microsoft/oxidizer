@@ -20,8 +20,6 @@ use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequest, HttpResponse, H
 use layered::{Layer, Service};
 use ohno::Labeled as _;
 
-testing_aids::init_tracing!();
-
 const URL: &str = "https://example.com/resource";
 
 /// Compresses well, so the transforms have something visible to do.

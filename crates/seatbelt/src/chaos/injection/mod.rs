@@ -1,16 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Chaos injection middleware for services, applications, and libraries.
+//! Output injection middleware for services, applications, and libraries.
 //!
-//! This module provides a fault injection mechanism that replaces service output
-//! with a user-provided value at a configurable probability. The primary types
-//! are [`Injection`] and [`InjectionLayer`]:
+//! This module replaces service output at a configured rate.
+//! It provides these main types:
 //!
-//! - [`Injection`] is the middleware that wraps an inner service and injects output
-//! - [`InjectionLayer`] is used to configure and construct the injection middleware
+//! - [`Injection`] wraps an inner service and injects output.
+//! - [`InjectionLayer`] configures and creates the injection middleware.
 //!
-//! # Quick Start
+//! # Quick start
 //!
 //! ```rust
 //! # use tick::Clock;
@@ -22,7 +21,7 @@
 //!
 //! let stack = (
 //!     Injection::layer("injection", &context)
-//!         .rate(0.1) // 10% of requests get injected output
+//!         .rate(0.1) // Inject output for 10% of requests.
 //!         .output_with(|_input, _args| "injected error".to_string()),
 //!     Execute::new(my_operation),
 //! );
@@ -35,62 +34,55 @@
 //!
 //! # Configuration
 //!
-//! The [`InjectionLayer`] uses a type-state pattern to enforce that all required
-//! properties are configured before the layer can be built. This compile-time
-//! safety ensures that you cannot accidentally create an injection layer without
-//! properly specifying the rate and the output factory:
+//! [`InjectionLayer`] uses the type state pattern.
+//! A type state records builder state in the type system.
+//! The layer cannot build until you set these properties:
 //!
 //! - [`rate`][InjectionLayer::rate] or [`rate_with`][InjectionLayer::rate_with]:
-//!   Required probability of injection in `[0.0, 1.0]`
+//!   sets the injection rate in `[0.0, 1.0]`.
 //! - [`output_with`][InjectionLayer::output_with], [`output`][InjectionLayer::output],
 //!   [`output_error_with`][InjectionLayer::output_error_with], or
 //!   [`output_error`][InjectionLayer::output_error]:
-//!   Required factory that produces the injected output
+//!   creates the injected output.
 //!
-//! Each injection layer requires an identifier for telemetry purposes. This
-//! identifier should use `snake_case` naming convention to maintain consistency
-//! across the codebase.
+//! Each injection layer requires an identifier for telemetry.
+//! Use `snake_case` for this identifier.
 //!
-//! # Output Factory
+//! # Output factory
 //!
 //! The injected output can be produced in two ways:
 //!
-//! - [`output_with`][InjectionLayer::output_with]: Callback - the closure receives
-//!   the consumed input and [`InjectionOutputArgs`], and returns the output.
-//! - [`output`][InjectionLayer::output]: Convenience shorthand that clones a fixed
-//!   value on every invocation.
-//! - [`output_error_with`][InjectionLayer::output_error_with]: Like `output_with`, but
-//!   the closure returns only the error value, which is automatically wrapped in `Err`.
-//! - [`output_error`][InjectionLayer::output_error]: Like `output`, but takes an error
-//!   value that is cloned and wrapped in `Err` on every invocation.
+//! - [`output_with`][InjectionLayer::output_with] receives consumed input and [`InjectionOutputArgs`].
+//! - [`output`][InjectionLayer::output] clones a fixed value.
+//! - [`output_error_with`][InjectionLayer::output_error_with] wraps the returned error in `Err`.
+//! - [`output_error`][InjectionLayer::output_error] clones an error and wraps it in `Err`.
 //!
 //! # Defaults
 //!
-//! | Parameter | Default Value | Description | Configured By |
+//! | Parameter | Default value | Description | Set by |
 //! |-----------|---------------|-------------|---------------|
 //! | Rate | `None` (required) | Probability of injection | [`rate`][InjectionLayer::rate], [`rate_with`][InjectionLayer::rate_with] |
 //! | Output | `None` (required) | Produces the injected output | [`output_with`][InjectionLayer::output_with], [`output`][InjectionLayer::output], [`output_error_with`][InjectionLayer::output_error_with], [`output_error`][InjectionLayer::output_error] |
 //! | Enable condition | Always enabled | Injection is applied to all requests | [`enable_if`][InjectionLayer::enable_if], [`enable_always`][InjectionLayer::enable_always], [`disable`][InjectionLayer::disable] |
 //!
-//! # Thread Safety
+//! # Thread safety
 //!
-//! The [`Injection`] type is thread-safe and implements both `Send` and `Sync` as
-//! enforced by the `Service` trait it implements.
+//! [`Injection`] implements `Send` and `Sync` as required by its `Service` implementation.
 //!
 //! # Telemetry
 //!
 //! ## Metrics
 //!
-//! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted when an injection is triggered
-//! - **Attributes**:
+//! - Metric: `resilience.event` (counter)
+//! - Emission: When the middleware injects output
+//! - Attributes:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Injection identifier from [`Injection::layer`]
-//!   - `resilience.event.name`: Always `chaos_injection`
+//!   - `resilience.event.name`: `chaos_injection`
 //!
 //! # Examples
 //!
-//! ## Basic Usage
+//! ## Basic use
 //!
 //! ```rust
 //! # use tick::Clock;
@@ -102,7 +94,7 @@
 //!
 //! let stack = (
 //!     Injection::layer("my_injection", &context)
-//!         .rate(0.05) // 5% injection rate
+//!         .rate(0.05) // Inject output for 5% of requests.
 //!         .output("injected_value".to_string()),
 //!     Execute::new(execute_operation),
 //! );
@@ -113,7 +105,7 @@
 //! # async fn execute_operation(input: String) -> String { input }
 //! ```
 //!
-//! ## From Configuration
+//! ## Configuration
 //!
 //! ```rust
 //! # use tick::Clock;
@@ -138,7 +130,7 @@
 //! # async fn execute_operation(input: String) -> String { input }
 //! ```
 //!
-//! ## With Conditional Enable
+//! ## Conditional injection
 //!
 //! ```rust
 //! # use tick::Clock;

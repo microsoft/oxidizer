@@ -4,7 +4,7 @@
 #![allow(
     missing_docs,
     clippy::unwrap_used,
-    reason = "Benchmarks don't require documentation and should fail fast on errors"
+    reason = "benchmarks do not need documentation and must fail fast"
 )]
 
 use std::future::poll_fn;
@@ -25,7 +25,7 @@ use tower_service::Service as TowerService;
 fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("tower");
 
-    // Execute
+    // Measure service execution without middleware.
     let mut service = service_fn(|v| async move { Ok::<_, ()>(v) });
     group.bench_function("execute_tower", |b| {
         b.iter(|| {
@@ -64,7 +64,7 @@ fn entry(c: &mut Criterion) {
         });
     });
 
-    // With middleware
+    // Measure service execution with one middleware layer.
     let layer = Middleware::layer();
 
     let mut service = ServiceBuilder::new()
@@ -113,7 +113,7 @@ fn entry(c: &mut Criterion) {
 criterion_group!(benches, entry);
 criterion_main!(benches);
 
-/// Simple middleware that counts the number of concurrent requests.
+/// Counts concurrent requests.
 #[derive(Clone, Debug)]
 struct Middleware<S> {
     executing: Arc<AtomicU32>,

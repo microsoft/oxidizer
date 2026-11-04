@@ -45,6 +45,8 @@ mod backend;
 mod backend_builder;
 mod options;
 
+#[cfg(any(feature = "native-tls", test))]
+pub use backend::NativeTlsBackend;
 pub use backend::{BackendError, TlsBackend};
 pub use backend_builder::TlsBackendBuilder;
 pub use options::{AutoBackend, TlsOptions, TlsOptionsBuilder};

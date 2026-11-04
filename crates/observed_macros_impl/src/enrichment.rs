@@ -188,25 +188,18 @@ fn generate_entry_stmt(field: &EnrichmentFieldDef) -> TokenStream {
     let exclude = matches!(log, Some(LogRouting::Exclude));
     let metric_key = dimension.and_then(|d| d.metric.resolve_key(&own_name));
     let key = match log {
-        Some(LogRouting::Rename(name)) => name.clone(),
-        _ => own_name,
+        Some(LogRouting::Rename(name)) => name.as_str(),
+        _ => own_name.as_str(),
     };
 
     let borrowed_str = is_borrowed_str(option_inner_type(&field.ty).unwrap_or(&field.ty));
 
     if option_inner_type(&field.ty).is_none() {
-        let entry = entry_ctor(
-            &key,
-            redaction,
-            &quote! { self.#field_ident },
-            exclude,
-            metric_key.as_deref(),
-            borrowed_str,
-        );
+        let entry = entry_ctor(key, redaction, &quote! { self.#field_ident }, exclude, metric_key, borrowed_str);
         return quote! { entries.push(#entry); };
     }
 
-    let some_entry = entry_ctor(&key, redaction, &quote! { __val }, exclude, metric_key.as_deref(), borrowed_str);
+    let some_entry = entry_ctor(key, redaction, &quote! { __val }, exclude, metric_key, borrowed_str);
 
     // On `None`, `#[if_none(...)]` decides whether the entry is dropped
     // or filled with a placeholder string (default `"n/a"`).
@@ -218,11 +211,11 @@ fn generate_entry_stmt(field: &EnrichmentFieldDef) -> TokenStream {
         },
         IfNone::Fill(placeholder) => {
             let fill_entry = entry_ctor(
-                &key,
+                key,
                 &FieldRedaction::Unredacted,
                 &quote! { #placeholder },
                 exclude,
-                metric_key.as_deref(),
+                metric_key,
                 // The placeholder is a literal, so it is stored without copying.
                 false,
             );

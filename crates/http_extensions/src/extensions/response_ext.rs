@@ -11,21 +11,21 @@ use tick::fmt::Rfc2822;
 
 use crate::{HeaderMapExt, StatusExt};
 
-/// Response recovery classification with `Retry-After` support.
+/// Response recovery information with `Retry-After` support.
 ///
-/// Extends recovery classification to consider the `Retry-After` header.
+/// This trait includes the `Retry-After` header in recovery information.
 pub trait ResponseExt: sealed::Sealed {
-    /// Returns recovery classification of the response, considering `Retry-After` header.
+    /// Returns recovery information that includes the `Retry-After` header.
     fn recovery_with_clock(&self, clock: &Clock) -> RecoveryInfo;
 }
 
 impl<B> ResponseExt for Response<B> {
-    /// Returns recovery classification of the response.
+    /// Returns recovery information for the response.
     ///
-    /// In addition to the [standard recovery classification][StatusExt::recovery], based on status code,
-    /// this method also considers the `Retry-After` header for `Retry` recoveries.
+    /// This method starts with [status recovery information][StatusExt::recovery].
+    /// It uses the `Retry-After` header to set the delay for `Retry` results.
     ///
-    /// For time manipulation, the provided `Clock` is used.
+    /// The provided [`Clock`] supplies the current time.
     fn recovery_with_clock(&self, clock: &Clock) -> RecoveryInfo {
         let recovery = self.recovery();
 
@@ -41,7 +41,7 @@ impl<B> ResponseExt for Response<B> {
 fn get_retry_after_duration(headers: &HeaderMap, clock: &Clock) -> Option<Duration> {
     let retry_after_raw = headers.get_str_value(RETRY_AFTER)?;
 
-    // First, try to parse as an integer (seconds)
+    // First, parse the value as an integer number of seconds.
     if let Ok(seconds) = retry_after_raw.parse::<u64>() {
         return Some(Duration::from_secs(seconds));
     }

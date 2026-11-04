@@ -11,15 +11,15 @@ use http::{HeaderName, HeaderValue, Version};
 use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header};
 use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpResponse, Result};
 
-/// A fluent builder for creating HTTP responses.
+/// A builder for HTTP responses.
 ///
-/// `HttpResponseBuilder` simplifies the process of building HTTP responses by providing a chainable API.
-/// It handles setting headers and different body types, and offers convenient methods for common
-/// response handling patterns.
+/// Methods on `HttpResponseBuilder` can be chained.
+/// They set headers, status codes, and body types.
 ///
-/// > **Note**: While useful in application code, `HttpResponseBuilder` is primarily designed for testing HTTP handlers
-/// > and middleware. The `HttpResponseBuilder::new_fake` method makes it particularly easy to create test responses
-/// > without needing a real HTTP context.
+/// > Note:
+/// > Application code can use this builder.
+/// > Its main purpose is to test HTTP handlers and middleware.
+/// > [`HttpResponseBuilder::new_fake`] creates responses without an HTTP context.
 ///
 /// # Examples
 ///
@@ -29,16 +29,16 @@ use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpResponse,
 /// # (|| {
 /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse, HttpResponseBuilder};
 /// # let builder = HttpBodyBuilder::new_fake();
-/// // Create a response builder
+/// // Create a response builder.
 /// let response_builder = HttpResponseBuilder::new(&builder);
 ///
-/// // Customize the response builder
+/// // Set the response values.
 /// let response_builder = response_builder
 ///     .text("Hello world")
 ///     .status(200)
 ///     .header("X-Custom-Header", "value");
 ///
-/// // Build the response
+/// // Build the response.
 /// let response: HttpResponse = response_builder.build()?;
 ///
 /// # Ok::<(), HttpError>(())
@@ -58,9 +58,8 @@ pub struct HttpResponseBuilder<'a> {
 impl HttpResponseBuilder<'static> {
     /// Creates a new response builder instance for testing.
     ///
-    /// This method provides a convenient way to create a `HttpResponseBuilder` for tests
-    /// without needing an existing body builder. The response builder is ready to be
-    /// configured with headers, status, and body.
+    /// This method creates a builder without an existing body builder.
+    /// Use it to set headers, a status code, and a body in tests.
     ///
     /// The `test-util` feature must be enabled to use this method.
     ///
@@ -137,7 +136,7 @@ impl HttpResponseBuilder<'_> {
     /// Sets a byte sequence as the response body.
     ///
     /// Use this when you need to send raw binary data.
-    /// Unlike [`text`](Self::text), this doesn't set a `Content-Type` header.
+    /// Unlike [`text`](Self::text), this method does not set a `Content-Type` header.
     ///
     /// # Examples
     ///
@@ -167,10 +166,10 @@ impl HttpResponseBuilder<'_> {
 
     /// Sets a JSON-serialized body for the response.
     ///
-    /// Takes any type that implements `serde::Serialize` and converts it to JSON with the following rules:
+    /// Converts any `serde::Serialize` value to JSON:
     ///
-    /// - The `Content-Type` header is set to `application/json` if not already set.
-    /// - The data is always encoded as UTF-8.
+    /// - It sets `Content-Type` to `application/json` if the header is absent.
+    /// - It encodes the data as UTF-8.
     ///
     /// This method requires the `json` feature to be enabled.
     ///
@@ -254,8 +253,8 @@ impl HttpResponseBuilder<'_> {
 
     /// Adds an extension to the response.
     ///
-    /// Extensions are type-mapped data that can be attached to responses for use by
-    /// middleware, handlers, or other parts of your application.
+    /// Extensions are typed data attached to a response.
+    /// Middleware and handlers can read them.
     ///
     /// # Examples
     ///
@@ -289,8 +288,8 @@ impl HttpResponseBuilder<'_> {
     ///
     /// # Performance
     ///
-    /// It's better to use pre-created `HeaderName` and `HeaderValue` instances to avoid
-    /// parsing overhead. This applies for values that are fixed and used multiple times.
+    /// Reuse `HeaderName` and `HeaderValue` instances for fixed values.
+    /// This avoids repeated parsing.
     ///
     /// # Examples
     ///
@@ -302,11 +301,11 @@ impl HttpResponseBuilder<'_> {
     /// # use http::HeaderValue;
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # let builder = HttpBodyBuilder::new_fake();
-    /// // Pre-create a HeaderValue to avoid parsing overhead
+    /// // Create the HeaderValue once.
     /// let header_value = HeaderValue::from_static("no-cache");
     ///
     /// let response_builder = HttpResponseBuilder::new(&builder)
-    ///     .header(CACHE_CONTROL, header_value.clone()) // Using a pre-created HeaderValue
+    ///     .header(CACHE_CONTROL, header_value.clone()) // Reuse the HeaderValue.
     ///     .header("X-Custom-Header", "value");
     ///
     /// # Ok::<(), HttpError>(())
@@ -380,19 +379,19 @@ impl HttpResponseBuilder<'_> {
         self.body_result(Ok(body))
     }
 
-    /// Sets the response body from a result that might contain an error.
+    /// Sets the response body from a result that can contain an error.
     ///
-    /// This is used internally by methods that might fail when creating the body.
+    /// Methods that can fail during body creation use this method internally.
     fn body_result(mut self, body: Result<HttpBody>) -> Self {
         self.body = Some(body);
         self
     }
 
-    /// Creates a response with the configured settings.
+    /// Creates a response from the current configuration.
     ///
     /// This method consumes the `HttpResponseBuilder` instance. It automatically sets
     /// appropriate headers based on the body, such as `Content-Length` and `Content-Type`,
-    /// if they haven't been set already.
+    /// if they have not been set already.
     ///
     /// # Examples
     ///
@@ -415,7 +414,7 @@ impl HttpResponseBuilder<'_> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The response couldn't be built because of errors
+    /// - An error prevented response construction
     /// - Body processing failed
     pub fn build(mut self) -> Result<HttpResponse> {
         let body = self.body.take().unwrap_or_else(|| Ok(self.body_builder.empty()))?;
@@ -716,7 +715,7 @@ mod tests {
             .build()
             .unwrap();
 
-        // Streams don't have a known content length
+        // Streams do not have a known content length.
         assert!(response.headers().get(CONTENT_LENGTH).is_none());
         assert_eq!(block_on(response.into_body().into_text()).unwrap(), "hello streaming world");
     }
@@ -750,7 +749,7 @@ mod tests {
         let body = HttpBodyBuilder::new_fake().empty();
         let response = HttpResponseBuilder::new_fake().body(body).build().unwrap();
 
-        // Content-Length should be set to 0 for empty body
+        // An empty body has a Content-Length value of 0.
         assert_eq!(response.headers().get_value_or(CONTENT_LENGTH, -1), 0);
     }
 

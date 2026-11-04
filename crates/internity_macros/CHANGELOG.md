@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.1] - 2026-11-02
+
+- Use version 0.3.1 to match the Internity packages. Macro behavior does not change.
+- Update the requirement for local package `internity_macros_impl` from `=0.3.0` to `=0.3.1`.
+
+## [0.3.0] - 2026-10-20
+
+- Align derive macros with Internity 0.3 and preserve generated deserializer field matching.
+- Update local dependency requirements: internity_macros_impl =0.2.1 -> 0.3.0.
+
 ## [0.2.1] - 2026-09-10
 
 ### Maintenance

@@ -9,18 +9,13 @@
 
 #![cfg(windows)]
 
-// The standard pipeline exercised here emits `tracing` events through `fetch`'s logging
-// handler, and integration binaries link the library with `cfg(test)` false, so no crate-root
-// initialization runs. Install it directly. See docs/tracing-tests.md.
-testing_aids::init_tracing!();
-
 use std::future::Future as _;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
 use bytesbuf::BytesView;
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::{GlobalPool, OpaqueMemory};
 use fetch::HttpClient;
 use fetch::options::{ConnectionPoolOptions, PoolSelection};
 use fetch_winhttp::{HttpClientWinHttpExt as _, WinHttpDeps, WinHttpTlsConfig};
@@ -162,8 +157,8 @@ fn mixed_completion_cancellation_and_body_drops_remain_usable() {
 fn full_fetch_pipeline_uses_the_winhttp_transport() {
     let server = TestServer::http([ResponsePlan::ok("full pipeline")]);
     let clock = Clock::new_frozen();
-    let global_pool = GlobalPool::new();
-    let deps = WinHttpDeps::builder(clock, global_pool, Sink::noop()).build();
+    let memory = OpaqueMemory::new(GlobalPool::new());
+    let deps = WinHttpDeps::builder(clock, memory, Sink::noop()).build();
     let client = HttpClient::builder_winhttp(deps)
         .insecure_allow_http()
         .supported_http_versions(&[Version::HTTP_11])

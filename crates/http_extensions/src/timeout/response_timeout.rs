@@ -3,13 +3,11 @@
 
 use std::time::Duration;
 
-/// A response-level timeout that can be attached to HTTP requests as an extension.
+/// A response timeout stored in an HTTP request extension.
 ///
-/// This timeout represents the maximum time allowed for receiving the response headers,
-/// including connection setup and sending the request. It does not cover reading the
-/// HTTP response body, use [`BodyTimeout`](crate::timeout::BodyTimeout) for that.
-/// Use this to set a per-request deadline that covers connection, sending, and receiving
-/// the initial response.
+/// The timeout covers connection setup, request sending, and response headers.
+/// It does not cover the response body.
+/// Use [`BodyTimeout`](crate::timeout::BodyTimeout) for the body.
 ///
 /// # Example
 ///

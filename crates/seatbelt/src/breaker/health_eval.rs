@@ -4,13 +4,10 @@
 use super::abandoned_policy::Mode;
 use super::{AbandonedPolicy, ExecutionInfo, HealthInfo, HealthStatus};
 
-/// Centralized health evaluation logic for the circuit breaker.
+/// Evaluates circuit breaker health.
 ///
-/// This is the single place where a raw [`ExecutionInfo`] tally is turned into a [`HealthInfo`]
-/// verdict. It combines the three inputs that drive the open/close decision — the configured
-/// failure threshold, the minimum throughput, and the [`AbandonedPolicy`] — so that the
-/// policy-specific handling of abandoned executions and the failure-rate / minimum-throughput
-/// evaluation are kept together rather than split across [`HealthInfo`] and [`AbandonedPolicy`].
+/// It converts [`ExecutionInfo`] counts into a [`HealthInfo`] result.
+/// It uses the failure threshold, minimum throughput, and [`AbandonedPolicy`].
 #[derive(Debug, Clone)]
 pub(crate) struct HealthEvaluator {
     failure_threshold: f32,
@@ -29,10 +26,8 @@ impl HealthEvaluator {
 
     /// Evaluates the health verdict for the given execution counts.
     ///
-    /// Abandoned executions (entered but never exited, e.g. a dropped/cancelled future) are always
-    /// counted towards the reported throughput in [`HealthInfo::counts`]. Whether they additionally
-    /// contribute to the failure rate and minimum-throughput check is decided by [`Self::decision`]
-    /// according to the configured [`AbandonedPolicy`].
+    /// [`HealthInfo::counts`] always includes abandoned executions.
+    /// The configured [`AbandonedPolicy`] decides whether they affect the health result.
     pub(crate) fn evaluate(&self, counts: ExecutionInfo) -> HealthInfo {
         let (decision_failures, decision_total) = self.evaluate_core(counts);
 
@@ -42,13 +37,11 @@ impl HealthEvaluator {
         }
     }
 
-    /// Derives the `(failures, total)` pair the failure-rate threshold is evaluated against,
-    /// applying the configured [`AbandonedPolicy`] handling of abandoned executions.
+    /// Calculates the `(failures, total)` pair for the health decision.
     ///
-    /// For [`Mode::RateThreshold`] the abandon rate is itself evaluated against the
-    /// threshold first: once it is reached, abandoned executions are folded in as failures (exactly
-    /// like [`Mode::AsFailures`]) and the normal failure-rate check then decides the verdict; while
-    /// it stays below the threshold the abandoned executions are excluded entirely.
+    /// For [`Mode::RateThreshold`], it first compares the abandon rate with the threshold.
+    /// At or above the threshold, abandoned executions count as failures.
+    /// Below the threshold, they do not affect the decision.
     fn evaluate_core(&self, counts: ExecutionInfo) -> (u32, u32) {
         match self.abandoned_policy.mode() {
             Mode::Ignore => (counts.failed, counts.succeeded.saturating_add(counts.failed)),
@@ -171,7 +164,7 @@ mod tests {
         // Once there is at least one conclusive result (here a failure), abandoned executions are
         // ignored entirely and the decision is made purely on successes/failures. The two real
         // failures are below the minimum throughput, so the circuit stays healthy even though the
-        // abandoned executions would otherwise have pushed the total over the threshold.
+        // Otherwise, abandoned executions push the total over the threshold.
         let info = evaluate(ExecutionInfo::new(0, 2, 3), 0.5, 5, AbandonedPolicy::rate_threshold(1.0));
         assert_eq!(
             (info.counts.total(), info.counts.abandoned, info.status),

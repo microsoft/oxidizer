@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.0] - 2026-11-02
+
+- Add the `arty` feature so `Spawner` can submit tasks to an Arty runtime.
+- Breaking: Use `Send + 'static` results with `JoinHandle` and `ThreadAware` results with
+  `spawn_anywhere`. `JoinHandle` no longer implements `Sync`.
+- Add a requirement for local package `arty` at `0.6.0`.
+- Update the requirement for local package `performables` from `0.3.0` to `0.3.1`.
+- Update the requirement for local package `thread_aware` from `0.12.1` to `0.12.2`.
+- Update the requirement for `tokio` from `1.48.0` to `1.53.3`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
+## [0.9.2] - 2026-10-20
+
+- Published local dependency requirement(s) will move: performables, thread_aware.
+- Update local dependency requirements: performables ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1.
+
 ## [0.9.1] - 2026-10-05
 
 - 🔧 Maintenance

@@ -362,3 +362,5 @@ async fn inner_service_output_preserved(#[case] use_tower: bool) {
     // Unlike injection, latency preserves the inner service output.
     assert_eq!(output, Ok("processed:hello".to_string()));
 }
+
+testing_aids::init_tracing!();

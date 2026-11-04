@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1] - 2026-11-02
+
+- Update optional dependencies for Seismograph measurements. Allocation behavior and public APIs do
+  not change.
+- Update the requirement for local package `seismograph` from `0.3.0` to `0.4.0`.
+- Update the requirement for local package `seismograph_rallocator` from `0.3.0` to `0.4.0`.
+
+## [0.3.0] - 2026-10-20
+
+- Replace allocator v1 with native v4, add native macOS support, and expose cooperative Seismograph allocator state.
+- Update local dependency requirements: seismograph ^0.2.0 -> 0.3.0; seismograph_rallocator ^0.2.0 -> 0.3.0.
+
 ## [0.2.0] - 2026-10-05
 
 - ⚠️ Breaking

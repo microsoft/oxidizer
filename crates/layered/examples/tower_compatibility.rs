@@ -1,14 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(missing_docs, clippy::unwrap_used, reason = "sample code")]
+#![allow(missing_docs, clippy::unwrap_used, reason = "example code")]
 
-//! Tower interoperability examples.
+//! Tower compatibility examples.
 //!
-//! Shows three ways to combine layered and Tower services:
-//! - Layered stack with Tower execution (requires polling)
-//! - Layered stack with `tower_layer()` adapter (no polling)
-//! - Tower `ServiceBuilder` with layered layers
+//! The examples combine layered and Tower in three ways:
+//! - Use a layered stack through the Tower interface. This requires readiness polling.
+//! - Use Tower layers in a layered stack through `tower_layer()`. This does not require polling.
+//! - Use layered layers in a Tower `ServiceBuilder`.
 
 use std::future::poll_fn;
 
@@ -30,7 +30,7 @@ async fn main() {
     example_tower().await;
 }
 
-// Layered stack with Tower execution model (requires polling)
+// Use a layered stack through the Tower interface.
 async fn example_oxidizer() {
     let stack = (
         GlobalConcurrencyLimitLayer::new(1),
@@ -45,7 +45,7 @@ async fn example_oxidizer() {
     service.call("hello world from Oxidizer".to_string()).await.unwrap();
 }
 
-// Layered stack with tower_layer() adapter (no polling needed)
+// Use Tower layers in a layered stack.
 async fn example_oxidizer_native() {
     let stack = (
         tower_layer(GlobalConcurrencyLimitLayer::new(1)),
@@ -57,11 +57,11 @@ async fn example_oxidizer_native() {
 
     let service = stack.into_service();
 
-    // Direct execution - no polling required
+    // The layered interface does not require readiness polling.
     service.execute("hello world from Oxidizer Native".to_string()).await.unwrap();
 }
 
-// Tower ServiceBuilder with layered layers
+// Use layered layers in a Tower `ServiceBuilder`.
 async fn example_tower() {
     let mut service = tower::ServiceBuilder::new()
         .concurrency_limit(10)
@@ -70,7 +70,7 @@ async fn example_tower() {
         .layer(Intercept::layer().on_input(|input: &String| println!("inner input: {input}")))
         .service_fn(execute);
 
-    // Tower services must be polled for readiness first
+    // Poll the Tower service for readiness before calling it.
     poll_fn(|cx| service.poll_ready(cx)).await.unwrap();
     service.call("hello world from Tower".to_string()).await.unwrap();
 }

@@ -145,8 +145,11 @@ impl TlsBackendBuilder {
             }
             #[cfg(any(feature = "native-tls", test))]
             TlsOptionsKind::NativeTls(native_backend) => {
-                let connector = native_backend.build(self, &options.shared)?;
-                Ok(TlsBackend::NativeTls(connector))
+                let (connector, server_name_overrides) = native_backend.build(self, &options.shared)?;
+                Ok(TlsBackend::NativeTls(crate::NativeTlsBackend::new(
+                    connector,
+                    server_name_overrides,
+                )))
             }
         }
     }
@@ -165,8 +168,11 @@ impl TlsBackendBuilder {
             }
             #[cfg(any(feature = "native-tls", test))]
             DefaultBackend::NativeTls => {
-                let connector = crate::native_tls::NativeTlsOptions::new().build(self, &shared)?;
-                Ok(TlsBackend::NativeTls(connector))
+                let (connector, server_name_overrides) = crate::native_tls::NativeTlsOptions::new().build(self, &shared)?;
+                Ok(TlsBackend::NativeTls(crate::NativeTlsBackend::new(
+                    connector,
+                    server_name_overrides,
+                )))
             }
             DefaultBackend::Unselected => {
                 // use the shared options
@@ -304,6 +310,23 @@ mod tests {
                 let tls = TlsOptions::builder_native_tls().build();
                 let backend = TlsBackendBuilder::new().build_backend(tls).unwrap();
                 assert!(matches!(backend, TlsBackend::NativeTls(_)));
+            }
+
+            #[test]
+            #[cfg_attr(miri, ignore)]
+            fn native_tls_preserves_server_name_overrides() {
+                let tls = TlsOptions::builder_native_tls()
+                    .server_name_override("localhost:8443", "expected.example.test")
+                    .build();
+                let backend = TlsBackendBuilder::new().build_backend(tls).unwrap();
+                let TlsBackend::NativeTls(backend) = backend else {
+                    panic!("expected native TLS backend");
+                };
+
+                assert_eq!(
+                    backend.server_name_for(&"localhost:8443".parse().unwrap()),
+                    Some("expected.example.test")
+                );
             }
         }
 

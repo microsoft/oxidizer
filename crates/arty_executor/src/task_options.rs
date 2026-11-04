@@ -6,7 +6,7 @@ use observed::context::Transfer;
 
 use crate::telemetry;
 
-/// Describes how the submitter selected this executor for a task.
+/// Classifies how the submitter selected this executor for a task.
 ///
 /// This value is lifecycle telemetry metadata. It does not change how the executor schedules or
 /// polls the task.
@@ -18,14 +18,17 @@ pub enum TaskPlacement {
 
     /// The submitter targeted its current worker.
     SameThread,
+
+    /// The submitter targeted a specific worker.
+    SpecificThread,
 }
 
 /// Lifecycle metadata for a task registered with [`TaskSet`](crate::TaskSet).
 ///
-/// The executor applies captured observed context while polling, cleaning up, and emitting
-/// lifecycle events so all task activity keeps the submission dimensions. Placement records how
-/// the caller chose the executor; it does not select a worker. The default options add no context
-/// and report [`TaskPlacement::Any`].
+/// The executor applies the captured observed context during polling, cleanup,
+/// and lifecycle events. The placement value classifies how the caller selected
+/// the executor. It does not select a worker. The default has no observed context
+/// and uses [`TaskPlacement::Any`].
 #[derive(Debug, Default)]
 pub struct TaskOptions {
     context: Option<Transfer>,
@@ -50,13 +53,13 @@ impl TaskCreatedReporter {
 }
 
 impl TaskOptions {
-    /// Creates options with the specified placement metadata.
+    /// Creates options with the specified placement classification.
     #[must_use]
     pub const fn new(placement: TaskPlacement) -> Self {
         Self { context: None, placement }
     }
 
-    /// Creates options that apply the captured observed `context` throughout the task lifecycle.
+    /// Creates options that apply the observed `context` for the task lifecycle.
     #[must_use]
     pub fn observed(context: Transfer, placement: TaskPlacement) -> Self {
         Self {
@@ -74,25 +77,28 @@ impl TaskOptions {
         f()
     }
 
-    pub(crate) fn created_reporter(&self, sink: Sink) -> TaskCreatedReporter {
-        TaskCreatedReporter {
+    pub(crate) fn created_reporter(&self, sink: Sink) -> Option<TaskCreatedReporter> {
+        (!sink.is_noop()).then(|| TaskCreatedReporter {
             context: self.context.clone(),
             placement: self.placement,
             sink,
-        }
+        })
     }
 
     pub(crate) fn report_succeeded(&self, sink: &Sink, polls: u64) {
-        self.with_context(|| telemetry::report_succeeded(sink, polls));
+        if !sink.is_noop() {
+            self.with_context(|| telemetry::report_succeeded(sink, polls));
+        }
     }
 
     pub(crate) fn report_panicked(&self, sink: &Sink, polls: u64) {
-        self.with_context(|| telemetry::report_panicked(sink, polls));
+        if !sink.is_noop() {
+            self.with_context(|| telemetry::report_panicked(sink, polls));
+        }
     }
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
 
@@ -101,8 +107,8 @@ mod tests {
     use super::*;
 
     assert_impl_all!(TaskPlacement: UnwindSafe, RefUnwindSafe);
-    // Captured enrichment can contain user-defined interior state, so options intentionally do
-    // not promise that they may cross a caught-unwind boundary.
+    // Captured enrichment can contain user-defined interior state. Options do
+    // not promise that they can cross a caught-unwind boundary.
     assert_not_impl_any!(TaskOptions: UnwindSafe, RefUnwindSafe);
 
     #[test]
@@ -115,9 +121,9 @@ mod tests {
 
     #[test]
     fn new_options_keep_placement_without_context() {
-        let options = TaskOptions::new(TaskPlacement::SameThread);
+        let options = TaskOptions::new(TaskPlacement::SpecificThread);
 
         assert!(options.context.is_none());
-        assert_eq!(options.placement, TaskPlacement::SameThread);
+        assert_eq!(options.placement, TaskPlacement::SpecificThread);
     }
 }

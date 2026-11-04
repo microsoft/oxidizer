@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.0] - 2026-11-02
+
+- Breaking: Supply a `TaskCompletion` target when registering a task. This replaces the executor's
+  join handles and remote result channels.
+- Breaking: Use a shared `Shutdown` handle and `ShutdownCause` instead of `begin_shutdown`.
+  `execute_cycle` now requires mutable access.
+- Add thread configuration and `PanicPolicy` to select whether a task panic stops the executor.
+- Reduce competition for locks when waking and completing tasks. Wakers, the callbacks that request
+  task execution, remain harmless after their tasks complete.
+- Add a requirement for local package `ohno` at `0.5.4`.
+- Add a requirement for local package `performables` at `0.3.1`.
+- Add a requirement for local package `thread_aware_core` at `0.1.3`.
+- Update the requirement for local package `data_privacy` from `0.13.1` to `0.13.2`.
+- Update the requirement for local package `observed` from `0.29.0` to `0.30.0`.
+- Update the requirement for local package `plurality` from `0.2.3` to `0.2.4`.
+- Update the requirement for local package `tick` from `0.8.0` to `0.9.0`.
+- Update the development requirement for `gungraun` from `=0.19.4` to `=0.20.0`.
+
+## [0.5.0] - 2026-10-20
+
+- Harden executor lifecycle, make construction and retained wakers safe, and update exposed `tick` identities through the Arty version group.
+- Update local dependency requirements: data_privacy ^0.13.0 -> 0.13.1; observed ^0.28.0 -> 0.29.0; plurality ^0.2.2 -> 0.2.3; tick ^0.7.1 -> 0.8.0.
+
 ## [0.1.3] - 2026-10-05
 
 - 🔧 Maintenance

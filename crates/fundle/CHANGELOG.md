@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.1] - 2026-10-20
+
+- Refresh published documentation and align the Fundle macro family.
+- Update local dependency requirements: fundle_macros =0.4.0 -> 0.4.1.
+
 ## [0.4.0] - 2026-09-10
 
 ### Changed

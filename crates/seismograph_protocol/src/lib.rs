@@ -1,15 +1,58 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Local monitor protocol and discovery model for Seismograph.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+//! Local monitor protocol, OS-authorized transport, and discovery for Seismograph.
+//!
+//! Monitors use pathname Unix sockets or local Windows named pipes. Connections
+//! are authorized by the operating system for the owning user and root/elevated
+//! administrators, without authentication secrets. A token-free Hello identifies
+//! the process instance and returns its recording configuration.
+//!
+//! [`discovery::Directory::current`] automatically creates a private registry
+//! for the current user, without administrator setup. Unix prefers
+//! `$XDG_RUNTIME_DIR/seismograph`, with a private randomized `/tmp` directory
+//! as the fallback. Windows uses local application data. Discovery aggregates
+//! accessible user registries; unsafe existing permissions are never relaxed.
+//! Monitor protocol version 8 is incompatible with the earlier TCP/token
+//! protocol; saved telemetry snapshots have an independent, unchanged format.
+//!
+//! Construct an [`io::MonitorIo`] at the application boundary and pass it to
+//! discovery, descriptor, and transport constructors. Their returned objects
+//! retain that capability.
+//!
+//! # Features
+//!
+//! - **`test-util`**: Provides supported, documented mock I/O through
+//!   `io::MonitorIo::new_mocked` and `io::MonitorIoControl`, including isolated
+//!   files and streams, injected failures, partial transfers, and controlled clocks.
+//!   Enable this on a dev-dependency for application tests. Mocked I/O creates no
+//!   host files or endpoints and does not prove native OS permission enforcement.
+//!   The same feature enables `testing` for isolated native IPC tests, which
+//!   create real temporary files and OS endpoints without using the installed
+//!   user registries.
+//!
+//! Use [`read_control_response`] for automatic metadata probes: its 64 KiB
+//! payload limit is checked before reading or allocating the advertised body.
+//! Explicit snapshot capture can use [`read_response`] for larger payloads.
 
 mod codec;
+pub mod discovery;
+pub mod io;
 pub mod message;
 pub mod monitor;
+mod platform;
+pub mod transport;
+
+#[cfg(any(test, feature = "test-util"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+pub mod testing;
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::{fmt, io};
+use std::{fmt, io as std_io};
 
 use message::{Request, Response};
 
@@ -19,13 +62,13 @@ const FRAME_READ_CHUNK_BYTES: usize = 8_192;
 const MAX_CONTROL_BYTES: usize = 65_536;
 const MAX_SNAPSHOT_BYTES: usize = u32::MAX as usize;
 
-const VERSION: u16 = 7;
+const VERSION: u16 = 8;
 
 /// Protocol or discovery failure.
 #[derive(Debug)]
 pub enum Error {
     /// Underlying I/O failure.
-    Io(io::Error),
+    Io(std_io::Error),
     /// Frame or request payload is malformed.
     InvalidMessage,
     /// Discovery descriptor is malformed.
@@ -36,6 +79,13 @@ pub enum Error {
     MessageTooLarge,
     /// No secure per-user runtime directory is available.
     MissingRuntimeDirectory,
+    /// A registry operation failed.
+    Registry {
+        /// Registry path involved in the operation.
+        path: PathBuf,
+        /// Underlying filesystem or access-control failure.
+        source: std_io::Error,
+    },
 }
 
 impl fmt::Display for Error {
@@ -47,6 +97,7 @@ impl fmt::Display for Error {
             Self::UnsupportedVersion => f.write_str("unsupported Seismograph monitor protocol version"),
             Self::MessageTooLarge => f.write_str("Seismograph monitor message exceeds its size limit"),
             Self::MissingRuntimeDirectory => f.write_str("no per-user runtime directory is available"),
+            Self::Registry { path, source } => write!(f, "Seismograph monitor registry {}: {source}", path.display()),
         }
     }
 }
@@ -54,7 +105,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io(error) => Some(error),
+            Self::Io(error) | Self::Registry { source: error, .. } => Some(error),
             _ => None,
         }
     }
@@ -98,6 +149,9 @@ pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Respo
 
 /// Reads one response frame.
 ///
+/// Permits large snapshot payloads. Use [`read_control_response`] for bounded
+/// automatic metadata probes.
+///
 /// # Errors
 ///
 /// Returns an error when reading fails or the response is malformed.
@@ -108,25 +162,19 @@ pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
     message::decode_response(frame.kind, &frame.payload).map(|response| (frame.request_id, response))
 }
 
-/// Returns the per-user monitor discovery directory.
+/// Reads one response with a 64 KiB control-payload limit.
+///
+/// Checks the advertised length before reading or allocating the body, even
+/// when the peer advertises an unexpected snapshot response. Use
+/// [`read_response`] for explicit snapshot capture.
 ///
 /// # Errors
 ///
-/// Returns an error when the platform does not expose a per-user directory.
-pub fn monitor_directory() -> Result<PathBuf, Error> {
-    #[cfg(target_os = "windows")]
-    let directory = std::env::var_os("LOCALAPPDATA")
-        .map(|local| PathBuf::from(local).join("seismograph").join("monitor"))
-        .ok_or(Error::MissingRuntimeDirectory);
-    #[cfg(unix)]
-    let directory = {
-        // SAFETY: geteuid has no preconditions and does not access Rust-owned memory.
-        let user_id = unsafe { libc::geteuid() };
-        Ok(unix_monitor_directory(std::env::var_os("XDG_RUNTIME_DIR"), user_id))
-    };
-    #[cfg(not(any(target_os = "windows", unix)))]
-    let directory = Ok(std::env::temp_dir().join("seismograph"));
-    directory
+/// Returns [`Error::MessageTooLarge`] for a larger payload, or an error when
+/// reading or decoding fails. Discard the reader after an error.
+pub fn read_control_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
+    let frame = read_frame(reader, MAX_CONTROL_BYTES)?;
+    message::decode_response(frame.kind, &frame.payload).map(|response| (frame.request_id, response))
 }
 
 fn write_frame(writer: &mut impl Write, kind: u16, request_id: u64, payload: &[u8]) -> Result<(), Error> {
@@ -175,15 +223,6 @@ fn read_frame(reader: &mut impl Read, maximum: usize) -> Result<Frame, Error> {
     Ok(Frame { kind, request_id, payload })
 }
 
-#[cfg(unix)]
-#[cfg_attr(test, mutants::skip)] // Windows mutation runs enumerate Unix-only source that cannot execute there.
-fn unix_monitor_directory(runtime: Option<std::ffi::OsString>, user_id: libc::uid_t) -> PathBuf {
-    runtime.map_or_else(
-        || std::env::temp_dir().join(format!("seismograph-{user_id}")),
-        |runtime| PathBuf::from(runtime).join("seismograph"),
-    )
-}
-
 struct Frame {
     kind: u16,
     request_id: u64,
@@ -191,8 +230,36 @@ struct Frame {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::io;
+
     use super::*;
+
+    #[test]
+    fn control_responses_reject_large_advertisements_after_the_header() {
+        let mut header = Vec::new();
+        write_response(&mut header, 1, &Response::Snapshot(Vec::new())).unwrap();
+        for length in [u32::try_from(MAX_CONTROL_BYTES + 1).unwrap(), u32::MAX] {
+            header[16..20].copy_from_slice(&length.to_le_bytes());
+            let mut reader = io::Cursor::new(&header);
+            assert!(matches!(read_control_response(&mut reader), Err(Error::MessageTooLarge)));
+            assert_eq!(reader.position(), 20);
+        }
+    }
+
+    #[test]
+    fn control_response_boundary_does_not_restrict_explicit_snapshots() {
+        let response = Response::Snapshot(vec![7; MAX_CONTROL_BYTES]);
+        let mut frame = Vec::new();
+        write_response(&mut frame, 2, &response).unwrap();
+        assert_eq!(read_control_response(&mut frame.as_slice()).unwrap(), (2, response));
+        let response = Response::Snapshot(vec![9; MAX_CONTROL_BYTES + 1]);
+        frame.clear();
+        write_response(&mut frame, 2, &response).unwrap();
+        assert_eq!(read_response(&mut frame.as_slice()).unwrap(), (2, response));
+        assert!(matches!(read_control_response(&mut frame.as_slice()), Err(Error::MessageTooLarge)));
+    }
 
     #[test]
     fn errors_expose_descriptive_messages_and_io_sources() {
@@ -294,7 +361,7 @@ mod tests {
         assert_eq!(
             request_bytes,
             [
-                b'S', b'G', b'M', b'P', 7, 0, 5, 0, 8, 7, 6, 5, 4, 3, 2, 1, 6, 0, 0, 0, 1, 0, 16, 0, 0, 0,
+                b'S', b'G', b'M', b'P', 8, 0, 5, 0, 8, 7, 6, 5, 4, 3, 2, 1, 6, 0, 0, 0, 1, 0, 16, 0, 0, 0,
             ]
         );
 
@@ -308,7 +375,7 @@ mod tests {
         assert_eq!(
             response_bytes,
             [
-                b'S', b'G', b'M', b'P', 7, 0, 105, 0, 9, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+                b'S', b'G', b'M', b'P', 8, 0, 105, 0, 9, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 1, 0, 1, 0, 0,
             ]
         );
     }
@@ -355,34 +422,9 @@ mod tests {
         assert_eq!(
             (writer.header, writer.written, writer.flushed),
             (
-                [b'S', b'G', b'M', b'P', 7, 0, 103, 0, 8, 7, 6, 5, 4, 3, 2, 1, 17, 0, 0, 0],
+                [b'S', b'G', b'M', b'P', 8, 0, 103, 0, 8, 7, 6, 5, 4, 3, 2, 1, 17, 0, 0, 0],
                 FRAME_HEADER_BYTES + payload_len,
                 true,
-            )
-        );
-    }
-
-    #[test]
-    #[cfg_attr(all(miri, target_os = "windows"), ignore)]
-    fn monitor_directory_is_platform_specific() {
-        let directory = monitor_directory().unwrap();
-        #[cfg(target_os = "windows")]
-        assert_eq!(directory.file_name().unwrap(), "monitor");
-        #[cfg(unix)]
-        assert!(directory.file_name().unwrap().to_string_lossy().starts_with("seismograph"));
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn unix_monitor_directory_uses_runtime_directory_or_user_fallback() {
-        assert_eq!(
-            (
-                unix_monitor_directory(Some("/run/user/example".into()), 42),
-                unix_monitor_directory(None, 42),
-            ),
-            (
-                PathBuf::from("/run/user/example/seismograph"),
-                std::env::temp_dir().join("seismograph-42"),
             )
         );
     }

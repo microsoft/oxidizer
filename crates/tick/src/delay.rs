@@ -12,12 +12,11 @@ use super::timers::TimerKey;
 ///
 /// # Precision
 ///
-/// The delay uses the current thread's scheduler to schedule its ticks. The precision
-/// of the delay is affected by the load on this thread. There are no guarantees about the
-/// precision of the delay other than that it will eventually complete. When the thread is healthy,
-/// the delay should be close to the specified duration.
+/// The delay uses the scheduler of the current thread. Thread load affects its
+/// precision. The delay will complete, but it does not guarantee an exact
+/// completion time. Under normal load, it completes near the requested duration.
 ///
-/// Note: `Delay` is not affected by changes in the system clock.
+/// Changes to the system clock do not affect `Delay`.
 ///
 /// # Examples
 ///
@@ -36,6 +35,7 @@ use super::timers::TimerKey;
 /// # }
 /// ```
 #[derive(Debug)]
+#[must_use = "futures do nothing unless awaited or polled"]
 pub struct Delay {
     // Currently scheduled timer. This value is not initialized before
     // actually calling the `Future::poll` method.
@@ -50,7 +50,7 @@ impl Delay {
     /// If the duration is [`Duration::ZERO`], the delay completes immediately.
     /// If the duration is [`Duration::MAX`], the delay never completes.
     ///
-    /// > **Note**: Consider using [`Clock::delay()`] as a shortcut for creating delays.
+    /// You can use [`Clock::delay()`] as a shorter form.
     ///
     /// # Examples
     ///
@@ -68,7 +68,7 @@ impl Delay {
     /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
     /// # }
     /// ```
-    #[must_use]
+    #[must_use = "futures do nothing unless awaited or polled"]
     pub fn new(clock: &Clock, duration: Duration) -> Self {
         Self {
             duration,
@@ -108,13 +108,21 @@ impl Future for Delay {
             Some(key) if key.tick() <= this.clock.timer_instant() => {
                 this.current_timer = None;
 
-                // Unregister the timer, just in case this call was explicit
-                // and not due to timers advancing.
+                // Unregister the timer if precise time reached the deadline before the driver.
                 this.clock.unregister_timer(key);
 
                 Poll::Ready(())
             }
-            Some(_) => Poll::Pending,
+            Some(key) => {
+                if this.clock.update_timer_waker(key, cx.waker()) {
+                    Poll::Pending
+                } else {
+                    // The driver can remove and wake the timer between the time check above
+                    // and this replacement. A missing registration therefore means completion.
+                    this.current_timer = None;
+                    Poll::Ready(())
+                }
+            }
         }
     }
 }
@@ -130,91 +138,14 @@ impl Drop for Delay {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::thread;
+    use std::sync::Arc;
 
     use super::*;
     use crate::ClockControl;
 
     #[test]
-    fn assert_types() {
-        static_assertions::assert_impl_all!(Delay: Send, Sync);
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn delay_ok() {
-        let clock = Clock::new_tokio();
-        let now = std::time::Instant::now();
-        Delay::new(&clock, Duration::from_millis(5)).await;
-        assert!(now.elapsed() >= Duration::from_millis(5));
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn delay_with_fast_instant_completes() {
-        let clock = Clock::new_tokio().with_fast_instant(true);
-
-        tokio::time::timeout(Duration::from_secs(1), Delay::new(&clock, Duration::from_millis(5)))
-            .await
-            .expect("timer scheduling uses the driver's precise time source");
-    }
-
-    #[test]
-    fn delay_with_control() {
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-        let mut delay = Delay::new(&clock, Duration::from_millis(1));
-
-        assert_eq!(poll_delay(&mut delay), Poll::Pending);
-        thread::sleep(Duration::from_millis(1));
-        assert_eq!(poll_delay(&mut delay), Poll::Pending);
-
-        let len = control.timers_len();
-        control.advance(Duration::from_millis(2));
-        assert_eq!(control.timers_len(), len - 1);
-        assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
-    }
-
-    #[test]
-    fn delay_zero() {
-        let clock = Clock::new_system_frozen();
-        let mut delay = Delay::new(&clock, Duration::ZERO);
-        assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
-    }
-
-    #[test]
-    fn delay_max() {
-        let clock = Clock::new_system_frozen();
-
-        let result = poll_delay(&mut Delay::new(&clock, Duration::MAX));
-
-        assert_eq!(result, Poll::Pending);
-    }
-
-    #[test]
-    fn delay_zero_ensure_timer_not_registered() {
-        let clock = Clock::new_system_frozen();
-        assert!(Delay::new(&clock, Duration::ZERO).current_timer.is_none());
-    }
-
-    #[test]
-    fn delay_max_ensure_timer_not_registered() {
-        let clock = Clock::new_system_frozen();
-        assert!(Delay::new(&clock, Duration::MAX).current_timer.is_none());
-    }
-
-    #[test]
-    fn delay_close_to_max_ensure_timer_not_registered() {
-        let clock = Clock::new_system_frozen();
-        let mut delay = Delay::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
-
-        assert_eq!(poll_delay(&mut delay), Poll::Pending);
-        assert_eq!(delay.duration, Duration::MAX);
-        assert!(delay.current_timer.is_none());
-    }
-
-    #[test]
-    fn overflowing_reregistration_unregisters_existing_timer() {
+    fn private_overflowing_reregistration_clears_the_existing_timer_key() {
+        // Public callers cannot mutate a polled delay's duration to force this recovery branch.
         let clock = ClockControl::new().to_clock();
         let mut delay = Delay::new(&clock, Duration::from_millis(1));
         let waker = Waker::noop();
@@ -230,40 +161,26 @@ mod tests {
     }
 
     #[test]
-    fn ready_without_advancing_timers_ensure_timer_unregistered() {
-        let clock = Clock::new_system_frozen();
-        let period = Duration::from_millis(1);
-        let mut delay = Delay::new(&clock, period);
+    fn missing_timer_is_treated_as_fired_when_the_task_changes() {
+        #[derive(Debug)]
+        struct CountingWake(std::sync::atomic::AtomicUsize);
 
-        assert_eq!(poll_delay(&mut delay), Poll::Pending);
-        assert_eq!(clock.clock_state().timers_len(), 1);
-        thread::sleep(period);
-        assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
-        assert_eq!(delay.current_timer, None);
-        assert_eq!(clock.clock_state().timers_len(), 0);
-    }
-
-    #[test]
-    fn drop_delay_unregisters_timer() {
-        let clock = Clock::new_system_frozen();
-        let period = Duration::from_millis(1);
-
-        // Create and poll the delay to register a timer.
-        {
-            let mut delay = Delay::new(&clock, period);
-            assert_eq!(poll_delay(&mut delay), Poll::Pending);
-            assert_eq!(clock.clock_state().timers_len(), 1);
-            // Delay is dropped here, unregistering the timer.
+        impl std::task::Wake for CountingWake {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
         }
 
-        // Timer should be unregistered after dropping the delay.
-        assert_eq!(clock.clock_state().timers_len(), 0);
-    }
+        let clock = ClockControl::new().to_clock();
+        let mut delay = Delay::new(&clock, Duration::from_millis(1));
+        let first_waker = Waker::from(Arc::new(CountingWake(std::sync::atomic::AtomicUsize::new(0))));
+        let mut first_context = Context::from_waker(&first_waker);
+        assert_eq!(Pin::new(&mut delay).poll(&mut first_context), Poll::Pending);
+        clock.unregister_timer(delay.current_timer.unwrap());
 
-    fn poll_delay(delay: &mut Delay) -> Poll<()> {
-        let mut cx = Context::from_waker(Waker::noop());
-        let delay = std::pin::pin!(delay);
+        let second_waker = Waker::from(Arc::new(CountingWake(std::sync::atomic::AtomicUsize::new(0))));
+        let mut second_context = Context::from_waker(&second_waker);
 
-        delay.poll(&mut cx)
+        assert_eq!(Pin::new(&mut delay).poll(&mut second_context), Poll::Ready(()));
     }
 }

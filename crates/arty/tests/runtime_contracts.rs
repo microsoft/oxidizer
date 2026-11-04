@@ -14,13 +14,13 @@ use std::future::poll_fn;
 use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
-use std::task::{Context, Poll, Waker};
+use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeOperations, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
 #[cfg(all(feature = "macros", feature = "test-util"))]
-use arty::task::Builtins;
+use arty::task::Context;
 use arty::task::JoinError;
 use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
@@ -29,8 +29,6 @@ use thread_aware::{ThreadAware, Unaware};
 use tick::ClockControl;
 #[cfg(all(feature = "macros", feature = "test-util"))]
 use tick::FutureExt;
-
-testing_aids::init_tracing!();
 
 #[cfg(test)]
 fn runtime(workers: usize) -> Runtime {
@@ -123,6 +121,35 @@ fn concurrent_schedulers_share_selection_without_losing_submissions() {
 }
 
 #[test]
+fn worker_local_result_channels_remain_sendable_after_worker_shutdown() {
+    let runtime = runtime(2);
+    let (completed, completions) = mpsc::channel();
+    let children = (0..2)
+        .map(|_| {
+            runtime
+                .scheduler()
+                .spawn_anywhere(Unaware(completed.clone()), |cx, Unaware(completed)| async move {
+                    let child = cx.scheduler().spawn(async |_| 42);
+                    let value = child.await.unwrap();
+                    let child = cx.scheduler().spawn(move |_| {
+                        completed.send(()).unwrap();
+                        std::future::ready(value)
+                    });
+                    (child,)
+                })
+        })
+        .map(|parent| parent.join().unwrap().0)
+        .collect::<Vec<_>>();
+    for _ in &children {
+        completions.recv_timeout(TEST_TIMEOUT).unwrap();
+    }
+    runtime.stop().unwrap();
+    for child in children {
+        assert_eq!(thread::spawn(move || child.join().unwrap()).join().unwrap(), 42);
+    }
+}
+
+#[test]
 fn registered_work_and_timers_progress_while_producers_keep_submitting() {
     struct InFlight(Arc<AtomicUsize>);
 
@@ -173,7 +200,7 @@ fn registered_work_and_timers_progress_while_producers_keep_submitting() {
                 started.send(()).unwrap();
                 while running.load(Ordering::Acquire) {
                     if in_flight
-                        .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |count| (count < capacity).then_some(count + 1))
+                        .try_update(Ordering::AcqRel, Ordering::Relaxed, |count| (count < capacity).then_some(count + 1))
                         .is_err()
                     {
                         thread::yield_now();
@@ -214,11 +241,11 @@ fn closed_runtime_rejects_factories_with_an_immediate_shutdown_error() {
     runtime.stop().unwrap();
     let invoked = Arc::new(AtomicBool::new(false));
     let captured = Arc::clone(&invoked);
-    let mut join = Box::pin(scheduler.spawn(move |_: arty::task::Builtins| {
+    let mut join = Box::pin(scheduler.spawn(move |_: arty::task::Context| {
         captured.store(true, Ordering::Relaxed);
         async {}
     }));
-    let mut cx = Context::from_waker(Waker::noop());
+    let mut cx = PollContext::from_waker(Waker::noop());
     let Poll::Ready(Err(error)) = join.as_mut().poll(&mut cx) else {
         panic!("a rejected join must be ready with a shutdown error");
     };
@@ -276,7 +303,7 @@ fn pending_future_is_woken_from_an_unrelated_thread() {
 
 #[cfg(all(feature = "macros", feature = "test-util"))]
 #[arty::test]
-async fn worker_can_drive_a_controlled_clock_without_io(cx: Builtins, control: ClockControl) {
+async fn controlled_clock_auto_advance_does_not_require_io(cx: Context, control: ClockControl) {
     let _control = control.auto_advance_timers(true);
     let watch = cx.clock().stopwatch();
     cx.clock().delay(Duration::from_secs(5)).await;
@@ -289,10 +316,15 @@ fn factory_and_poll_panics_return_errors_and_preserve_runtime_usability() {
     #[derive(Debug, PartialEq)]
     struct Payload(u32);
 
-    fn panic_factory(_: arty::task::Builtins) -> std::future::Ready<()> {
+    fn panic_factory(_: arty::task::Context) -> std::future::Ready<()> {
         panic_any(Payload(1))
     }
-    let runtime = runtime(1);
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(1))
+        .panic(PanicPolicy::ignore())
+        .build()
+        .unwrap();
     let factory = runtime.scheduler().spawn_anywhere((), |cx, ()| panic_factory(cx));
     let polling = runtime.scheduler().spawn_anywhere((), |_, ()| async { panic_any(Payload(2)) });
     for task in [factory, polling] {
@@ -334,7 +366,7 @@ fn scoped_borrowed_storage_is_destroyed_before_success_or_error() {
 }
 
 #[test]
-fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
+fn dropping_a_runtime_on_a_blocking_worker_panics() {
     for policy in [BlockingPoolPolicy::per_worker(), BlockingPoolPolicy::shared().max(1)] {
         let runtime = Runtime::builder()
             .workers(WorkersPolicy::exactly(1))
@@ -346,26 +378,16 @@ fn a_blocking_task_can_drop_its_runtime_without_joining_itself() {
             .spawn_anywhere((), |cx, ()| async move { cx.scheduler().clone() })
             .join()
             .unwrap();
-        let (finished, receive) = mpsc::channel();
-        let task = scheduler.spawn_blocking(move || {
-            drop(runtime);
-            finished.send(()).unwrap();
-        });
-        receive.recv_timeout(TEST_TIMEOUT).unwrap();
-        task.join().unwrap();
+        let error = scheduler.spawn_blocking(move || drop(runtime)).join().unwrap_err();
+        assert!(error.is_panic());
     }
 }
 
 #[test]
-fn repeated_stop_requests_report_one_completed_shutdown() {
-    let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).sink(sink).build().unwrap();
-    let operations = RuntimeOperations::from(&runtime);
-    operations.request_stop();
-    operations.request_stop();
+fn repeated_stop_requests_do_not_break_shutdown() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let control = support::runtime_control(&runtime);
+    control.request_stop();
+    control.request_stop();
     runtime.stop().unwrap();
-    assert_eq!(
-        processor.events().iter().filter(|event| event.name() == "arty.rt.stopped").count(),
-        1
-    );
 }

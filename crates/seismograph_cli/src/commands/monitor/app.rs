@@ -4,15 +4,19 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+#[cfg(test)]
+use std::time::SystemTime;
+use std::time::{Duration, Instant};
 
 use crossterm::event::KeyCode;
 use performables::sync::channel::{Receiver, Sender, unbounded};
+use seismograph_protocol::io::MonitorIo;
 use seismograph_protocol::message::{RecorderStatistics, RecordingConfiguration, SnapshotOptions};
 use seismograph_protocol::monitor::{InstanceId, MonitorDescriptor};
 
 use super::client::{
-    capture_snapshot, capture_snapshot_and_stop, clear_event_buffers, discover, handshake, recorder_activity, save_snapshot, set_recording,
+    Discovery, capture_snapshot, capture_snapshot_and_stop, clear_event_buffers, discover, handshake, recorder_activity, save_snapshot,
+    set_recording,
 };
 use super::data::{AllocationSort, AllocationStackFilter, CapturedSnapshot, MemoryTier, MemoryTierData, PrimitiveSort, RuntimeTaskSort};
 use super::live_activity::{LiveActivity, RecorderUpdate};
@@ -893,6 +897,7 @@ pub(super) enum Screen {
 }
 
 pub(super) struct App {
+    pub(super) io: MonitorIo,
     pub(super) instances: Vec<Instance>,
     pub(super) selected: usize,
     pub(super) screen: Screen,
@@ -923,7 +928,7 @@ pub(super) struct App {
     capture_generation: u64,
     clear_in_progress: bool,
     capture_receiver: Option<Receiver<CaptureMessage>>,
-    discovery_receiver: Option<Receiver<Result<Vec<Instance>, String>>>,
+    discovery_receiver: Option<Receiver<Result<Discovery, String>>>,
     statistics_receiver: Option<Receiver<Result<RecorderUpdate, String>>>,
     recording_receiver: Option<Receiver<Result<RecordingUpdate, String>>>,
     connection_generation: u64,
@@ -1005,7 +1010,13 @@ impl App {
     }
 
     pub(super) fn new() -> Self {
+        Self::with_io(MonitorIo::new_native())
+    }
+
+    pub(super) fn with_io(io: MonitorIo) -> Self {
+        let next_refresh = io.instant();
         Self {
+            io,
             instances: Vec::new(),
             selected: 0,
             screen: Screen::Browse,
@@ -1041,7 +1052,7 @@ impl App {
             recording_receiver: None,
             connection_generation: 0,
             recording_generation: 0,
-            next_refresh: Instant::now(),
+            next_refresh,
         }
     }
 
@@ -1051,15 +1062,20 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub(super) fn refresh(&mut self) {
-        self.refresh_with(discover, recorder_activity);
+        let discovery_io = self.io.clone();
+        let activity_io = self.io.clone();
+        self.refresh_with(
+            move || discover(&discovery_io),
+            move |descriptor| recorder_activity(&activity_io, descriptor),
+        );
     }
 
     fn refresh_with<D, S>(&mut self, discover: D, recorder_statistics: S)
     where
-        D: FnOnce() -> Result<Vec<Instance>, super::Error> + Send + 'static,
+        D: FnOnce() -> Result<Discovery, super::Error> + Send + 'static,
         S: FnOnce(&MonitorDescriptor) -> Result<RecorderUpdate, super::Error> + Send + 'static,
     {
-        self.next_refresh = Instant::now().checked_add(REFRESH_INTERVAL).unwrap_or_else(Instant::now);
+        self.next_refresh = self.io.instant().checked_add(REFRESH_INTERVAL).unwrap_or_else(|| self.io.instant());
         if matches!(self.screen, Screen::Offline { .. }) {
             return;
         }
@@ -1200,7 +1216,7 @@ impl App {
             self.connection_generation += 1;
             self.statistics_receiver = None;
             self.discovery_receiver = None;
-            self.next_refresh = Instant::now();
+            self.next_refresh = self.io.instant();
             self.activity_samples.clear();
             self.recorder_statistics = None;
             self.live_activity = LiveActivity::default();
@@ -1250,7 +1266,10 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn apply_recording_configuration(&mut self, configuration: RecordingConfiguration) {
-        self.apply_recording_configuration_with(configuration, set_recording);
+        let io = self.io.clone();
+        self.apply_recording_configuration_with(configuration, move |descriptor, configuration| {
+            set_recording(&io, descriptor, configuration)
+        });
     }
 
     fn apply_recording_configuration_with<F>(&mut self, configuration: RecordingConfiguration, set_recording: F)
@@ -1275,7 +1294,7 @@ impl App {
         };
         self.recording_receiver = None;
         // A failed multi-command update can still have changed part of the configuration.
-        self.next_refresh = Instant::now();
+        self.next_refresh = self.io.instant();
         if self.recording_generation != self.connection_generation {
             return;
         }
@@ -1342,9 +1361,9 @@ impl App {
             return;
         }
         match result {
-            Ok(instances) => {
+            Ok(discovery) => {
                 let selected_id = self.instances.get(self.selected).map(|instance| instance.descriptor.instance_id);
-                self.instances = instances;
+                self.instances = discovery.instances;
                 self.selected = selected_id
                     .and_then(|id| self.instances.iter().position(|instance| instance.descriptor.instance_id == id))
                     .unwrap_or(0)
@@ -1354,6 +1373,14 @@ impl App {
                 } else {
                     format!("{} application(s) available", self.instances.len())
                 };
+                if !discovery.warnings.is_empty() {
+                    self.status = format!(
+                        "{}; {} discovery warning(s): {}",
+                        self.status,
+                        discovery.warnings.len(),
+                        discovery.warnings.join("; ")
+                    );
+                }
             }
             Err(error) => self.status = error,
         }
@@ -1447,13 +1474,14 @@ impl App {
     fn start_snapshot_capture(&mut self, descriptor: MonitorDescriptor, mode: CaptureMode) {
         let (sender, receiver) = unbounded();
         let instance_id = descriptor.instance_id;
+        let io = self.io.clone();
         match thread::Builder::new().name("seismograph-snapshot".into()).spawn(move || {
-            let result = capture_connected_snapshot(&descriptor, mode, &sender);
+            let result = capture_connected_snapshot(&io, &descriptor, mode, &sender);
             let _receiver_closed = sender.send(CaptureMessage::Complete(result));
         }) {
             Ok(_worker) => {
                 self.snapshot_error = None;
-                self.capture_started_at = Some(Instant::now());
+                self.capture_started_at = Some(self.io.instant());
                 self.capture_step = Some(CaptureStep::Capture);
                 self.capture_instance_id = Some(instance_id);
                 self.capture_generation = self.connection_generation;
@@ -1499,9 +1527,10 @@ impl App {
     fn start_clear_buffers(&mut self, descriptor: MonitorDescriptor) {
         let (sender, receiver) = unbounded();
         let instance_id = descriptor.instance_id;
+        let io = self.io.clone();
         match thread::Builder::new().name("seismograph-clear".into()).spawn(move || {
-            let result = clear_event_buffers(&descriptor).map_err(|error| error.to_string());
-            let recording = handshake(&descriptor).map_err(|error| error.to_string());
+            let result = clear_event_buffers(&io, &descriptor).map_err(|error| error.to_string());
+            let recording = handshake(&io, &descriptor).map_err(|error| error.to_string());
             if sender.send(CaptureMessage::Recording(recording)).is_ok() {
                 let _receiver_closed = sender.send(CaptureMessage::Cleared(result));
             }
@@ -1520,7 +1549,7 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn start_discovery_with<F>(&mut self, discover: F)
     where
-        F: FnOnce() -> Result<Vec<Instance>, super::Error> + Send + 'static,
+        F: FnOnce() -> Result<Discovery, super::Error> + Send + 'static,
     {
         let (sender, receiver) = unbounded();
         match thread::Builder::new().name("seismograph-discovery".into()).spawn(move || {
@@ -1591,7 +1620,7 @@ impl App {
             .map(|thread| thread.statistics.thread_id);
         match update {
             RecorderUpdate::Detailed(activity) => {
-                if self.live_activity.record(activity, Instant::now()) {
+                if self.live_activity.record(activity, self.io.instant()) {
                     self.activity_samples.clear();
                     self.recorder_statistics = None;
                     self.activity_observed_at = None;
@@ -1611,7 +1640,7 @@ impl App {
     }
 
     fn record_activity(&mut self, statistics: RecorderStatistics) {
-        let captured_at = Instant::now();
+        let captured_at = self.io.instant();
         if let Some((previous, observed_at)) = self.recorder_statistics.as_ref().zip(self.activity_observed_at) {
             let elapsed = captured_at.saturating_duration_since(observed_at);
             self.activity_samples.push_back(ActivitySample {
@@ -2148,18 +2177,19 @@ fn handle_cache_key(code: KeyCode, view: &mut CacheViewState, snapshot: Option<&
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn capture_connected_snapshot(
+    io: &MonitorIo,
     descriptor: &MonitorDescriptor,
     mode: CaptureMode,
     progress: &Sender<CaptureMessage>,
 ) -> Result<CaptureOutcome, String> {
     report_capture_step(progress, CaptureStep::Capture)?;
     let captured = match mode {
-        CaptureMode::Continue => capture_snapshot(descriptor, SnapshotOptions::default()),
+        CaptureMode::Continue => capture_snapshot(io, descriptor, SnapshotOptions::default()),
         CaptureMode::Stop => {
-            let result = capture_snapshot_and_stop(descriptor);
+            let result = capture_snapshot_and_stop(io, descriptor);
             // Cleanup can succeed even when subsequent source capture/encoding fails.
             // Always reconcile, including after a lost response or remote error.
-            let recording = handshake(descriptor).map_err(|error| error.to_string());
+            let recording = handshake(io, descriptor).map_err(|error| error.to_string());
             progress
                 .send(CaptureMessage::Recording(recording))
                 .map_err(|_send_error| "snapshot progress receiver closed".to_owned())?;
@@ -2170,14 +2200,14 @@ fn capture_connected_snapshot(
     report_capture_step(progress, CaptureStep::Decode)?;
     let decoded = seismograph::snapshot::decode(&bytes).map_err(|error| format!("invalid Seismograph snapshot: {error}"))?;
     let mut snapshot = super::snapshot::prepare(decoded)?;
-    snapshot.captured_at = Some(SystemTime::now());
-    snapshot.captured_instant = Some(Instant::now());
+    snapshot.captured_at = Some(io.system_time());
+    snapshot.captured_instant = Some(io.instant());
     let mut status = snapshot.heap_error.clone().unwrap_or_else(|| match mode {
         CaptureMode::Continue => "Captured; server buffers and recording policy preserved".into(),
         CaptureMode::Stop => "Captured; recording stopped and server ring buffers deallocated".into(),
     });
     report_capture_step(progress, CaptureStep::Save)?;
-    if let Err(error) = save_snapshot(descriptor, &bytes) {
+    if let Err(error) = save_snapshot(io, descriptor, &bytes) {
         status = error.to_string();
     }
     Ok(CaptureOutcome { snapshot, status })
@@ -2217,8 +2247,15 @@ mod tests {
             instance: None,
             process_id: u32::from(id),
             instance_id: seismograph_protocol::monitor::InstanceId::from_bytes([id; 16]),
-            port: 0,
-            authentication: seismograph_protocol::monitor::AuthenticationToken::from_bytes([id; 32]),
+
+            owner: seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+
+            endpoint: seismograph_protocol::monitor::MonitorEndpoint::for_instance(
+                &std::env::temp_dir(),
+                &seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+                u32::from(id),
+                seismograph_protocol::monitor::InstanceId::from_bytes([id; 16]),
+            ),
         }
     }
 
@@ -2806,8 +2843,15 @@ mod tests {
                 instance: None,
                 process_id: 1,
                 instance_id: seismograph_protocol::monitor::InstanceId::from_bytes([1; 16]),
-                port: 0,
-                authentication: seismograph_protocol::monitor::AuthenticationToken::from_bytes([2; 32]),
+
+                owner: seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+
+                endpoint: seismograph_protocol::monitor::MonitorEndpoint::for_instance(
+                    &std::env::temp_dir(),
+                    &seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+                    1,
+                    seismograph_protocol::monitor::InstanceId::from_bytes([1; 16]),
+                ),
             },
             recording,
             tab: MonitorTab::Info,
@@ -2850,8 +2894,15 @@ mod tests {
                 instance: None,
                 process_id: 1,
                 instance_id: seismograph_protocol::monitor::InstanceId::from_bytes([1; 16]),
-                port: 0,
-                authentication: seismograph_protocol::monitor::AuthenticationToken::from_bytes([2; 32]),
+
+                owner: seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+
+                endpoint: seismograph_protocol::monitor::MonitorEndpoint::for_instance(
+                    &std::env::temp_dir(),
+                    &seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+                    1,
+                    seismograph_protocol::monitor::InstanceId::from_bytes([1; 16]),
+                ),
             },
             recording: RecordingConfiguration::default(),
             tab: MonitorTab::Info,
@@ -3071,11 +3122,17 @@ mod tests {
     fn refresh_schedules_the_next_worker_for_each_screen() {
         let mut browse = App::new();
         let before = browse.next_refresh();
-        browse.refresh_with(|| Ok(Vec::new()), |_descriptor| Ok(recorder_statistics_with_total(0).into()));
+        browse.refresh_with(
+            || Ok(Discovery::default()),
+            |_descriptor| Ok(recorder_statistics_with_total(0).into()),
+        );
         let browse_state = (browse.next_refresh() > before, browse.discovery_receiver.is_some());
 
         let mut connected = connected_app(MonitorTab::Info);
-        connected.refresh_with(|| Ok(Vec::new()), |_descriptor| Ok(recorder_statistics_with_total(0).into()));
+        connected.refresh_with(
+            || Ok(Discovery::default()),
+            |_descriptor| Ok(recorder_statistics_with_total(0).into()),
+        );
         let connected_state = (connected.statistics_receiver.is_some(), connected.discovery_receiver.is_none());
 
         assert_eq!((browse_state, connected_state), ((true, true), (true, true)));
@@ -3385,19 +3442,16 @@ mod tests {
 
     #[test]
     fn stop_worker_reconciles_server_policy_after_a_capture_error() {
-        use std::net::TcpListener;
-
         use seismograph_protocol::message::{Request, Response};
         use seismograph_protocol::{read_request, write_response};
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let mut descriptor = descriptor(1);
-        descriptor.port = listener.local_addr().unwrap().port();
+        let listener = seismograph_protocol::testing::listener();
+        let descriptor = listener.descriptor().clone();
         let id = descriptor.instance_id;
         let worker = thread::spawn(move || {
             for stop in [true, false] {
-                let (mut stream, _) = listener.accept().unwrap();
+                let mut stream = listener.accept().unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
-                assert!(matches!(read_request(&mut stream).unwrap(), (1, Request::Hello { .. })));
+                assert!(matches!(read_request(&mut stream).unwrap(), (1, Request::Hello)));
                 write_response(
                     &mut stream,
                     1,
@@ -3419,7 +3473,9 @@ mod tests {
             }
         });
         let (sender, receiver) = unbounded();
-        let error = capture_connected_snapshot(&descriptor, CaptureMode::Stop, &sender).err().unwrap();
+        let error = capture_connected_snapshot(&MonitorIo::new_native(), &descriptor, CaptureMode::Stop, &sender)
+            .err()
+            .unwrap();
         worker.join().unwrap();
         assert!(error.contains("source failed after recorder cleanup"));
         assert!(matches!(
@@ -3577,14 +3633,15 @@ mod tests {
                     recording: RecordingConfiguration::default(),
                     server_version: None,
                 },
-            ]))
+            ]
+            .into()))
             .unwrap();
         app.discovery_receiver = Some(receiver);
         app.poll_discovery();
         assert_eq!((app.selected, app.status.as_str()), (1, "2 application(s) available"));
 
         let (sender, receiver) = unbounded();
-        sender.send(Ok(Vec::new())).unwrap();
+        sender.send(Ok(Discovery::default())).unwrap();
         app.discovery_receiver = Some(receiver);
         app.poll_discovery();
         assert_eq!(app.status, "No reachable Seismograph monitors found");
@@ -3595,7 +3652,7 @@ mod tests {
         app.poll_discovery();
         assert_eq!(app.status, "discovery failed");
 
-        let (sender, receiver) = unbounded::<Result<Vec<Instance>, String>>();
+        let (sender, receiver) = unbounded::<Result<Discovery, String>>();
         drop(sender);
         app.discovery_receiver = Some(receiver);
         app.poll_discovery();
@@ -3606,11 +3663,31 @@ mod tests {
     fn discovery_results_are_ignored_after_connecting() {
         let mut app = connected_app(MonitorTab::Info);
         let (sender, receiver) = unbounded();
-        sender.send(Ok(Vec::new())).unwrap();
+        sender.send(Ok(Discovery::default())).unwrap();
         app.discovery_receiver = Some(receiver);
         app.poll_discovery();
 
         assert!(matches!(app.screen, Screen::Connected { .. }));
+    }
+
+    #[test]
+    fn discovery_warnings_do_not_hide_reachable_monitors() {
+        let mut app = App::new();
+        let (sender, receiver) = unbounded();
+        sender
+            .send(Ok(Discovery {
+                instances: vec![Instance {
+                    descriptor: descriptor(1),
+                    recording: RecordingConfiguration::default(),
+                    server_version: None,
+                }],
+                warnings: vec!["invalid descriptor".into()],
+            }))
+            .unwrap();
+        app.discovery_receiver = Some(receiver);
+        app.poll_discovery();
+        assert_eq!(app.instances.len(), 1);
+        assert_eq!(app.status, "1 application(s) available; 1 discovery warning(s): invalid descriptor");
     }
 
     #[test]
@@ -4027,8 +4104,15 @@ mod tests {
                 instance: None,
                 process_id: 1,
                 instance_id: seismograph_protocol::monitor::InstanceId::from_bytes([1; 16]),
-                port: 1,
-                authentication: seismograph_protocol::monitor::AuthenticationToken::from_bytes([2; 32]),
+
+                owner: seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+
+                endpoint: seismograph_protocol::monitor::MonitorEndpoint::for_instance(
+                    &std::env::temp_dir(),
+                    &seismograph_protocol::monitor::MonitorOwner::current().unwrap(),
+                    1,
+                    seismograph_protocol::monitor::InstanceId::from_bytes([1; 16]),
+                ),
             },
             recording: RecordingConfiguration::default(),
             tab: MonitorTab::Heaps,

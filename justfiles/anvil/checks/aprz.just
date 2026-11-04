@@ -20,6 +20,7 @@
 # Unscoped (consults external risk DB).
 
 # Analyze dependency features and version requirements with cargo-aprz.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-aprz: anvil-aprz-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -40,9 +41,9 @@ anvil-aprz: anvil-aprz-validate-prereqs
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-aprz` recipe.
-[group("anvil-setup")]
+[private]
 anvil-aprz-setup installer="install": (anvil-tool-cargo-aprz-install installer)
 
 # Validate prerequisites for the `anvil-aprz` recipe.
-[group("anvil-setup")]
+[private]
 anvil-aprz-validate-prereqs: anvil-tool-cargo-aprz-validate-prereqs

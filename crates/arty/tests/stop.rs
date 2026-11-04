@@ -5,12 +5,10 @@
 
 #![cfg(feature = "rt")]
 
-testing_aids::init_tracing!();
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use arty::runtime::{Runtime, RuntimeOperations};
+use arty::runtime::Runtime;
 use events_once::{BoxedReceiver, Event};
 use testing_aids::execute_or_abandon;
 use thread_aware::Unaware;
@@ -39,7 +37,7 @@ fn stop_via_runtime() {
 
         runtime.stop().unwrap();
 
-        // We expect the canary to have died. Otherwise, the runtime is still running!
+        // The runtime stopped only if it dropped the canary.
         assert!(observer.upgrade().is_none());
     })
     .unwrap();
@@ -60,14 +58,14 @@ fn stop_via_async_task() {
         runtime
             .scheduler()
             .spawn_anywhere(Unaware(requested), |cx, Unaware(requested)| async move {
-                RuntimeOperations::from(&cx).request_stop();
+                cx.control().request_stop();
                 requested.send(());
             });
 
         futures::executor::block_on(stop_requested).unwrap();
         runtime.stop().unwrap();
 
-        // We expect the canary to have died. Otherwise, the runtime is still running!
+        // The runtime stopped only if it dropped the canary.
         assert!(observer.upgrade().is_none());
     })
     .unwrap();

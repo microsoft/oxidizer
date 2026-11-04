@@ -7,10 +7,10 @@ use crate::{HttpRequest, HttpResponse, Result};
 
 /// Trait alias for [`Service<HttpRequest, Out = Result<HttpResponse>>`][layered::Service].
 ///
-/// Use `RequestHandler` as a trait bound to avoid spelling out the full
-/// `Service<HttpRequest, Out = Result<HttpResponse>>` constraint. Any type that
-/// implements [`Service<HttpRequest>`][layered::Service] with `Out = Result<HttpResponse>`
-/// automatically implements `RequestHandler`.
+/// Use `RequestHandler` instead of the complete
+/// `Service<HttpRequest, Out = Result<HttpResponse>>` constraint.
+/// A type implements `RequestHandler` when it implements
+/// [`Service<HttpRequest>`][layered::Service] with `Out = Result<HttpResponse>`.
 ///
 /// # Examples
 ///

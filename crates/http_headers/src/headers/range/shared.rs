@@ -22,6 +22,10 @@ mod tests {
     use super::super::{accept_ranges, range};
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native and cargo-careful runs retain the exhaustive range grammar matrix; direct SIMD range tests and compact header cases remain interpreted"
+    )]
     fn fast_scanners_agree_with_the_general_implementations() {
         const ALPHABET: &[u8] = b"01-, a=\t9";
         const RANGE_ALPHABET: &[u8] = b"01-, ";

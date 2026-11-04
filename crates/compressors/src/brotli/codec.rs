@@ -62,7 +62,7 @@ fn compress_stream_failed() -> Error {
 ///
 /// The encoder is owned outright rather than borrowed from a pool: brotli exposes no reset, so
 /// there is nothing to hand back and no `Drop` work to do. `finished` latches once the encoder has
-/// emitted its terminal block, and the pump never calls `step` again after that -- which is what
+/// emitted its terminal block. The pump never calls `step` after that point. This is what
 /// makes the "driven inconsistently" branch of `compress_stream` unreachable from here.
 pub(crate) struct BrotliCompress {
     state: BrotliEncoderStateStruct<StandardAlloc>,
@@ -85,7 +85,7 @@ impl BrotliCompress {
         // `set_parameter` refuses only an already-initialized encoder or an unrecognized parameter.
         // The state was created two statements ago and all three identifiers are recognized, so a
         // refusal here means the encoder's contract changed under us rather than that the caller
-        // configured something invalid -- `Quality`, `WindowSize` and `Mode` validate on
+        // configured an invalid value. `Quality`, `WindowSize`, and `Mode` validate during
         // construction, and the portable `Level` is mapped into `0..=11`.
         assert!(accepted, "the brotli encoder rejected a parameter it documents as recognized");
 
@@ -162,7 +162,7 @@ unsafe impl Codec for BrotliCompress {
 /// allows.
 ///
 /// Like the encoder, the state is owned rather than pooled. `limits`, `multi_stream` and
-/// `trailing_data` are fixed policy; `needs_reset` spans one stream and defers the reset until
+/// `trailing_data` are fixed policy. `needs_reset` spans one stream and defers the reset until
 /// another stream actually arrives. `total_out` is counted here rather than read back from the
 /// decoder, because the decoder reports per-call progress and the limits are cumulative.
 pub(crate) struct BrotliDecompress {
@@ -191,8 +191,8 @@ impl BrotliDecompress {
     /// `new_strict` rather than `new`: the permissive constructor also accepts Large Window Brotli,
     /// a non-standard extension whose declared window can reach 1 GiB, and the decoder sizes its
     /// ring buffer from that declaration before producing any output. Nothing in this crate emits
-    /// such a stream -- [`WindowSize`][crate::brotli::WindowSize] tops out at the window the RFC
-    /// allows -- so accepting one would only widen what untrusted input can ask the allocator for.
+    /// such a stream. [`WindowSize`][crate::brotli::WindowSize] stops at the RFC limit. Accepting
+    /// the extension only increases the allocation that untrusted input can request.
     fn state() -> BrotliState<HeapAlloc<u8>, HeapAlloc<u32>, HeapAlloc<HuffmanCode>> {
         BrotliState::new_strict(HeapAlloc::new(0), HeapAlloc::new(0), HeapAlloc::new(HuffmanCode::default()))
     }

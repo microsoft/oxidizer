@@ -125,14 +125,14 @@ impl State {
 
                 // In open state, we don't process results. This can happen when multiple threads are involved and
                 // the state of circuit breaker changes between enter and exit calls since these are separate
-                // method calls that could be interleaved with other threads. Ignore the result.
+                // method calls that can interleave with other threads. Ignore the result.
                 ExitCircuitResult::Unchanged
             }
             Self::HalfOpen { probes, stats } => {
                 // A `Normal` result here is stale: the caller entered while we were `Closed` and
-                // the circuit has since opened and moved to half-open. Treating it as a probe would
-                // let unrelated traffic decide recovery (and, under `AbandonedPolicy::as_failures`,
-                // a stale cancellation could spuriously re-open the circuit). Account for it as a
+                // the circuit has since opened and moved to half-open. Treating it as a probe can
+                // let unrelated traffic decide recovery. Under `AbandonedPolicy::as_failures`,
+                // a stale cancellation can reopen the circuit. Account for it as a
                 // lost execution so it is still surfaced via `circuit_breaker.execs.lost` when
                 // the circuit eventually closes.
                 if mode == ExecutionMode::Normal {
@@ -264,8 +264,7 @@ mod tests {
     fn new_with_valid_settings_creates_closed_state() {
         let engine = create_test_engine();
 
-        // Verify engine was created (we can't directly inspect the state due to encapsulation)
-        // but we can verify it starts in closed state by checking enter() behavior
+        // The state is private. Use enter() to make sure that the engine starts closed.
         let result = engine.enter();
         assert!(matches!(
             result,
@@ -408,7 +407,7 @@ mod tests {
     fn exit_when_closed_with_insufficient_failures_remains_unchanged() {
         let engine = create_test_engine();
 
-        // Record some failures but not enough to exceed a threshold (need at least 10 requests)
+        // Record some failures but not enough to reach a threshold (need at least 10 requests)
         for _ in 0..5 {
             engine.enter();
             engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
@@ -486,7 +485,7 @@ mod tests {
         // Under the default `rate_threshold(1.0)` policy an abandoned probe is inconclusive: it
         // cannot confirm recovery, but it must not re-open the circuit either, otherwise a high
         // rate of abandoned executions (e.g. immediate hedging cancelling the in-flight probe)
-        // would pin the circuit open and block recovery.
+        // can keep the circuit open and block recovery.
         let result = engine.exit(ExecutionResult::Abandoned, ExecutionMode::Probe);
 
         assert!(matches!(result, ExitCircuitResult::Unchanged));
@@ -713,7 +712,7 @@ mod tests {
         engine.enter();
         let result2 = engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
 
-        // Both should complete without panicking
+        // Both operations complete without a panic.
         assert!(matches!(result1, ExitCircuitResult::Unchanged));
         assert!(matches!(result2, ExitCircuitResult::Unchanged));
     }
@@ -842,7 +841,7 @@ mod tests {
         control.advance(Duration::from_secs(6));
         engine.enter();
 
-        // Record success - should return Unchanged because HealthProbe is still sampling
+        // Record success. HealthProbe is still sampling, so this returns Unchanged.
         let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
         assert!(matches!(result, ExitCircuitResult::Unchanged));
     }

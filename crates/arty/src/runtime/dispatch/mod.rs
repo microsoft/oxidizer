@@ -2,12 +2,16 @@
 // Licensed under the MIT License.
 
 //! Worker routing, submission capabilities, and stop coordination.
+//!
+//! `DispatcherCore` owns the worker endpoints and maps threads to workers.
+//! `DispatcherClient` is the cloneable handle that schedulers and workers use.
 
-mod dispatcher_client;
-mod dispatcher_core;
-pub(crate) use dispatcher_client::DispatcherClient;
-pub(crate) use dispatcher_core::WorkerIndex;
-pub(super) use dispatcher_core::{DispatcherCore, WorkerEndpoint};
+mod client;
+mod core;
+pub(crate) use core::WorkerIndex;
+pub(super) use core::{DispatcherCore, WorkerEndpoint};
+
+pub(crate) use client::DispatcherClient;
 
 #[cfg(test)]
 fn test_threads(count: usize) -> Vec<thread_aware::Thread> {

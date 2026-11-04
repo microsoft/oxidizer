@@ -5,26 +5,24 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
-    not(all(docsrs, feature = "rt", feature = "macros", feature = "time", feature = "test-util")),
-    expect(rustdoc::broken_intra_doc_links, reason = "feature-gated items and docs.rs-only guides")
+    not(all(feature = "rt", feature = "macros", feature = "test-util")),
+    expect(
+        rustdoc::broken_intra_doc_links,
+        reason = "feature-gated items are unavailable in partial documentation builds"
+    )
 )]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/favicon.ico")]
 
-//! Single-threaded, thread-aware application runtime.
+//! Single-threaded, thread-aware runtime for async applications.
 //!
-//! An Arty runtime can have several workers, but each async task stays on one
-//! worker throughout its life. This lets it use thread-local and non-[`Send`]
-//! state across awaits. Thread-aware values can be explicitly relocated when
-//! starting new work on another worker.
+//! Each async task stays on one worker thread for its entire life, even when
+//! Arty manages multiple workers. Tasks can keep thread-local and non-[`Send`]
+//! state across awaits.
 //!
-//! There is no process-global runtime: each instance owns its workers and
-//! services. Workers use thread-local bookkeeping rather than a global
-//! runtime singleton.
-//!
-//! Arty provides task scheduling, clocks, telemetry, and pools for offloading
-//! blocking callbacks. It does not provide async I/O drivers or move running
-//! tasks between workers.
+//! Arty can pass values between workers without moving running tasks.
+//! The [`ThreadAware`](core::ThreadAware) trait lets a value update its state
+//! for the worker that receives it. This update is called relocation.
 //!
 //! # Quickstart
 //!
@@ -36,11 +34,11 @@
 //!
 //! ```rust
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! use arty::task::{Builtins, JoinError};
+//! use arty::task::{Context, JoinError};
 //!
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
 //! #[arty::main]
-//! async fn main(cx: Builtins) -> Result<(), JoinError> {
+//! async fn main(cx: Context) -> Result<(), JoinError> {
 //!     let answer = cx.scheduler().spawn(async |_| 6 * 7).await?;
 //! #   assert_eq!(answer, 42);
 //!     println!("{answer}");
@@ -50,134 +48,152 @@
 //! ```
 //!
 //! This prints `42`. [`main`] starts and stops the runtime.
-//! The `?` returns a [`JoinError`](crate::task::JoinError) if the child fails.
-//! Await child work before returning; shutdown cancels pending async tasks.
+//! The `?` returns a [`JoinError`](crate::task::JoinError) if the child task fails.
+//! Await child tasks before returning. Shutdown cancels pending async tasks.
 //!
-//! # Overview
+//! # Execution model
 //!
-//! - [`main`] and [`test`] manage a runtime for an
-//!   async entry point or test; [`Runtime`](crate::runtime::Runtime) gives you
-//!   direct control over its lifetime and settings.
-//! - [`Builtins`](crate::task::Builtins) gives each task its scheduler, clock,
-//!   and worker. [`RuntimeScheduler`](crate::task::RuntimeScheduler) lets the
-//!   runtime place new work.
-//! - [`Scheduler`](crate::task::Scheduler) keeps child work on its worker.
-//! - [`Clock`](crate::time::Clock) provides timers and timeouts;
-//!   [`ClockControl`](crate::time::ClockControl) controls time in tests.
-//! - [`Thread`](core::Thread) describes a worker, and
-//!   [`ThreadAware`](core::ThreadAware) values can relocate between workers.
+//! Each worker is one operating-system thread with a cooperative executor.
+//! The worker thread polls the tasks assigned to it. When one task awaits an
+//! operation that is not ready, the worker can poll another assigned task.
+//! After a task starts, it stays on that worker thread for its entire life.
 //!
-//! # Why Arty?
+//! Choose the initial worker for a new task:
 //!
-//! Unlike Tokio's multi-thread runtime, Arty keeps each task on one worker.
-//! This supports thread-local and non-`Send` state, keeps worker-local data
-//! nearby, and can reduce contention for that data. Shared data may still contend.
-//! Choose Tokio for automatic task distribution or its async I/O ecosystem;
-//! Arty does not provide Tokio's I/O or timer drivers.
+//! - [`Scheduler::spawn`](crate::task::Scheduler::spawn) uses the worker bound
+//!   to the scheduler. A cloned scheduler keeps the same binding, even when
+//!   another thread calls it.
+//! - [`Scheduler::spawn_anywhere`](crate::task::Scheduler::spawn_anywhere) lets
+//!   the runtime select a worker. This initial placement is similar to Tokio
+//!   task placement.
+//! - [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at) uses a worker
+//!   that you select from the same runtime.
 //!
-//! # Blocking work
+//! Unlike a Tokio task, an Arty task does not move between workers after it
+//! starts.
 //!
-//! Join handles are futures: await them. Arty deliberately does not expose a
-//! synchronous join operation because async workers must stay free to poll
-//! tasks and advance timers. Blocking a worker stalls every task assigned to
-//! it. If the blocked code waits for work on that worker, or blocking callbacks
-//! wait on each other in an exhausted pool, the stall can become a deadlock.
+//! A task factory creates the task future on its destination worker. A payload
+//! is a separate value passed to that factory. If the factory starts, Arty
+//! relocates a [`ThreadAware`](core::ThreadAware) payload before the factory
+//! uses it. Rejected tasks and tasks cancelled before their factory starts can
+//! drop the payload without relocation.
 //!
-//! This deadlocks: the worker waits synchronously for a child that only the
-//! same worker can poll.
+//! Cloned values can refer to the same resource while keeping separate state
+//! on each worker. `ThreadAware` updates that state, but it does not share
+//! ownership of a resource or store local state for you.
 //!
-//! ```no_run
+//! This example compares fixed placement with runtime-selected placement:
+//!
+//! ```
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! #[arty::main]
-//! async fn main(cx: arty::task::Builtins) {
-//!     let child = cx.scheduler().spawn(async |_| 42);
-//!     let _ = futures::executor::block_on(child);
-//! }
+//! # #[arty::main]
+//! # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
+//! let parent_worker = cx.thread().id();
+//! let child_worker = cx
+//!     .scheduler()
+//!     .spawn(async |child| child.thread().id())
+//!     .await?;
+//! assert_eq!(child_worker, parent_worker);
+//!
+//! // `cx.clone()` is the payload. The closure is the task factory.
+//! cx.scheduler()
+//!     .spawn_anywhere(cx.clone(), |moved| async move {
+//!         assert_eq!(moved.thread().id(), std::thread::current().id());
+//!     })
+//!     .await?;
+//! # Ok(())
+//! # }
 //! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 //! ```
 //!
-//! [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on) is
-//! the narrow blocking entry point for running async work from synchronous
-//! code. It rejects calls from async workers. For synchronous I/O or library
-//! calls, use
-//! [`Scheduler::spawn_blocking`](crate::task::Scheduler::spawn_blocking) or
-//! [`RuntimeScheduler::spawn_blocking`](crate::task::RuntimeScheduler::spawn_blocking)
-//! and await the join. The callback runs in a blocking pool instead of on an
-//! async worker.
+//! `spawn_anywhere` can select the original worker. The relocated context
+//! always reports the worker that runs the new task.
 //!
-//! # Detailed documentation
+//! Each runtime owns its workers and services. Arty does not use a single
+//! runtime shared by the whole process. Each worker tracks its own state.
 //!
-//! The [guides](crate::documentation) explain Arty's capabilities in more detail:
+//! Arty runs tasks, provides clocks, and runs blocking functions on separate threads.
+//! It can also run I/O drivers, which handle input and output.
+//! I/O libraries connect to Arty through `arty_io_core`.
+//! Related I/O crates ship alongside Arty.
 //!
-//! - [Scheduling](crate::documentation::scheduling) explains where tasks run,
-//!   local non-`Send` work, and blocking pools.
-//! - [Configuration](crate::documentation::configuration) explains worker counts,
-//!   blocking-pool policies, clocks, and telemetry sinks.
-//! - [Shutdown](crate::documentation::shutdown) explains runtime ownership,
-//!   task cancellation, and what stopping the workers waits for.
-//! - [Thread awareness](crate::documentation::thread_awareness) explains
-//!   stable task placement and explicit relocation of values.
-//! - [Time](crate::documentation::time) explains worker-driven timers, timeouts,
-//!   and controlled time in tests.
-//! - [Telemetry](crate::documentation::telemetry) explains runtime events
-//!   and links to [`observed`] for further details.
+//! # API overview
 //!
-//! The `documentation` module is included only for docs.rs builds and
-//! doc-test collection with all documentation features, including `test-util`;
-//! it is not part of the public API available to applications.
+//! - [`runtime`] explains how to create, configure, and stop a runtime.
+//! - [`task`] explains how to start tasks, choose their workers, and receive results.
+//! - [`time`] provides clocks, delays, timeouts, and control over time in tests.
+//! - [`io`] connects I/O libraries to the runtime.
+//! - [`core`] describes workers and how values update their state for a worker.
+//! - [`main`] and [`test`] start and stop a runtime for an async function or test.
 //!
 //! # Features
 //!
-//! The default feature set enables `rt` and `macros`.
+//! The default feature set enables `rt`, `macros`, and `monitor`.
 //!
-//! - **`rt`** - Enables the runtime and task APIs, and implies `time`.
-//! - **`macros`** - Enables [`main`] and [`test`], and implies `rt`.
-//! - **`time`** - Enables clocks, timers, and timeouts.
-//! - **`test-util`** - Enables testing utilities, including [`ClockControl`](crate::time::ClockControl) with `time`.
+//! - `rt`: Enables the runtime, task, and I/O APIs.
+//! - `macros`: Enables [`main`] and [`test`]. It also enables `rt`.
+//! - `monitor`: Enables the Seismograph monitor dependency. It forwards
+//!   monitoring support for `performables` when `performables` is enabled. It does
+//!   not start monitoring or emit new telemetry.
+//! - `test-util`: Enables testing utilities, including
+//!   [`ClockControl`](crate::time::ClockControl).
 //!   Enable it in dev-dependencies, not production dependencies.
 
 use arty_io_core as _;
 /// Runs an async entry point on an Arty runtime.
 ///
-/// Apply it to an `async fn` taking one owned
-/// [`Builtins`](crate::task::Builtins) argument. It generates a synchronous
-/// entry point with no arguments and the same visibility and return type.
-/// The async body runs on an Arty worker, not on the calling thread. Name the
-/// argument `cx` or `_cx`, for example; `_` and destructuring patterns are not supported.
+/// Apply it to an `async fn` that takes one owned
+/// [`Context`](crate::task::Context) argument. It creates a synchronous
+/// function with no arguments and the same visibility and return type.
+/// The async body runs on an Arty worker, not on the calling thread. For
+/// example, name the argument `cx` or `_cx`. The argument must be an identifier.
+/// The attribute does not support `_` or destructuring patterns.
 ///
-/// The runtime stops when the body returns. Await child tasks you need first;
-/// shutdown cancels pending async work.
+/// The runtime stops when the body returns. Await required child tasks first.
+/// Shutdown cancels pending async tasks.
 ///
 /// Enable the `macros` feature to use this attribute.
 ///
 /// # Configuration
 ///
 /// Without options, the attribute uses
-/// [`Runtime::new`](crate::runtime::Runtime::new). The optional configuration is:
+/// [`Runtime::new`](crate::runtime::Runtime::new). It accepts these options:
 ///
-/// - `workers = N` caps the number of async workers. Use an integer literal
+/// - `workers = N` starts exactly `N` async workers. Use an integer literal
 ///   that fits `usize` (an explicit `usize` suffix is fine). If fewer processors
-///   are available, Arty starts fewer workers; zero fails at construction.
+///   are available, multiple worker threads share each processor. A value of zero
+///   causes runtime construction to fail.
+/// - `workers = all` starts one async worker per available processor.
+/// - `monitor = enabled` or `monitor = disabled` selects whether the runtime
+///   is prepared for monitoring. The default is `enabled`.
+/// - `panic = shutdown` or `panic = ignore` selects whether the runtime stops
+///   after Arty catches a task panic. The default is `shutdown`.
 ///
-/// A worker limit does not limit blocking-pool threads. Without a limit, the
-/// runtime uses [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
+/// The worker count does not limit threads that run blocking functions.
+/// Without `workers`, the runtime uses
+/// [`WorkersPolicy::default`](crate::runtime::WorkersPolicy::default).
+/// The default is one worker, for both applications and tests.
+/// Each worker uses an operating-system thread and its configured stack.
+/// Large counts can exceed operating-system thread or memory limits.
 ///
-/// Use explicit [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) construction
-/// instead of the attribute when clocks, telemetry, blocking pools, stack size,
-/// or an exact/all-workers policy must be configured.
+/// To configure clocks, blocking pools, stack size, or a maximum worker count,
+/// use [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) instead of the attribute.
 ///
 /// # Panics
 ///
-/// Runtime construction errors, root-task cancellation, and shutdown errors
-/// become panics. The runtime is stopped before returning the body's value or
-/// resuming its original panic on the calling thread. A root-task failure takes
-/// precedence if shutdown also fails.
+/// Errors while creating or stopping the runtime become panics.
+/// Cancellation of the main task also becomes a panic.
+/// The attribute stops the runtime before it returns the body's value or
+/// continues its original panic on the calling thread.
+/// If the main task and shutdown both fail, the attribute reports the main task's failure.
+/// If a runtime failure cancels the main task, the panic message includes that failure.
 ///
-/// An application error returned by the body remains its return value; it is
-/// not converted to a panic. Use [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build),
+/// An application error returned by the body remains its return value. The
+/// attribute does not convert it to a panic. Use
+/// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build),
 /// [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on), and
-/// [`Runtime::stop`](crate::runtime::Runtime::stop) directly to handle returned
-/// runtime errors. Worker-thread creation and initialization can still panic.
+/// [`Runtime::stop`](crate::runtime::Runtime::stop) to handle runtime errors
+/// directly. Starting or preparing worker threads can still panic.
 ///
 /// # Examples
 ///
@@ -186,19 +202,47 @@ use arty_io_core as _;
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// # #[arty::main]
-/// # async fn main(cx: arty::task::Builtins) {
+/// # async fn main(cx: arty::task::Context) {
 /// cx.clock().delay(std::time::Duration::from_millis(1)).await;
 /// println!("Hello from Arty!");
 /// # }
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
 ///
-/// Cap the async worker count:
+/// Disable monitoring for the runtime:
+///
+/// ```
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::main(monitor = disabled)]
+/// async fn main(_cx: arty::task::Context) {}
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+/// ```
+///
+/// Keep the runtime running after a task panic that Arty catches:
+///
+/// ```
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::main(panic = ignore)]
+/// async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
+///     assert!(
+///         cx.scheduler()
+///             .spawn(async |_| panic!("contained"))
+///             .await
+///             .unwrap_err()
+///             .is_panic()
+///     );
+///     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+///     Ok(())
+/// }
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+/// ```
+///
+/// Set the async worker count:
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::main(workers = 4)]
-/// async fn main(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 ///     let answer = cx.scheduler().spawn(async |_| 42).await?;
 ///     assert_eq!(answer, 42);
 ///     Ok(())
@@ -211,30 +255,35 @@ pub use arty_macros::main;
 /// Runs an async test on an Arty runtime.
 ///
 /// Apply it to an `async fn` taking one owned
-/// [`Builtins`](crate::task::Builtins) argument. It registers a synchronous
+/// [`Context`](crate::task::Context) argument. It registers a synchronous
 /// test that starts its own runtime, runs the body on a worker, and stops the
 /// runtime when the body returns.
 /// Name the argument `_cx` if it is unused.
 ///
-/// The return value, visibility, and attributes such as `#[should_panic]`
-/// and `#[ignore]` are preserved. An ignored test starts no runtime unless
-/// the test harness runs it.
+/// The test keeps its return value, visibility, and attributes such as
+/// `#[should_panic]` and `#[ignore]`. An ignored test starts no runtime unless
+/// the test runner runs it.
 ///
-/// Enable `macros` to use this attribute. The [`main`] attribute's `workers`
-/// option also applies. By default, a test uses one worker.
+/// Enable `macros` to use this attribute. The [`main`] attribute's `workers`,
+/// `monitor`, and `panic` options also apply.
+/// By default, a test uses one worker, disables monitoring, and stops its
+/// runtime after Arty catches a task panic.
+/// Ordinary tests therefore keep monitoring disabled if Arty adds automatic monitoring later.
+/// To test monitoring, use `monitor = enabled`.
 ///
 /// # Simulated time
 ///
 /// Enable `test-util` in an Arty dev-dependency and add a second owned
 /// `arty::time::ClockControl` argument. This gives the test control over its
 /// runtime's clocks. Time starts at the UNIX epoch and does not advance
-/// automatically; cloned controls share that time. Use different names for
-/// the two arguments. Type aliases and associated types are supported.
+/// automatically. Cloned controls share that time. Use different names for the
+/// two arguments. Type aliases and associated types are supported.
 ///
 /// Use `control.advance(duration)` to move time forward. Poll a delay before
-/// advancing: it starts its timer on the first poll. For sequential delays,
-/// `auto_advance_timers(true)` advances time eagerly; it does not wait for an
-/// idle runtime or guarantee the order of concurrent timers.
+/// advancing: it starts its timer on the first poll. For delays that run one
+/// after another, `auto_advance_timers(true)` advances time without waiting for
+/// the runtime to become idle. It does not guarantee which overlapping timer
+/// finishes first.
 ///
 /// The control argument works with `workers`. To use a custom runtime builder
 /// with controlled time, create the control in a synchronous test and call
@@ -243,27 +292,50 @@ pub use arty_macros::main;
 ///
 /// # Panics
 ///
-/// Runtime construction errors, test-body cancellation, and shutdown errors
-/// become panics. The runtime is stopped before reporting the test's outcome.
-/// A panic in the body takes precedence over a shutdown error and is resumed
-/// with its original payload, so
+/// Errors while creating or stopping the runtime become panics.
+/// Cancellation of the test body also becomes a panic.
+/// The attribute stops the runtime before reporting the test's outcome.
+/// If the body panics and shutdown also fails, the attribute continues the
+/// body's panic with its original value. Therefore,
 /// `#[should_panic(expected = "...")]` can match the original message.
+/// If a runtime failure cancels the test body, the panic message includes that
+/// failure.
 ///
 /// An application error returned by the body remains its return value. Use
-/// explicit runtime construction, [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on),
-/// and [`Runtime::stop`](crate::runtime::Runtime::stop) when runtime errors
-/// should be handled without the attribute converting them to panics.
+/// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) when you need
+/// to handle runtime errors without converting them to panics.
+/// Use [`RuntimeScheduler::block_on`](crate::task::RuntimeScheduler::block_on)
+/// and [`Runtime::stop`](crate::runtime::Runtime::stop) to run and stop the runtime.
 ///
 /// # Examples
 ///
-/// Await a task and check its result:
+/// Await a task and inspect its result:
 ///
 /// ```test_harness
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::test]
-/// async fn answer(cx: arty::task::Builtins) -> Result<(), arty::task::JoinError> {
+/// async fn answer(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 ///     assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
 ///     Ok(())
+/// }
+/// ```
+///
+/// Enable monitoring for a test that exercises monitoring behavior:
+///
+/// ```test_harness
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::test(monitor = enabled)]
+/// async fn monitored(_cx: arty::task::Context) {}
+/// ```
+///
+/// Keep the test runtime running after Arty catches a child task's panic:
+///
+/// ```test_harness
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// #[arty::test(panic = ignore)]
+/// async fn contained_panic(cx: arty::task::Context) {
+///     assert!(cx.scheduler().spawn(async |_| panic!("contained")).await.unwrap_err().is_panic());
+///     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
 /// }
 /// ```
 ///
@@ -272,7 +344,7 @@ pub use arty_macros::main;
 /// ```test_harness
 /// # #[cfg(all(feature = "macros", feature = "rt", feature = "test-util"))]
 /// #[arty::test]
-/// async fn simulated_delay(cx: arty::task::Builtins, control: arty::time::ClockControl) {
+/// async fn simulated_delay(cx: arty::task::Context, control: arty::time::ClockControl) {
 ///     use std::time::Duration;
 ///
 ///     let control = control.auto_advance_timers(true);
@@ -288,60 +360,135 @@ pub use arty_macros::main;
 #[doc(inline)]
 pub use arty_macros::test;
 
-#[cfg(all(
-    doc,
-    any(docsrs, doctest),
-    feature = "rt",
-    feature = "macros",
-    feature = "time",
-    feature = "test-util"
-))]
-pub mod documentation;
-
+#[cfg(any(test, feature = "rt"))]
+pub mod io;
 #[cfg(any(test, feature = "rt"))]
 pub mod runtime;
 #[cfg(any(test, feature = "rt"))]
 pub mod task;
 
-/// Worker coordinates and thread-aware relocation.
+/// Worker details and updates to a value's state for a worker.
 ///
 /// [`Thread`](crate::core::Thread) records a runtime [`Owner`](crate::core::Owner),
-/// an OS thread, and its [`NumaNode`](crate::core::NumaNode). It describes
-/// where a value belongs; it does not own that thread or keep its runtime running.
+/// an operating-system thread, and its [`NumaNode`](crate::core::NumaNode).
+/// A NUMA node groups processors near the same memory.
+/// `Thread` describes where a value belongs.
+/// It does not own that thread or keep its runtime running.
 ///
-/// Implement [`ThreadAware`](crate::core::ThreadAware) when a value needs to
-/// update worker-bound state after relocation. Relocation does not move a
-/// running task or change the OS thread executing your code.
+/// Relocation updates a value's state for a selected worker.
+/// Implement [`ThreadAware`](crate::core::ThreadAware) when a value needs this update.
+/// Relocation does not move a running task or change the thread that runs your code.
+///
+/// # Example
+///
+/// Read the details of the worker that runs a task. This example requires
+/// `macros`, which enables `rt`:
+///
+/// ```
+/// # #[cfg(all(feature = "macros", feature = "rt"))]
+/// # #[arty::main]
+/// # async fn main(cx: arty::task::Context) {
+/// let worker: &arty::core::Thread = cx.thread();
+/// assert_eq!(worker.id(), std::thread::current().id());
+/// # }
+/// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+/// ```
 pub mod core {
     #[doc(inline)]
     pub use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 }
 
-/// Runtime clocks and controlled test time.
+/// Clocks, delays, and controlled test time.
 ///
-/// Enable `time` to use [`Clock`](crate::time::Clock) without starting an Arty
-/// runtime. A task's `Builtins::clock()` has timers driven by its worker.
-/// Applications that need timer future types or extension traits should use
-/// the underlying [`tick`] API directly.
+/// Arty provides [`Clock`](crate::time::Clock) and, with `test-util`,
+/// [`ClockControl`](crate::time::ClockControl). Use [`tick`] directly for delays,
+/// timeouts, stopwatches, and timers that repeat.
+/// It also provides extension traits, which add methods to existing types.
+/// Add `tick` as a direct dependency before you use these APIs.
+/// `Clock` is always available without an Arty runtime. An Arty runtime drives
+/// system timers for its workers and wakes tasks when their timers expire.
 ///
-/// Enable `test-util` in dev-dependencies to use `ClockControl` for simulated time.
+/// # Use the task clock
 ///
-/// # Examples
-///
-/// With `rt` and `macros` enabled, await a delay on the task's clock:
+/// Each task gets a clock through
+/// [`Context::clock`](crate::task::Context::clock). Use a stopwatch for elapsed
+/// time. Use `system_time()` for the current date and time, which can change
+/// independently of elapsed time. This example requires `macros`, which enables
+/// `rt`.
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// # #[arty::main]
-/// # async fn main(cx: arty::task::Builtins) {
-/// let duration = std::time::Duration::from_millis(1);
+/// # async fn main(cx: arty::task::Context) {
+/// use std::future::pending;
+/// use std::time::Duration;
+///
+/// use tick::FutureExt;
+///
 /// let watch = cx.clock().stopwatch();
-/// cx.clock().delay(duration).await;
-/// assert!(watch.elapsed() >= duration);
+/// cx.clock().delay(Duration::from_millis(1)).await;
+/// assert!(watch.elapsed() >= Duration::from_millis(1));
+///
+/// let result = pending::<()>()
+///     .timeout(cx.clock(), Duration::from_millis(1))
+///     .await;
+/// assert!(result.is_err());
 /// # }
 /// # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
 /// ```
-#[cfg(any(test, feature = "time"))]
+///
+/// A busy worker can resume a task later than the requested delay. A timeout
+/// limits how long you wait for a result. It does not cancel a spawned task.
+///
+/// # Control time in tests
+///
+/// Enable `macros` and `test-util` in an Arty dev-dependency. Add a second
+/// [`ClockControl`](crate::time::ClockControl) parameter to
+/// [`arty::test`](crate::test) to control the runtime clocks. Time starts at
+/// the UNIX epoch and does not advance automatically.
+///
+/// A delay starts its timer when first polled. Poll it before you advance time:
+///
+/// ```test_harness
+/// use std::future::{Future, poll_fn};
+/// use std::pin::pin;
+/// use std::task::Poll;
+/// use std::time::Duration;
+///
+/// # #[cfg(all(feature = "macros", feature = "rt", feature = "test-util"))]
+/// #[arty::test]
+/// async fn controlled_delay(
+///     cx: arty::task::Context,
+///     control: arty::time::ClockControl,
+/// ) {
+///     let watch = cx.clock().stopwatch();
+///     let mut delay = pin!(cx.clock().delay(Duration::from_secs(30)));
+///     poll_fn(|context| {
+///         assert!(delay.as_mut().poll(context).is_pending());
+///         Poll::Ready(())
+///     })
+///     .await;
+///     control.advance(Duration::from_secs(30));
+///     assert_eq!(watch.elapsed(), Duration::from_secs(30));
+///     delay.await;
+/// }
+/// ```
+///
+/// `auto_advance_timers(true)` advances time when each timer is registered.
+/// It does not guarantee which overlapping timer finishes first. Advance time
+/// explicitly when the order matters. `auto_advance(duration)` advances time
+/// when code reads the clock.
+///
+/// `ClockControl` works with multiple workers. For a custom runtime builder,
+/// create the control in a synchronous test. Pass a clone to
+/// [`RuntimeBuilder::clock`](crate::runtime::RuntimeBuilder::clock).
+///
+/// # Without an Arty runtime
+///
+/// `Clock` does not start a timer driver by itself. The `tick::SimpleClock`
+/// type reads time without a driver. Delays on [`Clock`](crate::time::Clock)
+/// need a driver or controlled time. See [`tick`] for clocks that run outside
+/// Arty.
 pub mod time {
     #[doc(inline)]
     pub use tick::Clock;
@@ -349,6 +496,3 @@ pub mod time {
     #[doc(inline)]
     pub use tick::ClockControl;
 }
-
-#[cfg(test)]
-testing_aids::init_tracing!();

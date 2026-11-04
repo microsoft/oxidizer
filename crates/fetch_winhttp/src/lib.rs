@@ -4,8 +4,9 @@
 //! WinHTTP-based HTTP transport for the [`fetch`] HTTP client.
 //!
 //! This Windows-only crate adds a WinHTTP transport constructor to
-//! [`HttpClient`]. Callers supply the clock, memory pool, and telemetry sink
+//! [`HttpClient`]. Callers supply the clock, memory provider, and telemetry sink
 //! required by the transport through [`WinHttpDeps`].
+//! The provider uses `bytesbuf::mem::OpaqueMemory`, so callers can select their own allocator.
 //!
 //! WinHTTP-specific TLS configuration is available through
 //! [`WinHttpTlsConfig`]. Independently built clients do

@@ -4,14 +4,14 @@
 //! The macros that generate each format module's public surface.
 //!
 //! Every format exposes the same types and functions, differing only in which engine they drive and
-//! in their documentation. Generating them keeps the modules honest -- a change to the contract
-//! cannot drift between formats -- without collapsing them into one type that would lose the
+//! in their documentation. Generation applies each contract change to all formats. It also keeps
+//! separate concrete types, which preserve the
 //! compile-time distinction between, say, a gzip and a brotli compressor.
 //!
 //! # What a format module exposes
 //!
 //! A `Compressor` is reached through its builder and driven through
-//! [`Compression`][crate::core::Compression]; it has no inherent
+//! [`Compression`][crate::core::Compression]. It has no inherent
 //! methods of its own. That is what lets code be written once against the trait and used with
 //! any format, including the runtime-format `Compressor` the `format` module provides.
 //!
@@ -20,7 +20,7 @@
 //! The builders themselves are shared: [`CompressorBuilder`][crate::CompressorBuilder] and
 //! [`DecompressorBuilder`][crate::DecompressorBuilder] carry every setting that means the same
 //! thing in every format. What differs is the type parameter, which names the format and carries
-//! whatever settings only that format has -- brotli's quality, window and content mode, zstd's
+//! the settings for that format. These include brotli quality, window, and content mode, and zstd
 //! native levels and decompressor window limit. A format with no extra settings uses a unit struct.
 //!
 //! Each format's module owns that type, the setters that populate it, and the `build` method that
@@ -29,9 +29,9 @@
 //! # Fallible builds
 //!
 //! Most engines take their configuration without validating it, so their builders cannot fail.
-//! zstd's native library validates as it applies it, so its compressor build returns a
-//! [`BuildError`][crate::BuildError]. Each format declares which of the two it is and gets the
-//! matching signatures.
+//! zstd's native library validates compressor and decompressor settings as it applies them. These
+//! builds return a [`BuildError`][crate::BuildError]. Each format declares whether its builds are
+//! fallible and gets the matching signatures.
 
 /// Generates one format's compressor builds and its whole-buffer `compress`.
 ///
@@ -73,8 +73,8 @@ macro_rules! define_compressor_build {
         #[doc = concat!("Compresses a complete byte sequence into ", $name, ".")]
         ///
         /// Uses [`Level::DEFAULT`][crate::Level::DEFAULT], and recycles engine state through
-        /// `resources`; pass [`Resources::with_pool_capacity(0)`][crate::Resources::with_pool_capacity] to
-        /// recycle nothing. Prefer [`Compressor`] for data that arrives incrementally; this
+        /// `resources`. Pass [`Resources::with_pool_capacity(0)`][crate::Resources::with_pool_capacity] to
+        /// disable recycling. Use [`Compressor`] for data that arrives incrementally. This
         /// convenience buffers the entire result before returning.
         ///
         /// # Errors
@@ -136,8 +136,8 @@ macro_rules! define_compressor_build {
         #[doc = concat!("Compresses a complete byte sequence into ", $name, ".")]
         ///
         /// Uses [`Level::DEFAULT`][crate::Level::DEFAULT], and recycles engine state through
-        /// `resources`; pass [`Resources::with_pool_capacity(0)`][crate::Resources::with_pool_capacity] to
-        /// recycle nothing. Prefer [`Compressor`] for data that arrives incrementally; this
+        /// `resources`. Pass [`Resources::with_pool_capacity(0)`][crate::Resources::with_pool_capacity] to
+        /// disable recycling. Use [`Compressor`] for data that arrives incrementally. This
         /// convenience buffers the entire result before returning.
         ///
         /// # Errors
@@ -147,7 +147,7 @@ macro_rules! define_compressor_build {
         pub fn compress(input: impl $crate::InputData, resources: &$crate::Resources) -> Result<BytesView> {
             let input = $crate::InputData::into_view(input, resources);
             // Built through the fallible path rather than `Compressor::new`, which panics on a
-            // rejection: this function already returns `Result`, so a caller should never have to
+            // rejection. This function already returns `Result`, so a caller does not have to
             // catch a panic for something it can be told about.
             let compressor = Compressor::builder().build(resources)?;
 
@@ -208,23 +208,23 @@ macro_rules! define_decompressor_build {
 
         #[doc = concat!("Decompresses a complete ", $name, " stream that is already in memory.")]
         ///
-        /// Applies this format's default bounds, and recycles engine state through `resources`; pass
-        /// [`Resources::with_pool_capacity(0)`][crate::Resources::with_pool_capacity] to recycle nothing. Prefer [`Decompressor`]
-        /// for data that arrives incrementally; this convenience buffers the entire result before
-        /// returning.
+        /// Applies this format's default bounds and recycles engine state through `resources`. Pass
+        /// [`Resources::with_pool_capacity(0)`][crate::Resources::with_pool_capacity] to recycle
+        /// nothing. Prefer [`Decompressor`] for data that arrives incrementally. This function
+        /// buffers the complete result before returning.
         ///
         /// # Errors
         ///
-        /// Returns an error if the data is malformed, truncated, or exceeds the bounds this convenience
-        /// applies: the format's own ratio, plus the shared output and stream caps that
-        /// [`DecompressorLimits`][crate::DecompressorLimits] documents, because it buffers the whole
-        /// result. Use `decompress_with_limits` to choose your own.
+        /// Returns an error if the data is malformed or truncated. It also returns an error if the
+        /// data exceeds the applicable bounds. These bounds include the format ratio and the shared
+        /// output and stream caps in [`DecompressorLimits`][crate::DecompressorLimits]. Use
+        /// `decompress_with_limits` to select different bounds.
         pub fn decompress(input: impl $crate::InputData, resources: &$crate::Resources) -> Result<BytesView> {
             let input = $crate::InputData::into_view(input, resources);
 
             // This convenience accumulates the whole result, so it is the caller's memory that a
-            // bomb would exhaust. Incremental decompressors hand each chunk straight back and are
-            // left uncapped, because a total-output bound there would cut off long streams that
+            // bomb can exhaust. Incremental decompressors return each chunk directly and have no
+            // fallback cap. A total-output bound can stop long streams that
             // never buffer more than one chunk.
             $crate::decompress(
                 input,
@@ -319,9 +319,9 @@ macro_rules! define_decompressor_build {
 
         #[doc = concat!("Decompresses a complete ", $name, " stream that is already in memory.")]
         ///
-        /// Applies this format's default bounds, and recycles engine state through `resources`; pass
+        /// Applies this format's default bounds and recycles engine state through `resources`. Pass
         /// [`Resources::with_pool_capacity(0)`][crate::Resources::with_pool_capacity] to recycle nothing. Prefer [`Decompressor`]
-        /// for data that arrives incrementally; this convenience buffers the entire result before
+        /// for data that arrives incrementally. This function buffers the complete result before
         /// returning.
         ///
         /// # Errors
@@ -335,8 +335,8 @@ macro_rules! define_decompressor_build {
             let input = $crate::InputData::into_view(input, resources);
 
             // This convenience accumulates the whole result, so it is the caller's memory that a
-            // bomb would exhaust. Incremental decompressors hand each chunk straight back and are
-            // left uncapped, because a total-output bound there would cut off long streams that
+            // bomb can exhaust. Incremental decompressors return each chunk directly and have no
+            // fallback cap. A total-output bound can stop long streams that
             // never buffer more than one chunk.
             $crate::decompress(
                 input,
@@ -475,7 +475,7 @@ macro_rules! define_format {
         /// [`DecompressorBuilder::limits`][crate::DecompressorBuilder::limits] overrides them.
         ///
         /// Output is provisional until the decompressor reports that it is done, because a checksum or
-        /// trailer can reject the stream after earlier chunks have been returned.
+        /// trailer can reject the stream after the decompressor returns earlier chunks.
         #[derive(Debug)]
         pub struct Decompressor {
             pump: Pump,

@@ -223,9 +223,10 @@ fn arena_lifecycle_bumpalo_new() {
 macro_rules! arena_only_benchmark {
     ($const_name:ident, $fn_name:ident, $group:literal, $label:literal, $setup:expr, $hot:path) => {
         #[metabench::benchmark($const_name, $group, $label)]
-        #[bench::run(&mut $setup)]
-        fn $fn_name(arena: &mut Arena) {
-            $hot(arena);
+        #[bench::run(std::boxed::Box::new($setup))]
+        fn $fn_name<S: std::borrow::BorrowMut<Arena>>(mut state: S) -> ((), S) {
+            $hot(state.borrow_mut());
+            ((), state)
         }
     };
 }
@@ -233,9 +234,10 @@ macro_rules! arena_only_benchmark {
 macro_rules! bump_only_benchmark {
     ($const_name:ident, $fn_name:ident, $group:literal, $label:literal, $hot:path) => {
         #[metabench::benchmark($const_name, $group, $label)]
-        #[bench::run(&mut common::warm_bump())]
-        fn $fn_name(bump: &mut bumpalo::Bump) {
-            $hot(bump);
+        #[bench::run(std::boxed::Box::new(common::warm_bump()))]
+        fn $fn_name<S: std::borrow::BorrowMut<bumpalo::Bump>>(mut state: S) -> ((), S) {
+            $hot(state.borrow_mut());
+            ((), state)
         }
     };
 }
@@ -243,10 +245,11 @@ macro_rules! bump_only_benchmark {
 macro_rules! arena_collect_benchmark {
     ($const_name:ident, $fn_name:ident, $group:literal, $label:literal, $ty:ty, $count:expr, $hot:path) => {
         #[metabench::benchmark($const_name, $group, $label)]
-        #[bench::run(&mut common::setup_arena_out($count))]
-        fn $fn_name(state: &mut (Arena, Vec<$ty>)) {
-            let (arena, out) = state;
+        #[bench::run(std::boxed::Box::new(common::setup_arena_out::<$ty>($count)))]
+        fn $fn_name<S: std::borrow::BorrowMut<(Arena, Vec<$ty>)>>(mut state: S) -> ((), S) {
+            let (arena, out) = state.borrow_mut();
             $hot(arena, out);
+            ((), state)
         }
     };
 }
@@ -254,10 +257,11 @@ macro_rules! arena_collect_benchmark {
 macro_rules! arena_words_collect_benchmark {
     ($const_name:ident, $fn_name:ident, $group:literal, $label:literal, $ty:ty, $hot:path) => {
         #[metabench::benchmark($const_name, $group, $label)]
-        #[bench::run(&mut common::setup_arena_words_out())]
-        fn $fn_name(state: &mut (Arena, Vec<String>, Vec<$ty>)) {
-            let (arena, words, out) = state;
+        #[bench::run(std::boxed::Box::new(common::setup_arena_words_out::<$ty>()))]
+        fn $fn_name<S: std::borrow::BorrowMut<(Arena, Vec<String>, Vec<$ty>)>>(mut state: S) -> ((), S) {
+            let (arena, words, out) = state.borrow_mut();
             $hot(arena, words, out);
+            ((), state)
         }
     };
 }
@@ -265,10 +269,11 @@ macro_rules! arena_words_collect_benchmark {
 macro_rules! arena_slice_input_benchmark {
     ($const_name:ident, $fn_name:ident, $group:literal, $label:literal, $count:expr, $hot:path) => {
         #[metabench::benchmark($const_name, $group, $label)]
-        #[bench::run(&mut common::setup_arena_slices($count))]
-        fn $fn_name(state: &mut (Arena, Vec<[u64; common::SLICE_LEN]>)) {
-            let (arena, slices) = state;
+        #[bench::run(std::boxed::Box::new(common::setup_arena_slices($count)))]
+        fn $fn_name<S: std::borrow::BorrowMut<(Arena, Vec<[u64; common::SLICE_LEN]>)>>(mut state: S) -> ((), S) {
+            let (arena, slices) = state.borrow_mut();
             $hot(arena, slices);
+            ((), state)
         }
     };
 }
@@ -276,10 +281,11 @@ macro_rules! arena_slice_input_benchmark {
 macro_rules! arena_slice_collect_benchmark {
     ($const_name:ident, $fn_name:ident, $group:literal, $label:literal, $ty:ty, $count:expr, $hot:path) => {
         #[metabench::benchmark($const_name, $group, $label)]
-        #[bench::run(&mut common::setup_arena_slices_out($count))]
-        fn $fn_name(state: &mut (Arena, Vec<[u64; common::SLICE_LEN]>, Vec<$ty>)) {
-            let (arena, slices, out) = state;
+        #[bench::run(std::boxed::Box::new(common::setup_arena_slices_out::<$ty>($count)))]
+        fn $fn_name<S: std::borrow::BorrowMut<(Arena, Vec<[u64; common::SLICE_LEN]>, Vec<$ty>)>>(mut state: S) -> ((), S) {
+            let (arena, slices, out) = state.borrow_mut();
             $hot(arena, slices, out);
+            ((), state)
         }
     };
 }
@@ -424,17 +430,25 @@ arena_collect_benchmark!(
 );
 
 #[metabench::benchmark(ALLOC_STR_ALLOC_STR, "criterion_alloc/alloc_str", "alloc_str")]
-#[bench::run(&mut common::setup_arena_words())]
-fn alloc_str_alloc_str(state: &mut (Arena, Vec<String>)) {
-    let (arena, words) = state;
-    common::alloc_str(arena, words);
+#[bench::run(std::boxed::Box::new(common::setup_arena_words()))]
+fn alloc_str_alloc_str<S: std::borrow::BorrowMut<(Arena, Vec<String>)>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (arena, words) = state;
+        common::alloc_str(arena, words);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(ALLOC_STR_BUMPALO_ALLOC_STR, "criterion_alloc/alloc_str", "bumpalo_alloc_str")]
-#[bench::run(&mut common::setup_bump_words())]
-fn alloc_str_bumpalo_alloc_str(state: &mut (bumpalo::Bump, Vec<String>)) {
-    let (bump, words) = state;
-    common::bumpalo_alloc_str(bump, words);
+#[bench::run(std::boxed::Box::new(common::setup_bump_words()))]
+fn alloc_str_bumpalo_alloc_str<S: std::borrow::BorrowMut<(bumpalo::Bump, Vec<String>)>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (bump, words) = state;
+        common::bumpalo_alloc_str(bump, words);
+    }
+    ((), owned_input)
 }
 
 arena_words_collect_benchmark!(
@@ -471,10 +485,16 @@ arena_slice_input_benchmark!(
     common::alloc_slice_copy
 );
 #[metabench::benchmark(ALLOC_SLICE_BUMPALO_ALLOC_SLICE_COPY, "criterion_alloc/alloc_slice", "bumpalo_alloc_slice_copy")]
-#[bench::run(&mut common::setup_bump_slices())]
-fn alloc_slice_bumpalo_alloc_slice_copy(state: &mut (bumpalo::Bump, Vec<[u64; common::SLICE_LEN]>)) {
-    let (bump, slices) = state;
-    common::bumpalo_alloc_slice_copy(bump, slices);
+#[bench::run(std::boxed::Box::new(common::setup_bump_slices()))]
+fn alloc_slice_bumpalo_alloc_slice_copy<S: std::borrow::BorrowMut<(bumpalo::Bump, Vec<[u64; common::SLICE_LEN]>)>>(
+    mut owned_input: S,
+) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (bump, slices) = state;
+        common::bumpalo_alloc_slice_copy(bump, slices);
+    }
+    ((), owned_input)
 }
 
 arena_slice_input_benchmark!(
@@ -486,10 +506,16 @@ arena_slice_input_benchmark!(
     common::alloc_slice_clone
 );
 #[metabench::benchmark(ALLOC_SLICE_BUMPALO_ALLOC_SLICE_CLONE, "criterion_alloc/alloc_slice", "bumpalo_alloc_slice_clone")]
-#[bench::run(&mut common::setup_bump_slices())]
-fn alloc_slice_bumpalo_alloc_slice_clone(state: &mut (bumpalo::Bump, Vec<[u64; common::SLICE_LEN]>)) {
-    let (bump, slices) = state;
-    common::bumpalo_alloc_slice_clone(bump, slices);
+#[bench::run(std::boxed::Box::new(common::setup_bump_slices()))]
+fn alloc_slice_bumpalo_alloc_slice_clone<S: std::borrow::BorrowMut<(bumpalo::Bump, Vec<[u64; common::SLICE_LEN]>)>>(
+    mut owned_input: S,
+) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (bump, slices) = state;
+        common::bumpalo_alloc_slice_clone(bump, slices);
+    }
+    ((), owned_input)
 }
 
 arena_only_benchmark!(
@@ -686,17 +712,25 @@ arena_collect_benchmark!(
 );
 
 #[metabench::benchmark(STRING_BUILDER_ALLOC_STRING, "criterion_alloc/string_builder", "alloc_string")]
-#[bench::run(&mut common::setup_arena_words())]
-fn string_builder_alloc_string(state: &mut (Arena, Vec<String>)) {
-    let (arena, words) = state;
-    _ = common::alloc_string(arena, words);
+#[bench::run(std::boxed::Box::new(common::setup_arena_words()))]
+fn string_builder_alloc_string<S: std::borrow::BorrowMut<(Arena, Vec<String>)>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (arena, words) = state;
+        _ = common::alloc_string(arena, words);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(STRING_BUILDER_BUMPALO_STRING_NEW_IN, "criterion_alloc/string_builder", "bumpalo_string_new_in")]
-#[bench::run(&mut common::setup_bump_words())]
-fn string_builder_bumpalo_string_new_in(state: &mut (bumpalo::Bump, Vec<String>)) {
-    let (bump, words) = state;
-    _ = common::bumpalo_string_new_in(bump, words);
+#[bench::run(std::boxed::Box::new(common::setup_bump_words()))]
+fn string_builder_bumpalo_string_new_in<S: std::borrow::BorrowMut<(bumpalo::Bump, Vec<String>)>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (bump, words) = state;
+        _ = common::bumpalo_string_new_in(bump, words);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -704,10 +738,14 @@ fn string_builder_bumpalo_string_new_in(state: &mut (bumpalo::Bump, Vec<String>)
     "criterion_alloc/string_builder",
     "alloc_string_with_capacity"
 )]
-#[bench::run(&mut common::setup_arena_words_with_len())]
-fn string_builder_alloc_string_with_capacity(state: &mut (Arena, Vec<String>, usize)) {
-    let (arena, words, len) = state;
-    _ = common::alloc_string_with_capacity(arena, words, *len);
+#[bench::run(std::boxed::Box::new(common::setup_arena_words_with_len()))]
+fn string_builder_alloc_string_with_capacity<S: std::borrow::BorrowMut<(Arena, Vec<String>, usize)>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (arena, words, len) = state;
+        _ = common::alloc_string_with_capacity(arena, words, *len);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -715,31 +753,49 @@ fn string_builder_alloc_string_with_capacity(state: &mut (Arena, Vec<String>, us
     "criterion_alloc/string_builder",
     "bumpalo_string_with_capacity_in"
 )]
-#[bench::run(&mut common::setup_bump_words_with_len())]
-fn string_builder_bumpalo_string_with_capacity_in(state: &mut (bumpalo::Bump, Vec<String>, usize)) {
-    let (bump, words, len) = state;
-    _ = common::bumpalo_string_with_capacity_in(bump, words, *len);
+#[bench::run(std::boxed::Box::new(common::setup_bump_words_with_len()))]
+fn string_builder_bumpalo_string_with_capacity_in<S: std::borrow::BorrowMut<(bumpalo::Bump, Vec<String>, usize)>>(
+    mut owned_input: S,
+) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (bump, words, len) = state;
+        _ = common::bumpalo_string_with_capacity_in(bump, words, *len);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(VEC_BUILDER_ALLOC_VEC, "criterion_alloc/vec_builder", "alloc_vec")]
-#[bench::run(&mut common::setup_arena_ints())]
-fn vec_builder_alloc_vec(state: &mut (Arena, Vec<i32>)) {
-    let (arena, ints) = state;
-    _ = common::alloc_vec(arena, ints);
+#[bench::run(std::boxed::Box::new(common::setup_arena_ints()))]
+fn vec_builder_alloc_vec<S: std::borrow::BorrowMut<(Arena, Vec<i32>)>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (arena, ints) = state;
+        _ = common::alloc_vec(arena, ints);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(VEC_BUILDER_BUMPALO_VEC_NEW_IN, "criterion_alloc/vec_builder", "bumpalo_vec_new_in")]
-#[bench::run(&mut common::setup_bump_ints())]
-fn vec_builder_bumpalo_vec_new_in(state: &mut (bumpalo::Bump, Vec<i32>)) {
-    let (bump, ints) = state;
-    _ = common::bumpalo_vec_new_in(bump, ints);
+#[bench::run(std::boxed::Box::new(common::setup_bump_ints()))]
+fn vec_builder_bumpalo_vec_new_in<S: std::borrow::BorrowMut<(bumpalo::Bump, Vec<i32>)>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (bump, ints) = state;
+        _ = common::bumpalo_vec_new_in(bump, ints);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(VEC_BUILDER_ALLOC_VEC_WITH_CAPACITY, "criterion_alloc/vec_builder", "alloc_vec_with_capacity")]
-#[bench::run(&mut common::setup_arena_ints())]
-fn vec_builder_alloc_vec_with_capacity(state: &mut (Arena, Vec<i32>)) {
-    let (arena, ints) = state;
-    _ = common::alloc_vec_with_capacity(arena, ints);
+#[bench::run(std::boxed::Box::new(common::setup_arena_ints()))]
+fn vec_builder_alloc_vec_with_capacity<S: std::borrow::BorrowMut<(Arena, Vec<i32>)>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (arena, ints) = state;
+        _ = common::alloc_vec_with_capacity(arena, ints);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -747,10 +803,14 @@ fn vec_builder_alloc_vec_with_capacity(state: &mut (Arena, Vec<i32>)) {
     "criterion_alloc/vec_builder",
     "bumpalo_vec_with_capacity_in"
 )]
-#[bench::run(&mut common::setup_bump_ints())]
-fn vec_builder_bumpalo_vec_with_capacity_in(state: &mut (bumpalo::Bump, Vec<i32>)) {
-    let (bump, ints) = state;
-    _ = common::bumpalo_vec_with_capacity_in(bump, ints);
+#[bench::run(std::boxed::Box::new(common::setup_bump_ints()))]
+fn vec_builder_bumpalo_vec_with_capacity_in<S: std::borrow::BorrowMut<(bumpalo::Bump, Vec<i32>)>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        let (bump, ints) = state;
+        _ = common::bumpalo_vec_with_capacity_in(bump, ints);
+    }
+    ((), owned_input)
 }
 
 arena_only_benchmark!(
@@ -794,21 +854,21 @@ fn criterion_alloc_benchmarks(criterion: &mut Criterion) {
 
     let mut alloc_u64 = criterion.benchmark_group(ALLOC_U64_ALLOC.group_name());
     alloc_u64.bench_function(ALLOC_U64_ALLOC.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::warm_arena_local, alloc_u64_alloc);
+        iter_with_setup_alloc(bencher, common::warm_arena_local, |state| alloc_u64_alloc(state).0);
     });
     alloc_u64.bench_function(ALLOC_U64_BUMPALO_ALLOC.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::warm_bump, alloc_u64_bumpalo_alloc);
+        iter_with_setup_alloc(bencher, common::warm_bump, |state| alloc_u64_bumpalo_alloc(state).0);
     });
     alloc_u64.bench_function(ALLOC_U64_ALLOC_WITH.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::warm_arena_local, alloc_u64_alloc_with);
+        iter_with_setup_alloc(bencher, common::warm_arena_local, |state| alloc_u64_alloc_with(state).0);
     });
     alloc_u64.bench_function(ALLOC_U64_BUMPALO_ALLOC_WITH.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::warm_bump, alloc_u64_bumpalo_alloc_with);
+        iter_with_setup_alloc(bencher, common::warm_bump, |state| alloc_u64_bumpalo_alloc_with(state).0);
     });
     macro_rules! alloc_u64_collect {
         ($meta:ident, $func:ident, $ty:ty, $count:expr, $setup:expr) => {
             alloc_u64.bench_function($meta.benchmark_name(), |bencher| {
-                iter_with_setup_alloc(bencher, $setup, |state: &mut (Arena, Vec<$ty>)| $func(state));
+                iter_with_setup_alloc(bencher, $setup, |state: &mut (Arena, Vec<$ty>)| $func(state).0);
             });
         };
     }
@@ -876,15 +936,15 @@ fn criterion_alloc_benchmarks(criterion: &mut Criterion) {
 
     let mut alloc_str = criterion.benchmark_group(ALLOC_STR_ALLOC_STR.group_name());
     alloc_str.bench_function(ALLOC_STR_ALLOC_STR.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::setup_arena_words, alloc_str_alloc_str);
+        iter_with_setup_alloc(bencher, common::setup_arena_words, |state| alloc_str_alloc_str(state).0);
     });
     alloc_str.bench_function(ALLOC_STR_BUMPALO_ALLOC_STR.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::setup_bump_words, alloc_str_bumpalo_alloc_str);
+        iter_with_setup_alloc(bencher, common::setup_bump_words, |state| alloc_str_bumpalo_alloc_str(state).0);
     });
     macro_rules! alloc_str_collect {
         ($meta:ident, $func:ident, $ty:ty) => {
             alloc_str.bench_function($meta.benchmark_name(), |bencher| {
-                iter_with_setup_alloc(bencher, common::setup_arena_words_out::<$ty>, |state| $func(state));
+                iter_with_setup_alloc(bencher, common::setup_arena_words_out::<$ty>, |state| $func(state).0);
             });
         };
     }
@@ -895,28 +955,48 @@ fn criterion_alloc_benchmarks(criterion: &mut Criterion) {
 
     let mut alloc_slice = criterion.benchmark_group(ALLOC_SLICE_ALLOC_SLICE_COPY.group_name());
     alloc_slice.bench_function(ALLOC_SLICE_ALLOC_SLICE_COPY.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, || common::setup_arena_slices(common::N), alloc_slice_alloc_slice_copy);
+        iter_with_setup_alloc(
+            bencher,
+            || common::setup_arena_slices(common::N),
+            |state| alloc_slice_alloc_slice_copy(state).0,
+        );
     });
     alloc_slice.bench_function(ALLOC_SLICE_BUMPALO_ALLOC_SLICE_COPY.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::setup_bump_slices, alloc_slice_bumpalo_alloc_slice_copy);
+        iter_with_setup_alloc(bencher, common::setup_bump_slices, |state| {
+            alloc_slice_bumpalo_alloc_slice_copy(state);
+        });
     });
     alloc_slice.bench_function(ALLOC_SLICE_ALLOC_SLICE_CLONE.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, || common::setup_arena_slices(common::N), alloc_slice_alloc_slice_clone);
+        iter_with_setup_alloc(
+            bencher,
+            || common::setup_arena_slices(common::N),
+            |state| alloc_slice_alloc_slice_clone(state).0,
+        );
     });
     alloc_slice.bench_function(ALLOC_SLICE_BUMPALO_ALLOC_SLICE_CLONE.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::setup_bump_slices, alloc_slice_bumpalo_alloc_slice_clone);
+        iter_with_setup_alloc(bencher, common::setup_bump_slices, |state| {
+            alloc_slice_bumpalo_alloc_slice_clone(state);
+        });
     });
     alloc_slice.bench_function(ALLOC_SLICE_ALLOC_SLICE_FILL_WITH.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::warm_arena_local, alloc_slice_alloc_slice_fill_with);
+        iter_with_setup_alloc(bencher, common::warm_arena_local, |state| {
+            alloc_slice_alloc_slice_fill_with(state);
+        });
     });
     alloc_slice.bench_function(ALLOC_SLICE_BUMPALO_ALLOC_SLICE_FILL_WITH.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::warm_bump, alloc_slice_bumpalo_alloc_slice_fill_with);
+        iter_with_setup_alloc(bencher, common::warm_bump, |state| {
+            alloc_slice_bumpalo_alloc_slice_fill_with(state);
+        });
     });
     alloc_slice.bench_function(ALLOC_SLICE_ALLOC_SLICE_FILL_ITER.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::warm_arena_local, alloc_slice_alloc_slice_fill_iter);
+        iter_with_setup_alloc(bencher, common::warm_arena_local, |state| {
+            alloc_slice_alloc_slice_fill_iter(state);
+        });
     });
     alloc_slice.bench_function(ALLOC_SLICE_BUMPALO_ALLOC_SLICE_FILL_ITER.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::warm_bump, alloc_slice_bumpalo_alloc_slice_fill_iter);
+        iter_with_setup_alloc(bencher, common::warm_bump, |state| {
+            alloc_slice_bumpalo_alloc_slice_fill_iter(state);
+        });
     });
     macro_rules! alloc_slice_collect {
         ($meta:ident, $func:ident, $ty:ty, $count:expr) => {
@@ -924,7 +1004,7 @@ fn criterion_alloc_benchmarks(criterion: &mut Criterion) {
                 iter_with_setup_alloc(
                     bencher,
                     || common::setup_arena_slices_out::<$ty>($count),
-                    |state| $func(state),
+                    |state| $func(state).0,
                 );
             });
         };
@@ -932,7 +1012,7 @@ fn criterion_alloc_benchmarks(criterion: &mut Criterion) {
     macro_rules! alloc_slice_generated {
         ($meta:ident, $func:ident, $ty:ty, $count:expr) => {
             alloc_slice.bench_function($meta.benchmark_name(), |bencher| {
-                iter_with_setup_alloc(bencher, || common::setup_arena_out::<$ty>($count), |state| $func(state));
+                iter_with_setup_alloc(bencher, || common::setup_arena_out::<$ty>($count), |state| $func(state).0);
             });
         };
     }
@@ -1048,51 +1128,53 @@ fn criterion_alloc_benchmarks(criterion: &mut Criterion) {
 
     let mut string_builder = criterion.benchmark_group(STRING_BUILDER_ALLOC_STRING.group_name());
     string_builder.bench_function(STRING_BUILDER_ALLOC_STRING.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::setup_arena_words, string_builder_alloc_string);
+        iter_with_setup_alloc(bencher, common::setup_arena_words, |state| string_builder_alloc_string(state).0);
     });
     string_builder.bench_function(STRING_BUILDER_BUMPALO_STRING_NEW_IN.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::setup_bump_words, string_builder_bumpalo_string_new_in);
+        iter_with_setup_alloc(bencher, common::setup_bump_words, |state| {
+            string_builder_bumpalo_string_new_in(state);
+        });
     });
     string_builder.bench_function(STRING_BUILDER_ALLOC_STRING_WITH_CAPACITY.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(
-            bencher,
-            common::setup_arena_words_with_len,
-            string_builder_alloc_string_with_capacity,
-        );
+        iter_with_setup_alloc(bencher, common::setup_arena_words_with_len, |state| {
+            string_builder_alloc_string_with_capacity(state);
+        });
     });
     string_builder.bench_function(STRING_BUILDER_BUMPALO_STRING_WITH_CAPACITY_IN.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(
-            bencher,
-            common::setup_bump_words_with_len,
-            string_builder_bumpalo_string_with_capacity_in,
-        );
+        iter_with_setup_alloc(bencher, common::setup_bump_words_with_len, |state| {
+            string_builder_bumpalo_string_with_capacity_in(state);
+        });
     });
     string_builder.finish();
 
     let mut vec_builder = criterion.benchmark_group(VEC_BUILDER_ALLOC_VEC.group_name());
     vec_builder.bench_function(VEC_BUILDER_ALLOC_VEC.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::setup_arena_ints, vec_builder_alloc_vec);
+        iter_with_setup_alloc(bencher, common::setup_arena_ints, |state| vec_builder_alloc_vec(state).0);
     });
     vec_builder.bench_function(VEC_BUILDER_BUMPALO_VEC_NEW_IN.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::setup_bump_ints, vec_builder_bumpalo_vec_new_in);
+        iter_with_setup_alloc(bencher, common::setup_bump_ints, |state| vec_builder_bumpalo_vec_new_in(state).0);
     });
     vec_builder.bench_function(VEC_BUILDER_ALLOC_VEC_WITH_CAPACITY.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::setup_arena_ints, vec_builder_alloc_vec_with_capacity);
+        iter_with_setup_alloc(bencher, common::setup_arena_ints, |state| {
+            vec_builder_alloc_vec_with_capacity(state);
+        });
     });
     vec_builder.bench_function(VEC_BUILDER_BUMPALO_VEC_WITH_CAPACITY_IN.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::setup_bump_ints, vec_builder_bumpalo_vec_with_capacity_in);
+        iter_with_setup_alloc(bencher, common::setup_bump_ints, |state| {
+            vec_builder_bumpalo_vec_with_capacity_in(state);
+        });
     });
     vec_builder.finish();
 
     let mut allocator_grow = criterion.benchmark_group(ALLOCATOR_GROW_IN_PLACE.group_name());
     allocator_grow.bench_function(ALLOCATOR_GROW_IN_PLACE.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::warm_arena_local, allocator_grow_in_place);
+        iter_with_setup_alloc(bencher, common::warm_arena_local, |state| allocator_grow_in_place(state).0);
     });
     allocator_grow.bench_function(ALLOCATOR_GROW_ZEROED_IN_PLACE.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::warm_arena_local, allocator_grow_zeroed_in_place);
+        iter_with_setup_alloc(bencher, common::warm_arena_local, |state| allocator_grow_zeroed_in_place(state).0);
     });
     allocator_grow.bench_function(ALLOCATOR_SHRINK_IN_PLACE.benchmark_name(), |bencher| {
-        iter_with_setup_alloc(bencher, common::warm_arena_local, allocator_shrink_in_place);
+        iter_with_setup_alloc(bencher, common::warm_arena_local, |state| allocator_shrink_in_place(state).0);
     });
     allocator_grow.finish();
 }
@@ -1416,16 +1498,24 @@ fn setup_arena_vs_allocator_system() -> ArenaVsAllocatorSystemState {
 }
 
 #[metabench::benchmark(ARENA_VS_ALLOCATOR_ARENA, "criterion_arena_vs_allocator/arena_vs_allocator", "arena")]
-#[bench::run(&mut setup_arena_vs_allocator_arena())]
-fn arena_vs_allocator_arena(state: &mut ArenaVsAllocatorArenaState) {
-    alloc_arena_workload(&state.arena, &state.words, black_box(state.payload.as_slice()));
-    state.arena.reset();
+#[bench::run(std::boxed::Box::new(setup_arena_vs_allocator_arena()))]
+fn arena_vs_allocator_arena<S: std::borrow::BorrowMut<ArenaVsAllocatorArenaState>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        alloc_arena_workload(&state.arena, &state.words, black_box(state.payload.as_slice()));
+        state.arena.reset();
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(ARENA_VS_ALLOCATOR_SYSTEM, "criterion_arena_vs_allocator/arena_vs_allocator", "system")]
-#[bench::run(&setup_arena_vs_allocator_system())]
-fn arena_vs_allocator_system(state: &ArenaVsAllocatorSystemState) {
-    alloc_system_workload(&state.words, black_box(state.payload.as_slice()));
+#[bench::run(std::boxed::Box::new(setup_arena_vs_allocator_system()))]
+fn arena_vs_allocator_system<S: std::borrow::Borrow<ArenaVsAllocatorSystemState>>(owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow();
+        alloc_system_workload(&state.words, black_box(state.payload.as_slice()));
+    }
+    ((), owned_input)
 }
 
 fn criterion_arena_vs_allocator_benchmarks(criterion: &mut Criterion) {
@@ -1813,21 +1903,33 @@ fn criterion_drop_benchmarks(criterion: &mut Criterion) {
 }
 
 #[metabench::benchmark(RECORD_BATCH_DECODE_STANDARD_VEC, "multitude_record_batch/decode", "standard_vec")]
-#[bench::run(&record_batch_shared::unescaped_state())]
-fn record_batch_decode_standard_vec(state: &RecordBatchState) {
-    standard_vec_hot_path(&state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::unescaped_state()))]
+fn record_batch_decode_standard_vec<S: std::borrow::Borrow<RecordBatchState>>(owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow();
+        standard_vec_hot_path(&state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(RECORD_BATCH_DECODE_ARENA_BOX_SLICE, "multitude_record_batch/decode", "arena_box_slice")]
-#[bench::run(&mut record_batch_shared::unescaped_state())]
-fn record_batch_decode_arena_box_slice(state: &mut RecordBatchState) {
-    arena_box_slice_hot_path(&mut state.arena, &state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::unescaped_state()))]
+fn record_batch_decode_arena_box_slice<S: std::borrow::BorrowMut<RecordBatchState>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        arena_box_slice_hot_path(&mut state.arena, &state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(RECORD_BATCH_DECODE_ARENA_VEC_BASELINE, "multitude_record_batch/decode", "arena_vec_baseline")]
-#[bench::run(&mut record_batch_shared::unescaped_state())]
-fn record_batch_decode_arena_vec_baseline(state: &mut RecordBatchState) {
-    arena_vec_baseline_hot_path(&mut state.arena, &state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::unescaped_state()))]
+fn record_batch_decode_arena_vec_baseline<S: std::borrow::BorrowMut<RecordBatchState>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        arena_vec_baseline_hot_path(&mut state.arena, &state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1835,9 +1937,13 @@ fn record_batch_decode_arena_vec_baseline(state: &mut RecordBatchState) {
     "multitude_record_batch/strings",
     "standard_vec_unescaped"
 )]
-#[bench::run(&record_batch_shared::unescaped_state())]
-fn record_batch_strings_standard_vec_unescaped(state: &RecordBatchState) {
-    standard_vec_hot_path(&state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::unescaped_state()))]
+fn record_batch_strings_standard_vec_unescaped<S: std::borrow::Borrow<RecordBatchState>>(owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow();
+        standard_vec_hot_path(&state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1845,33 +1951,53 @@ fn record_batch_strings_standard_vec_unescaped(state: &RecordBatchState) {
     "multitude_record_batch/strings",
     "standard_vec_escaped"
 )]
-#[bench::run(&record_batch_shared::escaped_state())]
-fn record_batch_strings_standard_vec_escaped(state: &RecordBatchState) {
-    standard_vec_hot_path(&state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::escaped_state()))]
+fn record_batch_strings_standard_vec_escaped<S: std::borrow::Borrow<RecordBatchState>>(owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow();
+        standard_vec_hot_path(&state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(RECORD_BATCH_STRINGS_ARENA_VEC_UNESCAPED, "multitude_record_batch/strings", "arena_vec_unescaped")]
-#[bench::run(&mut record_batch_shared::unescaped_state())]
-fn record_batch_strings_arena_vec_unescaped(state: &mut RecordBatchState) {
-    arena_vec_baseline_hot_path(&mut state.arena, &state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::unescaped_state()))]
+fn record_batch_strings_arena_vec_unescaped<S: std::borrow::BorrowMut<RecordBatchState>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        arena_vec_baseline_hot_path(&mut state.arena, &state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(RECORD_BATCH_STRINGS_ARENA_VEC_ESCAPED, "multitude_record_batch/strings", "arena_vec_escaped")]
-#[bench::run(&mut record_batch_shared::escaped_state())]
-fn record_batch_strings_arena_vec_escaped(state: &mut RecordBatchState) {
-    arena_vec_baseline_hot_path(&mut state.arena, &state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::escaped_state()))]
+fn record_batch_strings_arena_vec_escaped<S: std::borrow::BorrowMut<RecordBatchState>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        arena_vec_baseline_hot_path(&mut state.arena, &state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(RECORD_BATCH_REUSE_REPEATED_NO_RESET, "multitude_record_batch/reuse", "repeated_no_reset")]
-#[bench::run(&mut reusable_vector_state())]
-fn record_batch_reuse_repeated_no_reset(state: &mut ReusableVectorState) {
-    repeated_no_reset_iteration(state);
+#[bench::run(std::boxed::Box::new(reusable_vector_state()))]
+fn record_batch_reuse_repeated_no_reset<S: std::borrow::BorrowMut<ReusableVectorState>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        repeated_no_reset_iteration(state);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(RECORD_BATCH_REUSE_RESET_RECREATE, "multitude_record_batch/reuse", "reset_recreate")]
-#[bench::run(&mut reset_recreate_state())]
-fn record_batch_reuse_reset_recreate(state: &mut RecordBatchState) {
-    reset_recreate_hot_path(&mut state.arena, &state.input);
+#[bench::run(std::boxed::Box::new(reset_recreate_state()))]
+fn record_batch_reuse_reset_recreate<S: std::borrow::BorrowMut<RecordBatchState>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        reset_recreate_hot_path(&mut state.arena, &state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1879,9 +2005,13 @@ fn record_batch_reuse_reset_recreate(state: &mut RecordBatchState) {
     "multitude_record_batch/sparse_retention",
     "standard_one_in_eight"
 )]
-#[bench::run(&record_batch_shared::unescaped_state())]
-fn record_batch_sparse_retention_standard_one_in_eight(state: &RecordBatchState) {
-    sparse_standard_hot_path(&state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::unescaped_state()))]
+fn record_batch_sparse_retention_standard_one_in_eight<S: std::borrow::Borrow<RecordBatchState>>(owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow();
+        sparse_standard_hot_path(&state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1889,9 +2019,13 @@ fn record_batch_sparse_retention_standard_one_in_eight(state: &RecordBatchState)
     "multitude_record_batch/sparse_retention",
     "arena_one_in_eight"
 )]
-#[bench::run(&mut record_batch_shared::unescaped_state())]
-fn record_batch_sparse_retention_arena_one_in_eight(state: &mut RecordBatchState) {
-    sparse_arena_hot_path(&mut state.arena, &state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::unescaped_state()))]
+fn record_batch_sparse_retention_arena_one_in_eight<S: std::borrow::BorrowMut<RecordBatchState>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        sparse_arena_hot_path(&mut state.arena, &state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1899,9 +2033,13 @@ fn record_batch_sparse_retention_arena_one_in_eight(state: &mut RecordBatchState
     "multitude_record_batch/lazy_raw_strings",
     "eager_sparse_escaped"
 )]
-#[bench::run(&record_batch_shared::escaped_state())]
-fn record_batch_lazy_raw_strings_eager_sparse_escaped(state: &RecordBatchState) {
-    sparse_standard_hot_path(&state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::escaped_state()))]
+fn record_batch_lazy_raw_strings_eager_sparse_escaped<S: std::borrow::Borrow<RecordBatchState>>(owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow();
+        sparse_standard_hot_path(&state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1909,21 +2047,33 @@ fn record_batch_lazy_raw_strings_eager_sparse_escaped(state: &RecordBatchState) 
     "multitude_record_batch/lazy_raw_strings",
     "lazy_sparse_escaped"
 )]
-#[bench::run(&record_batch_shared::escaped_state())]
-fn record_batch_lazy_raw_strings_lazy_sparse_escaped(state: &RecordBatchState) {
-    sparse_lazy_standard_hot_path(&state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::escaped_state()))]
+fn record_batch_lazy_raw_strings_lazy_sparse_escaped<S: std::borrow::Borrow<RecordBatchState>>(owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow();
+        sparse_lazy_standard_hot_path(&state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(RECORD_BATCH_ERRORS_MALFORMED_STANDARD, "multitude_record_batch/errors", "malformed_standard")]
-#[bench::run(&record_batch_shared::malformed_state())]
-fn record_batch_errors_malformed_standard(state: &RecordBatchState) {
-    malformed_standard_hot_path(&state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::malformed_state()))]
+fn record_batch_errors_malformed_standard<S: std::borrow::Borrow<RecordBatchState>>(owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow();
+        malformed_standard_hot_path(&state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(RECORD_BATCH_ERRORS_MALFORMED_ARENA, "multitude_record_batch/errors", "malformed_arena")]
-#[bench::run(&mut record_batch_shared::malformed_state())]
-fn record_batch_errors_malformed_arena(state: &mut RecordBatchState) {
-    malformed_arena_hot_path(&mut state.arena, &state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::malformed_state()))]
+fn record_batch_errors_malformed_arena<S: std::borrow::BorrowMut<RecordBatchState>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        malformed_arena_hot_path(&mut state.arena, &state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1931,9 +2081,13 @@ fn record_batch_errors_malformed_arena(state: &mut RecordBatchState) {
     "multitude_record_batch/errors",
     "resource_limited_arena"
 )]
-#[bench::run(&mut record_batch_shared::unescaped_state())]
-fn record_batch_errors_resource_limited_arena(state: &mut RecordBatchState) {
-    resource_limited_hot_path(&mut state.arena, &state.input);
+#[bench::run(std::boxed::Box::new(record_batch_shared::unescaped_state()))]
+fn record_batch_errors_resource_limited_arena<S: std::borrow::BorrowMut<RecordBatchState>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        resource_limited_hot_path(&mut state.arena, &state.input);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1941,9 +2095,13 @@ fn record_batch_errors_resource_limited_arena(state: &mut RecordBatchState) {
     "multitude_record_batch/refresh_workload",
     "standard_global_select"
 )]
-#[bench::run(&mut standard_refresh_state())]
-fn record_batch_refresh_workload_standard_global_select(state: &mut StandardRefreshState) {
-    standard_refresh_iteration(state);
+#[bench::run(std::boxed::Box::new(standard_refresh_state()))]
+fn record_batch_refresh_workload_standard_global_select<S: std::borrow::BorrowMut<StandardRefreshState>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        standard_refresh_iteration(state);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1951,9 +2109,15 @@ fn record_batch_refresh_workload_standard_global_select(state: &mut StandardRefr
     "multitude_record_batch/refresh_workload",
     "arena_vec_reset_global_select"
 )]
-#[bench::run(&mut arena_vec_refresh_state())]
-fn record_batch_refresh_workload_arena_vec_reset_global_select(state: &mut ArenaRefreshState) {
-    arena_vec_refresh_iteration(state);
+#[bench::run(std::boxed::Box::new(arena_vec_refresh_state()))]
+fn record_batch_refresh_workload_arena_vec_reset_global_select<S: std::borrow::BorrowMut<ArenaRefreshState>>(
+    mut owned_input: S,
+) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        arena_vec_refresh_iteration(state);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1961,9 +2125,15 @@ fn record_batch_refresh_workload_arena_vec_reset_global_select(state: &mut Arena
     "multitude_record_batch/refresh_workload",
     "arena_each_reset_global_select"
 )]
-#[bench::run(&mut arena_each_refresh_state())]
-fn record_batch_refresh_workload_arena_each_reset_global_select(state: &mut ArenaRefreshState) {
-    arena_each_refresh_iteration(state);
+#[bench::run(std::boxed::Box::new(arena_each_refresh_state()))]
+fn record_batch_refresh_workload_arena_each_reset_global_select<S: std::borrow::BorrowMut<ArenaRefreshState>>(
+    mut owned_input: S,
+) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        arena_each_refresh_iteration(state);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1971,9 +2141,15 @@ fn record_batch_refresh_workload_arena_each_reset_global_select(state: &mut Aren
     "multitude_record_batch/refresh_workload",
     "arena_raw_each_reset_global_select"
 )]
-#[bench::run(&mut arena_raw_each_refresh_state())]
-fn record_batch_refresh_workload_arena_raw_each_reset_global_select(state: &mut ArenaRefreshState) {
-    arena_raw_each_refresh_iteration(state);
+#[bench::run(std::boxed::Box::new(arena_raw_each_refresh_state()))]
+fn record_batch_refresh_workload_arena_raw_each_reset_global_select<S: std::borrow::BorrowMut<ArenaRefreshState>>(
+    mut owned_input: S,
+) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        arena_raw_each_refresh_iteration(state);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(
@@ -1981,9 +2157,15 @@ fn record_batch_refresh_workload_arena_raw_each_reset_global_select(state: &mut 
     "multitude_record_batch/refresh_workload",
     "arena_raw_index_reset_global_select"
 )]
-#[bench::run(&mut arena_raw_index_refresh_state())]
-fn record_batch_refresh_workload_arena_raw_index_reset_global_select(state: &mut ArenaRefreshState) {
-    arena_raw_index_refresh_iteration(state);
+#[bench::run(std::boxed::Box::new(arena_raw_index_refresh_state()))]
+fn record_batch_refresh_workload_arena_raw_index_reset_global_select<S: std::borrow::BorrowMut<ArenaRefreshState>>(
+    mut owned_input: S,
+) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        arena_raw_index_refresh_iteration(state);
+    }
+    ((), owned_input)
 }
 
 #[cfg(feature = "stats")]
@@ -2175,63 +2357,103 @@ fn criterion_record_batch_benchmarks(criterion: &mut Criterion) {
 }
 
 #[metabench::benchmark(SERDE_TYPED_ARENA_OWNED, "multitude_serde/typed", "arena_owned")]
-#[bench::run(&mut arena_output())]
-fn serde_typed_arena_owned(output: &mut ArenaOutput<SerdeArenaRecord>) {
-    typed_arena_hot_path(output);
+#[bench::run(std::boxed::Box::new(arena_output::<SerdeArenaRecord>()))]
+fn serde_typed_arena_owned<S: std::borrow::BorrowMut<ArenaOutput<SerdeArenaRecord>>>(mut owned_input: S) -> ((), S) {
+    {
+        let output = owned_input.borrow_mut();
+        typed_arena_hot_path(output);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(SERDE_TYPED_SERDE_JSON_OWNED, "multitude_serde/typed", "serde_json_owned")]
-#[bench::run(&mut None)]
-fn serde_typed_serde_json_owned(output: &mut Option<SerdeStandardRecord>) {
-    typed_standard_hot_path(output);
+#[bench::run(std::boxed::Box::new(None::<SerdeStandardRecord>))]
+fn serde_typed_serde_json_owned<S: std::borrow::BorrowMut<Option<SerdeStandardRecord>>>(mut owned_input: S) -> ((), S) {
+    {
+        let output = owned_input.borrow_mut();
+        typed_standard_hot_path(output);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(SERDE_DYNAMIC_ARENA_VALUE, "multitude_serde/dynamic", "arena_value")]
-#[bench::run(&mut arena_output())]
-fn serde_dynamic_arena_value(output: &mut ArenaOutput<multitude::de::Value>) {
-    dynamic_arena_hot_path(output);
+#[bench::run(std::boxed::Box::new(arena_output::<multitude::de::Value>()))]
+fn serde_dynamic_arena_value<S: std::borrow::BorrowMut<ArenaOutput<multitude::de::Value>>>(mut owned_input: S) -> ((), S) {
+    {
+        let output = owned_input.borrow_mut();
+        dynamic_arena_hot_path(output);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(SERDE_DYNAMIC_SERDE_JSON_VALUE, "multitude_serde/dynamic", "serde_json_value")]
-#[bench::run(&mut None)]
-fn serde_dynamic_serde_json_value(output: &mut Option<serde_json::Value>) {
-    dynamic_standard_hot_path(output);
+#[bench::run(std::boxed::Box::new(None::<serde_json::Value>))]
+fn serde_dynamic_serde_json_value<S: std::borrow::BorrowMut<Option<serde_json::Value>>>(mut owned_input: S) -> ((), S) {
+    {
+        let output = owned_input.borrow_mut();
+        dynamic_standard_hot_path(output);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(SERDE_TYPED_LIFECYCLE_SERDE_JSON, "multitude_serde/typed_lifecycle", "serde_json")]
-#[bench::run(&mut ())]
-fn serde_typed_lifecycle_serde_json(state: &mut ()) {
-    typed_standard_lifecycle(state);
+#[bench::run(std::boxed::Box::new(()))]
+fn serde_typed_lifecycle_serde_json<S: std::borrow::BorrowMut<()>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        typed_standard_lifecycle(state);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(SERDE_TYPED_LIFECYCLE_MULTITUDE, "multitude_serde/typed_lifecycle", "multitude")]
-#[bench::run(&mut warm_reset_arena())]
-fn serde_typed_lifecycle_multitude(arena: &mut Arena) {
-    typed_multitude_lifecycle(arena);
+#[bench::run(std::boxed::Box::new(warm_reset_arena()))]
+fn serde_typed_lifecycle_multitude<S: std::borrow::BorrowMut<Arena>>(mut owned_input: S) -> ((), S) {
+    {
+        let arena = owned_input.borrow_mut();
+        typed_multitude_lifecycle(arena);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(SERDE_TYPED_LIFECYCLE_BUMPALO, "multitude_serde/typed_lifecycle", "bumpalo")]
-#[bench::run(&mut warm_serde_bump())]
-fn serde_typed_lifecycle_bumpalo(bump: &mut bumpalo::Bump) {
-    typed_bumpalo_lifecycle(bump);
+#[bench::run(std::boxed::Box::new(warm_serde_bump()))]
+fn serde_typed_lifecycle_bumpalo<S: std::borrow::BorrowMut<bumpalo::Bump>>(mut owned_input: S) -> ((), S) {
+    {
+        let bump = owned_input.borrow_mut();
+        typed_bumpalo_lifecycle(bump);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(SERDE_BATCH_LIFECYCLE_SERDE_JSON, "multitude_serde/batch_lifecycle", "serde_json")]
-#[bench::run(&mut ())]
-fn serde_batch_lifecycle_serde_json(state: &mut ()) {
-    batch_standard_lifecycle(state);
+#[bench::run(std::boxed::Box::new(()))]
+fn serde_batch_lifecycle_serde_json<S: std::borrow::BorrowMut<()>>(mut owned_input: S) -> ((), S) {
+    {
+        let state = owned_input.borrow_mut();
+        batch_standard_lifecycle(state);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(SERDE_BATCH_LIFECYCLE_MULTITUDE, "multitude_serde/batch_lifecycle", "multitude")]
-#[bench::run(&mut warm_reset_arena())]
-fn serde_batch_lifecycle_multitude(arena: &mut Arena) {
-    batch_multitude_lifecycle(arena);
+#[bench::run(std::boxed::Box::new(warm_reset_arena()))]
+fn serde_batch_lifecycle_multitude<S: std::borrow::BorrowMut<Arena>>(mut owned_input: S) -> ((), S) {
+    {
+        let arena = owned_input.borrow_mut();
+        batch_multitude_lifecycle(arena);
+    }
+    ((), owned_input)
 }
 
 #[metabench::benchmark(SERDE_BATCH_LIFECYCLE_BUMPALO, "multitude_serde/batch_lifecycle", "bumpalo")]
-#[bench::run(&mut warm_serde_bump())]
-fn serde_batch_lifecycle_bumpalo(bump: &mut bumpalo::Bump) {
-    batch_bumpalo_lifecycle(bump);
+#[bench::run(std::boxed::Box::new(warm_serde_bump()))]
+fn serde_batch_lifecycle_bumpalo<S: std::borrow::BorrowMut<bumpalo::Bump>>(mut owned_input: S) -> ((), S) {
+    {
+        let bump = owned_input.borrow_mut();
+        batch_bumpalo_lifecycle(bump);
+    }
+    ((), owned_input)
 }
 
 fn criterion_serde_benchmarks(criterion: &mut Criterion) {
@@ -2340,33 +2562,38 @@ fn assert_teardown_allocation_free<T>(name: &str, mut input: T, routine: impl Fn
 macro_rules! teardown_benchmark_count {
     ($count:ident, $standard_const:ident, $standard_fn:ident, $multitude_const:ident, $multitude_fn:ident, $bumpalo_const:ident, $bumpalo_fn:ident, $multitude_reset_const:ident, $multitude_reset_fn:ident, $bumpalo_reset_const:ident, $bumpalo_reset_fn:ident, $label:literal) => {
         #[metabench::benchmark($standard_const, $label, "standard")]
-        #[bench::run(&mut standard_state::<$count>())]
-        fn $standard_fn(state: &mut StandardState<$count>) {
-            free_standard(state);
+        #[bench::run(std::boxed::Box::new(standard_state::<$count>()))]
+        fn $standard_fn<S: std::borrow::BorrowMut<StandardState<$count>>>(mut state: S) -> ((), S) {
+            free_standard(state.borrow_mut());
+            ((), state)
         }
 
         #[metabench::benchmark($multitude_const, $label, "multitude")]
-        #[bench::run(&mut multitude_state::<$count>())]
-        fn $multitude_fn(arena: &mut Arena) {
-            reset_multitude(arena);
+        #[bench::run(std::boxed::Box::new(multitude_state::<$count>()))]
+        fn $multitude_fn<S: std::borrow::BorrowMut<Arena>>(mut arena: S) -> ((), S) {
+            reset_multitude(arena.borrow_mut());
+            ((), arena)
         }
 
         #[metabench::benchmark($bumpalo_const, $label, "bumpalo")]
-        #[bench::run(&mut bumpalo_state::<$count>())]
-        fn $bumpalo_fn(bump: &mut bumpalo::Bump) {
-            reset_bumpalo(bump);
+        #[bench::run(std::boxed::Box::new(bumpalo_state::<$count>()))]
+        fn $bumpalo_fn<S: std::borrow::BorrowMut<bumpalo::Bump>>(mut bump: S) -> ((), S) {
+            reset_bumpalo(bump.borrow_mut());
+            ((), bump)
         }
 
         #[metabench::benchmark($multitude_reset_const, $label, "multitude_reset_allocate")]
-        #[bench::run(&mut multitude_state::<$count>())]
-        fn $multitude_reset_fn(arena: &mut Arena) {
-            reset_allocate_multitude(arena);
+        #[bench::run(std::boxed::Box::new(multitude_state::<$count>()))]
+        fn $multitude_reset_fn<S: std::borrow::BorrowMut<Arena>>(mut arena: S) -> ((), S) {
+            reset_allocate_multitude(arena.borrow_mut());
+            ((), arena)
         }
 
         #[metabench::benchmark($bumpalo_reset_const, $label, "bumpalo_reset_allocate")]
-        #[bench::run(&mut bumpalo_state::<$count>())]
-        fn $bumpalo_reset_fn(bump: &mut bumpalo::Bump) {
-            reset_allocate_bumpalo(bump);
+        #[bench::run(std::boxed::Box::new(bumpalo_state::<$count>()))]
+        fn $bumpalo_reset_fn<S: std::borrow::BorrowMut<bumpalo::Bump>>(mut bump: S) -> ((), S) {
+            reset_allocate_bumpalo(bump.borrow_mut());
+            ((), bump)
         }
     };
 }

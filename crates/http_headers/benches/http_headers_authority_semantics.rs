@@ -178,8 +178,9 @@ macro_rules! host_cases {
             }
         )+
 
+        // Gungraun needs the outer argument expression in this macro's hygiene context.
         #[metabench::benchmark(HOST_DECODE_RETAINED, "http_headers_authority_semantics/host_decode", "retained")]
-        $(#[bench::$id(setup = $id)])+
+        $(#[bench::$id(std::hint::black_box($id()))])+
         fn host_decode_retained(fixture: &HostFixture) {
             let view = <Host as SingleValueField>::decode_view_with(black_box(fixture.wire.as_field_value_ref()), fixture.mode)
                 .expect("validated fixture");
@@ -188,7 +189,7 @@ macro_rules! host_cases {
         }
 
         #[metabench::benchmark(HOST_DECODE_CONSUMER, "http_headers_authority_semantics/host_decode", "consumer_parse")]
-        $(#[bench::$id(setup = $id)])+
+        $(#[bench::$id(std::hint::black_box($id()))])+
         fn host_decode_consumer(fixture: &HostFixture) {
             let view = <Host as SingleValueField>::decode_view_with(black_box(fixture.wire.as_field_value_ref()), fixture.mode)
                 .expect("validated fixture");
@@ -197,7 +198,7 @@ macro_rules! host_cases {
         }
 
         #[metabench::benchmark(HOST_READS_RETAINED, "http_headers_authority_semantics/host_reads", "retained")]
-        $(#[bench::$id(setup = $id)])+
+        $(#[bench::$id(std::hint::black_box($id()))])+
         fn host_reads_retained(fixture: &HostFixture) {
             let view = black_box(&fixture.owned).as_view();
             drop(black_box(retained_host(black_box(&view))));
@@ -205,7 +206,7 @@ macro_rules! host_cases {
         }
 
         #[metabench::benchmark(HOST_READS_CONSUMER, "http_headers_authority_semantics/host_reads", "consumer_parse")]
-        $(#[bench::$id(setup = $id)])+
+        $(#[bench::$id(std::hint::black_box($id()))])+
         fn host_reads_consumer(fixture: &HostFixture) {
             let view = black_box(&fixture.owned).as_view();
             drop(black_box(consumer_host(black_box(&view))));
@@ -242,8 +243,9 @@ macro_rules! origin_cases {
             }
         )+
 
+        // Gungraun needs the outer argument expression in this macro's hygiene context.
         #[metabench::benchmark(ORIGIN_DECODE_RETAINED, "http_headers_authority_semantics/origin_decode", "retained")]
-        $(#[bench::$id(setup = $id)])+
+        $(#[bench::$id(std::hint::black_box($id()))])+
         fn origin_decode_retained(fixture: &OriginFixture) {
             let view = <AccessControlAllowOrigin as Field>::view(black_box(fixture)).expect("validated fixture").expect("present");
             black_box(retained_origin(black_box(view)));
@@ -251,7 +253,7 @@ macro_rules! origin_cases {
         }
 
         #[metabench::benchmark(ORIGIN_DECODE_CONSUMER, "http_headers_authority_semantics/origin_decode", "consumer_parse")]
-        $(#[bench::$id(setup = $id)])+
+        $(#[bench::$id(std::hint::black_box($id()))])+
         fn origin_decode_consumer(fixture: &OriginFixture) {
             let view = <AccessControlAllowOrigin as Field>::view(black_box(fixture)).expect("validated fixture").expect("present");
             black_box(consumer_origin(black_box(view)));
@@ -259,7 +261,7 @@ macro_rules! origin_cases {
         }
 
         #[metabench::benchmark(ORIGIN_READS_RETAINED, "http_headers_authority_semantics/origin_reads", "retained")]
-        $(#[bench::$id(setup = $id)])+
+        $(#[bench::$id(std::hint::black_box($id()))])+
         fn origin_reads_retained(fixture: &OriginFixture) {
             let view = black_box(&fixture.owned).as_view();
             black_box(retained_origin(black_box(view)));
@@ -267,7 +269,7 @@ macro_rules! origin_cases {
         }
 
         #[metabench::benchmark(ORIGIN_READS_CONSUMER, "http_headers_authority_semantics/origin_reads", "consumer_parse")]
-        $(#[bench::$id(setup = $id)])+
+        $(#[bench::$id(std::hint::black_box($id()))])+
         fn origin_reads_consumer(fixture: &OriginFixture) {
             let view = black_box(&fixture.owned).as_view();
             black_box(consumer_origin(black_box(view)));

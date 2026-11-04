@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared, OpaqueMemory};
+#[cfg(any(feature = "test-util", test))]
+use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::{HasMemory, Memory, MemoryShared, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
 use http_body::{Body, Frame};
@@ -16,13 +18,13 @@ use super::timeout_body::TimeoutBody;
 use crate::json::JsonError;
 use crate::{HttpError, Result};
 
-/// Builder for creating optimized HTTP bodies.
+/// A builder for HTTP bodies.
 ///
-/// This builder optimizes memory usage and performance for HTTP bodies by providing:
+/// The builder provides:
 ///
-/// - Memory pooling for better performance
-/// - Runtime-specific optimizations
-/// - Easier testing with the `test-util` feature
+/// - Configurable memory through [`OpaqueMemory`].
+/// - Optimizations for each runtime.
+/// - Test support through the `test-util` feature.
 ///
 /// # Examples
 ///
@@ -31,7 +33,7 @@ use crate::{HttpError, Result};
 /// # #[cfg(feature = "test-util")] {
 /// # use http_extensions::{HttpBody, HttpBodyBuilder};
 /// # let builder = HttpBodyBuilder::new_fake();
-/// // Create different body types
+/// // Create different body types.
 /// let text_body: HttpBody = builder.text("Hello world");
 /// let empty_body: HttpBody = builder.empty();
 /// let binary_body: HttpBody = builder.slice(&[1, 2, 3, 4]);
@@ -41,10 +43,10 @@ use crate::{HttpError, Result};
 ///
 /// # Testing
 ///
-/// With the `test-util` feature enabled, you can create a test instance using `HttpBodyBuilder::new_fake()`.
+/// The `test-util` feature provides [`HttpBodyBuilder::new_fake`].
 #[derive(Debug, Clone, ThreadAware)]
 pub struct HttpBodyBuilder {
-    memory: BodyMemory,
+    memory: OpaqueMemory,
     clock: Clock,
     pub(super) options: HttpBodyOptions,
 }
@@ -52,8 +54,9 @@ pub struct HttpBodyBuilder {
 impl HttpBodyBuilder {
     /// Creates a test-friendly [`HttpBodyBuilder`] instance.
     ///
-    /// Useful for unit tests. Available with the `test-util` feature, this allows creating and
-    /// working with HTTP bodies without any real network or server setup.
+    /// Use this method in unit tests.
+    /// The `test-util` feature provides it.
+    /// It creates HTTP bodies without a network or server.
     ///
     /// Uses a frozen clock, so body data receive timeouts will never fire.
     ///
@@ -71,31 +74,18 @@ impl HttpBodyBuilder {
     #[cfg(any(feature = "test-util", test))]
     #[must_use]
     pub fn new_fake() -> Self {
-        Self::new(GlobalPool::new(), &Clock::new_frozen())
+        Self::new(OpaqueMemory::new(GlobalPool::new()), &Clock::new_frozen())
     }
 
     /// Creates a new instance of [`HttpBodyBuilder`].
     ///
-    /// This method uses a per-thread memory pool from [`GlobalPool`].
+    /// The supplied memory provider serves body allocations.
+    /// Cloning the builder clones the provider.
+    /// [`ThreadAware::relocate`] forwards relocation to the provider.
     #[must_use]
-    pub fn new(memory: GlobalPool, clock: &Clock) -> Self {
+    pub fn new(memory: OpaqueMemory, clock: &Clock) -> Self {
         Self {
-            memory: BodyMemory::Global(memory),
-            clock: clock.clone(),
-            options: HttpBodyOptions::default(),
-        }
-    }
-
-    /// Creates a new instance of [`HttpBodyBuilder`] with custom memory.
-    ///
-    /// The provided memory provider is type-erased and used in place of the global per-thread
-    /// memory used by [`HttpBodyBuilder::new`]. It remains thread-aware: when the builder is moved
-    /// between threads via a thread-aware runtime mechanism, the provider's thread-affine state is
-    /// relocated along with it.
-    #[must_use]
-    pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
-        Self {
-            memory: BodyMemory::Opaque(OpaqueMemory::new(memory)),
+            memory,
             clock: clock.clone(),
             options: HttpBodyOptions::default(),
         }
@@ -103,8 +93,7 @@ impl HttpBodyBuilder {
 
     /// Sets default [`HttpBodyOptions`] for all bodies created by this builder.
     ///
-    /// Per-call options passed to [`body`](Self::body) or [`stream`](Self::stream) are
-    /// merged on top: the per-call value wins when both sides set the same field.
+    /// Options for [`body`](Self::body) or [`stream`](Self::stream) override these defaults.
     #[must_use]
     pub fn with_options(mut self, options: HttpBodyOptions) -> Self {
         self.options = options;
@@ -117,8 +106,8 @@ impl HttpBodyBuilder {
     /// [`HttpBody`] system. Useful for third-party libraries or your own custom body
     /// implementations.
     ///
-    /// When `options` contains a timeout, the body is wrapped with an idle timeout that limits
-    /// how long the body may go without yielding a frame.
+    /// If `options` contains a timeout, the builder wraps the body with an idle timeout.
+    /// The timeout limits the time between frames.
     ///
     /// # Examples
     ///
@@ -167,15 +156,13 @@ impl HttpBodyBuilder {
         }
     }
 
-    /// Interposes `wrap` on `body`'s frames, keeping the policies it already carries.
+    /// Applies `wrap` to the frames and keeps the existing body policies.
     ///
-    /// Use this to transform a body in flight - decoding, counting, tracing -
-    /// rather than [`body`](Self::body), which builds a body from scratch and
-    /// would layer a second idle timeout over the one `body` already applies.
-    /// The existing options travel to the result, so a later
-    /// [`into_buffered`](HttpBody::into_buffered) still applies the buffer limit
-    /// the body was created with. A body carrying no policy of its own falls
-    /// back to this builder's defaults.
+    /// Use this method to decode, count, or trace a body in flight.
+    /// [`body`](Self::body) builds a body from the start and can add a second idle timeout.
+    /// This method copies the existing options to the result.
+    /// A later [`into_buffered`](HttpBody::into_buffered) still applies the original buffer limit.
+    /// If the body has no policy, this method uses the builder defaults.
     ///
     /// # Examples
     ///
@@ -205,9 +192,9 @@ impl HttpBodyBuilder {
             // yet enforced anywhere: install it rather than record a policy
             // nothing applies.
             (None, Some(timeout)) => HttpBody::from_streaming(Box::pin(TimeoutBody::new(wrapped, timeout, &self.clock)), options),
-            // Already enforced underneath. Wrapping again would time the
-            // transformed frames instead, which a body turning many input
-            // frames into few output ones would trip.
+            // The wrapped body already applies this timeout.
+            // Another timeout measures the transformed frames.
+            // A transformation that combines many input frames can then time out.
             _ => HttpBody::from_streaming(Box::pin(wrapped), options),
         }
     }
@@ -217,8 +204,8 @@ impl HttpBodyBuilder {
     /// Accepts a [`Stream`][futures::Stream] of [`BytesView`] chunks and creates a streaming
     /// body from them.
     ///
-    /// When `options` contains a timeout, the stream is wrapped with an idle timeout that limits
-    /// how long the body may go without yielding a frame.
+    /// If `options` contains a timeout, the builder wraps the stream with an idle timeout.
+    /// The timeout limits the time between frames.
     ///
     /// # Examples
     ///
@@ -279,8 +266,8 @@ impl HttpBodyBuilder {
     ///
     /// # Performance
     ///
-    /// This will copy the contents of the byte slice. For more efficiency, you should consider
-    /// using [`bytes()`][Self::bytes].
+    /// This method copies the byte slice.
+    /// Use [`bytes()`][Self::bytes] to avoid this copy.
     ///
     /// # Examples
     ///
@@ -310,8 +297,8 @@ impl HttpBodyBuilder {
     ///
     /// # Performance
     ///
-    /// This method does not copy the contents of the [`BytesView`],
-    /// providing greater efficiency compared to [`slice()`][Self::slice].
+    /// This method does not copy the contents of the [`BytesView`].
+    /// [`slice()`][Self::slice] copies the data.
     ///
     /// # Examples
     ///
@@ -335,8 +322,8 @@ impl HttpBodyBuilder {
 
     /// Creates an empty body (zero bytes).
     ///
-    /// Use this for HTTP methods that don't need a body like GET or HEAD requests,
-    /// or for responses that only need status codes or headers.
+    /// Use this for HTTP methods that do not need a body, such as GET and HEAD.
+    /// You can also use it for responses that contain only status codes or headers.
     #[expect(clippy::unused_self, reason = "body might receive more data from builder later")]
     pub fn empty(&self) -> HttpBody {
         HttpBody::empty()
@@ -402,21 +389,6 @@ impl HasMemory for HttpBodyBuilder {
     }
 }
 
-#[derive(Debug, Clone, ThreadAware)]
-enum BodyMemory {
-    Global(GlobalPool),
-    Opaque(OpaqueMemory),
-}
-
-impl Memory for BodyMemory {
-    fn reserve(&self, min_bytes: usize) -> BytesBuf {
-        match self {
-            Self::Global(pool) => pool.reserve(min_bytes),
-            Self::Opaque(memory) => memory.reserve(min_bytes),
-        }
-    }
-}
-
 impl AsRef<Clock> for HttpBodyBuilder {
     fn as_ref(&self) -> &Clock {
         &self.clock
@@ -427,10 +399,12 @@ impl AsRef<Clock> for HttpBodyBuilder {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::pin::pin;
+    use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
     use std::time::Duration;
 
     use bytes::Bytes;
+    use bytesbuf::mem::CallbackMemory;
     use bytesbuf::mem::testing::TransparentMemory;
     use futures::channel::mpsc;
     use futures::executor::block_on;
@@ -438,6 +412,7 @@ mod tests {
     use ohno::Labeled as _;
     use serde::Serialize;
     use static_assertions::assert_impl_all;
+    use thread_aware::unaware;
     use tick::ClockControl;
 
     use super::*;
@@ -458,7 +433,7 @@ mod tests {
     #[test]
     fn rewrapping_preserves_the_source_idle_timeout() {
         let control = ClockControl::new();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock())
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &control.to_clock())
             .with_options(HttpBodyOptions::default().timeout(Duration::from_secs(1)));
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
         let source = builder.stream(stream::pending(), &options);
@@ -478,7 +453,7 @@ mod tests {
     #[test]
     fn rewrapping_does_not_time_transformed_frames_while_the_source_makes_progress() {
         let control = ClockControl::new();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &control.to_clock());
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
         let (sender, receiver) = mpsc::unbounded();
         let source = builder.stream(receiver, &options);
@@ -537,7 +512,7 @@ mod tests {
 
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(options);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock).with_options(options);
         let mut body = Box::pin(builder.rewrap(builder.text("source"), |_| PendingBody));
         let waker = futures::task::noop_waker();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -559,7 +534,7 @@ mod tests {
     fn new_with_global_memory() {
         let clock = Clock::new_frozen();
         let memory = GlobalPool::new();
-        let builder = HttpBodyBuilder::new(memory, &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(memory), &clock);
         let body = builder.text("test");
         assert_eq!(body.content_length(), Some(4));
 
@@ -568,9 +543,9 @@ mod tests {
     }
 
     #[test]
-    fn with_custom_memory() {
+    fn new_accepts_a_custom_provider() {
         let clock = Clock::new_frozen();
-        let builder = HttpBodyBuilder::with_custom_memory(TransparentMemory::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(TransparentMemory::new()), &clock);
         let body = builder.text("hello");
         let data = BytesView::try_from(body).unwrap();
         assert_eq!(data.len(), 5);
@@ -699,7 +674,7 @@ mod tests {
     #[test]
     fn stream_with_timeout_returns_data_before_timeout() {
         let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
         let chunks: Vec<Result<BytesView>> = [b"hello " as &[u8], b"world"]
             .iter()
             .map(|c| Ok(BytesView::copied_from_slice(c, &builder)))
@@ -724,6 +699,22 @@ mod tests {
     }
 
     // ── JSON body creation ───────────────────────────────────────────────
+
+    /// Observes JSON allocations through the selected provider in ordinary test builds.
+    #[test]
+    fn json_uses_the_supplied_memory_provider() {
+        let reservations = Arc::new(Mutex::new(Vec::new()));
+        let memory = CallbackMemory::new(unaware(Arc::clone(&reservations)), |reservations, min_bytes| {
+            reservations.lock().unwrap().push(min_bytes);
+            TransparentMemory::new().reserve(min_bytes)
+        });
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(memory), &Clock::new_frozen());
+
+        let body = builder.json(&["caller", "memory"]).unwrap();
+
+        assert_eq!(BytesView::try_from(body).unwrap(), br#"["caller","memory"]"#);
+        assert!(!reservations.lock().unwrap().is_empty());
+    }
 
     #[test]
     #[cfg_attr(
@@ -762,7 +753,7 @@ mod tests {
         );
 
         let clock = Clock::new_frozen();
-        let builder = HttpBodyBuilder::with_custom_memory(TransparentMemory::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(TransparentMemory::new()), &clock);
         let body = builder.json(&payload).unwrap();
         let bytes_view = body.into_bytes_no_buffering().unwrap();
 
@@ -779,12 +770,12 @@ mod tests {
     fn builder_merges_per_call_options_with_defaults() {
         let clock = Clock::new_frozen();
         let builder_options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(builder_options);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock).with_options(builder_options);
 
         // Per-call options override the builder-level default.
         let per_call = HttpBodyOptions::default().timeout(Duration::from_secs(5));
         let body = builder.stream(stream::iter(Vec::<Result<BytesView>>::new()), &per_call);
-        // Body created successfully — timeout was applied from per_call.
+        // The body uses the timeout from per_call.
         assert_eq!(body.content_length(), None);
     }
 

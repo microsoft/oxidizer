@@ -429,37 +429,37 @@ This crate is an alternative to the popular [`headers`][__link32] crate.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_headers">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbfVFs3NqFhWgbBn84idxhrs4bC_HSVxhRRoYbYww44PeKrh5hZIGCbGh0dHBfaGVhZGVyc2UwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbfVFs3NqFhWgbBn84idxhrs4bC_HSVxhRRoYbYww44PeKrh5hZIGCbGh0dHBfaGVhZGVyc2UwLjEuMQ
  [__link0]: https://docs.rs/http/latest/http/header/struct.HeaderMap.html
  [__link1]: https://docs.rs/http/latest/http/request/struct.Request.html
- [__link10]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::owned
- [__link11]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::FieldSink
+ [__link10]: https://docs.rs/http_headers/0.1.1/http_headers/?search=Field::owned
+ [__link11]: https://docs.rs/http_headers/0.1.1/http_headers/?search=sink::FieldSink
  [__link12]: https://docs.rs/http/latest/http/header/struct.HeaderMap.html
  [__link13]: https://docs.rs/http/latest/http/request/struct.Request.html
  [__link14]: https://docs.rs/http/latest/http/response/struct.Response.html
- [__link15]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::FieldSink
- [__link16]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::insert
- [__link17]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::remove
- [__link18]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldName
- [__link19]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldValue
+ [__link15]: https://docs.rs/http_headers/0.1.1/http_headers/?search=sink::FieldSink
+ [__link16]: https://docs.rs/http_headers/0.1.1/http_headers/?search=Field::insert
+ [__link17]: https://docs.rs/http_headers/0.1.1/http_headers/?search=Field::remove
+ [__link18]: https://docs.rs/http_headers/0.1.1/http_headers/?search=FieldName
+ [__link19]: https://docs.rs/http_headers/0.1.1/http_headers/?search=FieldValue
  [__link2]: https://docs.rs/http/latest/http/response/struct.Response.html
- [__link20]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::EncodedValues
- [__link21]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::view
- [__link22]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::owned
- [__link23]: https://docs.rs/http_headers/0.1.0/http_headers/?search=DecodeMode::Relaxed
- [__link24]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::view_with
- [__link25]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::owned_with
- [__link26]: https://docs.rs/http_headers/0.1.0/http_headers/?search=SingleValueField
- [__link27]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field
+ [__link20]: https://docs.rs/http_headers/0.1.1/http_headers/?search=sink::EncodedValues
+ [__link21]: https://docs.rs/http_headers/0.1.1/http_headers/?search=Field::view
+ [__link22]: https://docs.rs/http_headers/0.1.1/http_headers/?search=Field::owned
+ [__link23]: https://docs.rs/http_headers/0.1.1/http_headers/?search=DecodeMode::Relaxed
+ [__link24]: https://docs.rs/http_headers/0.1.1/http_headers/?search=Field::view_with
+ [__link25]: https://docs.rs/http_headers/0.1.1/http_headers/?search=Field::owned_with
+ [__link26]: https://docs.rs/http_headers/0.1.1/http_headers/?search=SingleValueField
+ [__link27]: https://docs.rs/http_headers/0.1.1/http_headers/?search=Field
  [__link28]: https://github.com/microsoft/oxidizer/blob/main/crates/http_headers/docs/PERF.md
- [__link29]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldName
+ [__link29]: https://docs.rs/http_headers/0.1.1/http_headers/?search=FieldName
  [__link3]: https://crates.io/crates/http
- [__link30]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldValue
- [__link31]: https://docs.rs/http_headers/0.1.0/http_headers/?search=sink::EncodedValues
+ [__link30]: https://docs.rs/http_headers/0.1.1/http_headers/?search=FieldValue
+ [__link31]: https://docs.rs/http_headers/0.1.1/http_headers/?search=sink::EncodedValues
  [__link32]: https://crates.io/crates/headers
- [__link4]: https://docs.rs/http_headers/0.1.0/http_headers/?search=source::FieldSource
+ [__link4]: https://docs.rs/http_headers/0.1.1/http_headers/?search=source::FieldSource
  [__link5]: https://docs.rs/http/latest/http/header/struct.HeaderMap.html
  [__link6]: https://docs.rs/http/latest/http/request/struct.Request.html
  [__link7]: https://docs.rs/http/latest/http/response/struct.Response.html
- [__link8]: https://docs.rs/http_headers/0.1.0/http_headers/?search=FieldName
- [__link9]: https://docs.rs/http_headers/0.1.0/http_headers/?search=Field::view
+ [__link8]: https://docs.rs/http_headers/0.1.1/http_headers/?search=FieldName
+ [__link9]: https://docs.rs/http_headers/0.1.1/http_headers/?search=Field::view

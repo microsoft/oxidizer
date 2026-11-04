@@ -197,6 +197,56 @@ fn queue_receive_timeout_returns_buffered_values() {
 }
 
 #[test]
+fn zero_timeout_drains_closed_queues_before_reporting_close() {
+    for bounded_queue in [false, true] {
+        let (sender, receiver) = if bounded_queue { bounded(2) } else { unbounded() };
+        sender.send(17).unwrap();
+        sender.send(23).unwrap();
+        assert!(sender.close());
+
+        assert_eq!(receiver.recv_timeout(Duration::ZERO), Ok(17));
+        assert_eq!(receiver.recv_timeout(Duration::ZERO), Ok(23));
+        assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_closed());
+        assert_eq!(sender.send(29).unwrap_err().into_value(), Some(29));
+    }
+}
+
+#[test]
+fn zero_timeout_does_not_consume_the_next_queue_value() {
+    let (sender, receiver) = bounded(1);
+    assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_timeout());
+    sender.try_send(17).unwrap();
+
+    assert_eq!(receiver.recv(), Ok(17));
+}
+
+#[test]
+fn zero_timeout_preserves_ready_closed_and_cancelled_oneshots() {
+    let (sender, receiver) = oneshot();
+    sender.send(17).unwrap();
+    assert_eq!(receiver.recv_timeout(Duration::ZERO), Ok(17));
+
+    let (sender, receiver) = oneshot::<usize>();
+    drop(sender);
+    assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_closed());
+
+    let (sender, receiver) = oneshot::<usize>();
+    assert!(receiver.recv_timeout(Duration::ZERO).unwrap_err().is_timeout());
+    assert_eq!(sender.send(23).unwrap_err().into_value(), Some(23));
+}
+
+#[test]
+fn blocking_watch_change_observes_the_final_version_before_close() {
+    let (sender, receiver) = watch(1);
+    sender.send(2).unwrap();
+    drop(sender);
+
+    assert_eq!(receiver.changed(), Ok(()));
+    assert_eq!(*receiver.borrow(), 2);
+    assert!(receiver.changed().unwrap_err().is_closed());
+}
+
+#[test]
 fn unbounded_channel_supports_multiple_producers_and_consumers() {
     let (sender, receiver) = unbounded();
     let producer_a = sender.clone();
@@ -655,6 +705,8 @@ fn channel_operations_share_runtime_telemetry_identity() {
         event_buffers: seismograph::snapshot::EventBufferDisposition::Release,
     });
 
+    // Keep the watch allocation live so recycled addresses cannot satisfy its telemetry assertions.
+    let (watch_sender, watch_receiver) = watch(1);
     let (bounded_sender, bounded_receiver) = bounded(1);
     bounded_sender.try_send(1).unwrap();
     assert!(bounded_sender.try_send(2).is_err());
@@ -668,7 +720,6 @@ fn channel_operations_share_runtime_telemetry_identity() {
     sender.try_send(4).unwrap();
     drop((bounded_sender, bounded_receiver, sender, receiver));
 
-    let (watch_sender, watch_receiver) = watch(1);
     watch_sender.send(2).unwrap();
     drop(watch_receiver);
 
@@ -681,11 +732,14 @@ fn channel_operations_share_runtime_telemetry_identity() {
         .find(|event| event.thread_id == thread_id && event.kind == EventKind::ChannelSend)
         .and_then(seismograph::recorder::event::Event::object_id)
         .unwrap();
-    assert!(
+    assert_eq!(
         snapshot
             .events
             .iter()
-            .any(|event| event.object_id() == Some(watch_id) && event.kind == EventKind::ChannelClose)
+            .filter(|event| event.thread_id == thread_id)
+            .filter(|event| event.object_id() == Some(watch_id) && event.kind == EventKind::ChannelClose)
+            .count(),
+        1
     );
     let channel_ids = snapshot
         .events

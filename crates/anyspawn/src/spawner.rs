@@ -100,12 +100,51 @@ pub struct Spawner(SpawnerKind);
 
 #[derive(Clone, ThreadAware)]
 enum SpawnerKind {
+    #[cfg(any(test, feature = "arty"))]
+    Arty(::arty::task::Scheduler),
     #[cfg(feature = "tokio")]
     Tokio(#[thread_aware(skip)] Option<::tokio::runtime::Handle>),
     Custom(CustomSpawner),
 }
 
 impl Spawner {
+    /// Creates a spawner bound to an Arty worker scheduler.
+    ///
+    /// Tasks retain the scheduler's worker association. Cloning or relocating
+    /// the `Spawner` follows [`Scheduler`](::arty::task::Scheduler) semantics,
+    /// and the scheduler does not keep its runtime running.
+    ///
+    /// # Panics
+    ///
+    /// Awaiting a returned [`JoinHandle`] will panic if Arty reports a task
+    /// panic, cancellation, or shutdown rejection.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # fn main() {
+    /// # #[cfg(feature = "arty")] {
+    /// # (|| {
+    /// use anyspawn::Spawner;
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// # runtime.scheduler().block_on(async |cx| {
+    /// let spawner = Spawner::new_arty(cx.scheduler().clone());
+    /// let result = spawner.spawn(async { 42 }).await;
+    /// assert_eq!(result, 42);
+    /// # })?;
+    /// runtime.stop()?;
+    /// # Ok::<(), arty::runtime::Error>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
+    /// ```
+    #[cfg(any(test, feature = "arty"))]
+    pub fn new_arty(scheduler: ::arty::task::Scheduler) -> Self {
+        Self(SpawnerKind::Arty(scheduler))
+    }
+
     /// Creates a spawner that uses the Tokio runtime.
     ///
     /// Tasks are spawned via [`tokio::spawn`], which requires a Tokio runtime
@@ -128,7 +167,6 @@ impl Spawner {
     /// # }
     /// ```
     #[cfg(feature = "tokio")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     pub fn new_tokio() -> Self {
         Self(SpawnerKind::Tokio(None))
     }
@@ -153,7 +191,6 @@ impl Spawner {
     /// # }
     /// ```
     #[cfg(feature = "tokio")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     pub fn new_tokio_with_handle(handle: ::tokio::runtime::Handle) -> Self {
         Self(SpawnerKind::Tokio(Some(handle)))
     }
@@ -208,15 +245,17 @@ impl Spawner {
     /// ```
     pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
+            #[cfg(any(test, feature = "arty"))]
+            SpawnerKind::Arty(scheduler) => JoinHandle::new(JoinHandleInner::Arty(scheduler.spawn(move |_| work))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
                     Some(h) => h.spawn(work),
                     None => ::tokio::spawn(work),
                 };
-                JoinHandle(JoinHandleInner::Tokio(jh))
+                JoinHandle::new(JoinHandleInner::Tokio(jh))
             }
-            SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.spawn(work))),
+            SpawnerKind::Custom(c) => JoinHandle::new(JoinHandleInner::Custom(c.spawn(work))),
         }
     }
 
@@ -225,7 +264,8 @@ impl Spawner {
     /// Unlike [`spawn`](Self::spawn), this does not guarantee execution on the current runtime thread.
     /// The `data` must implement [`ThreadAware`](thread_aware::ThreadAware) so
     /// the spawner can relocate it before execution. The function pointer `f`
-    /// receives ownership of `data` and returns a future.
+    /// receives ownership of `data` and returns a future. The result must also
+    /// implement `ThreadAware`.
     ///
     /// # Examples
     ///
@@ -244,20 +284,22 @@ impl Spawner {
     /// ```
     pub fn spawn_anywhere<T, D, F>(&self, data: D, f: fn(D) -> F) -> JoinHandle<T>
     where
-        T: Send + 'static,
+        T: ThreadAware + 'static,
         D: ThreadAware + 'static,
         F: Future<Output = T> + Send + 'static,
     {
         match &self.0 {
+            #[cfg(any(test, feature = "arty"))]
+            SpawnerKind::Arty(scheduler) => JoinHandle::new(JoinHandleInner::Arty(scheduler.spawn_anywhere(data, f))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
                     Some(h) => h.spawn(f(data)),
                     None => ::tokio::spawn(f(data)),
                 };
-                JoinHandle(JoinHandleInner::Tokio(jh))
+                JoinHandle::new(JoinHandleInner::Tokio(jh))
             }
-            SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_anywhere(data, f))),
+            SpawnerKind::Custom(c) => JoinHandle::new(JoinHandleInner::Custom(c.spawn_anywhere(data, f))),
         }
     }
 
@@ -301,15 +343,17 @@ impl Spawner {
         F: FnOnce() -> T + Send + 'static,
     {
         match &self.0 {
+            #[cfg(any(test, feature = "arty"))]
+            SpawnerKind::Arty(scheduler) => JoinHandle::new(JoinHandleInner::Arty(scheduler.spawn_blocking(f))),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
                     Some(h) => h.spawn_blocking(f),
                     None => ::tokio::task::spawn_blocking(f),
                 };
-                JoinHandle(JoinHandleInner::Tokio(jh))
+                JoinHandle::new(JoinHandleInner::Tokio(jh))
             }
-            SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_blocking(f))),
+            SpawnerKind::Custom(c) => JoinHandle::new(JoinHandleInner::Custom(c.spawn_blocking(f))),
         }
     }
 }
@@ -317,6 +361,8 @@ impl Spawner {
 impl Debug for Spawner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
+            #[cfg(any(test, feature = "arty"))]
+            SpawnerKind::Arty(_) => f.debug_tuple("Spawner").field(&"arty").finish(),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(None) => f.debug_tuple("Spawner").field(&"tokio").finish(),
             #[cfg(feature = "tokio")]

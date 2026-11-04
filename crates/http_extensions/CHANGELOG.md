@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.14.0] - 2026-11-02
+
+- Breaking: Replace `HttpBodyBuilder::with_custom_memory` with
+  `HttpBodyBuilder::new(OpaqueMemory::new(provider), clock)`.
+- Breaking: Pass `OpaqueMemory` instead of `GlobalPool` to `HttpBodyBuilder::new`.
+- Keep each memory provider's behavior when cloning body builders or moving them between threads.
+  Existing body storage and streaming policies do not change.
+- Simplify public HTTP and body documentation.
+- Update the requirement for local package `bytesbuf` from `0.12.0` to `0.13.0`.
+- Update the requirement for local package `layered` from `0.3.8` to `0.3.9`.
+- Update the requirement for local package `ohno` from `0.5.3` to `0.5.4`.
+- Update the requirement for local package `recoverable` from `0.3.0` to `0.3.1`.
+- Update the requirement for local package `templated_uri` from `0.7.0` to `0.7.1`.
+- Update the requirement for local package `thread_aware` from `0.12.1` to `0.12.2`.
+- Update the requirement for local package `tick` from `0.8.0` to `0.9.0`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+- Update the development requirement for `gungraun` from `=0.19.4` to `=0.20.0`.
+
+## [0.13.0] - 2026-10-20
+
+- The public API exposes types from `bytesbuf`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: bytesbuf ^0.11.0 -> 0.12.0; layered ^0.3.7 -> 0.3.8; ohno ^0.5.2 -> 0.5.3; recoverable ^0.2.0 -> 0.3.0; templated_uri ^0.6.0 -> 0.7.0; thread_aware ^0.12.0 -> 0.12.1; tick ^0.7.1 -> 0.8.0.
+
 ## [0.12.0] - 2026-10-05
 
 - ⚠️ Breaking

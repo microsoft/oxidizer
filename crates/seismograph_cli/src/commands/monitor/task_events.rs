@@ -132,6 +132,7 @@ enum Family {
     RwLock,
     Barrier,
     Condvar,
+    Notify,
     Once,
     Channel,
     // Poison events do not identify the lock family. Do not silently join a
@@ -154,6 +155,7 @@ impl Family {
             | K::RwLockWriteRelease => Self::RwLock,
             K::BarrierAccess | K::BarrierContention | K::BarrierRelease => Self::Barrier,
             K::CondvarAccess | K::CondvarContention | K::CondvarNotify => Self::Condvar,
+            K::NotifyAccess | K::NotifyContention | K::NotifySignal => Self::Notify,
             K::OnceAccess | K::OnceContention | K::OnceInitialize => Self::Once,
             K::ChannelSend
             | K::ChannelSendContention

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Basic retry middleware example with automatic input cloning and simple recovery logic.
+//! This example retries calls with cloned input and simple recovery rules.
 
 use std::io::Error;
 
@@ -16,7 +16,7 @@ async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
     let context = ResilienceContext::new(&clock);
 
-    // Define stack with retry layer
+    // Define a stack with a retry layer.
     let stack = (
         Retry::layer("my_retry", &context)
             .clone_input() // Automatically clone input for retries
@@ -27,7 +27,7 @@ async fn main() -> Result<(), AppError> {
         Execute::new(execute_operation),
     );
 
-    // Create the service from the stack
+    // Create the service from the stack.
     let service = stack.into_service();
 
     match service.execute("value".to_string()).await {
@@ -38,7 +38,7 @@ async fn main() -> Result<(), AppError> {
     Ok(())
 }
 
-// 20% chance of failing with a transient error
+// Return a temporary error for 10% of calls.
 async fn execute_operation(input: String) -> Result<String, Error> {
     if fastrand::i16(0..10) > 8 {
         Err(Error::other("transient execution error"))

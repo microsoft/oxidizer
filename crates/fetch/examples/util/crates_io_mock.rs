@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Mocked replies from "Crates.io" api for a specific crate / crate query
+//! Fake crates.io responses for a crate name or search query.
 use http::StatusCode;
 use http_extensions::{FakeHandler, HttpError, HttpResponse, HttpResponseBuilder};
 use serde_json::{Value, json};

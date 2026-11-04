@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.1] - 2026-11-02
+
+- Update cache-tier, synchronization, and test dependencies. This release does not change the memory
+  cache's source code.
+- Update the requirement for local package `cachet_tier` from `0.6.0` to `0.6.1`.
+- Update the requirement for local package `ohno` from `0.5.3` to `0.5.4`.
+- Update the requirement for local package `performables` from `0.3.0` to `0.3.1`.
+- Update the requirement for local package `thread_aware` from `0.12.1` to `0.12.2`.
+- Update the development requirement for `tokio` from `1.48.0` to `1.53.3`.
+
+## [0.9.0] - 2026-10-20
+
+- The public API exposes types from `recoverable`; upgrading to its incompatible release changes those public type identities.
+- Update local dependency requirements: cachet_tier ^0.5.1 -> 0.6.0; ohno ^0.5.2 -> 0.5.3; performables ^0.2.0 -> 0.3.0; thread_aware ^0.12.0 -> 0.12.1.
+
 ## [0.8.1] - 2026-10-05
 
 - 🔧 Maintenance

@@ -22,13 +22,15 @@
 # [package.metadata.anvil.miri]
 # exclude = true
 #
-# They can still compile as dependencies of selected consumers. Workspace runs
-# translate the metadata to `--exclude`; impact-scoped runs remove matching
-# `--package name@version` pairs before compilation.
+# They can still compile as dependencies of selected consumers. Selection is
+# `--workspace --exclude ...` (unambiguous even when a registry dependency
+# shares a member's name and version); opted-out packages are added to the
+# `--exclude` list.
 #
 # ANVIL_MIRI_JOBS overrides the default of one artifact worker per logical processor.
 
 # Run Miri tests for affected workspace packages.
+[group("anvil")]
 [arg("package", long, pattern='(?:[A-Za-z0-9_.-]+)?')]
 [arg("test", long, pattern='(?:[A-Za-z0-9_.:-]+)?')]
 [arg("example", long, pattern='(?:[A-Za-z0-9_.-]+)?')]
@@ -89,7 +91,8 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
         exit 2
     }
 
-    $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    $env:RUSTUP_TOOLCHAIN = '{{ rust_nightly }}'
+    $include = (& "{{ just_executable() }}" _anvil-impact-exclude affected)
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
     if (-not $package -and $include -eq '--skip') {
@@ -123,8 +126,6 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
         exit 0
     }
 
-    # The metadata and compiler-artifact streams must come from the same Cargo
-    # version because Cargo changed package-ID formats in 1.78.
     $metadata = & cargo '+{{ rust_nightly }}' metadata --no-deps --format-version 1
     if ($LASTEXITCODE -ne 0) {
         Write-Error 'anvil miri: cargo metadata failed'
@@ -145,47 +146,38 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
     $packageLabels = @{}
     $excludedPackages = [System.Collections.Generic.SortedSet[string]]::new([System.StringComparer]::Ordinal)
     $excludedPackageIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-    foreach ($package in $metadata.packages) {
-        $packageId = [string]$package.id
+    foreach ($member in $metadata.packages) {
+        $packageId = [string]$member.id
         if (-not $workspaceMembers.Contains($packageId)) { continue }
-        $packageDirectories[$packageId] = Split-Path -Parent ([string]$package.manifest_path)
-        $packageLabels[$packageId] = "$($package.name) $($package.version)"
-        if ($package.metadata.anvil.miri.exclude -eq $true) {
-            [void]$excludedPackages.Add([string]$package.name)
+        $packageDirectories[$packageId] = Split-Path -Parent ([string]$member.manifest_path)
+        $packageLabels[$packageId] = "$($member.name) $($member.version)"
+        if ($member.metadata.anvil.miri.exclude -eq $true) {
+            [void]$excludedPackages.Add([string]$member.name)
             [void]$excludedPackageIds.Add($packageId)
         }
     }
 
     if ($packageArgs -contains '--workspace') {
-        if ($workspaceMembers.Count -gt 0 -and $excludedPackageIds.Count -eq $workspaceMembers.Count) {
-            Write-Host 'anvil miri: all selected packages are excluded; nothing to test'
-            exit 0
+        # Impact selection arrives as `--workspace --exclude <name> ...`;
+        # add the Miri opt-outs that are still selected.
+        $impactExcluded = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        for ($i = 0; $i -lt $packageArgs.Count; $i++) {
+            if ($packageArgs[$i] -eq '--exclude' -and ($i + 1) -lt $packageArgs.Count) {
+                [void]$impactExcluded.Add($packageArgs[++$i])
+            }
         }
         foreach ($packageName in $excludedPackages) {
-            $packageArgs += @('--exclude', $packageName)
-        }
-    } else {
-        $filtered = [System.Collections.Generic.List[string]]::new()
-        for ($i = 0; $i -lt $packageArgs.Count; $i++) {
-            if ($packageArgs[$i] -ne '--package') {
-                Write-Error "anvil miri: unexpected impact argument '$($packageArgs[$i])'"
-                exit 1
+            if ($impactExcluded.Add($packageName)) {
+                $packageArgs += @('--exclude', $packageName)
             }
-            if (($i + 1) -ge $packageArgs.Count) {
-                Write-Error 'anvil miri: --package is missing its package spec'
-                exit 1
-            }
-            $packageSpec = $packageArgs[++$i]
-            $packageName = ($packageSpec -split '@', 2)[0]
-            if ($excludedPackages.Contains($packageName)) { continue }
-            $filtered.Add('--package')
-            $filtered.Add($packageSpec)
         }
-        $packageArgs = $filtered.ToArray()
-        if ($packageArgs.Count -eq 0) {
+        if ($workspaceMembers.Count -gt 0 -and $impactExcluded.Count -ge $workspaceMembers.Count) {
             Write-Host 'anvil miri: all selected packages are excluded; nothing to test'
             exit 0
         }
+    } elseif ($excludedPackages.Contains(($package -split '@', 2)[0])) {
+        Write-Host 'anvil miri: all selected packages are excluded; nothing to test'
+        exit 0
     }
 
     $logRoot = Join-Path ([IO.Path]::GetTempPath()) "anvil-miri-$PID-$([guid]::NewGuid())"
@@ -371,9 +363,9 @@ _anvil-miri-test profile package="" test_filter="" example="": anvil-impact
 # --- pr-runtime-analysis members ---
 
 # Install prerequisites for the `anvil-miri` recipe.
-[group("anvil-setup")]
+[private]
 anvil-miri-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
 
 # Validate prerequisites for the `anvil-miri` recipe.
-[group("anvil-setup")]
+[private]
 anvil-miri-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs

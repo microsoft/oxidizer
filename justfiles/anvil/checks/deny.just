@@ -11,6 +11,7 @@
 # depend on the adopter's default shell (absent/varying on Windows).
 
 # Check dependency licenses, bans, sources, and advisories.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-deny: anvil-deny-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -18,9 +19,9 @@ anvil-deny: anvil-deny-validate-prereqs
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-deny` recipe.
-[group("anvil-setup")]
+[private]
 anvil-deny-setup installer="install": (anvil-tool-cargo-deny-install installer)
 
 # Validate prerequisites for the `anvil-deny` recipe.
-[group("anvil-setup")]
+[private]
 anvil-deny-validate-prereqs: anvil-tool-cargo-deny-validate-prereqs

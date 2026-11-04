@@ -7,9 +7,9 @@ use tick::Clock;
 
 use crate::breaker::BreakerId;
 
-/// Arguments for the [`recovery_with`][super::BreakerLayer::recovery_with] callback function.
+/// Provides data to the [`recovery_with`][super::BreakerLayer::recovery_with] callback.
 ///
-/// Provides context for recovery classification in the circuit breaker.
+/// Use this data to classify output for the circuit breaker.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct RecoveryArgs<'a> {
@@ -24,16 +24,16 @@ impl RecoveryArgs<'_> {
         self.breaker_id
     }
 
-    /// Returns a reference to the clock use by the circuit breaker.
+    /// Returns the clock used by the circuit breaker.
     #[must_use]
     pub fn clock(&self) -> &Clock {
         self.clock
     }
 }
 
-/// Arguments for the [`rejected_input`][super::BreakerLayer::rejected_input] callback function.
+/// Provides data to the [`rejected_input`][super::BreakerLayer::rejected_input] callback.
 ///
-/// Provides context for generating outputs when the inputs are rejected by the circuit breaker.
+/// Use this data to create output for rejected input.
 #[derive(Debug)]
 pub struct RejectedInputArgs<'a> {
     pub(crate) breaker_id: &'a BreakerId,
@@ -47,9 +47,9 @@ impl RejectedInputArgs<'_> {
     }
 }
 
-/// Arguments for the [`on_probing`][super::BreakerLayer::on_probing] callback function.
+/// Provides data to the [`on_probing`][super::BreakerLayer::on_probing] callback.
 ///
-/// Provides context when the circuit breaker enters the probing state to test if the service has recovered.
+/// Use this data when the circuit breaker probes the service.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct OnProbingArgs<'a> {
@@ -64,9 +64,9 @@ impl OnProbingArgs<'_> {
     }
 }
 
-/// Arguments for the [`on_closed`][super::BreakerLayer::on_closed] callback function.
+/// Provides data to the [`on_closed`][super::BreakerLayer::on_closed] callback.
 ///
-/// Provides context when the circuit breaker transitions to the closed state, allowing normal operation.
+/// Use this data when the circuit closes.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct OnClosedArgs<'a> {
@@ -88,9 +88,9 @@ impl OnClosedArgs<'_> {
     }
 }
 
-/// Arguments for the [`on_opened`][super::BreakerLayer::on_opened] callback function.
+/// Provides data to the [`on_opened`][super::BreakerLayer::on_opened] callback.
 ///
-/// Provides context when the circuit breaker transitions to the open state, blocking inputs due to failures.
+/// Use this data when failures open the circuit.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct OnOpenedArgs<'a> {

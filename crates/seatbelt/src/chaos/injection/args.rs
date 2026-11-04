@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Arguments passed to the [`output_with`][super::InjectionLayer::output_with] callback.
+/// Provides data to the [`output_with`][super::InjectionLayer::output_with] callback.
 ///
-/// This type is `#[non_exhaustive]` so that additional fields can be added in the
-/// future without a breaking change.
+/// This type is `#[non_exhaustive]`, so later versions can add fields.
 #[derive(Debug)]
 #[non_exhaustive]
 #[expect(
@@ -13,10 +12,9 @@
 )]
 pub struct InjectionOutputArgs {}
 
-/// Arguments passed to the [`rate_with`][super::InjectionLayer::rate_with] callback.
+/// Provides data to the [`rate_with`][super::InjectionLayer::rate_with] callback.
 ///
-/// This type is `#[non_exhaustive]` so that additional fields can be added in the
-/// future without a breaking change.
+/// This type is `#[non_exhaustive]`, so later versions can add fields.
 #[derive(Debug)]
 #[non_exhaustive]
 #[expect(

@@ -5,16 +5,14 @@ use crate::RecoveryInfo;
 
 /// An evaluated execution result.
 ///
-/// From the perspective of a circuit breaker, an execution can either
-/// succeed or fail. This enum captures that binary outcome, plus the
-/// [`Abandoned`](Self::Abandoned) case for executions that were accepted
-/// by the circuit breaker but never completed (e.g. a dropped future).
+/// A circuit breaker records success, failure, or abandonment.
+/// An abandoned execution started but did not finish.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub(crate) enum ExecutionResult {
     Success,
     Failure,
 
-    /// The execution was accepted but never completed (e.g. its future was dropped or cancelled).
+    /// The execution started, but its future was dropped or canceled.
     Abandoned,
 }
 

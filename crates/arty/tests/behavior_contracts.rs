@@ -9,25 +9,21 @@
 mod support;
 
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
-use std::task::{Context, Poll, Waker};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 
-use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeOperations, WorkersPolicy};
-use arty::task::{Builtins, Scheduler};
+use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
+use arty::task::{Context, Scheduler};
 use arty::time::Clock;
 #[cfg(feature = "macros")]
 use futures::future::join_all;
-use observed::Sink;
-use observed_testing::{TEST_ID, test_emitter};
 use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
-
-testing_aids::init_tracing!();
 
 fn runtime(workers: usize) -> Runtime {
     Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
@@ -38,7 +34,15 @@ fn worker_scheduler(runtime: &Runtime) -> Scheduler {
 }
 
 fn count_workers(runtime: &Runtime) -> usize {
-    let tasks = worker_scheduler(runtime).spawn_everywhere((), |()| async { thread::current().id() });
+    let (scheduler, control) = runtime
+        .scheduler()
+        .block_on(async |cx| (cx.scheduler().clone(), cx.control().clone()))
+        .unwrap();
+    let tasks: Vec<_> = control
+        .workers()
+        .into_iter()
+        .map(|worker| scheduler.spawn_at(worker, (), |()| async { thread::current().id() }))
+        .collect();
     let count = tasks.len();
     let workers: std::collections::HashSet<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
     assert_eq!(workers.len(), count);
@@ -58,9 +62,103 @@ fn completes_without_deadlock(body: impl FnOnce() + Send + 'static) {
     }
 }
 
+/// Keeps callbacks blocked so queued work remains available while the test observes pool growth.
+struct BlockingGate {
+    released: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl BlockingGate {
+    fn wait(&self) {
+        let mut released = self.released.lock().unwrap();
+        while !*released {
+            released = self.changed.wait(released).unwrap();
+        }
+    }
+
+    fn release(&self) {
+        *self.released.lock().unwrap() = true;
+        self.changed.notify_all();
+    }
+}
+
+/// Releases blocked callbacks during unwinding so runtime teardown can complete.
+struct ReleaseBlockingGate(Arc<BlockingGate>);
+
+impl Drop for ReleaseBlockingGate {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
+/// Exercises automatic pool growth and its configured thread limit with a blocked workload.
+fn assert_blocking_pool_limit(max_threads: usize) {
+    const QUEUED_TASK_COUNT: usize = 6;
+
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .blocking_pool(BlockingPoolPolicy::shared().max(max_threads))
+        .build()
+        .unwrap();
+    let gate = Arc::new(BlockingGate {
+        released: Mutex::new(false),
+        changed: Condvar::new(),
+    });
+    let _release_gate = ReleaseBlockingGate(Arc::clone(&gate));
+    let scheduler = runtime.scheduler();
+    let (blocker_started_tx, blocker_started_rx) = mpsc::channel();
+    let blocker = scheduler.spawn_blocking({
+        let gate = Arc::clone(&gate);
+        move || {
+            let worker = thread::current().id();
+            blocker_started_tx.send(worker).unwrap();
+            gate.wait();
+            worker
+        }
+    });
+    let blocker_worker = blocker_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    let (queued_started_tx, queued_started_rx) = mpsc::channel();
+    // Keep enough callbacks blocked to exceed the pool's per-thread growth threshold.
+    let queued: [_; QUEUED_TASK_COUNT] = std::array::from_fn(|_| {
+        let gate = Arc::clone(&gate);
+        let queued_started_tx = queued_started_tx.clone();
+        scheduler.spawn_blocking(move || {
+            let worker = thread::current().id();
+            queued_started_tx.send(worker).unwrap();
+            gate.wait();
+            worker
+        })
+    });
+    drop(queued_started_tx);
+
+    if max_threads > 1 {
+        let growth_worker = queued_started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+        assert_ne!(growth_worker, blocker_worker);
+    }
+
+    gate.release();
+    let mut worker_ids = HashSet::new();
+    worker_ids.insert(blocker.join().unwrap());
+    worker_ids.extend(queued.into_iter().map(|task| task.join().unwrap()));
+    runtime.stop().unwrap();
+
+    assert_eq!(worker_ids.len(), max_threads);
+}
+
 #[test]
 fn public_policy_defaults_are_automatic_and_shared() {
     assert_eq!(BlockingPoolPolicy::default(), BlockingPoolPolicy::shared());
+}
+
+#[test]
+fn blocking_pool_grows_when_overloaded_below_its_limit() {
+    assert_blocking_pool_limit(2);
+}
+
+#[test]
+fn blocking_pool_growth_respects_its_configured_limit() {
+    assert_blocking_pool_limit(1);
 }
 
 #[test]
@@ -90,26 +188,15 @@ fn zero_stack_size_is_rejected_by_the_setter() {
 }
 
 #[test]
-fn resource_setters_preserve_worker_count_stack_and_pool_independently() {
-    const STACK: usize = 4 * 1024 * 1024;
-    let (sink, processor) = test_emitter(TEST_ID);
+fn resource_setters_preserve_worker_count_and_pool_policy() {
     let runtime = Runtime::builder()
-        .stack_size(STACK)
         .blocking_pool(BlockingPoolPolicy::per_worker())
         .workers(WorkersPolicy::at_most(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .workers(WorkersPolicy::exactly(2))
-        .sink(sink)
         .build()
         .unwrap();
     assert_eq!(count_workers(&runtime), 2);
-    runtime
-        .scheduler()
-        .block_on(async |cx| {
-            assert!(!cx.sink().is_noop());
-            cx.sink().flush().unwrap();
-        })
-        .unwrap();
     let first = worker_scheduler(&runtime);
     let second = worker_scheduler(&runtime);
     assert_eq!(
@@ -117,17 +204,6 @@ fn resource_setters_preserve_worker_count_stack_and_pool_independently() {
         second.spawn_blocking(|| thread::current().id()).join().unwrap()
     );
     runtime.stop().unwrap();
-    let events = processor.events();
-    let started: Vec<_> = events.iter().filter(|event| event.name() == "arty.rt.started").collect();
-    assert_eq!(started.len(), 1);
-    let configured_minimum = std::env::var("RUST_MIN_STACK")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or_default();
-    let dimensions = started[0].dimensions();
-    assert!(dimensions.contains(&("processors.used".into(), "2".into())));
-    assert!(dimensions.contains(&("blocking_worker_pool.mode".into(), "shared".into())));
-    assert!(dimensions.contains(&("stack_size_bytes".into(), STACK.max(configured_minimum).to_string().into())));
 }
 
 #[test]
@@ -149,11 +225,7 @@ fn construction_and_shutdown_work_inside_a_futures_executor() {
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "self-stop intentionally returns before the worker can finish; native and careful suites retain the guard contract"
-)]
-fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
+fn explicit_stop_on_a_task_worker_panics() {
     completes_without_deadlock(|| {
         let runtime = runtime(1);
         let scheduler = worker_scheduler(&runtime);
@@ -163,21 +235,21 @@ fn explicit_stop_on_an_async_worker_returns_an_error_without_unwinding() {
                 .join()
                 .unwrap()
         );
-        let outcome = scheduler.spawn(async move |_| runtime.stop()).join().unwrap();
-        assert!(outcome.unwrap_err().to_string().contains("async Arty worker"));
+        let error = scheduler.spawn(async move |_| runtime.stop()).join().unwrap_err();
+        assert!(error.is_panic());
     });
 }
 
 #[test]
-fn explicit_stop_in_its_blocking_callback_returns_an_error_without_self_joining() {
+fn explicit_stop_on_a_blocking_worker_panics() {
     let runtime = runtime(1);
     let scheduler = worker_scheduler(&runtime);
     assert_ne!(
         scheduler.spawn_blocking(|| thread::current().id()).join().unwrap(),
         scheduler.spawn(async |_| thread::current().id()).join().unwrap()
     );
-    let outcome = scheduler.spawn_blocking(move || runtime.stop()).join().unwrap();
-    assert!(outcome.unwrap_err().to_string().contains("blocking callback"));
+    let error = scheduler.spawn_blocking(move || runtime.stop()).join().unwrap_err();
+    assert!(error.is_panic());
 }
 
 #[test]
@@ -228,46 +300,48 @@ fn worker_context_belongs_to_one_runtime_and_rejects_nested_block_on() {
 }
 
 #[test]
-fn blocking_callbacks_can_run_borrowing_tasks_on_an_async_worker() {
+fn blocking_callbacks_reject_block_on_before_factory_submission() {
     let runtime = Arc::new(runtime(1));
     let captured = Arc::clone(&runtime);
-    let (on_worker, value) = runtime
+    let invoked = Arc::new(AtomicBool::new(false));
+    let invoked_by_factory = Arc::clone(&invoked);
+    let error = runtime
         .scheduler()
         .spawn_blocking(move || {
-            let mut value = 40;
-            let on_worker = captured
-                .scheduler()
-                .block_on(async |cx| {
-                    let child = cx.scheduler().spawn(async |_| 2).await.unwrap();
-                    let local = Rc::new(child);
-                    value += *local;
-                    cx.thread().id() == thread::current().id()
-                })
-                .unwrap();
-            (on_worker, value)
+            captured.scheduler().block_on(move |_| {
+                invoked_by_factory.store(true, Ordering::Relaxed);
+                async { 42 }
+            })
         })
         .join()
-        .unwrap();
-    assert_eq!((on_worker, value), (true, 42));
+        .unwrap()
+        .unwrap_err();
+
+    assert_eq!(error.to_string(), "block_on cannot be called from an Arty worker");
+    assert!(!invoked.load(Ordering::Relaxed));
     Arc::try_unwrap(runtime).unwrap().stop().unwrap();
 }
 
 #[test]
-fn builtins_publish_the_same_services_on_every_worker() {
+fn context_publishes_scheduler_and_clock_on_every_worker() {
     let runtime = runtime(2);
-    let builtins = runtime.scheduler().block_on(async |cx| cx).unwrap();
-    let tasks = builtins.scheduler().spawn_everywhere(builtins.clone(), |cx: Builtins| async move {
-        let scheduler: &Scheduler = cx.as_ref();
-        let clock: &Clock = cx.as_ref();
-        let sink: &Sink = cx.as_ref();
-        assert!(std::ptr::eq(scheduler, cx.scheduler()));
-        assert!(std::ptr::eq(clock, cx.clock()));
-        assert!(std::ptr::eq(sink, cx.sink()));
-        assert!(sink.is_noop());
-        assert_eq!(cx.thread().id(), thread::current().id());
-        assert_eq!(scheduler.spawn(async |_| 42).await.unwrap(), 42);
-        cx.thread().id()
-    });
+    let context = runtime.scheduler().block_on(async |cx| cx).unwrap();
+    let tasks: Vec<_> = context
+        .control()
+        .workers()
+        .into_iter()
+        .map(|worker| {
+            context.scheduler().spawn_at(worker, context.clone(), |cx: Context| async move {
+                let scheduler: &Scheduler = cx.as_ref();
+                let clock: &Clock = cx.as_ref();
+                assert!(std::ptr::eq(scheduler, cx.scheduler()));
+                assert!(std::ptr::eq(clock, cx.clock()));
+                assert_eq!(cx.thread().id(), thread::current().id());
+                assert_eq!(scheduler.spawn(async |_| 42).await.unwrap(), 42);
+                cx.thread().id()
+            })
+        })
+        .collect();
     assert_eq!(tasks.len(), 2);
     let workers: std::collections::HashSet<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
     assert_eq!(workers.len(), 2);
@@ -276,12 +350,11 @@ fn builtins_publish_the_same_services_on_every_worker() {
 
 #[cfg(all(feature = "macros", not(miri)))]
 #[arty::test(workers = 2)]
-async fn worker_services_are_ready_before_spawning(cx: Builtins) {
-    let count = many_cpus::SystemHardware::current().processors().len().min(2);
+async fn worker_services_are_ready_before_spawning(cx: Context) {
     let scheduler = cx.scheduler();
-    let tasks: Vec<_> = (0..count)
+    let tasks: Vec<_> = (0..2)
         .map(|_| {
-            scheduler.spawn_anywhere(cx.clone(), |worker: Builtins| async move {
+            scheduler.spawn_anywhere(cx.clone(), |worker: Context| async move {
                 worker.thread().id() == thread::current().id()
             })
         })
@@ -290,44 +363,6 @@ async fn worker_services_are_ready_before_spawning(cx: Builtins) {
     let actual = join_all(tasks).await.into_iter().map(Result::unwrap).collect::<Vec<_>>();
 
     assert_eq!(actual, expected);
-}
-
-#[cfg(all(feature = "macros", not(miri)))]
-#[arty::test]
-async fn emitter_is_available_by_default(cx: Builtins) {
-    assert!(cx.sink().is_noop());
-}
-
-#[cfg(not(miri))]
-#[test]
-fn configured_emitter_is_available_from_builtins() {
-    use observed::metadata::EventDescription;
-    use observed::processing::{EventProcessor, EventView};
-
-    struct TestProcessor;
-
-    impl EventProcessor for TestProcessor {
-        fn is_interested(&self, _description: &EventDescription) -> bool {
-            true
-        }
-
-        fn process(&self, _event: &EventView<'_>) {}
-
-        fn flush(&self) -> Result<(), observed::FlushError> {
-            Ok(())
-        }
-    }
-
-    let sink = Sink::new("test", vec![Arc::new(TestProcessor)], tick::SimpleClock::new_frozen());
-    let runtime = Runtime::builder().sink(sink).build().unwrap();
-
-    runtime
-        .scheduler()
-        .block_on(async move |cx: Builtins| {
-            assert!(!cx.sink().is_noop());
-            cx.sink().flush().unwrap();
-        })
-        .unwrap();
 }
 
 #[cfg(feature = "test-util")]
@@ -377,7 +412,7 @@ fn stopping_one_runtime_does_not_stop_another() {
     let first_worker = first_scheduler.spawn(async |cx| cx.thread().id()).join().unwrap();
     let second_worker = second_scheduler.spawn(async |cx| cx.thread().id()).join().unwrap();
     assert_ne!(first_worker, second_worker);
-    RuntimeOperations::from(&first).request_stop();
+    support::runtime_control(&first).request_stop();
     first.stop().unwrap();
     assert!(first_scheduler.spawn(async |_| 42).join().unwrap_err().is_shutdown());
     assert_eq!(second_scheduler.spawn(async |_| 42).join().unwrap(), 42);
@@ -385,9 +420,13 @@ fn stopping_one_runtime_does_not_stop_another() {
 }
 
 #[test]
-fn dropping_another_runtime_from_a_worker_does_not_wait_for_its_blocking_callback() {
+fn dropping_another_runtime_from_a_worker_panics() {
     let target = runtime(1);
-    let caller = runtime(1);
+    let caller = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .panic(PanicPolicy::ignore())
+        .build()
+        .unwrap();
     let retained = worker_scheduler(&target);
     let (started, ready) = mpsc::channel();
     let (release, gate) = mpsc::channel();
@@ -397,11 +436,12 @@ fn dropping_another_runtime_from_a_worker_does_not_wait_for_its_blocking_callbac
         42
     });
     ready.recv_timeout(TEST_TIMEOUT).unwrap();
-    caller
+    let error = caller
         .scheduler()
         .spawn_anywhere(Unaware(target), |_, Unaware(target)| async move { drop(target) })
         .join()
-        .unwrap();
+        .unwrap_err();
+    assert!(error.is_panic());
     assert!(retained.spawn(async |_| 42).join().unwrap_err().is_shutdown());
     release.send(()).unwrap();
     assert_eq!(callback.join().unwrap(), 42);
@@ -410,7 +450,7 @@ fn dropping_another_runtime_from_a_worker_does_not_wait_for_its_blocking_callbac
 
 #[cfg(feature = "macros")]
 #[arty::test]
-async fn application_errors_remain_results_for_async_and_blocking_tasks(cx: Builtins) {
+async fn application_errors_remain_results_for_async_and_blocking_tasks(cx: Context) {
     assert_eq!(
         cx.scheduler().spawn(async |_| Err::<(), _>("application")).await.unwrap(),
         Err("application")
@@ -434,11 +474,11 @@ fn remote_join_accepts_a_send_only_result_and_rejects_repolling() {
     observed.recv_timeout(TEST_TIMEOUT).unwrap();
     // This factory cannot run on the same worker until the signalled poll returns.
     scheduler.spawn(async |_| ()).join().unwrap();
-    let Poll::Ready(Ok(value)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
+    let Poll::Ready(Ok(value)) = task.as_mut().poll(&mut PollContext::from_waker(Waker::noop())) else {
         panic!("an already-completed task must be immediately ready");
     };
     assert_eq!(value.get(), 42);
-    catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut Context::from_waker(Waker::noop())))).unwrap_err();
+    catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut PollContext::from_waker(Waker::noop())))).unwrap_err();
     assert_eq!(
         runtime.scheduler().spawn_anywhere((), |_, ()| async { 123u32 }).join().unwrap(),
         123
@@ -449,23 +489,23 @@ fn remote_join_accepts_a_send_only_result_and_rejects_repolling() {
 #[test]
 fn rejected_remote_joins_report_shutdown_then_reject_repolling() {
     let runtime = runtime(1);
-    RuntimeOperations::from(&runtime).request_stop();
+    support::runtime_control(&runtime).request_stop();
     let mut task = Box::pin(runtime.scheduler().spawn_anywhere((), |_, ()| async {}));
-    let Poll::Ready(Err(error)) = task.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
+    let Poll::Ready(Err(error)) = task.as_mut().poll(&mut PollContext::from_waker(Waker::noop())) else {
         panic!("a rejected submission must be immediately ready");
     };
     assert!(error.is_shutdown());
     assert!(!error.is_panic());
-    catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut Context::from_waker(Waker::noop())))).unwrap_err();
+    catch_unwind(AssertUnwindSafe(|| task.as_mut().poll(&mut PollContext::from_waker(Waker::noop())))).unwrap_err();
     runtime.stop().unwrap();
 }
 
 #[cfg(feature = "macros")]
 mod entry_points {
-    use arty::task::Builtins;
+    use arty::task::Context;
 
     #[arty::main(workers = 1)]
-    async fn application_error(_cx: Builtins) -> Result<(), &'static str> {
+    async fn application_error(_cx: Context) -> Result<(), &'static str> {
         Err("application")
     }
 

@@ -46,6 +46,7 @@
 # ...") and bin->bin+lib transitions (reported as a missing lib target).
 
 # Check affected crates for semantic versioning violations.
+[group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-semver-check: anvil-semver-check-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
@@ -239,9 +240,9 @@ anvil-semver-check: anvil-semver-check-validate-prereqs anvil-impact
     exit 0
 
 # Install prerequisites for the `anvil-semver-check` recipe.
-[group("anvil-setup")]
+[private]
 anvil-semver-check-setup installer="install": (anvil-tool-cargo-semver-checks-install installer)
 
 # Validate prerequisites for the `anvil-semver-check` recipe.
-[group("anvil-setup")]
+[private]
 anvil-semver-check-validate-prereqs: anvil-tool-cargo-semver-checks-validate-prereqs
