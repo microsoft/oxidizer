@@ -600,7 +600,7 @@ fn connected_response_with_guard(request: &Request) -> ConnectedResponse {
                 };
             };
             ConnectedResponse {
-                response: crate::recorder::clear_event_buffers()
+                response: crate::recorder::clear_buffers()
                     .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
                 _snapshot_guard: None,
             }
@@ -663,8 +663,7 @@ fn connected_response_with_guard(request: &Request) -> ConnectedResponse {
 fn apply_recording_configuration(configuration: RecordingConfiguration) -> Result<(), crate::Error> {
     let event_capacity_per_thread = crate::recorder::EventBufferCapacity::new(
         usize::try_from(configuration.event_capacity_per_thread).expect("Seismograph requires a target whose usize can represent u32"),
-    )
-    .expect("the monitor protocol decoder validates event buffer capacity");
+    );
     let current = crate::recorder::configuration();
     crate::recorder::try_configure(crate::recorder::Configuration {
         allocations: recorder_policy(configuration.allocations),
@@ -765,11 +764,11 @@ impl Drop for SnapshotRequestGuard {
 }
 
 fn protocol_recording_configuration(
-    allocations: crate::recorder::RecordingPolicy,
-    general_events: crate::recorder::RecordingPolicy,
-    arc_dereferences: crate::recorder::RecordingPolicy,
-    runtime_tasks: crate::recorder::RecordingPolicy,
-    io: crate::recorder::RecordingPolicy,
+    allocations: crate::recorder::Policy,
+    general_events: crate::recorder::Policy,
+    arc_dereferences: crate::recorder::Policy,
+    runtime_tasks: crate::recorder::Policy,
+    io: crate::recorder::Policy,
     event_capacity_per_thread: usize,
 ) -> RecordingConfiguration {
     RecordingConfiguration {
@@ -783,7 +782,7 @@ fn protocol_recording_configuration(
     }
 }
 
-fn protocol_recording_policy(policy: crate::recorder::RecordingPolicy) -> seismograph_protocol::message::RecordingPolicy {
+fn protocol_recording_policy(policy: crate::recorder::Policy) -> seismograph_protocol::message::RecordingPolicy {
     seismograph_protocol::message::RecordingPolicy {
         enabled: policy.enabled,
         capture_backtraces: policy.capture_backtraces,
@@ -791,8 +790,8 @@ fn protocol_recording_policy(policy: crate::recorder::RecordingPolicy) -> seismo
     }
 }
 
-fn recorder_policy(policy: seismograph_protocol::message::RecordingPolicy) -> crate::recorder::RecordingPolicy {
-    crate::recorder::RecordingPolicy {
+fn recorder_policy(policy: seismograph_protocol::message::RecordingPolicy) -> crate::recorder::Policy {
+    crate::recorder::Policy {
         enabled: policy.enabled,
         capture_backtraces: policy.capture_backtraces,
         event_sampling: crate::recorder::EventSampling::one_in(
@@ -982,21 +981,21 @@ mod tests {
     #[test]
     fn connected_activity_reports_live_threads_without_snapshot_capture() {
         use crate::recorder::event::{EventClass, EventKind, ObjectId, Record};
-        use crate::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+        use crate::recorder::{Configuration, EventBufferCapacity, Policy};
 
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
         crate::recorder::configure(Configuration {
-            general_events: RecordingPolicy::all(false),
-            cache: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            general_events: Policy::all(false),
+            cache: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Default::default()
         });
-        crate::recorder::clear_event_buffers().unwrap();
+        crate::recorder::clear_buffers().unwrap();
         crate::record(EventClass::General, || {
             Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
         });
         crate::record(EventClass::Cache, || Some(Record::object(EventKind::CacheHit, ObjectId::new(1))));
-        let thread_id = crate::recorder::current_thread_id().get();
+        let thread_id = crate::recorder::thread_id().get();
         let before = crate::recorder::try_activity().unwrap();
         let _snapshot = SnapshotRequestGuard::acquire().unwrap();
         let (mut client, server) = connected_pair();
@@ -1046,7 +1045,7 @@ mod tests {
         client.close().unwrap();
         worker.join().unwrap().unwrap();
         crate::recorder::configure(Configuration::default());
-        crate::recorder::clear_event_buffers().unwrap();
+        crate::recorder::clear_buffers().unwrap();
     }
 
     #[test]
@@ -1539,12 +1538,12 @@ mod tests {
     #[test]
     fn lifecycle_commands_preserve_capture_and_do_not_restart_recording() {
         use crate::recorder::event::{EventKind, ObjectId, Record};
-        use crate::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+        use crate::recorder::{Configuration, EventBufferCapacity, Policy};
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
         let configuration = Configuration {
-            general_events: RecordingPolicy::all(false),
-            cache: RecordingPolicy::all(false),
-            event_capacity_per_thread: EventBufferCapacity::new(64).unwrap(),
+            general_events: Policy::all(false),
+            cache: Policy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
             ..Default::default()
         };
         crate::recorder::configure(configuration);
@@ -1559,7 +1558,14 @@ mod tests {
         let bytes = snapshot_bytes(connected_response(&Request::CaptureSnapshotAndStop));
         let decoded = crate::snapshot::decode(&bytes).unwrap();
         assert_eq!(decoded.events.events.len(), 1);
-        assert!(!crate::recorder::recording_enabled());
+        assert_eq!(
+            crate::recorder::configuration(),
+            Configuration {
+                general_events: Policy::default(),
+                cache: Policy::default(),
+                ..configuration
+            }
+        );
         crate::recorder::configure(Configuration::default());
     }
 
@@ -1769,7 +1775,7 @@ mod tests {
 
     #[test]
     fn conversion_helpers_preserve_policies_and_errors() {
-        let policy = crate::recorder::RecordingPolicy {
+        let policy = crate::recorder::Policy {
             enabled: true,
             capture_backtraces: true,
             event_sampling: crate::recorder::EventSampling::one_in(7).unwrap(),

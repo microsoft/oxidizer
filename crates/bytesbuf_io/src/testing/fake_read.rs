@@ -238,10 +238,11 @@ impl FakeReadBuilder {
 
     /// The memory provider to use in memory-related stream operations.
     ///
+    /// Pass a [`bytesbuf::mem::GlobalPool`] directly or wrap a custom provider in [`OpaqueMemory`].
     /// Optional. Defaults to using the Rust global allocator.
     #[must_use]
-    pub fn memory(mut self, memory: OpaqueMemory) -> Self {
-        self.memory = memory;
+    pub fn memory(mut self, memory: impl Into<OpaqueMemory>) -> Self {
+        self.memory = memory.into();
         self
     }
 

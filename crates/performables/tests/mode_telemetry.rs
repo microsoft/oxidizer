@@ -14,7 +14,7 @@ use performables::sync::condition::Condvar;
 use performables::sync::lock::RwLock;
 use performables::sync::mutex::Mutex;
 use seismograph::recorder::event::{EventKind, ObjectId};
-use seismograph::recorder::{Configuration, EventBufferCapacity, RecordingPolicy};
+use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
 
 fn object_id<T>(object: &T) -> ObjectId {
     ObjectId::from_ptr(std::ptr::from_ref(object).cast::<()>())
@@ -27,11 +27,11 @@ fn object_id<T>(object: &T) -> ObjectId {
 )]
 fn synchronization_modes_preserve_public_object_identity() {
     seismograph::recorder(Configuration {
-        general_events: RecordingPolicy {
+        general_events: Policy {
             enabled: true,
             ..Default::default()
         },
-        event_capacity_per_thread: EventBufferCapacity::new(4_096).unwrap(),
+        event_capacity_per_thread: EventBufferCapacity::new(4_096),
         ..Default::default()
     });
 

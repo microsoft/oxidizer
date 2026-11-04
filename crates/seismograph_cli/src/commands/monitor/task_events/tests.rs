@@ -5,7 +5,7 @@ use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, Heap
 use seismograph::recorder::event::{Address, EventClock, EventSequence, EventTimestamp, NumericEvent, ObjectId};
 use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
 use seismograph::recorder::thread::{ThreadId, ThreadLog};
-use seismograph::recorder::{RecordingPolicies, RecordingPolicy};
+use seismograph::recorder::{Policies, Policy};
 use seismograph::snapshot::DecodedSnapshot;
 use seismograph_rallocator::callers::AddressLookupFields;
 use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskActivity, TaskActivityState, TaskMetrics};
@@ -58,11 +58,11 @@ fn events(events: Vec<Event>) -> Events {
     Events {
         clock: EventClock::ProcessMonotonic,
         total_events: totals.values().sum(),
-        recording: RecordingPolicies {
-            runtime_tasks: RecordingPolicy::all(true),
-            general_events: RecordingPolicy::all(true),
-            allocations: RecordingPolicy::all(true),
-            ..RecordingPolicies::default()
+        recording: Policies {
+            runtime_tasks: Policy::all(true),
+            general_events: Policy::all(true),
+            allocations: Policy::all(true),
+            ..Policies::default()
         },
         threads: totals
             .into_iter()
@@ -406,7 +406,7 @@ fn legacy_unknown_recording_policy_is_not_assumed_unsampled() {
         operation(1, 2, 2, EventKind::MutexAccess, 7),
         finish(1, 3, 3, (1, 1), 2),
     ]);
-    raw.recording = RecordingPolicies::default();
+    raw.recording = Policies::default();
     let snapshot = TaskEventsSnapshot::from_events(&raw, &[], None);
     assert_eq!((snapshot.tasks.len(), snapshot.ambiguous_events), (0, 1));
 }
@@ -493,12 +493,14 @@ fn active_source() -> Snapshot {
             created_at: EventTimestamp::from_ticks(0),
             retired_at: None,
             counters: Counters::default(),
+            counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
             workers: Vec::new(),
             tasks: vec![Task {
                 id: TaskId::from_raw(1).unwrap(),
                 parent: None,
                 type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
-                spawned_at: EventTimestamp::from_ticks(0),
+                spawned_at: None,
+                metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                 last_worker_id: None,
                 metrics: TaskMetrics::default(),
                 activity: Some(TaskActivity {
@@ -509,7 +511,6 @@ fn active_source() -> Snapshot {
                     poll_worker_id: WorkerId::from_raw(101),
                     queued_since: None,
                 }),
-                spawn_backtrace: vec![Address::new(900)],
                 future_size_bytes: None,
             }],
         }],

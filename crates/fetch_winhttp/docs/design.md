@@ -70,7 +70,7 @@ impl WinHttpDeps {
     /// Starts building a `WinHttpDeps`.
     pub fn builder(
         clock: tick::Clock,
-        memory: bytesbuf::mem::OpaqueMemory,
+        memory: impl Into<bytesbuf::mem::OpaqueMemory>,
         sink: observed::Sink,
     ) -> WinHttpDepsBuilder;
 }
@@ -85,8 +85,9 @@ pub trait HttpClientWinHttpExt {
 `WinHttpTlsConfig` (§4) follows the same builder + `#[non_exhaustive]` pattern.
 
 The caller supplies a memory provider, which allocates buffers for body data.
-`OpaqueMemory::new(provider)` accepts any `MemoryShared` provider.
-To use the global pool, pass `OpaqueMemory::new(GlobalPool::new())`.
+The builder accepts `impl Into<OpaqueMemory>` and converts it once for storage in `WinHttpDeps`.
+Pass `GlobalPool::new()` directly or wrap a custom `MemoryShared` provider with `OpaqueMemory::new(provider)`.
+Explicit adapters such as `OpaqueMemory::new(GlobalPool::new())` remain valid.
 The transport uses this provider for body construction, response reads, and writer reservations.
 Request bodies can also contain buffers from other providers.
 

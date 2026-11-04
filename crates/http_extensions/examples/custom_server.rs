@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use argh::FromArgs;
 use bytesbuf::BytesView;
-use bytesbuf::mem::{GlobalPool, OpaqueMemory};
+use bytesbuf::mem::GlobalPool;
 use futures::TryStreamExt;
 use http::Request;
 use http_body_util::BodyExt;
@@ -41,7 +41,7 @@ async fn main() -> Result<(), ohno::AppError> {
     let clock = Clock::new_tokio();
 
     // An application framework normally provides the global memory pool.
-    let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
+    let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
     let body_builder_clone = body_builder.clone();
 
     // Define the middleware stack.

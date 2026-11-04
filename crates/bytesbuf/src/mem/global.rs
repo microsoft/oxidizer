@@ -16,7 +16,7 @@ use thread_aware::ThreadAware;
 
 use crate::BytesBuf;
 use crate::constants::ERR_POISONED_LOCK;
-use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Memory};
+use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Memory, OpaqueMemory};
 
 /// A memory pool that obtains memory from the Rust global allocator.
 ///
@@ -96,6 +96,12 @@ impl Memory for GlobalPool {
     #[inline]
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
+    }
+}
+
+impl From<GlobalPool> for OpaqueMemory {
+    fn from(pool: GlobalPool) -> Self {
+        Self::new(pool)
     }
 }
 
