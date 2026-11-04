@@ -153,7 +153,7 @@ impl RuntimeScheduler {
     /// `ThreadAware`, see [`Unaware`](thread_aware::Unaware) and its guidance
     /// before wrapping it.
     ///
-    /// Shutdown rejects tasks without relocating data or calling the factory.
+    /// During shutdown, Arty rejects tasks without calling the factory.
     /// Factory and future panics are reported through the returned [`JoinHandle`].
     ///
     /// # Examples

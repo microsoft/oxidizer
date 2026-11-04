@@ -247,7 +247,7 @@ impl Scheduler {
     /// This is normally this scheduler's worker.
     /// Awaiting outside an Arty async worker does not relocate the result.
     /// During shutdown, or if the destination is invalid, Arty rejects the task
-    /// without relocating `data` or calling `f`.
+    /// without calling `f`.
     ///
     /// # Examples
     ///
