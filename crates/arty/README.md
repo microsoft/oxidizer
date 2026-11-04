@@ -47,7 +47,8 @@ The `?` returns a [`JoinError`][__link3] if the child task fails.
 Await child tasks before returning. Shutdown cancels pending async tasks.
 
 [`Scheduler::spawn`][__link4] starts a child task on the
-scheduler’s current thread. See [`task`][__link5] to learn how to schedule tasks.
+scheduler’s current thread. The scheduler’s thread can differ from the thread
+that calls `spawn`. See [`task`][__link5] to learn how to schedule tasks.
 
 ## Additional documentation
 
@@ -77,7 +78,7 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbib17bSY2UMYbbtENf7VidAcbWIIEyFBw1fwb23E0aNeF3p5hZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQL336xbftBwb3WEJKMJ3SngbyR3bGBAhBb0b0RYBQT1d6EhhZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/0.6.0/arty/?search=core::ThreadAware
  [__link10]: https://docs.rs/arty/0.6.0/arty/core/index.html

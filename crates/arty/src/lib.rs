@@ -52,7 +52,8 @@
 //! Await child tasks before returning. Shutdown cancels pending async tasks.
 //!
 //! [`Scheduler::spawn`](crate::task::Scheduler::spawn) starts a child task on the
-//! scheduler's current thread. See [`task`] to learn how to schedule tasks.
+//! scheduler's current thread. The scheduler's thread can differ from the thread
+//! that calls `spawn`. See [`task`] to learn how to schedule tasks.
 //!
 //! # Additional documentation
 //!
