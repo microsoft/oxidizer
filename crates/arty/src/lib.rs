@@ -53,51 +53,7 @@
 //!
 //! # Task scheduling
 //!
-//! Choose where a new task starts with one of these methods:
-//!
-//! - [`Scheduler::spawn`](crate::task::Scheduler::spawn) uses the worker bound
-//!   to the scheduler. A cloned scheduler keeps that binding, even when
-//!   another thread calls it.
-//! - [`Scheduler::spawn_anywhere`](crate::task::Scheduler::spawn_anywhere) lets
-//!   the runtime select a worker. The runtime can select the same worker.
-//! - [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at) uses a worker
-//!   you select from the same runtime with
-//!   [`RuntimeControl::workers`](crate::runtime::RuntimeControl::workers).
-//!
-//! After a task starts, it stays on its assigned worker. If it awaits an
-//! operation that is not ready, that worker can poll another ready task
-//! assigned to it.
-//!
-//! For `spawn_anywhere` and `spawn_at`, pass task data separately from the
-//! factory. The data must implement [`ThreadAware`](core::ThreadAware). Arty
-//! calls its relocation method on the destination worker before the factory
-//! runs. The implementation can update worker-specific state or refresh an
-//! optimization, such as a cache. Relocation must preserve real data and
-//! cannot affect correctness.
-//!
-//! If Arty rejects a task or cancels it before the factory starts, it drops the
-//! data without relocating it.
-//!
-//! ```no_run
-//! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! # #[arty::main]
-//! # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
-//! let answer = cx
-//!     .scheduler()
-//!     .spawn_anywhere((cx.clock().clone(), 42_u32), |(clock, answer)| async move {
-//!         clock.delay(std::time::Duration::from_millis(1)).await;
-//!         answer
-//!     })
-//!     .await?;
-//! assert_eq!(answer, 42);
-//! # Ok(())
-//! # }
-//! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
-//! ```
-//!
-//! Tuples implement `ThreadAware` when every element does. Here, `Clock` and
-//! `u32` implement it. Arty relocates the clock to the selected worker before
-//! the factory runs. The factory waits for 1 ms, then returns the answer.
+//! See [`task`] for worker placement and thread-aware data relocation.
 //!
 //! # API overview
 //!

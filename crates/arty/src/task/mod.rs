@@ -13,6 +13,10 @@
 //! - [`Scheduler::spawn_at`] uses a worker from
 //!   [`RuntimeControl::workers`](crate::runtime::RuntimeControl::workers).
 //!
+//! After a task starts, it stays on its assigned worker. If it awaits an
+//! operation that is not ready, that worker can poll another ready task
+//! assigned to it.
+//!
 //! A task factory is a function that creates a future.
 //! Task APIs accept these factories instead of futures you already created.
 //! Arty calls the factory on the selected worker.
@@ -21,8 +25,11 @@
 //!
 //! Relocation updates a value's state for a selected worker.
 //! [`Scheduler::spawn_anywhere`] and [`Scheduler::spawn_at`] relocate the
-//! [`ThreadAware`](crate::core::ThreadAware) data you pass to them.
-//! Their results must also implement `ThreadAware`.
+//! [`ThreadAware`](crate::core::ThreadAware) data passed to their factories
+//! before the factories run. The data and result must implement `ThreadAware`.
+//! If Arty rejects a task or cancels it before its factory starts, it drops the
+//! data without relocating it. When an Arty worker awaits the result, Arty
+//! relocates it to that worker.
 //! [`RuntimeScheduler::spawn_anywhere`] does not relocate its result.
 //! Each method explains how it rejects tasks and returns results.
 //!
@@ -37,7 +44,31 @@
 //! its task. Keep the [`Runtime`](crate::runtime::Runtime) alive until required
 //! tasks finish.
 //!
-//! # Example
+//! # Examples
+//!
+//! Let Arty choose a worker and send it a clock and a number. The task waits
+//! for 1 ms, then returns the number:
+//!
+//! ```no_run
+//! # #[cfg(all(feature = "macros", feature = "rt"))]
+//! # #[arty::main]
+//! # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
+//! let answer = cx
+//!     .scheduler()
+//!     .spawn_anywhere((cx.clock().clone(), 42_u32), |(clock, answer)| async move {
+//!         clock.delay(std::time::Duration::from_millis(1)).await;
+//!         answer
+//!     })
+//!     .await?;
+//! assert_eq!(answer, 42);
+//! # Ok(())
+//! # }
+//! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
+//! ```
+//!
+//! Tuples implement `ThreadAware` when every element does. [`Clock`](crate::time::Clock)
+//! and `u32` implement it here. Arty relocates the clock before the factory
+//! runs.
 //!
 //! Create state on an async worker and run a blocking function
 //! outside the async worker. This example requires `macros`, which enables
