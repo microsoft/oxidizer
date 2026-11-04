@@ -1,0 +1,50 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed_destination_file"
+description = "File destination for Observed pipeline."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["observed", "telemetry", "tracing", "logging", "metrics"]
+categories = ["development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_file"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+rolling_file = ["dep:file-rotate", "dep:chrono"]
+
+[dependencies]
+
+# 3rd-party
+bon = { workspace = true }
+chrono = { workspace = true, optional = true }
+file-rotate = { workspace = true, optional = true }
+log = { workspace = true }
+# ox-sdk
+observed_destination_core = { workspace = true }
+ohno = { workspace = true }
+opentelemetry = { workspace = true, features = ["logs"] }
+opentelemetry_sdk = { workspace = true, features = ["logs"] }
+performables = { workspace = true }
+tick = { workspace = true }
+
+[dev-dependencies]
+fakeable = { workspace = true }
+mutants = { workspace = true }
+tempfile = { workspace = true }
+tick = { workspace = true, features = ["test-util"] }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
