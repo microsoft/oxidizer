@@ -51,11 +51,10 @@
 //! The `?` returns a [`JoinError`](crate::task::JoinError) if the child task fails.
 //! Await child tasks before returning. Shutdown cancels pending async tasks.
 //!
-//! # Task scheduling
+//! [`Scheduler::spawn`](crate::task::Scheduler::spawn) starts a child task on the
+//! thread assigned to the scheduler. See [`task`] to learn how to schedule tasks.
 //!
-//! See [`task`] for worker placement and thread-aware data relocation.
-//!
-//! # API overview
+//! # Additional documentation
 //!
 //! - [`runtime`] explains how to create, configure, and stop a runtime.
 //! - [`task`] explains how to start tasks, choose their workers, and receive results.

@@ -46,30 +46,29 @@ This prints `42`. [`main`][__link2] starts and stops the runtime.
 The `?` returns a [`JoinError`][__link3] if the child task fails.
 Await child tasks before returning. Shutdown cancels pending async tasks.
 
-## Task scheduling
+[`Scheduler::spawn`][__link4] starts a child task on the
+thread assigned to the scheduler. See [`task`][__link5] to learn how to schedule tasks.
 
-See [`task`][__link4] for worker placement and thread-aware data relocation.
+## Additional documentation
 
-## API overview
-
-* [`runtime`][__link5] explains how to create, configure, and stop a runtime.
-* [`task`][__link6] explains how to start tasks, choose their workers, and receive results.
-* [`time`][__link7] provides clocks, delays, timeouts, and control over time in tests.
-* [`io`][__link8] connects I/O libraries to the runtime.
-* [`core`][__link9] describes workers and how values update their state for a worker.
-* [`main`][__link10] and [`test`][__link11] start and stop a runtime for an async function or test.
+* [`runtime`][__link6] explains how to create, configure, and stop a runtime.
+* [`task`][__link7] explains how to start tasks, choose their workers, and receive results.
+* [`time`][__link8] provides clocks, delays, timeouts, and control over time in tests.
+* [`io`][__link9] connects I/O libraries to the runtime.
+* [`core`][__link10] describes workers and how values update their state for a worker.
+* [`main`][__link11] and [`test`][__link12] start and stop a runtime for an async function or test.
 
 ## Features
 
 The default feature set enables `rt`, `macros`, and `monitor`.
 
 * `rt`: Enables the runtime, task, and I/O APIs.
-* `macros`: Enables [`main`][__link12] and [`test`][__link13]. It also enables `rt`.
+* `macros`: Enables [`main`][__link13] and [`test`][__link14]. It also enables `rt`.
 * `monitor`: Enables the Seismograph monitor dependency. It forwards
   monitoring support for `performables` when `performables` is enabled. It does
   not start monitoring or emit new telemetry.
 * `test-util`: Enables testing utilities, including
-  [`ClockControl`][__link14].
+  [`ClockControl`][__link15].
   Enable it in dev-dependencies, not production dependencies.
 
 
@@ -78,19 +77,20 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbHgKf8GRRoMEbx8-8fYmslDsbHLfrETWsctIbaoTH_cw1BflhZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbf38s9GB3kKwb-rlJT9itQS8blYYQ6Dq21lAbwlzpep_3csphZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/0.6.0/arty/?search=core::ThreadAware
- [__link10]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
- [__link11]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
- [__link12]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
- [__link13]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
- [__link14]: https://docs.rs/arty/0.6.0/arty/?search=time::ClockControl
+ [__link10]: https://docs.rs/arty/0.6.0/arty/core/index.html
+ [__link11]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
+ [__link12]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
+ [__link13]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
+ [__link14]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
+ [__link15]: https://docs.rs/arty/0.6.0/arty/?search=time::ClockControl
  [__link2]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
  [__link3]: https://docs.rs/arty/0.6.0/arty/?search=task::JoinError
- [__link4]: https://docs.rs/arty/0.6.0/arty/task/index.html
- [__link5]: https://docs.rs/arty/0.6.0/arty/runtime/index.html
- [__link6]: https://docs.rs/arty/0.6.0/arty/task/index.html
- [__link7]: https://docs.rs/arty/0.6.0/arty/time/index.html
- [__link8]: https://docs.rs/arty/0.6.0/arty/io/index.html
- [__link9]: https://docs.rs/arty/0.6.0/arty/core/index.html
+ [__link4]: https://docs.rs/arty/0.6.0/arty/?search=task::Scheduler::spawn
+ [__link5]: https://docs.rs/arty/0.6.0/arty/task/index.html
+ [__link6]: https://docs.rs/arty/0.6.0/arty/runtime/index.html
+ [__link7]: https://docs.rs/arty/0.6.0/arty/task/index.html
+ [__link8]: https://docs.rs/arty/0.6.0/arty/time/index.html
+ [__link9]: https://docs.rs/arty/0.6.0/arty/io/index.html
