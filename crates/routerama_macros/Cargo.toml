@@ -27,7 +27,6 @@ proc-macro = true
 routerama_build = { workspace = true, default-features = false, features = ["codegen"] }
 
 [dev-dependencies]
-mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

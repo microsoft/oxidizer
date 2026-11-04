@@ -51,7 +51,6 @@ criterion = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
 metabench = { path = "../metabench" }
 mimalloc = { workspace = true }
-mutants = { workspace = true }
 static_assertions = { workspace = true }
 
 [target.'cfg(loom)'.dev-dependencies]

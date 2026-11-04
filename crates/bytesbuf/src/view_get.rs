@@ -235,11 +235,8 @@ impl BytesView {
     #[inline]
     // The span-fit decision is an optimization: when it declines (returns `None`), the caller falls
     // back to `get_array_buffered`, which yields an identical result. Mutation testing cannot
-    // distinguish a fast path that declines more eagerly from one that never declines, so we skip
-    // this function to avoid reporting those equivalent mutants. The read itself (the byte copy and
-    // span consumption) is instead exercised by the single-span behavioral tests below, and the
-    // `get_array` / `get_array_buffered` wrappers remain mutation-tested.
-    #[cfg_attr(test, mutants::skip)]
+    // distinguish a fast path that declines more eagerly from one that never declines.
+    // The single-span behavioral tests below exercise the byte copy and span consumption.
     fn get_array_from_first_span<const N: usize>(&mut self) -> Option<[u8; N]> {
         let front = self.spans_reversed.last_mut()?;
         let front_len = front.len() as usize;

@@ -94,7 +94,6 @@ http_extensions = { path = "../http_extensions", features = ["test-util"] }
 hyper-rustls = { workspace = true, features = ["http1", "http2"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "tokio"] }
 insta = { workspace = true }
-mutants = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
 ohno = { path = "../ohno", features = ["test-util"] }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"], default-features = false }

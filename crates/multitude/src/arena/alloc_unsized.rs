@@ -817,7 +817,6 @@ impl<A: Allocator + Clone> Arena<A> {
 /// Using `S::block_align` keeps the hint tight for `Rc`'s sub-4-byte alignments
 /// instead of over-budgeting at the `Arc` 4-byte strong-count floor. (`Box` DST
 /// is not strong-prefixed — it uses the separate `impl_alloc_dst_box` path.)
-#[cfg_attr(test, mutants::skip)] // underestimating refill hint ⇒ refill spin
 #[inline]
 fn worst_case_strong_dst<S: Strong>(payload_bytes: usize, value_align: usize, meta_bytes: usize) -> usize {
     strong_prefix_bytes_for(value_align, meta_bytes)

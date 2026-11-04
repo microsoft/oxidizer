@@ -895,9 +895,8 @@ anvil-tool-cargo-audit-validate-prereqs: (_check-tool "cargo-audit" cargo_audit_
 # install fails outright on windows-*-msvc. bolero's libfuzzer engine
 # is likewise Linux-only. oxidizer's reference workflow runs bolero
 # exclusively on ubuntu, so anvil follows suit: the install/validate
-# pair self-skips on non-Linux (analogous to cargo-mutants skipping
-# aarch64-pc-windows-msvc), and the anvil-bolero check self-skips on
-# the same hosts. The pr-runtime-analysis Windows/ARM legs therefore
+# pair and the anvil-bolero check self-skip on non-Linux hosts.
+# The pr-runtime-analysis Windows/ARM legs therefore
 # treat bolero as a no-op rather than a setup failure.
 
 # Install the pinned `cargo-bolero` tool.
@@ -1018,34 +1017,13 @@ anvil-tool-cargo-llvm-cov-install installer="install": (_install-tool "cargo-llv
 [private]
 anvil-tool-cargo-llvm-cov-validate-prereqs: (_check-tool "cargo-llvm-cov" cargo_llvm_cov_version)
 
-# cargo-mutants doesn't build on aarch64-pc-windows-msvc (upstream
-# winapi crate incompat). The install recipe self-skips on that target
-# so per-group setup recipes that depend on it (pr-mutants-setup,
-# scheduled-exhaustive-setup) don't fail on that platform. The
-# mutants-diff / mutants-full check recipes also self-skip on the same
-# target, so the check is effectively a no-op end-to-end there.
-
-# Install the pinned `cargo-mutants` tool.
+# Install the pinned `cargo-gamma` tool.
 [private]
-[script("pwsh", "-NoProfile")]
-anvil-tool-cargo-mutants-install installer="install": anvil-toolchain-stable-install
-    if ($IsWindows -and ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64')) {
-        Write-Host 'anvil-tool-cargo-mutants-install: aarch64-pc-windows-msvc -- skipping (winapi build incompat)'
-        exit 0
-    }
-    & "{{ just_executable() }}" _install-tool-core cargo-mutants {{cargo_mutants_version}} {{installer}}
-    exit $LASTEXITCODE
+anvil-tool-cargo-gamma-install installer="install": (_install-tool "cargo-gamma" cargo_gamma_version installer)
 
-# Validate that the pinned `cargo-mutants` tool is available.
+# Validate that the pinned `cargo-gamma` tool is available.
 [private]
-[script("pwsh", "-NoProfile")]
-anvil-tool-cargo-mutants-validate-prereqs:
-    if ($IsWindows -and ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64')) {
-        Write-Host 'anvil-tool-cargo-mutants-validate-prereqs: aarch64-pc-windows-msvc -- skipping (winapi build incompat)'
-        exit 0
-    }
-    & "{{ just_executable() }}" _check-tool cargo-mutants {{cargo_mutants_version}}
-    exit $LASTEXITCODE
+anvil-tool-cargo-gamma-validate-prereqs: (_check-tool "cargo-gamma" cargo_gamma_version)
 
 # Install the pinned `cargo-nextest` tool.
 [private]

@@ -208,7 +208,6 @@ impl EscapedString {
     ///
     /// # Panics
     /// if the provided string contains any reserved characters.
-    #[cfg_attr(test, mutants::skip)] // Mutating this function leads to infinite loop and timeout
     #[expect(clippy::panic, reason = "accepts only static string and behavior is clearly documented")]
     #[inline]
     #[must_use]
@@ -224,7 +223,6 @@ impl EscapedString {
 /// `%XX` percent-escape sequences. Returns `None` on success or a static description of
 /// the first fault found. Shared by [`EscapedString::try_new`] (runtime) and
 /// [`EscapedString::from_static`] (compile-time).
-#[cfg_attr(test, mutants::skip)] // mutating this function leads to infinite loop and timeout
 const fn validate_escaped(bytes: &[u8]) -> Option<&'static str> {
     let mut i = 0;
     while i < bytes.len() {
@@ -278,11 +276,6 @@ fn first_reserved(bytes: &[u8]) -> Option<usize> {
 /// a byte that is not an unreserved ASCII byte, and since all unreserved bytes are
 /// single-byte ASCII, such a position never falls in the middle of a multi-byte code point.
 /// So the `&str` indexing is always valid.
-// The manual index advance (`i += 1`) mutates to `i *= 1`, which never advances `i` and spins
-// the `while` loop forever, pushing to `out` until the process runs out of memory. That hangs the mutation
-// runner rather than producing a killable diff, so the function is skipped; its output is
-// pinned by the differential/fuzz/exact-hex and re-validation tests in this module instead.
-#[cfg_attr(test, mutants::skip)]
 fn percent_encode(s: &str, first: usize) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
 

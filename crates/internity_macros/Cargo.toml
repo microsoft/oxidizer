@@ -42,7 +42,6 @@ internity_macros_impl = { workspace = true }
 syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro", "clone-impls"] }
 
 [dev-dependencies]
-mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

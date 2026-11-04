@@ -179,7 +179,6 @@ impl ClockState {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // causes test timeout
     pub(crate) fn driver_is_finished(&self) -> bool {
         match self {
             Self::System(storage) => storage.has_no_clock_owners(),
@@ -328,7 +327,6 @@ impl SystemClockStorage {
         key
     }
 
-    #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
         // The single-slot probe keeps the idle and one-ready-timer paths small. Larger bursts use
         // eight stack slots per follow-up lock acquisition and loop without imposing a limit.

@@ -162,7 +162,6 @@ impl Runtime {
             .expect("mock clock advancement is checked by the controller")
     }
 
-    #[cfg_attr(test, mutants::skip)] // A scheduler handoff does not advance mocked time or change observable I/O.
     pub(crate) fn wait(&self) {
         // This is only a scheduler hand-off, not advancement of observable time.
         // Activity wakes the waiter; the short real timeout keeps shutdown

@@ -99,7 +99,6 @@ hashbrown = { workspace = true, features = ["allocator-api2", "default-hasher"] 
 metabench = { path = "../metabench" }
 mimalloc = { workspace = true }
 multitude_macros = { path = "../multitude_macros" }
-mutants = { workspace = true }
 serde = { workspace = true, features = ["alloc", "derive"] }
 serde_json = { workspace = true, features = ["alloc", "raw_value"] }
 widestring = { workspace = true, features = ["alloc"] }

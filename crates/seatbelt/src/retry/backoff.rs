@@ -142,7 +142,6 @@ fn apply_jitter(delay: Duration, rnd: &Rnd) -> Duration {
 ///   reduced tail latency, and a tighter distribution while still remaining
 ///   de-correlated.
 #[inline]
-#[cfg_attr(test, mutants::skip)] // Mutating arithmetic causes infinite loops in retry tests
 fn decorrelated_jitter_backoff_v2(attempt: u32, base_delay: Duration, prev: &mut f64, rnd: &Rnd) -> Duration {
     // The original author/credit for this jitter formula is @george-polevoy.
     // Minor adaptations (pFactor = 4.0 and rpScalingFactor = 1 / 1.4d) by @reisenberger, to scale the formula output for easier parameterization to users.

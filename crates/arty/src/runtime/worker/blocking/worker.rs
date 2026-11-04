@@ -21,7 +21,6 @@ const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution becau
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
-#[cfg_attr(test, mutants::skip)] // Missing pool identity disables the same-pool join deadlock guard.
 fn attach_thread(pool: PoolIdentity) {
     LocalWorker::attach(pool);
 }
@@ -66,7 +65,6 @@ impl JoinableThreadPool {
         true
     }
 
-    #[cfg_attr(test, mutants::skip)] // Mutating worker construction creates non-terminating pools.
     fn set_num_threads(&mut self, thread_count: usize) {
         while self.workers.len() < thread_count {
             let receiver = self.receiver.clone();
@@ -104,7 +102,6 @@ impl JoinableThreadPool {
         self.queued_count.load(Ordering::SeqCst)
     }
 
-    #[cfg_attr(test, mutants::skip)] // Equivalent mutation: consuming self still runs Drop.
     fn join(mut self) {
         self.shutdown_and_join();
     }
@@ -184,7 +181,6 @@ impl Worker {
     }
 
     /// Waits for the currently running blocking tasks to complete.
-    #[cfg_attr(test, mutants::skip)] // Impractical to test without overly-expensive timeout logic.
     pub(crate) fn join(&self) {
         self.pool.join();
     }
@@ -204,7 +200,6 @@ pub(crate) struct Pool {
 
 impl Pool {
     #[cfg(test)]
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn shares_pool_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.inner, &other.inner)
     }
@@ -244,7 +239,6 @@ impl Pool {
         pool.execute(f)
     }
 
-    #[cfg_attr(test, mutants::skip)] // Impractical to test without overly-expensive timeout logic.
     fn join(&self) {
         // Do not keep the pool alive through retained scheduler handles, and do not
         // hold its submission lock while waiting for blocking functions to finish.

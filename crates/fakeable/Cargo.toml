@@ -41,7 +41,6 @@ fakeable_impl = { workspace = true }
 
 [dev-dependencies]
 mockall = { workspace = true }
-mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

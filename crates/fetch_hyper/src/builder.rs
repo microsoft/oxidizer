@@ -233,7 +233,6 @@ fn configure_hyper_builder(spawner: Spawner, clock: &Clock, options: &TransportO
     hyper_builder
 }
 
-#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
 fn apply_pool_options(hyper_builder: &mut legacy::Builder, pool: &ConnectionPoolOptions) {
     let pool_idle_timeout = match pool.connection_idle_timeout {
         ConnectionIdleTimeout::Unlimited => None,
@@ -245,7 +244,6 @@ fn apply_pool_options(hyper_builder: &mut legacy::Builder, pool: &ConnectionPool
         .pool_max_idle_per_host(pool.max_connections);
 }
 
-#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
 fn apply_http2_options(hyper_builder: &mut legacy::Builder, http_2: &Http2Options) {
     // Order matters: hyper's `http2_adaptive_window(true)` resets the stream window to the
     // spec default, so the explicit size has to be applied first for adaptive tuning to win
@@ -267,7 +265,6 @@ fn initial_stream_window_size(http_2: &Http2Options) -> Option<u32> {
     http_2.initial_stream_window_size.map(|size| size.min(MAX_HTTP2_STREAM_WINDOW_SIZE))
 }
 
-#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
 fn apply_keep_alive(hyper_builder: &mut legacy::Builder, keep_alive: &ConnectionKeepAlive) {
     match *keep_alive {
         ConnectionKeepAlive::Disabled => {
@@ -288,7 +285,6 @@ fn apply_keep_alive(hyper_builder: &mut legacy::Builder, keep_alive: &Connection
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
 fn apply_http_version_preference(hyper_builder: &mut legacy::Builder, versions: &[Version]) {
     if versions.len() == 1 && versions[0] == Version::HTTP_2 {
         hyper_builder.http2_only(true);

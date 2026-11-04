@@ -41,7 +41,6 @@ proc-macro = true
 observed_macros_impl = { workspace = true }
 
 [dev-dependencies]
-mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

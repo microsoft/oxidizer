@@ -34,7 +34,6 @@ proc-macro = true
 arty_macros_impl = { workspace = true }
 
 [dev-dependencies]
-mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

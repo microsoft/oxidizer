@@ -44,6 +44,11 @@ anvil-bolero: anvil-bolero-validate-prereqs anvil-impact
         Write-Host 'anvil-bolero: no affected packages; skipping'
         exit 0
     }
+    $hostTarget = & rustc '+{{ rust_nightly }}' --print host-tuple
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error 'anvil-bolero: pinned compiler host-target discovery failed'
+        exit $LASTEXITCODE
+    }
     $packageSpecs = [System.Collections.Generic.List[string]]::new()
     if ($include -and $include -ne '--workspace') {
         $pkgArgs = @(-split $include)
@@ -80,7 +85,7 @@ anvil-bolero: anvil-bolero-validate-prereqs anvil-impact
     # registry dependency shares the member's name and version.
     $targets = [System.Collections.Generic.List[object]]::new()
     foreach ($packageSpec in $packageSpecs) {
-        $targetsJson = & cargo {{_anvil_stable_toolchain_args}} each --package $packageSpec '--' cargo '+{{ rust_nightly }}' bolero list --profile release --package '{cargo-spec}'
+        $targetsJson = & cargo {{_anvil_stable_toolchain_args}} each --package $packageSpec '--' cargo '+{{ rust_nightly }}' bolero list --profile release --target $hostTarget --package '{cargo-spec}'
         if ($LASTEXITCODE -ne 0) {
             Write-Error "anvil-bolero: target discovery failed for package '$packageSpec'"
             exit $LASTEXITCODE
@@ -108,7 +113,7 @@ anvil-bolero: anvil-bolero-validate-prereqs anvil-impact
             exit 1
         }
         Write-Host "anvil-bolero: $($t.anvilPackageSpec)::${testName}"
-        & cargo {{_anvil_stable_toolchain_args}} each --package $t.anvilPackageSpec '--' cargo '+{{ rust_nightly }}' bolero test --profile release --engine libfuzzer -T 60s --package '{cargo-spec}' $testName
+        & cargo {{_anvil_stable_toolchain_args}} each --package $t.anvilPackageSpec '--' cargo '+{{ rust_nightly }}' bolero test --profile release --target $hostTarget --engine libfuzzer -T 60s --package '{cargo-spec}' $testName
         if ($LASTEXITCODE -ne 0) { $failed = $true }
     }
     if ($failed) { exit 1 }

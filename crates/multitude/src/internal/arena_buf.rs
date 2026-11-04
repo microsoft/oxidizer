@@ -173,7 +173,6 @@ impl<'a, T> ArenaBuf<'a, T> {
     /// moving any existing initialized elements into it. The old
     /// buffer is abandoned (the arena reclaims it on teardown).
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // `>` vs `>=` equivalent: copy(0) is a no-op
     pub(crate) fn replace_buffer(&mut self, fresh: Uninit<'a, [T]>) {
         let (new_ptr, new_cap) = fresh.into_raw_buffer();
         // SAFETY: `fresh` was just consumed; the raw `(ptr, cap)` it
@@ -289,7 +288,6 @@ impl<'a, T> ArenaBuf<'a, T> {
     /// `[idx..len]` right by one. Caller must ensure `idx <= len` and
     /// `remaining_cap() >= 1`.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // guard/arithmetic mutations are observationally equivalent for in-cap writes
     pub(crate) fn insert_within_cap(&mut self, idx: usize, value: T) {
         debug_assert!(idx <= self.len, "insert_within_cap: idx out of bounds");
         debug_assert!(self.remaining_cap() >= 1, "insert_within_cap: no space");
@@ -311,7 +309,6 @@ impl<'a, T> ArenaBuf<'a, T> {
     /// by one and returning the removed value. Returns `None` when
     /// `idx >= len`.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // tail-shift mutations stay within abandoned slots
     pub(crate) fn remove(&mut self, idx: usize) -> Option<T> {
         if idx >= self.len {
             return None;
@@ -476,7 +473,6 @@ pub(crate) struct DrainAll<'a, T> {
 impl<T> Iterator for DrainAll<'_, T> {
     type Item = T;
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // `+= → *=` on `self.head` ⇒ iterator never advances ⇒ infinite loop
     fn next(&mut self) -> Option<T> {
         if self.head == self.tail {
             return None;
@@ -514,7 +510,6 @@ impl<T> FusedIterator for DrainAll<'_, T> {}
 
 impl<T> Drop for DrainAll<'_, T> {
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // mutations no-op for !Drop or empty range
     fn drop(&mut self) {
         if const { mem::needs_drop::<T>() } && self.head < self.tail {
             let len = self.tail - self.head;

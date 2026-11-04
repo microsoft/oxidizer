@@ -21,7 +21,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// chunk. Returns a [`Uninit`] ticket whose lifetime is bound
     /// to `&self`.
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin (OOM)
     pub(in crate::arena) fn try_reserve_local<T>(&self) -> Option<Uninit<'_, T>> {
         let ticket = self.current().try_alloc_uninit_local::<T>(&self.current_has_reference)?;
         // SAFETY: reference handouts retain the chunk until an exclusive arena
@@ -32,7 +31,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Try to reserve uninitialized storage for `len` consecutive `T`s
     /// in the current chunk.
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(crate) fn try_reserve_local_slice<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
         let ticket = self.current().try_alloc_uninit_slice_local::<T>(len, &self.current_has_reference)?;
         // SAFETY: reference handouts retain the chunk for this borrow.
@@ -49,7 +47,6 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// `size` must equal `size_of::<T>() * len` (without overflow).
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(in crate::arena) fn try_reserve_local_slice_with_size<T>(&self, len: usize, size: usize) -> Option<Uninit<'_, [T]>> {
         // SAFETY: required by this function's contract.
         let ticket = unsafe {
@@ -70,7 +67,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// here: the chunk is pinned via the local-reference marker and the
     /// refcount is acquired only at freeze time.
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(crate) fn try_reserve_freezable_slice<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
         let ticket = self
             .current()
@@ -82,7 +78,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Try to reserve `len` consecutive bytes in the current chunk.
     /// Byte-slice fast path that skips alignment math and overflow checks.
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(in crate::arena) fn try_reserve_local_bytes(&self, len: usize) -> Option<Uninit<'_, [u8]>> {
         let ticket = self.current().try_alloc_bytes_local(len, &self.current_has_reference)?;
         // SAFETY: reference handouts retain the chunk for this borrow.
@@ -96,7 +91,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// can take a +1 refcount on it without re-asserting that the
     /// current mutator owns a chunk.
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin (OOM); same for the helpers below
     pub(in crate::arena) fn try_reserve_shared<T>(&self) -> Option<(Uninit<'_, T>, NonNull<Chunk<A>>)> {
         let mutator = self.current();
         let ticket = mutator.try_alloc_uninit::<T>()?;
@@ -119,7 +113,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// `payload_bytes` must equal `size_of::<T>() * len` (without
     /// overflow).
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // see `try_reserve_shared`
     #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
@@ -140,7 +133,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// the current chunk. The returned ticket addresses the
     /// payload (the strong count is already initialized to `1`).
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // see `try_reserve_shared`
     pub(in crate::arena) fn try_reserve_arc_value<S: Strong, T>(&self) -> Option<(Uninit<'_, T>, NonNull<Chunk<A>>)> {
         let (ticket, chunk) = self.current().try_alloc_arc_value::<S, T>()?;
         // SAFETY: the caller acquires chunk ownership before this borrow ends.
@@ -150,7 +142,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Slice form of [`Self::try_reserve_arc_value`]: reserves a strong
     /// prefix, slice-length metadata, and `len` `T`s.
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // see `try_reserve_shared`
     #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
@@ -168,7 +159,6 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// `payload_bytes` must equal `size_of::<T>() * len` (without overflow).
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // see `try_reserve_shared`
     #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"

@@ -234,13 +234,11 @@ static RECORDERS: AtomicPtr<ThreadRecorder> = AtomicPtr::new(ptr::null_mut());
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(all(test, miri))]
-#[cfg_attr(test, mutants::skip)]
 fn test_event_buffer_capacity() -> EventBufferCapacity {
     EventBufferCapacity(MIN_EVENT_CAPACITY_PER_THREAD)
 }
 
 #[cfg(all(test, not(miri)))]
-#[cfg_attr(test, mutants::skip)]
 fn test_event_buffer_capacity() -> EventBufferCapacity {
     EventBufferCapacity::DEFAULT
 }
@@ -980,7 +978,6 @@ impl ThreadRecorder {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // Eviction release is covered with a held reader; removing it strands retired rings and blocks later tests.
     fn release_retired_ring(&self) {
         self.release_on_unlock.store(true, Ordering::Release);
         forget_retired_ring(self);
@@ -1047,7 +1044,6 @@ fn forget_retired_ring(recorder: &ThreadRecorder) {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Inverting identity releases another recorder's allocation.
 fn retired_ring_matches(candidate: &ThreadRecorder, recorder: &ThreadRecorder) -> bool {
     ptr::eq(candidate, recorder)
 }
@@ -1198,7 +1194,6 @@ impl ConfigurationLock {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // Lock timeout and reacquisition are tested directly; returning None unconditionally deadlocks configuration.
     fn acquire_until(deadline: Instant) -> Option<Self> {
         while CONFIGURATION_LOCKED
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -1456,7 +1451,6 @@ fn wait_deadline() -> Instant {
     Instant::now().checked_add(RECORDER_WAIT_TIMEOUT).unwrap_or_else(Instant::now)
 }
 
-#[cfg_attr(test, mutants::skip)] // Equality with a freshly sampled Instant is nondeterministic under mutation scheduling.
 fn wait_expired(deadline: Instant) -> bool {
     if Instant::now() < deadline {
         std::thread::yield_now();

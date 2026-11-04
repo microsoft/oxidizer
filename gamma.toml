@@ -1,0 +1,60 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+files = ["crates/**"]
+exclude-files = [
+    # Fixture scaffolding for the `fetch_winhttp` tests, benchmarks and examples.
+    "crates/fetch_winhttp_impl/src/testing/**",
+    "crates/fakeable_test/**",
+    "crates/http_headers/**",
+    "crates/http_headers_simd/**",
+    "crates/observed_testing/**",
+    # Allocator and its Seismograph integration are outside mutation-testing scope.
+    "crates/rallocator/**",
+    "crates/seismograph_rallocator/**",
+    "crates/rest_over_grpc_examples/**",
+    "crates/rest_over_grpc_tests/**",
+    # Seismograph terminal rendering, layout, mouse routing, and presentation-only formatting.
+    "crates/seismograph_cli/src/commands/monitor/help.rs",
+    "crates/seismograph_cli/src/commands/monitor/info_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/mouse.rs",
+    "crates/seismograph_cli/src/commands/monitor/native_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/native_ui/**",
+    "crates/seismograph_cli/src/commands/monitor/panels.rs",
+    "crates/seismograph_cli/src/commands/monitor/runtime_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/task_events_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/ui.rs",
+    "crates/seismograph_cli/src/native_view.rs",
+    "crates/testing_aids/**",
+]
+all-features = true
+profile = "mutants"
+
+# Debug and redacted formatting have no stable text contract.
+# Gamma matches the final written trait name, regardless of qualification.
+exclude-trait-impls = [
+    "Debug",
+    "Redactor",
+    "RedactedDebug",
+    "RedactedDisplay",
+    "RedactedToString",
+]
+
+# Gamma selects test targets itself.
+cargo-args = ["--locked"]
+
+# Retain fatal-path tests for termination guards. Skip other intentional aborts.
+# Metabench keeps deterministic deadline tests, but skips real-time stress.
+# Type/trait UI contracts run in the native and careful suites instead.
+cargo-test-args = [
+    "--skip", "abort::tests::subprocess_oracle_rejects_normal_return",
+    "--skip", "abort::tests::subprocess_oracle_accepts_genuine_abort",
+    "--skip", "backend::tests::missing_initialization_aborts_before_reading_range_metadata",
+    "--skip", "combining::tests::consumed_action_aborts_instead_of_running_twice",
+    "--skip", "observation::tests::poisoned_publication_copy_aborts_instead_of_reporting_empty_state",
+    "--skip", "observation::tests::poisoned_publisher_aborts_instead_of_overwriting_failed_state",
+    "--skip", "observation::tests::generation_overflow_aborts_instead_of_reusing_a_lease_identity",
+    "--skip", "thread::tests::poisoned_pool_aborts_before_lending_an_owner",
+    "--skip", "runner::tests::captured_logs_bound_sustained_output_and_timeout_cleanup",
+    "--skip", "type_system_contracts",
+]

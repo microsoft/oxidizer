@@ -148,7 +148,6 @@ impl RtNode {
 
     // The iterative destruction strategy is validated by the isolated
     // deep-route test; deleting it only changes stack usage.
-    #[cfg_attr(test, mutants::skip)]
     fn move_children_to(&mut self, pending: &mut Vec<Self>) {
         pending.extend(mem::take(&mut self.literals).into_vec().into_iter().map(|(_, child)| child));
         pending.extend(mem::take(&mut self.affix).into_vec().into_iter().map(|(_, _, child)| child));
@@ -179,7 +178,6 @@ fn node_weights(nodes: &[FlatNode]) -> Vec<usize> {
 }
 
 impl Drop for RtNode {
-    #[cfg_attr(test, mutants::skip)]
     fn drop(&mut self) {
         let mut pending = Vec::new();
         self.move_children_to(&mut pending);

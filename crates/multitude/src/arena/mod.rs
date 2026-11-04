@@ -208,7 +208,6 @@ impl Arena<Global> {
     /// assert_eq!(*arena.alloc(1), 1);
     /// ```
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // `Default::default()` mutation is observationally equivalent
     pub fn try_new() -> Result<Self, AllocError> {
         Self::try_new_in(Global)
     }
@@ -223,7 +222,6 @@ impl Arena<Global> {
     /// ```
     #[must_use]
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // `Default::default()` mutation is observationally equivalent
     pub fn builder() -> ArenaBuilder<Global> {
         ArenaBuilder::new()
     }
@@ -331,7 +329,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Pre-warm the chunk cache with one chunk in the given size class.
     /// Used by `ArenaBuilder::with_capacity`. Also raises `next_class` so
     /// the first refill consumes the cached chunk.
-    #[cfg_attr(test, mutants::skip)] // `>` vs `>=` is an identity-write difference
     pub(crate) fn preallocate_one(&self, class: SizeClass) -> Result<(), AllocError> {
         self.provider.preallocate(class)?;
         if class > self.next_class.get() {
@@ -670,8 +667,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// replace (and thus waste) the current chunk.
     #[cold]
     #[inline(never)]
-    // Skipped because a no-op refill makes allocation retry loops infinite.
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn refill(&self, min_payload: usize) -> Result<(), AllocError> {
         // Reconcile the surplus on the old chunk before its mutator is
         // dropped/retired so the chunk's atomic refcount equals the number of

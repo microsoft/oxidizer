@@ -291,7 +291,6 @@ mod tests {
     use crate::fake::FakeDeps;
     use crate::pipeline::Pipeline;
 
-    #[mutants::skip]
     fn custom_deps() -> CustomDeps {
         CustomDeps {
             clock: FakeDeps::default().clock,
@@ -300,7 +299,6 @@ mod tests {
         }
     }
 
-    #[mutants::skip]
     fn ok_factory(_ctx: CustomContext) -> FakeHandler {
         FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
     }

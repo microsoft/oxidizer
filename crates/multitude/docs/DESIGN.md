@@ -831,11 +831,11 @@ forces the oversized-chunk route. Dedicated variants force LIFO drop
 ordering and interleave a `reset` between every operation, which is the
 cheapest way to reach the eviction-and-cache-pop orderings.
 
-**Mutation testing** runs diff-scoped on pull requests and in full on a
-nightly schedule. Paths where a mutant would turn a fallible reservation
-into an infinite refill spin carry explicit `mutants::skip` annotations with
-the reason recorded at the site, so surviving mutants indicate real gaps
-rather than known-unkillable ones.
+**Mutation testing** runs through the generated Anvil recipes with Cargo Gamma.
+A mutation can turn a fallible reservation into an infinite refill loop.
+Review actual Gamma findings before adding suppressions.
+If a finding needs suppression, add a narrow, compiler-checked directive beside
+the source and explain the reason. Do not exclude the whole function.
 
 **Allocation tracking** pins the property the whole design exists to
 deliver. Using a counting global allocator, it warms an arena until the

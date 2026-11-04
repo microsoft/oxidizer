@@ -111,7 +111,6 @@ windows = { workspace = true, features = [
 future_assert = { path = "../future_assert" }
 futures = { workspace = true, features = ["std"] }
 mockall = { workspace = true }
-mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }
 performables = { path = "../performables" }
 static_assertions = { workspace = true }

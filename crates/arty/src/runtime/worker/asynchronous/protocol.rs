@@ -73,7 +73,6 @@ pub(crate) enum Command {
 
 impl fmt::Debug for Command {
     #[cfg_attr(coverage_nightly, coverage(off))] // Command names are diagnostic text only.
-    #[cfg_attr(test, mutants::skip)] // We have no contract to test here - can return anything.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EnqueueTask { .. } => write!(f, "EnqueueTask"),

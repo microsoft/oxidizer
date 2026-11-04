@@ -38,6 +38,11 @@ timeout starts. This keeps compilation outside the runtime limit.
 Review this override against the selected template during each upgrade.
 The PR workflow uses the unmodified Anvil template.
 
+Anvil 0.23.5 pins `cargo-coverage-gate` 0.7.4, which preserves package source
+identities during coverage collection. Workspace and registry copies of `ohno`
+and `plurality` can share a name and version without root `[patch.crates-io]`
+overrides.
+
 ## Verification behavior
 
 Coverage collection uses `cargo coverage-gate run` on the pinned nightly toolchain.
@@ -100,38 +105,39 @@ SSSE3 or SSE4.2. Their runtime scope is Linux, not Windows or other operating
 systems. These are ordinary correctness tests, not an additional coverage or
 mutation requirement for no_std-only code.
 
-Mutation testing uses complete native cargo-mutants configurations under
-`.cargo/`. Plain `cargo mutants` discovers `mutants.toml`; the generated Anvil
-recipes select `mutants.windows.toml` or `mutants.linux.toml` when running on
-that host. Cargo-mutants replaces rather than merges configurations selected
-with `--config`, so the shared policy is intentionally duplicated across all
-three files. Selection is by operating system, not architecture, so both Linux
-runner architectures share the Linux configuration.
+Mutation testing changes production code to test whether assertions detect faults.
+The generated Anvil recipes use Cargo Gamma with the root `gamma.toml`.
+The shared configuration selects all features and the `mutants` Cargo profile.
+It preserves file exclusions and test filters from the legacy cargo-mutants policy.
+Gamma selects unit and integration targets. Cargo arguments keep the dependency graph locked.
+Harness arguments filter individual tests. Gamma does not run doctests.
 
 The `rallocator` and `seismograph_rallocator` crates are excluded entirely from
-mutation testing in all three configurations, on every runner architecture.
+mutation testing through `gamma.toml`, on every runner architecture.
 This includes allocator termination guards, platform backends, and Seismograph
 integration rather than only individual known-hanging candidates. Ordinary tests,
 coverage, and runtime-analysis selection remain unchanged.
 
-The mutation configurations retain intentional-abort test filters and known-hanging
-candidate exclusions as additional safeguards. Hosted Linux mutation jobs also
-disable crash-handler forwarding so expected aborts do not launch crash reporters.
+Gamma excludes `Debug` and redaction trait implementations through
+`exclude-trait-impls`. Each entry matches the final written trait identifier,
+regardless of qualification, not a resolved trait identity.
+Gamma uses compiler evidence to remove inactive conditional code from its score.
+It therefore needs no operating-system file exclusions solely for inactive code.
 
-The host configurations exclude known mutation candidates that are inactive on
-the active platform. Without those exclusions, cargo-mutants can mutate
-inactive source, produce an unchanged test binary, and report the surviving
-mutant as a false `MISSED` test gap. File and crate patterns cover most
-platform-specific source; function-level gates require explicit exclusions or
-source annotations because cargo-mutants does not evaluate Rust `cfg`
-expressions during candidate discovery. The Linux policy excludes the
-Windows-only `fetch_winhttp` and `fetch_winhttp_impl` crates wholesale because
-their platform gates are applied across many implementation modules. This
-temporarily also skips their small non-Windows coverage anchors rather than
-maintaining a brittle list of every Windows-only file.
+The `.cargo/mutants.toml`, `.cargo/mutants.windows.toml`, and
+`.cargo/mutants.linux.toml` files remain available for standalone cargo-mutants runs.
+Gamma does not read them. Their `exclude_re` expressions use cargo-mutants descriptions,
+so they do not transfer to Gamma.
+This includes individual equivalent and known-hanging mutation exclusions.
+The legacy source suppression attributes and the `mutants` dependency are removed.
+Do not convert the legacy exclusions or add Gamma suppressions in advance.
+Run Gamma first and review its actual findings.
+If a finding needs suppression, add a narrow, compiler-checked `gamma::skip` directive beside the source and explain the reason.
+Do not suppress an entire function or file to silence an individual finding.
+Gamma honors `cfg_attr` wrappers around its own directives without evaluating the condition.
 
 The `http_headers` and `http_headers_simd` crates are excluded from mutation
-testing through all three configurations. Their ordinary tests, coverage
+testing through `gamma.toml`. Their ordinary tests, coverage
 checks, and Miri checks remain enabled.
 
 Under Miri, `http_headers` samples repetitive generated inputs and byte

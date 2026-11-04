@@ -76,7 +76,6 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 bolero = { workspace = true, features = ["std"] }
 
 [target.'cfg(not(target_os = "linux"))'.dev-dependencies]
-mutants = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

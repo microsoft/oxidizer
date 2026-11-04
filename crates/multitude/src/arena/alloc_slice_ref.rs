@@ -37,7 +37,6 @@ fn reject_over_aligned<T, A: Allocator + Clone>(arena: &Arena<A>) -> Result<(), 
 /// Worst-case payload bytes for a slice allocation of `len` `T`s: value
 /// bytes + alignment padding. Saturates at `usize::MAX` on overflow — the
 /// refill path then fails the allocator on the impossibly large request.
-#[cfg_attr(test, mutants::skip)] // under-sized hint ⇒ OOM spin
 #[inline]
 fn worst_case_slice_payload<T>(len: usize) -> usize {
     let value_bytes = mem::size_of::<T>().saturating_mul(len);
@@ -77,7 +76,6 @@ unsafe fn adopt_slice_with_len<T>(slot: &mut [T], len: usize) -> Alloc<'_, [T]> 
 
 /// Records the caller invariant that `len` is non-zero.
 #[inline(always)]
-#[cfg_attr(test, mutants::skip)]
 fn assume_nonzero_len(len: usize) {
     // SAFETY: callers handle `len == 0` via an early return before this.
     unsafe { assert_unchecked(len > 0) };
@@ -327,9 +325,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// returns a slice allocated from a dedicated oversized chunk.
     #[cold]
     #[inline(never)]
-    // Skipped because removing the refill side effect makes the caller's retry
-    // loop infinite.
-    #[cfg_attr(test, mutants::skip)]
     fn refill_or_alloc_oversized_slice_copy<T: Copy>(&self, src: &[T]) -> Result<Option<&mut [T]>, AllocError> {
         let refill_hint = worst_case_slice_payload::<T>(src.len());
         if self.is_oversized(refill_hint) {
@@ -401,8 +396,6 @@ impl<A: Allocator + Clone> Arena<A> {
         clippy::mut_from_ref,
         reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc at the public boundary"
     )]
-    // Skipped because returning without refilling makes the retry loop infinite.
-    #[cfg_attr(test, mutants::skip)]
     fn refill_or_alloc_oversized_slice_clone<T: Clone>(&self, src: &[T]) -> Result<Option<&mut [T]>, AllocError> {
         let len = src.len();
         let refill_hint = worst_case_slice_payload::<T>(len);
@@ -455,9 +448,6 @@ impl<A: Allocator + Clone> Arena<A> {
         clippy::mut_from_ref,
         reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc by impl_alloc_slice_fill_with"
     )]
-    // Skipped because removing the refill side effect makes the retry loop
-    // infinite.
-    #[cfg_attr(test, mutants::skip)]
     fn alloc_slice_fill_with_refill<T, F: FnMut(usize) -> T>(&self, len: usize, refill_hint: usize, f: F) -> Result<&mut [T], AllocError> {
         let mut f = Some(f);
         loop {
@@ -522,9 +512,6 @@ impl<A: Allocator + Clone> Arena<A> {
         clippy::mut_from_ref,
         reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc by impl_alloc_slice_fill_iter"
     )]
-    // Skipped because removing the refill side effect makes the retry loop
-    // infinite.
-    #[cfg_attr(test, mutants::skip)]
     fn alloc_slice_fill_iter_refill<T, I: Iterator<Item = T>>(
         &self,
         len: usize,

@@ -156,7 +156,6 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
 
     /// Resolve a desired preallocation `capacity` (total chunk-allocation
     /// bytes) into a `(target_class, chunk_count)` pair.
-    #[cfg_attr(test, mutants::skip)] // belt-and-suspenders cap; inner helper already saturates
     fn resolve_capacity(capacity: usize) -> Option<(SizeClass, usize)> {
         if capacity == 0 {
             return None;

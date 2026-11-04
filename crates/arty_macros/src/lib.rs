@@ -34,7 +34,6 @@ use proc_macro::TokenStream;
 /// required signature, configuration, examples, and panic behavior.
 #[proc_macro_attribute]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)] // Thin proc-macro shim; expansion logic is tested in arty_macros_impl.
 pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
     arty_macros_impl::main(args.into(), item.into()).into()
 }
@@ -45,7 +44,6 @@ pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
 /// required signature, configuration, controlled-time examples, and panic behavior.
 #[proc_macro_attribute]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)] // Thin proc-macro shim; expansion logic is tested in arty_macros_impl.
 pub fn test(args: TokenStream, item: TokenStream) -> TokenStream {
     arty_macros_impl::test(args.into(), item.into()).into()
 }

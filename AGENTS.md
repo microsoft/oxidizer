@@ -82,14 +82,16 @@ Once a crate documents a `no_std` configuration as supported, that configuration
 
 ### `no_std`-only code is exempt from coverage and mutation testing
 
-Code selected by the *absence* of `std` — `#[cfg(not(feature = "std"))]` and equivalents — is excluded from the coverage gate and from mutation testing. Neither harness is guaranteed to build a `no_std` configuration: mutation testing runs with default features, and in the coverage run's `--no-default-features` leg Cargo feature unification across the selected dependency graph can re-enable `std` anyway. Such code is therefore often absent from the measured build entirely, and holding it to a coverage or mutation obligation measures the harness rather than the code.
+Code selected by the absence of `std`, such as `#[cfg(not(feature = "std"))]`, is exempt from coverage and mutation requirements.
+Neither harness guarantees a `no_std` build. Gamma runs with all features and uses compiler evidence to remove inactive conditional code from its score.
+In the coverage run's `--no-default-features` leg, Cargo feature unification across the selected dependency graph can re-enable `std`.
+These runs often do not measure `no_std`-only code.
 
-Mark it with both exclusions:
+Mark the coverage exclusion:
 
 ```rust
 #[cfg(not(feature = "std"))]
 #[cfg_attr(coverage_nightly, coverage(off))] // no_std-only path (AGENTS.md, "no_std Support").
-#[cfg_attr(test, mutants::skip)] // no_std-only path (AGENTS.md, "no_std Support").
 fn capture() -> Self {
     Self::Disabled
 }
@@ -97,7 +99,15 @@ fn capture() -> Self {
 
 `coverage(off)` needs `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]` in the crate root.
 
-Attach the exclusions to the `no_std` arm alone, splitting the item into per-configuration definitions where the two arms share one function. The `std` arm keeps its full coverage and mutation obligations. The exemption covers only code that a `no_std` build selects *instead of* a `std` build; ungated code that merely also compiles under `no_std` is tested normally.
+Attach the coverage exclusion to the `no_std` arm alone.
+If both arms share one function, split it into separate definitions for each configuration.
+The `std` arm keeps its full coverage and mutation obligations.
+The exemption covers only code that a `no_std` build selects instead of a `std` build.
+Ungated code that also compiles under `no_std` is tested normally.
+
+Do not add mutation suppressions in advance.
+If an actual Gamma finding needs suppression, add a narrow directive beside the source and explain the reason.
+Use compiler-checked source directives rather than whole-function or whole-file exclusions.
 
 ## GitHub Actions Pinning
 

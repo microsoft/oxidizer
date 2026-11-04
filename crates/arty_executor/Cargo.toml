@@ -46,7 +46,6 @@ alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
 metabench = { path = "../metabench", default-features = false }
-mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }
 static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["std"] }

@@ -35,7 +35,6 @@ pub(crate) const fn round_up(x: usize, align: usize) -> usize {
 /// `u32` metadata words.
 #[inline]
 #[must_use]
-#[cfg_attr(test, mutants::skip)] // The first comparison is between two equal alignments; the second differs from `>=` only when its operands are equal. Both arms then return the same value.
 pub(crate) const fn cell_align(align: usize) -> usize {
     let refcount = align_of::<AtomicU32>();
     let index = align_of::<u32>();
@@ -103,7 +102,6 @@ pub(crate) const fn slots_offset(align: usize) -> usize {
 /// Alignment of a whole chunk allocation.
 #[inline]
 #[must_use]
-#[cfg_attr(test, mutants::skip)] // `>` vs `>=` is equivalent here: when the two are equal both arms return the same value.
 pub(crate) const fn chunk_align(align: usize) -> usize {
     let header = align_of::<ChunkHeader>();
     let cell = cell_align(align);

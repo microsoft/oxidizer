@@ -344,7 +344,6 @@ impl Body for WinHttpResponseBody {
         matches!(self.state, BodyState::Done)
     }
 
-    #[cfg_attr(test, mutants::skip)] // Intentionally unbounded; WinHTTP does not expose a remaining length.
     fn size_hint(&self) -> SizeHint {
         SizeHint::default()
     }

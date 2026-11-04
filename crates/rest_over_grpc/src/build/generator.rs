@@ -76,7 +76,6 @@ impl Generator {
     #[must_use]
     // `GeneratorBuilder::default()` and `Default::default()` are the same value
     // here (the return type is `GeneratorBuilder`), so that mutant is equivalent.
-    #[cfg_attr(test, mutants::skip)]
     pub fn builder() -> GeneratorBuilder {
         GeneratorBuilder::default()
     }

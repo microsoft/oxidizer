@@ -33,7 +33,6 @@ std = []
 
 [dev-dependencies]
 criterion = { workspace = true }
-mutants = { workspace = true }
 
 # Callgrind instruction-count benchmarks (Valgrind is Linux-only).
 [target.'cfg(target_os = "linux")'.dev-dependencies]

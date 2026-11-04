@@ -80,7 +80,6 @@ flate2 = { workspace = true, features = ["zlib-rs"] }
 futures = { workspace = true, features = ["executor"] }
 futures-core = { workspace = true }
 metabench = { path = "../metabench" }
-mutants = { workspace = true }
 pin-project-lite = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["std", "test-utils"] }
 tick = { path = "../tick", features = ["tokio", "test-util"] }
