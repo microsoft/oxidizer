@@ -270,6 +270,7 @@ fn enriched_three_sinks<S: Borrow<(Telemetry<Responding>, Transfer)>>(
     Box::new(responding_stack(filtered_sink(|name| name == ACTIVE))),
     common::get_to("ftp://example.com/books/1")
 )]
+#[bench::purge(Box::new(responding_stack(filtered_sink(|name| name == ACTIVE))), purge())]
 fn active_requests_only<S: Borrow<Telemetry<Responding>>>(stack: S, request: HttpRequest) -> (Result<HttpResponse, HttpError>, S) {
     (send(stack.borrow(), request), stack)
 }
@@ -389,6 +390,9 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             );
         });
     }
+    group.bench_function(BenchmarkId::new(ACTIVE_REQUESTS_ONLY.benchmark_name(), "purge"), |bencher| {
+        bencher.iter_batched(purge, |request| active_requests_only(&stack, request).0, BatchSize::SmallInput);
+    });
     let stack = responding_stack(filtered_sink(|name| name != ACTIVE));
     group.bench_function(BenchmarkId::new(REQUEST_EVENTS_ONLY.benchmark_name(), CASE), |bencher| {
         bencher.iter_batched(common::get, |request| request_events_only(&stack, request).0, BatchSize::SmallInput);

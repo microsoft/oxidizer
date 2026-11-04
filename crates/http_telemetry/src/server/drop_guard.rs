@@ -96,7 +96,6 @@ impl TelemetryDropGuard {
         let duration_ms = self.stopwatch.elapsed().as_millis() as u64;
         let _enrichment = self.enrichment.apply_current_thread();
         let method = http_method_name(&self.method);
-        let method_original = (method == OTHER).then(|| Text::from(Arc::<str>::from(self.method.as_str())));
         let protocol_version = self.protocol_version;
         let (server_address, server_port) = match &self.uri_authority {
             Some(UriAuthority::Uri(authority, default_port)) => (Some(authority.host()), authority.port_u16().or(*default_port)),
@@ -109,7 +108,9 @@ impl TelemetryDropGuard {
             }
             None => (None, None),
         };
-        // `emit!` builds an event only for a sink that is interested in it, so the host is copied only then.
+        // `emit!` builds an event only for a sink that is interested in it, so the method and the host are copied
+        // only then.
+        let method_original = || (method == OTHER).then(|| Text::from(Arc::<str>::from(self.method.as_str())));
         let server_address = || {
             server_address
                 .filter(|host| !host.is_empty())
@@ -125,7 +126,7 @@ impl TelemetryDropGuard {
                     self.sink,
                     RequestComplete {
                         method,
-                        method_original,
+                        method_original: method_original(),
                         scheme: self.scheme,
                         protocol_version,
                         server_address: server_address(),
@@ -140,7 +141,7 @@ impl TelemetryDropGuard {
                 self.sink,
                 RequestError {
                     method,
-                    method_original,
+                    method_original: method_original(),
                     scheme: self.scheme,
                     protocol_version,
                     server_address: server_address(),
@@ -154,7 +155,7 @@ impl TelemetryDropGuard {
                 self.sink,
                 RequestError {
                     method,
-                    method_original,
+                    method_original: method_original(),
                     scheme: self.scheme,
                     protocol_version,
                     server_address: server_address(),
@@ -168,7 +169,7 @@ impl TelemetryDropGuard {
                 self.sink,
                 RequestAbandoned {
                     method,
-                    method_original,
+                    method_original: method_original(),
                     scheme: self.scheme,
                     protocol_version,
                     server_address: server_address(),
