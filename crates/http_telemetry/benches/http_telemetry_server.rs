@@ -316,6 +316,16 @@ fn body_error<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> 
     stack
 }
 
+#[metabench::benchmark(COMPLETE_STREAMED_BODY_WITH_SERVER_ADDRESS, GROUP, "complete_streamed_body_with_server_address")]
+#[bench::get(
+    Box::new(echoing_stack(reading_sink(2))),
+    common::get_to("http://example.com/books/1").map(|_| common::scripted([common::data("chunk"), Step::End]))
+)]
+fn complete_streamed_body_with_server_address<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
+    read_body(stack.borrow(), request, 2);
+    stack
+}
+
 #[metabench::benchmark(INNER_ERROR, GROUP, "inner_error")]
 #[bench::validation(Box::new(common::FAILING), common::get())]
 #[bench::connection_refused(Box::new(common::FAILING_CHAINED), common::get())]
@@ -330,6 +340,7 @@ fn handler_error<S: Borrow<Telemetry<Failing>>>(stack: S, request: HttpRequest) 
     (send(stack.borrow(), request), stack)
 }
 
+#[expect(clippy::too_many_lines, reason = "one registration for each case of the group")]
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group(GROUP);
     let handler = common::responding(StatusCode::OK);
@@ -416,6 +427,17 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+    let stack = echoing_stack(reading_sink(2));
+    group.bench_function(
+        BenchmarkId::new(COMPLETE_STREAMED_BODY_WITH_SERVER_ADDRESS.benchmark_name(), CASE),
+        |bencher| {
+            bencher.iter_batched(
+                || common::get_to("http://example.com/books/1").map(|_| common::scripted([common::data("chunk"), Step::End])),
+                |request| complete_streamed_body_with_server_address(&stack, request),
+                BatchSize::SmallInput,
+            );
+        },
+    );
     for (case, handler) in [("validation", common::FAILING), ("connection_refused", common::FAILING_CHAINED)] {
         group.bench_function(BenchmarkId::new(INNER_ERROR.benchmark_name(), case), |bencher| {
             bencher.iter_batched(common::get, |request| inner_error(&handler, request).0, BatchSize::SmallInput);
@@ -445,6 +467,7 @@ metabench::main!(
         COMPLETE_STREAMED_BODY,
         ABANDONED_BODY,
         BODY_ERROR,
+        COMPLETE_STREAMED_BODY_WITH_SERVER_ADDRESS,
         INNER_ERROR,
         HANDLER_ERROR,
     ],
