@@ -3968,6 +3968,7 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "performables",
+ "scopeguard",
  "static_assertions",
 ]
 

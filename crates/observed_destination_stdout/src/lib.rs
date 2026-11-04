@@ -53,8 +53,9 @@
 
 use std::fmt::Debug;
 use std::io::{Write, stdout};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use log::LevelFilter;
 use observed_destination_core::{
@@ -68,6 +69,7 @@ use opentelemetry_sdk::logs::{LogProcessor, LoggerProviderBuilder, SdkLogRecord}
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_stdout::MetricExporter;
+use scopeguard::ScopeGuard;
 
 /// Creates a log destination that writes to stdout.
 ///
@@ -155,6 +157,7 @@ struct StdoutLogProcessor<F> {
     // continue during shutdown. The flag only records shutdown state; it does not
     // wait for in-flight writes.
     is_shutdown: AtomicBool,
+    ongoing_emissions: AtomicUsize,
     config: LogFormatConfig,
     #[debug(ignore)]
     make_writer: F,
@@ -165,9 +168,30 @@ impl<F> StdoutLogProcessor<F> {
         Self {
             resource_header: ResourceHeader::new(),
             is_shutdown: AtomicBool::new(false),
+            ongoing_emissions: AtomicUsize::new(0),
             config,
             make_writer,
         }
+    }
+
+    fn try_enter_emit(&self) -> Option<ScopeGuard<(), impl FnOnce(()) + '_>> {
+        if self.is_shutdown.load(Ordering::SeqCst) {
+            return None;
+        }
+
+        if self.ongoing_emissions.try_update(Ordering::SeqCst, Ordering::SeqCst, |c| c.checked_add(1)).is_err() {
+            return None;
+        }
+
+        let guard = scopeguard::guard((), |_| {
+            self.ongoing_emissions.fetch_sub(1, Ordering::SeqCst);
+        });
+
+        if self.is_shutdown.load(Ordering::SeqCst) {
+            return None;
+        }
+
+        Some(guard)
     }
 }
 
@@ -177,9 +201,9 @@ where
     W: Write,
 {
     fn emit(&self, data: &mut SdkLogRecord, instrumentation: &InstrumentationScope) {
-        if self.is_shutdown.load(Ordering::SeqCst) {
+        let Some(_in_flight) = self.try_enter_emit() else {
             return;
-        }
+        };
 
         let mut w = (self.make_writer)();
         let _ = self.resource_header.print_once(&mut w);
@@ -192,8 +216,25 @@ where
             .map_err(|e| OTelSdkError::InternalFailure(e.to_string()))
     }
 
-    fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        use std::cmp::min;
+
         self.is_shutdown.store(true, Ordering::SeqCst);
+
+        let start = Instant::now();
+
+        while self.ongoing_emissions.load(Ordering::SeqCst) > 0 {
+            let poll_interval = min(Duration::from_millis(10), timeout.saturating_sub(start.elapsed()));
+
+            if !poll_interval.is_zero() {
+                thread::sleep(poll_interval);
+            }
+
+            if start.elapsed() >= timeout {
+                return Err(OTelSdkError::Timeout(timeout));
+            }
+        }
+
         Ok(())
     }
 
