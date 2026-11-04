@@ -27,11 +27,8 @@
 //! [`Scheduler::spawn_anywhere`] and [`Scheduler::spawn_at`] relocate the
 //! [`ThreadAware`](crate::core::ThreadAware) data passed to their factories
 //! before the factories run. The data and result must implement `ThreadAware`.
-//! If Arty rejects a task or cancels it before its factory starts, it drops the
-//! data without relocating it. When an Arty worker awaits the result, Arty
-//! relocates it to that worker.
+//! When an Arty worker awaits the result, Arty relocates it to that worker.
 //! [`RuntimeScheduler::spawn_anywhere`] does not relocate its result.
-//! Each method explains how it rejects tasks and returns results.
 //!
 //! Use [`Scheduler::spawn_blocking`] or [`RuntimeScheduler::spawn_blocking`] for
 //! synchronous calls that can stop an async worker from running other tasks.
