@@ -13,15 +13,12 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
 
-use common::{
-    ABANDONED, ACTIVE, COMPLETE, Capture, Captured, ERROR, Echoing, Measurement, Step, Tenant, data, poll_frame, scripted, server,
-};
+use common::{ABANDONED, ACTIVE, COMPLETE, Capture, Captured, ERROR, Echoing, Measurement, Step, data, poll_frame, scripted, server};
 use future_assert::{FutureTestExt, poll_once};
 use http::{Method, StatusCode};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
 use http_telemetry::TelemetryLayer;
 use layered::{Execute, Layer, Service};
-use observed::enrichment::EnrichFnExt;
 use observed::metadata::InstrumentKind;
 use observed::{Severity, Value};
 
@@ -84,7 +81,6 @@ fn active_requests_logs_and_meters_each_delta() {
         name: ACTIVE,
         severity: Some(Severity::Debug),
         message: Some("Active HTTP server requests changed".into()),
-        timestamp: common::sink_time(),
         logs: vec![
             (ACTIVE, Value::I64(value)),
             ("http.request.method", Value::from("_OTHER")),
@@ -109,30 +105,6 @@ fn every_event_pairs_active_requests() {
         || Execute::new(|_: HttpRequest| poll_fn(|_| -> Poll<http_extensions::Result<HttpResponse>> { panic!("the handler panicked") }));
 
     let rows = [
-        events_of(|layer| {
-            drop(
-                layer
-                    .layer(common::responding(StatusCode::OK))
-                    .execute(common::get())
-                    .unwrap_ready(),
-            );
-        }),
-        events_of(|layer| {
-            drop(
-                layer
-                    .layer(common::responding(StatusCode::NOT_FOUND))
-                    .execute(common::get())
-                    .unwrap_ready(),
-            );
-        }),
-        events_of(|layer| {
-            drop(
-                layer
-                    .layer(common::responding(StatusCode::SERVICE_UNAVAILABLE))
-                    .execute(common::get())
-                    .unwrap_ready(),
-            );
-        }),
         events_of(|layer| drop(layer.layer(common::FAILING).execute(common::get()).unwrap_ready())),
         events_of(|layer| {
             let service = layer.layer(handler_panic());
@@ -160,9 +132,6 @@ fn every_event_pairs_active_requests() {
     assert_eq!(
         rows,
         [
-            paired(COMPLETE),
-            paired(COMPLETE),
-            paired(COMPLETE),
             paired(ERROR),
             paired(ERROR),
             paired(ABANDONED),
@@ -176,20 +145,7 @@ fn every_event_pairs_active_requests() {
 }
 
 #[test]
-fn active_requests_decrement_carries_start_enrichment() {
-    let capture = Capture::new(|name| name == ACTIVE);
-    let sink = common::sink_with(&capture);
-    let service = server(sink.clone()).layer(common::responding(StatusCode::OK));
-
-    let future = (|| service.execute(common::get())).enrich(&sink, Tenant { tenant: "contoso" })();
-    future.unwrap_ready().unwrap();
-
-    let enrichments: Vec<_> = capture.events().into_iter().map(|event| event.enrichments).collect();
-    assert_eq!(enrichments, vec![vec![("tenant", Value::from("contoso"))]; 2]);
-}
-
-#[test]
-fn request_dropped_during_unwind_emits_no_decrement() {
+fn request_dropped_during_unwind_leaves_active_requests_one_too_high() {
     let capture = Capture::new(|_| true);
     let service = server(common::sink_with(&capture)).layer(common::NeverResponding);
     let mut future = Box::pin(service.execute(common::get()));

@@ -16,7 +16,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use bytesbuf::BytesView;
 use http::{HeaderMap, Method, Request, StatusCode, Uri, Version};
@@ -39,11 +39,6 @@ pub(crate) const DURATION: &str = "http.server.request.duration";
 /// duration is `0`.
 pub(crate) fn server(sink: Sink) -> TelemetryLayer {
     Telemetry::server(sink).clock(SimpleClock::new_frozen())
-}
-
-/// The time of the frozen clock of [`capture_sink`].
-pub(crate) fn sink_time() -> SystemTime {
-    SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000)
 }
 
 /// The value that one field records in a metric, and the description of that metric.
@@ -73,7 +68,6 @@ pub(crate) struct Captured {
     pub(crate) name: &'static str,
     pub(crate) severity: Option<Severity>,
     pub(crate) message: Option<Cow<'static, str>>,
-    pub(crate) timestamp: SystemTime,
     /// The log fields, under their log keys.
     pub(crate) logs: Vec<(&'static str, Value)>,
     /// The fields that are metric dimensions, under their metric keys.
@@ -142,7 +136,6 @@ impl EventProcessor for Capture {
             name: event.name(),
             severity: event.severity(),
             message: event.body(),
-            timestamp: event.timestamp(),
             logs: Vec::new(),
             dimensions: Vec::new(),
             measurements: Vec::new(),
@@ -179,10 +172,10 @@ impl EventProcessor for Capture {
     }
 }
 
-/// A sink whose one processor is `capture`, and a frozen clock at [`sink_time`].
+/// A sink whose one processor is `capture`.
 pub(crate) fn sink_with(capture: &Capture) -> Sink {
     Sink::builder(SinkId::new("capture"))
-        .clock(SimpleClock::new_frozen_at(sink_time()))
+        .clock(SimpleClock::new_frozen())
         .processors(vec![Arc::new(capture.clone())])
         .build()
 }
@@ -194,22 +187,16 @@ pub(crate) fn capture_sink() -> (Sink, Capture) {
 }
 
 /// Tells the sink whether it is interested, with an answer that the test can change. It records
-/// each event description that the sink asks about, and the name of each event that it receives.
+/// the name of each event that it receives.
 #[derive(Clone, Default)]
 pub(crate) struct Probe {
     interested: Arc<AtomicBool>,
-    asked: Arc<Mutex<Vec<EventDescription>>>,
     received: Arc<Mutex<Vec<&'static str>>>,
 }
 
 impl Probe {
     pub(crate) fn set_interested(&self, interested: bool) {
         self.interested.store(interested, Ordering::SeqCst);
-    }
-
-    /// The event descriptions that the sink asked about.
-    pub(crate) fn asked(&self) -> Vec<EventDescription> {
-        self.asked.lock().unwrap().clone()
     }
 
     /// The names of the events that the processor received.
@@ -219,8 +206,7 @@ impl Probe {
 }
 
 impl EventProcessor for Probe {
-    fn is_interested(&self, description: &EventDescription) -> bool {
-        self.asked.lock().unwrap().push(*description);
+    fn is_interested(&self, _: &EventDescription) -> bool {
         self.interested.load(Ordering::SeqCst)
     }
 

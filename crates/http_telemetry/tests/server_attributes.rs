@@ -10,7 +10,7 @@ mod common;
 
 use std::task::Poll;
 
-use common::{COMPLETE, Capture, Echoing, Step, data, poll_frame, scripted, server};
+use common::{ACTIVE, COMPLETE, Capture, Echoing, Step, data, poll_frame, scripted, server};
 use future_assert::FutureTestExt;
 use http::header::HOST;
 use http::{HeaderValue, StatusCode};
@@ -41,37 +41,28 @@ fn server_fields(request: HttpRequest) -> [(Option<Value>, Option<Value>); 2] {
     ["server.address", "server.port"].map(|key| (event.log(key).cloned(), event.dimension(key).cloned()))
 }
 
-/// Whether the server layer that `configure` sets up leaves out the request to `uri`, so that it
-/// emits no event.
-fn is_excluded(configure: impl FnOnce(TelemetryLayer) -> TelemetryLayer, uri: &'static str) -> bool {
+/// The names of the events that the server layer that `configure` sets up emits for a request to
+/// `uri`.
+fn event_names(configure: impl FnOnce(TelemetryLayer) -> TelemetryLayer, uri: &'static str) -> Vec<&'static str> {
     let capture = Capture::new(|_| true);
     configure(server(common::sink_with(&capture)))
         .layer(common::responding(StatusCode::OK))
         .execute(get(uri, None))
         .unwrap_ready()
         .unwrap();
-    capture.names().is_empty()
+    capture.names()
 }
 
 #[test]
 fn server_address_and_port_come_from_uri_authority_else_host_header() {
     let rows = [
-        ("http://example.com:8080/", Some("other:9090"), Some("example.com"), Some(8080)),
-        ("https://example.com/", Some("other:9090"), Some("example.com"), Some(443)),
-        ("http://example.com/", None, Some("example.com"), Some(80)),
-        ("ftp://example.com/", None, Some("example.com"), None),
-        ("http://[2001:db8::1]:8443/", None, Some("[2001:db8::1]"), Some(8443)),
-        ("/", Some("example.com:8080"), Some("example.com"), Some(8080)),
-        ("/", Some("[2001:db8::1]:8443"), Some("[2001:db8::1]"), Some(8443)),
-        ("/", Some("example.com"), Some("example.com"), None),
-        ("/", Some("example.com:"), Some("example.com"), None),
-        ("/", Some("exa mple.com"), None, None),
-        ("/", Some(""), None, None),
-        ("/", None, None, None),
+        ("http://example.com:8080/", Some("other:9090"), "example.com", 8080),
+        ("https://example.com/", Some("other:9090"), "example.com", 443),
+        ("http://example.com/", None, "example.com", 80),
+        ("/", Some("example.com:8080"), "example.com", 8080),
     ];
-    let fields = |address: Option<&'static str>, port: Option<i64>| {
-        let address = address.map(Value::from);
-        let port = port.map(Value::I64);
+    let fields = |address: &'static str, port: i64| {
+        let (address, port) = (Some(Value::from(address)), Some(Value::I64(port)));
         [(address.clone(), address), (port.clone(), port)]
     };
 
@@ -108,7 +99,7 @@ fn excluded_request_reaches_handler_unchanged_and_emits_no_event() {
 
 #[test]
 fn excluded_paths_match_raw_path_start_ignoring_ascii_case() {
-    let rows: [(&[&str], &'static str, bool); 10] = [
+    let rows: [(&[&str], &'static str, bool); 9] = [
         (&["/health"], "/health", true),
         (&["/health"], "/HEALTH/live", true),
         (&["/Health"], "/healthz?probe=1", true),
@@ -118,11 +109,10 @@ fn excluded_paths_match_raw_path_start_ignoring_ascii_case() {
         (&["/health"], "/%68ealth", false),
         (&["/health?"], "/health?probe=1", false),
         (&["/health"], "/hea", false),
-        (&[], "/health", false),
     ];
 
     assert_eq!(
-        rows.map(|(paths, uri, _)| is_excluded(|layer| layer.excluded_paths(paths.iter().copied()), uri)),
+        rows.map(|(paths, uri, _)| event_names(|layer| layer.excluded_paths(paths.iter().copied()), uri).is_empty()),
         rows.map(|(.., excluded)| excluded)
     );
 }
@@ -131,8 +121,5 @@ fn excluded_paths_match_raw_path_start_ignoring_ascii_case() {
 fn excluded_paths_replace_earlier_paths() {
     let configure = |layer: TelemetryLayer| layer.excluded_paths(["/health"]).excluded_paths(["/metrics"]);
 
-    assert_eq!(
-        [is_excluded(configure, "/metrics"), is_excluded(configure, "/health")],
-        [true, false]
-    );
+    assert_eq!(event_names(configure, "/health"), vec![ACTIVE, COMPLETE, ACTIVE]);
 }

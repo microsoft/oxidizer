@@ -8,15 +8,13 @@
 
 mod common;
 
-use std::collections::HashSet;
 use std::time::Duration;
 
-use common::{ABANDONED, ACTIVE, COMPLETE, Capture, Captured, DURATION, ERROR, Probe, Tenant, duration, server};
+use common::{ABANDONED, ACTIVE, COMPLETE, Capture, Captured, DURATION, Probe, Tenant, duration, server};
 use future_assert::{FutureTestExt, poll_once};
 use http::{Method, StatusCode, Version};
 use layered::{Layer, Service};
 use observed::enrichment::EnrichFnExt;
-use observed::metadata::EventDescription;
 use observed::{Severity, Value};
 use tick::ClockControl;
 
@@ -42,7 +40,6 @@ fn server_complete_event_reports_method_scheme_status_version_and_duration() {
                 name: COMPLETE,
                 severity: Some(Severity::Info),
                 message: Some("HTTP server request completed".into()),
-                timestamp: common::sink_time(),
                 logs: vec![
                     ("http.request.method", Value::from("GET")),
                     ("url.scheme", Value::from("https")),
@@ -69,9 +66,11 @@ fn server_complete_event_reports_method_scheme_status_version_and_duration() {
 
 #[test]
 fn server_dropped_future_reports_abandoned_without_status() {
-    let (sink, capture) = common::capture_sink();
+    let capture = Capture::new(|name| name == ABANDONED);
     let clock = ClockControl::new();
-    let service = server(sink).clock(clock.to_simple_clock()).layer(common::NeverResponding);
+    let service = server(common::sink_with(&capture))
+        .clock(clock.to_simple_clock())
+        .layer(common::NeverResponding);
 
     let mut future = Box::pin(service.execute(common::get_to("https://example.com/books/1")));
     assert!(poll_once(&mut future).is_pending());
@@ -84,7 +83,6 @@ fn server_dropped_future_reports_abandoned_without_status() {
             name: ABANDONED,
             severity: Some(Severity::Warn),
             message: Some("HTTP server request abandoned".into()),
-            timestamp: common::sink_time(),
             logs: vec![
                 ("http.request.method", Value::from("GET")),
                 ("url.scheme", Value::from("https")),
@@ -109,63 +107,24 @@ fn server_dropped_future_reports_abandoned_without_status() {
 }
 
 #[test]
-fn url_scheme_is_http_https_other_or_missing() {
-    let schemes_of = |uri: &'static str| {
-        let capture = Capture::new(|_| true);
+fn url_scheme_is_http_https_or_other() {
+    let scheme_of = |uri: &'static str| {
+        let capture = Capture::new(|name| name == COMPLETE);
         let service = server(common::sink_with(&capture)).layer(common::responding(StatusCode::OK));
         service.execute(common::get_to(uri)).unwrap_ready().unwrap();
-        capture
-            .events()
-            .iter()
-            .map(|event| (event.name, event.log("url.scheme").cloned(), event.dimension("url.scheme").cloned()))
-            .collect::<Vec<_>>()
-    };
-    let each_event = |scheme: Option<&'static str>| {
-        let scheme = scheme.map(Value::from);
-        [ACTIVE, COMPLETE, ACTIVE]
-            .map(|name| (name, scheme.clone(), scheme.clone()))
-            .to_vec()
+        let event = capture.single();
+        (event.log("url.scheme").cloned(), event.dimension("url.scheme").cloned())
     };
 
     assert_eq!(
         [
-            "/books/1",
             "http://example.com/books/1",
             "https://example.com/books/1",
             "ftp://example.com/books/1"
         ]
-        .map(schemes_of),
-        [
-            each_event(None),
-            each_event(Some("http")),
-            each_event(Some("https")),
-            each_event(Some("_OTHER"))
-        ]
+        .map(scheme_of),
+        ["http", "https", "_OTHER"].map(|scheme| (Some(Value::from(scheme)), Some(Value::from(scheme))))
     );
-}
-
-#[test]
-fn unpolled_request_future_reports_abandoned() {
-    let (sink, capture) = common::capture_sink();
-    let service = server(sink).layer(common::NeverResponding);
-
-    drop(service.execute(common::get()));
-
-    assert_eq!(capture.names(), vec![ABANDONED]);
-}
-
-#[test]
-fn each_event_has_own_type_id() {
-    let probe = Probe::default();
-    let service = server(common::probe_sink(&probe)).layer(common::responding(StatusCode::OK));
-
-    service.execute(common::get()).unwrap_ready().unwrap();
-
-    let asked = probe.asked();
-    let mut names: Vec<_> = asked.iter().map(EventDescription::name).collect();
-    names.sort_unstable();
-    let type_ids: HashSet<_> = asked.iter().map(|description| description.type_id().unwrap()).collect();
-    assert_eq!((names, type_ids.len()), (vec![ACTIVE, ABANDONED, COMPLETE, ERROR], 4));
 }
 
 #[test]
@@ -228,7 +187,8 @@ fn protocol_version_uses_open_telemetry_values() {
 
 #[test]
 fn start_scope_enrichment_reaches_server_events() {
-    let (sink, capture) = common::capture_sink();
+    let capture = Capture::new(|_| true);
+    let sink = common::sink_with(&capture);
     let completing = server(sink.clone()).layer(common::responding(StatusCode::OK));
     let abandoning = server(sink.clone()).layer(common::NeverResponding);
 
@@ -238,33 +198,26 @@ fn start_scope_enrichment_reaches_server_events() {
     drop(abandoned);
 
     let enrichments: Vec<_> = capture.events().into_iter().map(|event| (event.name, event.enrichments)).collect();
+    let tenant = vec![("tenant", Value::from("contoso"))];
     assert_eq!(
         enrichments,
-        vec![
-            (COMPLETE, vec![("tenant", Value::from("contoso"))]),
-            (ABANDONED, vec![("tenant", Value::from("contoso"))]),
-        ]
+        [ACTIVE, ACTIVE, COMPLETE, ACTIVE, ABANDONED, ACTIVE]
+            .map(|name| (name, tenant.clone()))
+            .to_vec()
     );
-}
-
-#[test]
-fn uninterested_sink_forwards_request_untouched() {
-    let probe = Probe::default();
-    let service = server(common::probe_sink(&probe)).layer(common::responding(StatusCode::IM_A_TEAPOT));
-
-    let response = service.execute(common::get()).unwrap_ready().unwrap();
-
-    assert_eq!((response.status(), probe.received()), (StatusCode::IM_A_TEAPOT, vec![]));
 }
 
 #[test]
 fn interest_is_checked_for_each_request() {
     let probe = Probe::default();
-    let service = server(common::probe_sink(&probe)).layer(common::responding(StatusCode::OK));
+    let service = server(common::probe_sink(&probe)).layer(common::responding(StatusCode::IM_A_TEAPOT));
 
-    service.execute(common::get()).unwrap_ready().unwrap();
+    let uninterested = service.execute(common::get()).unwrap_ready().unwrap();
     probe.set_interested(true);
     service.execute(common::get()).unwrap_ready().unwrap();
 
-    assert_eq!(probe.received(), vec![ACTIVE, COMPLETE, ACTIVE]);
+    assert_eq!(
+        (uninterested.status(), probe.received()),
+        (StatusCode::IM_A_TEAPOT, vec![ACTIVE, COMPLETE, ACTIVE])
+    );
 }

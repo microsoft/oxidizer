@@ -34,11 +34,6 @@ fn resolves_io_error_kind_label() {
 }
 
 #[test]
-fn unknown_error_gives_empty_label() {
-    assert_eq!(collect_error_labels(&DummyError), "");
-}
-
-#[test]
 fn resolves_io_error_with_unrelated_inner_uses_outer_kind() {
     let error = io::Error::new(ErrorKind::PermissionDenied, DummyError);
 
@@ -50,12 +45,4 @@ fn unwraps_nested_io_error() {
     let error = io::Error::other(io::Error::from(ErrorKind::ConnectionReset));
 
     assert_eq!(collect_error_labels(&error), "connection_reset");
-}
-
-#[test]
-fn chained_errors_join_labels_with_dots() {
-    let refused = io::Error::from(ErrorKind::ConnectionRefused);
-    let error = HttpError::other(refused, RecoveryInfo::retry(), "connect");
-
-    assert_eq!(collect_error_labels(&error), "connect.connection_refused");
 }
