@@ -24,7 +24,7 @@ const VALIDATION_CHUNK: usize = 1024;
 pub enum ErrorKind {
     /// The payload magic does not identify native v4 observations.
     InvalidMagic,
-    /// A schema other than 3 was supplied.
+    /// A schema other than 3 or 4 was supplied.
     UnsupportedSchema(u16),
     /// The payload ended before all fields were available.
     Truncated,
@@ -57,7 +57,7 @@ impl core::fmt::Display for Error {
         f.write_str("native allocator payload: ")?;
         match self.kind {
             ErrorKind::InvalidMagic => f.write_str("the magic bytes are invalid"),
-            ErrorKind::UnsupportedSchema(schema) => write!(f, "schema {schema} is unsupported; expected schema 3"),
+            ErrorKind::UnsupportedSchema(schema) => write!(f, "schema {schema} is unsupported; expected schema 3 or 4"),
             ErrorKind::Truncated => f.write_str("the payload ended before all fields were available"),
             ErrorKind::LengthMismatch => f.write_str("the buffer length does not match the encoded payload"),
             ErrorKind::LengthOverflow => f.write_str("the inventory count or payload length exceeds the supported limit"),
@@ -114,7 +114,7 @@ fn validate_owner(owner: &Owner) -> Result<(), Error> {
     }
 }
 
-/// Exact schema-3 output length.
+/// Exact schema-4 output length.
 ///
 /// # Errors
 /// Rejects inventories beyond the bound and invalid owner metadata.
@@ -122,7 +122,7 @@ pub fn encoded_len(snapshot: &Snapshot) -> Result<usize, Error> {
     encoded_len_with_owners(snapshot, &snapshot.owners)
 }
 
-/// Exact schema-3 length using borrowed inventory rows instead of `snapshot.owners`.
+/// Exact schema-4 length using borrowed inventory rows instead of `snapshot.owners`.
 ///
 /// Does not allocate or deallocate through any allocator. Duplicate validation
 /// sorts fixed 8 KiB stack chunks without modifying the supplied inventory.
@@ -169,7 +169,7 @@ pub fn encode_with_owners(snapshot: &Snapshot, owners: &[Owner], output: &mut [u
     }
     let mut writer = Writer { output, position: 0 };
     writer.bytes(MAGIC)?;
-    writer.bytes(&3_u16.to_le_bytes())?;
+    writer.bytes(&4_u16.to_le_bytes())?;
     writer.bytes(&0_u16.to_le_bytes())?;
     for value in [snapshot.captured_nanos, snapshot.session_id, snapshot.round, snapshot.owner_count] {
         writer.u64(value)?;
@@ -364,7 +364,7 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Decodes a bounded native inventory; no older schemas are accepted.
+/// Decodes a bounded native inventory from schema 3 or 4.
 ///
 /// # Errors
 /// Reports malformed, truncated, duplicate, oversized and trailing input.
@@ -374,7 +374,7 @@ pub fn decode(input: &[u8]) -> Result<Snapshot, Error> {
         return Err(error(ErrorKind::InvalidMagic));
     }
     let schema = u16::from_le_bytes(reader.bytes(2)?.try_into().map_err(|_length| error(ErrorKind::Truncated))?);
-    if schema != 3 {
+    if !matches!(schema, 3 | 4) {
         return Err(error(ErrorKind::UnsupportedSchema(schema)));
     }
     if reader.bytes(2)? != [0, 0] {

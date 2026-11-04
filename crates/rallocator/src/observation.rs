@@ -12,7 +12,8 @@ use std::sync::Mutex;
 use std::sync::TryLockError;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
-use seismograph::recorder::{RecordingSession, SuppressionGuard};
+use seismograph::recorder::event::EventClass;
+use seismograph::recorder::{is_enabled, without_recording};
 use seismograph_rallocator::native::{Observation, ObservationSource};
 
 #[cfg(test)]
@@ -137,7 +138,6 @@ impl Metadata {
             unsafe {
                 slot.write(Slot {
                     round: AtomicU64::new(0),
-                    session: AtomicU64::new(0),
                     generation: AtomicU64::new(0),
                     value: Mutex::new(None),
                 });
@@ -207,14 +207,13 @@ impl Drop for OwnerBuffer {
 
 struct Slot {
     round: AtomicU64,
-    session: AtomicU64,
     generation: AtomicU64,
     value: Mutex<Option<Observation>>,
 }
 
-/// Called only after an event was accepted and the native operation ended.
-pub(crate) fn publish(session: RecordingSession) {
-    if !seismograph_rallocator::native::publication_enabled() || seismograph::recorder::active_recording_session() != Some(session) {
+/// Publishes at most once per lease and requested round after a native operation.
+pub(crate) fn publish() {
+    if !seismograph_rallocator::native::publication_enabled() || !is_enabled(EventClass::Allocation) {
         return;
     }
     let round = seismograph_rallocator::native::observation_round();
@@ -224,36 +223,32 @@ pub(crate) fn publish(session: RecordingSession) {
         let generation = unsafe { metadata.generation() };
         // SAFETY: No native core borrow is retained across slot initialization.
         let Some(slot) = (unsafe { metadata.slot() }) else { return };
-        if slot.round.load(Ordering::Relaxed) == round
-            && slot.session.load(Ordering::Relaxed) == session.get()
-            && slot.generation.load(Ordering::Relaxed) == generation
-        {
+        if slot.round.load(Ordering::Relaxed) == round && slot.generation.load(Ordering::Relaxed) == generation {
             return;
         }
-        let _suppression = SuppressionGuard::enter();
-        // The accepted event already initialized recorder TLS. Native actions
-        // do not run user destructors; temporary late-TLS leases are skipped by observe_current.
-        let thread_id = seismograph::recorder::current_thread_id().get();
-        let captured_nanos = seismograph_rallocator::native::captured_nanos();
-        let mut budget = WALK_BUDGET;
-        // SAFETY: The current thread holds the sole core lease; copying ends
-        // before publishing, locking, serializing, or invoking any callback.
-        let mut observation = unsafe { (&*owner.core_ptr()).observe(&mut budget) };
-        observation.generation = generation;
-        observation.session_id = session.get();
-        observation.round = round;
-        observation.thread_id = thread_id;
-        observation.captured_nanos = captured_nanos;
-        match slot.value.try_lock() {
-            Ok(mut value) => {
-                *value = Some(observation);
-                slot.generation.store(generation, Ordering::Relaxed);
-                slot.session.store(session.get(), Ordering::Relaxed);
-                slot.round.store(round, Ordering::Relaxed);
+        without_recording(|| {
+            // Metadata follows observation rounds, not event sampling or recorder epochs.
+            let thread_id = seismograph::recorder::thread_id().get();
+            let captured_nanos = seismograph_rallocator::native::captured_nanos();
+            let mut budget = WALK_BUDGET;
+            // SAFETY: The current thread holds the sole core lease; copying ends
+            // before publishing, locking, serializing, or invoking any callback.
+            let mut observation = unsafe { (&*owner.core_ptr()).observe(&mut budget) };
+            observation.generation = generation;
+            observation.session_id = 0;
+            observation.round = round;
+            observation.thread_id = thread_id;
+            observation.captured_nanos = captured_nanos;
+            match slot.value.try_lock() {
+                Ok(mut value) => {
+                    *value = Some(observation);
+                    slot.generation.store(generation, Ordering::Relaxed);
+                    slot.round.store(round, Ordering::Relaxed);
+                }
+                Err(TryLockError::WouldBlock) => {}
+                Err(TryLockError::Poisoned(_)) => crate::abort::abort(),
             }
-            Err(TryLockError::WouldBlock) => {}
-            Err(TryLockError::Poisoned(_)) => crate::abort::abort(),
-        }
+        });
     });
 }
 
@@ -299,13 +294,12 @@ mod tests {
         }
         seismograph_rallocator::native::set_publication_enabled(true);
         seismograph::recorder(seismograph::recorder::Configuration {
-            allocations: seismograph::recorder::RecordingPolicy::all(true),
+            allocations: seismograph::recorder::Policy::all(true),
             ..Default::default()
         });
         let layout = Layout::from_size_align(32, 16).unwrap();
         let pointer = crate::recording::allocate(layout, false);
         assert!(!pointer.is_null());
-        let session = seismograph::recorder::active_recording_session().unwrap();
         let mut observed = false;
         crate::thread::observe_current(|owner| {
             observed = true;
@@ -325,12 +319,12 @@ mod tests {
             let generation = slot.generation.load(Ordering::Relaxed);
             assert_eq!(previous.as_ref().unwrap().round, round);
             seismograph_rallocator::native::request_observation();
-            publish(session);
+            publish();
             assert_eq!(slot.round.load(Ordering::Relaxed), round);
             assert_eq!(slot.generation.load(Ordering::Relaxed), generation);
             assert_eq!(previous.as_ref().unwrap().round, round);
             drop(previous);
-            publish(session);
+            publish();
             assert_eq!(
                 slot.round.load(Ordering::Relaxed),
                 seismograph_rallocator::native::observation_round()
@@ -376,7 +370,7 @@ mod tests {
             || {
                 seismograph_rallocator::native::set_publication_enabled(true);
                 seismograph::recorder(seismograph::recorder::Configuration {
-                    allocations: seismograph::recorder::RecordingPolicy::all(true),
+                    allocations: seismograph::recorder::Policy::all(true),
                     ..Default::default()
                 });
                 let pointer = crate::recording::allocate(Layout::from_size_align(32, 16).unwrap(), false);
@@ -387,7 +381,7 @@ mod tests {
                     poison_slot(slot);
                 });
                 seismograph_rallocator::native::request_observation();
-                publish(seismograph::recorder::active_recording_session().unwrap());
+                publish();
             },
         );
     }
@@ -459,7 +453,6 @@ mod tests {
         assert_eq!(metadata.published(), (ObservationSource::Unavailable, None));
         let mut slot = Box::new(Slot {
             round: AtomicU64::new(0),
-            session: AtomicU64::new(0),
             generation: AtomicU64::new(0),
             value: Mutex::new(None),
         });

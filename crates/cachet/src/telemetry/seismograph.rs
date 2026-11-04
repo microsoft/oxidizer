@@ -24,7 +24,7 @@ fn cache_name_id(name: CacheName) -> u64 {
 #[cfg(test)]
 mod tests {
     use seismograph::recorder::event::{EventClass, EventKind, Events, ObjectId};
-    use seismograph::recorder::{Configuration, RecordingPolicy};
+    use seismograph::recorder::{Configuration, Policy};
     use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
     use serial_test::serial;
 
@@ -65,7 +65,7 @@ mod tests {
         );
 
         seismograph::recorder(Configuration {
-            cache: RecordingPolicy::all(false),
+            cache: Policy::all(false),
             ..Configuration::default()
         });
         record_event(CACHE_NAME, false, EventKind::CacheHit);
@@ -84,7 +84,7 @@ mod tests {
 
         assert_eq!(events, vec![(EventKind::CacheHit, Some(0)), (EventKind::CacheMiss, Some(1))]);
         assert_aggregate_state_is_consistent(&decoded.events);
-        assert_eq!(decoded.events.recording.cache, RecordingPolicy::all(false));
+        assert_eq!(decoded.events.recording.cache, Policy::all(false));
         assert_eq!(EventKind::CacheHit.class(), EventClass::Cache);
         seismograph::recorder(Configuration::default());
     }
@@ -102,7 +102,7 @@ mod tests {
         const CACHE_NAME: CacheName = "aggregate-cache-event-test";
         let telemetry = CacheTelemetry::new();
         seismograph::recorder(Configuration {
-            cache: RecordingPolicy::all(false),
+            cache: Policy::all(false),
             ..Configuration::default()
         });
         let _ = seismograph::snapshot(SnapshotOptions {

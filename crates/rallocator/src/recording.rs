@@ -7,6 +7,7 @@ use std::alloc::Layout;
 
 use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
 use seismograph::recorder::event::{Address, EventClass, Record};
+use seismograph::recorder::{is_enabled, without_recording};
 
 static SOURCE: seismograph::snapshot::Source = seismograph::snapshot::Source::new(
     seismograph_rallocator::source::ID,
@@ -25,7 +26,7 @@ pub(crate) fn register_source() {
 pub(crate) fn allocate(layout: Layout, zeroed: bool) -> *mut u8 {
     // Keep the recorder's closure environment and register saves off the
     // disabled path; the enabled body still uses the lazy record closure.
-    if seismograph::recorder::recording_enabled_for(EventClass::Allocation) {
+    if is_enabled(EventClass::Allocation) {
         return allocate_recorded(layout, zeroed);
     }
     allocate_core(layout, zeroed)
@@ -42,9 +43,14 @@ fn allocate_core(layout: Layout, zeroed: bool) -> *mut u8 {
 
 #[inline(never)]
 fn allocate_recorded(layout: Layout, zeroed: bool) -> *mut u8 {
+    allocate_recorded_with(layout, zeroed, emit)
+}
+
+fn allocate_recorded_with(layout: Layout, zeroed: bool, emit: impl FnOnce(*mut u8, usize, usize, bool)) -> *mut u8 {
     let address = allocate_core(layout, zeroed);
-    if let Some(session) = emit(address, layout.size(), layout.align(), false) {
-        crate::observation::publish(session);
+    if !address.is_null() {
+        emit(address, layout.size(), layout.align(), false);
+        crate::observation::publish();
     }
     address
 }
@@ -53,7 +59,7 @@ fn allocate_recorded(layout: Layout, zeroed: bool) -> *mut u8 {
 /// `address` is a live allocation with `layout` from this allocator.
 #[inline]
 pub(crate) unsafe fn deallocate(address: *mut u8, layout: Layout) {
-    if seismograph::recorder::recording_enabled_for(EventClass::Allocation) {
+    if is_enabled(EventClass::Allocation) {
         // SAFETY: The caller transfers a live allocation for destruction.
         return unsafe { deallocation_recorded(address, layout) };
     }
@@ -63,19 +69,17 @@ pub(crate) unsafe fn deallocate(address: *mut u8, layout: Layout) {
 
 #[inline(never)]
 unsafe fn deallocation_recorded(address: *mut u8, layout: Layout) {
-    let session = emit(address, layout.size(), layout.align(), true);
+    emit(address, layout.size(), layout.align(), true);
     // SAFETY: The caller transfers a live allocation for destruction.
     unsafe { crate::thread::deallocate(address) };
-    if let Some(session) = session {
-        crate::observation::publish(session);
-    }
+    crate::observation::publish();
 }
 
 /// # Safety
 /// `address` is live for `layout`, and `new_size` satisfies `GlobalAlloc`'s contract.
 #[inline]
 pub(crate) unsafe fn reallocate(address: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-    if seismograph::recorder::recording_enabled_for(EventClass::Allocation) {
+    if is_enabled(EventClass::Allocation) {
         // SAFETY: The caller's live allocation and resize contract are forwarded.
         return unsafe { reallocate_recorded(address, layout, new_size) };
     }
@@ -113,21 +117,19 @@ unsafe fn reallocate_recorded_with_release(address: *mut u8, layout: Layout, new
         replacement
     };
     if !replacement.is_null() && new_size != layout.size() {
-        let freed = emit(address, layout.size(), layout.align(), true);
+        emit(address, layout.size(), layout.align(), true);
         if !retained {
             release(address);
         }
-        let allocated = emit(replacement, new_size, layout.align(), false);
-        if let Some(session) = allocated.or(freed) {
-            crate::observation::publish(session);
-        }
+        emit(replacement, new_size, layout.align(), false);
+        crate::observation::publish();
     }
     replacement
 }
 
 #[inline]
-fn emit(address: *mut u8, size: usize, alignment: usize, freed: bool) -> Option<seismograph::recorder::RecordingSession> {
-    seismograph::record_session(EventClass::Allocation, || {
+fn emit(address: *mut u8, size: usize, alignment: usize, freed: bool) {
+    seismograph::record(EventClass::Allocation, || {
         if address.is_null() {
             return None;
         }
@@ -149,40 +151,139 @@ fn emit(address: *mut u8, size: usize, alignment: usize, freed: bool) -> Option<
         } else {
             Record::allocation(allocation)
         })
-    })
+    });
 }
 
-fn capture(context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
-    let _suppression = seismograph::recorder::SuppressionGuard::enter();
-    let round = seismograph_rallocator::native::observation_round();
-    let captured_nanos = seismograph_rallocator::native::captured_nanos();
-    let (owners, owner_count, owners_complete) = crate::thread::inventory(round, captured_nanos, crate::observation::WALK_BUDGET)?;
-    // Pool collection has ended before taking the global backend lock; owner
-    // creation takes pool -> backend, so the collector must not reverse that order.
-    let global = crate::backend::observe();
-    let snapshot = seismograph_rallocator::native::Snapshot {
-        captured_nanos: seismograph_rallocator::native::captured_nanos(),
-        session_id: context.recording_observation().map_or(0, |observation| observation.session.get()),
-        round,
-        owner_count,
-        owners_complete,
-        publication_enabled: seismograph_rallocator::native::publication_enabled(),
-        owners: Vec::new(),
-        global,
-    };
-    let len = seismograph_rallocator::encoded_len_with_owners(&snapshot, owners.as_slice())
-        .map_err(|_error| seismograph::Error::new("rallocator source sizing failed"))?;
-    let mut data = seismograph::snapshot::SourceData::zeroed(len)?;
-    seismograph_rallocator::encode_with_owners(&snapshot, owners.as_slice(), data.as_mut_bytes())
-        .map_err(|_error| seismograph::Error::new("rallocator source encoding failed"))?;
-    // Existing monitor/snapshot polling supplies the next cooperative round.
-    seismograph_rallocator::native::request_observation();
-    Ok(data)
+fn capture(_context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
+    without_recording(|| {
+        let round = seismograph_rallocator::native::observation_round();
+        let captured_nanos = seismograph_rallocator::native::captured_nanos();
+        let (owners, owner_count, owners_complete) = crate::thread::inventory(round, captured_nanos, crate::observation::WALK_BUDGET)?;
+        // Pool collection has ended before taking the global backend lock; owner
+        // creation takes pool -> backend, so the collector must not reverse that order.
+        let global = crate::backend::observe();
+        let snapshot = seismograph_rallocator::native::Snapshot {
+            captured_nanos: seismograph_rallocator::native::captured_nanos(),
+            session_id: 0,
+            round,
+            owner_count,
+            owners_complete,
+            publication_enabled: seismograph_rallocator::native::publication_enabled(),
+            owners: Vec::new(),
+            global,
+        };
+        let len = seismograph_rallocator::encoded_len_with_owners(&snapshot, owners.as_slice())
+            .map_err(|_error| seismograph::Error::new("rallocator source sizing failed"))?;
+        let mut data = seismograph::snapshot::SourceData::zeroed(len)?;
+        seismograph_rallocator::encode_with_owners(&snapshot, owners.as_slice(), data.as_mut_bytes())
+            .map_err(|_error| seismograph::Error::new("rallocator source encoding failed"))?;
+        // Existing monitor/snapshot polling supplies the next cooperative round.
+        seismograph_rallocator::native::request_observation();
+        Ok(data)
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use seismograph::recorder::event::Event;
+    use seismograph::recorder::{Configuration, EventSampling, Policy};
+
     use super::*;
+
+    static RECORDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct Restore(bool);
+
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            seismograph::recorder(Configuration::default());
+            seismograph_rallocator::native::set_publication_enabled(self.0);
+        }
+    }
+
+    #[test]
+    fn null_allocation_emission_is_omitted_while_valid_emission_is_retained() {
+        let _lock = RECORDING.lock().unwrap();
+        let _restore = Restore(seismograph_rallocator::native::publication_enabled());
+        seismograph::recorder(Configuration {
+            allocations: Policy::all(false),
+            ..Configuration::default()
+        });
+        let thread = seismograph::recorder::thread_id();
+        let mut value = 0_u8;
+        let address = &raw mut value;
+
+        emit(address, 1, 1, false);
+        emit(std::ptr::null_mut(), 1, 1, false);
+        let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        let allocations = decoded
+            .events
+            .events
+            .iter()
+            .filter(|event| event.thread_id == thread)
+            .filter_map(Event::allocation)
+            .filter(|allocation| allocation.address.get() == address.addr() as u64 || allocation.address.get() == 0)
+            .map(|allocation| (allocation.address.get(), allocation.size, allocation.alignment))
+            .collect::<Vec<_>>();
+
+        assert_eq!(allocations, [(address.addr() as u64, 1, 1)]);
+    }
+
+    #[test]
+    fn sampled_out_allocation_still_publishes_the_requested_native_round() {
+        let _lock = RECORDING.lock().unwrap();
+        let _restore = Restore(seismograph_rallocator::native::publication_enabled());
+        seismograph_rallocator::native::set_publication_enabled(true);
+        seismograph::recorder(Configuration {
+            allocations: Policy {
+                event_sampling: EventSampling::one_in(2).unwrap(),
+                ..Policy::all(false)
+            },
+            ..Configuration::default()
+        });
+        seismograph_rallocator::native::request_observation();
+        let requested = seismograph_rallocator::native::observation_round();
+        let layout = Layout::from_size_align(64, 16).unwrap();
+
+        // Fix only the sampling identity. The native operation and publication
+        // use the production bridge, without depending on the allocator's address.
+        let pointer = allocate_recorded_with(layout, false, |address, size, alignment, _freed| {
+            seismograph::record(EventClass::Allocation, || {
+                Some(Record::allocation(Allocation {
+                    allocation_id: AllocationId::new(1),
+                    event_thread_id: EventThreadId::new(0),
+                    heap_id: HeapId::new(0),
+                    heap_kind: HeapKind::General,
+                    freed_after_heap_release: false,
+                    address: Address::from_ptr(address),
+                    size: size as u64,
+                    alignment: alignment as u64,
+                }))
+            });
+        });
+        assert!(!pointer.is_null());
+        let mut published = None;
+        crate::thread::observe_current(|owner| {
+            published = owner.observation().published().1.map(|observation| observation.round);
+        });
+        let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        let events = decoded
+            .events
+            .events
+            .iter()
+            .filter(|event| {
+                event
+                    .allocation()
+                    .is_some_and(|allocation| allocation.address.get() == pointer.addr() as u64)
+            })
+            .count();
+        // SAFETY: The test uniquely owns the live allocation with its original layout.
+        unsafe { deallocate(pointer, layout) };
+
+        assert_eq!((events, published), (0, Some(requested)));
+    }
 
     #[test]
     fn moved_realloc_records_free_before_cross_thread_address_reuse() {
@@ -197,7 +298,7 @@ mod tests {
             return;
         }
         seismograph::recorder(seismograph::recorder::Configuration {
-            allocations: seismograph::recorder::RecordingPolicy::all(false),
+            allocations: seismograph::recorder::Policy::all(false),
             ..Default::default()
         });
         let layout = Layout::from_size_align(2 << 20, 16).unwrap();

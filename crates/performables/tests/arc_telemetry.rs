@@ -7,7 +7,7 @@
 
 use performables::arc::{Arc, PerThread};
 use seismograph::recorder::event::{EventKind, ObjectId};
-use seismograph::recorder::{Configuration, RecordingPolicy};
+use seismograph::recorder::{Configuration, Policy};
 use seismograph::snapshot::{SnapshotOptions, decode};
 use thread_aware::Relocator;
 
@@ -25,7 +25,7 @@ fn only_the_last_logical_reference_records_a_drop() {
         ObjectId::from_ptr(Arc::as_ptr(&aliased).cast::<()>()),
     ];
     seismograph::recorder(Configuration {
-        general_events: RecordingPolicy::all(false),
+        general_events: Policy::all(false),
         ..Default::default()
     });
 
