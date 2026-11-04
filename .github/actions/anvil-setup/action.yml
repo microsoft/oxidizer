@@ -110,6 +110,10 @@ runs:
     # cargo-binstall keeps the cold bootstrap path fast.
     - name: Install cargo-binstall
       uses: cargo-bins/cargo-binstall@851112458b5f28a29e5bc14a690c3f283d9dcc6f # v1.26.2
+      # Repository override: setup tools need Rust 1.97, not the library MSRV.
+      env:
+        RUSTUP_TOOLCHAIN: "1.97"
+        RUSTUP_AUTO_INSTALL: "1"
 
     # cargo-spellcheck links libclang when cargo-binstall falls back to a source
     # build. Install it eagerly on Linux jobs whose selected setup group includes
@@ -123,6 +127,8 @@ runs:
     - name: Install just
       shell: pwsh -NoProfile -Command ". '{0}'"
       env:
+        RUSTUP_TOOLCHAIN: "1.97"
+        RUSTUP_AUTO_INSTALL: "1"
         # cargo-binstall queries GitHub Releases. Use the workflow's built-in
         # token so setup gets the authenticated API quota. Its effective
         # permissions are defined by the calling workflow.
@@ -159,6 +165,8 @@ runs:
       # into shell source. Validation below occurs before path or recipe-name
       # composition.
       env:
+        RUSTUP_TOOLCHAIN: "1.97"
+        RUSTUP_AUTO_INSTALL: "1"
         ANVIL_GROUP: ${{ inputs.group }}
         # Catalog binstall calls also query GitHub Releases.
         GITHUB_TOKEN: ${{ github.token }}
