@@ -341,8 +341,7 @@ fn write_warning_line(writer: &mut (impl Write + ?Sized), timestamp: SystemTime,
 #[cfg(test)]
 #[cfg(not(miri))]
 mod tests {
-    use std::assert_matches;
-use std::{io, str};
+    use std::{assert_matches, io, str};
 
     use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
     use opentelemetry_sdk::Resource;
