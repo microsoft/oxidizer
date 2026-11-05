@@ -72,9 +72,14 @@ async fn serve(body: impl Into<Bytes>) -> MockServer {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn real_http_request_succeeds() {
-    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(), test_clock(), options(&[]))
-        .body_builder(HttpBodyBuilder::new_fake())
-        .build(build_tls());
+    let handler = HyperTransportBuilder::new(
+        TokioConnector,
+        Spawner::new_tokio(anyspawn::TokioDeps::new()),
+        test_clock(),
+        options(&[]),
+    )
+    .body_builder(HttpBodyBuilder::new_fake())
+    .build(build_tls());
 
     let server = serve(Bytes::from_static(b"Hello World!")).await;
 
@@ -96,7 +101,7 @@ async fn https_only_filter_rejects_http_request() {
     // No explicit `request_filter` override: defaults to `RequestFilter::Https`.
     let mut opts = TransportOptions::default();
     opts.connect_timeout = Duration::from_secs(5);
-    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(), test_clock(), opts)
+    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(anyspawn::TokioDeps::new()), test_clock(), opts)
         .body_builder(HttpBodyBuilder::new_fake())
         .build(build_tls());
 
@@ -122,7 +127,7 @@ async fn http2_only_rejected_when_server_negotiates_http1() {
     // post-connect protocol verification to reject the HTTP/1.1 connection.
     let handler = HyperTransportBuilder::new(
         TokioConnector,
-        Spawner::new_tokio(),
+        Spawner::new_tokio(anyspawn::TokioDeps::new()),
         test_clock(),
         options(&[Version::HTTP_2, Version::HTTP_3]),
     )
@@ -161,9 +166,14 @@ async fn http2_only_with_single_supported_version_uses_prior_knowledge() {
     // would speak HTTP/1.1 and the post-connect protocol verification step
     // would reject the response, so this test pins down the prior-knowledge
     // behavior selected by the `len == 1 && [0] == HTTP_2` branch.
-    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(), test_clock(), options(&[Version::HTTP_2]))
-        .body_builder(HttpBodyBuilder::new_fake())
-        .build(build_tls());
+    let handler = HyperTransportBuilder::new(
+        TokioConnector,
+        Spawner::new_tokio(anyspawn::TokioDeps::new()),
+        test_clock(),
+        options(&[Version::HTTP_2]),
+    )
+    .body_builder(HttpBodyBuilder::new_fake())
+    .build(build_tls());
 
     let server = serve(Bytes::from_static(b"Hello World!")).await;
 
@@ -185,9 +195,14 @@ async fn single_http1_version_does_not_enable_http2_only() {
     // Builder sees a single supported version of HTTP/1.1. Since the version
     // is not HTTP/2, prior-knowledge mode must NOT be enabled, otherwise the
     // request would fail against an HTTP/1.1 server.
-    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(), test_clock(), options(&[Version::HTTP_11]))
-        .body_builder(HttpBodyBuilder::new_fake())
-        .build(build_tls());
+    let handler = HyperTransportBuilder::new(
+        TokioConnector,
+        Spawner::new_tokio(anyspawn::TokioDeps::new()),
+        test_clock(),
+        options(&[Version::HTTP_11]),
+    )
+    .body_builder(HttpBodyBuilder::new_fake())
+    .build(build_tls());
 
     let server = serve(Bytes::from_static(b"Hello World!")).await;
 
@@ -220,9 +235,14 @@ async fn zero_lifetime_poisons_connection_after_request() {
 
     let mut opts = options(&[]);
     opts.connection_pool.connection_lifetime = fetch_options::ConnectionLifetime::fixed(Duration::ZERO);
-    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(), Clock::new_tokio(), opts)
-        .body_builder(HttpBodyBuilder::new_fake())
-        .build(build_tls());
+    let handler = HyperTransportBuilder::new(
+        TokioConnector,
+        Spawner::new_tokio(anyspawn::TokioDeps::new()),
+        Clock::new_tokio(),
+        opts,
+    )
+    .body_builder(HttpBodyBuilder::new_fake())
+    .build(build_tls());
 
     let server = serve(Bytes::from_static(b"Hello World!")).await;
 

@@ -6,19 +6,20 @@
 use anyspawn::Spawner;
 
 #[tokio::main]
-async fn main() {
-    let spawner = Spawner::new_tokio();
+async fn main() -> Result<(), anyspawn::JoinError> {
+    let spawner = Spawner::new_tokio(anyspawn::TokioDeps::new());
 
-    // Fire-and-forget: spawn a task without waiting for its result
+    // Wait for the task and propagate a runtime failure.
     let () = spawner
         .spawn({
             async move {
                 println!("Background task completed!");
             }
         })
-        .await;
+        .await?;
 
     // Retrieve a result by awaiting the JoinHandle
-    let value = spawner.spawn(async { 1 + 1 }).await;
+    let value = spawner.spawn(async { 1 + 1 }).await?;
     println!("Got result: {value}");
+    Ok(())
 }

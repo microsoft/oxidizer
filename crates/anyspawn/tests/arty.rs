@@ -6,12 +6,12 @@
 
 testing_aids::init_tracing!();
 
+use std::error::Error as _;
 use std::future;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::thread::{self, ThreadId};
 use std::time::Duration;
 
-use anyspawn::Spawner;
+use anyspawn::{ArtyDeps, JoinHandle, Spawner};
 use arty::runtime::{PanicPolicy, Runtime, WorkersPolicy};
 use futures::future::join_all;
 use thread_aware::{Thread, ThreadAware};
@@ -32,16 +32,8 @@ impl ThreadAware for RelocationProbe {
 fn runtime_and_spawner() -> (Runtime, Spawner) {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-    let spawner = Spawner::new_arty(scheduler);
+    let spawner = Spawner::new_arty(&scheduler);
     (runtime, spawner)
-}
-
-fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
-    panic
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| panic.downcast_ref::<&str>().copied())
-        .unwrap()
 }
 
 #[test]
@@ -49,10 +41,12 @@ fn arty_spawn_and_clone_dispatch_tasks() {
     let (runtime, spawner) = runtime_and_spawner();
     let clone = spawner.clone();
 
-    let original_result = futures::executor::block_on(spawner.spawn(async { String::from("original") }));
-    let clone_result = futures::executor::block_on(clone.spawn(async { String::from("clone") }));
+    let original_result = futures::executor::block_on(spawner.spawn(async { String::from("original") })).unwrap();
+    let clone_result = futures::executor::block_on(clone.spawn(async { String::from("clone") })).unwrap();
 
     assert_eq!((original_result.as_str(), clone_result.as_str()), ("original", "clone"));
+    let task_error = futures::executor::block_on(spawner.spawn(async { Err::<(), _>("task failed") })).unwrap();
+    assert_eq!(task_error, Err("task failed"));
     runtime.stop().unwrap();
 }
 
@@ -77,7 +71,7 @@ fn dropping_arty_join_handle_does_not_cancel_task() {
 fn arty_spawn_anywhere_returns_thread_aware_output() {
     let (runtime, spawner) = runtime_and_spawner();
 
-    let result = futures::executor::block_on(spawner.spawn_anywhere(21_u32, |value| async move { value * 2 }));
+    let result = futures::executor::block_on(spawner.spawn_anywhere(21_u32, |value| async move { value * 2 })).unwrap();
 
     assert_eq!(result, 42);
     runtime.stop().unwrap();
@@ -97,7 +91,7 @@ fn arty_relocation_round_trip_rebinds_to_destination_worker() {
             let threads =
                 join_all((0..2).map(|_| scheduler.spawn_anywhere(cx.clone(), |worker| async move { worker.thread().clone() }))).await;
             let destination = threads.into_iter().map(Result::unwrap).find(|thread| thread != &source).unwrap();
-            (Spawner::new_arty(scheduler), source, destination)
+            (Spawner::new_arty(ArtyDeps::new(scheduler)), source, destination)
         })
         .unwrap();
     let original = spawner.clone();
@@ -107,8 +101,8 @@ fn arty_relocation_round_trip_rebinds_to_destination_worker() {
 
     spawner.relocate(Some(&source), &foreign);
     spawner.relocate(Some(&foreign), &destination);
-    let original_worker = futures::executor::block_on(original.spawn(async { thread::current().id() }));
-    let relocated_worker = futures::executor::block_on(spawner.spawn(async { thread::current().id() }));
+    let original_worker = futures::executor::block_on(original.spawn(async { thread::current().id() })).unwrap();
+    let relocated_worker = futures::executor::block_on(spawner.spawn(async { thread::current().id() })).unwrap();
 
     assert_eq!((original_worker, relocated_worker), (source.id(), destination.id()));
     runtime_b.stop().unwrap();
@@ -123,7 +117,8 @@ fn arty_spawn_anywhere_relocates_payload_before_factory() {
 
     let relocated = futures::executor::block_on(spawner.spawn_anywhere(RelocationProbe(None), |probe| async move {
         probe.0 == Some(thread::current().id())
-    }));
+    }))
+    .unwrap();
 
     assert!(relocated);
     runtime.stop().unwrap();
@@ -133,31 +128,33 @@ fn arty_spawn_anywhere_relocates_payload_before_factory() {
 fn arty_spawn_blocking_returns_output() {
     let (runtime, spawner) = runtime_and_spawner();
 
-    let result = futures::executor::block_on(spawner.spawn_blocking(|| 6 * 7));
+    let result = futures::executor::block_on(spawner.spawn_blocking(|| 6 * 7)).unwrap();
 
     assert_eq!(result, 42);
     runtime.stop().unwrap();
 }
 
 #[test]
-fn arty_task_panic_panics_when_joined() {
+fn arty_task_panics_return_join_errors() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .panic(PanicPolicy::ignore())
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
-    let spawner = Spawner::new_arty(scheduler);
-    let (started, task_ran) = std::sync::mpsc::channel();
-    let handle = spawner.spawn(async move {
-        started.send(()).unwrap();
-        panic!("task failed");
-    });
-
-    let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
-
-    task_ran.recv_timeout(TEST_TIMEOUT).unwrap();
-    assert_eq!(panic_message(&*panic), "spawned task did not complete: task panicked");
+    let spawner = Spawner::new_arty(ArtyDeps::new(scheduler));
+    let handles: [JoinHandle<()>; 3] = [
+        spawner.spawn(async { panic!("async task failed") }),
+        spawner.spawn_anywhere((), |()| async { panic!("anywhere task failed") }),
+        spawner.spawn_blocking(|| panic!("blocking task failed")),
+    ];
+    for handle in handles {
+        let error = futures::executor::block_on(handle).unwrap_err();
+        assert!(error.is_panic());
+        assert!(!error.is_cancelled());
+        assert!(error.source().unwrap().downcast_ref::<arty::task::JoinError>().unwrap().is_panic());
+        assert!(error.to_string().contains("task panicked"));
+    }
     runtime.stop().unwrap();
 }
 
@@ -172,9 +169,18 @@ fn arty_shutdown_cancels_pending_task() {
     task_started.recv_timeout(TEST_TIMEOUT).unwrap();
     runtime.stop().unwrap();
 
-    let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
+    let error = futures::executor::block_on(handle).unwrap_err();
 
-    assert_eq!(panic_message(&*panic), "spawned task did not complete: runtime is shutting down");
+    assert!(error.is_cancelled());
+    assert!(!error.is_panic());
+    assert!(
+        error
+            .source()
+            .unwrap()
+            .downcast_ref::<arty::task::JoinError>()
+            .unwrap()
+            .is_shutdown()
+    );
 }
 
 #[test]
@@ -183,9 +189,11 @@ fn arty_scheduler_does_not_keep_runtime_alive() {
     runtime.stop().unwrap();
 
     let handle = spawner.spawn(async { 42 });
-    let panic = catch_unwind(AssertUnwindSafe(|| futures::executor::block_on(handle))).unwrap_err();
+    let error = futures::executor::block_on(handle).unwrap_err();
 
-    assert_eq!(panic_message(&*panic), "spawned task did not complete: runtime is shutting down");
+    assert!(error.is_cancelled());
+    assert!(!error.is_panic());
+    assert!(error.to_string().contains("runtime is shutting down"));
 }
 
 #[test]
