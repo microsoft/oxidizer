@@ -815,7 +815,7 @@ mod tests {
                 assert!(stats.writes > 1);
             }
             if let Some(expected) = &expected_output {
-                assert!(&stats.bytes == expected);
+                assert_eq!(&stats.bytes, expected);
             } else {
                 expected_output = Some(stats.bytes.clone());
             }
