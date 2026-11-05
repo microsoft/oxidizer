@@ -1197,6 +1197,7 @@ fn convert_async_to_impl_future(sig: &syn::Signature) -> proc_macro2::TokenStrea
 
 /// Adds explicit lifetimes to a method signature for mockall compatibility.
 /// This is needed because mockall cannot handle elided lifetimes in generic type arguments.
+#[cfg(any(test, feature = "mockall"))]
 fn add_explicit_lifetimes(sig: &syn::Signature) -> syn::Signature {
     let mut sig = sig.clone();
 
@@ -1251,6 +1252,7 @@ fn add_explicit_lifetimes(sig: &syn::Signature) -> syn::Signature {
 }
 
 /// Checks if a type contains references within generic arguments.
+#[cfg(any(test, feature = "mockall"))]
 fn contains_reference_in_generic(ty: &syn::Type) -> bool {
     count_nested_elided_references(ty, false) > 0
 }
@@ -1322,6 +1324,7 @@ fn type_contains_implicit_higher_ranked_elision(ty: &syn::Type) -> bool {
     visitor.found
 }
 
+#[cfg(any(test, feature = "mockall"))]
 fn count_nested_elided_references(ty: &syn::Type, nested: bool) -> usize {
     struct NestedReferenceVisitor {
         nested: bool,
@@ -1350,10 +1353,12 @@ fn count_nested_elided_references(ty: &syn::Type, nested: bool) -> usize {
 }
 
 /// Adds a lifetime to all elided references within generic type arguments.
+#[cfg(any(test, feature = "mockall"))]
 fn add_lifetime_to_references(ty: &mut syn::Type, lifetime: &syn::Lifetime) {
     add_lifetime_to_nested_references(ty, lifetime, false);
 }
 
+#[cfg(any(test, feature = "mockall"))]
 fn add_lifetime_to_nested_references(ty: &mut syn::Type, lifetime: &syn::Lifetime, nested: bool) {
     struct LifetimeVisitor<'a> {
         nested: bool,
