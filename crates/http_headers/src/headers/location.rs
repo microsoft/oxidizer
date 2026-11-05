@@ -330,6 +330,7 @@ impl TryFrom<&str> for LocationOwned {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut value = FieldValue::from_str(value).map_err(|_invalid| super::invalid_syntax(&FieldName::Location))?;
+        // #[gamma::skip(stmt.delete_call, literal.bool_flip, tag = "equivalent", reason = "The immediately called TryFrom<FieldValue> unconditionally marks every successfully decoded Location sensitive again")]
         value.set_sensitive(true);
         Self::try_from(value)
     }
@@ -340,6 +341,7 @@ impl TryFrom<String> for LocationOwned {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let mut value = FieldValue::try_from(value).map_err(|_invalid| super::invalid_syntax(&FieldName::Location))?;
+        // #[gamma::skip(stmt.delete_call, literal.bool_flip, tag = "equivalent", reason = "The immediately called TryFrom<FieldValue> unconditionally marks every successfully decoded Location sensitive again")]
         value.set_sensitive(true);
         Self::try_from(value)
     }
@@ -396,6 +398,7 @@ fn validate_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<LocationView<'
             normalized: None,
         });
     }
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "Without a backslash replace produces identical text, which the already failed general-reference validator rejects again with the same error")]
     if !text.contains('\\') {
         return Err(invalid());
     }
@@ -425,7 +428,20 @@ fn validate_general_reference(value: &str) -> Result<ComponentRanges, DecodeErro
 
 #[inline]
 fn validate_general_reference_len(length: usize) -> Result<(), DecodeError> {
-    if i32::try_from(length).is_ok() { Ok(()) } else { Err(invalid()) }
+    if general_reference_len_fits(length) {
+        Ok(())
+    } else {
+        Err(invalid())
+    }
+}
+
+#[inline]
+fn general_reference_len_fits(length: usize) -> bool {
+    #[cfg(test)]
+    if let Some(limit) = tests::GENERAL_REFERENCE_LIMIT.get() {
+        return length <= limit;
+    }
+    i32::try_from(length).is_ok()
 }
 
 /// Accepts the references that need no RFC 3986 parse.
@@ -482,6 +498,33 @@ mod tests {
     use super::{Location, LocationOwned, validate, validate_general_reference, validate_general_reference_len, validate_with};
     use crate::sink::FieldSink;
     use crate::{DecodeErrorKind, DecodeMode, FieldName, FieldValue, SingleValueField, TestSink};
+
+    std::thread_local! {
+        pub(super) static GENERAL_REFERENCE_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    }
+
+    #[test]
+    fn gamma_afternoon_length_policy_retains_simple_reference_bypass_and_propagates_general_failures() {
+        use crate::FieldValueRef;
+
+        assert!(LocationOwned::try_from("../next").is_ok());
+        GENERAL_REFERENCE_LIMIT.set(Some(1));
+        let strict_view = Location::decode_view_with(FieldValueRef::new(b"/safe"), DecodeMode::Strict);
+        let relaxed_view = Location::decode_view_with(FieldValueRef::new(b"/safe"), DecodeMode::Relaxed);
+        let strict_owned = Location::decode_owned_with(FieldValue::from_static("/safe"), DecodeMode::Strict);
+        let relaxed_owned = Location::decode_owned_with(FieldValue::from_static("/safe"), DecodeMode::Relaxed);
+        let general = Location::decode_owned_with(FieldValue::from_static("../next"), DecodeMode::Strict);
+        let constructed = LocationOwned::from_components(None, None, "../next", None, None);
+        GENERAL_REFERENCE_LIMIT.set(None);
+        assert!(strict_view.is_ok());
+        assert!(relaxed_view.is_ok());
+        assert!(strict_owned.is_ok());
+        assert!(relaxed_owned.is_ok());
+        for error in [general.unwrap_err(), constructed.unwrap_err()] {
+            assert_eq!(error.header(), &FieldName::Location);
+            assert_eq!(error.kind(), DecodeErrorKind::InvalidSyntax);
+        }
+    }
 
     #[test]
     #[should_panic(expected = "all Location constructors validate UTF-8 and storage is immutable")]

@@ -251,6 +251,7 @@ impl Compressor {
 
     /// Starts configuring a compressor whose format is chosen when it is built.
     #[must_use]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "CompressorBuilder::new delegates directly to Default::default")]
     pub fn builder() -> CompressorBuilder<()> {
         CompressorBuilder::new()
     }
@@ -322,6 +323,7 @@ impl Decompressor {
 
     /// Starts configuring a decompressor whose format is chosen when it is built.
     #[must_use]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "DecompressorBuilder::new delegates directly to Default::default")]
     pub fn builder() -> DecompressorBuilder<()> {
         DecompressorBuilder::new()
     }
@@ -374,7 +376,11 @@ impl CompressionInternal for Decompressor {
 pub fn compress(format: Format, input: impl crate::InputData, resources: &Resources) -> Result<BytesView> {
     let input = crate::InputData::into_view(input, resources);
 
-    crate::compress(input, Compressor::new(format, resources)?)
+    crate::compress(
+        input,
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Every enabled format constructor succeeds for its validated default settings; zstd's supported compression-level setter only clamps a scalar on an init-stage context")]
+        Compressor::new(format, resources)?,
+    )
 }
 
 /// Decompresses a complete stream in `format`.
@@ -405,6 +411,7 @@ pub fn decompress_with_limits(
 
     crate::decompress(
         input,
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "These generic limits affect runtime decoding, not native construction; every format has infallible default native settings and zstd has no custom window parameter here")]
         Decompressor::builder()
             .limits(limits.for_buffered_output())
             .build_format(format, resources)?,
@@ -452,6 +459,7 @@ impl CompressorBuilder<()> {
             #[cfg(any(test, feature = "brotli"))]
             Format::Brotli => CompressorKind::Brotli(Box::new(self.build_brotli(resources))),
             #[cfg(any(test, feature = "zstd"))]
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The generic builder supplies only a validated portable level; zstd's supported level setter clamps a scalar on a fresh or pool-reset init-stage context and cannot fail")]
             Format::Zstd => CompressorKind::Zstd(self.build_zstd(resources)?),
         };
 
@@ -499,6 +507,7 @@ impl DecompressorBuilder<()> {
             #[cfg(any(test, feature = "brotli"))]
             Format::Brotli => DecompressorKind::Brotli(Box::new(self.build_brotli(resources))),
             #[cfg(any(test, feature = "zstd"))]
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The generic builder has no custom zstd window setting; fresh or pool-reset context construction has no fallible parameter operation")]
             Format::Zstd => DecompressorKind::Zstd(self.build_zstd(resources)?),
         };
 

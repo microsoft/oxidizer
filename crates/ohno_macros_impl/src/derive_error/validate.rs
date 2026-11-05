@@ -135,3 +135,63 @@ fn report_duplicate_markers(fields: &[AstField], errors: &mut Errors) {
         }
     }
 }
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use syn::parse_quote;
+
+    use super::select_core;
+    use crate::derive_error::parse::parse;
+    use crate::diagnostics::Errors;
+
+    #[test]
+    fn gamma_survivor_generated_core_occupies_the_marker_slot() {
+        let marker = crate::marker::generated_marker();
+        let input = syn::parse2(quote::quote!(struct Example {
+            #[error] original: Alias,
+            #marker generated: OhnoCore,
+        }))
+        .unwrap();
+        let mut errors = Errors::default();
+        let ast = parse(input, &mut errors).unwrap();
+        assert_eq!(select_core(&ast, &mut errors), Some(1));
+        assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn gamma_survivor_core_selection_returns_exact_index_or_none() {
+        for (input, expected) in [
+            (
+                parse_quote!(
+                    struct Example {
+                        first: u32,
+                        #[error]
+                        second: Alias,
+                    }
+                ),
+                Some(1),
+            ),
+            (
+                parse_quote!(
+                    struct Example {
+                        first: OhnoCore,
+                        second: OhnoCore,
+                    }
+                ),
+                None,
+            ),
+            (
+                parse_quote!(
+                    struct Example {
+                        first: u32,
+                    }
+                ),
+                None,
+            ),
+        ] {
+            let mut errors = Errors::default();
+            let ast = parse(input, &mut errors).unwrap();
+            assert_eq!(select_core(&ast, &mut errors), expected);
+        }
+    }
+}

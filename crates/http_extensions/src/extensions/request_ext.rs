@@ -50,6 +50,7 @@ impl<B> RequestExt for Request<B> {
         if let Some(uris) = self.extensions().get::<RequestUris>() {
             return Ok(uris.routed().unwrap_or_else(|| uris.original()).clone());
         }
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "TryFrom<http::Uri> for templated_uri::Uri only moves validated components and returns Ok on every branch")]
         Ok(self.uri().clone().try_into()?)
     }
 }

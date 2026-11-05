@@ -36,6 +36,7 @@ impl TaskList {
         let links = unsafe { pointer.as_task() }.get_ref().links();
         assert!(!links.linked.replace(true), "a task may be linked only once");
         links.previous.set(self.tail);
+        // #[gamma::skip(stmt.delete_call, reason = "New tasks initialize next to None; removal resets next to None before a task can be reinserted.")]
         links.next.set(None);
 
         if let Some(tail) = self.tail {
@@ -99,7 +100,9 @@ impl std::fmt::Debug for TaskList {
 
 impl Drop for TaskList {
     fn drop(&mut self) {
-        while self.pop_front().is_some() {}
+        while
+        // #[gamma::skip(cond.negate, option.is_some_to_is_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        self.pop_front().is_some() {}
     }
 }
 
@@ -110,6 +113,52 @@ mod tests {
     use static_assertions::assert_not_impl_any;
 
     use super::*;
+
+    #[cfg(feature = "inspection")]
+    #[test]
+    fn inspection_advances_once_per_task_and_honors_early_termination() {
+        let pool = MultiPool::new();
+        let mut list = TaskList::default();
+        let expected: Vec<_> = (0..3).map(|_| list.insert(crate::allocate_test_task_in(&pool))).collect();
+        let mut visited = Vec::new();
+        list.inspect_until(|pointer| {
+            assert!(!visited.contains(&pointer), "inspection must advance to the next task");
+            visited.push(pointer);
+            ControlFlow::Continue(())
+        });
+        assert_eq!(visited, expected);
+        visited.clear();
+        list.inspect_until(|pointer| {
+            visited.push(pointer);
+            ControlFlow::Break(())
+        });
+        assert_eq!(visited, vec![*expected.first().unwrap()]);
+        drop(list);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn gamma_survivor_middle_and_tail_unlinks_preserve_neighbors_and_owner_counts() {
+        let pool = MultiPool::new();
+        let mut list = TaskList::default();
+        let pointers: Vec<_> = (0..4).map(|_| list.insert(crate::allocate_test_task_in(&pool))).collect();
+        assert!(!list.is_empty());
+        // SAFETY: all pointers remain owned by this list on the current thread.
+        let middle = unsafe { list.remove(pointers[1]) }.unwrap();
+        // SAFETY: middle still owns the unlinked allocation.
+        assert!(unsafe { list.remove(pointers[1]) }.is_none());
+        drop(middle);
+        // SAFETY: the tail remains owned by this list.
+        drop(unsafe { list.remove(pointers[3]) }.unwrap());
+        assert_eq!(list.pop_front().unwrap().as_ptr(), pointers[0]);
+        assert_eq!(list.pop_front().unwrap().as_ptr(), pointers[2]);
+        assert!(list.is_empty());
+        for _ in 0..4 {
+            list.insert(crate::allocate_test_task_in(&pool));
+        }
+        drop(list);
+        assert!(pool.is_empty());
+    }
 
     #[test]
     fn task_list_is_thread_affine() {

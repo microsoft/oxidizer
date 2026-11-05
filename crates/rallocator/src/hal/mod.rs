@@ -43,8 +43,24 @@ pub(crate) enum Failure {
 }
 
 #[cfg(test)]
+type CommitProbe = fn(usize, usize) -> bool;
+
+#[cfg(test)]
 std::thread_local! {
     static FAILURE: Cell<Option<Failure>> = const { Cell::new(None) };
+    static COMMIT_PROBE: Cell<Option<CommitProbe>> = const { Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_commit_probe<R>(probe: CommitProbe, run: impl FnOnce() -> R) -> R {
+    struct Restore(Option<CommitProbe>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            COMMIT_PROBE.set(self.0);
+        }
+    }
+    let _restore = Restore(COMMIT_PROBE.replace(Some(probe)));
+    run()
 }
 
 #[cfg(test)]
@@ -75,12 +91,22 @@ pub(crate) fn reserve(size: usize, alignment: usize) -> *mut u8 {
 /// The page-aligned range lies within a live caller-owned reservation.
 /// Committing already accessible pages preserves their contents.
 pub(crate) unsafe fn commit(address: *mut u8, size: usize) -> bool {
+    commit_with(address, size, |address, size| {
+        #[cfg(test)]
+        if let Some(probe) = COMMIT_PROBE.get() {
+            return probe(address.addr(), size);
+        }
+        // SAFETY: Forward the caller's exclusive reservation and page-granular bounds.
+        unsafe { platform::commit(address, size) }
+    })
+}
+
+fn commit_with(address: *mut u8, size: usize, commit: impl FnOnce(*mut u8, usize) -> bool) -> bool {
     #[cfg(test)]
     if should_fail(Failure::Commit) {
         return false;
     }
-    // SAFETY: Forward the caller's exclusive reservation and page-granular bounds.
-    unsafe { platform::commit(address, size) }
+    commit(address, size)
 }
 
 /// # Safety
@@ -88,12 +114,18 @@ pub(crate) unsafe fn commit(address: *mut u8, size: usize) -> bool {
 /// Success requests backing-page reclamation; Linux and macOS retain writable
 /// mappings. macOS reclamation is lazy and does not promise zero on recommit.
 pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
+    decommit_with(address, size, |address, size| {
+        // SAFETY: The caller has retired all objects in its reserved range.
+        unsafe { platform::decommit(address, size) }
+    })
+}
+
+fn decommit_with(address: *mut u8, size: usize, decommit: impl FnOnce(*mut u8, usize) -> bool) -> bool {
     #[cfg(test)]
     if should_fail(Failure::Decommit) {
         return false;
     }
-    // SAFETY: The caller has retired all objects in its reserved range.
-    unsafe { platform::decommit(address, size) }
+    decommit(address, size)
 }
 
 #[cfg(test)]
@@ -101,6 +133,71 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use super::*;
+
+    #[test]
+    fn gamma_round2_hal_dispatch_preserves_exact_lengths_and_native_results() {
+        let mut byte = 0u8;
+        let address = std::ptr::from_mut(&mut byte);
+        for size in [0, PAGE, PAGE * 2] {
+            for result in [false, true] {
+                assert_eq!(
+                    commit_with(address, size, |actual, length| {
+                        assert_eq!((actual, length), (address, size));
+                        result
+                    }),
+                    result
+                );
+                assert_eq!(
+                    decommit_with(address, size, |actual, length| {
+                        assert_eq!((actual, length), (address, size));
+                        result
+                    }),
+                    result
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_hal_alignment_idempotent_commit_and_failure_consumption() {
+        for alignment in [1, RESERVE_MIN, RESERVE_MIN * 2] {
+            let pointer = reserve(RESERVE_MIN * 2, alignment);
+            assert!(!pointer.is_null());
+            assert_eq!(pointer.addr() % alignment, 0);
+            // SAFETY: The complete reservation is exclusively owned through release.
+            assert!(unsafe { commit(pointer, PAGE * 2) });
+            // SAFETY: Both committed pages are writable and owned, with no aliases.
+            unsafe { pointer.write_bytes(37, PAGE * 2) };
+            // SAFETY: Committing the same owned pages again is idempotent.
+            assert!(unsafe { commit(pointer, PAGE * 2) });
+            // SAFETY: Exactly two initialized committed pages remain live.
+            let bytes = unsafe { std::slice::from_raw_parts(pointer, PAGE * 2) };
+            assert!(bytes.iter().all(|&byte| byte == 37));
+            fail_next(Failure::Commit);
+            // SAFETY: Valid committed pages are provided; the in-memory failure seam intercepts the call.
+            assert!(!unsafe { commit(pointer, PAGE) });
+            fail_next(Failure::Decommit);
+            // SAFETY: No object references survive; the in-memory failure seam leaves these pages committed.
+            assert!(!unsafe { decommit(pointer, PAGE * 2) });
+            // SAFETY: Failed decommit preserved both initialized committed pages.
+            assert_eq!(unsafe { pointer.wrapping_add(PAGE).read() }, 37);
+            // SAFETY: The test retires both pages before decommit.
+            assert!(unsafe { decommit(pointer, PAGE * 2) });
+            // SAFETY: The same live reservation remains owned.
+            assert!(unsafe { commit(pointer, PAGE * 2) });
+            #[cfg(not(target_os = "macos"))]
+            {
+                // SAFETY: Recommitted pages are readable; Windows and Linux reclaim their anonymous contents.
+                let bytes = unsafe { std::slice::from_raw_parts(pointer, PAGE * 2) };
+                assert!(bytes.iter().all(|&byte| byte == 0));
+            }
+            // SAFETY: All references have ended and the test returns its entire reservation once.
+            unsafe { release(pointer, RESERVE_MIN * 2) };
+        }
+        for (size, alignment) in [(0, 1), (1, 1), (RESERVE_MIN, 0), (RESERVE_MIN, 3)] {
+            assert!(reserve(size, alignment).is_null());
+        }
+    }
 
     #[test]
     fn cpu_hints_accept_unreadable_addresses() {

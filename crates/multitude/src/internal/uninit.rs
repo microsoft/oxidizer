@@ -58,6 +58,7 @@ unsafe fn copy_fixed_bytes_nonoverlapping(src: *const u8, dst: *mut u8) {
 /// `dst` must be valid for writes of `len` bytes, `src` must be valid for reads
 /// of `len` bytes, and the regions must not overlap.
 #[inline]
+// #[gamma::skip(match_arm.never_matches, reason = "Every specialized arm copies exactly len bytes, including zero; removing any one arm selects the identical default copy")]
 pub(crate) unsafe fn copy_bytes_nonoverlapping(src: *const u8, dst: *mut u8, len: usize) {
     // SAFETY: the caller guarantees readable/writable non-overlapping regions
     // for `len`; every match arm copies at most that exact byte count.
@@ -194,9 +195,13 @@ impl<'a, T> Uninit<'a, [T]> {
         // provenance (no narrow `&mut [T]` retag).
         unsafe {
             let dst = slice_ptr.as_ptr().cast::<T>();
+            // #[gamma::skip(cond.always_false, reason = "The following generic copies write the same entire source payload when the fixed-width optimization is bypassed")]
             if mem::size_of_val(src) == FIXED_COPY_BYTES {
+                // #[gamma::skip(call_result.default, reason = "The copy still executes and its result is unit")]
                 copy_fixed_bytes_nonoverlapping(src.as_ptr().cast(), dst.cast());
+            // #[gamma::skip(cond.always_false, reason = "The generic element copy writes the same len bytes for one-byte Copy elements")]
             } else if const { mem::size_of::<T>() == 1 } {
+                // #[gamma::skip(call_result.default, reason = "The copy still executes and its result is unit")]
                 copy_bytes_nonoverlapping(src.as_ptr().cast(), dst.cast(), len);
             } else {
                 ptr::copy_nonoverlapping(src.as_ptr(), dst, len);
@@ -230,6 +235,7 @@ impl<'a, T> Uninit<'a, [T]> {
         unsafe {
             let dst = slice_ptr.as_ptr().cast::<T>();
             let mut guard = InitGuard { dst, initialized: 0 };
+            // #[gamma::skip(relational.ge_to_gt, reason = "The scalar tail clones the final full group in the same order and updates the same panic cleanup guard after each element")]
             while len - guard.initialized >= CLONE_UNROLL {
                 let index = guard.initialized;
                 dst.add(index).write((*src.as_ptr().add(index)).clone());
@@ -365,5 +371,30 @@ impl<T> Drop for InitGuard<T> {
         unsafe {
             ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.dst, self.initialized));
         }
+    }
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_copy_exact_length_and_destination_canaries() {
+        let source = core::array::from_fn::<_, 160, _>(|index| u8::try_from(index).unwrap());
+        for len in 0..=80 {
+            let mut destination = [0xa5; 160];
+            // SAFETY: the separate arrays provide readable/writable storage
+            // for every tested length, with untouched guard bytes on both sides.
+            unsafe { copy_bytes_nonoverlapping(source.as_ptr().wrapping_add(1), destination.as_mut_ptr().wrapping_add(1), len) };
+            assert_eq!(&destination[1..=len], &source[1..=len]);
+            assert_eq!(destination[0], 0xa5);
+            assert!(destination[1 + len..].iter().all(|byte| *byte == 0xa5));
+        }
+        let mut destination = [0xa5; 160];
+        // SAFETY: each array covers the non-overlapping 64-byte copy plus guards.
+        unsafe { copy_fixed_bytes_nonoverlapping(source.as_ptr().wrapping_add(1), destination.as_mut_ptr().wrapping_add(1)) };
+        assert_eq!(&destination[1..65], &source[1..65]);
+        assert_eq!(destination[0], 0xa5);
+        assert!(destination[65..].iter().all(|byte| *byte == 0xa5));
     }
 }

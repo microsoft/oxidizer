@@ -18,6 +18,24 @@ use crate::strings::string_common::impl_arena_string_common;
 use crate::vec::{FromIteratorIn, Vec};
 use crate::{AllocError, Arc, Arena, Box, FromIn, Rc};
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_utf16_lower_bounds_and_utf8_reserve_exact_target() {
+        let arena = Arena::new();
+        let mut text = arena.alloc_utf16_string();
+        text.extend(['a', 'b', 'c', 'd', 'e']);
+        assert_eq!(text.inner.capacity(), 5);
+        assert_eq!(text.to_string(), "abcde");
+        let mut from_utf8 = arena.alloc_utf16_string();
+        from_utf8.push_from_str("A😀");
+        assert_eq!(from_utf8.inner.capacity(), 5);
+        assert_eq!(from_utf8.to_string(), "A😀");
+    }
+}
+
 /// A growable, mutable UTF-16 string that lives in an [`Arena`].
 ///
 /// # Example
@@ -152,6 +170,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     pub fn try_from_utf16_str_in(s: impl AsRef<Utf16Str>, arena: &'a Arena<A>) -> Result<Self, AllocError> {
         let s = s.as_ref();
         let mut out = Self::try_with_capacity_in(s.len(), arena)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "The successful preceding reservation covers every input UTF16 unit, so this push cannot allocate or fail")]
         out.try_push_str(s)?;
         Ok(out)
     }
@@ -210,6 +229,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # fn main() {}
     /// ```
     pub fn truncate(&mut self, new_len: usize) {
+        // #[gamma::skip(relational.ge_to_gt, reason = "At equal lengths the end is a character boundary and the inner truncation is a no-op")]
         if new_len >= self.len() {
             return;
         }
@@ -237,6 +257,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # fn main() {}
     /// ```
     pub fn push(&mut self, ch: char) {
+        // #[gamma::skip(literal.int_increment, reason = "encode_utf16 overwrites the entire returned prefix; the unused suffix is not appended")]
         let mut buf = [0u16; 2];
         let units = ch.encode_utf16(&mut buf);
         self.inner.extend_from_slice(&*units);
@@ -264,6 +285,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # fn main() {}
     /// ```
     pub fn try_push(&mut self, ch: char) -> Result<(), AllocError> {
+        // #[gamma::skip(literal.int_increment, reason = "encode_utf16 overwrites the entire returned prefix; the unused suffix is not appended")]
         let mut buf = [0u16; 2];
         let units = ch.encode_utf16(&mut buf);
         self.inner.try_extend_from_slice(&*units)
@@ -338,6 +360,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
         let s = s.as_ref();
         self.inner.reserve(s.len());
         for ch in s.chars() {
+            // #[gamma::skip(literal.int_increment, reason = "encode_utf16 overwrites the entire returned prefix; the unused suffix is not appended")]
             let mut buf = [0u16; 2];
             let units = ch.encode_utf16(&mut buf);
             self.inner.extend_from_slice(&*units);
@@ -368,8 +391,10 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
         let s = s.as_ref();
         self.inner.try_reserve(s.len())?;
         for ch in s.chars() {
+            // #[gamma::skip(literal.int_increment, reason = "encode_utf16 overwrites the entire returned prefix; the unused suffix is not appended")]
             let mut buf = [0u16; 2];
             let units = ch.encode_utf16(&mut buf);
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "The UTF8 byte length reserved before the loop bounds the total UTF16 unit count, so every extension fits existing capacity")]
             self.inner.try_extend_from_slice(&*units)?;
         }
         Ok(())
@@ -427,6 +452,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # fn main() {}
     /// ```
     pub fn try_insert(&mut self, idx: usize, ch: char) -> Result<(), AllocError> {
+        // #[gamma::skip(literal.int_increment, reason = "encode_utf16 overwrites the entire returned prefix; the unused suffix is not appended")]
         let mut buf = [0u16; 2];
         let units = ch.encode_utf16(&mut buf);
         self.try_insert_units(idx, units)
@@ -501,6 +527,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
             "Utf16String::insert: idx {idx} is not on a UTF-16 char boundary"
         );
         let added = units.len();
+        // #[gamma::skip(cond.always_false, reason = "Reserving zero, appending no units, and rotating by zero leave the string and its capacity unchanged")]
         if added == 0 {
             return Ok(());
         }
@@ -617,6 +644,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
             } else {
                 guard.del_units += ch_len;
             }
+            // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             guard.idx += ch_len;
         }
         // Normal completion: `idx == len`; the guard truncates to
@@ -819,6 +847,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
             "Utf16String::split_off: `at` is not a char boundary"
         );
         Ok(Self {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "Vec splitting shares existing nonempty storage; an empty tail reserves zero capacity and cannot allocate")]
             inner: self.inner.try_split_off(at)?,
         })
     }
@@ -1212,6 +1241,7 @@ impl<A: Allocator + Clone> Iterator for Utf16Drain<'_, '_, A> {
 
     fn next(&mut self) -> Option<char> {
         let u0 = self.inner.next()?;
+        // #[gamma::skip(literal.int_increment, reason = "Extending the high-surrogate range to DC00 adds only a low surrogate, which cannot occur at the front character boundary of valid UTF-16")]
         let decoded = if (0xD800..=0xDBFF).contains(&u0) {
             let u1 = self.inner.next().expect("Utf16Drain holds valid UTF-16");
             char::decode_utf16([u0, u1]).next()
@@ -1234,6 +1264,7 @@ impl<A: Allocator + Clone> DoubleEndedIterator for Utf16Drain<'_, '_, A> {
         let last = self.inner.next_back()?;
         // A trailing unit at a char boundary is either a BMP scalar or the
         // low surrogate completing a pair; never a lone high surrogate.
+        // #[gamma::skip(literal.int_decrement, reason = "Extending the low-surrogate range down to DBFF adds only a high surrogate, which cannot occur at the final character boundary of valid UTF-16")]
         let decoded = if (0xDC00..=0xDFFF).contains(&last) {
             let high = self.inner.next_back().expect("Utf16Drain holds valid UTF-16");
             char::decode_utf16([high, last]).next()

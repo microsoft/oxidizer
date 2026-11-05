@@ -145,7 +145,7 @@ where
 
 #[cfg(test)]
 #[derive(Debug)]
-struct TestCompletion;
+pub(crate) struct TestCompletion;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -335,6 +335,7 @@ where
             .result_target
             .take()
             .expect("the result target is present until the task enters a terminal state");
+        // #[gamma::skip(cond.always_false, reason = "On success FutureStorage already retired its future; destroying that empty storage returns Ok without running a destructor.")]
         let future_panic = if matches!(&outcome, TerminalOutcome::Succeeded(_)) {
             // FutureStorage retires the future before returning Ready.
             None
@@ -364,7 +365,10 @@ where
     fn retire_payload(maybe_payload: &mut Option<Payload<F, R, T, I>>) {
         // The future is retired and the completion target has been transferred.
         // Diagnostic captures must not prevent delivery of that terminal outcome.
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| *maybe_payload = None)) {
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| {
+            // #[gamma::skip(assign_value.default, reason = "Option::default is None, exactly the assigned value.")]
+            *maybe_payload = None;
+        })) {
             discard_task_panic_payload(panic);
         }
     }
@@ -377,7 +381,10 @@ where
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn on_unhandled_task_panic(panic: TaskPanicPayload) -> ! {
     #[cfg(test)]
-    std::panic::resume_unwind(panic);
+    {
+        UNHANDLED_PANICS.set(UNHANDLED_PANICS.get() + 1);
+        std::panic::resume_unwind(panic);
+    }
 
     #[cfg(not(test))]
     if let Some(s) = panic.downcast_ref::<&str>() {
@@ -388,6 +395,11 @@ pub(crate) fn on_unhandled_task_panic(panic: TaskPanicPayload) -> ! {
 
     #[cfg(not(test))]
     std::process::abort();
+}
+
+#[cfg(test)]
+thread_local! {
+    static UNHANDLED_PANICS: Cell<usize> = const { Cell::new(0) };
 }
 
 /// Stores the future and completion target for a task.
@@ -447,6 +459,7 @@ impl<F> FutureStorage<F> {
 
     fn destroy_pinned(self: Pin<&mut Self>) -> Result<(), TaskPanicPayload> {
         let mut inner = self.project().inner;
+        // #[gamma::skip(cond.always_false, reason = "Setting an already empty pinned Option to None is a no-op and returns Ok.")]
         if inner.is_none() {
             return Ok(());
         }
@@ -476,7 +489,6 @@ impl<F: Future> Future for FutureStorage<F> {
 
 #[pinned_drop]
 impl<F> PinnedDrop for FutureStorage<F> {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Wrapper-invariant fallback terminates in a child process.
     fn drop(self: Pin<&mut Self>) {
         if let Err(panic) = self.destroy_pinned() {
             on_unhandled_task_panic(panic);
@@ -544,6 +556,207 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn nov4_pinned_storage_drop_dispatches_a_retirement_panic_to_the_unhandled_adapter() {
+        struct Panics;
+        impl Drop for Panics {
+            fn drop(&mut self) {
+                panic!("retiring pinned storage");
+            }
+        }
+        UNHANDLED_PANICS.set(0);
+        let storage = Box::pin(FutureStorage::new(Panics));
+        let panic = catch_unwind(AssertUnwindSafe(|| drop(storage))).unwrap_err();
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"retiring pinned storage"));
+        assert_eq!(UNHANDLED_PANICS.get(), 1);
+    }
+
+    #[test]
+    fn gamma_survivor_task_lifecycle_counts_real_polls_and_retires_saved_waker_before_delivery() {
+        use std::cell::{Cell, RefCell};
+        use std::rc::Rc;
+
+        use observed_testing::{TEST_ID, test_emitter};
+
+        for panics in [false, true] {
+            let pool = MultiPool::new();
+            let polls = Rc::new(Cell::new(0));
+            let saved = Rc::new(RefCell::new(None));
+            let (sink, processor) = test_emitter(TEST_ID);
+            let future = std::future::poll_fn({
+                let polls = Rc::clone(&polls);
+                let saved = Rc::clone(&saved);
+                move |cx| {
+                    *saved.borrow_mut() = Some(cx.waker().clone());
+                    polls.set(polls.get() + 1);
+                    if polls.get() < 3 {
+                        return task::Poll::Pending;
+                    }
+                    assert!(!panics, "poll panic");
+                    task::Poll::Ready(())
+                }
+            });
+            let handle = TaskHandle::new(allocate_task(&pool, future, TaskMetadata::default(), sink, TestCompletion, ()));
+            let owner = std::thread::current().id();
+            let (wake, receiver) = crate::WakeShared::new(Waker::noop().clone(), owner);
+            let shared = ExecutorShared::new(Waker::noop().clone(), Sink::noop(), owner, crate::PanicPolicy::IGNORE);
+            // SAFETY: handle owns its initialized pinned task on this thread.
+            let task = unsafe { handle.as_task() };
+            task.initialize(WakeSignal::new(wake.clone(), handle.as_ptr()));
+            assert!(task.poll(&shared).is_pending());
+            assert!(task.poll(&shared).is_pending());
+            assert!(task.poll(&shared).is_ready());
+            let events = processor.events();
+            assert_eq!(events.len(), 1);
+            assert_eq!(
+                events[0].name(),
+                if panics {
+                    "arty.rt.task.panicked"
+                } else {
+                    "arty.rt.task.succeeded"
+                }
+            );
+            assert_eq!(events[0].field_metrics()[0].value().to_bits(), 3.0_f64.to_bits());
+            saved.borrow().as_ref().unwrap().wake_by_ref();
+            assert!(!wake.has_remote_wakes());
+            receiver.try_recv().unwrap_err();
+            assert!(!task.promote_remote_notification());
+            task.abort(ShutdownCause::default());
+            drop(handle);
+            assert_eq!(pool.len(), 1);
+            saved.borrow_mut().take();
+            assert!(pool.is_empty());
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_cancellation_clears_payload_once_without_false_panic_telemetry() {
+        use observed_testing::{TEST_ID, test_emitter};
+
+        let pool = MultiPool::new();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let (sink, processor) = test_emitter(TEST_ID);
+        let handle = TaskHandle::new(allocate_task(
+            &pool,
+            DropCountingFuture(Arc::clone(&drops)),
+            TaskMetadata::default(),
+            sink,
+            TestCompletion,
+            (),
+        ));
+        // SAFETY: handle owns its pinned task on this thread.
+        let task = unsafe { handle.as_task() };
+        task.abort(ShutdownCause::default());
+        task.abort(ShutdownCause::default());
+        drop(handle);
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(processor.events().len(), 0);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn gamma_survivor_cancellation_disposes_panicking_future_and_payload_once_and_reports_zero_polls() {
+        use observed_testing::{TEST_ID, test_emitter};
+
+        struct Payload(Arc<AtomicUsize>);
+        impl Drop for Payload {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                panic!("panic payload destructor");
+            }
+        }
+        struct Pending(Arc<AtomicUsize>, Arc<AtomicUsize>);
+        impl Future for Pending {
+            type Output = ();
+            fn poll(self: Pin<&mut Self>, _: &mut task::Context<'_>) -> task::Poll<()> {
+                task::Poll::Pending
+            }
+        }
+        impl Drop for Pending {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                std::panic::panic_any(Payload(Arc::clone(&self.1)));
+            }
+        }
+        let pool = MultiPool::new();
+        let future_drops = Arc::new(AtomicUsize::new(0));
+        let payload_drops = Arc::new(AtomicUsize::new(0));
+        let (sink, processor) = test_emitter(TEST_ID);
+        let handle = TaskHandle::new(allocate_task(
+            &pool,
+            Pending(Arc::clone(&future_drops), Arc::clone(&payload_drops)),
+            TaskMetadata::default(),
+            sink,
+            TestCompletion,
+            (),
+        ));
+        // SAFETY: the handle owns its initialized pinned task on this thread.
+        let task = unsafe { handle.as_task() };
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| task.abort(ShutdownCause::default())));
+        result.unwrap();
+        task.abort(ShutdownCause::default());
+        drop(handle);
+        assert_eq!(future_drops.load(Ordering::Relaxed), 1);
+        assert_eq!(payload_drops.load(Ordering::Relaxed), 1);
+        let event = processor.single_event();
+        assert_eq!(event.name(), "arty.rt.task.panicked");
+        assert_eq!(event.field_metrics()[0].value().to_bits(), 0.0_f64.to_bits());
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn gamma_survivor_poll_panic_disposes_secondary_future_drop_payload_without_unwinding() {
+        use observed_testing::{TEST_ID, test_emitter};
+
+        struct Payload(Arc<AtomicUsize>);
+        impl Drop for Payload {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                panic!("secondary payload destructor");
+            }
+        }
+        struct Panicking(Arc<AtomicUsize>);
+        impl Future for Panicking {
+            type Output = ();
+            fn poll(self: Pin<&mut Self>, _: &mut task::Context<'_>) -> task::Poll<()> {
+                panic!("poll panic");
+            }
+        }
+        impl Drop for Panicking {
+            fn drop(&mut self) {
+                std::panic::panic_any(Payload(Arc::clone(&self.0)));
+            }
+        }
+        let pool = MultiPool::new();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let (sink, processor) = test_emitter(TEST_ID);
+        let handle = TaskHandle::new(allocate_task(
+            &pool,
+            Panicking(Arc::clone(&drops)),
+            TaskMetadata::default(),
+            sink,
+            TestCompletion,
+            (),
+        ));
+        let owner = std::thread::current().id();
+        let (wake, _receiver) = crate::WakeShared::new(Waker::noop().clone(), owner);
+        let shared = ExecutorShared::new(Waker::noop().clone(), Sink::noop(), owner, crate::PanicPolicy::IGNORE);
+        // SAFETY: handle owns its initialized pinned task on this thread.
+        let task = unsafe { handle.as_task() };
+        task.initialize(WakeSignal::new(wake, handle.as_ptr()));
+        assert!(
+            std::panic::catch_unwind(AssertUnwindSafe(|| task.poll(&shared)))
+                .unwrap()
+                .is_ready()
+        );
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        let event = processor.single_event();
+        assert_eq!(event.name(), "arty.rt.task.panicked");
+        assert_eq!(event.field_metrics()[0].value().to_bits(), 1.0_f64.to_bits());
+        drop(handle);
+        assert!(pool.is_empty());
+    }
+
     fn initialized_task<R: 'static>(pool: &MultiPool, future: impl Future<Output = R> + 'static) -> TaskHandle {
         let handle = TaskHandle::new(allocate_task(
             pool,
@@ -571,6 +784,38 @@ mod tests {
         task.abort(ShutdownCause::default());
 
         drop(handle);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_aborting_an_unqueued_pending_task_makes_its_retained_waker_inert() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let owner = std::thread::current().id();
+        crate::executor_context::register(owner);
+        let captured = Rc::new(RefCell::new(None));
+        let observed = Rc::clone(&captured);
+        let pool = MultiPool::new();
+        let handle = initialized_task(
+            &pool,
+            std::future::poll_fn(move |cx| {
+                *observed.borrow_mut() = Some(cx.waker().clone());
+                task::Poll::<()>::Pending
+            }),
+        );
+        let shared = ExecutorShared::new(Waker::noop().clone(), Sink::noop(), owner, crate::PanicPolicy::IGNORE);
+        // SAFETY: The handle owns its initialized pinned task on this thread.
+        let task = unsafe { handle.as_task() };
+        assert!(task.poll(&shared).is_pending());
+        task.abort(ShutdownCause::default());
+        captured.borrow().as_ref().unwrap().wake_by_ref();
+        let was_requeued = crate::executor_context::has_wakes(owner);
+        crate::executor_context::clear_wakes(owner);
+        crate::executor_context::unregister(owner);
+        drop(handle);
+        drop(captured);
+        assert!(!was_requeued);
         assert!(pool.is_empty());
     }
 

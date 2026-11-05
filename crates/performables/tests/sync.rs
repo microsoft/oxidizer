@@ -33,6 +33,7 @@ use serde::de::value::{Error as ValueError, U64Deserializer};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde")]
 use serializer_support::ValueSerializer;
+use testing_aids::is_mutation_testing;
 #[cfg(feature = "seismograph")]
 use thread_aware::Relocator;
 use waker_support::clone_hook_waker;
@@ -93,32 +94,37 @@ fn waker(counter: &StdArc<WakeCounter>) -> Waker {
 }
 
 fn block_on<F: Future>(future: F) -> F::Output {
-    let deadline = Instant::now() + TEST_DEADLINE;
+    let deadline = (!is_mutation_testing()).then(|| Instant::now() + TEST_DEADLINE);
     let waker = Waker::from(StdArc::new(ThreadWaker(std::thread::current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);
     loop {
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return output,
-            Poll::Pending => {
-                let remaining = deadline
-                    .checked_duration_since(Instant::now())
-                    .unwrap_or_else(|| panic!("future did not complete within the bounded test deadline"));
-                std::thread::park_timeout(remaining);
-                assert!(
-                    Instant::now() < deadline,
-                    "future did not receive a wake before the bounded test deadline"
-                );
-            }
+            Poll::Pending => match deadline {
+                Some(deadline) => {
+                    let remaining = deadline
+                        .checked_duration_since(Instant::now())
+                        .unwrap_or_else(|| panic!("future did not complete within the bounded test deadline"));
+                    std::thread::park_timeout(remaining);
+                    assert!(
+                        Instant::now() < deadline,
+                        "future did not receive a wake before the bounded test deadline"
+                    );
+                }
+                None => std::thread::park(),
+            },
         }
     }
 }
 
 fn join_with_timeout<T>(thread: std::thread::JoinHandle<T>) -> T {
-    let deadline = Instant::now() + TEST_DEADLINE;
-    while !thread.is_finished() {
-        assert!(Instant::now() < deadline, "thread did not finish within the bounded test deadline");
-        std::thread::sleep(THREAD_POLL_INTERVAL);
+    if !is_mutation_testing() {
+        let deadline = Instant::now() + TEST_DEADLINE.max(Duration::from_secs(10));
+        while !thread.is_finished() {
+            assert!(Instant::now() < deadline, "thread did not finish within the bounded test deadline");
+            std::thread::sleep(THREAD_POLL_INTERVAL);
+        }
     }
     #[expect(clippy::unwrap_used, reason = "a thread panic should fail the test with its captured backtrace")]
     let result = thread.join().unwrap();

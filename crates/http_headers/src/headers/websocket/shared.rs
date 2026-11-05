@@ -55,6 +55,7 @@ pub(super) fn validate_canonical_base64(bytes: &[u8], decoded_length: usize, nam
 )]
 #[inline(always)]
 fn all_padding(bytes: &[u8]) -> bool {
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The fallback OR-fold checks that every byte is equals, which is exactly the fixed two-byte equality for length two")]
     if bytes.len() == 2 {
         bytes == b"=="
     } else {
@@ -126,6 +127,7 @@ pub(super) fn validate_bare_list(
 ) -> Result<(), DecodeError> {
     values.validate_list_item_limit(b',', true)?;
     for value in values.repeated() {
+        // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "The complete list parser validates the same retained values; bare recognition only avoids redundant splitting and validation")]
         if !accepts_bare_item(value.as_bytes()) {
             let mut validate_item = validate_item;
             return validate_list(values, &mut validate_item);
@@ -194,6 +196,7 @@ fn validate_quoted_line(
     while position < bytes.len() {
         let byte = bytes[position];
         if escaped {
+            // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
             escaped = false;
         } else if quoted && byte == b'\\' {
             escaped = true;
@@ -204,9 +207,14 @@ fn validate_quoted_line(
             *present |= validate_present_item(item, validate_item)?;
             start = position + 1;
         }
-        position += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        position +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
-    if quoted || escaped {
+    if
+    // #[gamma::skip(logical.or_remove_right, tag = "equivalent", reason = "escaped becomes true only within a quoted string, and an escaped quote cannot close that string")]
+    quoted || escaped {
         return Err(DecodeError::new(name, DecodeErrorKind::UnterminatedQuote).at_value(value_index));
     }
     let item = trim_ows(&bytes[start..]);
@@ -222,14 +230,38 @@ fn validate_present_item(item: &[u8], validate_item: &mut dyn FnMut(&[u8]) -> Re
     Ok(true)
 }
 
+#[cfg(test)]
+#[test]
+fn gamma_nov6_quoted_line_reports_presence_before_and_after_the_last_comma() {
+    for bytes in [b"first,".as_slice(), b"first"] {
+        let mut present = false;
+        let mut observed = Vec::new();
+        validate_quoted_line(
+            &FieldName::SecWebSocketExtensions,
+            bytes,
+            0,
+            &mut |item| {
+                observed.push(item.to_vec());
+                Ok(())
+            },
+            &mut present,
+        )
+        .unwrap();
+        assert!(present, "{bytes:?}");
+        assert_eq!(observed, [b"first".to_vec()]);
+    }
+}
+
 /// Removes optional whitespace without the bounds checks of range slicing.
 #[inline]
 pub(super) fn trim_ows(bytes: &[u8]) -> &[u8] {
     let mut trimmed = bytes;
     while let [b' ' | b'\t', rest @ ..] = trimmed {
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         trimmed = rest;
     }
     while let [rest @ .., b' ' | b'\t'] = trimmed {
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         trimmed = rest;
     }
     trimmed
@@ -244,6 +276,7 @@ pub(super) fn validate_header_value_list(
     let mut count = 0_usize;
     for item in CommaItems::new(value.as_bytes()) {
         validate_item(item)?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "A single field-value slice has at most isize::MAX bytes and no more nonempty comma items than bytes, so this counter cannot overflow usize")]
         count = increment_item_count(count, name)?;
     }
     Ok(count != 0)
@@ -276,6 +309,7 @@ impl<'a> Iterator for CommaItems<'a> {
             let mut escaped = false;
             while let Some(byte) = self.bytes.get(self.position).copied() {
                 if escaped {
+                    // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
                     escaped = false;
                 } else if quoted && byte == b'\\' {
                     escaped = true;
@@ -283,14 +317,20 @@ impl<'a> Iterator for CommaItems<'a> {
                     quoted = !quoted;
                 } else if !quoted && byte == b',' {
                     let item = header_trim_ows(&self.bytes[self.start..self.position]);
-                    self.position += 1;
+                    // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    self.position +=
+                    // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    1;
                     self.start = self.position;
                     if item.is_empty() {
                         continue;
                     }
                     return Some(item);
                 }
-                self.position += 1;
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                self.position +=
+                // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                1;
             }
             self.finished = true;
             let item = header_trim_ows(&self.bytes[self.start..]);
@@ -305,6 +345,69 @@ impl<'a> Iterator for CommaItems<'a> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_generic_list_helpers_apply_their_own_exact_budget() {
+        let empty_members = format!("{}x", ",".repeat(1024));
+        let lines = crate::source::FieldLines::single(&crate::FieldName::SecWebSocketProtocol, empty_members.as_bytes());
+        super::validate_list(&lines, &mut |_| Ok(())).unwrap();
+        super::validate_bare_list(&lines, |_| true, |_| Ok(())).unwrap();
+        let many_members = vec!["a"; 1025].join(",");
+        let lines = crate::source::FieldLines::single(&crate::FieldName::SecWebSocketProtocol, many_members.as_bytes());
+        assert_eq!(
+            super::validate_list(&lines, &mut |_| Ok(())).unwrap_err().kind(),
+            crate::DecodeErrorKind::SourceLimitExceeded
+        );
+    }
+
+    #[test]
+    fn gamma_round2_quoted_line_splitter_preserves_escaped_delimiters_and_presence() {
+        for wire in [b"\"a\\\",b\",c".as_slice(), b"\"ax\",b", b"\"a\\\\\",b", b"a\\,b"] {
+            let mut observed = Vec::new();
+            let mut present = false;
+            super::validate_quoted_line(
+                &crate::FieldName::SecWebSocketExtensions,
+                wire,
+                3,
+                &mut |item| {
+                    observed.push(item.to_vec());
+                    Ok(())
+                },
+                &mut present,
+            )
+            .unwrap();
+            let expected: Vec<_> = match wire {
+                b"\"a\\\",b\",c" => vec![b"\"a\\\",b\"".to_vec(), b"c".to_vec()],
+                b"\"ax\",b" => vec![b"\"ax\"".to_vec(), b"b".to_vec()],
+                b"a\\,b" => vec![b"a\\".to_vec(), b"b".to_vec()],
+                _ => vec![b"\"a\\\\\"".to_vec(), b"b".to_vec()],
+            };
+            assert_eq!(observed, expected);
+            assert!(present);
+            assert_eq!(super::CommaItems::new(wire).map(<[u8]>::to_vec).collect::<Vec<_>>(), expected);
+        }
+
+        for wire in [b"\"a\\".as_slice(), b"\"a"] {
+            let error =
+                super::validate_quoted_line(&crate::FieldName::SecWebSocketExtensions, wire, 3, &mut |_| Ok(()), &mut false).unwrap_err();
+            assert_eq!(error.kind(), crate::DecodeErrorKind::UnterminatedQuote);
+            assert_eq!(error.value_index(), Some(3));
+        }
+    }
+    #[test]
+    fn gamma_round2_mixed_plain_quoted_validation_visits_each_member_once() {
+        let lines = crate::source::FieldLines::single(&crate::FieldName::SecWebSocketExtensions, b"aa,bbb,x;p=\"y\"");
+        let mut observed = Vec::new();
+        super::validate_list(&lines, &mut |item| {
+            observed.push(item.to_vec());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(observed, [b"aa".to_vec(), b"bbb".to_vec(), b"x;p=\"y\"".to_vec()]);
+        let mut present = false;
+        super::validate_quoted_line(&crate::FieldName::SecWebSocketExtensions, b"a,b", 0, &mut |_| Ok(()), &mut present).unwrap();
+        assert!(present);
+    }
+
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD;
 

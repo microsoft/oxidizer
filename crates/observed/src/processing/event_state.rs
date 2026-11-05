@@ -154,6 +154,12 @@ impl Event for NoopEvent {
 mod tests {
     use super::*;
 
+    #[test]
+    #[should_panic(expected = "NoopEvent should never have its fields accessed")]
+    fn nov4_noop_type_parameter_cannot_be_visited_as_an_event() {
+        let _ = NoopEvent.visit_fields(&mut |_, _| ControlFlow::Continue(()));
+    }
+
     struct TestEvent;
 
     impl Event for TestEvent {

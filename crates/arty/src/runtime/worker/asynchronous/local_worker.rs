@@ -152,10 +152,9 @@ impl LocalWorker {
     }
 
     pub(crate) fn try_with_driver_host<R>(f: impl FnOnce(&RuntimeDriverHost) -> R) -> Option<R> {
-        if !WorkerMarker::is_current() {
-            return None;
-        }
-        Self::with_current(|current| current.and_then(|current| current.driver_host.as_ref().map(f)))
+        only_on_worker(WorkerMarker::is_current(), || {
+            Self::with_current(|current| current.and_then(|current| current.driver_host.as_ref().map(f)))
+        })
     }
 
     #[cfg(test)]
@@ -175,6 +174,29 @@ impl LocalWorker {
 
     fn with_current_mut<R>(f: impl FnOnce(Option<&mut Self>) -> R) -> R {
         CURRENT.with_borrow_mut(|current| f(current.as_mut()))
+    }
+}
+
+fn only_on_worker<R>(current_worker: bool, access: impl FnOnce() -> Option<R>) -> Option<R> {
+    if !current_worker {
+        return None;
+    }
+    access()
+}
+
+#[cfg(test)]
+mod gamma_round2_tests {
+    #[test]
+    fn gamma_round2_unmarked_driver_access_never_invokes_the_tls_accessor() {
+        for marked in [false, true] {
+            let mut accesses = 0;
+            let result = super::only_on_worker(marked, || {
+                accesses += 1;
+                Some(59)
+            });
+            assert_eq!(result, marked.then_some(59));
+            assert_eq!(accesses, usize::from(marked));
+        }
     }
 }
 

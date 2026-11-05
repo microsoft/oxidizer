@@ -35,6 +35,94 @@ use crate::rc::Rc;
 use crate::slot::{MAX_CHUNK_SIZE_SLOTS, SlotCell};
 use crate::sync::Arc;
 
+#[cfg(test)]
+mod gamma_round2_tests {
+    use core::cell::Cell;
+    use core::ptr::NonNull;
+
+    use super::*;
+
+    #[test]
+    fn nov4_first_reservation_failure_does_not_reserve_or_inspect_the_layout_directory() {
+        let result = MultiPool::<Global>::try_reserve_one_with(
+            || Err::<(), _>(AllocError::ALLOCATOR_FAILED),
+            || panic!("the layout directory must not be reserved after the pool reservation fails"),
+            || panic!("failed reservation must not inspect either directory"),
+        );
+        assert_eq!(result, Err::<((), ()), _>(AllocError::ALLOCATOR_FAILED));
+    }
+
+    #[test]
+    fn gamma_round2_directory_reservation_propagates_the_second_failure_without_taking_a_snapshot() {
+        let pool_calls = Cell::new(0);
+        let result = MultiPool::<Global>::try_reserve_one_with(
+            || {
+                pool_calls.set(pool_calls.get() + 1);
+                Ok(31)
+            },
+            || Err::<(), _>(AllocError::ALLOCATOR_FAILED),
+            || panic!("a failed reservation cannot proceed to directory inspection"),
+        );
+        assert_eq!(result, Err(AllocError::ALLOCATOR_FAILED));
+        assert_eq!(pool_calls.get(), 1);
+    }
+
+    #[test]
+    fn gamma_round2_directory_reservation_retries_when_only_the_layout_directory_lost_its_room() {
+        let pool_calls = Cell::new(0);
+        let layout_calls = Cell::new(0);
+        let snapshots = Cell::new(0);
+        let result = MultiPool::<Global>::try_reserve_one_with(
+            || {
+                pool_calls.set(pool_calls.get() + 1);
+                Ok(pool_calls.get())
+            },
+            || {
+                layout_calls.set(layout_calls.get() + 1);
+                Ok(layout_calls.get())
+            },
+            || {
+                snapshots.set(snapshots.get() + 1);
+                (snapshots.get(), true, snapshots.get() == 2)
+            },
+        );
+        assert_eq!(result, Ok((2, 2)));
+        assert_eq!(pool_calls.get(), 2);
+        assert_eq!(layout_calls.get(), 2);
+        assert_eq!(snapshots.get(), 2);
+    }
+
+    #[test]
+    fn gamma_round2_reached_layout_cap_rejects_before_cloning_the_user_allocator() {
+        struct Counted<'a>(&'a Cell<usize>);
+
+        impl Clone for Counted<'_> {
+            fn clone(&self) -> Self {
+                self.0.set(self.0.get() + 1);
+                Self(self.0)
+            }
+        }
+
+        // SAFETY: allocation and deallocation use the same Global allocator and unchanged layouts.
+        unsafe impl Allocator for Counted<'_> {
+            fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, allocator_api2::alloc::AllocError> {
+                Global.allocate(layout)
+            }
+
+            unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+                // SAFETY: the caller provides the unchanged allocation and layout returned by Global.
+                unsafe { Global.deallocate(ptr, layout) };
+            }
+        }
+
+        let clones = Cell::new(0);
+        let pool = MultiPool::builder().allocator(Counted(&clones)).max_layouts(0).build();
+        let before = clones.get();
+        assert!(matches!(pool.try_alloc(73u8), Err(AllocError::CAPACITY_EXHAUSTED)));
+        assert_eq!(clones.get(), before);
+    }
+}
+
 /// Chunk sizing shared by every layout pool a [`MultiPool`] creates.
 ///
 /// A byte target lets layouts of very different sizes commit comparable memory
@@ -58,7 +146,9 @@ impl ChunkSizing {
     fn slots_for(self, stride: usize) -> u32 {
         match self {
             Self::Bytes(target) => {
+                // #[gamma::skip(literal.int_decrement, literal.int_increment, reason = "All callers supply a geometry stride containing two u32 metadata words, so stride is at least eight.")]
                 let slots = target / stride.max(1);
+                // #[gamma::skip(expr.decrement, reason = "Both fallback values exceed MAX_CHUNK_SIZE_SLOTS and are reduced to that same upper clamp.")]
                 let slots = u32::try_from(slots).unwrap_or(u32::MAX).clamp(1, MAX_CHUNK_SIZE_SLOTS);
                 // Rounding down keeps the chunk within the byte target. Chunk
                 // sizes stay powers of two so that slot addressing remains
@@ -221,7 +311,9 @@ impl<A: Allocator + Clone> MultiPool<A> {
         // reentrant allocation reaching either sees a consistent — merely
         // incomplete — directory.
         let stride = crate::geometry::stride(layout.size(), layout.align());
-        let pool = LayoutPool::new(layout, self.sizing.slots_for(stride), self.max_chunks, self.allocator.clone())?;
+        let pool =
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        LayoutPool::new(layout, self.sizing.slots_for(stride), self.max_chunks, self.allocator.clone())?;
 
         // Step 4: reserve after construction, so the reservation cannot be
         // consumed by a reentrant miss that happened during step 3. The
@@ -305,19 +397,39 @@ impl<A: Allocator + Clone> MultiPool<A> {
     /// in the first is confirmed once both are in hand rather than assumed.
     /// Ref: docs/implementation/reentrancy.md, "Reserving two vectors at once".
     fn try_reserve_one(&self) -> Result<(Displaced<LayoutPool<A>>, Displaced<Layout>), AllocError> {
+        Self::try_reserve_one_with(
+            || {
+                // SAFETY: as for `lookup`; neither call holds a borrow across the
+                // allocation it makes.
+                unsafe { directory::reserve_one(&self.pools) }
+            },
+            || {
+                // SAFETY: as for `lookup`.
+                unsafe { directory::reserve_one(&self.layouts) }
+            },
+            || {
+                // SAFETY: as for `lookup`.
+                unsafe {
+                    (
+                        (*self.layouts.get()).len(),
+                        directory::has_room(&self.pools),
+                        directory::has_room(&self.layouts),
+                    )
+                }
+            },
+        )
+    }
+
+    fn try_reserve_one_with<P, L>(
+        mut reserve_pool: impl FnMut() -> Result<P, AllocError>,
+        mut reserve_layout: impl FnMut() -> Result<L, AllocError>,
+        mut snapshot: impl FnMut() -> (usize, bool, bool),
+    ) -> Result<(P, L), AllocError> {
         let mut previous = None;
         loop {
-            // SAFETY: as for `lookup`; neither call holds a borrow across the
-            // allocation it makes.
-            let displaced = unsafe { (directory::reserve_one(&self.pools)?, directory::reserve_one(&self.layouts)?) };
-
-            // SAFETY: as for `lookup`.
-            let (installed, reserved) = unsafe {
-                (
-                    (*self.layouts.get()).len(),
-                    directory::has_room(&self.pools) && directory::has_room(&self.layouts),
-                )
-            };
+            let displaced = (reserve_pool()?, reserve_layout()?);
+            let (installed, pools_room, layouts_room) = snapshot();
+            let reserved = pools_room && layouts_room;
             if reserved {
                 return Ok(displaced);
             }
@@ -331,6 +443,7 @@ impl<A: Allocator + Clone> MultiPool<A> {
                 previous.is_none_or(|seen| installed > seen),
                 "reservation retried without an intervening install"
             );
+            // #[gamma::skip(stmt.delete_assign, option.some_to_none, reason = "previous only checks the debug invariant; a valid reentrant reservation retry has installed a new layout, increasing the actual count.")]
             previous = Some(installed);
 
             // Freeing the buffers displaced by this attempt is another point

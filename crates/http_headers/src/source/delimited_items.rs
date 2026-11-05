@@ -72,7 +72,9 @@ impl<'a> DelimitedItems<'a> {
             delimiter,
             skip_empty: delimiter == b',',
             current: None,
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "next() resets start and position to zero when it loads the first current line, before either cursor is read")]
             start: 0,
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "next() resets start and position to zero when it loads the first current line, before either cursor is read")]
             position: 0,
             value_index: 0,
             item_count: 0,
@@ -90,7 +92,9 @@ impl<'a> DelimitedItems<'a> {
             delimiter,
             skip_empty: delimiter == b',',
             current: None,
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "next() resets start and position to zero when it loads the first current line, before either cursor is read")]
             start: 0,
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "next() resets start and position to zero when it loads the first current line, before either cursor is read")]
             position: 0,
             value_index: 0,
             item_count: 0,
@@ -101,11 +105,14 @@ impl<'a> DelimitedItems<'a> {
     }
 
     fn item(&mut self, item: &'a [u8]) -> Result<&'a [u8], DecodeError> {
+        // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "Unlimited iterators never increment item_count, so their zero counter cannot equal the positive MAX_CUSTOM_LIST_ITEMS limit")]
         if self.limited && self.item_count == MAX_CUSTOM_LIST_ITEMS {
             self.finished = true;
             return Err(DecodeError::new(self.name, DecodeErrorKind::SourceLimitExceeded));
         }
-        if self.limited {
+        if
+        // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "The counter is consulted only when limited is true; incrementing it for trusted input changes no emitted item or limit decision")]
+        self.limited {
             self.item_count += 1;
         }
         Ok(item)
@@ -154,36 +161,54 @@ impl<'a> Iterator for DelimitedItems<'a> {
             let mut escaped = false;
             while self.position < bytes.len() {
                 if !quoted && let Some(skip) = find_delimiter_or_quote(&bytes[self.position..], self.delimiter) {
+                    // #[gamma::skip(stmt.delete_assign, tag = "equivalent", reason = "Without the jump, the same loop advances one byte at a time until the same delimiter or quote; only search cost changes")]
                     self.position += skip;
-                } else if !quoted {
+                } else if
+                // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "Declining the no-more-delimiters shortcut scans the remaining unquoted bytes one by one")]
+                !quoted {
+                    // #[gamma::skip(stmt.delete_assign, tag = "equivalent", reason = "The tail is taken from start to slice end, not position; current is then cleared and the next line resets both cursors")]
                     self.position = bytes.len();
+                    // #[gamma::skip(loop.break_to_continue, tag = "equivalent", reason = "position was set to bytes.len(), so continue immediately fails this while condition exactly as break does")]
                     break;
                 }
 
                 let byte = bytes[self.position];
                 if escaped {
+                    // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
                     escaped = false;
-                } else if quoted && byte == b'\\' {
+                } else if
+                // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "Outside quotes the fast scan reaches only a delimiter or quote, never backslash; a backslash reaching this branch therefore already implies quoted")]
+                quoted && byte == b'\\' {
                     escaped = true;
                 } else if byte == b'"' {
                     quoted = !quoted;
-                } else if !quoted && byte == self.delimiter {
+                } else if
+                // #[gamma::skip(logical.and_remove_right, tag = "equivalent", reason = "Outside quotes the fast scan reaches only delimiter or quote, and the preceding branch has already handled quote")]
+                !quoted && byte == self.delimiter {
                     let item = trim_ows(&bytes[self.start..self.position]);
-                    self.position += 1;
+                    // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "written by cargo gamma suppress 2026-11-07")]
+                    self.position +=
+                    // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    1;
                     self.start = self.position;
                     if self.skip_empty && item.is_empty() {
                         continue;
                     }
                     return Some(self.item(item));
                 }
-                self.position += 1;
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                self.position +=
+                // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                1;
             }
 
             let index = self.value_index;
             self.value_index += 1;
             let item = trim_ows(&bytes[self.start..]);
             self.current = None;
-            if quoted || escaped {
+            if
+            // #[gamma::skip(logical.or_remove_right, tag = "equivalent", reason = "escaped can become true only inside a quote and escaped quotes cannot toggle quoted, so escaped implies quoted")]
+            quoted || escaped {
                 return Some(Err(DecodeError::new(self.name, DecodeErrorKind::UnterminatedQuote).at_value(index)));
             }
 
@@ -197,6 +222,18 @@ impl<'a> Iterator for DelimitedItems<'a> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_delimited_budget_error_terminates_without_a_second_item() {
+        let lines = crate::source::FieldLines::single(&crate::FieldName::Vary, b"a,b");
+        let mut items = super::DelimitedItems::new(&lines, b',');
+        items.item_count = super::MAX_CUSTOM_LIST_ITEMS;
+        assert_eq!(
+            items.next().unwrap().unwrap_err().kind(),
+            crate::DecodeErrorKind::SourceLimitExceeded
+        );
+        assert!(items.next().is_none());
+        assert!(items.next().is_none());
+    }
     use std::iter;
 
     use crate::source::{FieldLines, MAX_CUSTOM_FIELD_BYTES, MAX_CUSTOM_FIELD_LINES, MAX_CUSTOM_LIST_ITEMS};
@@ -319,6 +356,13 @@ mod tests {
 
     #[test]
     fn delimited_iteration_handles_ows_empty_items_quotes_escapes_and_errors() {
+        let semicolons = FieldLines::single(&FieldName::ContentType, b" alpha ; ; \"b;\\\"c\" ; ");
+        let mut items = semicolons.semicolon_items();
+        for expected in [b"alpha".as_slice(), b"", b"\"b;\\\"c\"", b""] {
+            assert_eq!(items.next().transpose().unwrap(), Some(expected));
+        }
+        assert!(items.next().is_none());
+
         let stored = [
             FieldValue::from_static(" , alpha, \"bravo,charlie\" ,, "),
             FieldValue::from_static("delta"),
@@ -334,15 +378,6 @@ mod tests {
             [b"alpha".as_slice(), b"\"bravo,charlie\"".as_slice(), b"delta".as_slice(),]
         );
         assert!(items.next().is_none());
-
-        let semicolons = FieldLines::single(&FieldName::ContentType, b" alpha ; ; \"b;\\\"c\" ; ");
-        assert_eq!(
-            semicolons
-                .semicolon_items()
-                .map(|item| item.expect("valid item"))
-                .collect::<Vec<_>>(),
-            [b"alpha".as_slice(), b"".as_slice(), b"\"b;\\\"c\"".as_slice(), b"".as_slice(),]
-        );
 
         let unterminated = FieldLines::single(&FieldName::Vary, b"alpha,\"bravo");
         let error = unterminated

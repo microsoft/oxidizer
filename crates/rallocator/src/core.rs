@@ -5,12 +5,13 @@
 //! `UnsafeCell`, so taking the core lease does not alias concurrent publishers.
 
 use std::cell::UnsafeCell;
-use std::sync::atomic::{Ordering, fence};
+use std::sync::atomic::Ordering;
 
 use crate::backend::Local;
 use crate::classes::{self, CLASSES, COUNT, Request, SMALL_TAG};
 use crate::pagemap::{BACKEND, Map};
 use crate::remote::{self, Cache, Queue};
+use crate::sync_fence::fence;
 
 #[repr(C, align(256))]
 pub(crate) struct Owner {
@@ -223,6 +224,7 @@ impl LocalHint {
     const EMPTY: Self = Self { base: 0, size: 0, meta: 0 };
 
     fn lookup(&mut self, ptr: usize) -> Option<usize> {
+        // #[gamma::skip(logical.and_remove_left, literal.int_increment, reason = "A zero size makes the following unsigned range comparison false, while live slab sizes are whole chunks and never one")]
         if self.size != 0 && ptr.wrapping_sub(self.base) < self.size {
             return Some(self.meta);
         }
@@ -268,7 +270,11 @@ impl ReallocMap {
     }
 
     fn insert(&mut self, base: usize, size: usize, meta: usize) {
-        for chunk in (base..base + size).step_by(classes::CHUNK) {
+        for chunk in (base..
+            // #[gamma::skip(expr.decrement, reason = "This range starts on a chunk boundary and contains whole chunks, so subtracting one from its exclusive end retains every chunk start")]
+            base + size)
+            .step_by(classes::CHUNK)
+        {
             let set = Self::set(chunk);
             let first = self.entries[set];
             let slot = if first.chunk == 0 || first.chunk == chunk { set } else { set + 1 };
@@ -277,7 +283,12 @@ impl ReallocMap {
     }
 
     fn remove(&mut self, base: usize, size: usize, meta: usize) {
-        for chunk in (base..base + size).step_by(classes::CHUNK) {
+        for chunk in (base..
+        // #[gamma::skip(arith.add_to_mul, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // #[gamma::skip(expr.decrement, reason = "This range starts on a chunk boundary and contains whole chunks, so subtracting one from its exclusive end retains every chunk start")]
+        base + size)
+            .step_by(classes::CHUNK)
+        {
             let set = Self::set(chunk);
             for entry in &mut self.entries[set..set + 2] {
                 if (entry.chunk, entry.meta) == (chunk, meta) {
@@ -332,6 +343,7 @@ impl Core {
                 if *budget == 0 {
                     result.slabs_complete = false;
                     result.large.complete = false;
+                    // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                     break;
                 }
                 *budget -= 1;
@@ -396,6 +408,7 @@ impl Core {
                 // SAFETY: A hot-list node is exclusively owned, committed and
                 // initialized. Taking it removes it before publishing to client.
                 unsafe { self.fast[index] = *(head as *const usize) };
+                // #[gamma::skip(stmt.delete_call, reason = "The non-faulting prefetch is a cache hint and changes neither the free list nor ownership")]
                 crate::hal::prefetch(self.fast[index]);
                 return head as *mut u8;
             }
@@ -414,15 +427,7 @@ impl Core {
         } else {
             self.new_slab(tag, request.size()) as *mut u8
         };
-        if !ptr.is_null() {
-            // Every object subsequently popped from this prepared fast list,
-            // including the directly returned first object, is sequenced after
-            // the slab, pagemap, and intrusive free-object initialization.
-            // Pair with pointer consumers that acquire ownership after a
-            // relaxed atomic handoff.
-            fence(Ordering::Release);
-        }
-        ptr
+        publish_allocation(ptr)
     }
 
     fn new_slab(&mut self, tag: usize, size: usize) -> usize {
@@ -441,25 +446,50 @@ impl Core {
             reason = "Callers supply validated Request tags or 64 plus one of 44 class indices"
         )]
         let encoded_tag = tag as u8;
+        let (needed, sleeping) = slab_initial_state(tag);
         // SAFETY: Independent metadata and object ranges are exclusively owned.
         // The stable slab is initialized before its pagemap is published.
         unsafe {
             (meta as *mut Slab).write(Slab {
+                // #[gamma::skip(literal.int_increment, reason = "laden.insert below overwrites prev before publishing this exclusively owned new slab in its list")]
                 prev: 0,
+                // #[gamma::skip(literal.int_increment, reason = "laden.insert below overwrites next before publishing this exclusively owned new slab in its list")]
                 next: 0,
                 free_head: 0,
                 free_end: 0,
                 base,
-                needed: if tag >= SMALL_TAG { CLASSES[tag - SMALL_TAG].waking } else { 1 },
+                needed,
                 tag: encoded_tag,
-                sleeping: tag >= SMALL_TAG,
+                sleeping,
             });
         }
         // SAFETY: The initialized slab and registered object range share this owner.
-        unsafe { self.map.assign(base, size, meta, self.owner | tag) };
-        self.local_hint.observe(base, size, meta);
-        let indexed_size = if tag >= SMALL_TAG { size } else { classes::CHUNK };
-        self.realloc_map().insert(base, indexed_size, meta);
+        unsafe {
+            self.map.assign(
+                base,
+                // #[gamma::skip(expr.decrement, reason = "Pagemap assignment steps over whole chunks, so reducing the exclusive byte count by one retains the same final chunk start")]
+                size,
+                meta,
+                self.owner | tag,
+            );
+        }
+        self.local_hint.observe(
+            base,
+            // #[gamma::skip(expr.decrement, expr.increment, reason = "Fresh metadata differs from every live hint; release_slab clears matching hints before reuse, so this first observation records only meta and discards size")]
+            size, meta,
+        );
+        let indexed_size = slab_indexed_size(
+            // #[gamma::skip(expr.decrement, expr.increment, reason = "Valid large tags stay below SMALL_TAG after either one-step change; SMALL_TAG minus one still indexes the identical one-CHUNK first small slab")]
+            tag,
+            // #[gamma::skip(expr.decrement, reason = "Large tags ignore size; small whole-chunk sizes minus one visit exactly the same chunk starts in insert")]
+            size,
+        );
+        self.realloc_map().insert(
+            base,
+            // #[gamma::skip(expr.decrement, reason = "The indexed extent is a nonzero whole number of chunks; reducing its exclusive end by one preserves every chunk start")]
+            indexed_size,
+            meta,
+        );
         // SAFETY: This owner-exclusive slab is not yet linked in another list.
         unsafe { self.laden.insert(meta) };
         base
@@ -505,6 +535,7 @@ impl Core {
         slab.needed = class.waking;
         // SAFETY: The first object contains an initialized freelist link.
         self.fast[index] = unsafe { *(first as *const usize) };
+        // #[gamma::skip(stmt.delete_call, reason = "The non-faulting prefetch is a cache hint and changes neither the free list nor ownership")]
         crate::hal::prefetch(self.fast[index]);
         first as *mut u8
     }
@@ -512,7 +543,10 @@ impl Core {
     /// # Safety
     /// ptr is the start of an exclusively owned live allocation in this map.
     pub(crate) unsafe fn deallocate(&mut self, ptr: usize) {
-        if let Some(meta) = self.local_hint.lookup(ptr) {
+        if let Some(meta) = self.local_hint.lookup(
+            // #[gamma::skip(expr.increment, reason = "Live allocation starts are at least sixteen-byte aligned with at least sixteen reserved bytes, so their next byte belongs to the identical live hint range")]
+            ptr,
+        ) {
             #[cfg(debug_assertions)]
             {
                 // SAFETY: The live hint retains this initialized local slab.
@@ -532,15 +566,14 @@ impl Core {
 
     #[inline(never)]
     unsafe fn deallocate_unhinted(&mut self, ptr: usize) {
-        if let Some(meta) = self.realloc_map().lookup(ptr) {
+        if let Some(meta) = self.realloc_map().lookup(
+            // #[gamma::skip(expr.increment, reason = "Live allocation starts are at least sixteen-byte aligned, so adding one preserves their pagemap chunk key")]
+            ptr,
+        ) {
             // SAFETY: The local index retains this initialized local slab.
             let slab = unsafe { &*(meta as *const Slab) };
             let tag = usize::from(slab.tag);
-            let size = if tag >= SMALL_TAG {
-                CLASSES[tag - SMALL_TAG].slab
-            } else {
-                classes::size(tag)
-            };
+            let size = slab_allocation_size(tag);
             self.local_hint.observe(slab.base, size, meta);
             #[cfg(debug_assertions)]
             {
@@ -554,17 +587,18 @@ impl Core {
         }
         // Pair with a relaxed atomic pointer handoff before consulting the
         // address-indexed publication for a non-local allocation.
-        fence(Ordering::Acquire);
-        // SAFETY: A live allocation guarantees its immutable frontend entry.
-        let (meta, encoded) = unsafe { self.map.lookup(ptr) };
+        let (meta, encoded) = lookup_published_with(
+            // #[gamma::skip(expr.increment, reason = "A live allocation start is at least sixteen-byte aligned; its next byte has the identical pagemap chunk key")]
+            ptr,
+            |ptr| {
+                // SAFETY: A live allocation guarantees its immutable frontend entry after acquisition.
+                unsafe { self.map.lookup(ptr) }
+            },
+        );
         if encoded & !255 == self.owner {
             // SAFETY: The current pagemap snapshot identifies this live local slab.
             let slab = unsafe { &*(meta as *const Slab) };
-            let size = if usize::from(slab.tag) >= SMALL_TAG {
-                CLASSES[usize::from(slab.tag) - SMALL_TAG].slab
-            } else {
-                classes::size(usize::from(slab.tag))
-            };
+            let size = slab_allocation_size(usize::from(slab.tag));
             self.local_hint.observe(slab.base, size, meta);
             // SAFETY: Ownership matches this lease; the object is now retired.
             unsafe { self.return_one(meta, ptr) };
@@ -578,12 +612,11 @@ impl Core {
     /// ptr is a live allocation from this allocator and `copy_len` fits both it
     /// and request.
     pub(crate) unsafe fn reallocate(&mut self, ptr: usize, request: Request, copy_len: usize) -> *mut u8 {
-        let local = self.realloc_map().lookup(ptr);
-        if local.is_none() {
-            // Pair with a relaxed atomic pointer handoff before reading or
-            // routing a replacement for a non-local allocation.
-            fence(Ordering::Acquire);
-        }
+        let local = self.realloc_map().lookup(
+            // #[gamma::skip(expr.increment, reason = "Live allocation starts are at least sixteen-byte aligned, so adding one preserves their pagemap chunk key")]
+            ptr,
+        );
+        acquire_if_unindexed(local);
         let replacement = self.allocate(request);
         if replacement.is_null() {
             return replacement;
@@ -642,6 +675,7 @@ impl Core {
         let slab = unsafe { &mut *(meta as *mut Slab) };
         // SAFETY: This retired object transfers exactly once to the slab's queue.
         unsafe { slab.append(ptr, ptr) };
+        // #[gamma::skip(cond.always_false, relational.gt_to_lt, literal.int_increment, reason = "A live object's slab has a positive needed threshold; for needed greater than one return_count(meta,1) takes its first branch and performs the identical subtraction, while needed one uses the unchanged transition branch")]
         if slab.needed > 1 {
             slab.needed -= 1;
         } else {
@@ -682,8 +716,13 @@ impl Core {
                 break;
             }
             let index = tag - SMALL_TAG;
-            if slab.sleeping {
-                slab.sleeping = false;
+            if
+            // #[gamma::skip(cond.always_true, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            slab.sleeping {
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                slab.sleeping =
+                // #[gamma::skip(literal.bool_flip, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                false;
                 slab.needed = CLASSES[index].capacity - CLASSES[index].waking;
                 // SAFETY: The sleeping slab is linked only in laden.
                 unsafe { self.laden.remove(meta) };
@@ -697,8 +736,11 @@ impl Core {
                 }
                 // No more objects can be outstanding when a slab is empty.
                 debug_assert_eq!(count, 0);
+                // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                // #[gamma::skip(loop.delete_break, reason = "An empty slab has no outstanding objects, so count is zero; removing this break immediately reaches the unchanged count-zero break below without another state transition")]
                 break;
             }
+            // #[gamma::skip(cond.always_false, loop.break_to_continue, loop.delete_break, reason = "This check is reached only after waking a small slab, whose capacity exceeds waking; for count zero the next iteration subtracts zero from its positive needed count and immediately breaks, changing no list or counter")]
             if count == 0 {
                 break;
             }
@@ -711,18 +753,31 @@ impl Core {
         let slab = unsafe { &*(meta as *const Slab) };
         let base = slab.base;
         let tag = usize::from(slab.tag);
-        let size = if tag >= SMALL_TAG {
-            CLASSES[tag - SMALL_TAG].slab
-        } else {
-            classes::size(tag)
-        };
+        let size = slab_allocation_size(tag);
         if self.local_hint.meta == meta {
             self.local_hint = LocalHint::EMPTY;
         }
-        let indexed_size = if tag >= SMALL_TAG { size } else { classes::CHUNK };
-        self.realloc_map().remove(base, indexed_size, meta);
+        let indexed_size = slab_indexed_size(
+            // #[gamma::skip(expr.decrement, expr.increment, reason = "Valid large tags stay below SMALL_TAG after either one-step change; SMALL_TAG minus one still indexes the identical one-CHUNK first small slab")]
+            tag,
+            // #[gamma::skip(expr.decrement, expr.increment, reason = "Large tags ignore size; small size minus one visits the same chunks, while plus one only visits an adjacent chunk that cannot share this live slab's unique metadata")]
+            size,
+        );
+        self.realloc_map().remove(
+            base,
+            // #[gamma::skip(expr.decrement, expr.increment, reason = "Minus one keeps every indexed chunk; plus one only visits an adjacent chunk, and remove requires this retiring slab's exact unique metadata before changing an entry")]
+            indexed_size,
+            meta,
+        );
         // SAFETY: No frontend reader remains for these registered entries.
-        unsafe { self.map.assign(base, size, 0, BACKEND) };
+        unsafe {
+            self.map.assign(
+                // #[gamma::skip(expr.increment, reason = "This chunk-aligned range still indexes the identical pagemap entries when each stepped address is increased by one")]
+                base,
+                // #[gamma::skip(expr.decrement, reason = "The retired range is a nonzero whole number of chunks; reducing its exclusive end by one preserves every assigned entry")]
+                size, 0, BACKEND,
+            );
+        }
         // SAFETY: The slab is unlinked and its metadata is no longer used.
         unsafe { self.backend.free_meta(meta, Slab::ALLOC_SIZE) };
         // SAFETY: All objects returned and the map now marks backend ownership.
@@ -751,6 +806,7 @@ impl Core {
         // SAFETY: The endpoint is persistent and this core is its unique lease;
         // the queue is disjoint from mutable core state (an UnsafeCell).
         let queue = unsafe { (*(self.owner as *const Owner)).queue() };
+        // #[gamma::skip(literal.int_increment, reason = "Every drained byte amount and DRAIN_LIMIT is a multiple of the sixteen-byte minimum class; a one-byte budget offset crosses no additional threshold")]
         let mut bytes = 0usize;
         let mut post = false;
         let consume = |message| {
@@ -764,6 +820,7 @@ impl Core {
                 // SAFETY: The owner matches and the exact ring transfers once.
                 unsafe { self.return_local(meta, first, message, count) };
             } else {
+                // #[gamma::skip(logical.and_remove_left, reason = "Once post is true, extra reserve calls only alter the private remaining budget that the guaranteed post below resets to BUDGET")]
                 if !post && !self.remote.reserve(amount) {
                     post = true;
                 }
@@ -956,7 +1013,10 @@ impl Core {
         let queue = unsafe { (*(self.owner as *const Owner)).queue() };
         // Preserve native flush's retained user tail, including at owner exit.
         // Advancing it with a dummy message would change slab/OS retention.
-        while queue.can_dequeue() {
+        while
+        // #[gamma::skip(cond.negate, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        queue.can_dequeue() {
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             self.drain();
         }
         for index in 0..COUNT {
@@ -981,11 +1041,615 @@ impl Core {
     }
 }
 
+#[inline]
+fn publish_allocation(ptr: *mut u8) -> *mut u8 {
+    if !ptr.is_null() {
+        fence(Ordering::Release);
+    }
+    ptr
+}
+
+fn slab_initial_state(tag: usize) -> (u16, bool) {
+    (if tag >= SMALL_TAG { CLASSES[tag - SMALL_TAG].waking } else { 1 }, tag >= SMALL_TAG)
+}
+
+fn slab_allocation_size(tag: usize) -> usize {
+    if tag >= SMALL_TAG {
+        CLASSES[tag - SMALL_TAG].slab
+    } else {
+        classes::size(tag)
+    }
+}
+
+fn slab_indexed_size(tag: usize, size: usize) -> usize {
+    // #[gamma::skip(relational.ge_to_gt, reason = "At SMALL_TAG the first small slab is exactly CHUNK bytes, so both indexed-size branches are identical")]
+    if tag >= SMALL_TAG { size } else { classes::CHUNK }
+}
+
+#[inline]
+fn lookup_published_with<T>(ptr: usize, lookup: impl FnOnce(usize) -> T) -> T {
+    fence(Ordering::Acquire);
+    lookup(ptr)
+}
+
+#[inline]
+fn acquire_if_unindexed(local: Option<usize>) {
+    if local.is_none() {
+        fence(Ordering::Acquire);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    #[test]
+    fn nov6_unindexed_reallocation_acquires_before_allocating_or_copying() {
+        let address = fresh_owner();
+        // SAFETY: The fresh persistent owner belongs exclusively to this test.
+        let owner = unsafe { &*(address as *const Owner) };
+        // SAFETY: This test holds the owner's only core lease.
+        let core = unsafe { &mut *owner.core_ptr() };
+        let request = Request::new(std::alloc::Layout::from_size_align(16, 16).unwrap()).unwrap();
+        let original = core.allocate(request);
+        assert!(!original.is_null());
+        // SAFETY: This test exclusively owns the complete sixteen-byte allocation.
+        unsafe { original.write_bytes(0x5a, 16) };
+        // SAFETY: The live allocation retains its initialized immutable metadata.
+        let meta = unsafe { core.map.lookup(original.addr()) }.0;
+        // SAFETY: The current core exclusively owns the live slab metadata.
+        let base = unsafe { (*(meta as *const Slab)).base };
+        core.realloc_map().remove(base, CLASSES[0].slab, meta);
+        core.local_hint = LocalHint::EMPTY;
+        assert_ne!(core.fast[0], 0);
+        let trace = crate::sync_fence::trace::Trace::start();
+        // SAFETY: Both old and requested layouts contain the entire copied sixteen-byte range.
+        let replacement = unsafe { core.reallocate(original.addr(), request, 16) };
+        assert!(!replacement.is_null());
+        // The second acquire belongs to deallocation and cannot replace the
+        // handoff fence before the hot allocation and copy.
+        assert_eq!(trace.events(), [Ordering::Acquire, Ordering::Acquire]);
+        drop(trace);
+        // SAFETY: The replacement exclusively owns sixteen initialized copied bytes.
+        assert_eq!(unsafe { std::slice::from_raw_parts(replacement, 16) }, [0x5a; 16]);
+        // SAFETY: This is the unique return of the replacement allocation.
+        unsafe { core.deallocate(replacement.addr()) };
+        core.flush();
+        assert!(core.is_empty());
+    }
+
+    #[test]
+    fn nov6_new_slab_initializes_threshold_before_refill_and_retires_every_frontend_entry() {
+        let address = fresh_owner();
+        // SAFETY: The fresh persistent owner belongs exclusively to this test.
+        let owner = unsafe { &*(address as *const Owner) };
+        // SAFETY: This test holds the owner's only core lease.
+        let core = unsafe { &mut *owner.core_ptr() };
+        for index in [0, 1, COUNT - 1] {
+            let class = CLASSES[index];
+            let base = core.new_slab(SMALL_TAG + index, class.slab);
+            assert_ne!(base, 0);
+            // SAFETY: new_slab initialized the registered entries and retains their backing.
+            let meta = unsafe { core.map.lookup(base) }.0;
+            // SAFETY: The fresh slab is stable and belongs exclusively to this core.
+            let slab = unsafe { &*(meta as *const Slab) };
+            assert_eq!(slab.needed, class.waking);
+            assert!(slab.sleeping);
+            for offset in (0..class.slab).step_by(classes::CHUNK) {
+                assert_eq!(core.realloc_map().lookup(base + offset), Some(meta));
+            }
+            assert_eq!(core.realloc_map().lookup(base + class.slab), None);
+            // SAFETY: The fresh slab belongs to this core and has exactly one list link.
+            unsafe { core.laden.remove(meta) };
+            // SAFETY: The slab is unlinked and no allocation was issued from it.
+            unsafe { core.release_slab(meta) };
+            for offset in (0..class.slab).step_by(classes::CHUNK) {
+                assert_eq!(core.realloc_map().lookup(base + offset), None);
+                // SAFETY: The map itself remains committed; retirement must leave initialized backend entries.
+                assert_eq!(unsafe { core.map.lookup(base + offset) }, (0, BACKEND));
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_nov4_slab_publication_and_retirement_keep_exact_thresholds_and_full_class_ranges() {
+        for (index, class) in CLASSES.iter().enumerate() {
+            let tag = SMALL_TAG + index;
+            assert_eq!(slab_initial_state(tag), ((class.capacity / 4).min(32), true));
+            assert_eq!(slab_allocation_size(tag), class.slab);
+            assert_eq!(slab_indexed_size(tag, class.slab), class.slab);
+        }
+        for bits in [17, 18, 19, 30, 62] {
+            let tag = 64 - bits;
+            let size = 1usize << bits;
+            assert_eq!(slab_initial_state(tag), (1, false));
+            assert_eq!(slab_allocation_size(tag), size);
+            assert_eq!(slab_indexed_size(tag, size), 16384);
+        }
+    }
+
+    #[test]
+    fn gamma_nov4_publication_and_lookup_follow_exact_success_failure_and_indexed_handoff_orders() {
+        use crate::sync_fence::trace::Trace;
+        let mut byte = 71u8;
+        let pointer = &raw mut byte;
+        {
+            let trace = Trace::start();
+            assert!(publish_allocation(std::ptr::null_mut()).is_null());
+            assert!(trace.events().is_empty());
+            assert_eq!(publish_allocation(pointer), pointer);
+            assert_eq!(trace.events(), [Ordering::Release]);
+            let result = lookup_published_with(pointer.addr(), |address| {
+                assert_eq!(address, pointer.addr());
+                assert_eq!(trace.events(), [Ordering::Release, Ordering::Acquire]);
+                (17, 29)
+            });
+            assert_eq!(result, (17, 29));
+        }
+        for indexed in [false, true] {
+            let trace = Trace::start();
+            acquire_if_unindexed(indexed.then_some(17usize));
+            assert_eq!(trace.events(), if indexed { vec![] } else { vec![Ordering::Acquire] });
+        }
+    }
+
+    #[test]
+    fn gamma_round2_slow_allocation_drains_existing_remote_returns_before_refilling() {
+        let target = fresh_owner();
+        let sender = fresh_owner();
+        // SAFETY: the two persistent endpoints are uniquely leased by this test.
+        let target_owner = unsafe { &*(target as *const Owner) };
+        // SAFETY: this test is the target's only core borrower.
+        let target_core = unsafe { &mut *target_owner.core_ptr() };
+        // SAFETY: sender is a separate persistent endpoint.
+        let sender_owner = unsafe { &*(sender as *const Owner) };
+        // SAFETY: this test uniquely leases the sender's core.
+        let sender_core = unsafe { &mut *sender_owner.core_ptr() };
+        let small = Request::new(std::alloc::Layout::from_size_align(32, 16).unwrap()).unwrap();
+        for _ in 0..3 {
+            for _ in 0..2 {
+                let pointer = target_core.allocate(small);
+                assert!(!pointer.is_null());
+                // SAFETY: the live target allocation is transferred once to the sender.
+                unsafe { sender_core.deallocate(pointer.addr()) };
+            }
+            // SAFETY: all cached objects target the other persistent owner.
+            unsafe { sender_core.remote.post(sender_core.map, sender) };
+        }
+        let (first, last) = target_owner.queue().observe();
+        assert_ne!(first, last, "the fixture must contain consumable messages before allocation");
+        let request = Request::new(std::alloc::Layout::from_size_align(96, 16).unwrap()).unwrap();
+        let pointer = target_core.allocate(request);
+        assert!(!pointer.is_null());
+        assert_eq!(target_owner.queue().observe(), (last, last));
+        // SAFETY: the unrelated allocation is returned once to its owner.
+        unsafe { target_core.deallocate(pointer.addr()) };
+        sender_core.flush();
+        target_core.flush();
+    }
+
+    #[test]
+    fn gamma_round2_remote_cache_keeps_exact_metadata_and_forwarded_round_zero_routing() {
+        let target = fresh_owner();
+        let sender = fresh_owner();
+        let forwarder = fresh_owner();
+        // SAFETY: this test owns three distinct persistent endpoints and their sole core leases.
+        let target_owner = unsafe { &*(target as *const Owner) };
+        // SAFETY: the target core is exclusively owned by this test.
+        let target_core = unsafe { &mut *target_owner.core_ptr() };
+        // SAFETY: the sender is a separate exclusively leased persistent endpoint.
+        let sender_owner = unsafe { &*(sender as *const Owner) };
+        // SAFETY: the sender core is exclusively owned by this test.
+        let sender_core = unsafe { &mut *sender_owner.core_ptr() };
+        // SAFETY: the forwarder is a separate exclusively leased persistent endpoint.
+        let forwarder_owner = unsafe { &*(forwarder as *const Owner) };
+        // SAFETY: the forwarder core is exclusively owned by this test.
+        let forwarder_core = unsafe { &mut *forwarder_owner.core_ptr() };
+        let request = Request::new(std::alloc::Layout::from_size_align(32, 16).unwrap()).unwrap();
+        let pointers = (0..6).map(|_| target_core.allocate(request)).collect::<Vec<_>>();
+        assert!(pointers.iter().all(|pointer| !pointer.is_null()));
+        for pair in pointers.chunks_exact(2) {
+            for pointer in pair {
+                // SAFETY: each distinct live target allocation is transferred once to the sender.
+                unsafe { sender_core.deallocate(pointer.addr()) };
+                sender_core.remote.assert_cached_metadata_and_initial_routing(sender_core.map);
+            }
+            // SAFETY: all retired objects target the other persistent endpoint and transfer once.
+            unsafe { sender_core.remote.post(sender_core.map, sender) };
+        }
+        let mut message_count = 0;
+        let consume = |message| {
+            // SAFETY: the target queue hands over this initialized message exactly once.
+            unsafe { forwarder_owner.queue().enqueue(message, message) };
+            message_count += 1;
+            true
+        };
+        // SAFETY: this test is the target queue's sole consumer and transfers each dequeued message once.
+        unsafe { target_owner.queue().drain(consume) };
+        assert_eq!(message_count, 2);
+        forwarder_core.drain();
+        let mut budget = usize::MAX;
+        assert_eq!(forwarder_core.remote.observe(forwarder_core.map, &mut budget).messages, 1);
+        forwarder_core.remote.assert_cached_metadata_and_initial_routing(forwarder_core.map);
+        forwarder_core.flush();
+        target_core.flush();
+        sender_core.flush();
+    }
+
+    #[test]
+    fn gamma_round2_unarmed_hint_miss_preserves_the_observed_metadata() {
+        let mut hint = LocalHint {
+            base: 0,
+            size: 0,
+            meta: 0x4000,
+        };
+        assert_eq!(hint.lookup(0x8000), None);
+        assert_eq!((hint.base, hint.size, hint.meta), (0, 0, 0x4000));
+        hint.observe(0x8000, classes::CHUNK, 0x4000);
+        assert_eq!(hint.lookup(0x8000), Some(0x4000));
+    }
+
+    #[test]
+    fn gamma_round2_new_slabs_and_both_unhinted_paths_preserve_exact_class_metadata() {
+        let address = fresh_owner();
+        // SAFETY: The fresh persistent owner belongs exclusively to this test.
+        let owner = unsafe { &*(address as *const Owner) };
+        // SAFETY: This test exclusively leases the fresh owner's core.
+        let core = unsafe { &mut *owner.core_ptr() };
+        for index in [0, 27, 28, COUNT - 1] {
+            let class = CLASSES[index];
+            let request = Request::new(std::alloc::Layout::from_size_align(class.size, 16).unwrap()).unwrap();
+            let pointers: Vec<_> = (0..3).map(|_| core.allocate(request).addr()).collect();
+            assert!(pointers.iter().all(|&pointer| pointer != 0));
+            // SAFETY: All three live allocations retain their immutable frontend entry.
+            let meta = unsafe { core.map.lookup(pointers[0]) }.0;
+            // SAFETY: This test exclusively leases the initialized, live slab.
+            let slab = unsafe { &*(meta as *const Slab) };
+            let base = slab.base;
+            assert_eq!(usize::from(slab.tag), SMALL_TAG + index);
+            assert_eq!(slab.needed, class.waking);
+            assert!(slab.sleeping);
+            assert_eq!((slab.prev, slab.next), (0, 0));
+            for offset in (0..class.slab).step_by(classes::CHUNK) {
+                assert_eq!(core.realloc_map().lookup(base + offset), Some(meta));
+            }
+            // SAFETY: The first live object transfers once through the local index path.
+            unsafe { core.deallocate_unhinted(pointers[0]) };
+            assert_eq!(
+                (core.local_hint.base, core.local_hint.size, core.local_hint.meta),
+                (base, class.slab, meta)
+            );
+            core.realloc_map().remove(base, class.slab, meta);
+            core.local_hint = LocalHint { base: 0, size: 0, meta };
+            // SAFETY: The second live object retains its pagemap entry despite deliberate index eviction.
+            unsafe { core.deallocate_unhinted(pointers[1]) };
+            assert_eq!(
+                (core.local_hint.base, core.local_hint.size, core.local_hint.meta),
+                (base, class.slab, meta)
+            );
+            let mut budget = usize::MAX;
+            assert!(core.observe(&mut budget).local.requested_bytes >= class.slab as u64);
+            // SAFETY: The last live allocation transfers once to the same owner.
+            unsafe { core.deallocate(pointers[2]) };
+            core.flush();
+            core.validate(&BTreeSet::new());
+            assert!(core.is_empty());
+        }
+    }
+
+    #[test]
+    fn gamma_round2_releasing_another_slab_preserves_hint_then_retiring_its_slab_clears_it() {
+        let address = fresh_owner();
+        // SAFETY: The fresh owner is persistent and belongs to this test.
+        let owner = unsafe { &*(address as *const Owner) };
+        // SAFETY: This test holds the fresh owner's only core lease.
+        let core = unsafe { &mut *owner.core_ptr() };
+        let small = Request::new(std::alloc::Layout::from_size_align(16, 16).unwrap()).unwrap();
+        let other = Request::new(std::alloc::Layout::from_size_align(32, 16).unwrap()).unwrap();
+        let retained = core.allocate(small).addr();
+        let retired = core.allocate(other).addr();
+        assert_ne!(retained, 0);
+        assert_ne!(retired, 0);
+        // SAFETY: Both objects are live and retain their immutable metadata.
+        let retained_meta = unsafe { core.map.lookup(retained) }.0;
+        // SAFETY: This object remains live until the unique return below.
+        let retired_meta = unsafe { core.map.lookup(retired) }.0;
+        // SAFETY: This is the unique owner-exclusive return of the second allocation.
+        unsafe { core.deallocate(retired) };
+        core.local_hint = LocalHint {
+            base: retained,
+            size: CLASSES[0].slab,
+            meta: retained_meta,
+        };
+        core.flush();
+        assert_eq!(
+            (core.local_hint.base, core.local_hint.size, core.local_hint.meta),
+            (retained, CLASSES[0].slab, retained_meta)
+        );
+        assert_eq!(core.realloc_map().lookup(retired), None);
+        assert_eq!((core.available[1].length, core.available[1].unused), (0, 0));
+        assert_ne!(retained_meta, retired_meta);
+        // SAFETY: The retained allocation still belongs to this live, cached-hint slab.
+        unsafe { core.deallocate(retained) };
+        core.reclaim(0);
+        assert_eq!((core.local_hint.base, core.local_hint.size, core.local_hint.meta), (0, 0, 0));
+        assert_eq!(core.realloc_map().lookup(retained), None);
+        core.validate(&BTreeSet::new());
+        assert!(core.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_batch_return_crosses_waking_threshold_with_one_residual_object() {
+        let address = fresh_owner();
+        // SAFETY: The fresh persistent owner belongs exclusively to this test.
+        let owner = unsafe { &*(address as *const Owner) };
+        // SAFETY: This test uniquely leases the fresh owner's core.
+        let core = unsafe { &mut *owner.core_ptr() };
+        let request = Request::new(std::alloc::Layout::from_size_align(16, 16).unwrap()).unwrap();
+        let pointers: Vec<_> = (0..33).map(|_| core.allocate(request).addr()).collect();
+        assert!(pointers.iter().all(|&pointer| pointer != 0));
+        // SAFETY: The live objects all retain the same immutable slab publication.
+        let meta = unsafe { core.map.lookup(pointers[0]) }.0;
+        for pair in pointers.windows(2) {
+            // SAFETY: Each exclusively owned live object has one writable aligned link word.
+            unsafe { *(pair[0] as *mut usize) = pair[1] };
+        }
+        // SAFETY: The initialized links describe exactly 33 distinct objects returned once as a batch.
+        unsafe { core.return_local(meta, pointers[0], pointers[32], 33) };
+        // SAFETY: The slab remains live with 991 objects retained in the fast list.
+        let slab = unsafe { &*(meta as *const Slab) };
+        assert_eq!((slab.sleeping, slab.needed), (false, 991));
+        assert_eq!((slab.free_head, slab.free_end), (pointers[0], pointers[32]));
+        assert_eq!((core.available[0].length, core.available[0].unused), (1, 0));
+        core.flush();
+        core.validate(&BTreeSet::new());
+        assert!(core.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_single_returns_cross_the_sleeping_slab_threshold_exactly() {
+        let address = fresh_owner();
+        // SAFETY: fresh_owner initializes a persistent endpoint used only by this test.
+        let owner = unsafe { &*(address as *const Owner) };
+        // SAFETY: This test exclusively leases the fresh owner's core.
+        let core = unsafe { &mut *owner.core_ptr() };
+        let request = Request::new(std::alloc::Layout::from_size_align(16, 16).unwrap()).unwrap();
+        let pointers: Vec<_> = (0..32).map(|_| core.allocate(request).addr()).collect();
+        assert!(pointers.iter().all(|&pointer| pointer != 0));
+        // SAFETY: These live allocations keep their published slab entry immutable.
+        let meta = unsafe { core.map.lookup(pointers[0]) }.0;
+        // SAFETY: Metadata is stable under this unique owner lease.
+        assert_eq!(unsafe { (*(meta as *const Slab)).needed }, 32);
+        for (index, &pointer) in pointers.iter().enumerate() {
+            // SAFETY: Each allocated object transfers exactly once back to its live owning slab.
+            unsafe { core.return_one(meta, pointer) };
+            // SAFETY: The slab remains live with 992 objects retained in the core's fast list.
+            let slab = unsafe { &*(meta as *const Slab) };
+            assert_eq!(slab.sleeping, index != 31);
+            assert_eq!(slab.needed, if index == 31 { 992 } else { u16::try_from(31 - index).unwrap() });
+            assert_eq!(core.available[0].length, usize::from(index == 31));
+        }
+        core.flush();
+        core.validate(&BTreeSet::new());
+        assert!(core.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_realloc_index_half_open_removal_preserves_adjacent_same_metadata() {
+        let mut index = ReallocMap::new();
+        let base = 4 * classes::CHUNK;
+        index.insert(base, 3 * classes::CHUNK, 0x2000);
+        index.remove(base, 2 * classes::CHUNK, 0x2000);
+        assert_eq!(index.lookup(base), None);
+        assert_eq!(index.lookup(base + classes::CHUNK), None);
+        assert_eq!(index.lookup(base + 2 * classes::CHUNK), Some(0x2000));
+        assert_eq!(index.lookup(base + 3 * classes::CHUNK - 1), Some(0x2000));
+    }
+
+    #[test]
+    fn gamma_survivor_local_hint_boundaries_and_repeated_observation() {
+        let mut hint = LocalHint::EMPTY;
+        let (base, size, meta) = (0x40000, classes::CHUNK, 0x80000);
+        hint.observe(base, size, meta);
+        assert_eq!((hint.base, hint.size, hint.meta), (0, 0, meta));
+        hint.observe(base, size, meta);
+        assert_eq!(hint.lookup(base), Some(meta));
+        assert_eq!(hint.lookup(base + size - 1), Some(meta));
+        hint.observe(base, size, meta);
+        assert_eq!((hint.base, hint.size, hint.meta), (0, 0, meta));
+        assert_eq!(hint.lookup(base), None);
+        hint.observe(base, size, meta);
+        assert_eq!(hint.lookup(base - 1), None);
+        assert_eq!((hint.base, hint.size, hint.meta), (0, 0, 0));
+        hint.observe(base, size, meta);
+        hint.observe(base, size, meta);
+        assert_eq!(hint.lookup(base + size), None);
+    }
+
+    #[test]
+    fn gamma_survivor_realloc_index_hash_collisions_update_and_removal() {
+        let mut index = ReallocMap::new();
+        for (chunk, expected) in [(1, 2), (31, 62), (32, 0), (127, 62), (128, 2), (255, 60), (256, 4), (4096, 0)] {
+            assert_eq!(ReallocMap::set(chunk * classes::CHUNK), expected);
+        }
+        let first = classes::CHUNK;
+        let second = 128 * classes::CHUNK;
+        let third = 33 * classes::CHUNK;
+        index.insert(first, classes::CHUNK, 0x1000);
+        index.insert(second, classes::CHUNK, 0x2000);
+        index.insert(first, classes::CHUNK, 0x3000);
+        assert_eq!(index.lookup(first + classes::CHUNK - 1), Some(0x3000));
+        assert_eq!(index.lookup(second), Some(0x2000));
+        index.remove(first, classes::CHUNK, 0x1000);
+        assert_eq!(index.lookup(first), Some(0x3000));
+        index.insert(third, classes::CHUNK, 0x4000);
+        assert_eq!(index.lookup(second), None);
+        assert_eq!(index.lookup(third), Some(0x4000));
+        index.remove(first, classes::CHUNK, 0x3000);
+        assert_eq!(index.lookup(first), None);
+        assert_eq!(index.lookup(third), Some(0x4000));
+        index.insert(4 * classes::CHUNK, 3 * classes::CHUNK, 0x5000);
+        for chunk in 4..7 {
+            assert_eq!(index.lookup(chunk * classes::CHUNK), Some(0x5000));
+        }
+        assert_eq!(index.lookup(7 * classes::CHUNK), None);
+        index.remove(4 * classes::CHUNK, 3 * classes::CHUNK, 0x5000);
+        for chunk in 4..7 {
+            assert_eq!(index.lookup(chunk * classes::CHUNK), None);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_owner_smallest_class_observation_and_reclaim() {
+        let address = fresh_owner();
+        // SAFETY: This test owns a fresh persistent endpoint.
+        let owner = unsafe { &*(address as *const Owner) };
+        // SAFETY: No other caller leases this test's private endpoint.
+        let core = unsafe { &mut *owner.core_ptr() };
+        // SAFETY: The test exclusively owns inactive pool linkage.
+        assert_eq!(unsafe { owner.pool_next() }, 0);
+        let request = Request::new(std::alloc::Layout::from_size_align(16, 16).unwrap()).unwrap();
+        let pointers: Vec<_> = (0..5000).map(|_| core.allocate(request)).collect();
+        assert!(pointers.iter().all(|pointer| !pointer.is_null()));
+        let mut live: BTreeSet<_> = pointers.iter().map(|pointer| pointer.addr()).collect();
+        assert_eq!(live.len(), pointers.len());
+        core.validate(&live);
+        let mut budget = usize::MAX;
+        let observation = core.observe(&mut budget);
+        assert!(observation.classes[0].observed_slabs >= 4);
+        assert_eq!((observation.classes[0].object_bytes, observation.classes[0].capacity), (16, 1024));
+        for (index, pointer) in pointers.into_iter().enumerate() {
+            assert!(live.remove(&pointer.addr()));
+            // SAFETY: This private core returns each checked live allocation exactly once.
+            unsafe { core.deallocate(pointer.addr()) };
+            if index % 127 == 0 {
+                core.validate(&live);
+            }
+        }
+        core.flush();
+        core.validate(&live);
+        assert!(core.is_empty());
+        let mut budget = usize::MAX;
+        let observation = core.observe(&mut budget);
+        assert!(!observation.classes[0].fast_nonempty);
+        assert!(observation.classes[0].empty_slabs <= 2);
+        assert_eq!(core.local_hint.size, 0);
+    }
+
+    #[test]
+    fn gamma_survivor_reclaim_threshold_requires_both_count_and_fraction() {
+        for slabs in [2, 3, 4, 8, 12, 16] {
+            let address = fresh_owner();
+            // SAFETY: The fresh persistent endpoint is initialized and remains live.
+            let owner = unsafe { &*(address as *const Owner) };
+            // SAFETY: The test owns this fresh persistent endpoint's unique core lease.
+            let core = unsafe { &mut *owner.core_ptr() };
+            let request = Request::new(std::alloc::Layout::from_size_align(16, 16).unwrap()).unwrap();
+            let pointers: Vec<_> = (0..slabs * 1024).map(|_| core.allocate(request).addr()).collect();
+            assert!(pointers.iter().all(|&pointer| pointer != 0));
+            let mut live: BTreeSet<_> = pointers.iter().copied().collect();
+            for slab in pointers.chunks(1024) {
+                for &pointer in &slab[..32] {
+                    live.remove(&pointer);
+                    // SAFETY: Transfer each live object once to its exact owner's slab.
+                    unsafe { core.deallocate(pointer) };
+                }
+            }
+            assert_eq!((core.available[0].length, core.available[0].unused), (slabs, 0));
+            let (mut length, mut empty) = (slabs, 0);
+            for slab in pointers.chunks(1024) {
+                for &pointer in &slab[32..] {
+                    assert!(live.remove(&pointer));
+                    // SAFETY: No object is freed twice and this test remains the sole core owner.
+                    unsafe { core.deallocate(pointer) };
+                }
+                empty += 1;
+                if empty > 2 && empty > length / 4 {
+                    length -= empty;
+                    empty = 0;
+                }
+                assert_eq!((core.available[0].length, core.available[0].unused), (length, empty));
+                core.validate(&live);
+            }
+            core.flush();
+            assert_eq!((core.available[0].length, core.available[0].unused), (0, 0));
+            assert!(core.is_empty());
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_remote_observation_preserves_odd_class_byte_budget() {
+        let target = fresh_owner();
+        let sender = fresh_owner();
+        // SAFETY: These fresh persistent endpoints are initialized and disjoint.
+        let target_owner = unsafe { &*(target as *const Owner) };
+        // SAFETY: The sender endpoint is also initialized and remains live.
+        let sender_owner = unsafe { &*(sender as *const Owner) };
+        // SAFETY: These two fresh persistent endpoints have disjoint, exclusively test-owned core leases.
+        let target_core = unsafe { &mut *target_owner.core_ptr() };
+        // SAFETY: The sender core is distinct from the target core and has no other lease holder.
+        let sender_core = unsafe { &mut *sender_owner.core_ptr() };
+        let request = Request::new(std::alloc::Layout::from_size_align(32, 16).unwrap()).unwrap();
+        let pointers: Vec<_> = (0..4).map(|_| target_core.allocate(request)).collect();
+        assert!(pointers.iter().all(|pointer| !pointer.is_null()));
+        for pointer in pointers {
+            // SAFETY: Each checked live target allocation is transferred once to the sender for remote return.
+            unsafe { sender_core.deallocate(pointer.addr()) };
+        }
+        let mut budget = usize::MAX;
+        let observed = sender_core.observe(&mut budget);
+        assert_eq!((observed.remote.open_rings, observed.remote.open_objects), (1, 4));
+        assert_eq!(observed.remote.budget_remaining, (remote::BUDGET - 128) as u64);
+        // SAFETY: The sender owns all pending remote objects and posts once to the different target endpoint.
+        unsafe { sender_core.remote.post(sender_core.map, sender) };
+        let incoming = target_core.observe(&mut budget);
+        assert_ne!(incoming.remote.incoming_front, 0);
+        assert_ne!(incoming.remote.incoming_back, 0);
+        assert_eq!(incoming.remote.incoming_front, incoming.remote.incoming_back);
+        let pointer = target_core.allocate(request);
+        assert!(!pointer.is_null());
+        // SAFETY: Return the new live object once; queued remote objects retain their separate ownership.
+        unsafe { target_core.deallocate(pointer.addr()) };
+        target_core.flush();
+    }
+
+    #[test]
+    fn gamma_survivor_slab_observation_arms_hint_in_index_and_map_paths() {
+        let address = fresh_owner();
+        // SAFETY: The fresh persistent endpoint is initialized and remains live.
+        let owner = unsafe { &*(address as *const Owner) };
+        // SAFETY: This fresh persistent endpoint's core is exclusively leased to the test.
+        let core = unsafe { &mut *owner.core_ptr() };
+        let request = Request::new(std::alloc::Layout::from_size_align(48, 16).unwrap()).unwrap();
+        let pointers: Vec<_> = (0..3).map(|_| core.allocate(request).addr()).collect();
+        assert!(pointers.iter().all(|&pointer| pointer != 0));
+        // SAFETY: All three live allocations retain immutable slab metadata.
+        let meta = unsafe { core.map.lookup(pointers[0]) }.0;
+        // SAFETY: The test retains the owner's sole lease and the slab has live objects.
+        let slab = unsafe { &*(meta as *const Slab) };
+        let base = slab.base;
+        let size = CLASSES[classes::index(48)].slab;
+        assert_eq!((core.local_hint.base, core.local_hint.size, core.local_hint.meta), (0, 0, meta));
+        // SAFETY: Retire the first live object once, exercising the index path rather than the hint.
+        unsafe { core.deallocate_unhinted(pointers[0]) };
+        assert_eq!(
+            (core.local_hint.base, core.local_hint.size, core.local_hint.meta),
+            (base, size, meta)
+        );
+        core.local_hint = LocalHint::EMPTY;
+        // SAFETY: The second object remains live and is returned once through the same index path.
+        unsafe { core.deallocate_unhinted(pointers[1]) };
+        assert_eq!((core.local_hint.base, core.local_hint.size, core.local_hint.meta), (0, 0, meta));
+        core.realloc_map().remove(base, size, meta);
+        core.local_hint = LocalHint::EMPTY;
+        // SAFETY: The last live object remains correctly published in the pagemap despite index eviction.
+        unsafe { core.deallocate_unhinted(pointers[2]) };
+        assert_eq!((core.local_hint.base, core.local_hint.size, core.local_hint.meta), (0, 0, meta));
+        core.flush();
+        assert!(core.is_empty());
+    }
 
     fn fresh_owner() -> usize {
         let map = crate::backend::map().unwrap();

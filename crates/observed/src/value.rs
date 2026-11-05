@@ -259,6 +259,7 @@ impl From<usize> for Value {
     /// The saturating fallback exists only so a hypothetical wider target
     /// cannot make this panic.
     fn from(v: usize) -> Self {
+        // #[gamma::skip(expr.decrement, reason = "All supported targets have at most 64-bit usize, so this conversion cannot reach its fallback.")]
         Self::U64(u64::try_from(v).unwrap_or(u64::MAX))
     }
 }
@@ -268,6 +269,7 @@ impl From<isize> for Value {
     /// The saturating fallback exists only so a hypothetical wider target
     /// cannot make this panic.
     fn from(v: isize) -> Self {
+        // #[gamma::skip(expr.decrement, reason = "All supported targets have at most 64-bit isize, so this conversion cannot reach its fallback.")]
         Self::I64(i64::try_from(v).unwrap_or(i64::MAX))
     }
 }

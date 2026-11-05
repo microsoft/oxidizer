@@ -20,6 +20,7 @@ where
     FormattingLayer {
         events: tracing_subscriber::fmt::layer()
             .event_format(CompleteEvent)
+            // #[gamma::skip(literal.bool_flip, reason = "CompleteEvent creates its own Writer and explicitly disables ANSI on the actual Format used to render every event.")]
             .with_ansi(false)
             .with_writer(writer),
     }

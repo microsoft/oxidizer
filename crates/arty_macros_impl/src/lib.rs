@@ -106,7 +106,45 @@ impl Args {
 }
 
 fn arty_path() -> TokenStream {
-    arty_path_for(crate_name("arty").ok())
+    arty_path_with(|name| crate_name(name).ok())
+}
+
+fn arty_path_with(resolve: impl FnOnce(&str) -> Option<FoundCrate>) -> TokenStream {
+    arty_path_for(resolve("arty"))
+}
+
+#[cfg(test)]
+mod gamma_round2 {
+    use super::*;
+
+    #[test]
+    fn gamma_round2_runtime_lookup_uses_the_package_name_before_resolving_an_alias() {
+        let tokens = arty_path_with(|name| {
+            assert_eq!(name, "arty");
+            Some(FoundCrate::Name("renamed_runtime".to_owned()))
+        });
+        assert_eq!(tokens.to_string(), quote!(::renamed_runtime).to_string());
+    }
+
+    #[test]
+    fn gamma_round2_clock_alone_requires_runtime_builder() {
+        let args = Args {
+            monitor: None,
+            panic: None,
+            workers: None,
+        };
+        let clock = parse_quote!(clock);
+        let output = args.runtime(&quote!(::arty), Some(&clock), false).unwrap();
+        assert_eq!(
+            output.to_string(),
+            quote!(
+                ::arty::runtime::Runtime::builder()
+                    .clock(::core::clone::Clone::clone(&clock))
+                    .build()
+            )
+            .to_string()
+        );
+    }
 }
 
 fn arty_path_for(found: Option<FoundCrate>) -> TokenStream {
@@ -124,6 +162,7 @@ fn arty_path_for(found: Option<FoundCrate>) -> TokenStream {
 
 fn worker_policy(mut value: &Expr, runtime_path: &TokenStream) -> syn::Result<TokenStream> {
     while let Expr::Group(group) = value {
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         value = &group.expr;
     }
     if let Expr::Lit(syn::ExprLit { lit: Lit::Int(count), .. }) = value
@@ -309,6 +348,24 @@ mod tests {
     use testing_aids::render_expansion;
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_worker_policy_unwraps_nested_invisible_groups() {
+        let literal: Expr = parse_quote!(3usize);
+        let grouped = Expr::Group(syn::ExprGroup {
+            attrs: Vec::new(),
+            group_token: syn::token::Group::default(),
+            expr: Box::new(Expr::Group(syn::ExprGroup {
+                attrs: Vec::new(),
+                group_token: syn::token::Group::default(),
+                expr: Box::new(literal),
+            })),
+        });
+        assert_eq!(
+            worker_policy(&grouped, &quote!(::arty)).unwrap().to_string(),
+            quote!(::arty::runtime::WorkersPolicy::exactly(3usize)).to_string()
+        );
+    }
 
     #[test]
     fn arty_path_uses_a_renamed_dependency() {

@@ -86,6 +86,7 @@ where
 
                     // Drain this flush before polling the source again. Idle polls must not
                     // produce empty compressed blocks when no new input arrived.
+                    // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "The assigned value is already false, which is bool::default()")]
                     *needs_flush = false;
                 }
                 Poll::Pending => return Poll::Pending,
@@ -341,6 +342,96 @@ mod tests {
     use crate::format::Format;
     use crate::testing::{ProgressCompression, view};
     use crate::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources, gzip};
+
+    #[test]
+    fn gamma_afternoon_successful_eof_is_fused_without_repolling_source() {
+        let polls = std::cell::Cell::new(0);
+        let source = stream::poll_fn(|_| {
+            polls.set(polls.get() + 1);
+            assert_eq!(polls.get(), 1);
+            Poll::Ready(None::<std::result::Result<BytesView, std::io::Error>>)
+        });
+        let compressor = gzip::Compressor::new(Resources::global());
+        let mut adapter = pin!(CompressionStream::compress(source, compressor));
+        let waker = noop_waker();
+        let mut context = Context::from_waker(&waker);
+        let mut completed = false;
+        for _ in 0..MAX_POLLS {
+            match adapter.as_mut().poll_next(&mut context) {
+                Poll::Ready(None) => {
+                    completed = true;
+                    break;
+                }
+                Poll::Ready(Some(Ok(_))) | Poll::Pending => {}
+                Poll::Ready(Some(Err(error))) => panic!("{error}"),
+            }
+        }
+        assert!(completed);
+        assert!(adapter.as_ref().get_ref().finished);
+        for _ in 0..3 {
+            assert!(matches!(adapter.as_mut().poll_next(&mut context), Poll::Ready(None)));
+        }
+        assert_eq!(polls.get(), 1);
+    }
+
+    #[test]
+    fn gamma_round2_input_after_eof_failure_never_repolls_the_source() {
+        let polls = std::cell::Cell::new(0);
+        let source = stream::poll_fn(|_| {
+            polls.set(polls.get() + 1);
+            assert_eq!(polls.get(), 1);
+            Poll::Ready(None::<std::result::Result<BytesView, std::io::Error>>)
+        });
+        let mut adapter = pin!(CompressionStream::compress(source, crate::testing::RejectsPush));
+        let waker = noop_waker();
+        let mut context = Context::from_waker(&waker);
+        let Poll::Ready(Some(Err(error))) = adapter.as_mut().poll_next(&mut context) else {
+            panic!("a second request for input after EOF must fail");
+        };
+        assert_eq!(error.to_string(), "the operation requested input after end of input");
+        assert!(matches!(adapter.as_mut().poll_next(&mut context), Poll::Ready(None)));
+        assert!(matches!(adapter.as_mut().poll_next(&mut context), Poll::Ready(None)));
+        assert_eq!(polls.get(), 1);
+    }
+
+    #[test]
+    fn gamma_survivor_stream_progress_wakes_and_terminal_errors_latch() {
+        let scheduled = Arc::new(CountingWaker::default());
+        let waker = futures::task::waker(Arc::clone(&scheduled));
+        let mut context = Context::from_waker(&waker);
+        let pulls = Arc::new(AtomicUsize::new(0));
+        let mut progress = pin!(CompressionStream::compress(
+            ok_stream(vec![]),
+            ProgressCompression::new(Arc::clone(&pulls))
+        ));
+        assert!(progress.as_mut().poll_next(&mut context).is_pending());
+        assert_eq!(scheduled.0.load(Ordering::Relaxed), 1);
+        assert_eq!(pulls.load(Ordering::Relaxed), 1);
+
+        for chunks in [vec![], vec![view(b"payload")]] {
+            let mut adapter = CompressionStream::compress(ok_stream(chunks), crate::testing::RejectsPush);
+            assert!(!adapter.needs_flush);
+            let error = match Pin::new(&mut adapter).poll_next(&mut context) {
+                Poll::Ready(Some(Err(error))) => error,
+                other => panic!("expected a terminal error, got {other:?}"),
+            };
+            assert_eq!(
+                error.to_string(),
+                if adapter.needs_flush {
+                    "this fixture always rejects pushed input"
+                } else {
+                    "the operation requested input after end of input"
+                }
+            );
+            assert!(adapter.finished);
+            assert!(matches!(Pin::new(&mut adapter).poll_next(&mut context), Poll::Ready(None)));
+            assert!(matches!(Pin::new(&mut adapter).poll_next(&mut context), Poll::Ready(None)));
+        }
+
+        let adapter = CompressionStream::decompress(ok_stream(vec![]), gzip::Decompressor::new(Resources::global()));
+        assert!(!adapter.flush_on_pending);
+        assert!(!adapter.needs_flush);
+    }
 
     fn ok_stream(chunks: Vec<BytesView>) -> impl Stream<Item = std::result::Result<BytesView, std::io::Error>> {
         stream::iter(chunks.into_iter().map(Ok))

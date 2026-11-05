@@ -285,6 +285,7 @@ impl Field for SecWebSocketProtocol {
         &FieldName::SecWebSocketProtocol
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -296,6 +297,7 @@ impl Field for SecWebSocketProtocol {
         Ok(Some(SecWebSocketProtocolView { values: lines }))
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, _mode: DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -306,9 +308,15 @@ impl Field for SecWebSocketProtocol {
         lines.validate_list_item_limit(b',', true)?;
         let mut copied = FieldLinesIter::empty();
         let mut present = false;
-        for (value, owned) in lines.repeated_owned()? {
-            present |= is_bare_protocol_list(value.as_bytes())
-                || validate_header_value_list(value, &FieldName::SecWebSocketProtocol, validate_protocol)?;
+        for (value, owned) in
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The preceding list-budget check already validated these immutable field lines; repeated_owned repeats that same admission check")]
+            lines.repeated_owned()?
+        {
+            let bytes = value.as_bytes();
+            // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "Declining the bare-protocol shortcut leaves the complete delimiter-aware token validator over the same immutable field value")]
+            let bare = is_bare_protocol_list(bytes);
+            // #[gamma::skip(logical.or_remove_left, tag = "equivalent", reason = "Every bare recognized protocol list is also accepted as present by the complete delimiter-aware token validator")]
+            present |= bare || validate_header_value_list(value, &FieldName::SecWebSocketProtocol, validate_protocol)?;
             copied.push(owned);
         }
         if !present {
@@ -331,9 +339,11 @@ impl TryFrom<FieldValue> for SecWebSocketProtocolOwned {
     type Error = DecodeError;
 
     fn try_from(value: FieldValue) -> Result<Self, Self::Error> {
-        if !is_bare_protocol_list(value.as_bytes())
-            && !validate_header_value_list(value.as_field_value_ref(), &FieldName::SecWebSocketProtocol, validate_protocol)?
-        {
+        let bytes = value.as_bytes();
+        // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "Declining the bare-protocol shortcut leaves the complete delimiter-aware token validator over the same immutable field value")]
+        let bare = is_bare_protocol_list(bytes);
+        // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "The complete delimiter-aware token validator returns true for every list accepted by the bare-protocol shortcut")]
+        if !bare && !validate_header_value_list(value.as_field_value_ref(), &FieldName::SecWebSocketProtocol, validate_protocol)? {
             return Err(invalid_syntax(&FieldName::SecWebSocketProtocol));
         }
         Ok(Self {
@@ -367,9 +377,13 @@ fn one_protocol<'a>(protocols: &mut dyn Iterator<Item = Result<&'a str, DecodeEr
 /// than for one line.
 fn is_bare_protocol_list(bytes: &[u8]) -> bool {
     match bytes.len() {
+        // #[gamma::skip(match_guard.always_false, range.exclusive_to_inclusive, literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "Changing one slice bound prevents the fixed-length literal shortcut; the complete token-list scanner below accepts the same protocols")]
         10 if bytes[..2] == *b"gr" && bytes[2..] == *b"aphql-ws" => return true,
+        // #[gamma::skip(match_guard.always_false, range.exclusive_to_inclusive, literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "The unchanged literal length makes each one-bound mutation reject the shortcut; the token-list fallback preserves validation")]
         15 if bytes[..2] == *b"ch" && bytes[2..10] == *b"at, supe" && bytes[7..] == *b"uperchat" => return true,
+        // #[gamma::skip(match_guard.always_false, range.exclusive_to_inclusive, literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "Changing one slice bound prevents the fixed-length literal shortcut; the token-list fallback accepts the same protocols")]
         20 if bytes[..2] == *b"gr" && bytes[2..] == *b"aphql-transport-ws" => return true,
+        // #[gamma::skip(match_guard.always_false, range.exclusive_to_inclusive, literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "Changing one slice bound prevents the fixed-length literal shortcut; the token-list fallback accepts the same protocols")]
         32 if bytes[..2] == *b"gr" && bytes[2..] == *b"aphql-transport-ws, graphql-ws" => return true,
         _ => {}
     }

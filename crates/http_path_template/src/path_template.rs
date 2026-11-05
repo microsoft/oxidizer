@@ -285,6 +285,7 @@ fn split_verb(template: &str) -> Result<(&str, Option<&str>), ParseError> {
 fn split_and_parse_segments(body: &str, extended: bool) -> Result<Box<[Segment<'_>]>, ParseError> {
     // Pre-size to the segment count so pushing never reallocates (a hint only;
     // see `segment_count_hint`).
+    // #[gamma::skip(call.replace_with_default, call_result.default, reason = "The capacity hint is discarded when the parsed segments become a boxed slice")]
     let mut out = Vec::with_capacity(segment_count_hint(body));
 
     let mut depth = 0_usize;
@@ -327,6 +328,22 @@ fn segment_count_hint(body: &str) -> usize {
         }
     }
     count
+}
+
+#[test]
+fn gamma_round2_segment_count_hint_tracks_only_outer_slashes() {
+    for (body, expected) in [
+        ("", 1),
+        ("a", 1),
+        ("a/b/c", 3),
+        ("{name=projects/*/locations/*}/next", 2),
+        ("{a={b/x}/y}/last", 2),
+        ("{name=a/b}", 1),
+        ("}/a/b", 3),
+        ("a/{unclosed/x", 2),
+    ] {
+        assert_eq!(segment_count_hint(body), expected, "{body}");
+    }
 }
 
 /// Parses one raw segment slice and appends it to `out`, rejecting an empty
@@ -380,12 +397,14 @@ fn parse_affix(seg: &str) -> Result<Segment<'_>, ParseError> {
         match byte {
             b'{' => {
                 braces += 1;
+                // #[gamma::skip(cond.always_true, reason = "Accepted affixes have exactly one opening brace; multiple braces are rejected before this offset is read")]
                 if open.is_none() {
                     open = Some(idx);
                 }
             }
             b'}' => {
                 braces += 1;
+                // #[gamma::skip(cond.always_true, reason = "Accepted affixes have exactly one closing brace; multiple braces are rejected before this offset is read")]
                 if close.is_none() {
                     close = Some(idx);
                 }
@@ -457,6 +476,7 @@ fn parse_variable(inner: &str) -> Result<Segment<'_>, ParseError> {
     let sub = match sub_str {
         None => "*",
         Some(sub) => {
+            // #[gamma::skip(cond.always_false, reason = "Splitting an empty subtemplate below yields one empty segment and returns the identical EmptySegment error")]
             if sub.is_empty() {
                 return Err(ParseError::new(ParseErrorKind::EmptySegment));
             }
@@ -487,6 +507,7 @@ fn is_valid_ident(ident: &[u8]) -> bool {
         Some(&b) if b == b'_' || b.is_ascii_alphabetic() => {}
         _ => return false,
     }
+    // #[gamma::skip(literal.int_decrement, reason = "The first byte has already passed the stricter alphabetic-or-underscore check")]
     ident[1..].iter().all(|&b| b == b'_' || b.is_ascii_alphanumeric())
 }
 
@@ -512,6 +533,7 @@ fn is_valid_literal_bytes(bytes: &[u8]) -> bool {
             if !hi.is_ascii_hexdigit() || !lo.is_ascii_hexdigit() {
                 return false;
             }
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             remaining = tail;
             continue;
         }
@@ -523,6 +545,7 @@ fn is_valid_literal_bytes(bytes: &[u8]) -> bool {
         {
             return false;
         }
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         remaining = tail;
     }
     true

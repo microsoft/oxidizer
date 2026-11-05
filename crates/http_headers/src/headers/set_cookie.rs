@@ -392,6 +392,7 @@ impl Field for SetCookie {
         reason = "generic header forwarding should monomorphize into each source call site"
     )]
     #[inline(always)]
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -404,6 +405,7 @@ impl Field for SetCookie {
         reason = "generic header forwarding should monomorphize into each source call site"
     )]
     #[inline(always)]
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -446,6 +448,7 @@ fn decode_owned_values(values: Option<FieldLines<'_>>) -> Result<Option<SetCooki
     };
     for (value, mut owned) in values.repeated_owned()? {
         validate(value)?;
+        // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "Setting the existing sensitivity bit to true again is idempotent and changes neither bytes nor ownership")]
         if !owned.is_sensitive() {
             owned.set_sensitive(true);
         }

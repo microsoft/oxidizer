@@ -222,6 +222,34 @@ fn render_files(transcoder: &TokenStream, outputs: Vec<GeneratedOutput>) -> std:
     Ok(rendered)
 }
 
+#[test]
+fn gamma_round2_rendered_module_keeps_each_bridge_and_service_separator() {
+    let first = quote::quote!(
+        trait First {}
+    );
+    let bridge = quote::quote!(
+        struct FirstBridge;
+    );
+    let second = quote::quote!(
+        trait Second {}
+    );
+    let first_output = GeneratedOutput::new("shared".to_owned(), "First".to_owned(), first.clone(), Some(bridge.clone()));
+    let second_output = GeneratedOutput::new("shared".to_owned(), "Second".to_owned(), second.clone(), None);
+    #[cfg(feature = "build-openapi")]
+    {
+        assert_eq!(first_output.openapi_spec(), None);
+        assert_eq!(second_output.openapi_spec(), None);
+    }
+    let rendered = render_files(&TokenStream::new(), vec![first_output, second_output]).unwrap();
+    assert_eq!(
+        rendered,
+        [
+            ("shared.rest.rs".to_owned(), format!("{first}\n{bridge}\n{second}")),
+            ("transcoder.rest.rs".to_owned(), String::new()),
+        ]
+    );
+}
+
 /// Merges one or more per-service OpenAPI documents (pretty JSON) that share a
 /// module into a single document by unioning their `paths` and
 /// `components.schemas` objects. The documents share identical top-level
@@ -357,6 +385,55 @@ pub fn compile_fds(descriptor_set: impl AsRef<[u8]>, out_dir: impl AsRef<Path>) 
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "build-openapi")]
+    #[test]
+    fn gamma_round2_render_failure_returns_before_invoking_any_output_writer() {
+        use prost_types::{DescriptorProto, FileDescriptorProto, FileDescriptorSet};
+
+        use crate::build::openapi::Builder;
+        use crate::build::route::Route;
+        use crate::build::{RequestBody, ResponseBody};
+
+        let pool = prost_reflect::DescriptorPool::from_file_descriptor_set(FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                name: Some("round2_empty.proto".to_owned()),
+                message_type: vec![DescriptorProto {
+                    name: Some("Empty".to_owned()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        })
+        .unwrap();
+        let input = pool.get_message_by_name("Empty").unwrap();
+        let route = Route::new(
+            "Fetch".to_owned(),
+            routerama::HttpMethod::GET,
+            "/same".to_owned(),
+            RequestBody::None,
+            ResponseBody::Whole,
+        );
+        let mut openapi = Builder::default();
+        openapi.add_operation(&route, &input, &input, false);
+        openapi.add_operation(&route, &input, &input, false);
+        let mut service = ServiceDefinition::new("Fixture", None);
+        service.set_openapi(openapi);
+        let mut generator = Generator::builder()
+            .emit_openapi_spec(Some(OpenApiInfo::new("fixture", "v1")))
+            .build();
+        generator.add(service);
+        let mut writes = 0;
+        let error = generator
+            .write_with("unused", &mut |_, _| {
+                writes += 1;
+                Ok(())
+            })
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("get /same"), "{error}");
+        assert_eq!(writes, 0);
+    }
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]

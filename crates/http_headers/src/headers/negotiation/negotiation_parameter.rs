@@ -34,6 +34,7 @@ impl<'a> NegotiationParameterValue<'a> {
     }
 
     fn from_validated(raw: &'a [u8]) -> Self {
+        // #[gamma::skip(iter.first_to_last, tag = "equivalent", reason = "Validated quoted strings both start and end with quotes, while valid unquoted tokens contain no quote")]
         let quoted = raw.first() == Some(&b'"');
         let contents = if quoted { &raw[1..raw.len() - 1] } else { raw };
         Self { raw, contents, quoted }
@@ -63,6 +64,7 @@ impl<'a> NegotiationParameterValue<'a> {
 
     fn next_decoded(bytes: &mut impl Iterator<Item = u8>, quoted: bool) -> Option<u8> {
         let byte = bytes.next()?;
+        // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "An unquoted validated token cannot contain a backslash, so encountering backslash already proves this is a quoted value")]
         Some(if quoted && byte == b'\\' {
             bytes.next().expect("validated quoted pairs always contain an escaped byte")
         } else {

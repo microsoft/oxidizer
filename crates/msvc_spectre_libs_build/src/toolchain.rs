@@ -43,7 +43,42 @@ impl Toolchain for SystemToolchain {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))] // Pure I/O; the policy that consults it is covered through `plan`.
+    // #[gamma::skip(fn_value.none, fn_value.some_default, tag = "adapter", reason = "This adapter queries the real Windows registry; the target, executable, found-path, and absent-path contracts are tested through injected find_cl_exe_with.")]
     fn find_cl_exe(&self, target: &str) -> Option<PathBuf> {
-        cc::windows_registry::find_tool(target, "cl.exe").map(|tool| tool.path().to_path_buf())
+        // #[gamma::skip(call.replace_with_default, call_result.default, tag = "adapter", reason = "This call delegates to real registry discovery; deterministic found/absent behavior is exercised through the injected lookup seam.")]
+        find_cl_exe_with(target, |target, name| {
+            cc::windows_registry::find_tool(target, name).map(|tool| tool.path().to_path_buf())
+        })
+    }
+}
+
+fn find_cl_exe_with(target: &str, find: impl FnOnce(&str, &str) -> Option<PathBuf>) -> Option<PathBuf> {
+    find(target, "cl.exe")
+}
+
+#[cfg(test)]
+mod gamma_round2 {
+    use std::path::PathBuf;
+
+    use super::find_cl_exe_with;
+
+    #[test]
+    fn gamma_round2_compiler_lookup_preserves_target_executable_and_result() {
+        let path = PathBuf::from(r"C:\controlled\cl.exe");
+        assert_eq!(
+            find_cl_exe_with("aarch64-pc-windows-msvc", |target, executable| {
+                assert_eq!(target, "aarch64-pc-windows-msvc");
+                assert_eq!(executable, "cl.exe");
+                Some(path.clone())
+            }),
+            Some(path),
+        );
+        assert_eq!(
+            find_cl_exe_with("missing-target", |_, executable| {
+                assert_eq!(executable, "cl.exe");
+                None
+            }),
+            None
+        );
     }
 }

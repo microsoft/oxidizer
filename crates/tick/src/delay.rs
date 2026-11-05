@@ -143,6 +143,55 @@ mod tests {
     use crate::ClockControl;
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native and cargo careful cover the system timer source; controlled completion tests remain under Miri"
+    )]
+    fn completion_poll_unregisters_an_expired_timer_before_driver_dispatch() {
+        let clock = Clock::new_system_frozen();
+        let mut delay = Delay::new(&clock, Duration::from_millis(3));
+        // Frozen system timers retain this already-reached deadline until explicitly dispatched.
+        let key = clock.register_timer(clock.timer_instant(), Waker::noop().clone());
+        delay.current_timer = Some(key);
+        assert_eq!(clock.clock_state().timers_len(), 1);
+
+        assert_eq!(Pin::new(&mut delay).poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+
+        assert_eq!(delay.current_timer, None);
+        assert_eq!(clock.clock_state().timers_len(), 0);
+    }
+
+    #[test]
+    fn gamma_round2_completion_clears_the_registration_in_both_paths() {
+        for driver_removed in [false, true] {
+            let control = ClockControl::new();
+            let clock = control.to_clock();
+            let mut delay = Delay::new(&clock, Duration::from_millis(3));
+            let mut context = Context::from_waker(Waker::noop());
+            assert_eq!(Pin::new(&mut delay).poll(&mut context), Poll::Pending);
+            let key = delay.current_timer.unwrap();
+            if driver_removed {
+                clock.unregister_timer(key);
+            } else {
+                control.advance(Duration::from_millis(3));
+                assert_eq!(key.tick(), clock.timer_instant());
+            }
+            assert_eq!(Pin::new(&mut delay).poll(&mut context), Poll::Ready(()));
+            assert_eq!(delay.current_timer, None);
+            assert_eq!(clock.clock_state().timers_len(), 0);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_finite_overflow_delay_sets_never_complete_sentinel() {
+        let clock = ClockControl::new().to_clock();
+        let mut delay = Delay::new(&clock, Duration::MAX - Duration::from_nanos(1));
+        assert!(Pin::new(&mut delay).poll(&mut Context::from_waker(Waker::noop())).is_pending());
+        assert_eq!(delay.duration, Duration::MAX);
+        assert!(delay.current_timer.is_none());
+    }
+
+    #[test]
     fn private_overflowing_reregistration_clears_the_existing_timer_key() {
         // Public callers cannot mutate a polled delay's duration to force this recovery branch.
         let clock = ClockControl::new().to_clock();

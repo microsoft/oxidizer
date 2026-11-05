@@ -151,6 +151,7 @@ pub(crate) struct RecordingIo<S> {
 impl<S: Read + Unpin> Read for RecordingIo<S> {
     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
         let result = Pin::new(&mut self.inner).poll_read(cx, buf);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "record_error_kind returns unit; default_after preserves its error recording and returns the same ()")]
         record_error_kind(&self.error_kind, &result);
         result
     }
@@ -159,6 +160,7 @@ impl<S: Read + Unpin> Read for RecordingIo<S> {
 impl<S: Write + Unpin> Write for RecordingIo<S> {
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
         let result = Pin::new(&mut self.inner).poll_write(cx, buf);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "record_error_kind returns unit; default_after preserves its error recording and returns the same ()")]
         record_error_kind(&self.error_kind, &result);
         result
     }
@@ -166,6 +168,7 @@ impl<S: Write + Unpin> Write for RecordingIo<S> {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_write_vectored(mut self: Pin<&mut Self>, cx: &mut Context<'_>, bufs: &[IoSlice<'_>]) -> Poll<std::io::Result<usize>> {
         let result = Pin::new(&mut self.inner).poll_write_vectored(cx, bufs);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "record_error_kind returns unit; default_after preserves its error recording and returns the same ()")]
         record_error_kind(&self.error_kind, &result);
         result
     }
@@ -178,6 +181,7 @@ impl<S: Write + Unpin> Write for RecordingIo<S> {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let result = Pin::new(&mut self.inner).poll_flush(cx);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "record_error_kind returns unit; default_after preserves its error recording and returns the same ()")]
         record_error_kind(&self.error_kind, &result);
         result
     }
@@ -185,6 +189,7 @@ impl<S: Write + Unpin> Write for RecordingIo<S> {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let result = Pin::new(&mut self.inner).poll_shutdown(cx);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "record_error_kind returns unit; default_after preserves its error recording and returns the same ()")]
         record_error_kind(&self.error_kind, &result);
         result
     }
@@ -359,6 +364,70 @@ mod tests {
     use crate::HyperTransportBuilder;
     use crate::testing::{FakeConnector, FakeStream, TestError};
     use crate::tls::connector::TlsConnector;
+
+    struct GammaErrorIo(bool);
+
+    impl hyper::rt::Read for GammaErrorIo {
+        fn poll_read(self: Pin<&mut Self>, _: &mut Context<'_>, _: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset)))
+        }
+    }
+
+    impl hyper::rt::Write for GammaErrorIo {
+        fn poll_write(self: Pin<&mut Self>, _: &mut Context<'_>, _: &[u8]) -> Poll<std::io::Result<usize>> {
+            Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)))
+        }
+
+        fn poll_write_vectored(self: Pin<&mut Self>, _: &mut Context<'_>, _: &[IoSlice<'_>]) -> Poll<std::io::Result<usize>> {
+            Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::ConnectionAborted)))
+        }
+
+        fn is_write_vectored(&self) -> bool {
+            self.0
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::TimedOut)))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::NotConnected)))
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_native_io_capabilities_and_error_kinds_are_forwarded() {
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        for vectored in [false, true] {
+            let recorded = Arc::new(Mutex::new(None));
+            let mut io = RecordingIo {
+                inner: GammaErrorIo(vectored),
+                error_kind: Arc::clone(&recorded),
+            };
+            assert_eq!(hyper::rt::Write::is_write_vectored(&io), vectored);
+            assert!(hyper::rt::Write::poll_write_vectored(Pin::new(&mut io), &mut cx, &[IoSlice::new(b"x")]).is_ready());
+            assert_eq!(*recorded.lock().unwrap(), Some(std::io::ErrorKind::ConnectionAborted));
+            *recorded.lock().unwrap() = None;
+            assert!(hyper::rt::Write::poll_flush(Pin::new(&mut io), &mut cx).is_ready());
+            assert_eq!(*recorded.lock().unwrap(), Some(std::io::ErrorKind::TimedOut));
+            *recorded.lock().unwrap() = None;
+            assert!(hyper::rt::Write::poll_shutdown(Pin::new(&mut io), &mut cx).is_ready());
+            assert_eq!(*recorded.lock().unwrap(), Some(std::io::ErrorKind::NotConnected));
+            let stream = NativeTlsStream::Http(GammaErrorIo(vectored));
+            assert_eq!(hyper::rt::Write::is_write_vectored(&stream), vectored);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native tests cover server-name overrides through native TLS; Miri retains stream forwarding"
+    )]
+    fn gamma_survivor_native_server_name_strips_ipv6_brackets() {
+        let backend = native_tls_backend_config_with_override();
+        assert_eq!(server_name(&backend, &"https://[::1]:8443/path".parse().unwrap()), "::1");
+        assert_eq!(server_name(&backend, &"/path".parse().unwrap()), "");
+    }
 
     fn native_tls_backend() -> fetch_tls::TlsBackend {
         native_tls::TlsConnector::new().unwrap().into()

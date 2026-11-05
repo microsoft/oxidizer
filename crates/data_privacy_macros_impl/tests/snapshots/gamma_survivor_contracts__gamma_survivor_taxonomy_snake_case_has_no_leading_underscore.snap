@@ -1,0 +1,77 @@
+---
+source: crates/data_privacy_macros_impl/tests/gamma_survivor_contracts.rs
+expression: render_expansion(&output)
+---
+enum Privacy {
+    UserName,
+    IPAddress,
+}
+impl Privacy {
+    /// Returns the data class associated with the current variant.
+    #[must_use]
+    pub const fn data_class(&self) -> ::data_privacy::DataClass {
+        match self {
+            Privacy::UserName => ::data_privacy::DataClass::new("privacy", "user_name"),
+            Privacy::IPAddress => {
+                ::data_privacy::DataClass::new("privacy", "i_p_address")
+            }
+        }
+    }
+}
+impl ::core::convert::AsRef<::data_privacy::DataClass> for Privacy {
+    fn as_ref(&self) -> &::data_privacy::DataClass {
+        match self {
+            Privacy::UserName => {
+                const { &::data_privacy::DataClass::new("privacy", "user_name") }
+            }
+            Privacy::IPAddress => {
+                const { &::data_privacy::DataClass::new("privacy", "i_p_address") }
+            }
+        }
+    }
+}
+impl ::data_privacy::IntoDataClass for Privacy {
+    fn into_data_class(self) -> ::data_privacy::DataClass {
+        self.data_class()
+    }
+}
+impl ::core::cmp::PartialEq<::data_privacy::DataClass> for Privacy {
+    fn eq(&self, other: &::data_privacy::DataClass) -> core::primitive::bool {
+        self.data_class() == *other
+    }
+}
+impl ::core::cmp::PartialEq<&::data_privacy::DataClass> for Privacy {
+    fn eq(&self, other: &&::data_privacy::DataClass) -> core::primitive::bool {
+        self.data_class() == **other
+    }
+}
+impl ::core::cmp::PartialEq<Privacy> for ::data_privacy::DataClass {
+    fn eq(&self, other: &Privacy) -> core::primitive::bool {
+        other == self
+    }
+}
+impl ::core::cmp::PartialEq<Privacy> for &::data_privacy::DataClass {
+    fn eq(&self, other: &Privacy) -> core::primitive::bool {
+        *other == **self
+    }
+}
+impl Privacy {
+    ///Constructs a classified value for this data class.
+    #[must_use]
+    pub fn classify_user_name<T>(payload: T) -> ::data_privacy::Sensitive<T> {
+        ::data_privacy::Sensitive::new(
+            payload,
+            ::data_privacy::DataClass::new("privacy", "user_name"),
+        )
+    }
+}
+impl Privacy {
+    ///Constructs a classified value for this data class.
+    #[must_use]
+    pub fn classify_i_p_address<T>(payload: T) -> ::data_privacy::Sensitive<T> {
+        ::data_privacy::Sensitive::new(
+            payload,
+            ::data_privacy::DataClass::new("privacy", "i_p_address"),
+        )
+    }
+}

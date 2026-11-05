@@ -46,6 +46,7 @@ impl TlsBackendBuilder {
     /// [`BackendError`] unless the options or this builder provide a crypto
     /// provider and server certificate verifier.
     #[must_use]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "Self::default() and inferred Default::default() call the same TlsBackendBuilder implementation")]
     pub fn new() -> Self {
         Self::default()
     }

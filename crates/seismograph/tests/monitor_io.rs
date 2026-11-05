@@ -18,6 +18,22 @@ use seismograph_protocol::transport::Connection;
 use seismograph_protocol::{read_response, write_request};
 
 #[test]
+fn gamma_survivor_startup_propagates_mock_directory_failure_before_spawning() {
+    let (io, control) = MonitorIo::new_mocked();
+    control.fail_next(
+        IoOperation::CreateDirectory,
+        io::Error::new(io::ErrorKind::PermissionDenied, "gamma directory denied"),
+    );
+    let error = Monitor::builder().io(io).start().unwrap_err();
+    assert!(error.to_string().contains("gamma directory denied"));
+    let source = std::error::Error::source(&error).unwrap();
+    let source = source.downcast_ref::<seismograph_protocol::Error>().unwrap();
+    let io_error = std::error::Error::source(source).unwrap().downcast_ref::<io::Error>().unwrap();
+    assert_eq!(io_error.kind(), io::ErrorKind::PermissionDenied);
+    assert!(!control.operations().contains(&IoOperation::Bind));
+}
+
+#[test]
 fn startup_failures_are_injectable_without_host_registry_setup() {
     for operation in [
         IoOperation::CurrentExe,

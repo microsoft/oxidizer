@@ -540,6 +540,32 @@ impl From<&Clock> for SimpleClock {
 mod tests {
     use super::*;
 
+    #[test]
+    fn gamma_survivor_clock_relocation_preserves_isolated_source_storage_without_time_queries() {
+        let builder = thread_aware::ThreadBuilder::default();
+        let source = builder.build(std::thread::spawn(|| std::thread::current().id()).join().unwrap());
+        let destination = builder.build(std::thread::current().id());
+        let mut clock = Clock {
+            state: ClockState::new_system(),
+            time: SimpleClock::new_frozen(),
+        };
+        clock.state.activate_clock_owner();
+        assert_eq!(
+            format!("{:?}", clock.state.register_driver(std::task::Waker::noop().clone())),
+            "Some(0)"
+        );
+        clock.relocate(Some(&source), &destination);
+        assert_eq!(
+            format!("{:?}", clock.state.register_driver(std::task::Waker::noop().clone())),
+            "Some(0)"
+        );
+        clock.relocate(Some(&destination), &source);
+        assert_eq!(
+            format!("{:?}", clock.state.register_driver(std::task::Waker::noop().clone())),
+            "Some(1)"
+        );
+    }
+
     #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
     #[test]
     fn private_simple_clock_state_tracks_fast_instant_configuration() {

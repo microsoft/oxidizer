@@ -133,6 +133,66 @@ mod tests {
     use crate::task::scheduler::Scheduler;
 
     #[test]
+    fn gamma_survivor_private_io_closed_response_returns_error_and_preserves_thread_debug() {
+        use arty_io_host::IoRuntime;
+
+        use crate::io::Io;
+        use crate::runtime::worker::asynchronous::{SystemCommand, command_channel};
+
+        struct Options(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        impl Clone for Options {
+            fn clone(&self) -> Self {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Self(std::sync::Arc::clone(&self.0))
+            }
+        }
+        #[derive(Clone)]
+        struct ProbeContext;
+        impl ThreadAware for ProbeContext {
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+        }
+        impl IoContext for ProbeContext {
+            type ContextOptions = Options;
+            type Driver = TestDriver;
+
+            fn new(_options: Self::ContextOptions) -> Self {
+                Self
+            }
+
+            fn driver(&mut self, _options: DriverOptions) -> Result<Self::Driver, DriverError> {
+                Ok(TestDriver)
+            }
+        }
+
+        let thread = test_threads(1).remove(0);
+        let (tx, rx) = command_channel();
+        let endpoint = worker_endpoint(
+            tx,
+            Waker::noop().clone(),
+            thread.clone(),
+            Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+        );
+        let shutdown = Shutdown::default();
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown.clone()));
+        let io = Io::new(IoRuntime::new(Sink::noop()), dispatcher, thread.clone());
+        assert_eq!(format!("{io:?}"), format!("{} {{ thread: {thread:?}, .. }}", type_name::<Io>()));
+        let worker_shutdown = shutdown;
+        let worker = std::thread::spawn(move || {
+            let SystemCommand::AccessIo { access } = rx.system_receiver().recv().unwrap() else {
+                panic!("the external context request must enqueue an I/O command");
+            };
+            worker_shutdown.begin(ShutdownCause::default());
+            drop(access);
+        });
+        let result = io.try_context::<TestIo>(&());
+        assert_eq!(result.err().unwrap().to_string(), Error::runtime_shutting_down().to_string());
+        worker.join().unwrap();
+        let clones = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        assert!(io.try_context::<ProbeContext>(&Options(std::sync::Arc::clone(&clones))).is_err());
+        assert_eq!(clones.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    #[test]
     fn clients_observe_the_shared_shutdown_state() {
         let (commands, _command_rx) = crate::runtime::worker::asynchronous::command_channel();
         let worker = worker_endpoint(
@@ -148,6 +208,60 @@ mod tests {
         client.stop(ShutdownCause::default());
         assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Started);
         assert_eq!(clone.shutdown().state(), crate::runtime::ShutdownState::Started);
+    }
+
+    #[test]
+    fn gamma_survivor_private_context_and_scheduler_relocation_preserve_clone_and_worker_bindings() {
+        use crate::io::Io;
+        use crate::runtime::worker::asynchronous::{SpawnCommand, command_channel};
+
+        let threads = test_threads(2);
+        let (first_tx, first_rx) = command_channel();
+        let (second_tx, second_rx) = command_channel();
+        let endpoints = nonempty::NonEmpty::from_vec(vec![
+            worker_endpoint(
+                first_tx,
+                Waker::noop().clone(),
+                threads[0].clone(),
+                Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+            ),
+            worker_endpoint(
+                second_tx,
+                Waker::noop().clone(),
+                threads[1].clone(),
+                Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+            ),
+        ])
+        .unwrap();
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(endpoints, Shutdown::default()));
+        let io = Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher.clone(), threads[0].clone());
+        let mut context = Context::new(dispatcher, tick::Clock::new_frozen(), io, threads[0].clone());
+        let source = context.clone();
+        assert!(std::ptr::eq(context.thread(), source.thread()));
+        context.relocate(None, &threads[0]);
+        assert!(std::ptr::eq(context.thread(), source.thread()));
+        context.relocate(Some(&threads[0]), &threads[1]);
+        assert_eq!(context.thread(), &threads[1]);
+        assert_eq!(source.thread(), &threads[0]);
+        assert!(!std::ptr::eq(context.thread(), source.thread()));
+        assert!(format!("{:?}", context.io()).contains(&format!("thread: {:?}", threads[1])));
+
+        let foreign = test_threads(1).remove(0);
+        context.relocate(Some(&threads[1]), &foreign);
+        assert_eq!(context.thread(), &threads[1]);
+        drop(context.scheduler().spawn(async |_| 17));
+        assert!(matches!(second_rx.spawn_receiver().try_recv().unwrap(), SpawnCommand { .. }));
+        first_rx.spawn_receiver().try_recv().unwrap_err();
+        drop(source.scheduler().spawn(async |_| 19));
+        assert!(matches!(first_rx.spawn_receiver().try_recv().unwrap(), SpawnCommand { .. }));
+        second_rx.spawn_receiver().try_recv().unwrap_err();
+
+        let mut scheduler = source.scheduler().clone();
+        scheduler.relocate(None, &threads[1]);
+        scheduler.relocate(Some(&threads[1]), &foreign);
+        drop(scheduler.spawn(async |_| 23));
+        assert!(matches!(second_rx.spawn_receiver().try_recv().unwrap(), SpawnCommand { .. }));
+        first_rx.spawn_receiver().try_recv().unwrap_err();
     }
 
     #[test]

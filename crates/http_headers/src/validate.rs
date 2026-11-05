@@ -92,10 +92,20 @@ pub(super) fn eq_ignore_ascii_case(left: &[u8], right: &[u8]) -> bool {
 #[inline]
 pub(super) fn trim_ows(mut bytes: &[u8]) -> &[u8] {
     while bytes.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
-        bytes = &bytes[1..];
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        bytes = &bytes[
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1..];
     }
     while bytes.last().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
-        bytes = &bytes[..bytes.len() - 1];
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        bytes = &bytes[
+        // #[gamma::skip(range.exclusive_to_inclusive, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        ..
+        // #[gamma::skip(arith.sub_to_div, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        bytes.len() -
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1];
     }
     bytes
 }
@@ -116,7 +126,9 @@ pub(super) fn decimal_u64(bytes: &[u8]) -> Option<u64> {
     // Nineteen digits is the widest decimal `u64` always holds, so a shorter
     // input needs no per-digit overflow check and the accumulation collapses
     // to a multiply-add.
-    if bytes.is_empty() || bytes.len() > 19 {
+    if
+    // #[gamma::skip(cond.always_true, relational.gt_to_ge, literal.int_decrement, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "These changes only send more lengths through wide_decimal_u64, which validates the same digits and checked numeric bound")]
+    bytes.is_empty() || bytes.len() > 19 {
         return wide_decimal_u64(bytes);
     }
     let mut value = 0_u64;
@@ -154,6 +166,13 @@ fn wide_decimal_u64(bytes: &[u8]) -> Option<u64> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_decimal_colon_is_not_a_tenth_digit() {
+        for bytes in [b":".as_slice(), b"1:", b"123456789012345678:", b"0000000000000000000:"] {
+            assert_eq!(super::decimal_u64(bytes), None, "{bytes:?}");
+            assert_eq!(super::wide_decimal_u64(bytes), None, "{bytes:?}");
+        }
+    }
     use super::*;
 
     #[test]

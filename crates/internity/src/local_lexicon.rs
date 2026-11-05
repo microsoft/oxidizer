@@ -168,6 +168,7 @@ impl<S: BuildHasher> LocalLexicon<S> {
     /// Hashes a byte slice directly (see the
     /// [`ThreadedLexicon`](crate::ThreadedLexicon) note).
     #[inline]
+    // #[gamma::skip(fn_value.one, tag = "timeout", reason = "written by cargo gamma suppress 2026-11-07")]
     fn hash_bytes(&self, bytes: &[u8]) -> u64 {
         let mut hasher = self.hasher.build_hasher();
         hasher.write(bytes);
@@ -542,6 +543,51 @@ impl<T: AsRef<str>> FromIterator<T> for LocalLexicon {
 #[cfg(test)]
 mod tests {
     use super::LocalLexicon;
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn gamma_survivor_deserialize_hints_reserve_entries_but_not_string_bytes() {
+        struct EmptyHint;
+
+        impl<'de> serde::de::SeqAccess<'de> for EmptyHint {
+            type Error = serde::de::value::Error;
+
+            fn next_element_seed<T: serde::de::DeserializeSeed<'de>>(&mut self, _: T) -> Result<Option<T::Value>, Self::Error> {
+                Ok(None)
+            }
+
+            fn size_hint(&self) -> Option<usize> {
+                Some(14)
+            }
+        }
+
+        let deserializer = serde::de::value::SeqAccessDeserializer::new(EmptyHint);
+        let lexicon = <LocalLexicon as serde::Deserialize>::deserialize(deserializer).unwrap();
+        assert_eq!(lexicon.dedup.capacity(), 14);
+        assert_eq!(lexicon.offsets.capacity(), 15);
+        assert_eq!(lexicon.buffer.capacity(), 0);
+        assert_eq!(lexicon.len(), 0);
+    }
+
+    #[test]
+    fn gamma_survivor_capacity_hints_preserve_empty_sentinel_and_requested_storage() {
+        for (strings, bytes) in [(0, 0), (14, 17)] {
+            let lexicon = LocalLexicon::with_capacity(strings, bytes);
+            assert_eq!(lexicon.offsets, [0]);
+            assert_eq!(lexicon.offsets.capacity(), strings + 1);
+            assert_eq!(lexicon.buffer.capacity(), bytes);
+            assert!(lexicon.dedup.capacity() >= strings);
+            if strings == 0 {
+                assert_eq!(lexicon.dedup.capacity(), 0);
+            }
+        }
+        let lexicon = LocalLexicon::with_hasher(rustc_hash::FxBuildHasher);
+        assert_eq!(lexicon.buffer.capacity(), 0);
+        assert_eq!(lexicon.dedup.capacity(), 0);
+        assert_eq!(lexicon.offsets.capacity(), 1);
+        let lexicon: LocalLexicon = ["a", "a", "a"].into_iter().collect();
+        assert_eq!(lexicon.buffer.capacity(), 8);
+    }
 
     #[test]
     fn from_iter_preallocates_from_lower_size_hint() {

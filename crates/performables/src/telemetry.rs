@@ -116,6 +116,7 @@ pub(crate) fn record_channel_high_watermark(object: *const (), high_watermark: u
         Some(Record::object_measurement(
             SeismographEventKind::ChannelHighWatermark,
             ObjectId::from_ptr(object),
+            // #[gamma::skip(expr.decrement, reason = "Supported targets have at most 64-bit usize, so converting a high watermark to u64 cannot fail.")]
             u64::try_from(high_watermark).unwrap_or(u64::MAX),
         ))
     });
@@ -135,10 +136,16 @@ mod tests {
     #[test]
     fn disabled_drop_recording_does_not_resolve_objects() {
         let resolved = Cell::new(false);
-        record_arc_drop(|| {
-            resolved.set(true);
-            Some(ptr::null())
-        });
+        let record = || {
+            record_arc_drop(|| {
+                resolved.set(true);
+                Some(ptr::null())
+            });
+        };
+        #[cfg(feature = "seismograph")]
+        seismograph::recorder::without_recording(record);
+        #[cfg(not(feature = "seismograph"))]
+        record();
 
         assert!(!resolved.get());
     }

@@ -177,7 +177,11 @@ impl<'a> QualityView<'a> {
             Representation::Fraction(digits) => digits.get(index).copied().unwrap_or(b'0'),
             Representation::Compact(Quality(value)) => {
                 let digit = match index {
-                    0 => value / 100 % 10,
+                    0 => {
+                        value / 100 %
+                        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "digit(0) is emitted only for fractional compact values below 1000, whose hundreds quotient is at most nine; Quality::ONE emits no fractional digits")]
+                        10
+                    }
                     1 => value / 10 % 10,
                     2 => value % 10,
                     _ => 0,
