@@ -423,14 +423,6 @@ wildcard_imports = "allow"
 # Repository-specific Clippy lint policy beyond the Anvil catalog.
 panic = "warn"
 
-[patch.crates-io]
-# Runtime processor discovery reaches `ohno` through `cpulist`. Use the same
-# version and source as `observed` so packaging and CI selectors stay unambiguous.
-ohno = { path = "crates/ohno" }
-# `events_once` depends on the published crate. Reuse this workspace member so
-# Cargo package selectors remain unambiguous in impact-scoped CI.
-plurality = { path = "crates/plurality" }
-
 # A bit of debugging support for release builds.
 [profile.release]
 debug = "line-tables-only"
