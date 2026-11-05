@@ -35,9 +35,7 @@ impl WorkersPolicy {
     /// Creates a policy requiring exactly `count` workers.
     ///
     /// Each worker is a separate operating-system thread. If `count` exceeds
-    /// the available processor count, Arty assigns workers to processors in
-    /// repeated processor-ID order. The operating system schedules the workers
-    /// that share each processor.
+    /// the available processor count, some workers share a processor.
     ///
     /// [`RuntimeBuilder::build`](crate::runtime::RuntimeBuilder::build) returns
     /// [`Error`] if `count` is zero. Creating the policy does not validate the

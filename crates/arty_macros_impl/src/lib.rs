@@ -4,15 +4,15 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-//! Token expansion for Arty's entry-point attributes.
+//! Expands Arty's runtime entry-point attributes.
 //!
-//! This companion crate provides the expansion functions used by
-//! [`arty_macros`](https://docs.rs/arty_macros). Application code should enable
-//! Arty's `macros` feature and use its `main` and `test` attributes instead.
+//! This crate implements the attributes from
+//! [`arty_macros`](https://docs.rs/arty_macros). Application code uses Arty's
+//! `macros` feature and its `main` and `test` attributes.
 //!
-//! [`main()`] expands an async entry point; [`test()`] additionally registers
-//! the function with Rust's test harness. Invalid input produces compiler
-//! diagnostic tokens rather than a runtime error.
+//! [`main()`] turns an async function into a synchronous entry point. [`test()`]
+//! also registers the function with Rust's test harness. Invalid input produces
+//! compiler diagnostic tokens.
 
 use darling::FromMeta;
 use darling::ast::NestedMeta;
@@ -145,15 +145,15 @@ fn worker_policy(mut value: &Expr, runtime_path: &TokenStream) -> syn::Result<To
     ))
 }
 
-/// Expands an async entry-point function into synchronous runtime setup.
+/// Expands an async function into a synchronous Arty entry point.
 ///
-/// `args` contains the attribute's configuration tokens, and `item` contains the
-/// annotated async function. The returned tokens define the entry point
-/// or report invalid syntax with compiler diagnostics.
+/// `args` contains the attribute configuration. `item` contains the annotated
+/// async function. Valid input returns tokens for the entry point. Invalid input
+/// returns compiler diagnostic tokens.
 ///
-/// This is the implementation hook for `arty_macros::main`, not an application
-/// entry point. See [`arty::main`](https://docs.rs/arty/latest/arty/attr.main.html)
-/// for the supported configuration and generated function's behavior.
+/// This function implements `arty_macros::main`. Application code uses
+/// [`arty::main`](https://docs.rs/arty/latest/arty/attr.main.html), which
+/// documents the configuration and the generated function.
 ///
 /// # Examples
 ///
@@ -173,15 +173,15 @@ pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {
     entrypoint(args, item, false)
 }
 
-/// Expands an async function into a runtime-backed synchronous test.
+/// Expands an async function into a synchronous Arty test.
 ///
-/// `args` contains the attribute's configuration tokens, and `item` contains the
-/// annotated async function. The returned tokens register a test with
-/// Rust's test harness or report invalid syntax with compiler diagnostics.
+/// `args` contains the attribute configuration. `item` contains the annotated
+/// async function. Valid input returns tokens that register the test with Rust's
+/// test harness. Invalid input returns compiler diagnostic tokens.
 ///
-/// This is the implementation hook for `arty_macros::test`. See
-/// [`arty::test`](https://docs.rs/arty/latest/arty/attr.test.html) for application
-/// examples and the optional controlled-time argument.
+/// This function implements `arty_macros::test`. Application code uses
+/// [`arty::test`](https://docs.rs/arty/latest/arty/attr.test.html), which
+/// documents examples and the optional controlled-time argument.
 ///
 /// # Examples
 ///
