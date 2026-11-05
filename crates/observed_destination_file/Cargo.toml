@@ -17,6 +17,17 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_file"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "bon::builder_state::IsUnset",
+    "log::LevelFilter",
+    "observed_destination_core::format::LogFormatConfig",
+    "observed_destination_core::IntoLogDestination",
+    "observed_destination_core::LogDestination",
+    "ohno::enrichable::Enrichable",
+    "ohno::error_ext::ErrorExt",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 
