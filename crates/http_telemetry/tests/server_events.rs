@@ -128,6 +128,25 @@ fn url_scheme_is_http_https_or_other() {
 }
 
 #[test]
+fn known_methods_keep_their_names() {
+    let (sink, capture) = common::capture_sink();
+    let service = server(sink).layer(common::responding(StatusCode::OK));
+    let names = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "CONNECT", "TRACE"];
+
+    for name in names {
+        let method = Method::from_bytes(name.as_bytes()).unwrap();
+        service.execute(common::request(method, Version::HTTP_11)).unwrap_ready().unwrap();
+    }
+
+    let methods: Vec<_> = capture
+        .events()
+        .iter()
+        .map(|event| event.log("http.request.method").cloned())
+        .collect();
+    assert_eq!(methods, names.map(|name| Some(Value::from(name))).to_vec());
+}
+
+#[test]
 fn unknown_method_meters_other_and_logs_original() {
     let (sink, capture) = common::capture_sink();
     let service = server(sink).layer(common::responding(StatusCode::OK));
@@ -220,4 +239,14 @@ fn interest_is_checked_for_each_request() {
         (uninterested.status(), probe.received()),
         (StatusCode::IM_A_TEAPOT, vec![ACTIVE, COMPLETE, ACTIVE])
     );
+}
+
+#[test]
+fn layer_and_middleware_debug_output_names_their_types() {
+    let (sink, _capture) = common::capture_sink();
+    let layer = server(sink);
+    let service = layer.layer(common::responding(StatusCode::OK));
+
+    assert!(format!("{layer:?}").contains("TelemetryLayer"));
+    assert!(format!("{service:?}").contains("Telemetry<"));
 }

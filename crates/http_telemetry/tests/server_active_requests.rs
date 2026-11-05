@@ -158,3 +158,16 @@ fn request_dropped_during_unwind_leaves_active_requests_one_too_high() {
 
     assert_eq!((unwinding.is_err(), capture.names()), (true, vec![ACTIVE]));
 }
+
+#[test]
+fn response_body_dropped_during_unwind_leaves_active_requests_one_too_high() {
+    let capture = Capture::new(|_| true);
+    let body = respond(&server(common::sink_with(&capture)), [data("chunk"), Step::Pending]);
+
+    let unwinding = catch_unwind(AssertUnwindSafe(move || {
+        let _body = body;
+        panic!("the caller panicked");
+    }));
+
+    assert_eq!((unwinding.is_err(), capture.names()), (true, vec![ACTIVE]));
+}

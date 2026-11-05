@@ -45,6 +45,15 @@ fn size_hint_survives_wrapping() {
 }
 
 #[test]
+fn end_of_stream_survives_wrapping() {
+    let (mut body, _capture) = respond(StatusCode::OK, get(HttpBodyBuilder::new_fake().text("chunk")));
+    let before = body.is_end_stream();
+    let _ = poll_frame(&mut body);
+
+    assert_eq!((before, body.is_end_stream()), (false, true));
+}
+
+#[test]
 fn request_completes_when_body_ends() {
     let complete = |method: Method, status: StatusCode| {
         let (sink, capture) = common::capture_sink();
