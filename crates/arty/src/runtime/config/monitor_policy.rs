@@ -8,8 +8,7 @@
 /// The enabled policy is the default.
 ///
 /// The `monitor` Cargo feature enables the Seismograph dependencies that
-/// monitoring needs. This choice does not start a monitor, add task measurements,
-/// or change which tasks run.
+/// monitoring needs. This choice does not start a monitor or add task measurements.
 ///
 /// # Examples
 ///
