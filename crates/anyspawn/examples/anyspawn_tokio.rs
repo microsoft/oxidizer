@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Spawning tasks with Tokio.
+//! Spawning tasks with a Tokio runtime.
 
 use anyspawn::Spawner;
 

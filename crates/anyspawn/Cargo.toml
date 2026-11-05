@@ -75,7 +75,11 @@ harness = false
 required-features = ["tokio"]
 
 [[example]]
-name = "tokio"
+name = "anyspawn_arty"
+required-features = ["arty"]
+
+[[example]]
+name = "anyspawn_tokio"
 required-features = ["tokio"]
 
 # >>> anvil-managed: anvil-lints
