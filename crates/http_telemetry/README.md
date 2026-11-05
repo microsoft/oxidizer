@@ -74,7 +74,7 @@ Each event carries the [attributes](#metric-httpserverrequestduration) of the me
 |`server.address`|string|Host of the server, from the request URI, else from the `Host` header. An IPv6 address keeps its brackets.|`example.com`; `[2001:db8::1]`|If the request URI or the `Host` header names a host.|
 |`server.port`|int|Port of the server, from the request URI, else 80 for `http` and 443 for `https`. A request URI without a host takes the port from the `Host` header.|`443`; `8080`|If the port is known.|
 |`http.response.status_code`|int|HTTP response status code.|`200`|If the handler returned a response.|
-|`error.type`|string|Describes a class of error the request ended with. An error of the handler or of the response body gives the labels of the error and its sources, joined with dots ([`collect_error_labels`][__link5]). A panic of the handler or of the response body gives `panic`. A request future or a response body that is dropped before its end gives `abandoned`. Else, a status from 500 to 599 gives the status code.|`validation`; `io.connection_refused`; `panic`; `503`; `abandoned`|If the request ended with an error, a panic or a drop, or with a status from 500 to 599.|
+|`error.type`|string|Describes a class of error the request ended with. An error of the handler or of the response body gives the labels of the error and its sources, joined with dots: the label of each [`HttpError`][__link5] and the kind of each I/O error. A panic of the handler or of the response body gives `panic`. A request future or a response body that is dropped before its end gives `abandoned`. Else, a status from 500 to 599 gives the status code.|`validation`; `io.connection_refused`; `panic`; `503`; `abandoned`|If the request ended with an error, a panic or a drop, or with a status from 500 to 599.|
 
 `server.address` and `server.port` come from the request, so a client that sends new host names
 creates new metric series.
@@ -169,12 +169,12 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbnYLMCGOiXoEbJ-Oy7x2OXpkbIdEPTmnOB_AbEVi24SMT3dhhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE0LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb6zCf5Of8JC4bF_jhuJlk3bUbTib1EXea--IbUDWipBkeB_ZhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE0LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjA
  [__link0]: https://crates.io/crates/observed/0.30.0
  [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
  [__link2]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry
  [__link3]: https://docs.rs/layered/0.3.9/layered/?search=Layer
  [__link4]: https://docs.rs/observed/0.30.0/observed/?search=Sink
- [__link5]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=collect_error_labels
+ [__link5]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpError
  [__link6]: https://docs.rs/http-body/1.1.0/http_body/?search=Body::is_end_stream
  [__link7]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::excluded_paths

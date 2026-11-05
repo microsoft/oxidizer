@@ -8,7 +8,8 @@
 
 mod common;
 
-use std::future::{Ready, poll_fn};
+use std::future::{Ready, poll_fn, ready};
+use std::io::{self, ErrorKind};
 use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
 use std::sync::Arc;
 use std::task::Poll;
@@ -16,7 +17,7 @@ use std::task::Poll;
 use common::{ACTIVE, COMPLETE, Capture, Captured, DURATION, ERROR, duration, server};
 use future_assert::FutureTestExt;
 use http::StatusCode;
-use http_extensions::{HttpRequest, HttpResponse};
+use http_extensions::{HttpError, HttpRequest, HttpResponse};
 use layered::{Execute, Layer, Service};
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
@@ -94,13 +95,22 @@ fn server_handler_error_reports_error_event_without_status() {
 
 #[test]
 fn chained_handler_error_reports_labels_of_the_chain() {
-    let (sink, capture) = common::capture_sink();
-    let service = server(sink).layer(common::FAILING_CHAINED);
+    let error_type_of = |error: fn() -> HttpError| {
+        let (sink, capture) = common::capture_sink();
+        let handler = Execute::new(move |_: HttpRequest| ready(Err::<HttpResponse, _>(error())));
+        server(sink).layer(handler).execute(common::get()).unwrap_ready().unwrap_err();
+        error_type(&capture.single())
+    };
 
-    service.execute(common::get()).unwrap_ready().unwrap_err();
-
-    let label = Some("io.connection_refused".to_owned());
-    assert_eq!(error_type(&capture.single()), (label.clone(), label));
+    assert_eq!(
+        [
+            error_type_of(|| HttpError::from(io::Error::from(ErrorKind::ConnectionRefused))),
+            error_type_of(|| HttpError::from(io::Error::other(io::Error::from(ErrorKind::ConnectionReset)))),
+            error_type_of(|| HttpError::from(io::Error::new(ErrorKind::PermissionDenied, "access denied"))),
+        ],
+        ["io.connection_refused", "io.connection_reset", "io.permission_denied"]
+            .map(|label| (Some(label.to_owned()), Some(label.to_owned())))
+    );
 }
 
 #[test]

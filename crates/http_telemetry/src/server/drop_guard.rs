@@ -7,11 +7,12 @@ use std::sync::Arc;
 
 use http::uri::Authority;
 use http::{HeaderValue, Method, StatusCode, Version};
-use http_extensions::{HttpError, collect_error_labels};
+use http_extensions::HttpError;
 use http_headers::SingleValueField;
 use http_headers::headers::{Host, HostView};
 use observed::context::Transfer;
 use observed::{Sink, Text, emit};
+use ohno::{ErrorLabel, Labeled};
 use tick::Stopwatch;
 
 use super::OTHER;
@@ -153,7 +154,7 @@ impl TelemetryDropGuard {
                     server_address: server_address(),
                     server_port,
                     status_code: status_code.map(|status_code| status_code.as_u16()),
-                    error_type: Text::from(collect_error_labels(error).into_cow()),
+                    error_type: Text::from(ErrorLabel::from_error_chain(error, resolve_error_label).into_cow()),
                     duration_ms,
                 }
             ),
@@ -187,6 +188,23 @@ impl TelemetryDropGuard {
             ),
         }
         self.add_active_request(-1);
+    }
+}
+
+/// The label of one error of a source chain: the label of an [`HttpError`], the kind of an I/O
+/// error, or none for any other error.
+fn resolve_error_label(error: &(dyn std::error::Error + 'static)) -> Option<ErrorLabel> {
+    if let Some(error) = error.downcast_ref::<HttpError>() {
+        return Some(error.label().clone());
+    }
+    error.downcast_ref::<std::io::Error>().map(resolve_io_error_label)
+}
+
+/// The kind of the I/O error that `error` wraps, if it wraps one, else the kind of `error`.
+fn resolve_io_error_label(error: &std::io::Error) -> ErrorLabel {
+    match error.get_ref().and_then(|inner| inner.downcast_ref::<std::io::Error>()) {
+        Some(inner) => resolve_io_error_label(inner),
+        None => error.kind().into(),
     }
 }
 

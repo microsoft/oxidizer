@@ -2797,6 +2797,7 @@ dependencies = [
  "metabench",
  "observed",
  "observed_testing",
+ "ohno",
  "tick",
  "tokio",
 ]

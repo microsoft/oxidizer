@@ -209,9 +209,6 @@ pub type HttpResponse = Response<HttpBody>;
 mod error;
 pub use error::{HttpError, Result};
 
-mod collect_error_labels;
-pub use collect_error_labels::collect_error_labels;
-
 mod error_labels;
 
 mod body;
