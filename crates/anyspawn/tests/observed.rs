@@ -10,9 +10,9 @@ use std::task::Poll;
 
 #[cfg(feature = "arty")]
 use anyspawn::ArtyDeps;
-use anyspawn::Spawner;
 #[cfg(feature = "tokio")]
 use anyspawn::TokioDeps;
+use anyspawn::{JoinError, Spawner};
 use observed::enrichment::EnrichFnExt;
 use observed::{Enrichment, Severity, Sink, emit};
 use observed_testing::events::ProbeEvent;
@@ -40,7 +40,7 @@ fn assert_events(processor: &MockProcessor, expected: &[ExpectedEvent]) {
     }
 }
 
-fn exercise_spawns(spawner: &Spawner, plain: &Spawner, sink: &Sink, processor: &MockProcessor) {
+fn exercise_spawns(spawner: &Spawner, plain: &Spawner, sink: &Sink, processor: &MockProcessor) -> Result<(), JoinError> {
     assert!(format!("{spawner:?}").contains(&format!("{sink:?}")));
     let mut expectations = Vec::new();
     for request_id in [10, 20] {
@@ -68,7 +68,6 @@ fn exercise_spawns(spawner: &Spawner, plain: &Spawner, sink: &Sink, processor: &
                         42
                     })
                     .await
-                    .unwrap()
             });
             let anywhere = clone.spawn_anywhere(sink.clone(), |sink| {
                 emit!(&sink, ProbeEvent::new(3));
@@ -86,9 +85,9 @@ fn exercise_spawns(spawner: &Spawner, plain: &Spawner, sink: &Sink, processor: &
         })
         .enrich(sink, Request { request_id })();
 
-        assert_eq!(futures::executor::block_on(task).unwrap(), 42);
-        assert_eq!(futures::executor::block_on(anywhere).unwrap(), 43);
-        assert_eq!(futures::executor::block_on(blocking).unwrap(), 44);
+        assert_eq!(futures::executor::block_on(task)??, 42);
+        assert_eq!(futures::executor::block_on(anywhere)?, 43);
+        assert_eq!(futures::executor::block_on(blocking)?, 44);
         expectations.extend((1..=6).map(|value| expected(value, Some(request_id))));
         assert_events(processor, &expectations);
     }
@@ -98,17 +97,14 @@ fn exercise_spawns(spawner: &Spawner, plain: &Spawner, sink: &Sink, processor: &
     let task_sink = sink.clone();
     futures::executor::block_on(spawner.spawn(async move {
         emit!(&task_sink, ProbeEvent::new(8));
-    }))
-    .unwrap();
+    }))?;
     futures::executor::block_on(spawner.spawn_anywhere(sink.clone(), |sink| async move {
         emit!(&sink, ProbeEvent::new(9));
-    }))
-    .unwrap();
+    }))?;
     let blocking_sink = sink.clone();
     futures::executor::block_on(spawner.spawn_blocking(move || {
         emit!(&blocking_sink, ProbeEvent::new(10));
-    }))
-    .unwrap();
+    }))?;
     expectations.extend((7..=10).map(|value| expected(value, None)));
 
     // Enabling the feature does not opt dependencies without a sink into transfer.
@@ -127,77 +123,81 @@ fn exercise_spawns(spawner: &Spawner, plain: &Spawner, sink: &Sink, processor: &
         (task, anywhere, blocking)
     })
     .enrich(sink, Request { request_id: 99 })();
-    futures::executor::block_on(task).unwrap();
-    futures::executor::block_on(anywhere).unwrap();
-    futures::executor::block_on(blocking).unwrap();
+    futures::executor::block_on(task)?;
+    futures::executor::block_on(anywhere)?;
+    futures::executor::block_on(blocking)?;
     expectations.extend((11..=13).map(|value| expected(value, None)));
     assert_events(processor, &expectations);
+    Ok(())
 }
 
 #[cfg(feature = "tokio")]
 #[test]
 fn tokio_transfers_context_for_all_spawn_methods() {
-    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).build().unwrap();
     let _entered = runtime.enter();
     let (sink, processor) = test_emitter(TEST_ID);
     let deps = TokioDeps::default().observed(Sink::noop()).observed(sink.clone());
-    assert!(format!("{deps:?}").contains(&format!("{sink:?}")));
     let spawner = Spawner::new_tokio(deps.clone());
-    exercise_spawns(&spawner, &Spawner::new_tokio(TokioDeps::default()), &sink, &processor);
+    assert!(format!("{deps:?}").contains(&format!("{sink:?}")));
+    exercise_spawns(&spawner, &Spawner::new_tokio(TokioDeps::default()), &sink, &processor).unwrap();
 }
 
 #[cfg(feature = "tokio")]
 #[test]
 fn tokio_handle_transfers_context_without_an_ambient_runtime() {
-    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).build().unwrap();
     let (sink, processor) = test_emitter(TEST_ID);
     let mut spawner = Spawner::new_tokio(TokioDeps::with_handle(runtime.handle().clone()).observed(sink.clone()));
     _ = thread_aware::Relocator::between_threads().relocate(&mut spawner);
     let plain = Spawner::new_tokio(TokioDeps::with_handle(runtime.handle().clone()));
-    exercise_spawns(&spawner, &plain, &sink, &processor);
+    exercise_spawns(&spawner, &plain, &sink, &processor).unwrap();
 }
 
 #[cfg(feature = "tokio")]
-#[tokio::test]
-async fn pending_task_does_not_leak_context_on_the_same_thread() {
-    let (sink, processor) = test_emitter(TEST_ID);
-    let spawner = Spawner::new_tokio(TokioDeps::new().observed(sink.clone()));
-    let (started, ready) = tokio::sync::oneshot::channel();
-    let (release, released) = tokio::sync::oneshot::channel();
-    let task_sink = sink.clone();
-    let task = (|| {
-        spawner.spawn(async move {
-            emit!(&task_sink, ProbeEvent::new(1));
-            started.send(()).unwrap();
-            released.await.unwrap();
-            emit!(&task_sink, ProbeEvent::new(2));
+#[test]
+fn pending_task_does_not_leak_context_on_the_same_thread() {
+    let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    runtime.block_on(async {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let spawner = Spawner::new_tokio(TokioDeps::new().observed(sink.clone()));
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let task_sink = sink.clone();
+        let task = (|| {
+            spawner.spawn(async move {
+                emit!(&task_sink, ProbeEvent::new(1));
+                started.send(()).unwrap();
+                released.await.unwrap();
+                emit!(&task_sink, ProbeEvent::new(2));
+            })
         })
-    })
-    .enrich(&sink, Request { request_id: 42 })();
+        .enrich(&sink, Request { request_id: 42 })();
 
-    ready.await.unwrap();
-    emit!(&sink, ProbeEvent::new(3));
-    let unrelated_sink = sink.clone();
-    Spawner::new_tokio(TokioDeps::default())
-        .spawn(async move {
-            emit!(&unrelated_sink, ProbeEvent::new(4));
-        })
-        .await
-        .unwrap();
-    release.send(()).unwrap();
-    task.await.unwrap();
-    emit!(&sink, ProbeEvent::new(5));
+        ready.await.unwrap();
+        emit!(&sink, ProbeEvent::new(3));
+        let unrelated_sink = sink.clone();
+        Spawner::new_tokio(TokioDeps::default())
+            .spawn(async move {
+                emit!(&unrelated_sink, ProbeEvent::new(4));
+            })
+            .await
+            .unwrap();
+        release.send(()).unwrap();
+        task.await.unwrap();
+        emit!(&sink, ProbeEvent::new(5));
 
-    assert_events(
-        &processor,
-        &[
-            expected(1, Some(42)),
-            expected(2, Some(42)),
-            expected(3, None),
-            expected(4, None),
-            expected(5, None),
-        ],
-    );
+        assert_events(
+            &processor,
+            &[
+                expected(1, Some(42)),
+                expected(2, Some(42)),
+                expected(3, None),
+                expected(4, None),
+                expected(5, None),
+            ],
+        );
+    });
 }
 
 #[cfg(feature = "arty")]
@@ -210,9 +210,9 @@ fn arty_transfers_context_for_all_spawn_methods() {
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let (sink, processor) = test_emitter(TEST_ID);
     let deps = ArtyDeps::new(scheduler.clone()).observed(Sink::noop()).observed(sink.clone());
-    assert!(format!("{deps:?}").contains(&format!("{sink:?}")));
     let spawner = Spawner::new_arty(deps.clone());
-    exercise_spawns(&spawner, &Spawner::new_arty(ArtyDeps::new(scheduler)), &sink, &processor);
+    assert!(format!("{deps:?}").contains(&format!("{sink:?}")));
+    exercise_spawns(&spawner, &Spawner::new_arty(ArtyDeps::new(scheduler)), &sink, &processor).unwrap();
     runtime.stop().unwrap();
 }
 
