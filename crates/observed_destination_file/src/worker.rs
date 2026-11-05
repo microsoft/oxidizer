@@ -341,7 +341,7 @@ fn write_warning_line(writer: &mut (impl Write + ?Sized), timestamp: SystemTime,
 #[cfg(test)]
 #[cfg(not(miri))]
 mod tests {
-    use std::{assert_matches, io, str};
+    use std::{io, str};
 
     use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
     use opentelemetry_sdk::Resource;
@@ -840,7 +840,11 @@ mod tests {
 
         worker.write_log(&queued_log("record"));
 
-        assert_matches!(worker.first_write_error.as_deref(), Some("Operation failed: write failed"));
+        if let Err(err) = worker.flush_pending() {
+            assert_eq!(err, "Operation failed: write failed");
+        } else {
+            panic!("expected a write error to be returned");
+        }
     }
 
     #[test]
