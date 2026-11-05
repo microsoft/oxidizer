@@ -13,7 +13,6 @@ use drop_guard::{RequestEnd, TelemetryDropGuard, UriAuthority};
 use events::{ActiveRequests, RequestAbandoned, RequestComplete, RequestError};
 use futures::FutureExt;
 use futures::future::Either;
-use http::Version;
 use http::header::HOST;
 use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
 use layered::Service;
@@ -53,14 +52,6 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
             return Either::Left(self.inner.execute(input));
         }
 
-        let protocol_version = match input.version() {
-            Version::HTTP_10 => "1.0",
-            Version::HTTP_11 => "1.1",
-            Version::HTTP_2 => "2",
-            Version::HTTP_3 => "3",
-            _ => OTHER,
-        };
-
         let (scheme, default_port) = match input.uri().scheme_str() {
             Some("http") => (Some("http"), Some(80)),
             Some("https") => (Some("https"), Some(443)),
@@ -73,7 +64,7 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
             stopwatch: layer.clock.stopwatch(),
             enrichment: layer.sink.transfer_context(),
             method: input.method().clone(),
-            protocol_version,
+            version: input.version(),
             scheme,
             uri_authority: match input.uri().authority() {
                 Some(authority) => Some(UriAuthority::Uri(authority.clone(), default_port)),

@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use http::uri::Authority;
-use http::{HeaderValue, Method, StatusCode};
+use http::{HeaderValue, Method, StatusCode, Version};
 use http_extensions::{HttpError, collect_error_labels};
 use http_headers::SingleValueField;
 use http_headers::headers::{Host, HostView};
@@ -66,7 +66,7 @@ pub(crate) struct TelemetryDropGuard {
     pub(crate) stopwatch: Stopwatch,
     pub(crate) enrichment: Transfer,
     pub(crate) method: Method,
-    pub(crate) protocol_version: &'static str,
+    pub(crate) version: Version,
     pub(crate) scheme: Option<&'static str>,
     pub(crate) uri_authority: Option<UriAuthority>,
     pub(crate) finished: bool,
@@ -96,7 +96,13 @@ impl TelemetryDropGuard {
         let duration_ms = self.stopwatch.elapsed().as_millis() as u64;
         let _enrichment = self.enrichment.apply_current_thread();
         let method = http_method_name(&self.method);
-        let protocol_version = self.protocol_version;
+        let protocol_version = match self.version {
+            Version::HTTP_10 => "1.0",
+            Version::HTTP_11 => "1.1",
+            Version::HTTP_2 => "2",
+            Version::HTTP_3 => "3",
+            _ => OTHER,
+        };
         let (server_address, server_port) = match &self.uri_authority {
             Some(UriAuthority::Uri(authority, default_port)) => (Some(authority.host()), authority.port_u16().or(*default_port)),
             Some(UriAuthority::Host(value)) => {

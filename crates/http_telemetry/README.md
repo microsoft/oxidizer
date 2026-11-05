@@ -109,8 +109,9 @@ when one of these occurs:
 * A poll returns data, and then [`is_end_stream`][__link6] of the body
   returns `true`.
 * The server drops the body while `is_end_stream` returns `true`.
-* The server drops the body after the length that the response declares. A valid
-  `Content-Length` header declares the length, else the exact size hint of the body.
+* Over HTTP/1.0 or HTTP/1.1, the server drops the body after the length that the response
+  declares. A valid `Content-Length` header declares the length, else the exact size hint of the
+  body.
 
 These responses have no content, so the middleware does not wrap their body, and their request
 ends when the handler returns:
@@ -168,7 +169,7 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbNhafXznsTJ8bwJu-q9S-TCsbe3ruaYdGJ-cb-SXo6-xAJ6BhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE0LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbnYLMCGOiXoEbJ-Oy7x2OXpkbIdEPTmnOB_AbEVi24SMT3dhhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE0LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjA
  [__link0]: https://crates.io/crates/observed/0.30.0
  [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
  [__link2]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry

@@ -103,8 +103,9 @@
 //! - A poll returns data, and then [`is_end_stream`](http_body::Body::is_end_stream) of the body
 //!   returns `true`.
 //! - The server drops the body while `is_end_stream` returns `true`.
-//! - The server drops the body after the length that the response declares. A valid
-//!   `Content-Length` header declares the length, else the exact size hint of the body.
+//! - Over HTTP/1.0 or HTTP/1.1, the server drops the body after the length that the response
+//!   declares. A valid `Content-Length` header declares the length, else the exact size hint of the
+//!   body.
 //!
 //! These responses have no content, so the middleware does not wrap their body, and their request
 //! ends when the handler returns:

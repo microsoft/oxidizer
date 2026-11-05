@@ -100,8 +100,8 @@ fn data_frame_that_ends_body_completes_request() {
 #[test]
 fn drop_completes_ended_body_and_abandons_unfinished_body() {
     // Each body gets two polls and is then dropped.
-    let names = |content_length: Option<&'static str>, steps: Vec<Step>| {
-        let mut request = get(scripted(steps));
+    let names = |version, content_length: Option<&'static str>, steps: Vec<Step>| {
+        let mut request = common::request(Method::GET, version).map(|_| scripted(steps));
         if let Some(content_length) = content_length {
             request
                 .headers_mut()
@@ -117,11 +117,12 @@ fn drop_completes_ended_body_and_abandons_unfinished_body() {
 
     assert_eq!(
         [
-            names(None, vec![data("hello"), Step::Pending]),
-            names(Some("5"), unfinished()),
-            names(Some("10"), unfinished()),
+            names(Version::HTTP_11, None, vec![data("hello"), Step::Pending]),
+            names(Version::HTTP_11, Some("5"), unfinished()),
+            names(Version::HTTP_11, Some("10"), unfinished()),
+            names(Version::HTTP_2, Some("5"), vec![data("hello"), Step::Pending, Step::Trailers]),
         ],
-        [vec![COMPLETE], vec![COMPLETE], vec![ABANDONED]]
+        [vec![COMPLETE], vec![COMPLETE], vec![ABANDONED], vec![ABANDONED]]
     );
 }
 
