@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use bytesbuf::BytesView;
 use http::{HeaderMap, Method, Request, StatusCode, Uri, Version};
-use http_body::{Body, Frame};
+use http_body::{Body, Frame, SizeHint};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::{Telemetry, TelemetryLayer};
 use layered::{Execute, Service};
@@ -337,8 +337,12 @@ pub(crate) fn data(text: &str) -> Step {
 }
 
 /// A body that takes one step for each poll, and returns `None` after the last step. It is at its
-/// end when no step is left. Its length is unknown.
-pub(crate) struct Scripted(VecDeque<Step>);
+/// end when no step is left. A sized body has an exact size hint: the length of its data steps that
+/// are left. The length of other bodies is unknown.
+pub(crate) struct Scripted {
+    steps: VecDeque<Step>,
+    sized: bool,
+}
 
 impl Body for Scripted {
     type Data = BytesView;
@@ -346,7 +350,7 @@ impl Body for Scripted {
 
     #[expect(clippy::panic, reason = "the step `Panic` makes the body panic")]
     fn poll_frame(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<http_extensions::Result<Frame<BytesView>>>> {
-        match self.0.pop_front() {
+        match self.steps.pop_front() {
             Some(Step::Data(data)) => Poll::Ready(Some(Ok(Frame::data(data)))),
             Some(Step::Trailers) => Poll::Ready(Some(Ok(Frame::trailers(HeaderMap::new())))),
             Some(Step::Pending) => Poll::Pending,
@@ -357,13 +361,32 @@ impl Body for Scripted {
     }
 
     fn is_end_stream(&self) -> bool {
-        self.0.is_empty()
+        self.steps.is_empty()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        if !self.sized {
+            return SizeHint::default();
+        }
+        let length: usize = self
+            .steps
+            .iter()
+            .map(|step| if let Step::Data(data) = step { data.len() } else { 0 })
+            .sum();
+        SizeHint::with_exact(u64::try_from(length).unwrap())
     }
 }
 
-/// A streamed body that takes `steps`.
+/// A streamed body that takes `steps`. Its length is unknown.
 pub(crate) fn scripted(steps: impl IntoIterator<Item = Step>) -> HttpBody {
-    HttpBodyBuilder::new_fake().body(Scripted(steps.into_iter().collect()), &HttpBodyOptions::new())
+    let steps = steps.into_iter().collect();
+    HttpBodyBuilder::new_fake().body(Scripted { steps, sized: false }, &HttpBodyOptions::new())
+}
+
+/// A streamed body that takes `steps`, with an exact size hint.
+pub(crate) fn sized_scripted(steps: impl IntoIterator<Item = Step>) -> HttpBody {
+    let steps = steps.into_iter().collect();
+    HttpBodyBuilder::new_fake().body(Scripted { steps, sized: true }, &HttpBodyOptions::new())
 }
 
 /// Polls `body` once, with a waker that does nothing.

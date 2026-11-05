@@ -8,6 +8,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use bytesbuf::BytesView;
+use http::header::TRANSFER_ENCODING;
 use http::{Method, StatusCode, Version};
 use http_body::{Body, Frame, SizeHint};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpResponse};
@@ -35,18 +36,19 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
         return response;
     }
 
-    // A body with a declared length ends at that length over HTTP/1.0 and HTTP/1.1 only. Over HTTP/2
-    // and HTTP/3, trailers can follow the content (RFC 9112, sections 6.2 and 7.1, RFC 9113, section
-    // 8.1, and RFC 9114, section 4.1).
-    let content_length = matches!(guard.version, Version::HTTP_10 | Version::HTTP_11)
-        .then(|| {
-            ContentLength::view(response.headers())
-                .ok()
-                .flatten()
-                .map(ContentLengthOwned::get)
-                .or_else(|| response.body().size_hint().exact())
-        })
-        .flatten();
+    // A body with a declared length ends at that length over HTTP/1.0 and HTTP/1.1 only, and only when
+    // no `Transfer-Encoding` frames the body. Chunked framing, HTTP/2 and HTTP/3 let trailers follow
+    // the content (RFC 9112, sections 6.3 and 7.1, RFC 9113, section 8.1, and RFC 9114, section 4.1).
+    let content_length = (matches!(guard.version, Version::HTTP_10 | Version::HTTP_11)
+        && !response.headers().contains_key(TRANSFER_ENCODING))
+    .then(|| {
+        ContentLength::view(response.headers())
+            .ok()
+            .flatten()
+            .map(ContentLengthOwned::get)
+            .or_else(|| response.body().size_hint().exact())
+    })
+    .flatten();
     response.map(|body| {
         body_builder.rewrap(body, |inner| TelemetryBody {
             inner,

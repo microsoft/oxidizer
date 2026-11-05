@@ -110,7 +110,7 @@ when one of these occurs:
   returns `true`.
 * The server drops the body while `is_end_stream` returns `true`.
 * Over HTTP/1.0 or HTTP/1.1, the server drops the body after the length that the response
-  declares. A valid `Content-Length` header declares the length, else the exact size hint of the
+  declares with a `Content-Length` header, else the exact size hint of the
   body.
 
 These responses have no content, so the middleware does not wrap their body, and their request

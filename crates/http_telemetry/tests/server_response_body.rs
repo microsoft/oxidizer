@@ -13,9 +13,11 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::task::Poll;
 use std::time::Duration;
 
-use common::{ABANDONED, COMPLETE, Capture, Captured, DURATION, ERROR, Echoing, Step, data, duration, poll_frame, scripted, server};
+use common::{
+    ABANDONED, COMPLETE, Capture, Captured, DURATION, ERROR, Echoing, Step, data, duration, poll_frame, scripted, server, sized_scripted,
+};
 use future_assert::FutureTestExt;
-use http::header::{CONTENT_LENGTH, HeaderValue};
+use http::header::{CONTENT_LENGTH, HeaderName, HeaderValue, TRANSFER_ENCODING};
 use http::{Method, StatusCode, Version};
 use http_body::Body;
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest};
@@ -109,12 +111,10 @@ fn data_frame_that_ends_body_completes_request() {
 #[test]
 fn drop_completes_ended_body_and_abandons_unfinished_body() {
     // Each body gets two polls and is then dropped.
-    let names = |version, content_length: Option<&'static str>, steps: Vec<Step>| {
-        let mut request = common::request(Method::GET, version).map(|_| scripted(steps));
-        if let Some(content_length) = content_length {
-            request
-                .headers_mut()
-                .insert(CONTENT_LENGTH, HeaderValue::from_static(content_length));
+    let names = |version, header: Option<(HeaderName, &'static str)>, body: HttpBody| {
+        let mut request = common::request(Method::GET, version).map(|_| body);
+        if let Some((name, value)) = header {
+            request.headers_mut().insert(name, HeaderValue::from_static(value));
         }
         let (mut body, capture) = respond(StatusCode::OK, request);
         let _ = poll_frame(&mut body);
@@ -122,16 +122,22 @@ fn drop_completes_ended_body_and_abandons_unfinished_body() {
         drop(body);
         capture.names()
     };
-    let unfinished = || vec![data("hello"), Step::Pending, Step::Pending];
+    let unfinished = || scripted([data("hello"), Step::Pending, Step::Pending]);
+    let trailers_pending = || [data("hello"), Step::Pending, Step::Trailers];
 
     assert_eq!(
         [
-            names(Version::HTTP_11, None, vec![data("hello"), Step::Pending]),
-            names(Version::HTTP_11, Some("5"), unfinished()),
-            names(Version::HTTP_11, Some("10"), unfinished()),
-            names(Version::HTTP_2, Some("5"), vec![data("hello"), Step::Pending, Step::Trailers]),
+            names(Version::HTTP_11, None, scripted([data("hello"), Step::Pending])),
+            names(Version::HTTP_11, Some((CONTENT_LENGTH, "5")), unfinished()),
+            names(Version::HTTP_11, Some((CONTENT_LENGTH, "10")), unfinished()),
+            names(Version::HTTP_2, Some((CONTENT_LENGTH, "5")), scripted(trailers_pending())),
+            names(
+                Version::HTTP_11,
+                Some((TRANSFER_ENCODING, "chunked")),
+                sized_scripted(trailers_pending())
+            ),
         ],
-        [vec![COMPLETE], vec![COMPLETE], vec![ABANDONED], vec![ABANDONED]]
+        [vec![COMPLETE], vec![COMPLETE], vec![ABANDONED], vec![ABANDONED], vec![ABANDONED]]
     );
 }
 
