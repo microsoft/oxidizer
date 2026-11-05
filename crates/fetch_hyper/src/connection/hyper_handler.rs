@@ -211,7 +211,7 @@ mod tests {
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         options.connection_pool.connection_lifetime = lifetime;
-        HyperTransportBuilder::new(connector, Spawner::new_tokio(anyspawn::TokioDeps::new()), clock, options)
+        HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options)
             .body_builder(HttpBodyBuilder::new_fake())
             .build(tls())
     }
@@ -231,7 +231,7 @@ mod tests {
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         let handler: HyperHandler<FakeConnector, crate::testing::FakeStream> = build_hyper_handler(
-            HyperTransportBuilder::new(connector, Spawner::new_tokio(anyspawn::TokioDeps::new()), clock, options),
+            HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options),
             tls(),
             HttpBodyBuilder::new_fake(),
             &opentelemetry::global::meter("test"),
@@ -264,7 +264,7 @@ mod tests {
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         options.supported_http_versions = vec![Version::HTTP_2];
-        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(anyspawn::TokioDeps::new()), clock, options)
+        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options)
             .body_builder(HttpBodyBuilder::new_fake())
             .build(tls());
         // Execute to drive the http2 path; we don't care if it fails or not.

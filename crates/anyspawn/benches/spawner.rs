@@ -15,7 +15,7 @@ fn entry(c: &mut Criterion) {
 
     // Tokio benchmarks
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let tokio_spawner = Spawner::new_tokio(anyspawn::TokioDeps::new());
+    let tokio_spawner = Spawner::new_tokio(None);
 
     group.bench_function("tokio_direct", |b| {
         b.iter(|| rt.block_on(async { tokio::spawn(async { 42 }).await.unwrap() }));

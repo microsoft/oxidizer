@@ -19,7 +19,7 @@ use tick::Clock;
 
 #[tokio::test]
 async fn runtime_spawn_runs_task_to_completion() {
-    let runtime = Runtime::new(Spawner::new_tokio(anyspawn::TokioDeps::new()), Clock::new_tokio());
+    let runtime = Runtime::new(Spawner::new_tokio(None), Clock::new_tokio());
     let ran = Arc::new(AtomicBool::new(false));
     let ran_in_task = Arc::clone(&ran);
 
@@ -33,7 +33,7 @@ async fn runtime_spawn_runs_task_to_completion() {
 
 #[tokio::test]
 async fn runtime_spawn_preserves_task_panics_as_join_errors() {
-    let runtime = Runtime::new(Spawner::new_tokio(anyspawn::TokioDeps::default()), Clock::new_tokio());
+    let runtime = Runtime::new(Spawner::new_tokio(None), Clock::new_tokio());
     let error = runtime.spawn(Box::pin(async { panic!("task failed") })).await.unwrap_err();
 
     let error = error.downcast_ref::<anyspawn::JoinError>().unwrap();
@@ -46,7 +46,7 @@ fn runtime_shutdown_preserves_the_join_error() {
     let native = tokio::runtime::Builder::new_current_thread().build().unwrap();
     let runtime = {
         let _entered = native.enter();
-        Runtime::new(Spawner::new_tokio(native.handle()), Clock::new_tokio())
+        Runtime::new(Spawner::new_tokio(native.handle().clone()), Clock::new_tokio())
     };
     let task = runtime.spawn(Box::pin(std::future::pending::<()>()));
     drop(native);
@@ -67,7 +67,7 @@ fn executor_reports_shutdown_as_an_io_error_without_running_the_command() {
     let native = tokio::runtime::Builder::new_current_thread().build().unwrap();
     let runtime = {
         let _entered = native.enter();
-        Runtime::new(Spawner::new_tokio(native.handle()), Clock::new_tokio())
+        Runtime::new(Spawner::new_tokio(native.handle().clone()), Clock::new_tokio())
     };
     drop(native);
 
@@ -85,7 +85,7 @@ fn executor_reports_shutdown_as_an_io_error_without_running_the_command() {
 
 #[tokio::test]
 async fn runtime_abort_resolves_without_waiting() {
-    let runtime = Runtime::new(Spawner::new_tokio(anyspawn::TokioDeps::new()), Clock::new_tokio());
+    let runtime = Runtime::new(Spawner::new_tokio(None), Clock::new_tokio());
 
     // The task never completes on its own; aborting must wake the waiter so the
     // await resolves rather than hanging forever. The timeout bounds the wait so
@@ -101,7 +101,7 @@ async fn runtime_abort_resolves_without_waiting() {
 
 #[tokio::test]
 async fn runtime_sleep_completes() {
-    let runtime = Runtime::new(Spawner::new_tokio(anyspawn::TokioDeps::new()), Clock::new_tokio());
+    let runtime = Runtime::new(Spawner::new_tokio(None), Clock::new_tokio());
 
     runtime.sleep(Duration::milliseconds(1)).await;
 }
@@ -112,7 +112,7 @@ async fn runtime_yield_now_yields_once_then_completes() {
 
     use futures::task::noop_waker;
 
-    let runtime = Runtime::new(Spawner::new_tokio(anyspawn::TokioDeps::new()), Clock::new_tokio());
+    let runtime = Runtime::new(Spawner::new_tokio(None), Clock::new_tokio());
     let mut future = runtime.yield_now();
 
     let waker = noop_waker();
@@ -125,14 +125,14 @@ async fn runtime_yield_now_yields_once_then_completes() {
 
 #[tokio::test]
 async fn runtime_converts_into_dyn_runtime() {
-    let runtime: Arc<dyn AsyncRuntime> = Runtime::new(Spawner::new_tokio(anyspawn::TokioDeps::new()), Clock::new_tokio()).into();
+    let runtime: Arc<dyn AsyncRuntime> = Runtime::new(Spawner::new_tokio(None), Clock::new_tokio()).into();
 
     runtime.spawn(Box::pin(async {})).await.unwrap();
 }
 
 #[tokio::test]
 async fn runtime_accessors_round_trip() {
-    let runtime = Runtime::new(Spawner::new_tokio(anyspawn::TokioDeps::new()), Clock::new_tokio());
+    let runtime = Runtime::new(Spawner::new_tokio(None), Clock::new_tokio());
 
     // `spawner` and `clock` expose the wrapped components; rebuild from them.
     let runtime = Runtime::new(runtime.spawner().clone(), runtime.clock().clone());
@@ -147,7 +147,7 @@ async fn runtime_executor_runs_command() {
 
     use azure_identity::Executor;
 
-    let runtime = Runtime::new(Spawner::new_tokio(anyspawn::TokioDeps::new()), Clock::new_tokio());
+    let runtime = Runtime::new(Spawner::new_tokio(None), Clock::new_tokio());
 
     #[cfg(windows)]
     let output = runtime
@@ -171,7 +171,7 @@ async fn runtime_converts_into_dyn_executor() {
 
     use azure_identity::Executor;
 
-    let executor: Arc<dyn Executor> = Runtime::new(Spawner::new_tokio(anyspawn::TokioDeps::new()), Clock::new_tokio()).into();
+    let executor: Arc<dyn Executor> = Runtime::new(Spawner::new_tokio(None), Clock::new_tokio()).into();
 
     #[cfg(windows)]
     let output = executor

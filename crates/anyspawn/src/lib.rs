@@ -20,12 +20,12 @@
 //! # fn main() {
 //! # #[cfg(feature = "arty")] {
 //! # (|| {
-//! use anyspawn::{ArtyDeps, Spawner};
+//! use anyspawn::Spawner;
 //! use arty::runtime::Runtime;
 //!
 //! let runtime = Runtime::new()?;
 //! # runtime.scheduler().block_on(async |cx| {
-//! let spawner = Spawner::new_arty(ArtyDeps::new(cx.scheduler().clone()));
+//! let spawner = Spawner::new_arty(cx.scheduler().clone());
 //! let result = spawner.spawn(async { 1 + 1 }).await?;
 //! assert_eq!(result, 2);
 //! # Ok::<(), anyspawn::JoinError>(())
@@ -43,9 +43,9 @@
 //! # #[cfg(feature = "tokio")]
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), anyspawn::JoinError> {
-//! use anyspawn::{Spawner, TokioDeps};
+//! use anyspawn::Spawner;
 //!
-//! let spawner = Spawner::new_tokio(TokioDeps::new());
+//! let spawner = Spawner::new_tokio(None);
 //! let result = spawner.spawn(async { 1 + 1 }).await?;
 //! assert_eq!(result, 2);
 //! # Ok(())
@@ -54,11 +54,12 @@
 //! # fn main() {}
 //! ```
 //!
-//! The convenience constructors accept dependency values or borrowed runtime
-//! objects. `Spawner::new_tokio(&handle)` clones the handle.
-//! `Spawner::new_arty(&scheduler)` clones the scheduler.
-//! `Spawner::new_tokio(TokioDeps::default())` selects the runtime active at each
-//! spawn call. None of these forms enables enrichment transfer.
+//! `Spawner::new_tokio` accepts a runtime handle, `Some(handle)`, or `None`.
+//! `None` selects the runtime active at each spawn call.
+//! `Spawner::new_arty` takes ownership of a scheduler.
+//! These constructors do not enable enrichment transfer.
+//! Use `Spawner::builder_tokio` or `Spawner::builder_arty` to configure
+//! a spawner through [`SpawnerBuilder`].
 //!
 //! Awaiting a [`JoinHandle`] returns `Result<T, JoinError>`. A task panic,
 //! cancellation, or shutdown rejection becomes an error rather than another panic
@@ -75,19 +76,19 @@
 //!
 //! Enrichment is context attached to events emitted through an `observed::Sink`.
 //! With the `observed` feature and a runtime feature, call `observed(sink)`
-//! on the dependencies to transfer context to spawned work.
+//! on the [`SpawnerBuilder`] to transfer context to spawned work.
 //! Each spawn call captures the supplied sink's context. Async tasks restore it
 //! on each poll, and blocking tasks restore it for the closure call.
 //!
 //! `spawn_anywhere` also restores context while its factory creates the future.
 //! Arty still relocates the task data before calling the factory.
-//! Dependencies without a sink do not transfer context, even when `observed` is enabled.
+//! Spawners without a sink do not transfer context, even when `observed` is enabled.
 //!
 //! ```rust
 //! # #[cfg(all(feature = "tokio", feature = "observed"))]
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), anyspawn::JoinError> {
-//! use anyspawn::{Spawner, TokioDeps};
+//! use anyspawn::Spawner;
 //! use observed::enrichment::EnrichFutureExt;
 //! use observed::{Enrichment, Sink, event};
 //!
@@ -102,7 +103,7 @@
 //! struct TaskStarted;
 //!
 //! let sink = Sink::builder("app").build();
-//! let spawner = Spawner::new_tokio(TokioDeps::new().observed(sink.clone()));
+//! let spawner = Spawner::builder_tokio(None).observed(sink.clone()).build();
 //! async {
 //!     // Events emitted through this sink in the task include request_id.
 //!     let task_sink = sink.clone();
@@ -123,25 +124,19 @@
 //!
 //! # Features
 //!
-//! - `arty`: Enables `ArtyDeps` for constructing an Arty spawner.
-//! - `tokio`: Enables `TokioDeps` for constructing a Tokio spawner.
-//! - `observed`: Enables `observed` methods that accept an `observed::Sink`.
+//! - `arty`: Enables the Arty constructors on `Spawner`.
+//! - `tokio`: Enables the Tokio constructors on `Spawner`.
+//! - `observed`: Enables `SpawnerBuilder::observed`, which accepts an `observed::Sink`.
 //!   Combine it with `arty` or `tokio`. It does not select a runtime.
 //! - `seismograph`: Enables instrumentation in the optional `observed` dependency.
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/favicon.ico")]
 
-#[cfg(any(test, feature = "arty", feature = "tokio"))]
-mod deps;
 mod handle;
 mod join_error;
 mod spawner;
 
-#[cfg(any(test, feature = "arty"))]
-pub use deps::ArtyDeps;
-#[cfg(any(test, feature = "tokio"))]
-pub use deps::TokioDeps;
 pub use handle::JoinHandle;
 pub use join_error::JoinError;
-pub use spawner::Spawner;
+pub use spawner::{Spawner, SpawnerBuilder};

@@ -9,7 +9,7 @@ use arty::runtime::Runtime;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = Runtime::new()?;
     runtime.scheduler().block_on(async |cx| {
-        let spawner = Spawner::new_arty(cx.scheduler());
+        let spawner = Spawner::new_arty(cx.scheduler().clone());
 
         spawner
             .spawn(async {

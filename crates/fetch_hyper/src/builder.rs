@@ -99,7 +99,7 @@ where
 ///
 /// let transport: HyperTransport = HyperTransportBuilder::new(
 ///     Execute::new(connect),
-///     Spawner::new_tokio(anyspawn::TokioDeps::new()),
+///     Spawner::new_tokio(None),
 ///     tick::ClockControl::new()
 ///         .auto_advance_timers(true)
 ///         .to_clock(),
@@ -315,7 +315,7 @@ mod tests {
     fn make_builder_with(options: TransportOptions) -> HyperTransportBuilder<FakeConnector, crate::testing::FakeStream> {
         HyperTransportBuilder::new(
             FakeConnector::new_success(Bytes::new(), tick::ClockControl::new().auto_advance_timers(true).to_clock()),
-            Spawner::new_tokio(anyspawn::TokioDeps::new()),
+            Spawner::new_tokio(None),
             tick::ClockControl::new().auto_advance_timers(true).to_clock(),
             options,
         )
@@ -430,7 +430,7 @@ mod tests {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(response_bytes, clock.clone()),
-            Spawner::new_tokio(anyspawn::TokioDeps::new()),
+            Spawner::new_tokio(None),
             clock,
             http_and_https_options(),
         )
@@ -452,7 +452,7 @@ mod tests {
         options.supported_http_versions = vec![Version::HTTP_2];
         let _handler = HyperTransportBuilder::new(
             FakeConnector::new_success(Bytes::new(), clock.clone()),
-            Spawner::new_tokio(anyspawn::TokioDeps::new()),
+            Spawner::new_tokio(None),
             clock,
             options,
         )
@@ -467,7 +467,7 @@ mod tests {
         let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(response_bytes, clock.clone()),
-            Spawner::new_tokio(anyspawn::TokioDeps::new()),
+            Spawner::new_tokio(None),
             clock,
             http_and_https_options(),
         )
@@ -486,7 +486,7 @@ mod tests {
         let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(response_bytes, clock.clone()),
-            Spawner::new_tokio(anyspawn::TokioDeps::new()),
+            Spawner::new_tokio(None),
             clock,
             http_and_https_options(),
         )
@@ -508,7 +508,7 @@ mod tests {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(response_bytes, clock.clone()),
-            Spawner::new_tokio(anyspawn::TokioDeps::new()),
+            Spawner::new_tokio(None),
             clock,
             http_and_https_options(),
         )
@@ -523,7 +523,7 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
 
-        let executor = SpawnerExecutor(Spawner::new_tokio(anyspawn::TokioDeps::new()));
+        let executor = SpawnerExecutor(Spawner::new_tokio(None));
         let fired = Arc::new(AtomicBool::new(false));
         let fired_clone = Arc::clone(&fired);
         hyper::rt::Executor::execute(&executor, async move {

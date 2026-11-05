@@ -780,14 +780,9 @@ mod tests {
         };
         let mut transport_options = TransportOptions::default();
         transport_options.supported_http_versions = vec![Version::HTTP_11];
-        let handler = HyperTransportBuilder::new(
-            connector,
-            Spawner::new_tokio(anyspawn::TokioDeps::new()),
-            Clock::new_tokio(),
-            transport_options,
-        )
-        .body_builder(HttpBodyBuilder::new_fake())
-        .build(server.backend(&endpoint, expected_server_name, &[Version::HTTP_11]));
+        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), Clock::new_tokio(), transport_options)
+            .body_builder(HttpBodyBuilder::new_fake())
+            .build(server.backend(&endpoint, expected_server_name, &[Version::HTTP_11]));
         let body_builder = HttpBodyBuilder::new_fake();
         let request = HttpRequestBuilder::new(&body_builder)
             .method(Method::GET)

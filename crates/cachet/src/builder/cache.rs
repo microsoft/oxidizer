@@ -494,7 +494,7 @@ mod tests {
     fn mock_builder_fallback_time_to_refresh() {
         let clock = Clock::new_frozen();
         let fb = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
-        let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio(anyspawn::TokioDeps::new()));
+        let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio(None));
         let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
             .fallback(fb)

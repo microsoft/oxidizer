@@ -8,10 +8,6 @@
 use std::future::poll_fn;
 use std::task::Poll;
 
-#[cfg(feature = "arty")]
-use anyspawn::ArtyDeps;
-#[cfg(feature = "tokio")]
-use anyspawn::TokioDeps;
 use anyspawn::{JoinError, Spawner};
 use observed::enrichment::EnrichFnExt;
 use observed::{Enrichment, Severity, Sink, emit};
@@ -107,7 +103,7 @@ fn exercise_spawns(spawner: &Spawner, plain: &Spawner, sink: &Sink, processor: &
     }))?;
     expectations.extend((7..=10).map(|value| expected(value, None)));
 
-    // Enabling the feature does not opt dependencies without a sink into transfer.
+    // Enabling the feature does not opt spawners without a sink into transfer.
     let (task, anywhere, blocking) = (|| {
         let task_sink = sink.clone();
         let task = plain.spawn(async move {
@@ -137,10 +133,10 @@ fn tokio_transfers_context_for_all_spawn_methods() {
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).build().unwrap();
     let _entered = runtime.enter();
     let (sink, processor) = test_emitter(TEST_ID);
-    let deps = TokioDeps::default().observed(Sink::noop()).observed(sink.clone());
-    let spawner = Spawner::new_tokio(deps.clone());
-    assert!(format!("{deps:?}").contains(&format!("{sink:?}")));
-    exercise_spawns(&spawner, &Spawner::new_tokio(TokioDeps::default()), &sink, &processor).unwrap();
+    let builder = Spawner::builder_tokio(None).observed(Sink::noop()).observed(sink.clone());
+    let spawner = builder.clone().build();
+    assert!(format!("{builder:?}").contains(&format!("{sink:?}")));
+    exercise_spawns(&spawner, &Spawner::builder_tokio(None).build(), &sink, &processor).unwrap();
 }
 
 #[cfg(feature = "tokio")]
@@ -148,9 +144,9 @@ fn tokio_transfers_context_for_all_spawn_methods() {
 fn tokio_handle_transfers_context_without_an_ambient_runtime() {
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).build().unwrap();
     let (sink, processor) = test_emitter(TEST_ID);
-    let mut spawner = Spawner::new_tokio(TokioDeps::with_handle(runtime.handle().clone()).observed(sink.clone()));
+    let mut spawner = Spawner::builder_tokio(runtime.handle().clone()).observed(sink.clone()).build();
     _ = thread_aware::Relocator::between_threads().relocate(&mut spawner);
-    let plain = Spawner::new_tokio(TokioDeps::with_handle(runtime.handle().clone()));
+    let plain = Spawner::new_tokio(runtime.handle().clone());
     exercise_spawns(&spawner, &plain, &sink, &processor).unwrap();
 }
 
@@ -160,7 +156,7 @@ fn pending_task_does_not_leak_context_on_the_same_thread() {
     let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
     runtime.block_on(async {
         let (sink, processor) = test_emitter(TEST_ID);
-        let spawner = Spawner::new_tokio(TokioDeps::new().observed(sink.clone()));
+        let spawner = Spawner::builder_tokio(None).observed(sink.clone()).build();
         let (started, ready) = tokio::sync::oneshot::channel();
         let (release, released) = tokio::sync::oneshot::channel();
         let task_sink = sink.clone();
@@ -177,7 +173,7 @@ fn pending_task_does_not_leak_context_on_the_same_thread() {
         ready.await.unwrap();
         emit!(&sink, ProbeEvent::new(3));
         let unrelated_sink = sink.clone();
-        Spawner::new_tokio(TokioDeps::default())
+        Spawner::new_tokio(None)
             .spawn(async move {
                 emit!(&unrelated_sink, ProbeEvent::new(4));
             })
@@ -209,10 +205,12 @@ fn arty_transfers_context_for_all_spawn_methods() {
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let (sink, processor) = test_emitter(TEST_ID);
-    let deps = ArtyDeps::new(scheduler.clone()).observed(Sink::noop()).observed(sink.clone());
-    let spawner = Spawner::new_arty(deps.clone());
-    assert!(format!("{deps:?}").contains(&format!("{sink:?}")));
-    exercise_spawns(&spawner, &Spawner::new_arty(ArtyDeps::new(scheduler)), &sink, &processor).unwrap();
+    let builder = Spawner::builder_arty(scheduler.clone())
+        .observed(Sink::noop())
+        .observed(sink.clone());
+    let spawner = builder.clone().build();
+    assert!(format!("{builder:?}").contains(&format!("{sink:?}")));
+    exercise_spawns(&spawner, &Spawner::builder_arty(scheduler).build(), &sink, &processor).unwrap();
     runtime.stop().unwrap();
 }
 
@@ -236,7 +234,7 @@ fn arty_relocates_data_before_the_observed_factory() {
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let (sink, processor) = test_emitter(TEST_ID);
-    let spawner = Spawner::new_arty(ArtyDeps::new(scheduler).observed(sink.clone()));
+    let spawner = Spawner::builder_arty(scheduler).observed(sink.clone()).build();
     let task = (|| {
         spawner.spawn_anywhere(
             Probe {

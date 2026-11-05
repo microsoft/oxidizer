@@ -30,7 +30,7 @@ use crate::handle::JoinHandleInner;
 /// # async fn main() -> Result<(), anyspawn::JoinError> {
 /// use anyspawn::Spawner;
 ///
-/// let spawner = Spawner::new_tokio(anyspawn::TokioDeps::new());
+/// let spawner = Spawner::new_tokio(None);
 /// let handle = spawner.spawn(async {
 ///     println!("Task running!");
 /// });
@@ -52,7 +52,7 @@ use crate::handle::JoinHandleInner;
 /// # async fn main() -> Result<(), anyspawn::JoinError> {
 /// use anyspawn::Spawner;
 ///
-/// let spawner = Spawner::new_tokio(anyspawn::TokioDeps::new());
+/// let spawner = Spawner::new_tokio(None);
 /// let value = spawner.spawn(async { 1 + 1 }).await?;
 /// assert_eq!(value, 2);
 /// # Ok(())
@@ -72,7 +72,7 @@ use crate::handle::JoinHandleInner;
 /// # async fn main() -> Result<(), anyspawn::JoinError> {
 /// use anyspawn::Spawner;
 ///
-/// let spawner = Spawner::new_tokio(anyspawn::TokioDeps::new());
+/// let spawner = Spawner::new_tokio(None);
 ///
 /// let result = spawner
 ///     .spawn(async {
@@ -115,40 +115,86 @@ enum SpawnerKind {
     Tokio(#[thread_aware(skip)] Option<::tokio::runtime::Handle>),
 }
 
-impl Spawner {
-    /// Creates a Tokio spawner from dependencies or a runtime handle.
+/// Configures a [`Spawner`] for Arty or Tokio.
+///
+/// Start with `Spawner::builder_arty` or `Spawner::builder_tokio`.
+/// A builder without a sink does not transfer enrichment to spawned work.
+#[derive(Clone, Debug)]
+#[must_use]
+pub struct SpawnerBuilder {
+    spawner: Spawner,
+}
+
+impl SpawnerBuilder {
+    /// Enables enrichment transfer from `sink` for every spawn call.
     ///
-    /// Pass `TokioDeps::default()` to use the runtime active at each spawn call,
-    /// without enrichment transfer. Pass a handle or a borrowed handle to select
-    /// an explicit runtime. A borrowed handle is cloned.
+    /// Enrichment is context attached to events. The spawner captures it when
+    /// work is spawned, not when the builder is created or cloned.
+    /// Async tasks apply it on each poll, and blocking tasks apply it during
+    /// the closure call. `spawn_anywhere` also applies it while its factory
+    /// creates the future, after Arty relocates the data.
+    ///
+    /// Calling this method again replaces the sink.
+    /// See the [enrichment example](crate#observed-enrichment).
+    #[cfg(any(test, feature = "observed"))]
+    pub fn observed(mut self, sink: Sink) -> Self {
+        self.spawner.sink = Some(sink);
+        self
+    }
+
+    /// Builds the spawner with the selected runtime and sink.
+    ///
+    /// This does not start a runtime or require an active runtime.
+    pub fn build(self) -> Spawner {
+        self.spawner
+    }
+}
+
+impl Spawner {
+    /// Creates a Tokio spawner with an optional runtime handle.
+    ///
+    /// Pass `None` to use the runtime active at each spawn call.
+    /// Pass a handle or `Some(handle)` to select an explicit runtime.
     /// Construction does not require an active runtime.
+    /// Use [`Self::builder_tokio`] to configure enrichment transfer.
     ///
     /// # Examples
     ///
     /// ```rust
     /// # #[cfg(feature = "tokio")]
-    /// # fn configure(handle: &tokio::runtime::Handle) {
-    /// use anyspawn::{Spawner, TokioDeps};
+    /// # fn configure(handle: tokio::runtime::Handle) {
+    /// use anyspawn::Spawner;
     ///
     /// let explicit = Spawner::new_tokio(handle);
-    /// let ambient = Spawner::new_tokio(TokioDeps::default());
+    /// let ambient = Spawner::new_tokio(None);
     /// # let _ = (explicit, ambient);
     /// # }
     /// ```
     #[cfg(any(test, feature = "tokio"))]
-    pub fn new_tokio(deps: impl Into<crate::TokioDeps>) -> Self {
-        let deps = deps.into();
-        Self {
-            kind: SpawnerKind::Tokio(deps.handle),
-            #[cfg(any(test, feature = "observed"))]
-            sink: deps.sink,
+    pub fn new_tokio(handle: impl Into<Option<::tokio::runtime::Handle>>) -> Self {
+        Self::builder_tokio(handle).build()
+    }
+
+    /// Configures a Tokio spawner with an optional runtime handle.
+    ///
+    /// Pass `None` to use the runtime active at each spawn call.
+    /// Pass a handle or `Some(handle)` to select an explicit runtime.
+    /// Construction does not require an active runtime.
+    /// See [`Self::new_tokio`] for a runtime selection example.
+    #[cfg(any(test, feature = "tokio"))]
+    pub fn builder_tokio(handle: impl Into<Option<::tokio::runtime::Handle>>) -> SpawnerBuilder {
+        SpawnerBuilder {
+            spawner: Self {
+                kind: SpawnerKind::Tokio(handle.into()),
+                #[cfg(any(test, feature = "observed"))]
+                sink: None,
+            },
         }
     }
 
-    /// Creates an Arty spawner from dependencies or a worker scheduler.
+    /// Creates an Arty spawner from a worker scheduler.
     ///
-    /// A borrowed scheduler is cloned. Passing a scheduler directly does not
-    /// enable enrichment transfer. Use `ArtyDeps::observed` to enable it.
+    /// Use [`Self::builder_arty`] to configure enrichment transfer.
     /// Tasks retain the scheduler's worker association. Cloning and relocation
     /// follow the scheduler's semantics, and the spawner does not keep its
     /// runtime running.
@@ -157,7 +203,7 @@ impl Spawner {
     ///
     /// ```rust
     /// # #[cfg(feature = "arty")]
-    /// # fn configure(scheduler: &arty::task::Scheduler) {
+    /// # fn configure(scheduler: arty::task::Scheduler) {
     /// use anyspawn::Spawner;
     ///
     /// let spawner = Spawner::new_arty(scheduler);
@@ -165,12 +211,23 @@ impl Spawner {
     /// # }
     /// ```
     #[cfg(any(test, feature = "arty"))]
-    pub fn new_arty(deps: impl Into<crate::ArtyDeps>) -> Self {
-        let deps = deps.into();
-        Self {
-            kind: SpawnerKind::Arty(deps.scheduler),
-            #[cfg(any(test, feature = "observed"))]
-            sink: deps.sink,
+    pub fn new_arty(scheduler: ::arty::task::Scheduler) -> Self {
+        Self::builder_arty(scheduler).build()
+    }
+
+    /// Configures an Arty spawner from a worker scheduler.
+    ///
+    /// The spawner retains the scheduler's worker association
+    /// but does not keep its runtime running.
+    /// See [`Self::new_arty`] for a scheduler selection example.
+    #[cfg(any(test, feature = "arty"))]
+    pub fn builder_arty(scheduler: ::arty::task::Scheduler) -> SpawnerBuilder {
+        SpawnerBuilder {
+            spawner: Self {
+                kind: SpawnerKind::Arty(scheduler),
+                #[cfg(any(test, feature = "observed"))]
+                sink: None,
+            },
         }
     }
 
@@ -197,7 +254,7 @@ impl Spawner {
     /// # async fn main() -> Result<(), anyspawn::JoinError> {
     /// use anyspawn::Spawner;
     ///
-    /// let spawner = Spawner::new_tokio(anyspawn::TokioDeps::new());
+    /// let spawner = Spawner::new_tokio(None);
     ///
     /// // Await to get the result
     /// let value = spawner.spawn(async { 1 + 1 }).await?;
@@ -261,7 +318,7 @@ impl Spawner {
     /// # async fn main() -> Result<(), anyspawn::JoinError> {
     /// use anyspawn::Spawner;
     ///
-    /// let spawner = Spawner::new_tokio(anyspawn::TokioDeps::new());
+    /// let spawner = Spawner::new_tokio(None);
     /// let result = spawner.spawn_anywhere(42, |x| async move { x + 1 }).await?;
     /// assert_eq!(result, 43);
     /// # Ok(())
@@ -337,7 +394,7 @@ impl Spawner {
     /// # async fn main() -> Result<(), anyspawn::JoinError> {
     /// use anyspawn::Spawner;
     ///
-    /// let spawner = Spawner::new_tokio(anyspawn::TokioDeps::new());
+    /// let spawner = Spawner::new_tokio(None);
     /// let value = spawner
     ///     .spawn_blocking(|| {
     ///         // expensive synchronous work goes here

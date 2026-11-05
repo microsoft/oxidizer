@@ -476,7 +476,7 @@ async fn fallback_builder_time_to_refresh_does_not_panic() {
     // task is fire-and-forget, we just verify the cache is usable.
     let clock = Clock::new_frozen();
     let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
-    let ttr = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio(anyspawn::TokioDeps::new()));
+    let ttr = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio(None));
 
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
@@ -509,7 +509,7 @@ async fn do_refresh_updates_primary_from_fallback() {
     primary_storage.insert("key".to_string(), stale_entry).await.unwrap();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
-    let ttr = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio(anyspawn::TokioDeps::new()));
+    let ttr = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio(None));
 
     let cache = Cache::builder::<String, i32>(clock)
         .storage(primary_storage)
@@ -545,7 +545,7 @@ async fn do_refresh_deduplicates_in_flight() {
     fallback_storage.insert("key".to_string(), CacheEntry::new(99)).await.unwrap();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
-    let ttr = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio(anyspawn::TokioDeps::new()));
+    let ttr = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio(None));
 
     let cache = Cache::builder::<String, i32>(clock)
         .memory()

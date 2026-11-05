@@ -59,10 +59,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
             Cache::builder(clock.clone())
                 .storage(mock_with_value("key", "value"))
                 .fallback(Cache::builder(clock).storage(MockCache::<String, String>::new()))
-                .time_to_refresh(TimeToRefresh::new(
-                    Duration::from_hours(1),
-                    Spawner::new_tokio(anyspawn::TokioDeps::new()),
-                ))
+                .time_to_refresh(TimeToRefresh::new(Duration::from_hours(1), Spawner::new_tokio(None)))
                 .build()
         });
         let key = "key".to_string();
@@ -85,10 +82,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
             Cache::builder(clock.clone())
                 .storage(mock_with_value("key", "value"))
                 .fallback(Cache::builder(clock).storage(mock_with_value("key", "refreshed")))
-                .time_to_refresh(TimeToRefresh::new(
-                    Duration::from_secs(0),
-                    Spawner::new_tokio(anyspawn::TokioDeps::new()),
-                ))
+                .time_to_refresh(TimeToRefresh::new(Duration::from_secs(0), Spawner::new_tokio(None)))
                 .build()
         });
         let key = "key".to_string();

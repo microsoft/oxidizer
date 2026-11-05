@@ -21,9 +21,9 @@ use ohno::OhnoCore;
 /// # #[cfg(feature = "tokio")]
 /// # #[tokio::main]
 /// # async fn main() {
-/// use anyspawn::{Spawner, TokioDeps};
+/// use anyspawn::Spawner;
 ///
-/// let spawner = Spawner::new_tokio(TokioDeps::default());
+/// let spawner = Spawner::new_tokio(None);
 /// match spawner.spawn(async { 42 }).await {
 ///     Ok(value) => assert_eq!(value, 42),
 ///     Err(error) if error.is_cancelled() => eprintln!("Task was cancelled: {error}"),

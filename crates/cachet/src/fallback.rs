@@ -442,7 +442,7 @@ mod tests {
 
         let fallback_mock = MockCache::<String, i32>::new();
         let telemetry = CacheTelemetry::new();
-        let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio(anyspawn::TokioDeps::new()));
+        let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio(None));
 
         let primary = CacheWrapper::new(
             "primary",

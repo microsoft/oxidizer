@@ -379,7 +379,7 @@ mod tests {
         options.request_filter = RequestFilter::HttpAndHttps;
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(http_1_response(), clock.clone()),
-            Spawner::new_tokio(anyspawn::TokioDeps::new()),
+            Spawner::new_tokio(None),
             clock,
             options,
         )
@@ -405,7 +405,7 @@ mod tests {
                 TestError::new("forced connect error").with_inner_recoverability(RecoveryInfo::retry()),
                 clock.clone(),
             ),
-            Spawner::new_tokio(anyspawn::TokioDeps::new()),
+            Spawner::new_tokio(None),
             clock,
             options,
         )
@@ -430,7 +430,7 @@ mod tests {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(http_1_response(), clock.clone()),
-            Spawner::new_tokio(anyspawn::TokioDeps::new()),
+            Spawner::new_tokio(None),
             clock,
             // default RequestFilter is Https only
             fetch_options::TransportOptions::default(),

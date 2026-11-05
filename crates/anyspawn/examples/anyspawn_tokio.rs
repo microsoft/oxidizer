@@ -7,7 +7,7 @@ use anyspawn::Spawner;
 
 #[tokio::main]
 async fn main() -> Result<(), anyspawn::JoinError> {
-    let spawner = Spawner::new_tokio(anyspawn::TokioDeps::new());
+    let spawner = Spawner::new_tokio(None);
 
     // Wait for the task and propagate a runtime failure.
     let () = spawner

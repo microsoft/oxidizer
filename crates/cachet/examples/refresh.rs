@@ -56,10 +56,7 @@ async fn main() {
         .memory()
         .ttl(Duration::from_secs(10))
         .fallback(Cache::builder::<String, String>(clock.clone()).storage(db.clone()))
-        .time_to_refresh(TimeToRefresh::new(
-            Duration::from_secs(1),
-            Spawner::new_tokio(anyspawn::TokioDeps::new()),
-        ))
+        .time_to_refresh(TimeToRefresh::new(Duration::from_secs(1), Spawner::new_tokio(None)))
         .build();
 
     let key = "config".to_string();

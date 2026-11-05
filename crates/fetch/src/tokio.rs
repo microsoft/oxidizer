@@ -287,7 +287,7 @@ fn build_tokio_handler(cx: CustomContext<TokioDeps>, options: &TokioTransportOpt
     let tls_backend = build_tls_backend(&cx.options, cx.tls);
     let connector = TokioConnector::new(options.socket);
 
-    HyperTransportBuilder::new(connector, Spawner::new_tokio(anyspawn::TokioDeps::new()), cx.clock, cx.options)
+    HyperTransportBuilder::new(connector, Spawner::new_tokio(None), cx.clock, cx.options)
         .body_builder(cx.body_builder)
         .pool_index(cx.pool_index)
         .meter(cx.meter)

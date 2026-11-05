@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service_url: Url = endpoint.parse()?;
 
     // Use a tokio-based `Runtime` to run credential tools such as the Azure CLI.
-    let executor: Arc<dyn Executor> = Arc::new(Runtime::new(Spawner::new_tokio(anyspawn::TokioDeps::new()), Clock::new_tokio()));
+    let executor: Arc<dyn Executor> = Arc::new(Runtime::new(Spawner::new_tokio(None), Clock::new_tokio()));
     let credential: Arc<dyn TokenCredential> =
         DeveloperToolsCredential::new(Some(DeveloperToolsCredentialOptions { executor: Some(executor) }))?;
 
