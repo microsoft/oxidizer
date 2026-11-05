@@ -31,7 +31,7 @@ use performables::sync::mutex::Mutex;
 ///
 /// # Examples
 ///
-/// Starting a task after shutdown returns a task error without calling its factory:
+/// Starting a task after shutdown returns a task error:
 ///
 /// ```
 /// use arty::runtime::Runtime;
