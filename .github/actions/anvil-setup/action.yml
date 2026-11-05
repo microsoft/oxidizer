@@ -165,8 +165,6 @@ runs:
       # into shell source. Validation below occurs before path or recipe-name
       # composition.
       env:
-        RUSTUP_TOOLCHAIN: "1.97"
-        RUSTUP_AUTO_INSTALL: "1"
         ANVIL_GROUP: ${{ inputs.group }}
         # Catalog binstall calls also query GitHub Releases.
         GITHUB_TOKEN: ${{ github.token }}
@@ -189,11 +187,21 @@ runs:
           exit 2
         fi
 
-        case "$ANVIL_GROUP" in
-          none) echo "anvil-setup: group=none, skipping tool install" ;;
-          "")   just anvil-setup binstall ;;
-          *)    just "anvil-$ANVIL_GROUP-setup" binstall ;;
-        esac
+        install_group() {
+          case "$ANVIL_GROUP" in
+            none) echo "anvil-setup: group=none, skipping tool install" ;;
+            "")   just anvil-setup binstall ;;
+            *)    just "anvil-$ANVIL_GROUP-setup" binstall ;;
+          esac
+        }
+
+        RUSTUP_TOOLCHAIN=1.97 RUSTUP_AUTO_INSTALL=1 install_group
+        if [[ "$ANVIL_GROUP" != "none" ]]; then
+          # Reuse cached tools, but provision the compiler and components that
+          # checks select after the tool-installation override ends.
+          echo "anvil-setup: preparing check toolchains and components"
+          install_group
+        fi
 
     # Save the cache as the LAST step of setup, regardless of whether
     # any earlier install step partially failed. `actions/cache`
