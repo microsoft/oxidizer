@@ -208,6 +208,29 @@ impl From<SystemTimeError> for Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_backtrace_formatting_preserves_a_writer_error() {
+        use std::fmt::Write as _;
+
+        struct FirstWriteOnly(bool);
+
+        impl std::fmt::Write for FirstWriteOnly {
+            fn write_str(&mut self, _: &str) -> std::fmt::Result {
+                if std::mem::replace(&mut self.0, false) {
+                    Ok(())
+                } else {
+                    Err(std::fmt::Error)
+                }
+            }
+        }
+
+        let error = super::Error {
+            kind: super::ErrorKind::Timeout(std::io::Error::other("round2")),
+            backtrace: std::backtrace::Backtrace::force_capture(),
+        };
+        assert!(write!(FirstWriteOnly(true), "{error}").is_err());
+    }
+
     use std::error::Error as StdError;
 
     use super::*;

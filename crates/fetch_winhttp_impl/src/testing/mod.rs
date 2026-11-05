@@ -29,6 +29,7 @@ mod http3_server;
 mod recording;
 mod reset_server;
 mod server;
+mod startup;
 
 use std::future::poll_fn;
 use std::io::Read as _;
@@ -112,4 +113,50 @@ pub async fn collect_frames(mut body: fetch::HttpBody) -> (Vec<u8>, Option<Heade
     }
 
     (data, trailers)
+}
+
+async fn stop_connections(connections: &mut tokio::task::JoinSet<()>) {
+    // #[gamma::skip(stmt.delete_call, tag = "resource", reason = "Nov 4 SARIF 18bb869c9606 timed out while joining connection tasks whose abort call was deleted")]
+    connections.abort_all();
+    while connections.join_next().await.is_some() {}
+}
+
+#[cfg(test)]
+mod gamma_round2 {
+    use super::*;
+
+    struct GammaTaskDrop(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    impl Drop for GammaTaskDrop {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn gamma_round2_connection_shutdown_aborts_and_joins_every_task() {
+        let drops = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..3 {
+            let probe = GammaTaskDrop(std::sync::Arc::clone(&drops));
+            tasks.spawn(async move {
+                let _probe = probe;
+                std::future::pending::<()>().await;
+            });
+        }
+        stop_connections(&mut tasks).await;
+        assert!(tasks.is_empty());
+        assert_eq!(drops.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn gamma_round2_fixture_builder_sets_only_explicit_http_versions() {
+        for (versions, expected) in [
+            (vec![], vec![Version::HTTP_11, Version::HTTP_2]),
+            (vec![Version::HTTP_3], vec![Version::HTTP_3]),
+        ] {
+            let (builder, _) = client_builder(&versions, WinHttpTlsConfig::default(), Clock::new_frozen());
+            assert!(format!("{builder:?}").contains(&format!("supported_http_versions: {expected:?}")));
+        }
+    }
 }

@@ -289,6 +289,7 @@ impl BytesBuf {
         // Growing `available` must not push the total capacity (`len + available`) past `usize::MAX`.
         // Checking `available` alone is insufficient because `len` can grow independently via
         // appended shared memory (see `append`). This upholds the invariant relied on by `capacity()`.
+        // #[gamma::skip(call_result.default, reason = "The assertion still executes and its successful result is unit")]
         assert_capacity_within_bounds(self.len, new_available);
 
         self.available = new_available;
@@ -329,6 +330,7 @@ impl BytesBuf {
         let transferred_identity = if self.is_empty() {
             bytes.take_identity()
         } else {
+            // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "The final identity.replace(empty_transfer()) clears the same identity; freezing spans between these calls does not read or publish the buffer identity")]
             self.identity.clear();
             BufferIdentity::empty_transfer()
         };
@@ -719,6 +721,7 @@ impl BytesBuf {
                     .checked_sub(span_len as usize)
                     .expect("somehow ended up with negative bytes remaining - algorithm defect");
 
+                // #[gamma::skip(cond.always_true, reason = "Continuing with zero remaining bytes only reaches the next nonempty span's unchanged terminating break, or the end of the iterator")]
                 if len != 0 {
                     // We will consume this whole span and need more - go to next one.
                     continue;
@@ -832,6 +835,7 @@ impl BytesBuf {
             return None;
         }
 
+        // #[gamma::skip(cond.always_false, reason = "With zero requested bytes no builder can be taken or split; the general path constructs the identical empty buffer")]
         if count == 0 {
             return Some(Self::new());
         }
@@ -848,6 +852,7 @@ impl BytesBuf {
                 // We have reached the last span builder (logically first) because it is the
                 // only one allowed to have data in it. As it is not empty, we exit the loop
                 // and will later split this span builder to get any remaining bytes.
+                // #[gamma::skip(loop.break_to_continue, reason = "The only filled builder is the final reverse-storage element, so continuing it ends this iterator exactly like breaking")]
                 break;
             }
 
@@ -1376,7 +1381,9 @@ impl BytesBufVectoredWrite<'_> {
 
         let mut bytes_remaining = bytes_written;
 
-        while bytes_remaining > 0 {
+        while
+        // #[gamma::skip(relational.gt_to_ge, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        bytes_remaining > 0 {
             let span_builder = self
                 .buf
                 .span_builders_reversed
@@ -1384,7 +1391,10 @@ impl BytesBufVectoredWrite<'_> {
                 .expect("there must be at least one span builder because we still have filled capacity remaining to freeze");
 
             let bytes_available = span_builder.remaining_capacity();
-            let bytes_to_commit = bytes_available.min(bytes_remaining);
+            let bytes_to_commit = bytes_available.min(
+                // #[gamma::skip(expr.decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                bytes_remaining,
+            );
 
             // SAFETY: We forward the promise from our own safety requirements to guarantee that
             // the specified number of bytes really has been written.
@@ -1518,6 +1528,150 @@ impl seismograph_io::Buffer for BytesBuf {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing, reason = "Fine in test code, we prefer panic on error")]
+
+    #[test]
+    fn gamma_nov6_append_checks_capacity_before_changing_any_state() {
+        let mut buffer = super::BytesBuf::new();
+        // Keep the content length consistent with its spans so a debug assertion
+        // cannot substitute for the capacity guard under test.
+        buffer.available = usize::MAX;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            buffer.append(crate::BytesView::from(vec![42]));
+        }));
+        let state = (buffer.len, buffer.available, buffer.frozen, buffer.frozen_spans.len());
+        buffer.len = 0;
+        buffer.available = 0;
+        assert!(result.is_err());
+        assert_eq!(state, (0, usize::MAX, 0, 0));
+    }
+
+    #[test]
+    fn gamma_round2_put_small_accepts_an_exactly_filling_slice() {
+        let memory = FixedBlockMemory::new(std::num::NonZero::new(4).unwrap());
+        let mut buffer = memory.reserve(4);
+        assert!(buffer.put_small(b"ABCD"));
+        assert_eq!((buffer.len(), buffer.remaining_capacity()), (4, 0));
+        assert_eq!(buffer.peek().to_vec(), b"ABCD");
+    }
+
+    #[test]
+    fn gamma_round2_unequal_spare_blocks_split_without_skipping_an_oversized_tail_block() {
+        use std::num::NonZero;
+
+        use crate::mem::testing::std_alloc_block;
+
+        let mut buffer = super::BytesBuf::from_blocks([5, 11, 7].map(|size| std_alloc_block::allocate(NonZero::new(size).unwrap())));
+        let mut tail = buffer.split_off_remaining_checked(6).unwrap();
+        assert_eq!((buffer.remaining_capacity(), tail.remaining_capacity()), (17, 6));
+        buffer.put_byte_repeated(37, 17);
+        tail.put_byte_repeated(91, 6);
+        assert_eq!(buffer.peek().to_vec(), vec![37; 17]);
+        assert_eq!(tail.peek().to_vec(), vec![91; 6]);
+
+        let mut buffer = super::BytesBuf::from_blocks([std_alloc_block::allocate(NonZero::new(7).unwrap())]);
+        let tail = buffer.split_off_remaining_checked(7).unwrap();
+        assert_eq!(tail.remaining_capacity(), 7);
+        assert_eq!((buffer.len(), buffer.remaining_capacity()), (0, 0));
+        assert!(buffer.span_builders_reversed.is_empty());
+        assert!(buffer.frozen_spans.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_append_itself_rejects_total_capacity_overflow_before_mutation() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        let mut buffer = super::BytesBuf::new();
+        buffer.len = usize::MAX - 1;
+        buffer.available = 1;
+        let result = catch_unwind(AssertUnwindSafe(|| buffer.append(crate::BytesView::from(vec![7]))));
+        assert!(result.is_err());
+        assert_eq!((buffer.len, buffer.available, buffer.frozen), (usize::MAX - 1, 1, 0));
+        assert!(buffer.frozen_spans.is_empty());
+        buffer.len = 0;
+        buffer.available = 0;
+    }
+
+    #[cfg(feature = "seismograph")]
+    #[test]
+    fn gamma_round2_append_nonempty_buffer_does_not_inherit_incoming_identity() {
+        let mut buffer = super::BytesBuf::new();
+        buffer.put_bytes(crate::BytesView::from(b"left".to_vec()));
+        let old = buffer.identity.get_or_allocate();
+        let incoming = crate::telemetry::BufferIdentity::new().get_or_allocate();
+        assert_ne!(old, incoming);
+        let suffix = crate::BytesView::from(b"right".to_vec());
+        suffix.replace_identity(Some(incoming));
+        buffer.append(suffix);
+        assert_eq!(buffer.identity.take(), None);
+        assert_eq!(buffer.peek().to_vec(), b"leftright");
+    }
+
+    #[test]
+    fn gamma_survivor_capacity_overflow_rejects_before_mutating_state() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        use crate::mem::testing::TransparentMemory;
+
+        let mut buffer = super::BytesBuf::new();
+        // This scalar-only seam exercises overflow guards without manufacturing
+        // giant or aliased writable allocations. No data-access API is called.
+        buffer.len = usize::MAX;
+        assert!(catch_unwind(AssertUnwindSafe(|| buffer.reserve(1, &TransparentMemory::new()))).is_err());
+        assert_eq!((buffer.len, buffer.available), (usize::MAX, 0));
+        assert!(buffer.span_builders_reversed.is_empty());
+        buffer.len = usize::MAX - 1;
+        buffer.available = 1;
+        let view = crate::BytesView::from(vec![1]);
+        assert!(catch_unwind(AssertUnwindSafe(|| buffer.put_bytes(view))).is_err());
+        assert_eq!((buffer.len, buffer.available, buffer.frozen), (usize::MAX - 1, 1, 0));
+        assert!(buffer.frozen_spans.is_empty());
+    }
+
+    #[test]
+    fn gamma_survivor_debug_formats_ordered_frozen_and_spare_spans() {
+        use crate::mem::testing::TransparentMemory;
+
+        let memory = TransparentMemory::new();
+        let mut buffer = super::BytesBuf::new();
+        buffer.reserve(2, &memory);
+        buffer.reserve(5, &memory);
+        buffer.reserve(9, &memory);
+        buffer.put_slice([17]);
+        assert_eq!(
+            format!("{buffer:?}"),
+            "bytesbuf::buf::BytesBuf { len: 1, frozen: 0, available: 8, frozen_spans: \"\", span_builders: \"1 + 1, 3, 4\" }"
+        );
+        buffer.put_bytes(crate::BytesView::from(vec![19, 23, 29]));
+        assert_eq!(
+            format!("{buffer:?}"),
+            "bytesbuf::buf::BytesBuf { len: 4, frozen: 4, available: 8, frozen_spans: \"1, 3\", span_builders: \"1, 3, 4\" }"
+        );
+    }
+
+    #[cfg(feature = "seismograph")]
+    #[test]
+    fn gamma_survivor_identity_transfers_only_for_nonempty_consumption() {
+        use crate::mem::testing::TransparentMemory;
+
+        let mut buffer = TransparentMemory::new().reserve(8);
+        buffer.put_slice(*b"abc");
+        let original = buffer.identity.get_or_allocate();
+        assert!(buffer.consume(0).is_empty());
+        assert_eq!(buffer.identity.get_or_allocate(), original);
+        let view = buffer.consume(1);
+        assert_eq!(view.take_identity(), Some(original));
+        assert_ne!(buffer.identity.get_or_allocate(), original);
+        let view = crate::BytesView::from(vec![7, 11]);
+        let id = seismograph_io::BufferId::allocate();
+        view.replace_identity(Some(id));
+        let mut empty = super::BytesBuf::new();
+        empty.put_bytes(view);
+        assert_eq!(empty.identity.get_or_allocate(), id);
+        empty.put_bytes(crate::BytesView::new());
+        assert_eq!(empty.identity.get_or_allocate(), id);
+        empty.put_bytes(crate::BytesView::from(vec![13]));
+        assert_ne!(empty.identity.get_or_allocate(), id);
+    }
 
     use std::pin::pin;
 

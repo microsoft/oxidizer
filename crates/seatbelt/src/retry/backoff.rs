@@ -69,7 +69,9 @@ impl Iterator for DelaysIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         // zero base delay => always zero
-        if self.props.base_delay.is_zero() {
+        if
+        // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        self.props.base_delay.is_zero() {
             return Some(Duration::ZERO);
         }
 
@@ -101,6 +103,7 @@ fn clamp_to_max(d: Duration, max: Option<Duration>) -> Duration {
 }
 
 fn duration_mul_pow2(base: Duration, attempt: u32) -> Duration {
+    // #[gamma::skip(expr.decrement, reason = "The fallback exponents i32::MAX and i32::MAX - 1 both overflow 2.powi to infinity, with the same saturating duration.")]
     let factor = EXPONENTIAL_FACTOR.powi(i32::try_from(attempt).unwrap_or(i32::MAX));
     secs_to_duration_saturating(base.as_secs_f64() * factor)
 }
@@ -159,6 +162,7 @@ fn decorrelated_jitter_backoff_v2(attempt: u32, base_delay: Duration, prev: &mut
     let t = f64::from(attempt) + rnd.next_f64();
     let next = t.exp2() * (P_FACTOR * t).sqrt().tanh();
 
+    // #[gamma::skip(cond.always_false, reason = "The fallthrough also stores next; an infinite or NaN difference saturates to Duration::MAX through try_from_secs_f64.")]
     if !next.is_finite() {
         *prev = next;
         return Duration::MAX;
@@ -171,6 +175,7 @@ fn decorrelated_jitter_backoff_v2(attempt: u32, base_delay: Duration, prev: &mut
 }
 
 fn secs_to_duration_saturating(secs: f64) -> Duration {
+    // #[gamma::skip(relational.le_to_lt, reason = "At either signed zero, try_from_secs_f64 also returns Duration::ZERO.")]
     if secs <= 0.0 {
         return Duration::ZERO;
     }
@@ -205,6 +210,34 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+
+    #[test]
+    fn gamma_round2_zero_delay_is_an_infinite_sequence_without_advancing_attempt_state() {
+        let mut delays = DelaysIter {
+            props: BackoffOptions {
+                base_delay: Duration::ZERO,
+                rnd: Rnd::new_function(|| panic!("zero delay must not sample jitter")),
+                ..BackoffOptions::default()
+            },
+            attempt: 9,
+            prev: 7.0,
+        };
+        for _ in 0..3 {
+            assert_eq!(delays.next(), Some(Duration::ZERO));
+            assert_eq!(delays.attempt, 9);
+            assert_eq!(delays.prev.to_bits(), 7.0_f64.to_bits());
+        }
+    }
+
+    #[test]
+    fn gamma_round2_overflowing_jitter_retains_the_nonfinite_previous_position() {
+        let mut previous = 7.0;
+        assert_eq!(
+            decorrelated_jitter_backoff_v2(u32::MAX, Duration::from_secs(1), &mut previous, &Rnd::new_fixed(0.5)),
+            Duration::MAX
+        );
+        assert!(previous.is_infinite() && previous.is_sign_positive());
+    }
 
     #[test]
     fn default_props() {

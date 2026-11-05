@@ -23,6 +23,7 @@ pub(super) fn is_token68(bytes: &[u8]) -> bool {
 pub(super) fn token68_tail(bytes: &[u8], mut has_data: bool) -> bool {
     for (index, &byte) in bytes.iter().enumerate() {
         if !is_token68_data_byte(byte) {
+            // #[gamma::skip(arith.add_to_mul, expr.decrement, literal.int_decrement, tag = "equivalent", reason = "This branch already proved the current byte is padding, so including that same equals byte in the all-equals suffix check changes nothing")]
             return has_data && byte == b'=' && bytes[index + 1..].iter().all(|byte| *byte == b'=');
         }
         has_data = true;

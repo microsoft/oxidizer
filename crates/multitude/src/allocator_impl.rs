@@ -92,6 +92,7 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
         // own +1 chunk refcount; the old refcount is released by `deallocate`
         // below.
         let new = self.allocate(new_layout)?;
+        // #[gamma::skip(cond.always_true, reason = "The added zero-sized u8 copy has valid aligned nonnull pointers and copies no bytes")]
         if old_layout.size() != 0 {
             // SAFETY: the old allocation is initialized for
             // `old_layout.size()` bytes, and the grow contract guarantees the
@@ -140,6 +141,7 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
         }
 
         let new = self.allocate(new_layout)?;
+        // #[gamma::skip(cond.always_true, reason = "The added zero-sized u8 copy has valid aligned nonnull pointers and copies no bytes")]
         if new_layout.size() != 0 {
             // SAFETY: the shrink contract guarantees the old block covers
             // `new_layout.size()` bytes; the allocations do not overlap.
@@ -216,6 +218,34 @@ mod tests {
     use allocator_api2_02::alloc::Allocator as LegacyAllocator;
 
     use crate::Arena;
+
+    #[test]
+    fn gamma_round2_in_place_zeroed_growth_does_not_overwrite_initialized_spare_bytes() {
+        use allocator_api2::alloc::Allocator;
+
+        let arena = Arena::new();
+        let handle = &arena;
+        let old_layout = Layout::from_size_align(8, 1).unwrap();
+        let old = Allocator::allocate(&handle, old_layout).unwrap().cast::<u8>();
+        // SAFETY: the exclusively owned allocation contains eight writable bytes.
+        unsafe { old.as_ptr().write_bytes(0x71, 8) };
+        let spare = arena.current().try_alloc_bytes(24).unwrap().init_copy_from_slice(&[0xa7; 24]);
+        let spare_pointer = spare.as_ptr();
+        assert_eq!(spare_pointer.addr(), old.as_ptr().addr() + 8);
+        assert!(arena.current().try_reclaim_tail(spare_pointer.addr() + 24, 24));
+        let grown_layout = Layout::from_size_align(16, 1).unwrap();
+        // SAFETY: old is live with old_layout, and grown_layout extends it with unchanged alignment.
+        let grown = unsafe { Allocator::grow_zeroed(&handle, old, old_layout, grown_layout) }.unwrap();
+        assert_eq!(grown.cast::<u8>(), old);
+        // SAFETY: grow_zeroed retains the old eight bytes and initializes the newly exposed eight bytes.
+        let initialized = unsafe { core::slice::from_raw_parts(grown.cast::<u8>().as_ptr(), 16) };
+        assert_eq!(initialized, [&[0x71; 8][..], &[0; 8]].concat());
+        // SAFETY: these sixteen bytes were initialized in the still-live backing chunk and lie beyond the grown allocation.
+        let untouched = unsafe { core::slice::from_raw_parts(spare_pointer.wrapping_add(8), 16) };
+        assert_eq!(untouched, [0xa7; 16]);
+        // SAFETY: the grown allocation remains live with its exact returned layout.
+        unsafe { Allocator::deallocate(&handle, grown.cast(), grown_layout) };
+    }
 
     // Exercises the complete `allocator-api2` 0.2 interface directly.
     #[test]

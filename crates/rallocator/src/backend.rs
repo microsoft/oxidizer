@@ -74,7 +74,12 @@ fn global_alloc_reserved(global: &mut Global, size: usize) -> usize {
     if address == 0 {
         let refill = global
             .requested
-            .clamp(hal::RESERVE_MIN, GLOBAL_REFILL)
+            .clamp(
+                hal::RESERVE_MIN,
+                // #[gamma::skip(expr.decrement, reason = "The maximum is a power of two greater than RESERVE_MIN; clamping to maximum minus one still rounds to the identical next power of two after max(size)")]
+                GLOBAL_REFILL,
+            )
+            // #[gamma::skip(expr.decrement, reason = "The validated requested size is a power of two greater than one; size minus one rounds back to the same power")]
             .max(size)
             .next_power_of_two();
         address = hal::reserve(refill, refill) as usize;
@@ -91,8 +96,16 @@ fn global_alloc_reserved(global: &mut Global, size: usize) -> usize {
         // Split the unused, uncommitted suffix into naturally aligned powers.
         let mut cursor = address + size;
         let end = address + refill;
+        // #[gamma::skip(arith.sub_to_add, arith.sub_to_div, literal.int_decrement, reason = "Increasing this logarithm bound cannot change min with cursor trailing zeros for an aligned power-of-two suffix")]
+        let highest_bit = usize::BITS - 1;
         while cursor < end {
-            let bits = (cursor.trailing_zeros() as usize).min((usize::BITS - 1 - (end - cursor).leading_zeros()) as usize);
+            let bits = (cursor.trailing_zeros() as usize).min(
+                // #[gamma::skip(expr.increment, arith.sub_to_add, reason = "The aligned power-of-two reservation end makes cursor trailing zeros no greater than floor(log2(end-cursor)); increasing the other min operand cannot affect bits")]
+                (
+                    // #[gamma::skip(arith.sub_to_div, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    highest_bit - (end - cursor).leading_zeros()
+                ) as usize,
+            );
             // SAFETY: Suffix blocks are registered, aligned and exclusively owned.
             let overflow = unsafe { global.ranges.add(Nodes::Map(map), cursor, bits) };
             debug_assert_eq!(overflow, 0);
@@ -103,32 +116,61 @@ fn global_alloc_reserved(global: &mut Global, size: usize) -> usize {
 }
 
 fn global_alloc(size: usize) -> usize {
-    let address = GLOBAL.with(|global| global_alloc_reserved(global, size));
+    global_alloc_with(
+        size,
+        |size| GLOBAL.with(|global| global_alloc_reserved(global, size)),
+        |address, size| {
+            // CommitRange is OUTSIDE GlobalRange, exactly as in StandardLocalState:
+            // cached local blocks stay committed; global cached blocks stay decommitted.
+            // SAFETY: The removed block is exclusively owned and within one reservation.
+            unsafe { hal::commit(address as *mut u8, size) }
+        },
+        global_free,
+    )
+}
+
+fn global_alloc_with(
+    size: usize,
+    reserve: impl FnOnce(usize) -> usize,
+    commit: impl FnOnce(usize, usize) -> bool,
+    release: impl FnOnce(usize, usize),
+) -> usize {
+    let address = reserve(size);
     if address == 0 {
         return 0;
     }
-    // CommitRange is OUTSIDE GlobalRange, exactly as in StandardLocalState:
-    // cached local blocks stay committed; global cached blocks stay decommitted.
-    // SAFETY: The removed block is exclusively owned and within one reservation.
-    if !unsafe { hal::commit(address as *mut u8, size) } {
+    if !commit(address, size) {
         // A failed MEM_COMMIT does not publish any objects.
-        global_free(address, size);
+        release(address, size);
         return 0;
     }
     address
 }
 
 fn global_free(address: usize, size: usize) {
-    // SAFETY: Caller has retired all allocations and acquired exclusive ownership.
+    global_free_with(
+        address,
+        size,
+        |address, size| {
+            // SAFETY: Caller has retired all allocations and acquired exclusive ownership.
+            unsafe { hal::decommit(address as *mut u8, size) }
+        },
+        |address, size| {
+            GLOBAL.with(|global| {
+                let map = initialized_map(global.map);
+                // SAFETY: The global lock transfers this registered, aligned block to its buddy.
+                let overflow = unsafe { global.ranges.add(Nodes::Map(map), address, size.trailing_zeros() as usize) };
+                debug_assert_eq!(overflow, 0);
+            });
+        },
+    );
+}
+
+fn global_free_with(address: usize, size: usize, decommit: impl FnOnce(usize, usize) -> bool, cache: impl FnOnce(usize, usize)) {
     // A failed decommit leaves the block committed, which is still valid cache
     // storage; the next commit is idempotent and retries normal OS treatment.
-    let _decommitted = unsafe { hal::decommit(address as *mut u8, size) };
-    GLOBAL.with(|global| {
-        let map = initialized_map(global.map);
-        // SAFETY: The global lock transfers this registered, aligned block to its buddy.
-        let overflow = unsafe { global.ranges.add(Nodes::Map(map), address, size.trailing_zeros() as usize) };
-        debug_assert_eq!(overflow, 0);
-    });
+    let _decommitted = decommit(address, size);
+    cache(address, size);
 }
 
 pub(crate) struct Local {
@@ -163,9 +205,23 @@ impl Local {
         }
     }
 
+    fn invalid_alloc_size(size: usize) -> bool {
+        !size.is_power_of_two() || !(CHUNK..=(1usize << 46)).contains(&size)
+    }
+
+    fn refill_size(requested: usize, size: usize) -> usize {
+        requested
+            .min(1 << LOCAL_BITS)
+            .max(
+                // #[gamma::skip(expr.decrement, reason = "For validated power-of-two allocation sizes above one, size minus one rounds back to the identical refill")]
+                size,
+            )
+            .next_power_of_two()
+    }
+
     /// Transfers a committed power-of-two object range to the caller.
     pub(crate) fn alloc(&mut self, size: usize) -> usize {
-        if !size.is_power_of_two() || !(CHUNK..=(1usize << 46)).contains(&size) {
+        if Self::invalid_alloc_size(size) {
             return 0;
         }
         if size >= 1 << LOCAL_BITS {
@@ -177,14 +233,31 @@ impl Local {
         if cached != 0 {
             return cached;
         }
-        let refill = self.requested.min(1 << LOCAL_BITS).max(size).next_power_of_two();
+        let refill = Self::refill_size(
+            self.requested,
+            // #[gamma::skip(expr.decrement, reason = "refill_size rounds size minus one back to the same validated power-of-two allocation size")]
+            size,
+        );
         let address = global_alloc(refill);
         if address != 0 {
             self.requested = self.requested.saturating_add(refill);
             let mut cursor = address + size;
             let end = address + refill;
+            // #[gamma::skip(arith.sub_to_add, arith.sub_to_div, literal.int_decrement, reason = "Increasing this logarithm bound cannot change min with cursor trailing zeros for an aligned power-of-two suffix")]
+            let highest_bit = usize::BITS - 1;
             while cursor < end {
-                let bits = (cursor.trailing_zeros() as usize).min((usize::BITS - 1 - (end - cursor).leading_zeros()) as usize);
+                let bits = (cursor.trailing_zeros() as usize).min(
+                    // #[gamma::skip(expr.increment, arith.sub_to_add, reason = "The aligned power-of-two reservation end makes cursor trailing zeros no greater than floor(log2(end-cursor)); increasing the other min operand cannot affect bits")]
+                    (
+                        // #[gamma::skip(arith.sub_to_div, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                        highest_bit
+                            - (
+                                // #[gamma::skip(arith.sub_to_div, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                                end - cursor
+                            )
+                                .leading_zeros()
+                    ) as usize,
+                );
                 // SAFETY: Unused suffix is committed, registered and exclusively owned.
                 unsafe { self.free(cursor, 1 << bits) };
                 cursor += 1 << bits;
@@ -197,6 +270,7 @@ impl Local {
     /// The complete range came from `alloc()`, is no longer in use, and its
     /// frontend pagemap entries have been changed back to backend-owned.
     pub(crate) unsafe fn free(&mut self, address: usize, size: usize) {
+        // #[gamma::skip(relational.ge_to_gt, literal.int_increment, reason = "At the local limit the buddy cannot retain the block and returns it unchanged for global_free, giving the same global return")]
         if size >= 1 << LOCAL_BITS {
             global_free(address, size);
             return;
@@ -215,8 +289,14 @@ impl Local {
     /// permanently: a donor must not subsequently return its containing backing.
     pub(crate) unsafe fn seed_metadata(&mut self, mut address: usize, mut size: usize) {
         while size != 0 {
-            let bits = (address.trailing_zeros() as usize).min((usize::BITS - 1 - size.leading_zeros()) as usize);
-            let block = 1usize << bits;
+            let bits = Self::metadata_seed_bits(
+                address,
+                // #[gamma::skip(expr.increment, reason = "Donated sizes are multiples of sixteen bounded by a registered reservation; adding one cannot cross a power-of-two boundary or overflow")]
+                size,
+            );
+            let block =
+            // #[gamma::skip(literal.int_decrement, shift.shl_to_shr, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1usize << bits;
             // SAFETY: Each aligned power-of-two block is a disjoint subrange
             // of the exclusively owned spare metadata supplied by the caller.
             unsafe { self.free_meta(address, block) };
@@ -225,29 +305,35 @@ impl Local {
         }
     }
 
+    fn metadata_seed_bits(address: usize, size: usize) -> usize {
+        (address.trailing_zeros() as usize).min((usize::BITS - 1 - size.leading_zeros()) as usize)
+    }
+
     pub(crate) fn alloc_meta(&mut self, size: usize) -> usize {
-        if !size.is_power_of_two() || size < 16 {
+        self.alloc_meta_with(size, Self::alloc)
+    }
+
+    fn alloc_meta_with(&mut self, size: usize, mut allocate: impl FnMut(&mut Self, usize) -> usize) -> usize {
+        if
+        // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // #[gamma::skip(literal.int_decrement, reason = "There is no power of two between fifteen and sixteen, and non-powers are rejected by the other disjunct")]
+        !size.is_power_of_two() || size < 16 {
             return 0;
         }
+        // #[gamma::skip(relational.ge_to_gt, reason = "At exactly CHUNK the metadata buddy take returns zero at its exclusive upper bound, then requests the same full chunk with no suffix to split")]
         if size >= CHUNK {
-            return self.alloc(size);
+            return allocate(self, size);
         }
         // SAFETY: Metadata buddy blocks remain committed and exclusively owned.
         let address = unsafe { self.metadata.take(Nodes::Inline, size.trailing_zeros() as usize) };
         if address != 0 {
             return address;
         }
-        let address = self.alloc(CHUNK);
-        if address == 0 {
-            return 0;
-        }
-        let mut offset = size;
-        while offset < CHUNK {
-            // SAFETY: Each suffix is a separate aligned, exclusively owned block.
-            unsafe { self.free_meta(address + offset, offset) };
-            offset *= 2;
-        }
-        address
+        let address = allocate(self, CHUNK);
+        split_metadata_with(address, size, |address, size| {
+            // SAFETY: Each suffix is disjoint committed metadata from this allocation.
+            unsafe { self.free_meta(address, size) };
+        })
     }
 
     /// # Safety
@@ -255,6 +341,7 @@ impl Local {
     /// disjoint subdivision of registered backend-owned metadata permanently
     /// transferred to this local state. It contains no live metadata.
     pub(crate) unsafe fn free_meta(&mut self, address: usize, size: usize) {
+        // #[gamma::skip(relational.ge_to_gt, reason = "At exactly CHUNK the metadata buddy add immediately returns the complete block as overflow and free receives the same range")]
         if size >= CHUNK {
             // SAFETY: The caller transfers the complete retired metadata block.
             unsafe { self.free(address, size) };
@@ -287,9 +374,278 @@ impl Local {
     }
 }
 
+// #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "Defaulting size to zero makes the metadata donation loop repeat forever because doubling zero never advances it")]
+fn split_metadata_with(address: usize, size: usize, mut donate: impl FnMut(usize, usize)) -> usize {
+    if address == 0 {
+        return 0;
+    }
+    let mut offset = size;
+    while offset < CHUNK {
+        donate(address + offset, offset);
+        offset *= 2;
+    }
+    address
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gamma_nov4_metadata_split_failure_has_no_donations_and_success_is_exact() {
+        for size in [16, CHUNK / 2] {
+            let mut donations = Vec::new();
+            assert_eq!(split_metadata_with(0, size, |a, s| donations.push((a, s))), 0);
+            assert!(donations.is_empty());
+            assert_eq!(split_metadata_with(0x10000, size, |a, s| donations.push((a, s))), 0x10000);
+            let expected: Vec<_> = (size.trailing_zeros()..CHUNK.trailing_zeros())
+                .map(|bits| (0x10000 + (1 << bits), 1 << bits))
+                .collect();
+            assert_eq!(donations, expected);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_global_free_decommits_exact_range_before_caching_even_on_failure() {
+        for result in [false, true] {
+            let calls = std::cell::RefCell::new(Vec::new());
+            global_free_with(
+                0x10000,
+                CHUNK,
+                |address, size| {
+                    calls.borrow_mut().push(("decommit", address, size));
+                    result
+                },
+                |address, size| calls.borrow_mut().push(("cache", address, size)),
+            );
+            assert_eq!(*calls.borrow(), [("decommit", 0x10000, CHUNK), ("cache", 0x10000, CHUNK)]);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_metadata_donation_selects_the_largest_aligned_fitting_block() {
+        for (address, size, expected) in [(0x10000, 64, 6), (0x10010, 64, 4), (0x10000, 48, 5), (0x10020, 16, 4)] {
+            assert_eq!(Local::metadata_seed_bits(address, size), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_commit_plan_releases_exactly_the_failed_reservation() {
+        use std::cell::RefCell;
+
+        for (address, committed, expected) in [(0, true, 0), (0x40000, true, 0x40000), (0x40000, false, 0)] {
+            let calls = RefCell::new(Vec::new());
+            let actual = global_alloc_with(
+                CHUNK,
+                |size| {
+                    calls.borrow_mut().push(("reserve", 0, size));
+                    address
+                },
+                |pointer, size| {
+                    calls.borrow_mut().push(("commit", pointer, size));
+                    committed
+                },
+                |pointer, size| calls.borrow_mut().push(("release", pointer, size)),
+            );
+            assert_eq!(actual, expected);
+            let mut expected = vec![("reserve", 0, CHUNK)];
+            if address != 0 {
+                expected.push(("commit", address, CHUNK));
+                if !committed {
+                    expected.push(("release", address, CHUNK));
+                }
+            }
+            assert_eq!(calls.into_inner(), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_refill_plan_caps_accumulated_requests_at_the_local_limit() {
+        for (requested, size, expected) in [
+            (0, CHUNK, CHUNK),
+            (CHUNK, CHUNK, CHUNK),
+            (3 * CHUNK, CHUNK, 4 * CHUNK),
+            (3 << LOCAL_BITS, CHUNK, 1 << LOCAL_BITS),
+        ] {
+            assert_eq!(Local::refill_size(requested, size), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_failed_metadata_refill_leaves_every_metadata_class_empty() {
+        let map = map().unwrap();
+        // SAFETY: This test creates a new local state using the backend's unique map.
+        let mut local = unsafe { Local::new(map) };
+        let mut sizes = Vec::new();
+        assert_eq!(
+            local.alloc_meta_with(16, |_, size| {
+                sizes.push(size);
+                0
+            }),
+            0
+        );
+        assert_eq!(sizes, [CHUNK]);
+        // SAFETY: The local metadata buddy has never received any backing.
+        assert!(unsafe { local.metadata.validate(Nodes::Inline) }.is_empty());
+        assert_eq!(local.requested, 0);
+    }
+
+    #[test]
+    fn gamma_round2_size_limit_decision_is_inclusive_without_native_calls() {
+        for (size, accepted) in [
+            (0, false),
+            (CHUNK - 1, false),
+            (CHUNK, true),
+            (CHUNK + 1, false),
+            ((1_usize << 46) - 1, false),
+            (1_usize << 46, true),
+            ((1_usize << 46) + 1, false),
+            (1_usize << 47, false),
+            (usize::MAX, false),
+        ] {
+            assert_eq!(!Local::invalid_alloc_size(size), accepted, "size {size}");
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_local_refill_partition_and_metadata_donation() {
+        let map = map().unwrap();
+        // SAFETY: The test holds the backend's unique map handle and owns this independent Local.
+        let mut local = unsafe { Local::new(map) };
+        for size in [0, 1, 15, 17, CHUNK - 1, CHUNK + 1, 1 << 47] {
+            assert_eq!(local.alloc(size), 0);
+        }
+        for size in [0, 1, 8, 15, 17, CHUNK + 1] {
+            assert_eq!(local.alloc_meta(size), 0);
+        }
+        let direct = local.alloc(1 << LOCAL_BITS);
+        assert_ne!(direct, 0);
+        assert_eq!(local.requested, 0);
+        // SAFETY: The complete unpublished large block is returned exactly once.
+        unsafe { local.free(direct, 1 << LOCAL_BITS) };
+        let mut budget = usize::MAX;
+        assert_eq!(local.observe(&mut budget).ranges.observed_bytes(), 0);
+        for size in [CHUNK, CHUNK * 2] {
+            let address = local.alloc_meta(size);
+            assert_ne!(address, 0);
+            assert_eq!(address % size, 0);
+            let before = local.observe(&mut budget).ranges.observed_bytes();
+            // SAFETY: Return the exact complete metadata allocation once, without subdividing it.
+            unsafe { local.free_meta(address, size) };
+            assert_eq!(local.observe(&mut budget).ranges.observed_bytes(), before + size as u128);
+            local.validate();
+        }
+        // Exhaust these small cached blocks so the next refill has a known size.
+        let cached_small = local.alloc(CHUNK);
+        let cached_large = local.alloc(CHUNK * 2);
+        assert_ne!(cached_small, 0);
+        assert_ne!(cached_large, 0);
+        local.requested = 1 << LOCAL_BITS;
+        let base = local.alloc(CHUNK);
+        assert_ne!(base, 0);
+        let mut remaining = (1 << LOCAL_BITS) - CHUNK;
+        let mut sizes = vec![(base, CHUNK)];
+        for bits in CHUNK_BITS..LOCAL_BITS {
+            let size = 1 << bits;
+            let mut budget = usize::MAX;
+            assert_eq!(local.observe(&mut budget).ranges.observed_bytes(), remaining as u128);
+            let address = local.alloc(size);
+            assert_ne!(address, 0);
+            assert_eq!(address % size, 0);
+            assert!(
+                sizes
+                    .iter()
+                    .all(|&(other, length)| address + size <= other || other + length <= address)
+            );
+            remaining -= size;
+            sizes.push((address, size));
+            local.validate();
+        }
+        assert_eq!(remaining, 0);
+        for (address, size) in sizes {
+            // SAFETY: Each unpublished block is returned exactly once; all are mutually disjoint.
+            unsafe { local.free(address, size) };
+        }
+        // SAFETY: This separately withheld cached allocation is still live and unpublished.
+        unsafe { local.free(cached_small, CHUNK) };
+        // SAFETY: This other withheld allocation remains live, disjoint, and unpublished.
+        unsafe { local.free(cached_large, CHUNK * 2) };
+        let donor = local.alloc(CHUNK);
+        assert_ne!(donor, 0);
+        // SAFETY: Permanently transfer this registered, committed, disjoint suffix once.
+        // The withheld prefix is not in a buddy and the containing block is never separately returned.
+        unsafe { local.seed_metadata(donor + 16, CHUNK - 16) };
+        let mut budget = usize::MAX;
+        assert_eq!(local.observe(&mut budget).metadata.observed_bytes(), (CHUNK - 16) as u128);
+        let metadata: Vec<_> = (0..CHUNK / 16 - 1).map(|_| local.alloc_meta(16)).collect();
+        assert_eq!(
+            metadata.iter().copied().collect::<std::collections::BTreeSet<_>>().len(),
+            metadata.len()
+        );
+        assert!(
+            metadata
+                .iter()
+                .all(|&address| (donor + 16..donor + CHUNK).contains(&address) && address % 16 == 0)
+        );
+        for address in metadata {
+            // SAFETY: Each donated subdivision was removed from the buddy and is retired exactly once.
+            unsafe { local.free_meta(address, 16) };
+        }
+        // SAFETY: The withheld disjoint prefix is permanently donated now; no owner references the containing block.
+        unsafe { local.free_meta(donor, 16) };
+        local.validate();
+        assert_eq!(local.observe(&mut budget).metadata.observed_bytes(), 0);
+        let returned = local.alloc_meta(CHUNK);
+        assert_ne!(returned, 0);
+        // SAFETY: Return the complete, unpublished allocation from alloc_meta once.
+        unsafe { local.free_meta(returned, CHUNK) };
+        // SAFETY: A separate Local uses the same unique backend map without sharing range ownership.
+        let mut partial = unsafe { Local::new(map) };
+        let donor = partial.alloc(CHUNK);
+        assert_ne!(donor, 0);
+        // SAFETY: Permanently donate exactly the first 48 committed, aligned bytes once.
+        // The remainder stays withheld; the containing allocation is never separately returned.
+        unsafe { partial.seed_metadata(donor, 48) };
+        assert_eq!(partial.observe(&mut budget).metadata.observed_bytes(), 48);
+        let nodes: Vec<_> = (0..3).map(|_| partial.alloc_meta(16)).collect();
+        assert_eq!(
+            nodes.iter().copied().collect::<std::collections::BTreeSet<_>>(),
+            [donor, donor + 16, donor + 32].into_iter().collect()
+        );
+        for node in nodes {
+            // SAFETY: Each node came from one disjoint donated subdivision and is retired once.
+            unsafe { partial.free_meta(node, 16) };
+        }
+        partial.validate();
+        assert_eq!(partial.observe(&mut budget).metadata.observed_bytes(), 48);
+    }
+
+    #[test]
+    fn gamma_survivor_isolated_global_refill_cap_and_budget() {
+        for requested in [0, GLOBAL_REFILL - 1, GLOBAL_REFILL, GLOBAL_REFILL + 1] {
+            let mut global = Global {
+                map: Some(Map::reserve().unwrap()),
+                ranges: Buddy::new(),
+                requested,
+            };
+            let refill = if requested == 0 { hal::RESERVE_MIN } else { GLOBAL_REFILL };
+            let first = global_alloc_reserved(&mut global, CHUNK);
+            assert_ne!(first, 0);
+            assert_eq!(first % refill, 0);
+            let observed = observe_global(&global);
+            assert_eq!(observed.reserved_bytes, (requested + refill) as u64);
+            assert_eq!(observed.pagemap_reserved_bytes, crate::pagemap::RESERVED_BYTES as u64);
+            assert_eq!(observed.global_refill_bytes, 1 << 24);
+            assert_eq!(observed.local_limit_bytes, 1 << 21);
+            assert_eq!(observed.ranges.observed_bytes(), (refill - CHUNK) as u128);
+            for bits in CHUNK_BITS..refill.trailing_zeros() as usize {
+                assert_eq!(global_alloc_reserved(&mut global, 1 << bits), first + (1 << bits));
+            }
+            assert_eq!(observe_global(&global).ranges.observed_bytes(), 0);
+            // SAFETY: The initial block and exhausted disjoint suffix cover the entire unpublished reservation.
+            unsafe { hal::release(first as *mut u8, refill) };
+        }
+    }
 
     #[test]
     fn missing_initialization_aborts_before_reading_range_metadata() {

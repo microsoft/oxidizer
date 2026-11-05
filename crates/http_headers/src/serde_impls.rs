@@ -176,6 +176,7 @@ impl<'de> DeserializeSeed<'de> for FieldBytesSeed {
             }
 
             fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                // #[gamma::skip(iter.min_to_max, literal.int_increment, fallback.unwrap_or_to_default, expr.decrement, expr.increment, tag = "equivalent", reason = "This expression only chooses initial Vec capacity; the remaining clamp or configured 64-KiB byte budget bounds every altered reservation, while the independent loop still enforces the original byte limit")]
                 let capacity = seq
                     .size_hint()
                     .unwrap_or(0)
@@ -312,6 +313,74 @@ enum ListBudgets {
     Two(ListCounter, ListCounter),
 }
 
+#[cfg(test)]
+mod gamma_round2_tests {
+    use serde::de::value::{Error, U32Deserializer};
+    use serde::de::{Error as _, Visitor};
+    use serde::{Deserialize, Deserializer, forward_to_deserialize_any};
+
+    use super::ListBudgets;
+    use crate::FieldName;
+
+    #[test]
+    fn gamma_round2_serde_field_identifier_error_names_the_supported_fields() {
+        let error = super::FieldValueField::deserialize(U32Deserializer::<Error>::new(7)).err().unwrap();
+        assert_eq!(error.to_string(), "invalid type: integer `7`, expected `bytes` or `sensitivity`");
+    }
+
+    struct StructName;
+
+    impl<'de> Deserializer<'de> for StructName {
+        type Error = Error;
+
+        fn deserialize_any<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value, Self::Error> {
+            Err(Error::custom("expected a struct"))
+        }
+
+        fn deserialize_struct<V: Visitor<'de>>(
+            self,
+            name: &'static str,
+            _fields: &'static [&'static str],
+            _visitor: V,
+        ) -> Result<V::Value, Self::Error> {
+            Err(Error::custom(name))
+        }
+
+        forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string bytes byte_buf option
+            unit unit_struct newtype_struct seq tuple tuple_struct map enum identifier ignored_any
+        }
+    }
+
+    #[test]
+    fn gamma_round2_serde_field_value_passes_its_struct_name_to_the_format() {
+        assert_eq!(
+            crate::FieldValue::deserialize(StructName).unwrap_err().to_string(),
+            "FieldValueRepr"
+        );
+    }
+
+    #[test]
+    fn gamma_round2_serde_budget_grammar_flags_and_counts_match_each_header() {
+        for (name, delimiter, skip_empty, escapes, wire, expected) in [
+            (&FieldName::CacheControl, b',', true, true, b"\"a\\\",b,c".as_slice(), 1),
+            (&FieldName::ContentLength, b',', false, true, b",1,", 3),
+            (&FieldName::ContentType, b';', false, true, b"a;\"b\\\";c;d", 2),
+            (&FieldName::IfMatch, b',', true, false, b"\"a\\\",b,c", 3),
+        ] {
+            let mut budgets = ListBudgets::for_name(Some(name));
+            budgets.observe(Some(name), wire).unwrap();
+            let ListBudgets::One(counter) = budgets else {
+                panic!("one budget is required for {name}");
+            };
+            assert_eq!(counter.delimiter, delimiter);
+            assert_eq!(counter.skip_empty, skip_empty);
+            assert_eq!(counter.backslash_escapes, escapes);
+            assert_eq!(counter.count, expected, "{name}");
+        }
+    }
+}
+
 impl ListBudgets {
     fn for_name(name: Option<&'static FieldName>) -> Self {
         let comma = || ListCounter::new(b',', true, true);
@@ -375,6 +444,7 @@ impl<'de> Visitor<'de> for FieldValuesVisitor {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        // #[gamma::skip(iter.min_to_max, literal.int_increment, fallback.unwrap_or_to_default, expr.decrement, expr.increment, tag = "equivalent", reason = "This expression only chooses initial Vec capacity; the remaining clamp or fixed field-line budget bounds every altered reservation, while the independent loop enforces the unchanged line and byte limits")]
         let capacity = seq
             .size_hint()
             .unwrap_or(0)
@@ -406,6 +476,12 @@ impl<'de> Visitor<'de> for FieldValuesVisitor {
 }
 
 fn checked_total_bytes<E: serde::de::Error>(total: usize, additional: usize) -> Result<usize, E> {
+    #[cfg(test)]
+    let total = if tests::FAIL_NEXT_TOTAL_BYTES.replace(false) {
+        usize::MAX
+    } else {
+        total
+    };
     total.checked_add(additional).ok_or_else(|| {
         E::custom(format_args!(
             "{}: aggregate field-value size overflow",
@@ -914,20 +990,47 @@ impl Serialize for SetCookieOwned {
 impl<'de> Deserialize<'de> for SetCookieOwned {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let source = SerdeSource {
-            values: deserialize_field_values_for(Some(SetCookie::name()), deserializer)?,
+            values: deserialize_field_values_for(
+                // #[gamma::skip(option.some_to_none, tag = "equivalent", reason = "Both SetCookie and absent names select ListBudgets::None; byte and line admission limits do not depend on this optional name")]
+                Some(SetCookie::name()),
+                deserializer,
+            )?,
         };
         if source.values.is_empty() {
             return Ok(Self::new());
         }
-        SetCookie::owned(&source)
-            .map_err(D::Error::custom)?
-            .ok_or_else(|| D::Error::custom("nonempty Set-Cookie values must decode as present"))
+        SetCookie::owned(&source).map_err(D::Error::custom)?.ok_or_else(|| {
+            D::Error::custom(
+                // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, tag = "equivalent", reason = "SerdeSource::lines is present for the already checked nonempty vector and SetCookie::owned returns Some for every present source; this error is unreachable")]
+                "nonempty Set-Cookie values must decode as present",
+            )
+        })
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    std::thread_local! {
+        pub(super) static FAIL_NEXT_TOTAL_BYTES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    #[cfg(feature = "headers-negotiation")]
+    #[test]
+    fn gamma_afternoon_public_deserialization_propagates_aggregate_size_overflow() {
+        let value = crate::sink::EncodedValues::single(crate::FieldValue::from_static("text/plain"));
+        let json = serde_json::to_string(&value).unwrap();
+        FAIL_NEXT_TOTAL_BYTES.set(true);
+        let result = serde_json::from_str::<crate::headers::AcceptOwned>(&json);
+        assert!(!FAIL_NEXT_TOTAL_BYTES.get());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("source limit exceeded: aggregate field-value size overflow")
+        );
+    }
+
     use serde::de::value::Error;
 
     use super::checked_total_bytes;

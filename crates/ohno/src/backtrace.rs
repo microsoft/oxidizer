@@ -23,13 +23,15 @@ pub(crate) enum Backtrace {
 
 impl Backtrace {
     /// Create a `Backtrace` from a standard backtrace.
-    #[cfg_attr(coverage_nightly, coverage(off))] // we can't create Unsupported backtraces in tests
-    #[cfg_attr(test, mutants::skip)] // we can't create Unsupported backtraces in tests
     pub(crate) fn from_backtrace(bt: StdBacktrace) -> Self {
-        match bt.status() {
+        Self::from_status(&bt.status(), || Arc::new(bt))
+    }
+
+    fn from_status(status: &BacktraceStatus, captured: impl FnOnce() -> Arc<StdBacktrace>) -> Self {
+        match status {
             BacktraceStatus::Disabled => Self::Disabled,
             BacktraceStatus::Unsupported => Self::Unsupported,
-            _ => Self::Captured(Arc::new(bt)),
+            _ => Self::Captured(captured()),
         }
     }
 
@@ -76,6 +78,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn nov6_status_conversion_keeps_unsupported_distinct_and_captures_only_on_demand() {
+        for (status, unsupported) in [(BacktraceStatus::Disabled, false), (BacktraceStatus::Unsupported, true)] {
+            let converted = Backtrace::from_status(&status, || panic!("this status must not allocate a captured backtrace"));
+            assert_eq!(matches!(converted, Backtrace::Unsupported), unsupported);
+            assert_eq!(matches!(converted, Backtrace::Disabled), !unsupported);
+        }
+        let captured = Arc::new(StdBacktrace::disabled());
+        let converted = Backtrace::from_status(&BacktraceStatus::Captured, || Arc::clone(&captured));
+        let Backtrace::Captured(actual) = converted else {
+            panic!("captured status must preserve the backtrace");
+        };
+        assert!(Arc::ptr_eq(&actual, &captured));
+    }
+
+    #[test]
     fn cloning() {
         let bt1 = Backtrace::capture();
         let bt2 = bt1.clone();
@@ -93,6 +110,10 @@ mod tests {
         let bt_disabled = Backtrace::from_backtrace(disabled_bt);
         assert_eq!(bt_disabled.status(), BacktraceStatus::Disabled);
         assert!(matches!(bt_disabled, Backtrace::Disabled));
+
+        let forced = StdBacktrace::force_capture();
+        let status = forced.status();
+        assert_eq!(Backtrace::from_backtrace(forced).status(), status);
     }
 
     #[test]

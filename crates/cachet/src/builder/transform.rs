@@ -264,3 +264,47 @@ where
         DynamicCache::new(fallback)
     }
 }
+
+#[cfg(test)]
+mod gamma_round2_tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::Buildable;
+    use crate::telemetry::CacheTelemetry;
+    use crate::{Cache, CacheEventHandler, CacheOperationEvent, CacheTier, CacheTierEvent, MockCache, TransformCodec, TransformEncoder};
+
+    #[derive(Clone)]
+    struct Roles(Arc<Mutex<Vec<(String, bool)>>>);
+
+    impl CacheEventHandler for Roles {
+        fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
+            self.0.lock().unwrap().push((event.tier_name.to_owned(), event.fallback));
+        }
+
+        fn on_operation_complete(&self, _: &CacheOperationEvent<'_>) {}
+    }
+
+    #[tokio::test]
+    async fn gamma_round2_transform_building_preserves_telemetry_and_each_tiers_role() {
+        let clock = tick::Clock::new_frozen();
+        for root in [false, true] {
+            let roles = Roles(Arc::new(Mutex::new(Vec::new())));
+            let builder = Cache::builder::<i32, i32>(clock.clone())
+                .name("pre")
+                .event_handler(roles.clone())
+                .storage(MockCache::new())
+                .transform(
+                    TransformEncoder::new(crate::infallible(|key: &i32| *key)),
+                    TransformCodec::new(crate::infallible(|value: &i32| *value), crate::infallible_owned(|value: i32| value)),
+                )
+                .fallback(Cache::builder(clock.clone()).name("post").storage(MockCache::new()));
+            if root {
+                assert!(builder.build().get(&7).await.unwrap().is_none());
+            } else {
+                let tier = builder.build_tier(clock.clone(), CacheTelemetry::new().with_handler(Arc::new(roles.clone())), true);
+                assert!(tier.get(&7).await.unwrap().is_none());
+            }
+            assert_eq!(*roles.0.lock().unwrap(), vec![("pre".to_owned(), !root), ("post".to_owned(), true)]);
+        }
+    }
+}

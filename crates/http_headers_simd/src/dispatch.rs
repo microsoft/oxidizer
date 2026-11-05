@@ -7,6 +7,14 @@ use crate::list::{self, EmptyMembers, TokenListScan};
 use crate::range::{self, RangeMasks, WINDOW};
 use crate::{base64, scalar, uri};
 
+#[cfg(any(test, not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))))]
+mod portable;
+
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+pub(super) use portable::all_base64_alphabet;
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+use portable::simple_uri_tail;
+
 /// The shortest input eligible for the shared byte-classification scanners.
 ///
 /// On an AMD EPYC 7763, x86-64 Criterion and Callgrind measurements at 16,
@@ -38,13 +46,21 @@ const URI_SIMD_THRESHOLD: usize = 16;
 
 #[inline]
 pub(super) fn is_token(bytes: &[u8]) -> bool {
-    if bytes.is_empty() {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "Both the scalar and vector token implementations independently reject empty input")]
+    bytes.is_empty() {
         return false;
     }
-    if bytes.len() < SIMD_THRESHOLD {
+    if
+    // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, relational.lt_to_gt, relational.lt_to_le, tag = "equivalent", reason = "Both token backends handle short inputs and implement the same byte grammar; only dispatch cost changes")]
+    bytes.len() < SIMD_THRESHOLD {
         return scalar::is_token(bytes);
     }
-    finish_with(optimized_is_token(bytes), || scalar::is_token(bytes))
+    finish_with(
+        // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "Replacing the optional optimized answer with None invokes the scalar validator for the same bytes")]
+        optimized_is_token(bytes),
+        || scalar::is_token(bytes),
+    )
 }
 
 #[inline]
@@ -54,18 +70,30 @@ fn finish_with<T>(optimized: Option<T>, fallback: impl FnOnce() -> T) -> T {
 
 #[inline]
 pub(super) fn is_token68(bytes: &[u8]) -> bool {
-    if bytes.len() < SIMD_THRESHOLD {
+    if
+    // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, relational.lt_to_gt, relational.lt_to_le, tag = "equivalent", reason = "Both token68 backends handle short inputs and implement the same data-and-padding grammar")]
+    bytes.len() < SIMD_THRESHOLD {
         return scalar::is_token68(bytes);
     }
-    finish_with(optimized_is_token68(bytes), || scalar::is_token68(bytes))
+    finish_with(
+        // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "None selects the scalar token68 validator for the same bytes")]
+        optimized_is_token68(bytes),
+        || scalar::is_token68(bytes),
+    )
 }
 
 #[inline]
 pub(super) fn is_field_value(bytes: &[u8]) -> bool {
-    if bytes.len() < SIMD_THRESHOLD {
+    if
+    // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, relational.lt_to_gt, relational.lt_to_le, tag = "equivalent", reason = "Both field-value backends handle short inputs and reject the same control bytes")]
+    bytes.len() < SIMD_THRESHOLD {
         return scalar::is_field_value(bytes);
     }
-    finish_with(optimized_is_field_value(bytes), || scalar::is_field_value(bytes))
+    finish_with(
+        // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "None invokes the scalar validator for the same bytes")]
+        optimized_is_field_value(bytes),
+        || scalar::is_field_value(bytes),
+    )
 }
 
 #[inline]
@@ -73,10 +101,17 @@ pub(super) fn eq_ignore_ascii_case(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
     }
-    if left.len() < EQUALITY_SIMD_THRESHOLD {
+    if
+    // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, relational.lt_to_gt, relational.lt_to_le, tag = "equivalent", reason = "After the equal-length check, both comparison backends handle short inputs and fold only ASCII letters")]
+    left.len() < EQUALITY_SIMD_THRESHOLD {
         return scalar::eq_ignore_ascii_case(left, right);
     }
-    finish_eq_ignore_ascii_case(left, right, optimized_eq_ignore_ascii_case(left, right))
+    finish_eq_ignore_ascii_case(
+        left,
+        right,
+        // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "None invokes the scalar case-insensitive comparison for the same equal-length slices")]
+        optimized_eq_ignore_ascii_case(left, right),
+    )
 }
 
 #[inline]
@@ -86,7 +121,9 @@ fn finish_eq_ignore_ascii_case(left: &[u8], right: &[u8], optimized: Option<bool
 
 #[inline]
 pub(super) fn find_interesting(bytes: &[u8]) -> Option<usize> {
-    if bytes.len() < SIMD_THRESHOLD {
+    if
+    // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, relational.lt_to_gt, relational.lt_to_le, tag = "equivalent", reason = "Both search backends handle short inputs and return the first interesting byte position")]
+    bytes.len() < SIMD_THRESHOLD {
         return scalar::find_interesting(bytes);
     }
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -107,7 +144,9 @@ pub(super) fn find_interesting(bytes: &[u8]) -> Option<usize> {
 
 #[inline]
 pub(super) fn find_either(bytes: &[u8], first: u8, second: u8) -> Option<usize> {
-    if bytes.len() < SIMD_THRESHOLD {
+    if
+    // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, relational.lt_to_gt, relational.lt_to_le, tag = "equivalent", reason = "Both search backends handle short inputs and return the first matching byte position")]
+    bytes.len() < SIMD_THRESHOLD {
         return scalar::find_either(bytes, first, second);
     }
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -145,7 +184,11 @@ unsafe fn find_either_arm(bytes: &[u8], first: u8, second: u8, neon: bool) -> Op
 /// If `sse2` is true, the processor must support SSE2.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn find_either_x86(bytes: &[u8], first: u8, second: u8, sse2: bool) -> Option<usize> {
+    #[cfg(test)]
+    tests::record_features(false, false, sse2);
     if sse2 {
+        #[cfg(test)]
+        tests::record_selection("sse2");
         // SAFETY: the caller guarantees SSE2 support when `sse2` is true.
         return unsafe { crate::x86::find_either(bytes, first, second) };
     }
@@ -173,7 +216,11 @@ unsafe fn find_interesting_arm(bytes: &[u8], neon: bool) -> Option<usize> {
 /// If `sse2` is true, the processor must support SSE2.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn find_interesting_x86(bytes: &[u8], sse2: bool) -> Option<usize> {
+    #[cfg(test)]
+    tests::record_features(false, false, sse2);
     if sse2 {
+        #[cfg(test)]
+        tests::record_selection("sse2");
         // SAFETY: the caller guarantees SSE2 support when `sse2` is true.
         return unsafe { crate::x86::find_interesting(bytes) };
     }
@@ -181,8 +228,11 @@ unsafe fn find_interesting_x86(bytes: &[u8], sse2: bool) -> Option<usize> {
 }
 
 #[inline]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
 pub(super) fn all_base64_alphabet(bytes: &[u8]) -> bool {
-    if bytes.len() < URI_SIMD_THRESHOLD {
+    if
+    // #[gamma::skip(cond.always_true, relational.lt_to_le, tag = "equivalent", reason = "Using the complete scalar alphabet validator more often changes only dispatch cost")]
+    bytes.len() < URI_SIMD_THRESHOLD {
         return base64::all_base64_alphabet(bytes);
     }
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -195,10 +245,6 @@ pub(super) fn all_base64_alphabet(bytes: &[u8]) -> bool {
     {
         // SAFETY: the feature flag comes from runtime or compile-time detection.
         unsafe { all_base64_alphabet_arm(bytes, neon_available()) }
-    }
-    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
-    {
-        base64::all_base64_alphabet(bytes)
     }
 }
 
@@ -224,11 +270,17 @@ unsafe fn all_base64_alphabet_arm(bytes: &[u8], neon: bool) -> bool {
 /// and `bytes` must hold at least one whole vector.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn all_base64_alphabet_x86(bytes: &[u8], packed_ranges: bool, baseline: bool) -> bool {
+    #[cfg(test)]
+    tests::record_features(packed_ranges, false, baseline);
     if packed_ranges {
+        #[cfg(test)]
+        tests::record_selection("sse42");
         // SAFETY: the caller guarantees SSE4.2 support and a whole input vector.
         return unsafe { crate::x86::all_base64_alphabet_sse42(bytes) };
     }
     if baseline {
+        #[cfg(test)]
+        tests::record_selection("sse2");
         // SAFETY: the caller guarantees SSE2 support and a whole input vector.
         return unsafe { crate::x86::all_base64_alphabet_sse2(bytes) };
     }
@@ -309,27 +361,53 @@ unsafe fn scan_token_list_arm(bytes: &[u8], empty: EmptyMembers, neon: bool) -> 
 /// and `bytes` must hold at least one whole vector.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn scan_token_list_x86(bytes: &[u8], empty: EmptyMembers, packed_ranges: bool, baseline: bool) -> TokenListScan {
+    #[cfg(test)]
+    tests::record_features(packed_ranges, false, baseline);
     if packed_ranges {
         if bytes.len() <= LIST_SHORT_LIMIT {
             if bytes.len() == WIDTH {
+                #[cfg(test)]
+                tests::record_selection("sse42-one");
                 // SAFETY: the caller guarantees SSE4.2 and exactly one vector.
-                return unsafe { crate::x86::scan_short_token_list_sse42(bytes, empty, false) };
+                return unsafe {
+                    crate::x86::scan_short_token_list_sse42(
+                        bytes, empty,
+                        // #[gamma::skip(literal.bool_flip, tag = "equivalent", reason = "At exactly WIDTH bytes both loaded windows coincide; two-window folding shifts away the entire duplicate mask and folds the same WIDTH lanes")]
+                        false,
+                    )
+                };
             }
+            #[cfg(test)]
+            tests::record_selection("sse42-two");
             // SAFETY: the caller guarantees SSE4.2 and at most two vectors.
             return unsafe { crate::x86::scan_short_token_list_sse42(bytes, empty, true) };
         }
+        #[cfg(test)]
+        tests::record_selection("sse42-long");
         // SAFETY: the caller guarantees SSE4.2 and at least one vector.
         return unsafe { crate::x86::scan_token_list_sse42(bytes, empty) };
     }
     if baseline {
         if bytes.len() <= LIST_SHORT_LIMIT {
             if bytes.len() == WIDTH {
+                #[cfg(test)]
+                tests::record_selection("sse2-one");
                 // SAFETY: the caller guarantees SSE2 and exactly one vector.
-                return unsafe { crate::x86::scan_short_token_list_sse2(bytes, empty, false) };
+                return unsafe {
+                    crate::x86::scan_short_token_list_sse2(
+                        bytes, empty,
+                        // #[gamma::skip(literal.bool_flip, tag = "equivalent", reason = "At exactly WIDTH bytes both loaded windows coincide; two-window folding shifts away the entire duplicate mask and folds the same WIDTH lanes")]
+                        false,
+                    )
+                };
             }
+            #[cfg(test)]
+            tests::record_selection("sse2-two");
             // SAFETY: the caller guarantees SSE2 and at most two vectors.
             return unsafe { crate::x86::scan_short_token_list_sse2(bytes, empty, true) };
         }
+        #[cfg(test)]
+        tests::record_selection("sse2-long");
         // SAFETY: the caller guarantees SSE2 and at least one vector.
         return unsafe { crate::x86::scan_token_list_sse2(bytes, empty) };
     }
@@ -344,7 +422,9 @@ pub(super) fn scan_byte_range_set(bytes: &[u8], start: usize) -> bool {
     };
     // A payload of nothing and a payload past one window are both out of the
     // subset, and one wrapping subtraction folds the pair into one comparison.
-    if len.wrapping_sub(1) >= WINDOW {
+    if
+    // #[gamma::skip(cond.always_false, relational.ge_to_gt, literal.int_increment, tag = "equivalent", reason = "accepts independently rejects zero and oversized payload lengths; subtracting two only additionally rejects a one-byte payload, which cannot contain a valid byte range")]
+    len.wrapping_sub(1) >= WINDOW {
         return false;
     }
     let Some(window) = range::window_of(bytes) else {
@@ -404,7 +484,11 @@ unsafe fn classify_range_arm(window: &[u8; WINDOW], neon: bool) -> RangeMasks {
 /// If `sse2` is true, the processor must support SSE2.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn classify_range_x86(window: &[u8; WINDOW], sse2: bool) -> RangeMasks {
+    #[cfg(test)]
+    tests::record_features(false, false, sse2);
     if sse2 {
+        #[cfg(test)]
+        tests::record_selection("sse2");
         // SAFETY: the caller guarantees SSE2 support when `sse2` is true.
         return unsafe { crate::x86::range_masks(window) };
     }
@@ -431,6 +515,7 @@ pub(super) fn is_simple_uri_reference(bytes: &[u8]) -> bool {
 }
 
 /// Classifies every byte of a path, query, and fragment run.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
 fn simple_uri_tail(bytes: &[u8]) -> bool {
     if bytes.len() < URI_SIMD_THRESHOLD {
         return uri::simple_uri_tail(bytes, 0);
@@ -446,10 +531,6 @@ fn simple_uri_tail(bytes: &[u8]) -> bool {
         // SAFETY: the feature flag comes from runtime or compile-time detection,
         // and the input contains at least one whole vector.
         unsafe { is_simple_uri_path_arm(bytes, neon_available()) }
-    }
-    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
-    {
-        uri::simple_uri_tail(bytes, 0)
     }
 }
 
@@ -476,15 +557,23 @@ unsafe fn is_simple_uri_path_arm(bytes: &[u8], neon: bool) -> bool {
 /// and `bytes` must hold at least one whole vector.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn is_simple_uri_path_x86(bytes: &[u8], packed_ranges: bool, shuffle_table: bool, baseline: bool) -> bool {
+    #[cfg(test)]
+    tests::record_features(packed_ranges, shuffle_table, baseline);
     if packed_ranges {
+        #[cfg(test)]
+        tests::record_selection("sse42");
         // SAFETY: the caller guarantees SSE4.2 and at least one vector.
         return unsafe { crate::x86::is_simple_uri_tail_sse42(bytes) };
     }
     if shuffle_table {
+        #[cfg(test)]
+        tests::record_selection("ssse3");
         // SAFETY: the caller guarantees SSSE3 and at least one vector.
         return unsafe { crate::x86::is_simple_uri_tail_ssse3(bytes) };
     }
     if baseline {
+        #[cfg(test)]
+        tests::record_selection("sse2");
         // SAFETY: the caller guarantees SSE2 and at least one vector.
         return unsafe { crate::x86::is_simple_uri_tail_sse2(bytes) };
     }
@@ -505,6 +594,8 @@ fn optimized_is_token(bytes: &[u8]) -> Option<bool> {
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn optimized_is_token_x86(bytes: &[u8], sse2: bool) -> Option<bool> {
     if sse2 {
+        #[cfg(test)]
+        tests::record_selection("sse2");
         // SAFETY: the caller guarantees SSE2 support when `sse2` is true.
         return Some(unsafe { crate::x86::is_token(bytes) });
     }
@@ -524,11 +615,17 @@ fn optimized_is_token68(bytes: &[u8]) -> Option<bool> {
 /// Every true feature flag must name an instruction set the processor supports.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn optimized_is_token68_x86(bytes: &[u8], packed_ranges: bool, baseline: bool) -> Option<bool> {
+    #[cfg(test)]
+    tests::record_features(packed_ranges, false, baseline);
     if packed_ranges {
+        #[cfg(test)]
+        tests::record_selection("sse42");
         // SAFETY: the caller guarantees SSE4.2 support when `sse42` is true.
         return Some(unsafe { crate::x86::is_token68_sse42(bytes) });
     }
     if baseline {
+        #[cfg(test)]
+        tests::record_selection("sse2");
         // SAFETY: the caller guarantees SSE2 support when `sse2` is true.
         return Some(unsafe { crate::x86::is_token68_sse2(bytes) });
     }
@@ -599,6 +696,8 @@ fn optimized_is_field_value(bytes: &[u8]) -> Option<bool> {
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn optimized_is_field_value_x86(bytes: &[u8], sse2: bool) -> Option<bool> {
     if sse2 {
+        #[cfg(test)]
+        tests::record_selection("sse2");
         // SAFETY: the caller guarantees SSE2 support when `sse2` is true.
         return Some(unsafe { crate::x86::is_field_value(bytes) });
     }
@@ -646,6 +745,8 @@ fn optimized_eq_ignore_ascii_case(left: &[u8], right: &[u8]) -> Option<bool> {
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn optimized_eq_ignore_ascii_case_x86(left: &[u8], right: &[u8], sse2: bool) -> Option<bool> {
     if sse2 {
+        #[cfg(test)]
+        tests::record_selection("sse2");
         // SAFETY: the caller guarantees SSE2 support when `sse2` is true and
         // equal-length slices.
         return Some(unsafe { crate::x86::eq_ignore_ascii_case(left, right) });
@@ -700,6 +801,10 @@ fn sse2_available() -> bool {
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn ssse3_available() -> bool {
+    #[cfg(test)]
+    if let Some((shuffle_table, _packed_ranges)) = tests::FEATURE_OVERRIDE.get() {
+        return shuffle_table;
+    }
     #[cfg(target_feature = "ssse3")]
     {
         true
@@ -742,6 +847,10 @@ fn cached_ssse3_available() -> bool {
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn sse42_available() -> bool {
+    #[cfg(test)]
+    if let Some((_shuffle_table, packed_ranges)) = tests::FEATURE_OVERRIDE.get() {
+        return packed_ranges;
+    }
     #[cfg(target_feature = "sse4.2")]
     {
         true
@@ -797,7 +906,9 @@ fn neon_available() -> bool {
 
 #[cfg(any(feature = "benchmarking", feature = "test-util"))]
 pub(super) fn backend() -> crate::Backend {
-    backend_for(SIMD_THRESHOLD)
+    backend_for(
+        SIMD_THRESHOLD,
+    )
 }
 
 #[cfg(any(feature = "benchmarking", feature = "test-util"))]
@@ -829,6 +940,8 @@ const fn backend_for_arm(neon: bool) -> crate::Backend {
     any(feature = "benchmarking", feature = "test-util")
 ))]
 fn backend_for_x86(packed_ranges: bool, baseline: bool) -> crate::Backend {
+    #[cfg(test)]
+    tests::record_features(packed_ranges, false, baseline);
     if packed_ranges {
         return crate::Backend::Sse42;
     }
@@ -841,6 +954,333 @@ fn backend_for_x86(packed_ranges: bool, baseline: bool) -> crate::Backend {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    std::thread_local! {
+        pub(super) static FEATURE_OVERRIDE: core::cell::Cell<Option<(bool, bool)>> = const { core::cell::Cell::new(None) };
+        static SELECTED: core::cell::Cell<Option<&'static str>> = const { core::cell::Cell::new(None) };
+        static FEATURES: core::cell::Cell<(bool, bool, bool)> = const { core::cell::Cell::new((false, false, false)) };
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[test]
+    fn gamma_afternoon_feature_queries_preserve_both_available_and_unavailable_detector_answers() {
+        FEATURE_OVERRIDE.set(Some((false, false)));
+        let unavailable = (super::ssse3_available(), super::sse42_available());
+        FEATURE_OVERRIDE.set(Some((true, true)));
+        let available = (super::ssse3_available(), super::sse42_available());
+        FEATURE_OVERRIDE.set(None);
+        assert_eq!(unavailable, (false, false));
+        assert_eq!(available, (true, true));
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    pub(super) fn record_selection(kernel: &'static str) {
+        SELECTED.set(Some(kernel));
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    pub(super) fn record_features(packed_ranges: bool, shuffle_table: bool, baseline: bool) {
+        FEATURES.set((packed_ranges, shuffle_table, baseline));
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    fn selected<T>(expected: Option<&'static str>, invoke: impl FnOnce() -> T) -> T {
+        SELECTED.set(None);
+        let value = invoke();
+        assert_eq!(SELECTED.get(), expected);
+        value
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[test]
+    #[expect(
+        clippy::similar_names,
+        reason = "SSE2, SSSE3, and SSE4.2 are the distinct instruction-set names under test"
+    )]
+    fn gamma_afternoon_dispatch_flags_choose_the_requested_kernel_and_preserve_scalar_results() {
+        use crate::list::EmptyMembers;
+
+        macro_rules! kernel {
+            ($call:expr) => {{
+                // SAFETY: flags are false or backed by host detection; every input has at least
+                // one vector and equality inputs have identical lengths.
+                unsafe { $call }
+            }};
+        }
+
+        let actual_sse2 = std::is_x86_feature_detected!("sse2");
+        let actual_sse42 = std::is_x86_feature_detected!("sse4.2");
+        let actual_ssse3 = std::is_x86_feature_detected!("ssse3");
+        for length in [16, 17, 24, 31, 32, 33, 47, 48, 64, 65] {
+            for byte in [b'a', b';', b'=', b'#', b',', b'\n', 0x80] {
+                let mut bytes = std::vec![b'a'; length];
+                bytes[length / 2] = byte;
+                for sse2 in [false, actual_sse2] {
+                    let baseline = sse2.then_some("sse2");
+                    {
+                        assert_eq!(
+                            selected(baseline, || kernel!(super::find_either_x86(&bytes, b';', b'=', sse2))),
+                            crate::scalar::find_either(&bytes, b';', b'=')
+                        );
+                        assert_eq!(
+                            selected(baseline, || kernel!(super::find_interesting_x86(&bytes, sse2))),
+                            crate::scalar::find_interesting(&bytes)
+                        );
+                        assert_eq!(
+                            selected(baseline, || kernel!(super::optimized_is_token_x86(&bytes, sse2))),
+                            sse2.then(|| crate::scalar::is_token(&bytes))
+                        );
+                        assert_eq!(
+                            selected(baseline, || kernel!(super::optimized_is_field_value_x86(&bytes, sse2))),
+                            sse2.then(|| crate::scalar::is_field_value(&bytes))
+                        );
+                        assert_eq!(
+                            selected(baseline, || kernel!(super::optimized_eq_ignore_ascii_case_x86(
+                                &bytes, &bytes, sse2
+                            ))),
+                            sse2.then_some(true)
+                        );
+                        for sse42 in [false, actual_sse42] {
+                            let kernel = if sse42 { Some("sse42") } else { baseline };
+                            assert_eq!(
+                                selected(kernel, || kernel!(super::all_base64_alphabet_x86(&bytes, sse42, sse2))),
+                                crate::base64::all_base64_alphabet(&bytes)
+                            );
+                            assert_eq!(
+                                selected(kernel, || kernel!(super::optimized_is_token68_x86(&bytes, sse42, sse2))),
+                                (sse42 || sse2).then(|| crate::scalar::is_token68(&bytes))
+                            );
+                            let list_kernel = match (sse42, sse2, length) {
+                                (true, _, 16) => Some("sse42-one"),
+                                (true, _, 17..=32) => Some("sse42-two"),
+                                (true, _, _) => Some("sse42-long"),
+                                (false, true, 16) => Some("sse2-one"),
+                                (false, true, 17..=32) => Some("sse2-two"),
+                                (false, true, _) => Some("sse2-long"),
+                                _ => None,
+                            };
+                            for empty in [EmptyMembers::Skip, EmptyMembers::Reject] {
+                                assert_eq!(
+                                    selected(list_kernel, || kernel!(super::scan_token_list_x86(&bytes, empty, sse42, sse2))),
+                                    crate::list::scan_token_list(&bytes, empty)
+                                );
+                            }
+                            for ssse3 in [false, actual_ssse3] {
+                                let uri_kernel = if sse42 {
+                                    Some("sse42")
+                                } else if ssse3 {
+                                    Some("ssse3")
+                                } else {
+                                    baseline
+                                };
+                                assert_eq!(
+                                    selected(uri_kernel, || kernel!(super::is_simple_uri_path_x86(&bytes, sse42, ssse3, sse2))),
+                                    crate::uri::simple_uri_tail(&bytes, 0)
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for sse2 in [false, actual_sse2] {
+            let window = [b'1'; super::WINDOW];
+            assert_eq!(
+                selected(sse2.then_some("sse2"), || kernel!(super::classify_range_x86(&window, sse2))),
+                crate::range::RangeMasks::scalar(&window)
+            );
+        }
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[test]
+    #[expect(
+        clippy::similar_names,
+        reason = "SSE2, SSSE3, and SSE4.2 are the distinct instruction-set names under test"
+    )]
+    fn gamma_afternoon_detected_features_reach_the_selected_kernels_without_losing_the_answer() {
+        let bytes = b"abcdefghijklmnopqrstuvwxyzABCDEF";
+        let sse2 = std::is_x86_feature_detected!("sse2");
+        let sse42 = std::is_x86_feature_detected!("sse4.2");
+        let ssse3 = std::is_x86_feature_detected!("ssse3");
+        let baseline = sse2.then_some("sse2");
+        let packed = if sse42 { Some("sse42") } else { baseline };
+        assert_eq!(selected(baseline, || super::find_either(bytes, b'A', b'z')), Some(25));
+        assert_eq!(FEATURES.get(), (false, false, sse2));
+        #[cfg(any(feature = "benchmarking", feature = "test-util"))]
+        {
+            let expected = if sse42 {
+                crate::Backend::Sse42
+            } else if sse2 {
+                crate::Backend::Sse2
+            } else {
+                crate::Backend::Scalar
+            };
+            assert_eq!(super::backend_for(bytes.len()), expected);
+            assert_eq!(FEATURES.get(), (sse42, false, sse2));
+            for packed_ranges in [false, true] {
+                for baseline in [false, true] {
+                    let expected = if packed_ranges {
+                        crate::Backend::Sse42
+                    } else if baseline {
+                        crate::Backend::Sse2
+                    } else {
+                        crate::Backend::Scalar
+                    };
+                    assert_eq!(super::backend_for_x86(packed_ranges, baseline), expected);
+                }
+            }
+        }
+        assert_eq!(selected(baseline, || super::find_interesting(bytes)), None);
+        assert_eq!(FEATURES.get(), (false, false, sse2));
+        assert_eq!(selected(baseline, || super::optimized_is_token(bytes)), sse2.then_some(true));
+        assert_eq!(selected(baseline, || super::optimized_is_field_value(bytes)), sse2.then_some(true));
+        assert_eq!(
+            selected(baseline, || super::optimized_eq_ignore_ascii_case(bytes, bytes)),
+            sse2.then_some(true)
+        );
+        assert_eq!(
+            selected(packed, || super::optimized_is_token68(bytes)),
+            (sse42 || sse2).then_some(true)
+        );
+        assert_eq!(FEATURES.get(), (sse42, false, sse2));
+        assert!(selected(packed, || super::all_base64_alphabet(bytes)));
+        assert_eq!(FEATURES.get(), (sse42, false, sse2));
+        let uri_kernel = if sse42 {
+            Some("sse42")
+        } else if ssse3 {
+            Some("ssse3")
+        } else {
+            baseline
+        };
+        assert!(selected(uri_kernel, || super::simple_uri_tail(bytes)));
+        assert_eq!(FEATURES.get(), (sse42, ssse3, sse2));
+        let list_kernel = if sse42 {
+            Some("sse42-two")
+        } else if sse2 {
+            Some("sse2-two")
+        } else {
+            None
+        };
+        assert_eq!(
+            selected(list_kernel, || super::scan_token_list(bytes, crate::list::EmptyMembers::Skip)),
+            crate::list::TokenListScan::Members
+        );
+        assert_eq!(FEATURES.get(), (sse42, false, sse2));
+        for length in [super::WIDTH - 1, super::WIDTH, super::WIDTH + 1] {
+            let short = &bytes[..length];
+            let vectorized = length >= super::WIDTH;
+            assert!(selected(if vectorized { packed } else { None }, || super::all_base64_alphabet(
+                short
+            )));
+            assert!(selected(if vectorized { uri_kernel } else { None }, || super::simple_uri_tail(
+                short
+            )));
+            let expected = if !vectorized {
+                None
+            } else if sse42 {
+                Some(if length == super::WIDTH { "sse42-one" } else { "sse42-two" })
+            } else if sse2 {
+                Some(if length == super::WIDTH { "sse2-one" } else { "sse2-two" })
+            } else {
+                None
+            };
+            assert_eq!(
+                selected(expected, || super::scan_token_list(short, crate::list::EmptyMembers::Skip)),
+                crate::list::TokenListScan::Members
+            );
+        }
+        let window = [b'1'; super::WINDOW];
+        assert_eq!(
+            selected(baseline, || super::classify_range(&window)),
+            crate::range::RangeMasks::scalar(&window)
+        );
+        assert_eq!(FEATURES.get(), (false, false, sse2));
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[test]
+    fn gamma_round2_feature_queries_match_the_runtime_feature_bits() {
+        assert_eq!(super::sse42_available(), std::is_x86_feature_detected!("sse4.2"));
+        assert_eq!(super::ssse3_available(), std::is_x86_feature_detected!("ssse3"));
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[test]
+    fn gamma_survivor_optimized_option_dispatch_and_lazy_fallback() {
+        use core::cell::Cell;
+
+        let calls = Cell::new(0);
+        assert!(!super::finish_with(Some(false), || {
+            calls.set(calls.get() + 1);
+            true
+        }));
+        assert_eq!(calls.get(), 0);
+        assert!(super::finish_with(None, || {
+            calls.set(calls.get() + 1);
+            true
+        }));
+        assert_eq!(calls.get(), 1);
+        assert!(!super::finish_eq_ignore_ascii_case(b"same", b"same", Some(false)));
+        let baseline = arch::is_x86_feature_detected!("sse2");
+        let packed_ranges = arch::is_x86_feature_detected!("sse4.2");
+        for length in [16, 17, 31, 32, 33, 48, 65] {
+            for invalid in [false, true] {
+                let mut input = vec![b'a'; length];
+                if invalid {
+                    input[length - 1] = b'\n';
+                }
+                let expected = !invalid;
+                // SAFETY: the false flag disables native instructions.
+                assert_eq!(unsafe { super::optimized_is_token_x86(&input, false) }, None);
+                // SAFETY: the false flag disables native instructions.
+                assert_eq!(unsafe { super::optimized_is_field_value_x86(&input, false) }, None);
+                // SAFETY: both false flags disable native instructions.
+                assert_eq!(unsafe { super::optimized_is_token68_x86(&input, false, false) }, None);
+                // SAFETY: the false flag disables native instructions and slice lengths match.
+                assert_eq!(unsafe { super::optimized_eq_ignore_ascii_case_x86(&input, &input, false) }, None);
+                if baseline {
+                    // SAFETY: SSE2 was detected and the input contains a full vector.
+                    assert_eq!(unsafe { super::optimized_is_token_x86(&input, true) }, Some(expected));
+                    // SAFETY: SSE2 was detected and the input contains a full vector.
+                    assert_eq!(unsafe { super::optimized_is_field_value_x86(&input, true) }, Some(expected));
+                    // SAFETY: SSE2 was detected and the input contains a full vector.
+                    assert_eq!(unsafe { super::optimized_is_token68_x86(&input, false, true) }, Some(expected));
+                    assert_eq!(
+                        // SAFETY: SSE2 was detected and both slices have the same length.
+                        unsafe { super::optimized_eq_ignore_ascii_case_x86(&input, &input, true) },
+                        Some(true)
+                    );
+                    let other = vec![b'z'; length];
+                    assert_eq!(
+                        // SAFETY: SSE2 was detected and both slices have the same length.
+                        unsafe { super::optimized_eq_ignore_ascii_case_x86(&input, &other, true) },
+                        Some(false)
+                    );
+                    assert_eq!(super::optimized_is_token(&input), Some(expected));
+                    assert_eq!(super::optimized_is_field_value(&input), Some(expected));
+                    assert_eq!(super::optimized_is_token68(&input), Some(expected));
+                    assert_eq!(super::optimized_eq_ignore_ascii_case(&input, &input), Some(true));
+                    assert_eq!(
+                        // SAFETY: SSE2 was detected and the input contains a full vector.
+                        unsafe { super::scan_token_list_x86(&input, EmptyMembers::Reject, false, true) },
+                        if invalid { TokenListScan::Rejected } else { TokenListScan::Members }
+                    );
+                }
+                if packed_ranges {
+                    // SAFETY: SSE4.2 was detected and the input contains a full vector.
+                    assert_eq!(unsafe { super::optimized_is_token68_x86(&input, true, false) }, Some(expected));
+                }
+            }
+            // SAFETY: the false flag selects scalar code.
+            assert_eq!(unsafe { super::find_either_x86(b"aaaaaz", b'x', b'z', false) }, Some(5));
+            // SAFETY: every feature flag is false, selecting scalar code.
+            assert!(unsafe { super::is_simple_uri_path_x86(b"/fragment#one", false, false, false) });
+            // SAFETY: every feature flag is false, selecting scalar code.
+            assert!(!unsafe { super::is_simple_uri_path_x86(b"/fragment#one#two", false, false, false) });
+        }
+    }
+
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     use std::arch;
     #[cfg(not(feature = "std"))]

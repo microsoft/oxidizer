@@ -115,9 +115,37 @@ pub(crate) const fn chunk_align(align: usize) -> usize {
 #[inline]
 #[must_use]
 pub(crate) fn chunk_layout(size: usize, align: usize, slots: usize) -> Option<Layout> {
+    // #[gamma::skip(expr.decrement, reason = "Slot metadata ends at a multiple of four; for power-of-two alignments above four, rounding that even offset with align - 1 gives the same result, and smaller alignments are widened to four.")]
     let payload = stride(size, align).checked_mul(slots)?;
+    // #[gamma::skip(expr.decrement, reason = "The chunk header size is a multiple of four; rounding an even offset with a power-of-two alignment minus one gives the same result, and smaller alignments are widened to four.")]
     let total = slots_offset(align).checked_add(payload)?;
     Layout::from_size_align(total, chunk_align(align)).ok().map(|l| l.pad_to_align())
+}
+
+#[cfg(test)]
+#[test]
+fn gamma_round2_chunk_layout_keeps_a_valid_large_alignment() {
+    for alignment in [16, 64, 256] {
+        let layout = chunk_layout(alignment, alignment, 1).unwrap();
+        assert_eq!(layout.align(), alignment);
+        assert_eq!(layout.size(), slots_offset(alignment) + stride(alignment, alignment));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn gamma_survivor_chunk_geometry_uses_exact_stride_alignment_and_reports_add_overflow() {
+    let expected = round_up(slots_offset(4) + 3 * stride(4, 4), chunk_align(4));
+    assert_eq!(chunk_layout(4, 4, 3).unwrap().size(), expected);
+    for align in [8, 16, 64] {
+        let actual = chunk_layout(align, align, 2).unwrap();
+        assert_eq!(actual.align(), align);
+        assert_eq!(actual.size(), slots_offset(align) + 2 * stride(align, align));
+    }
+    let slots = usize::MAX / stride(0, 4);
+    assert!(stride(0, 4).checked_mul(slots).is_some());
+    assert!(slots_offset(4).checked_add(stride(0, 4) * slots).is_none());
+    assert!(chunk_layout(0, 4, slots).is_none());
 }
 
 /// Supplies the slot geometry for one pool.

@@ -177,6 +177,7 @@ where
             Ok(connection)
         }
         Ok(Err(error)) => {
+            // #[gamma::skip(call_result.default, tag = "equivalent", reason = "report_connection_error returns unit; default_after preserves metrics and events and returns the same ()")]
             report_connection_error(&base_uri, elapsed, &connection_setup_duration, collect_error_labels(&error), &error);
 
             Err(error)
@@ -187,6 +188,7 @@ where
                 connect_timeout.as_secs(),
             );
 
+            // #[gamma::skip(call_result.default, tag = "equivalent", reason = "report_connection_error returns unit; default_after preserves metrics and events and returns the same ()")]
             report_connection_error(&base_uri, elapsed, &connection_setup_duration, LABEL_CONNECT, &message);
 
             Err(HttpError::other(message, RecoveryInfo::retry(), LABEL_CONNECT))
@@ -248,6 +250,118 @@ fn negotiated_version(connected: &Connected) -> Version {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use opentelemetry_sdk::metrics::data::{HistogramDataPoint, ResourceMetrics, ScopeMetrics};
+    #[test]
+    fn gamma_survivor_connect_failure_and_timeout_both_record_metrics() {
+        use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
+
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
+        let histogram = provider.meter("test").f64_histogram("failures").build();
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let base = templated_uri::BaseUri::from_static("https://example.test");
+        let failure = futures::executor::block_on(super::connect_with_timeout(
+            std::future::ready(Err::<crate::testing::FakeStream, _>(http_extensions::HttpError::unavailable(
+                "failure-marker",
+            ))),
+            base.clone(),
+            &clock,
+            std::time::Duration::from_secs(2),
+            histogram.clone(),
+        ))
+        .unwrap_err();
+        assert!(failure.to_string().contains("failure-marker"));
+        let timeout = futures::executor::block_on(super::connect_with_timeout(
+            std::future::pending::<http_extensions::Result<crate::testing::FakeStream>>(),
+            base,
+            &clock,
+            std::time::Duration::from_secs(2),
+            histogram,
+        ))
+        .unwrap_err();
+        assert!(timeout.to_string().contains("server connection timeout"));
+        provider.force_flush().unwrap();
+        let resources = exporter.get_finished_metrics().unwrap();
+        let metric = resources
+            .iter()
+            .flat_map(ResourceMetrics::scope_metrics)
+            .flat_map(ScopeMetrics::metrics)
+            .find(|metric| metric.name() == "failures")
+            .unwrap();
+        let opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(opentelemetry_sdk::metrics::data::MetricData::Histogram(histogram)) =
+            metric.data()
+        else {
+            panic!("failure samples must be histogram data");
+        };
+        assert_eq!(histogram.data_points().map(HistogramDataPoint::count).sum::<u64>(), 2);
+        assert_eq!(
+            histogram.data_points().map(HistogramDataPoint::sum).sum::<f64>().to_bits(),
+            2.0_f64.to_bits()
+        );
+    }
+    #[test]
+    fn gamma_survivor_connection_metrics_metadata_buckets_and_failure_sample() {
+        use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
+
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
+        let clock = tick::Clock::new_frozen();
+        let connector = crate::testing::FakeConnector::new_success(bytes::Bytes::new(), clock.clone());
+        let cc: super::ClientConnector<_, crate::testing::FakeStream> = super::ClientConnector::new(
+            connector,
+            clock,
+            std::time::Duration::from_secs(1),
+            vec![http::Version::HTTP_11],
+            &provider.meter("test"),
+            fetch_options::PoolIndex::new(0),
+            fetch_options::ConnectionLifetime::unlimited(),
+        );
+        super::report_connection_error(
+            &templated_uri::BaseUri::from_static("https://example.test"),
+            std::time::Duration::from_millis(125),
+            &cc.connection_setup_duration,
+            crate::error_labels::LABEL_CONNECT,
+            &"marker",
+        );
+        cc.connection_duration.record(0.25, &[]);
+        provider.force_flush().unwrap();
+        let metrics = exporter.get_finished_metrics().unwrap();
+        let metrics = metrics
+            .iter()
+            .flat_map(ResourceMetrics::scope_metrics)
+            .flat_map(ScopeMetrics::metrics)
+            .collect::<Vec<_>>();
+        for (name, description, bounds, sum) in [
+            (
+                "http.client.connection.setup.duration",
+                "The duration of setting up the connection.",
+                vec![
+                    0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0, 25.0, 50.0,
+                ],
+                0.125_f64,
+            ),
+            (
+                "http.client.connection.duration",
+                "The total duration of the connection from establishment to close.",
+                vec![0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0],
+                0.25,
+            ),
+        ] {
+            let metric = metrics.iter().find(|metric| metric.name() == name).unwrap();
+            assert_eq!(metric.description(), description);
+            assert_eq!(metric.unit(), "s");
+            let opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(opentelemetry_sdk::metrics::data::MetricData::Histogram(
+                histogram,
+            )) = metric.data()
+            else {
+                panic!("connection metrics must use an explicit histogram");
+            };
+            let point = histogram.data_points().next().unwrap();
+            assert_eq!(point.bounds().collect::<Vec<_>>(), bounds);
+            assert_eq!(point.sum().to_bits(), sum.to_bits());
+            assert_eq!(point.count(), 1);
+        }
+    }
     use ohno::ErrorExt;
     use opentelemetry::KeyValue;
     use opentelemetry::metrics::MeterProvider;

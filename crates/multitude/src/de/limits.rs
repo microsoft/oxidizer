@@ -18,6 +18,9 @@ use super::{DeserializationResource, LimitExceeded};
 
 mod deserialization_limits;
 #[cfg(test)]
+#[path = "limits/gamma_survivor.rs"]
+mod gamma_survivor;
+#[cfg(test)]
 mod tests;
 
 /// Resource limits for format-independent deserialization.
@@ -75,6 +78,7 @@ impl Drop for DepthGuard<'_> {
 
 impl LimitState {
     fn enter<E: serde::de::Error>(&self) -> Result<(), E> {
+        // #[gamma::skip(cond.always_false, reason = "With the unlimited immutable limit, saturating depth can never exceed the limit and the private depth counter is not otherwise observable")]
         if self.limits.max_depth == usize::MAX {
             return Ok(());
         }
@@ -354,6 +358,7 @@ impl<'de, V: Visitor<'de>> Visitor<'de> for LimitedVisitor<'_, V> {
 impl<V> LimitedVisitor<'_, V> {
     fn check_string<E: serde::de::Error>(&self, value: &str) -> Result<(), E> {
         let limit = self.state.limits.max_string_len;
+        // #[gamma::skip(logical.and_remove_left, reason = "A str length cannot exceed usize::MAX, so the comparison alone accepts the unlimited sentinel")]
         if limit != usize::MAX && value.len() > limit {
             Err(self.state.reject(
                 DeserializationResource::StringLength,
@@ -367,6 +372,7 @@ impl<V> LimitedVisitor<'_, V> {
 
     fn check_bytes<E: serde::de::Error>(&self, value: &[u8]) -> Result<(), E> {
         let limit = self.state.limits.max_bytes_len;
+        // #[gamma::skip(logical.and_remove_left, reason = "A slice length cannot exceed usize::MAX, so the comparison alone accepts the unlimited sentinel")]
         if limit != usize::MAX && value.len() > limit {
             Err(self.state.reject(
                 DeserializationResource::ByteStringLength,

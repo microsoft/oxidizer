@@ -69,6 +69,11 @@ impl RedactionEngine {
         RedactionEngineBuilder::new()
     }
 
+    #[cfg(test)]
+    pub(super) fn gamma_survivor_inner(engine: &Self) -> &RedactionEngineInner {
+        &engine.inner
+    }
+
     #[must_use]
     pub(crate) fn new(mut inner: RedactionEngineInner) -> Self {
         inner.shrink();

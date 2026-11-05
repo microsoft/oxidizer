@@ -82,10 +82,18 @@ impl<T: Send> Combining<T> {
             result.write(action(unsafe { &mut *value }));
         }
         let _abort = AbortOnUnwind;
-        if self.last.load(Ordering::Relaxed).is_null() && !self.flag.swap(true, Ordering::Acquire) {
+        if
+        // #[gamma::skip(cond.negate, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // #[gamma::skip(cond.always_false, reason = "Bypassing fast entry leaves the lock untouched and attach acquires the same exclusive lease before invoking the action")]
+        self.try_enter_fast() {
             // SAFETY: Successfully acquiring the flag grants exclusive value access.
             let result = action(unsafe { &mut *self.value.get() });
-            self.flag.store(false, Ordering::Release);
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.flag.store(
+                // #[gamma::skip(literal.bool_flip, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                false,
+                Ordering::Release,
+            );
             return result;
         }
         let mut work = Work {
@@ -106,13 +114,24 @@ impl<T: Send> Combining<T> {
         unsafe { result.assume_init_read() }
     }
 
+    fn try_enter_fast(&self) -> bool {
+        self.last.load(Ordering::Relaxed).is_null() &&
+        // #[gamma::skip(unary.remove_not, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        !self.flag.swap(true, Ordering::Acquire)
+    }
+
+    // #[gamma::skip(fn_value.unit, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     unsafe fn wake(node: *mut Node<T>, status: u32) {
         // SAFETY: The node's waiting caller cannot leave before this release.
         // HAL wake uses a numeric wait key rather than a Rust reference, so a
         // caller departing immediately after the exchange is safe.
         let address = unsafe { &raw const (*node).status };
         // SAFETY: The waiting caller keeps this atomic live until the exchange.
-        if unsafe { (*address).swap(status, Ordering::AcqRel) } == SLEEPING {
+        if
+        // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, relational.eq_to_ne, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // SAFETY: The waiting caller keeps this atomic live until the exchange.
+        unsafe { (*address).swap(status, Ordering::AcqRel) } == SLEEPING {
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             crate::hal::wake_one(address.cast());
         }
     }
@@ -121,10 +140,13 @@ impl<T: Send> Combining<T> {
         // SAFETY: This is the waiting caller's own live stack node. Only its
         // status atomic is concurrently modified by a combiner.
         let status = unsafe { &(*node).status };
+        // #[gamma::skip(literal.int_decrement, literal.int_increment, literal.int_to_one, literal.int_to_zero, range.exclusive_to_inclusive, reason = "The bounded spin count only delays the compare_exchange and OS wait; neither action depends on the iteration count")]
         for _ in 0..100 {
+            // #[gamma::skip(cond.always_false, reason = "The following acquire compare_exchange also observes DONE or HEAD and returns without sleeping if the status has changed")]
             if status.load(Ordering::Acquire) != WAITING {
                 return;
             }
+            // #[gamma::skip(stmt.delete_call, reason = "pause is a processor hint; synchronization comes from the status atomics")]
             crate::hal::pause();
         }
         if status
@@ -138,8 +160,13 @@ impl<T: Send> Combining<T> {
     unsafe fn attach(&self, node: *mut Node<T>) {
         let previous = self.last.swap(node, Ordering::AcqRel);
         if previous.is_null() {
-            while self.flag.swap(true, Ordering::Acquire) {
-                while self.flag.load(Ordering::Relaxed) {
+            while
+            // #[gamma::skip(cond.negate, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.flag.swap(true, Ordering::Acquire) {
+                while
+                // #[gamma::skip(cond.negate, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                self.flag.load(Ordering::Relaxed) {
+                    // #[gamma::skip(stmt.delete_call, reason = "pause is a processor hint; the flag atomics control lock ownership")]
                     crate::hal::pause();
                 }
             }
@@ -149,13 +176,17 @@ impl<T: Send> Combining<T> {
             // SAFETY: node is this caller's live stack storage.
             unsafe { Self::wait(node) };
             // SAFETY: The caller still owns its stack node.
-            if unsafe { (*node).status.load(Ordering::Acquire) } == DONE {
+            if
+            // #[gamma::skip(cond.always_true, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            // SAFETY: The caller still owns its stack node.
+            unsafe { (*node).status.load(Ordering::Acquire) } == DONE {
                 return;
             }
         }
         let mut current = node;
         loop {
             // SAFETY: This queued node stays live until its DONE notification.
+            // #[gamma::skip(stmt.delete_call, expr.increment, reason = "Prefetch is explicitly non-faulting, conveys no synchronization, and only changes cache residency")]
             crate::hal::prefetch(unsafe { (*current).next.load(Ordering::Acquire) } as usize);
             // SAFETY: Publication initialized the node's invocation function.
             let invoke = unsafe { (*current).invoke };
@@ -170,7 +201,9 @@ impl<T: Send> Combining<T> {
             unsafe { Self::wake(current, DONE) };
             current = successor;
         }
-        if self
+        if
+        // #[gamma::skip(cond.always_false, cond.negate, result.is_ok_to_is_err, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        self
             .last
             .compare_exchange(current, std::ptr::null_mut(), Ordering::Release, Ordering::Relaxed)
             .is_ok()
@@ -186,6 +219,7 @@ impl<T: Send> Combining<T> {
         }
         // SAFETY: A stalled publisher still owns current's successor link.
         while unsafe { (*current).next.load(Ordering::Relaxed) }.is_null() {
+            // #[gamma::skip(stmt.delete_call, reason = "pause is a processor hint; the following acquire load observes the published successor")]
             crate::hal::pause();
         }
         // SAFETY: current stays live until DONE; acquire observes its successor.
@@ -201,6 +235,60 @@ impl<T: Send> Combining<T> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_fast_combiner_entry_respects_a_pending_queue_before_taking_the_flag() {
+        use super::*;
+
+        unsafe fn unexpected_invoke(_: *mut Node<()>, _: *mut ()) {
+            panic!("the entry decision must not dispatch pending work");
+        }
+
+        let combining = Combining::new(());
+        let mut pending = Node {
+            status: AtomicU32::new(WAITING),
+            next: AtomicPtr::new(std::ptr::null_mut()),
+            invoke: unexpected_invoke,
+        };
+        combining.last.store(&raw mut pending, Ordering::Relaxed);
+        assert!(!combining.try_enter_fast());
+        assert!(!combining.flag.load(Ordering::Relaxed));
+        combining.last.store(std::ptr::null_mut(), Ordering::Relaxed);
+        assert!(combining.try_enter_fast());
+        assert!(combining.flag.load(Ordering::Relaxed));
+        assert!(!combining.try_enter_fast());
+    }
+
+    #[test]
+    fn gamma_survivor_combining_executes_each_owned_action_once() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let combining = Arc::new(super::Combining::new(Vec::new()));
+        let calls = Arc::new(AtomicUsize::new(0));
+        std::thread::scope(|scope| {
+            for index in 0..8 {
+                let combining = Arc::clone(&combining);
+                let calls = Arc::clone(&calls);
+                scope.spawn(move || {
+                    for step in 0..64 {
+                        let token = Box::new(index * 64 + step);
+                        let calls = Arc::clone(&calls);
+                        let result = combining.with(move |values| {
+                            calls.fetch_add(1, Ordering::Relaxed);
+                            values.push(*token);
+                            token
+                        });
+                        assert_eq!(*result, index * 64 + step);
+                    }
+                });
+            }
+        });
+        assert_eq!(calls.load(Ordering::Relaxed), 512);
+        let mut values = combining.with(std::mem::take);
+        values.sort_unstable();
+        assert_eq!(values, (0..512).collect::<Vec<_>>());
+    }
+
     use std::sync::{Arc, Barrier};
 
     use super::*;

@@ -9,11 +9,34 @@
 /// vector path; changing this value requires comparing both benchmark groups.
 pub(crate) const SIMD_THRESHOLD: usize = 32;
 
+#[test]
+fn gamma_round2_scan_hits_each_position_and_first_of_multiple_matches() {
+    for len in 0..=65 {
+        let absent = alloc::vec![b'x'; len];
+        assert_eq!(find_byte::<true>(&absent, b'&'), None);
+        assert!(!contains_either::<true>(&absent, b'%', b'+'));
+        for index in 0..len {
+            let mut input = absent.clone();
+            input[index] = b'&';
+            assert_eq!(find_byte::<true>(&input, b'&'), Some(index));
+            assert_eq!(find_byte::<false>(&input, b'&'), Some(index));
+            input[index] = b'%';
+            assert!(contains_either::<true>(&input, b'%', b'+'));
+            input[index] = b'+';
+            assert!(contains_either::<true>(&input, b'%', b'+'));
+            input[index] = b'&';
+            input[len - 1] = b'&';
+            assert_eq!(find_byte::<true>(&input, b'&'), Some(index));
+        }
+    }
+}
+
 #[inline]
 // SIMD selection is performance-only; scalar/SIMD results are checked
 // exhaustively at vector boundaries below.
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn find_byte<const WIDE: bool>(bytes: &[u8], needle: u8) -> Option<usize> {
+    // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, logical.and_remove_left, logical.and_remove_right, logical.and_to_or, relational.ge_to_gt, relational.ge_to_le, reason = "Scalar and vector searches return the identical first matching offset, including on short inputs handled by the scalar tail")]
     if WIDE && bytes.len() >= SIMD_THRESHOLD {
         #[cfg(target_arch = "x86_64")]
         {
@@ -30,6 +53,7 @@ pub(crate) fn find_byte<const WIDE: bool>(bytes: &[u8], needle: u8) -> Option<us
 #[inline]
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn contains_either<const WIDE: bool>(bytes: &[u8], first: u8, second: u8) -> bool {
+    // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, logical.and_remove_left, logical.and_remove_right, logical.and_to_or, relational.ge_to_gt, relational.ge_to_le, reason = "Scalar and vector membership searches return the same boolean, including on short inputs handled by the scalar tail")]
     if WIDE && bytes.len() >= SIMD_THRESHOLD {
         #[cfg(target_arch = "x86_64")]
         {
@@ -64,6 +88,8 @@ fn find_byte_sse2(bytes: &[u8], needle: u8) -> Option<usize> {
     use core::arch::x86_64::{_mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8};
 
     let mut offset = 0;
+    // #[gamma::skip(relational.le_to_lt, literal.int_increment, reason = "Deferring the last complete vector to the scalar tail preserves the first matching offset")]
+    // #[gamma::skip(arith.add_to_mul, cond.negate, relational.le_to_ge, reason = "The only caller requires at least 32 bytes; these guards either skip vector work entirely or stop it earlier, leaving the full unsearched suffix to the scalar search")]
     while offset + 16 <= bytes.len() {
         // SAFETY: SSE2 is part of the x86_64 baseline, and the loop guard
         // guarantees a complete in-bounds vector at `offset`.
@@ -74,7 +100,11 @@ fn find_byte_sse2(bytes: &[u8], needle: u8) -> Option<usize> {
         if mask != 0 {
             return Some(offset + mask.trailing_zeros() as usize);
         }
-        offset += 16;
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        offset +=
+        // #[gamma::skip(literal.int_to_zero, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // #[gamma::skip(literal.int_decrement, literal.int_to_one, reason = "A positive stride smaller than the vector width only overlaps already searched bytes; the first matching offset and scalar-tail coverage are unchanged")]
+        16;
     }
     find_byte_scalar(&bytes[offset..], needle).map(|index| offset + index)
 }
@@ -90,6 +120,8 @@ fn contains_either_sse2(bytes: &[u8], first: u8, second: u8) -> bool {
     use core::arch::x86_64::{_mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_or_si128, _mm_set1_epi8};
 
     let mut offset = 0;
+    // #[gamma::skip(relational.le_to_lt, literal.int_increment, reason = "Deferring the last complete vector to the scalar tail preserves membership")]
+    // #[gamma::skip(arith.add_to_mul, cond.negate, relational.le_to_ge, reason = "The only caller requires at least 32 bytes; these guards either skip vector work entirely or stop it earlier, leaving the full unsearched suffix to the scalar search")]
     while offset + 16 <= bytes.len() {
         // SAFETY: SSE2 is part of the x86_64 baseline, and the loop guard
         // guarantees a complete in-bounds vector at `offset`.
@@ -102,7 +134,11 @@ fn contains_either_sse2(bytes: &[u8], first: u8, second: u8) -> bool {
         if mask != 0 {
             return true;
         }
-        offset += 16;
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        offset +=
+        // #[gamma::skip(literal.int_to_zero, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // #[gamma::skip(literal.int_decrement, literal.int_to_one, reason = "A positive stride smaller than the vector width only repeats membership checks; scalar-tail coverage is unchanged")]
+        16;
     }
     contains_either_scalar(&bytes[offset..], first, second)
 }

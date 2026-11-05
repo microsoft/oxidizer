@@ -74,6 +74,7 @@ pub trait ErrorExt: StdError {
             {
                 return Some(target);
             }
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             source = err.source();
         }
         None

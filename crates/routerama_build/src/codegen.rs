@@ -305,6 +305,7 @@ struct VariantSpec {
 
 /// Collects variants and diagnostics in route declaration order.
 fn collect_variants(routes: &[Route], templates: &[PathTemplate<'_>]) -> (Vec<VariantSpec>, Vec<TokenStream>) {
+    // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_false, cond.always_true, cond.negate, expr.increment, reason = "Both collectors preserve declaration order and compare exactly the same route names and capture sets; the threshold only selects indexed versus linear lookup")]
     if use_indexed_variant_collection(routes.len()) {
         collect_variants_impl::<true>(routes, templates)
     } else {
@@ -326,6 +327,7 @@ fn collect_variants_impl<const INDEXED: bool>(routes: &[Route], templates: &[Pat
         let fields: Vec<Ident> = names.iter().map(|name| field_ident(name)).collect();
         let keys: Vec<String> = names.iter().map(|name| name.join(".")).collect();
 
+        // #[gamma::skip(cond.always_false, reason = "Linear lookup finds the same first declaration as the maintained name-to-index map")]
         let existing_index = if INDEXED {
             spec_indices.get(route.name()).copied()
         } else {
@@ -351,6 +353,7 @@ fn collect_variants_impl<const INDEXED: bool>(routes: &[Route], templates: &[Pat
             continue;
         }
 
+        // #[gamma::skip(cond.always_true, reason = "Maintaining the map when linear lookup is selected has no effect on the generated variants or diagnostics")]
         if INDEXED {
             spec_indices.insert(route.name(), specs.len());
         }
@@ -417,7 +420,18 @@ fn variant_ident(name: &str) -> Ident {
     } else {
         let sanitized: String = name
             .chars()
-            .map(|c| if c == '_' || c.is_ascii_alphanumeric() { c } else { '_' })
+            // #[gamma::skip(logical.or_remove_left, reason = "An underscore rejected by the predicate is replaced with the identical underscore")]
+            .map(|c| {
+                if c ==
+                    // #[gamma::skip(literal.char_to_distinct, reason = "The distinct replacement x is already ASCII alphanumeric, and a rejected underscore is replaced by the identical underscore")]
+                    '_'
+                    || c.is_ascii_alphanumeric()
+                {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         Ident::new(&format!("_R_{sanitized}"), Span::call_site())
     }
@@ -579,6 +593,7 @@ fn emit_leaves(leaves: &[Leaf], any_verb: bool, route_enum: &Ident) -> TokenStre
                 }
             }
         } else {
+            // #[gamma::skip(iter.first_to_last, tag = "equivalent", reason = "With any_verb false all leaves have verb None; grouping already deduplicates method/verb pairs, so each method group contains exactly one leaf")]
             emit_return(entries.first().expect("each group has at least one leaf"), route_enum)
         };
         quote! { #method => { #body } }
@@ -650,6 +665,7 @@ fn var_slice_expr(plan: &VarPlan) -> TokenStream {
 
 #[cfg(test)]
 mod tests {
+    use alloc::boxed::Box;
     use alloc::format;
     use core::fmt::Write as _;
 
@@ -657,6 +673,98 @@ mod tests {
 
     use super::*;
     use crate::generator::Generator;
+
+    fn leaf_for_round2(name: &str, verb: Option<&str>) -> Leaf {
+        Leaf {
+            method: "GET".to_owned(),
+            verb: verb.map(str::to_owned),
+            name: name.to_owned(),
+            vars: Vec::new(),
+            route_index: 0,
+        }
+    }
+
+    #[test]
+    fn gamma_round2_variant_placeholders_preserve_reserved_names_and_punctuation() {
+        for (name, expected) in [
+            ("resolve", "_R_resolve"),
+            ("xyzzy", "xyzzy"),
+            ("Ordinary", "Ordinary"),
+            ("", "_R_"),
+            ("9_bad?", "_R_9_bad_"),
+            ("a-b.c", "_R_a_b_c"),
+        ] {
+            assert_eq!(variant_ident(name).to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_emit_empty_and_single_nodes_have_no_unused_dispatch() {
+        let route_enum = Ident::new("Routes", Span::call_site());
+        assert!(emit_node(&Node::default(), 2, false, &route_enum).is_empty());
+        assert!(emit_leaves(&[], false, &route_enum).is_empty());
+        let mut child = Node::default();
+        child.exact.push(leaf_for_round2("Single", None));
+        let root = Node {
+            single: Some(Box::new(child)),
+            ..Node::default()
+        };
+        let output = emit_node(&root, 2, false, &route_enum)
+            .to_string()
+            .split_whitespace()
+            .collect::<String>();
+        assert!(output.contains("if__count>2"), "{output}");
+        assert!(output.contains("if__count==3"), "{output}");
+        for absent in ["let__seg", "match__seg", "match__verb", "if__count==2", "if__count>=2"] {
+            assert!(!output.contains(absent), "{absent}: {output}");
+        }
+        assert_eq!(
+            emit_return(&leaf_for_round2("Unit", None), &route_enum).to_string(),
+            quote! { return ::core::option::Option::Some(Routes::Unit); }.to_string()
+        );
+    }
+
+    #[test]
+    fn gamma_round2_emit_each_edge_preserves_verb_dispatch_and_affix_segment_binding() {
+        let route_enum = Ident::new("Routes", Span::call_site());
+        for kind in ["literal", "affix", "single"] {
+            let mut child = Node::default();
+            child.exact.push(leaf_for_round2("Selected", Some("inspect")));
+            let mut root = Node::default();
+            match kind {
+                "literal" => {
+                    root.literals.insert("literal".to_owned(), child);
+                }
+                "affix" => {
+                    root.affix.insert((String::new(), ".txt".to_owned()), child);
+                }
+                _ => root.single = Some(Box::new(child)),
+            }
+            let output = emit_node(&root, 2, true, &route_enum)
+                .to_string()
+                .split_whitespace()
+                .collect::<String>();
+            assert!(output.contains("match__verb"), "{kind}: {output}");
+            assert!(output.contains("Some(\"inspect\")"), "{kind}: {output}");
+            if kind == "affix" {
+                assert!(output.contains("let__seg:"), "{output}");
+                assert!(!output.contains("starts_with(b\"\")"), "{output}");
+                assert!(output.contains("ends_with(b\".txt\")"), "{output}");
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_emit_leaves_deduplicates_before_method_and_optional_verb_dispatch() {
+        let route_enum = Ident::new("Routes", Span::call_site());
+        let leaves = [leaf_for_round2("First", None), leaf_for_round2("Duplicate", None)];
+        for verbs in [false, true] {
+            let output = emit_leaves(&leaves, verbs, &route_enum).to_string();
+            assert_eq!(output.matches("Routes :: First").count(), 1);
+            assert!(!output.contains("Duplicate"));
+            assert_eq!(output.contains("match __verb"), verbs);
+        }
+    }
 
     fn rules(specs: &[(&str, &str, &str)]) -> Vec<Route> {
         specs

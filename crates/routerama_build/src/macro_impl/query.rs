@@ -80,6 +80,12 @@ fn words(name: &str) -> Vec<String> {
     result
 }
 
+#[test]
+fn gamma_round2_query_words_split_hyphens_underscores_and_case_boundaries() {
+    assert_eq!(words("alpha-beta_gammaDelta"), ["alpha", "beta", "gamma", "delta"]);
+    assert_eq!(words("--alpha__beta--"), ["alpha", "beta"]);
+}
+
 fn capitalize(word: &str) -> String {
     let mut characters = word.chars();
     characters
@@ -129,11 +135,13 @@ fn parse_attrs(attrs: &[Attribute], namespace: &str) -> syn::Result<RawAttrs> {
                 // Serde's concern, while query attributes should catch typos.
                 if namespace == "serde" {
                     if meta.input.peek(Token![=]) {
+                        // #[gamma::skip(try.propagate_to_unwrap, reason = "The immediately preceding equals-token peek guarantees meta.value consumes that token successfully")]
                         let value = meta.value()?;
                         let _: Expr = value.parse()?;
                     } else if meta.input.peek(syn::token::Paren) {
                         let content;
                         parenthesized!(content in meta.input);
+                        // #[gamma::skip(try.propagate_to_unwrap, reason = "Parsing the entire remaining delimited token stream has no fallible syntax restriction")]
                         let _: TokenStream = content.parse()?;
                     }
                     Ok(())
@@ -342,6 +350,7 @@ fn container_inner<'a>(ty: &'a Type, expected: &str, generic_types: &HashSet<Str
     if !standard_path(&path.path, expected, generic_types) {
         return None;
     }
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "standard_path above has matched a nonempty standard container path")]
     let segment = path.path.segments.last()?;
     let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
         return None;
@@ -349,6 +358,7 @@ fn container_inner<'a>(ty: &'a Type, expected: &str, generic_types: &HashSet<Str
     if arguments.args.len() != 1 {
         return None;
     }
+    // #[gamma::skip(iter.first_to_last, try.propagate_to_unwrap, reason = "The preceding length check requires exactly one generic argument")]
     match arguments.args.first()? {
         GenericArgument::Type(ty) => Some(ty),
         _ => None,
@@ -501,6 +511,7 @@ fn encode_parameter(parameter: &str) -> String {
 fn unique_lifetime_marker(parsed: &QueryInput<'_>) -> Ident {
     let mut candidate = "__routerama_query_lifetime".to_owned();
     while parsed.fields.iter().any(|field| field.ident == candidate.as_str()) {
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         candidate.push('_');
     }
     format_ident!("{candidate}")
@@ -518,6 +529,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
     let (_, type_generics, _) = original_generics.split_for_impl();
     let outer_type: Type = syn::parse_quote!(#name #type_generics);
     let (mut generated_generics, query_lifetime) = decoding_generics(original_generics, parsed.query_lifetime.as_ref());
+    // #[gamma::skip(call_result.default, reason = "Bound insertion still executes and its result is unit")]
     add_from_query_bounds(&mut generated_generics, &parsed, &runtime, &query_lifetime);
     let (impl_generics, _, generated_where_clause) = generated_generics.split_for_impl();
     let deny_unknown_fields = parsed.deny_unknown_fields;
@@ -550,6 +562,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
             GenericParam::Lifetime(_) => {}
         }
     }
+    // #[gamma::skip(call_result.default, reason = "Generic rewriting still executes and its result is unit")]
     replace_self_in_generics(&mut state_declaration_generics, &outer_type);
     let (_, _, state_where_clause) = state_declaration_generics.split_for_impl();
     let mut state_parameters = state_declaration_generics
@@ -573,6 +586,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
             #decoder: #runtime::query::QueryDecoder<#query_lifetime, Output = #ty>
         });
     }
+    // #[gamma::skip(call_result.default, reason = "Generic rewriting still executes and its result is unit")]
     replace_self_in_generics(&mut decoder_generics, &outer_type);
     let (decoder_impl_generics, _, decoder_where) = decoder_generics.split_for_impl();
 
@@ -805,6 +819,7 @@ fn decoding_generics(original: &Generics, lifetime: Option<&syn::Lifetime>) -> (
         let used = lifetime_names(original);
         let mut name = "__routerama_q".to_owned();
         while used.contains(&name) {
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             name.push('_');
         }
         let lifetime = syn::Lifetime::new(&format!("'{name}"), Span::call_site());
@@ -834,7 +849,10 @@ fn lifetime_names(generics: &Generics) -> HashSet<String> {
 #[cfg_attr(test, mutants::skip)]
 fn unique_generic_ident(base: &str, used: &mut HashSet<String>) -> Ident {
     let mut name = base.to_owned();
-    while !used.insert(name.clone()) {
+    while
+    // #[gamma::skip(cond.negate, unary.remove_not, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+    !used.insert(name.clone()) {
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         name.push('_');
     }
     format_ident!("{name}")
@@ -949,6 +967,7 @@ fn add_from_query_bounds(generics: &mut Generics, parsed: &QueryInput<'_>, runti
 
 fn has_unconditional_default(ty: &Type, generic_types: &HashSet<String>) -> bool {
     let Type::Path(path) = ty else { return false };
+    // #[gamma::skip(collection.reverse_array, reason = "The pure any predicate tests membership in the same three standard type names")]
     if ["Option", "String", "Vec"]
         .iter()
         .any(|name| standard_path(&path.path, name, generic_types))
@@ -967,6 +986,22 @@ fn has_unconditional_default(ty: &Type, generic_types: &HashSet<String>) -> bool
         [root, module, name] => (root == "core" || root == "std") && module == "marker" && name == "PhantomData",
         _ => false,
     }
+}
+
+#[test]
+fn gamma_round2_default_analysis_rejects_other_marker_types_and_finds_associated_types() {
+    let parameters = HashSet::from(["T".to_owned()]);
+    assert!(has_unconditional_default(
+        &syn::parse_quote!(core::marker::PhantomData<T>),
+        &parameters
+    ));
+    assert!(!has_unconditional_default(
+        &syn::parse_quote!(core::marker::PhantomPinned),
+        &parameters
+    ));
+    assert!(!has_unconditional_default(&syn::parse_quote!(std::marker::Other<T>), &parameters));
+    assert!(type_depends_on_generic_parameter(&syn::parse_quote!(T::Associated), &parameters));
+    assert!(!type_depends_on_generic_parameter(&syn::parse_quote!(external::T), &parameters));
 }
 
 fn type_depends_on_generic_parameter(ty: &Type, parameters: &HashSet<String>) -> bool {
@@ -1010,6 +1045,7 @@ pub(crate) fn expand_to_query(input: &DeriveInput) -> syn::Result<TokenStream> {
     let runtime = runtime_path();
     let name = &input.ident;
     let mut generated_generics = input.generics.clone();
+    // #[gamma::skip(call_result.default, reason = "Bound insertion still executes and its result is unit")]
     add_to_query_bounds(&mut generated_generics, &parsed, &runtime);
     let (impl_generics, _, where_clause) = generated_generics.split_for_impl();
     let (_, type_generics, _) = input.generics.split_for_impl();
@@ -1104,6 +1140,20 @@ mod tests {
     use syn::parse_quote;
 
     use super::*;
+
+    #[test]
+    fn gamma_round2_query_type_classifier_checks_all_cow_arguments_and_serde_namespace() {
+        let generics = HashSet::new();
+        assert!(is_cow_str(&parse_quote!(Cow<'q, str>), &generics));
+        assert!(!is_cow_str(&parse_quote!(Cow<'q, str, u8>), &generics));
+        let input: DeriveInput = parse_quote!(
+            #[serde(deny_unknown_fields)]
+            struct Query {
+                value: u32,
+            }
+        );
+        assert!(parse_attrs(&input.attrs, "serde").unwrap().deny_unknown_fields.is_none());
+    }
 
     fn input(tokens: TokenStream) -> DeriveInput {
         syn::parse2(tokens).expect("valid derive input")

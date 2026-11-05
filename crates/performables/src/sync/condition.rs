@@ -123,9 +123,25 @@ impl Condvar<Sync> {
         timeout: Duration,
     ) -> (MutexGuard<'mutex, T>, WaitTimeoutOutcome) {
         let mutex = guard.mutex();
+        self.wait_timeout_with(guard, |raw| {
+            self.raw.inner.wait(
+                mutex.native_state(),
+                raw,
+                // #[gamma::skip(option.some_to_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                Some(timeout),
+            )
+        })
+    }
+
+    fn wait_timeout_with<'mutex, T: ?Sized>(
+        &self,
+        guard: MutexGuard<'mutex, T>,
+        wait: impl FnOnce(mutex::hal::Guard<'mutex>) -> (mutex::hal::Guard<'mutex>, bool),
+    ) -> (MutexGuard<'mutex, T>, WaitTimeoutOutcome) {
+        let mutex = guard.mutex();
         self.record(EventKind::CondvarContention);
         let (raw, panicking_at_acquisition) = guard.into_native();
-        let (raw, timed_out) = self.raw.inner.wait(mutex.native_state(), raw, Some(timeout));
+        let (raw, timed_out) = wait(raw);
         let guard = match mutex.acquired_native(raw, panicking_at_acquisition) {
             Ok(guard) => guard,
             Err(error) => panic_poisoned(&error),
@@ -187,6 +203,7 @@ impl Condvar<Async> {
         F: FnMut(&mut T) -> bool,
     {
         while condition(&mut *guard) {
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             guard = self.wait_async(guard).await;
         }
         guard
@@ -202,6 +219,7 @@ impl Condvar<Async> {
         F: FnMut(&mut T) -> bool,
     {
         while condition(&mut *guard) {
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             guard = self.wait(guard);
         }
         guard
@@ -277,11 +295,13 @@ impl<'mutex, T: ?Sized> Future for CondvarWait<'_, 'mutex, T> {
                     return Poll::Pending;
                 }
                 if let Some(waiter) = self.waiter.take() {
+                    // #[gamma::skip(stmt.delete_call, reason = "The successful enqueue recheck already deactivates and unlinks the waiter and takes its waker.")]
                     condition.raw.waiters.cancel(&waiter);
                 }
             }
 
             self.notified = true;
+            // #[gamma::skip(cond.always_true, reason = "This block runs only before the first notification; lock starts None and is assigned only here.")]
             if self.lock.is_none() {
                 self.lock = Some(self.mutex.lock_async());
             }
@@ -326,11 +346,90 @@ impl WaitTimeoutOutcome {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    #[cfg(feature = "seismograph")]
+    fn gamma_round2_native_timeout_result_controls_access_telemetry_without_parking() {
+        use seismograph::recorder::event::EventKind as RecordedKind;
+
+        crate::gamma_round2_telemetry::enable_recording();
+        let condition = super::Condvar::default();
+        let mutex = super::mutex::Mutex::new(47);
+        for timed_out in [false, true] {
+            let guard = mutex.lock();
+            let before_wait = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::CondvarContention);
+            let before_access = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::CondvarAccess);
+            let (guard, outcome) = condition.wait_timeout_with(guard, |raw| (raw, timed_out));
+            assert_eq!(*guard, 47);
+            assert_eq!(outcome.timed_out(), timed_out);
+            drop(guard);
+            assert_eq!(
+                crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::CondvarContention),
+                before_wait + 1
+            );
+            assert_eq!(
+                crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::CondvarAccess),
+                before_access + usize::from(!timed_out)
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_round2_notified_wait_does_not_reregister_after_a_generation_wrap() {
+        let mutex = super::super::mutex::Mutex::<_, super::Async>::new(47);
+        let condition = super::Condvar::<super::Async>::new();
+        let mut wait = condition.wait_async(mutex.lock());
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(std::pin::Pin::new(&mut wait).poll(&mut context).is_pending());
+        let held = mutex.lock();
+        condition.notify_one();
+        assert!(std::pin::Pin::new(&mut wait).poll(&mut context).is_pending());
+        assert!(wait.notified);
+        assert!(wait.lock.is_some());
+        // Model the generation returning to its sampled value while mutex reacquisition is pending.
+        condition
+            .raw
+            .generation
+            .store(wait.generation, std::sync::atomic::Ordering::Release);
+        drop(held);
+        let std::task::Poll::Ready(guard) = std::pin::Pin::new(&mut wait).poll(&mut context) else {
+            panic!("an already notified wait must only await mutex reacquisition");
+        };
+        assert_eq!(*guard, 47);
+    }
+
     use std::sync::Arc as StdArc;
     use std::sync::atomic::AtomicUsize;
     use std::task::{Wake, Waker};
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_condvar_notify_all_advances_private_generation_by_exactly_one() {
+        let condition = Condvar::<Async>::new();
+        assert_eq!(condition.raw.generation.load(Ordering::Acquire), 0);
+        condition.notify_all();
+        assert_eq!(condition.raw.generation.load(Ordering::Acquire), 1);
+    }
+
+    #[test]
+    fn gamma_survivor_condvar_reacquisition_keeps_private_notified_state_and_drops_waiter() {
+        let condition = Condvar::<Async>::new();
+        let mutex = Mutex::<u32, Async>::new(7);
+        let mut wait = condition.wait_async(mutex.lock());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(Pin::new(&mut wait).poll(&mut cx).is_pending());
+        let held = mutex.lock();
+        condition.notify_one();
+        assert!(Pin::new(&mut wait).poll(&mut cx).is_pending());
+        assert!(wait.notified);
+        drop(held);
+        let Poll::Ready(guard) = Pin::new(&mut wait).poll(&mut cx) else {
+            panic!("notified waiter must complete when its mutex is released");
+        };
+        assert!(wait.notified);
+        assert!(wait.waiter.is_none());
+        drop(guard);
+    }
     use crate::sync::mutex::Mutex;
 
     #[derive(Default)]

@@ -12,10 +12,14 @@ impl<T: ?Sized> Mutex<T, Sync> {
         let raw = if let Some(raw) = self.raw.inner.try_lock() {
             raw
         } else {
-            self.record(EventKind::MutexContention);
-            self.raw.inner.lock()
+            self.lock_contended_native()
         };
         self.acquired_native(raw, std::thread::panicking())
+    }
+
+    fn lock_contended_native(&self) -> hal::Guard<'_> {
+        self.record(EventKind::MutexContention);
+        self.raw.inner.lock()
     }
 
     pub(in crate::sync) fn try_lock_result_native(&self) -> Result<Option<MutexGuard<'_, T>>, Error<MutexGuard<'_, T>>> {
@@ -96,5 +100,43 @@ impl<'a, T: ?Sized> MutexGuard<'a, T, Sync> {
             mutex.raw.inner.unlock(raw);
         }
         mutex.record(EventKind::MutexRelease);
+    }
+}
+
+#[cfg(all(test, feature = "seismograph"))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod gamma_round2_tests {
+    use seismograph::recorder::event::EventKind as RecordedKind;
+
+    use super::*;
+    use crate::gamma_round2_telemetry::recorded_test_events;
+
+    #[test]
+    fn gamma_round2_native_mutex_cold_acquisition_records_the_already_detected_conflict() {
+        crate::gamma_round2_telemetry::enable_recording();
+        let mutex = Mutex::new(43);
+        let held = mutex.lock();
+        assert!(mutex.try_lock().is_none());
+        drop(held);
+        let before = recorded_test_events(RecordedKind::MutexContention);
+        let raw = mutex.lock_contended_native();
+        let guard = mutex.acquired_native(raw, false).unwrap();
+        assert_eq!(*guard, 43);
+        drop(guard);
+        assert_eq!(recorded_test_events(RecordedKind::MutexContention), before + 1);
+    }
+
+    #[test]
+    fn gamma_round2_native_guard_transfer_records_release_before_handing_off_ownership() {
+        crate::gamma_round2_telemetry::enable_recording();
+        let mutex = Mutex::new(41);
+        let guard = mutex.lock();
+        let before = recorded_test_events(RecordedKind::MutexRelease);
+        let (raw, panicking) = guard.into_native();
+        let after = recorded_test_events(RecordedKind::MutexRelease);
+        mutex.raw.inner.unlock(raw);
+        assert!(!panicking);
+        assert_eq!(after, before + 1);
+        assert_eq!(*mutex.lock(), 41);
     }
 }

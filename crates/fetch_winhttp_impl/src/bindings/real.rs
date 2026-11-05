@@ -6,12 +6,24 @@ use std::ptr::{NonNull, null, null_mut};
 
 use widestring::U16CStr;
 use windows::Win32::Foundation::{ERROR_IO_PENDING, ERROR_SUCCESS, GetLastError};
+use windows::Win32::Networking::WinHttp::{WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_OPEN_REQUEST_FLAGS};
+#[cfg(not(test))]
 use windows::Win32::Networking::WinHttp::{
-    WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_OPEN_REQUEST_FLAGS, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
-    WinHttpQueryHeaders, WinHttpQueryOption, WinHttpReadDataEx, WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetOption,
-    WinHttpSetStatusCallback, WinHttpSetTimeouts, WinHttpWriteData,
+    WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest, WinHttpQueryHeaders, WinHttpQueryOption, WinHttpReadDataEx,
+    WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetOption, WinHttpSetStatusCallback, WinHttpSetTimeouts, WinHttpWriteData,
 };
 use windows::core::{Error as WindowsError, PCWSTR};
+
+#[cfg(test)]
+#[path = "real_calls.rs"]
+mod calls;
+#[cfg(test)]
+use calls::{
+    close_handle as WinHttpCloseHandle, connect as WinHttpConnect, open as WinHttpOpen, open_request as WinHttpOpenRequest,
+    query_headers as WinHttpQueryHeaders, query_option as WinHttpQueryOption, read_data_ex as WinHttpReadDataEx,
+    receive_response as WinHttpReceiveResponse, send_request as WinHttpSendRequest, set_option as WinHttpSetOption,
+    set_status_callback as WinHttpSetStatusCallback, set_timeouts as WinHttpSetTimeouts, write_data as WinHttpWriteData,
+};
 
 use super::{Bindings, StatusCallback, WINHTTP_READ_DATA_EX_FLAG_FILL_BUFFER};
 use crate::error::{Result, WinHttpError, WinHttpOperation};

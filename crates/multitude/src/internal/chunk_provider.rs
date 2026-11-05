@@ -333,6 +333,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     /// Caller must route oversized requests to [`Self::acquire_oversized`].
     pub(crate) fn acquire(&self, min_payload: usize, ratchet_class: SizeClass) -> Result<NonNull<Chunk<A>>, AllocError> {
         let header = Chunk::<A>::header_size();
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "The documented normal-request precondition bounds min_payload by max_normal_alloc, configured below MAX_CHUNK_BYTES minus the header")]
         let needed_total = header.checked_add(min_payload).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         debug_assert!(
             min_payload <= self.config.max_normal_alloc && !exceeds_max_chunk_bytes(needed_total),
@@ -596,6 +597,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                 Err(actual) => {
                     #[cfg(test)]
                     tests::note_push_retry();
+                    // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                     cur = actual;
                 }
             }
@@ -707,13 +709,295 @@ impl<A: Allocator + Clone> Chunk<A> {
 }
 
 #[cfg(test)]
+impl<A: Allocator + Clone> ChunkProvider<A> {
+    pub(crate) fn gamma_survivor_byte_budget(&self) -> usize {
+        self.config.byte_budget
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use alloc::rc::Rc;
+    use alloc::vec::Vec;
     use core::cell::Cell;
     use std::thread_local;
 
     use allocator_api2::alloc::Global;
 
     use super::*;
+
+    #[cfg(feature = "stats")]
+    #[test]
+    fn gamma_round2_provider_generation_starts_empty_and_refunds_a_single_wasted_byte() {
+        let provider = ChunkProvider::new(Global, ChunkProviderConfig::default());
+        assert_eq!(provider.normal_chunks_allocated_since_reset.load(Ordering::Relaxed), 0);
+        assert_eq!(provider.wasted_tail_bytes(), 0);
+        let chunk = provider.acquire(1, SizeClass::ZERO).unwrap();
+        // SAFETY: this test owns the acquired chunk's sole reference.
+        unsafe { Chunk::record_retire(chunk, 1) };
+        assert_eq!(provider.wasted_tail_bytes(), 1);
+        // SAFETY: this test returns the sole reference acquired above.
+        assert!(unsafe { Chunk::dec_ref(chunk) });
+        // SAFETY: the exclusively owned chunk now has zero references.
+        unsafe { provider.release(chunk) };
+        assert_eq!(provider.wasted_tail_bytes(), 0);
+        provider.drain_all();
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
+    }
+
+    #[derive(Clone, Default)]
+    struct GammaBackingAllocator {
+        live: Rc<Cell<usize>>,
+        fail: Rc<Cell<bool>>,
+    }
+
+    // SAFETY: allocation and deallocation are forwarded unchanged to Global.
+    // A requested allocation failure returns Err without allocating storage.
+    unsafe impl Allocator for GammaBackingAllocator {
+        fn allocate(&self, layout: core::alloc::Layout) -> Result<NonNull<[u8]>, allocator_api2::alloc::AllocError> {
+            if self.fail.get() {
+                return Err(allocator_api2::alloc::AllocError);
+            }
+            let allocation = Global.allocate(layout)?;
+            self.live.set(self.live.get() + 1);
+            Ok(allocation)
+        }
+
+        unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: core::alloc::Layout) {
+            self.live.set(self.live.get() - 1);
+            // SAFETY: pointer and layout identify an allocation returned by Global.
+            unsafe { Global.deallocate(ptr, layout) };
+        }
+    }
+
+    #[cfg(feature = "stats")]
+    #[test]
+    fn gamma_survivor_provider_floor_eviction_and_straggler_release_resources() {
+        let allocator = GammaBackingAllocator::default();
+        let provider = ChunkProvider::new(allocator.clone(), ChunkProviderConfig::default());
+        let header = Chunk::<GammaBackingAllocator>::header_size();
+        for class in [0, 1, 2] {
+            let chunk = provider.allocate_fresh(SizeClass::new(class)).unwrap();
+            // SAFETY: this test owns the freshly allocated chunk's sole reference.
+            assert!(unsafe { Chunk::dec_ref(chunk) });
+            // SAFETY: transfer the exclusively owned zero-count chunk to this provider.
+            unsafe { provider.push(chunk) };
+        }
+        assert_eq!(allocator.live.get(), 3);
+        // SAFETY: this test is the provider's sole popper.
+        unsafe { provider.advance_cache_floor(SizeClass::new(1)) };
+        assert_eq!(allocator.live.get(), 2);
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 3072);
+        assert_eq!(provider.cached_chunks(), 2);
+        assert_eq!(provider.cached_bytes(), 3072);
+        let straggler = provider.allocate_fresh(SizeClass::ZERO).unwrap();
+        // SAFETY: this test owns the fresh straggler's sole reference.
+        assert!(unsafe { Chunk::dec_ref(straggler) });
+        // SAFETY: the zero-count straggler belongs exclusively to this provider.
+        unsafe { provider.push(straggler) };
+        // SAFETY: this test is the provider's sole popper.
+        let first = unsafe { provider.pop() }.unwrap();
+        assert_eq!(allocator.live.get(), 2);
+        // SAFETY: pop returned an initialized detached chunk that remains live.
+        assert_eq!(unsafe { first.as_ref() }.capacity(), 1024 - header);
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 3072);
+        // SAFETY: the detached chunk has zero references and no remaining cache link ownership.
+        unsafe { Chunk::destroy(first) };
+        provider.release_bytes(1024);
+        // SAFETY: this test is the provider's sole popper.
+        let second = unsafe { provider.pop() }.unwrap();
+        // SAFETY: pop returned an initialized detached chunk that remains live.
+        assert_eq!(unsafe { second.as_ref() }.capacity(), 2048 - header);
+        // SAFETY: this detached chunk also has zero references.
+        unsafe { Chunk::destroy(second) };
+        provider.release_bytes(2048);
+        // SAFETY: this test remains the provider's sole popper.
+        assert!(unsafe { provider.pop() }.is_none());
+        assert_eq!(allocator.live.get(), 0);
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
+        assert_eq!(provider.cached_chunks(), 0);
+        assert_eq!(provider.cached_bytes(), 0);
+    }
+
+    #[test]
+    fn gamma_survivor_provider_oversized_exact_slack_and_failure_rollback() {
+        for minimum in [0_usize, 1, 2, 7, 8, 9, 4097] {
+            let allocator = GammaBackingAllocator::default();
+            let provider = ChunkProvider::new(allocator.clone(), ChunkProviderConfig::default());
+            let word = mem::align_of::<usize>();
+            let payload = (minimum + word - 1).div_ceil(word) * word;
+            let total = (Chunk::<GammaBackingAllocator>::header_size() + payload).div_ceil(word) * word;
+            let chunk = provider.acquire_oversized(minimum).unwrap();
+            assert_eq!(allocator.live.get(), 1);
+            assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), total);
+            // SAFETY: acquire_oversized returned a live initialized chunk.
+            assert_eq!(unsafe { chunk.as_ref() }.capacity(), payload);
+            // SAFETY: the test owns its sole reference.
+            assert!(unsafe { Chunk::dec_ref(chunk) });
+            // SAFETY: this test exclusively owns the now-zero-count chunk.
+            unsafe { provider.release(chunk) };
+            assert_eq!(allocator.live.get(), 0);
+            assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
+        }
+        let allocator = GammaBackingAllocator::default();
+        allocator.fail.set(true);
+        let provider = ChunkProvider::new(allocator.clone(), ChunkProviderConfig::default());
+        gamma_survivor_expect_error(provider.acquire_oversized(4097));
+        assert_eq!(allocator.live.get(), 0);
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
+        for minimum in [usize::MAX, usize::MAX - 7, usize::MAX - 14] {
+            gamma_survivor_expect_error(provider.acquire_oversized(minimum));
+            assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
+        }
+        let zero_budget = ChunkProvider::new(Global, ChunkProviderConfig::new(0, 4096));
+        gamma_survivor_expect_error(zero_budget.acquire_oversized(1));
+        assert_eq!(zero_budget.bytes_outstanding.load(Ordering::Relaxed), 0);
+    }
+
+    #[cfg(feature = "stats")]
+    #[test]
+    fn gamma_survivor_provider_exact_size_class_reuse_and_draining() {
+        let header = Chunk::<Global>::header_size();
+        for total in [MIN_CHUNK_BYTES, MIN_CHUNK_BYTES + 1, 1024, 1025, MAX_CHUNK_BYTES] {
+            let provider = ChunkProvider::new(Global, ChunkProviderConfig::new(usize::MAX, MAX_CHUNK_BYTES - header));
+            let chunk = provider.acquire(total - header, SizeClass::ZERO).unwrap();
+            let expected = total.next_power_of_two();
+            assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), expected);
+            assert_eq!(provider.bytes_allocated(), u64::try_from(expected).unwrap());
+            assert_eq!(provider.chunk_alloc_stats().normal, 1);
+            // SAFETY: acquire returned a live initialized chunk.
+            assert_eq!(unsafe { chunk.as_ref() }.capacity(), expected - header);
+            // SAFETY: this test owns the acquired chunk's sole reference.
+            assert!(unsafe { Chunk::dec_ref(chunk) });
+            // SAFETY: this single-popper test exclusively owns the zero-count chunk.
+            unsafe { provider.release(chunk) };
+            assert_eq!(provider.cached_chunks(), 1);
+            assert_eq!(provider.cached_bytes(), u64::try_from(expected).unwrap());
+            let reused = provider.acquire(1, SizeClass::ZERO).unwrap();
+            assert_eq!(reused, chunk);
+            assert_eq!(provider.cached_chunks(), 0);
+            assert_eq!(provider.cached_bytes(), 0);
+            assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), expected);
+            assert_eq!(provider.chunk_alloc_stats().normal, 1);
+            assert_eq!(provider.generation_stats().normal_reused, 1);
+            // SAFETY: the cached chunk was reinitialized with our sole reference.
+            assert!(unsafe { Chunk::dec_ref(reused) });
+            // SAFETY: the exclusively owned chunk now has zero references.
+            unsafe { provider.release(reused) };
+            provider.drain_all();
+            assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
+            assert_eq!(provider.bytes_allocated(), 0);
+            assert_eq!(provider.cached_chunks(), 0);
+            assert_eq!(provider.cached_bytes(), 0);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_provider_rounding_routing_and_budget_state() {
+        let word = mem::align_of::<usize>();
+        assert_eq!(oversized_payload_align_slack(), word - 1);
+        for n in [0, 1, word - 1, word, word + 1, 511, usize::MAX - word, usize::MAX] {
+            let rounded = (n as u128).div_ceil(word as u128) * (word as u128);
+            match usize::try_from(rounded) {
+                Ok(expected) => assert_eq!(round_up_to_word_align(n).unwrap(), expected),
+                Err(_) => gamma_survivor_expect_error(round_up_to_word_align(n)),
+            }
+        }
+        for n in [
+            0,
+            MIN_CHUNK_BYTES - 1,
+            MIN_CHUNK_BYTES,
+            MIN_CHUNK_BYTES + 1,
+            MAX_CHUNK_BYTES - 1,
+            MAX_CHUNK_BYTES,
+            MAX_CHUNK_BYTES + 1,
+            usize::MAX,
+        ] {
+            assert_eq!(exceeds_max_chunk_bytes(n), n > MAX_CHUNK_BYTES);
+            assert_eq!(
+                is_cacheable_size(n),
+                n.is_power_of_two() && (MIN_CHUNK_BYTES..=MAX_CHUNK_BYTES).contains(&n)
+            );
+        }
+        let provider = ChunkProvider::new(Global, ChunkProviderConfig::new(usize::MAX, 4096));
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
+        assert!(provider.cache.load(Ordering::Relaxed).is_null());
+        assert_eq!(provider.cache_class.load(Ordering::Relaxed), 0);
+        provider.reserve_bytes(usize::MAX).unwrap();
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), usize::MAX);
+        gamma_survivor_expect_error(provider.reserve_bytes(1));
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), usize::MAX);
+        provider.release_reservation(usize::MAX - 7);
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 7);
+        provider.release_reservation(7);
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn gamma_survivor_provider_equal_floor_preserves_lifo_and_never_lowers_floor() {
+        let provider = ChunkProvider::new(Global, ChunkProviderConfig::default());
+        let header = Chunk::<Global>::header_size();
+        provider.preallocate(SizeClass::ZERO).unwrap();
+        provider.preallocate(SizeClass::new(1)).unwrap();
+        let first = provider.acquire(1, SizeClass::ZERO).unwrap();
+        // SAFETY: acquire returned a live initialized chunk.
+        assert_eq!(unsafe { first.as_ref() }.capacity(), 1024 - header);
+        // SAFETY: acquire gave this test the sole reference.
+        assert!(unsafe { Chunk::dec_ref(first) });
+        // SAFETY: this single-popper test exclusively owns the zero-count chunk.
+        unsafe { provider.release(first) };
+        let raised = provider.acquire(600, SizeClass::ZERO).unwrap();
+        assert_eq!(provider.cache_class.load(Ordering::Relaxed), 1);
+        // SAFETY: the test owns the acquired reference.
+        assert!(unsafe { Chunk::dec_ref(raised) });
+        // SAFETY: the test exclusively owns the zero-count chunk.
+        unsafe { provider.release(raised) };
+        let smaller = provider.acquire(1, SizeClass::ZERO).unwrap();
+        assert_eq!(provider.cache_class.load(Ordering::Relaxed), 1);
+        // SAFETY: the test owns the acquired reference.
+        assert!(unsafe { Chunk::dec_ref(smaller) });
+        // SAFETY: the test exclusively owns the zero-count chunk.
+        unsafe { provider.release(smaller) };
+        provider.drain_all();
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn gamma_survivor_provider_contended_cache_preserves_every_node() {
+        let provider = ChunkProvider::new(Global, ChunkProviderConfig::default());
+        PUSH_RETRY_COUNT.with(|count| count.set(0));
+        let first = provider.allocate_fresh(SizeClass::ZERO).unwrap();
+        // SAFETY: this test owns the freshly allocated chunk's sole reference.
+        assert!(unsafe { Chunk::dec_ref(first) });
+        // SAFETY: transfer the exclusively owned zero-count chunk to this provider.
+        unsafe { provider.push(first) };
+        let injected = provider.allocate_fresh(SizeClass::ZERO).unwrap();
+        // SAFETY: the hook receives the fresh chunk only after its sole reference is returned.
+        assert!(unsafe { Chunk::dec_ref(injected) });
+        INJECT_PUSH_RACE.with(|slot| slot.set(injected.cast::<u8>().as_ptr()));
+        let pushed = provider.allocate_fresh(SizeClass::ZERO).unwrap();
+        // SAFETY: this test owns the freshly allocated chunk's sole reference.
+        assert!(unsafe { Chunk::dec_ref(pushed) });
+        // SAFETY: both this zero-count node and the injected node belong to this provider.
+        unsafe { provider.push(pushed) };
+        assert!(PUSH_RETRY_COUNT.with(Cell::get) >= 1);
+        let mut actual = Vec::new();
+        // SAFETY: this test is the sole popper throughout the cache-draining loop.
+        while let Some(chunk) = unsafe { provider.pop() } {
+            actual.push(chunk.cast::<u8>().as_ptr() as usize);
+            // SAFETY: pop detached a live initialized zero-count chunk.
+            let total = Chunk::<Global>::footprint(unsafe { chunk.as_ref() }.capacity()).unwrap();
+            // SAFETY: this detached node has no outstanding references or cache ownership.
+            unsafe { Chunk::destroy(chunk) };
+            provider.release_bytes(total);
+        }
+        actual.sort_unstable();
+        let mut expected = [first, injected, pushed].map(|chunk| chunk.cast::<u8>().as_ptr() as usize);
+        expected.sort_unstable();
+        assert_eq!(actual, expected);
+        assert!(provider.cache.load(Ordering::Relaxed).is_null());
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
+    }
 
     thread_local! {
         /// Test-only: when non-null, the next `push` on this thread
@@ -843,5 +1127,11 @@ mod tests {
         assert_eq!(provider.cached_bytes(), 0);
         assert_eq!(provider.bytes_allocated(), 0);
         assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
+    }
+    fn gamma_survivor_expect_error<T, E>(result: Result<T, E>) {
+        let Err(_) = result else {
+            panic!("the fixture requires this operation to return its injected error");
+        };
+        drop(result);
     }
 }

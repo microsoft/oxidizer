@@ -42,7 +42,9 @@ impl<T> SlotList<T> {
             let index = self.slots.len();
             self.slots.push(Slot {
                 value: None,
+                // #[gamma::skip(option.none_to_some, reason = "push_back overwrites previous with self.last before publishing this slot.")]
                 previous: None,
+                // #[gamma::skip(option.none_to_some, reason = "push_back overwrites next with None before publishing this slot.")]
                 next: None,
                 generation: 0,
             });
@@ -135,6 +137,42 @@ struct Slot<T> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn gamma_round2_removed_slot_clears_its_previous_link_before_reuse() {
+        let mut list = SlotList::new();
+        let first = list.push_back(13);
+        let second = list.push_back(17);
+        assert_eq!(list.slots[second.index].previous, Some(first.index));
+        assert_eq!(list.remove(second), Some(17));
+        assert_eq!(list.slots[second.index].previous, None);
+        assert_eq!(list.slots[second.index].value, None);
+        assert_eq!(list.pop_front(), Some(13));
+    }
+
+    #[test]
+    fn gamma_survivor_slot_generation_advances_on_every_reuse_and_rejects_all_stale_keys() {
+        let mut list = SlotList::new();
+        let mut stale = Vec::new();
+        for value in 0..5 {
+            let key = list.push_back(value);
+            assert_eq!(key.generation, value);
+            for old in &stale {
+                assert_eq!(list.get_mut(*old), None);
+                assert_eq!(list.remove(*old), None);
+            }
+            assert_eq!(list.remove(key), Some(value));
+            stale.push(key);
+        }
+        let first = list.push_back(7);
+        let middle = list.push_back(11);
+        let tail = list.push_back(13);
+        assert_eq!(list.remove_index_if(middle.index, |value| *value == 11), Some(11));
+        assert_eq!(list.pop_front(), Some(7));
+        assert_eq!(list.pop_front(), Some(13));
+        assert_eq!(list.remove(first), None);
+        assert_eq!(list.remove(tail), None);
+        assert!(list.is_empty());
+    }
     #[test]
     fn unlinking_preserves_order_and_reused_slots_reject_old_keys() {
         let mut list = SlotList::new();

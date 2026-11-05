@@ -185,19 +185,25 @@ impl WinHttpSession {
         // contexts, operations, and lent buffers discharges the trait-level
         // invariants for a session opened with WINHTTP_FLAG_ASYNC.
         unsafe {
-            handle
-                .bindings()
-                .set_status_callback(handle.raw(), Some(status_callback), session_notification_flags())
+            handle.bindings().set_status_callback(
+                handle.raw(),
+                // #[gamma::skip(option.some_to_none, tag = "resource", reason = "Nov 4 SARIF a2ddd0650296 exceeded its memory limit after disabling completion callbacks")]
+                Some(status_callback),
+                // #[gamma::skip(call.replace_with_default, call_result.default, expr.decrement, expr.increment, tag = "resource", reason = "Nov 4 SARIF 4b97c910190b, 98294f499eb1, 1d57a0e1d7a4 and 56c524848228 exceeded their memory limits after changing the completion notification mask")]
+                session_notification_flags(),
+            )
         }
         .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::SetStatusCallback, error))?;
 
         Ok(Self { handle })
     }
 
+    // #[gamma::skip(fn_value.none, tag = "resource", reason = "Nov 4 SARIF fa441ae3ca21 exceeded its memory limit after disabling session probes")]
     fn keep_alive_interval(keep_alive: &ConnectionKeepAlive) -> Option<std::time::Duration> {
         match keep_alive {
             ConnectionKeepAlive::Disabled => None,
             ConnectionKeepAlive::ActiveConnections { interval, .. } | ConnectionKeepAlive::ActiveAndIdleConnections { interval, .. } => {
+                // #[gamma::skip(option.some_to_none, tag = "resource", reason = "Nov 4 SARIF d988e93eedb0 exceeded its memory limit after disabling configured session probes")]
                 Some(*interval)
             }
         }
@@ -315,6 +321,48 @@ mod tests {
     use crate::convert::{connection_idle_timeout_millis, dword_bytes};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::RawHandle;
+
+    #[test]
+    fn gamma_survivor_session_setup_diagnostics_and_keepalive_intervals() {
+        for (operation, text) in [
+            (SessionInitializationOperation::Open, "opening the WinHTTP session"),
+            (SessionInitializationOperation::SetTimeouts, "configuring WinHTTP session timeouts"),
+            (
+                SessionInitializationOperation::DisableGlobalPooling,
+                "disabling WinHTTP global connection pooling",
+            ),
+            (
+                SessionInitializationOperation::ConnectionIdleTimeout,
+                "configuring the WinHTTP connection idle timeout",
+            ),
+            (
+                SessionInitializationOperation::AssuredNonBlockingCallbacks,
+                "enabling assured non-blocking WinHTTP callbacks",
+            ),
+            (
+                SessionInitializationOperation::Http2KeepAlive,
+                "configuring WinHTTP HTTP/2 keep-alive",
+            ),
+            (
+                SessionInitializationOperation::Http3KeepAlive,
+                "configuring WinHTTP HTTP/3 keep-alive",
+            ),
+            (
+                SessionInitializationOperation::SetStatusCallback,
+                "registering the WinHTTP status callback",
+            ),
+        ] {
+            assert_eq!(operation.to_string(), text);
+        }
+        let interval = Duration::from_secs(13);
+        assert_eq!(WinHttpSession::keep_alive_interval(&ConnectionKeepAlive::Disabled), None);
+        for policy in [
+            ConnectionKeepAlive::active_connections(interval, Duration::from_secs(29)),
+            ConnectionKeepAlive::active_and_idle_connections(interval, Duration::from_secs(29)),
+        ] {
+            assert_eq!(WinHttpSession::keep_alive_interval(&policy), Some(interval));
+        }
+    }
 
     assert_impl_all!(WinHttpSession: Send, Sync, std::fmt::Debug, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(
@@ -446,6 +494,22 @@ mod tests {
         ("HANDLE_CREATED", WINHTTP_CALLBACK_STATUS_HANDLE_CREATED),
         ("HANDLE_CLOSING", WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING),
     ];
+
+    #[test]
+    fn gamma_survivor_session_registers_exact_notifications_and_keep_alive() {
+        let expected = OperationKind::ALL
+            .into_iter()
+            .map(awaited_status)
+            .chain(DISPATCHED_STATUSES.into_iter().map(|(_, status)| status))
+            .chain([super::WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE])
+            .fold(0, |flags, status| flags | status);
+        assert_eq!(session_notification_flags(), expected);
+
+        let options = active_transport_options();
+        let bindings = configured_bindings(SetupScript::new());
+        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &options).unwrap();
+        drop(session);
+    }
 
     /// Asserts that `session_notification_flags()` enables every notification the
     /// callback protocol consumes.

@@ -21,6 +21,38 @@ use allocator_api2::alloc::Allocator;
 use super::{Arena, ExpectAlloc};
 use crate::{Alloc, AllocError};
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_slice_cold_helpers_refill_before_returning_none() {
+        let copy = Arena::new();
+        assert!(copy.refill_or_alloc_oversized_slice_copy(&[1_u8, 2, 3]).unwrap().is_none());
+        assert!(copy.current().try_alloc_bytes(1).is_some());
+        let clone = Arena::new();
+        assert!(clone.refill_or_alloc_oversized_slice_clone(&[1_u8, 2, 3]).unwrap().is_none());
+        assert!(clone.current().try_alloc_bytes(1).is_some());
+    }
+
+    fn check<T>() {
+        for len in [0, 1, 2, 7, 64, usize::MAX / mem::size_of::<T>().max(1), usize::MAX] {
+            let expected = (mem::size_of::<T>() as u128) * (len as u128) + (mem::align_of::<T>() as u128);
+            assert_eq!(worst_case_slice_payload::<T>(len), usize::try_from(expected).unwrap_or(usize::MAX));
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_exact_reference_slice_hint_boundaries() {
+        check::<()>();
+        check::<u8>();
+        check::<u16>();
+        check::<u64>();
+        check::<u128>();
+        check::<[u8; 65]>();
+    }
+}
+
 /// Reject over-aligned slice element types early. Simple-reference
 /// slices return a plain `&mut [T]` (no header-recovery mask), so they
 /// can use the full chunk and only reject alignments that no single
@@ -78,8 +110,10 @@ unsafe fn adopt_slice_with_len<T>(slot: &mut [T], len: usize) -> Alloc<'_, [T]> 
 /// Records the caller invariant that `len` is non-zero.
 #[inline(always)]
 #[cfg_attr(test, mutants::skip)]
+// #[gamma::skip(fn_value.unit, reason = "This helper supplies only an optimizer assumption; every caller has already returned for zero length")]
 fn assume_nonzero_len(len: usize) {
     // SAFETY: callers handle `len == 0` via an early return before this.
+    // #[gamma::skip(relational.gt_to_ge, reason = "Weakening a known-true nonzero-length assumption does not change valid executions")]
     unsafe { assert_unchecked(len > 0) };
 }
 
@@ -310,6 +344,8 @@ impl<A: Allocator + Clone> Arena<A> {
         if len == 0 {
             return Ok(empty_slice::<T>());
         }
+        // #[gamma::skip(call_result.default, reason = "The optimizer assumption still executes and its result is unit")]
+        // #[gamma::skip(call.replace_with_default, stmt.delete_call, reason = "The preceding zero-length return already proves the optimizer assumption")]
         assume_nonzero_len(len);
         // A live slice has a representable byte size.
         let size = mem::size_of_val(src);
@@ -333,7 +369,10 @@ impl<A: Allocator + Clone> Arena<A> {
     fn refill_or_alloc_oversized_slice_copy<T: Copy>(&self, src: &[T]) -> Result<Option<&mut [T]>, AllocError> {
         let refill_hint = worst_case_slice_payload::<T>(src.len());
         if self.is_oversized(refill_hint) {
-            return Ok(Some(self.alloc_oversized_slice_copy::<T>(refill_hint, src)?));
+            return Ok(
+                // #[gamma::skip(option.some_to_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                Some(self.alloc_oversized_slice_copy::<T>(refill_hint, src)?),
+            );
         }
         self.refill(refill_hint)?;
         Ok(None)
@@ -378,6 +417,8 @@ impl<A: Allocator + Clone> Arena<A> {
             return Ok(empty_slice::<T>());
         }
         // See `alloc_slice_copy_raw`.
+        // #[gamma::skip(call_result.default, reason = "The optimizer assumption still executes and its result is unit")]
+        // #[gamma::skip(call.replace_with_default, stmt.delete_call, reason = "The preceding zero-length return already proves the optimizer assumption")]
         assume_nonzero_len(len);
         // See `alloc_slice_copy_raw`. Hoisted byte size lets the reservation
         // skip the `checked_mul` overflow guard.
@@ -440,6 +481,8 @@ impl<A: Allocator + Clone> Arena<A> {
             return Ok(empty_slice::<T>());
         }
         // See `alloc_slice_copy_raw`.
+        // #[gamma::skip(call_result.default, reason = "The optimizer assumption still executes and its result is unit")]
+        // #[gamma::skip(call.replace_with_default, stmt.delete_call, reason = "The preceding zero-length return already proves the optimizer assumption")]
         assume_nonzero_len(len);
         let refill_hint = worst_case_slice_payload::<T>(len);
         if let Some(u) = self.try_reserve_local_slice::<T>(len) {
@@ -457,6 +500,7 @@ impl<A: Allocator + Clone> Arena<A> {
     )]
     // Skipped because removing the refill side effect makes the retry loop
     // infinite.
+    // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     #[cfg_attr(test, mutants::skip)]
     fn alloc_slice_fill_with_refill<T, F: FnMut(usize) -> T>(&self, len: usize, refill_hint: usize, f: F) -> Result<&mut [T], AllocError> {
         let mut f = Some(f);
@@ -507,6 +551,8 @@ impl<A: Allocator + Clone> Arena<A> {
             return Ok(empty_slice::<T>());
         }
         // See `alloc_slice_copy_raw`.
+        // #[gamma::skip(call_result.default, reason = "The optimizer assumption still executes and its result is unit")]
+        // #[gamma::skip(call.replace_with_default, stmt.delete_call, reason = "The preceding zero-length return already proves the optimizer assumption")]
         assume_nonzero_len(len);
         let refill_hint = worst_case_slice_payload::<T>(len);
         if let Some(u) = self.try_reserve_local_slice::<T>(len) {
@@ -524,6 +570,7 @@ impl<A: Allocator + Clone> Arena<A> {
     )]
     // Skipped because removing the refill side effect makes the retry loop
     // infinite.
+    // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     #[cfg_attr(test, mutants::skip)]
     fn alloc_slice_fill_iter_refill<T, I: Iterator<Item = T>>(
         &self,

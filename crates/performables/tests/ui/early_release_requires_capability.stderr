@@ -11,8 +11,8 @@ note: associated function defined here
   |            ^^^^^^^^^^^^^
 help: provide the argument
   |
-7 |     M::mutex_release(guard, /* performables::sync::sealed::Release */);
-  |                           +++++++++++++++++++++++++++++++++++++++++++
+7 |     M::mutex_release(guard, /* Release */);
+  |                           +++++++++++++++
 
 error[E0061]: this function takes 2 arguments but 1 argument was supplied
   --> tests/ui/early_release_requires_capability.rs:11:5
@@ -27,8 +27,8 @@ note: associated function defined here
    |            ^^^^^^^^^^^^^^^^^^^
 help: provide the argument
    |
-11 |     M::rwlock_release_read(guard, /* performables::sync::sealed::Release */);
-   |                                 +++++++++++++++++++++++++++++++++++++++++++
+11 |     M::rwlock_release_read(guard, /* Release */);
+   |                                 +++++++++++++++
 
 error[E0061]: this function takes 2 arguments but 1 argument was supplied
   --> tests/ui/early_release_requires_capability.rs:15:5
@@ -43,5 +43,5 @@ note: associated function defined here
    |            ^^^^^^^^^^^^^^^^^^^^
 help: provide the argument
    |
-15 |     M::rwlock_release_write(guard, /* performables::sync::sealed::Release */);
-   |                                  +++++++++++++++++++++++++++++++++++++++++++
+15 |     M::rwlock_release_write(guard, /* Release */);
+   |                                  +++++++++++++++

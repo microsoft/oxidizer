@@ -114,6 +114,7 @@ impl ClockControl {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
+    // #[gamma::skip(fn_value.default, reason = "ClockControl derives Default over the same Arc<Mutex<State>> construction.")]
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(State::default())),
@@ -558,6 +559,7 @@ impl State {
 
             // No need to advance, break from the loop
             if advance == Duration::ZERO {
+                // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 break;
             }
 
@@ -568,11 +570,13 @@ impl State {
                 "positive forward advancement must move the clock instant"
             );
             self.auto_advance_total = self.auto_advance_total.saturating_add(advance);
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             self.timers.advance_timers(self.instant, ready);
         }
     }
 
     fn advance_time(&mut self, duration: Duration, flow: TimeFlow) {
+        // #[gamma::skip(cond.always_false, reason = "Adding or subtracting Duration::ZERO leaves both timestamps unchanged and cannot overflow.")]
         if duration == Duration::ZERO {
             return;
         }
@@ -614,6 +618,109 @@ static OUTSIDE_RANGE_MESSAGE: &str =
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_explicit_auto_advance_overrides_the_configured_increment() {
+        let mut state = super::State {
+            auto_advance: std::time::Duration::from_millis(3),
+            ..super::State::default()
+        };
+        let initial = state.instant;
+        let mut ready = super::ReadyWakers::new();
+        state.auto_advance(Some(std::time::Duration::from_millis(7)), &mut ready);
+        assert_eq!(state.instant, initial + std::time::Duration::from_millis(7));
+        assert_eq!(state.auto_advance_total, std::time::Duration::from_millis(7));
+        state.auto_advance(None, &mut ready);
+        assert_eq!(state.instant, initial + std::time::Duration::from_millis(10));
+        assert_eq!(state.auto_advance_total, std::time::Duration::from_millis(10));
+        assert!(ready.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_delay_and_periodic_timer_complete_at_a_deadline_before_driver_dispatch() {
+        use std::pin::pin;
+        use std::task::{Context, Waker};
+        use std::time::Duration;
+
+        use super::ClockControl;
+
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let mut delay = pin!(clock.delay(Duration::from_millis(4)));
+        let mut timer = crate::Timer::new(&clock, Duration::from_millis(4));
+        let mut next = pin!(timer.next());
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(delay.as_mut().poll(&mut context).is_pending());
+        assert!(next.as_mut().poll(&mut context).is_pending());
+        {
+            // Model precise time reaching the deadline before the timer driver runs.
+            let mut state = control.state.lock().unwrap();
+            state.instant += Duration::from_millis(4);
+            assert_eq!(state.timers.len(), 2);
+        }
+        assert!(delay.as_mut().poll(&mut context).is_ready());
+        assert!(next.as_mut().poll(&mut context).is_ready());
+        assert_eq!(control.timers_len(), 0);
+    }
+
+    #[test]
+    fn nov4_exact_delay_deadline_does_not_clone_a_replacement_waker() {
+        use std::pin::Pin;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::task::{Context, RawWaker, RawWakerVTable, Waker};
+        use std::time::Duration;
+
+        static CLONES: AtomicUsize = AtomicUsize::new(0);
+        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone_waker, inert, inert, inert);
+        unsafe fn clone_waker(_: *const ()) -> RawWaker {
+            CLONES.fetch_add(1, Ordering::Relaxed);
+            RawWaker::new(std::ptr::null(), &VTABLE)
+        }
+        unsafe fn inert(_: *const ()) {}
+
+        // SAFETY: the callbacks never dereference data or own resources; cloning only counts calls.
+        let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
+        let control = super::ClockControl::new();
+        let clock = control.to_clock();
+        let mut delay = clock.delay(Duration::from_secs(3));
+        let mut cx = Context::from_waker(&waker);
+        assert!(Pin::new(&mut delay).poll(&mut cx).is_pending());
+        let before = CLONES.load(Ordering::Relaxed);
+        {
+            let mut state = control.state.lock().unwrap();
+            state.instant += Duration::from_secs(3);
+            assert_eq!(state.timers.len(), 1);
+        }
+        assert!(Pin::new(&mut delay).poll(&mut cx).is_ready());
+        assert_eq!(CLONES.load(Ordering::Relaxed), before);
+        assert_eq!(control.timers_len(), 0);
+    }
+
+    #[test]
+    fn nov4_exact_periodic_deadline_uses_the_first_precise_observation() {
+        use std::pin::pin;
+        use std::task::{Context, Poll, Waker};
+        use std::time::Duration;
+
+        let control = super::ClockControl::new();
+        let clock = control.to_clock();
+        let mut timer = crate::Timer::new(&clock, Duration::from_secs(3));
+        let mut next = pin!(timer.next());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(next.as_mut().poll(&mut cx).is_pending());
+        let deadline = {
+            let mut state = control.state.lock().unwrap();
+            state.instant += Duration::from_secs(3);
+            state.auto_advance = Duration::from_nanos(1);
+            assert_eq!(state.timers.len(), 1);
+            state.instant
+        };
+        let Poll::Ready(tick) = next.as_mut().poll(&mut cx) else {
+            panic!("a timer at its exact deadline must be ready");
+        };
+        assert_eq!(tick.observed_at(), deadline);
+        assert_eq!(control.timers_len(), 0);
+    }
+
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;

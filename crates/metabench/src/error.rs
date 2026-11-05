@@ -215,6 +215,78 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_survivor_error_messages_and_json_causes() {
+        use std::error::Error as _;
+        for (error, expected) in [
+            (
+                Error::ConflictingOutputOptions,
+                "--no-output, --output, --export-json, and --export-md cannot conflict",
+            ),
+            (
+                Error::ConflictingBaselineOptions,
+                "--no-baseline cannot be combined with --baseline",
+            ),
+            (Error::StaleWorkerMarker, "refusing an inherited or stale internal worker marker"),
+            (
+                Error::PerfWorkloadNotMeasured,
+                "the perf worker did not execute its generated probe",
+            ),
+            (
+                Error::VtuneWorkloadNotMeasured,
+                "the vtune worker did not execute its generated probe",
+            ),
+            (
+                Error::MultipleModeFailures(vec!["first".into(), "second".into()]),
+                "multiple benchmark failures occurred\n- first\n- second",
+            ),
+            (
+                Error::AmbiguousArguments(vec!["one".into(), "two".into()]),
+                "arguments after -- are ambiguous with multiple engines selected: one two",
+            ),
+        ] {
+            assert_eq!(error.to_string(), expected);
+        }
+        for report in [false, true] {
+            let source = serde_json::from_str::<serde_json::Value>("!").unwrap_err();
+            let expected = source.to_string();
+            let error = if report {
+                Error::ReportJson {
+                    path: "report.json".into(),
+                    source,
+                }
+            } else {
+                Error::ArtifactJson {
+                    path: "artifact.json".into(),
+                    source,
+                }
+            };
+            assert_eq!(error.source().unwrap().to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_error_formatting_propagates_writer_failure() {
+        struct FailsAfter(usize);
+        impl std::fmt::Write for FailsAfter {
+            fn write_str(&mut self, s: &str) -> std::fmt::Result {
+                if s.len() > self.0 {
+                    return Err(std::fmt::Error);
+                }
+                self.0 -= s.len();
+                Ok(())
+            }
+        }
+        for error in [
+            Error::AmbiguousArguments(vec!["one".into(), "two".into()]),
+            Error::MultipleModeFailures(vec!["one".into(), "two".into()]),
+        ] {
+            for budget in 0..error.to_string().len() {
+                std::fmt::write(&mut FailsAfter(budget), format_args!("{error}")).unwrap_err();
+            }
+        }
+    }
+
+    #[test]
     fn probe_diagnostics_escape_untrusted_messages() {
         let message = "unsupported option --bad\n\u{1b}[31m\r\t\u{061c}\u{200e}\u{200f}\u{202e}\u{2066}";
         let error = Error::Probe(message.to_owned());

@@ -22,6 +22,7 @@ impl Buf for BytesView {
     #[cfg(feature = "std")]
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn chunks_vectored<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
+        // #[gamma::skip(cond.always_false, reason = "An empty output already makes slice_count zero, performs no loop iterations, and returns zero")]
         if dst.is_empty() {
             return 0;
         }

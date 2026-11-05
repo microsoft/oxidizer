@@ -129,7 +129,10 @@ unsafe impl<const SIZE: usize> Sync for BlockHandle<SIZE> {}
 fn new_block_pool<const SIZE: usize>() -> Pool<NeutralBlock<SIZE>> {
     const TARGET_CHUNK_BYTES: usize = 64 * 1024;
     #[expect(clippy::cast_possible_truncation, reason = "slot count is bounded by TARGET / SIZE, always small")]
-    let slots_per_chunk = (TARGET_CHUNK_BYTES / SIZE).max(1) as u32;
+    let slots_per_chunk = (TARGET_CHUNK_BYTES / SIZE).max(
+        // #[gamma::skip(literal.int_decrement, reason = "Every instantiated block size is at most TARGET_CHUNK_BYTES, so the quotient is already at least one")]
+        1,
+    ) as u32;
     Pool::builder().chunk_size(slots_per_chunk).build()
 }
 
@@ -203,9 +206,19 @@ impl GlobalPoolInner {
         if min_bytes <= 1024 {
             allocate_uniform::<1024>(&self.pool_1k, &BLOCK_REF_FNS_1K, min_bytes)
         } else if min_bytes <= 4096 {
-            allocate_uniform::<4096>(&self.pool_4k, &BLOCK_REF_FNS_4K, min_bytes)
+            allocate_uniform::<4096>(
+                &self.pool_4k,
+                &BLOCK_REF_FNS_4K,
+                // #[gamma::skip(expr.decrement, reason = "This branch has 1025..=4096 requested bytes; subtracting one still rounds to the same single 4096-byte block")]
+                min_bytes,
+            )
         } else if min_bytes <= 16_384 {
-            allocate_uniform::<16_384>(&self.pool_16k, &BLOCK_REF_FNS_16K, min_bytes)
+            allocate_uniform::<16_384>(
+                &self.pool_16k,
+                &BLOCK_REF_FNS_16K,
+                // #[gamma::skip(expr.decrement, reason = "This branch has 4097..=16384 requested bytes; subtracting one still rounds to the same single 16384-byte block")]
+                min_bytes,
+            )
         } else {
             allocate_uniform::<65_536>(&self.pool_64k, &BLOCK_REF_FNS_64K, min_bytes)
         }
@@ -224,6 +237,7 @@ fn allocate_uniform<const SIZE: usize>(
 
     // The overwhelmingly common reservation fits in a single block. Building the buffer directly
     // from that block skips the iterator/collect/sum machinery the multi-block path requires.
+    // #[gamma::skip(cond.always_false, literal.int_decrement, reason = "The general iterator path also creates exactly one block for a one-block reservation, with identical capacity, initialized length, ownership, and metrics")]
     if block_count == 1 {
         // Scope the pool lock to block allocation only. The block carries its own handle back to
         // the pool, so the buffer can be built without holding the lock, keeping the critical
@@ -254,6 +268,7 @@ fn allocate_block<const SIZE: usize>(pool: &Pool<NeutralBlock<SIZE>>, vtable: &'
             ref_count: AtomicUsize::new(1),
         };
 
+        // #[gamma::skip(call_result.default, reason = "Block initialization still executes and its result is unit")]
         in_place_initialize_block(place, meta);
 
         handle
@@ -441,7 +456,7 @@ unsafe impl<const SIZE: usize> BlockRefDynamic for BlockMeta<SIZE> {
 
         // Ensure that we have observed all writes into the block from other threads.
         // On x86 this does nothing but on weaker memory models writes could be delayed.
-        atomic::fence(atomic::Ordering::Acquire);
+        crate::sync_fence::fence(atomic::Ordering::Acquire);
 
         // Copy the self-handle out before we relinquish `state`: reconstructing and
         // dropping the box below runs the block's destructor, which invalidates it.

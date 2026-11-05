@@ -212,14 +212,24 @@ fn reject_crossing_polls(polls: &mut [Poll]) {
         let mut maximum = polls[indices[first]].end;
         let mut active = BTreeSet::new();
         let mut crossing = false;
-        while end < indices.len() && (end == first || polls[indices[end]].first < maximum) {
+        while
+        // #[gamma::skip(cond.negate, relational.lt_to_gt, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        end < indices.len()
+            && (
+                // #[gamma::skip(logical.or_remove_left, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                end == first || polls[indices[end]].first < maximum
+            )
+        {
             let poll = &polls[indices[end]];
-            while active.first().is_some_and(|(finish, _)| *finish <= poll.first) {
+            while
+            // #[gamma::skip(cond.negate, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            active.first().is_some_and(|(finish, _)| *finish <= poll.first) {
                 active.pop_first();
             }
             crossing |= active.first().is_some_and(|(finish, _)| *finish < poll.end);
             active.insert((poll.end, indices[end]));
             maximum = maximum.max(poll.end);
+            // #[gamma::skip(stmt.delete_assign, literal.int_decrement, tag = "timeout", reason = "November 6 campaign 4d16e3a285c1 and 426dae0c4f59: disabling this cursor advance exceeded the timeout")]
             end += 1;
         }
         if crossing {
@@ -227,6 +237,7 @@ fn reject_crossing_polls(polls: &mut [Poll]) {
                 polls[index].valid = false;
             }
         }
+        // #[gamma::skip(stmt.delete_assign, assign_value.default, tag = "timeout", reason = "November 6 campaign 754d53826b54 and b0bbc1ec39f4: disabling this group advance exceeded the timeout")]
         first = end;
     }
 }
@@ -355,22 +366,28 @@ fn assign(thread: &Thread<'_>, polls: &[Poll], candidates: &[usize], evidence: &
     for (position, &index) in thread.indices.iter().enumerate() {
         while let Some(&(end, candidate)) = endings.first() {
             if end > position {
+                // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 break;
             }
 
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             endings.remove(&(end, candidate));
             active.remove(&candidate);
         }
         while let Some(&candidate) = candidates.get(next) {
             let poll = &polls[candidate];
             if poll.first > position {
+                // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 break;
             }
             if poll.end > position {
                 active.insert(candidate);
                 endings.insert((poll.end, candidate));
             }
-            next += 1;
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            next +=
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
         }
         let Some(&candidate) = active.first() else {
             continue;
@@ -428,6 +445,126 @@ mod tests {
             valid: true,
             boundary: Boundary { start: None, finish: None },
         }
+    }
+
+    #[test]
+    fn gamma_survivor_attribution_open_poll_uses_actual_start_and_continuity() {
+        let mut events = [
+            runtime_event(EventKind::TaskPollFinished, 10, 1),
+            runtime_event(EventKind::TaskPollStarted, 20, 0),
+            runtime_event(EventKind::TaskPollStarted, 25, 0),
+        ];
+        for (index, event) in events.iter_mut().enumerate() {
+            event.sequence = EventSequence::new(u64::try_from(index + 1).unwrap());
+        }
+        let thread = Thread {
+            id: 1,
+            events: &events,
+            indices: vec![0, 1, 2],
+            breaks: vec![0, 0, 0],
+            ordered_time: true,
+        };
+        let observations = HashMap::from([(((1, 1), 20, 1), 30)]);
+        let totals = HashMap::from([(1, 3)]);
+        let result = open_poll(&thread, 1, true, &observations, &totals).unwrap();
+        assert_eq!(
+            (result.first, result.end, result.started_at, result.finished_at, result.valid),
+            (2, 3, 20, 30, true)
+        );
+        assert_eq!((result.boundary.start, result.boundary.finish), (Some(1), None));
+        assert!(open_poll(&thread, 1, true, &HashMap::from([(((1, 1), 20, 1), 20)]), &totals).is_none());
+        let broken = Thread {
+            breaks: vec![0, 0, 1],
+            ..thread
+        };
+        assert!(!open_poll(&broken, 1, true, &observations, &totals).unwrap().valid);
+        let mut ordinary = runtime_event(EventKind::TaskPollStarted, 20, 0);
+        ordinary.payload = EventPayload::Object(seismograph::recorder::event::ObjectId::new(1));
+        let ordinary_events = [ordinary];
+        let ordinary_thread = Thread {
+            id: 1,
+            events: &ordinary_events,
+            indices: vec![0],
+            breaks: vec![0],
+            ordered_time: true,
+        };
+        assert!(open_poll(&ordinary_thread, 0, true, &observations, &totals).is_none());
+        assert!(closed_poll(&ordinary_thread, (1, 1), None, 0, true).is_none());
+        let mut no_worker = runtime_event(EventKind::TaskPollStarted, 20, 0);
+        if let EventPayload::Runtime(runtime) = &mut no_worker.payload {
+            runtime.worker_id = None;
+        }
+        let events = [no_worker];
+        let thread = Thread {
+            id: 1,
+            events: &events,
+            indices: vec![0],
+            breaks: vec![0],
+            ordered_time: true,
+        };
+        assert!(open_poll(&thread, 0, true, &observations, &totals).is_none());
+    }
+
+    #[test]
+    fn gamma_survivor_crossing_rejection_expires_nested_polls_and_extends_groups() {
+        let mut polls = [poll(0, 10), poll(1, 3), poll(4, 6), poll(10, 12), poll(11, 13), poll(20, 21)];
+        reject_crossing_polls(&mut polls);
+        assert_eq!(polls.map(|poll| poll.valid), [true, true, true, false, false, true]);
+        let mut polls = [poll(10, 15), poll(0, 5), poll(4, 11), poll(20, 21)];
+        polls[0].thread = 2;
+        reject_concurrent_task_polls(&mut polls);
+        assert_eq!(polls.map(|poll| poll.valid), [false, false, false, true]);
+    }
+
+    #[test]
+    fn gamma_survivor_assignment_removes_ended_polls_before_later_evidence() {
+        let events = (0..8).map(|i| runtime_event(EventKind::TaskPollStarted, i, 0)).collect::<Vec<_>>();
+        let thread = Thread {
+            id: 1,
+            events: &events,
+            indices: (0..8).collect(),
+            breaks: vec![0; 8],
+            ordered_time: true,
+        };
+        let polls = [
+            poll(1, 3),
+            Poll {
+                task: (1, 2),
+                ..poll(4, 6)
+            },
+        ];
+        let mut evidence = vec![Evidence::default(); 8];
+        assign(&thread, &polls, &[0, 1], &mut evidence);
+        assert_eq!(
+            evidence.iter().map(|item| item.task).collect::<Vec<_>>(),
+            [None, Some((1, 1)), Some((1, 1)), None, Some((1, 2)), Some((1, 2)), None, None]
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_attribution_keeps_later_threads_and_requires_complete_clock_and_policy() {
+        let mut ignored = runtime_event(EventKind::TaskPollStarted, 1, 0);
+        ignored.payload = EventPayload::Object(seismograph::recorder::event::ObjectId::new(1));
+        let mut start = runtime_event(EventKind::TaskPollStarted, 10, 0);
+        let mut inside = runtime_event(EventKind::TaskPollStarted, 15, 0);
+        inside.payload = EventPayload::Object(seismograph::recorder::event::ObjectId::new(1));
+        let mut finish = runtime_event(EventKind::TaskPollFinished, 20, 10);
+        for (index, event) in [&mut start, &mut inside, &mut finish].into_iter().enumerate() {
+            event.thread_id = ThreadId::new(2);
+            event.sequence = EventSequence::new(u64::try_from(index + 1).unwrap());
+        }
+        let mut events = Events {
+            clock: EventClock::ProcessMonotonic,
+            events: vec![ignored, start, inside, finish],
+            ..Events::default()
+        };
+        events.recording.runtime_tasks.enabled = true;
+        assert_eq!(infer(&events, None)[2].task, Some((1, 1)));
+        events.recording.runtime_tasks.event_sampling = seismograph::recorder::EventSampling::one_in(2).unwrap();
+        assert!(infer(&events, None)[2].task.is_none());
+        events.recording.runtime_tasks.event_sampling = seismograph::recorder::EventSampling::one_in(1).unwrap();
+        events.clock = EventClock::Unspecified;
+        assert!(infer(&events, None)[2].task.is_none());
     }
 
     #[test]

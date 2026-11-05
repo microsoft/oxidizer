@@ -114,7 +114,7 @@ unsafe impl BlockRefDynamic for BytesBlock {
 
         // Ensure that we have observed all writes into the block from other threads.
         // On x86 this does nothing but on weaker memory models writes could be delayed.
-        atomic::fence(atomic::Ordering::Acquire);
+        crate::sync_fence::fence(atomic::Ordering::Acquire);
 
         // SAFETY: No more references exist, we can resurrect the object inside a Box and drop.
         drop(unsafe { Box::from_raw(state_ptr.as_ptr()) });
@@ -187,9 +187,13 @@ impl Iterator for BytesBlockIterator {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let blocks_remaining = self.remaining.len().div_ceil(BlockSize::MAX as usize);
+        let blocks_remaining = bytes_block_count(self.remaining.len());
         (blocks_remaining, Some(blocks_remaining))
     }
+}
+
+fn bytes_block_count(remaining: usize) -> usize {
+    remaining.div_ceil(BlockSize::MAX as usize)
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -198,6 +202,47 @@ mod tests {
     use bytes::{BufMut, BytesMut};
 
     use super::*;
+
+    #[test]
+    fn gamma_round2_bytes_block_count_is_exact_at_the_maximum_block_boundary() {
+        let maximum = BlockSize::MAX as usize;
+        assert_eq!(bytes_block_count(0), 0);
+        assert_eq!(bytes_block_count(maximum - 1), 1);
+        assert_eq!(bytes_block_count(maximum), 1);
+        for (bytes, expected) in [
+            maximum.checked_add(1).map(|bytes| (bytes, 2)),
+            maximum.checked_mul(2).map(|bytes| (bytes, 2)),
+            maximum
+                .checked_mul(2)
+                .and_then(|bytes| bytes.checked_add(1))
+                .map(|bytes| (bytes, 3)),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert_eq!(bytes_block_count(bytes), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_bytes_state_clone_counts_and_iterator_exhaustion() {
+        let state = NonNull::from(Box::leak(Box::new(BytesBlock::new(Bytes::from_static(b"prime")))));
+        // SAFETY: This initialized Box was transferred into one dynamic owned reference.
+        assert_eq!(unsafe { state.as_ref() }.ref_count.load(atomic::Ordering::Relaxed), 1);
+        let clone = <BytesBlock as BlockRefDynamic>::clone(state);
+        // SAFETY: Both dynamic references keep the state live.
+        assert_eq!(unsafe { state.as_ref() }.ref_count.load(atomic::Ordering::Relaxed), 2);
+        <BytesBlock as BlockRefDynamic>::drop(clone);
+        // SAFETY: The original dynamic reference still owns the state.
+        assert_eq!(unsafe { state.as_ref() }.ref_count.load(atomic::Ordering::Relaxed), 1);
+        <BytesBlock as BlockRefDynamic>::drop(state);
+        let mut iterator = BytesBlockIterator::new(Bytes::from_static(b"abc"));
+        assert_eq!(iterator.size_hint(), (1, Some(1)));
+        assert_eq!(iterator.next().unwrap().as_ref(), b"abc");
+        assert_eq!(iterator.size_hint(), (0, Some(0)));
+        assert!(iterator.next().is_none());
+        assert!(iterator.next().is_none());
+    }
 
     #[test]
     fn test_bytes_to_view() {

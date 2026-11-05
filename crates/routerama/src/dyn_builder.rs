@@ -128,6 +128,7 @@ impl<X> fmt::Debug for DynBuilder<X> {
 }
 
 fn fmt_set(items: &[String]) -> String {
+    // #[gamma::skip(cond.always_false, reason = "For an empty slice the fallthrough performs zero loop iterations and appends the closing brace, returning the identical empty-set text; callers use only that text")]
     if items.is_empty() {
         return "{}".to_string();
     }

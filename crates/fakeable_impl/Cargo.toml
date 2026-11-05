@@ -34,6 +34,10 @@ all-features = true
 default = []
 mockall = []
 
+[[test]]
+name = "gamma_survivor_expansion"
+path = "tests/gamma_survivor_expansion.rs"
+
 [dependencies]
 proc-macro2 = { workspace = true }
 quote = { workspace = true }

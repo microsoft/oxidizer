@@ -166,7 +166,7 @@ pub fn scan_token_list_scalar(bytes: &[u8], empty: EmptyMembers) -> TokenListSca
 #[must_use]
 pub fn is_simple_uri_path_sse2(bytes: &[u8]) -> Option<bool> {
     #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
-    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && arch::is_x86_feature_detected!("sse2") {
+    if uri_backend_eligible(bytes, || arch::is_x86_feature_detected!("sse2")) {
         // SAFETY: runtime detection establishes SSE2 and the length check
         // satisfies the scanner's trailing-block precondition.
         return Some(unsafe { crate::x86::is_simple_uri_tail_sse2(bytes) });
@@ -189,7 +189,7 @@ pub fn is_simple_uri_path_sse2(bytes: &[u8]) -> Option<bool> {
 #[must_use]
 pub fn is_simple_uri_path_ssse3(bytes: &[u8]) -> Option<bool> {
     #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
-    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && arch::is_x86_feature_detected!("ssse3") {
+    if uri_backend_eligible(bytes, || arch::is_x86_feature_detected!("ssse3")) {
         // SAFETY: runtime detection establishes SSSE3 and the length check
         // satisfies the scanner's trailing-block precondition.
         return Some(unsafe { crate::x86::is_simple_uri_tail_ssse3(bytes) });
@@ -212,7 +212,7 @@ pub fn is_simple_uri_path_ssse3(bytes: &[u8]) -> Option<bool> {
 #[must_use]
 pub fn is_simple_uri_path_sse42(bytes: &[u8]) -> Option<bool> {
     #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
-    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && arch::is_x86_feature_detected!("sse4.2") {
+    if uri_backend_eligible(bytes, || arch::is_x86_feature_detected!("sse4.2")) {
         // SAFETY: runtime detection establishes SSE4.2 and the length
         // check satisfies the scanner's trailing-block precondition.
         return Some(unsafe { crate::x86::is_simple_uri_tail_sse42(bytes) });
@@ -234,19 +234,111 @@ pub fn is_simple_uri_path_sse42(bytes: &[u8]) -> Option<bool> {
 /// ```
 #[must_use]
 pub fn is_simple_uri_path_neon(bytes: &[u8]) -> Option<bool> {
-    #[cfg(all(feature = "std", target_arch = "aarch64"))]
-    if bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && arch::is_aarch64_feature_detected!("neon") {
-        // SAFETY: runtime detection establishes NEON and the length check
-        // satisfies the scanner's trailing-block precondition.
-        return Some(unsafe { crate::arm::is_simple_uri_tail(bytes) });
+    if bytes.len() < 16 || !uri::has_origin_relative_prefix(bytes) {
+        return None;
     }
-    let _ = bytes;
-    None
+    let scan = neon_uri_scanner()?;
+    // SAFETY: the provider establishes CPU support and the checks above provide a whole path vector.
+    Some(unsafe { scan(bytes) })
+}
+
+type UriScanner = unsafe fn(&[u8]) -> bool;
+
+#[inline]
+fn neon_uri_scanner() -> Option<UriScanner> {
+    #[cfg(all(test, feature = "std"))]
+    if let Some((available, scan)) = tests::NEON_URI_OVERRIDE.get() {
+        return available.then_some(scan as UriScanner);
+    }
+    #[cfg(all(feature = "std", target_arch = "aarch64"))]
+    {
+        arch::is_aarch64_feature_detected!("neon").then_some(crate::arm::is_simple_uri_tail as UriScanner)
+    }
+    #[cfg(not(all(feature = "std", target_arch = "aarch64")))]
+    {
+        None
+    }
+}
+
+#[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+#[inline]
+fn uri_backend_eligible(bytes: &[u8], available: impl FnOnce() -> bool) -> bool {
+    bytes.len() >= 16 && uri::has_origin_relative_prefix(bytes) && available()
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[cfg(feature = "std")]
+    type NeonUriHook = (bool, fn(&[u8]) -> bool);
+
+    #[cfg(feature = "std")]
+    std::thread_local! {
+        pub(super) static NEON_URI_OVERRIDE: core::cell::Cell<Option<NeonUriHook>> = const { core::cell::Cell::new(None) };
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn gamma_nov6_neon_wrapper_forwards_the_exact_eligible_scanner_answer() {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                NEON_URI_OVERRIDE.set(None);
+            }
+        }
+        assert!(NEON_URI_OVERRIDE.get().is_none());
+        let _reset = Reset;
+        for answer in [false, true] {
+            let scan: fn(&[u8]) -> bool = if answer {
+                |bytes| {
+                    assert_eq!(bytes, b"/0123456789abcdef");
+                    true
+                }
+            } else {
+                |bytes| {
+                    assert_eq!(bytes, b"/0123456789abcdef");
+                    false
+                }
+            };
+            NEON_URI_OVERRIDE.set(Some((true, scan)));
+            assert_eq!(super::is_simple_uri_path_neon(b"/0123456789abcdef"), Some(answer));
+        }
+        NEON_URI_OVERRIDE.set(Some((false, |_| panic!("unavailable backend must not run"))));
+        assert_eq!(super::is_simple_uri_path_neon(b"/0123456789abcdef"), None);
+        NEON_URI_OVERRIDE.set(Some((true, |_| true)));
+        assert_eq!(super::is_simple_uri_path_neon(b"/0123456789abcd"), None);
+        assert_eq!(super::is_simple_uri_path_neon(b"/0123456789abcde"), Some(true));
+        assert_eq!(super::is_simple_uri_path_neon(b"/0123456789abcdef"), Some(true));
+        NEON_URI_OVERRIDE.set(Some((true, |_| panic!("ineligible input must not reach the scanner"))));
+        for bytes in [b"/short".as_slice(), b"relative/long/path", b"//long/authority"] {
+            assert_eq!(super::is_simple_uri_path_neon(bytes), None, "{bytes:?}");
+        }
+    }
+
+    #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+    #[test]
+    fn gamma_afternoon_uri_backend_policy_requires_an_available_isa_and_preserves_lazy_detection() {
+        for bytes in [
+            b"/short".as_slice(),
+            b"relative/long/path",
+            b"//long/authority",
+            b"/long/simple/path",
+        ] {
+            for available in [false, true] {
+                let queried = core::cell::Cell::new(false);
+                let eligible = bytes.len() >= 16 && bytes.starts_with(b"/") && !bytes.starts_with(b"//");
+                assert_eq!(
+                    super::uri_backend_eligible(bytes, || {
+                        queried.set(true);
+                        available
+                    }),
+                    eligible && available,
+                );
+                assert_eq!(queried.get(), eligible);
+            }
+        }
+    }
+
     #[cfg(all(not(feature = "std"), any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
     use std::arch;
     #[cfg(not(feature = "std"))]

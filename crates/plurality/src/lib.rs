@@ -168,6 +168,8 @@ mod pool_stats;
 mod rc;
 mod slot;
 mod sync;
+#[cfg(all(test, not(loom)))]
+mod test_hooks;
 
 pub use alloced::Alloc;
 pub use boxed::Box;

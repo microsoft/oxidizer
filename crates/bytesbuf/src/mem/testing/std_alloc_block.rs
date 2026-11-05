@@ -70,7 +70,7 @@ unsafe impl BlockRefDynamic for StdAllocBlock {
 
         // Ensure that we have observed all writes into the block from other threads.
         // On x86 this does nothing but on weaker memory models writes could be delayed.
-        atomic::fence(atomic::Ordering::Acquire);
+        crate::sync_fence::fence(atomic::Ordering::Acquire);
 
         // First we deallocate the block's capacity.
         // SAFETY: Layout must match between allocation and deallocation. It does.
@@ -120,4 +120,34 @@ fn new_block(len: NonZero<BlockSize>) -> NonNull<StdAllocBlock> {
     unsafe { block_ptr.write(block) };
 
     block_ptr
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_std_block_layout_and_balanced_references() {
+        for length in [1, 16, 127, 4096] {
+            let length = NonZero::new(length).unwrap();
+            assert_eq!(byte_array_layout(length).size(), length.get() as usize);
+            assert_eq!(byte_array_layout(length).align(), 1);
+            let state = new_block(length);
+            // SAFETY: new_block initializes this state and creates one owned reference.
+            assert_eq!(unsafe { state.as_ref() }.ref_count.load(atomic::Ordering::Relaxed), 1);
+            let first = <StdAllocBlock as BlockRefDynamic>::clone(state);
+            let second = <StdAllocBlock as BlockRefDynamic>::clone(first);
+            assert_eq!(state, first);
+            assert_eq!(state, second);
+            // SAFETY: Three owned references retain the state.
+            assert_eq!(unsafe { state.as_ref() }.ref_count.load(atomic::Ordering::Relaxed), 3);
+            <StdAllocBlock as BlockRefDynamic>::drop(second);
+            // SAFETY: Two owned references retain the state.
+            assert_eq!(unsafe { state.as_ref() }.ref_count.load(atomic::Ordering::Relaxed), 2);
+            <StdAllocBlock as BlockRefDynamic>::drop(first);
+            // SAFETY: The original reference still owns live state.
+            assert_eq!(unsafe { state.as_ref() }.ref_count.load(atomic::Ordering::Relaxed), 1);
+            <StdAllocBlock as BlockRefDynamic>::drop(state);
+        }
+    }
 }

@@ -371,6 +371,13 @@ fn trim_ows(bytes: &[u8]) -> &[u8] {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_afternoon_failed_vector_folds_retain_an_absorbing_rejected_state() {
+        let mut state = super::ListScan::new();
+        assert!(!state.push_line(0, 0, 0, 16));
+        assert_eq!(state.finish(&[], super::EmptyMembers::Skip), super::TokenListScan::Rejected);
+    }
+
     use std::hint;
     #[cfg(not(feature = "std"))]
     use std::vec::Vec;

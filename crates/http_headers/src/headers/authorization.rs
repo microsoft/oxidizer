@@ -288,12 +288,14 @@ impl AuthorizationOwned<Basic> {
         let prefix = b"Basic ";
         let mut wire = Vec::with_capacity(total_len);
         wire.extend_from_slice(prefix);
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after executes the encoder and replaces only its unit return value with unit")]
         encode_basic_credentials(&mut wire, username, password);
         debug_assert_eq!(
             wire.len(),
             total_len,
             "Basic authorization wire length must match the precomputed capacity"
         );
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The fixed Basic prefix and standard base64 encoder produce only field-value-safe ASCII regardless of credential bytes")]
         let mut value = super::value_from_bytes(&FieldName::Authorization, wire)?;
         value.set_sensitive(true);
         Ok(Self {
@@ -505,6 +507,7 @@ impl BasicCredentials {
         self.bytes.clear();
         self.username_end = 0;
         self.password_start = 0;
+        // #[gamma::skip(cond.always_true, relational.gt_to_ge, tag = "equivalent", reason = "Vec::shrink_to is a no-op whenever its requested minimum is at least current capacity, including equality")]
         if self.bytes.capacity() > self.retain_limit {
             self.bytes.shrink_to(self.retain_limit);
         }
@@ -620,6 +623,10 @@ fn encode_basic_credentials(wire: &mut Vec<u8>, username: &[u8], password: &[u8]
 
 #[inline]
 fn basic_wire_len(username_len: usize, password_len: usize) -> Result<usize, DecodeError> {
+    #[cfg(test)]
+    if tests::FAIL_BASIC_LENGTH.replace(false) {
+        return Err(authorization_size_error());
+    }
     let input_len = username_len
         .checked_add(1)
         .and_then(|length| length.checked_add(password_len))
@@ -652,7 +659,10 @@ fn authorization_owned_from_value<S>(value: FieldValue) -> AuthorizationOwned<S>
 }
 
 fn build_authorization(scheme: &str, credentials: &[u8]) -> Result<AuthorizationOwned<Bearer>, DecodeError> {
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Two real string or byte slices are each isize::MAX-bounded, so adding their lengths and one separator cannot exceed usize::MAX")]
     let total_len = authorization_wire_len(scheme.len(), credentials.len())?;
+    #[cfg(test)]
+    tests::LAST_AUTHORIZATION_CAPACITY.set(Some(total_len));
     let mut wire = Vec::with_capacity(total_len);
     wire.extend_from_slice(scheme.as_bytes());
     wire.push(b' ');
@@ -730,10 +740,14 @@ const TOKEN68_INVALID: [u8; 256] = {
 /// Equivalent to [`validate::token68`], but short credentials skip the
 /// dispatch preamble and validate through a branchless table scan.
 fn token68(bytes: &[u8]) -> bool {
-    if bytes.len() >= TOKEN68_SIMD_THRESHOLD {
+    if
+    // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, relational.ge_to_gt, relational.ge_to_le, tag = "equivalent", reason = "The scalar table scan and accelerated scanner both handle every length and implement the same token68 grammar")]
+    bytes.len() >= TOKEN68_SIMD_THRESHOLD {
         return token68_accelerated(bytes);
     }
-    if all_token68_data(bytes) {
+    if
+    // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_false, tag = "equivalent", reason = "Declining the unpadded shortcut calls token68_with_padding, which finds the last non-equals byte and validates the same data prefix")]
+    all_token68_data(bytes) {
         return !bytes.is_empty();
     }
     token68_with_padding(bytes)
@@ -774,12 +788,16 @@ fn all_token68_data(bytes: &[u8]) -> bool {
         return invalid == 0;
     };
     let mut invalid = token68_invalid_bits(head);
+    // #[gamma::skip(literal.int_decrement, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "The first eight bytes were already folded; starting rest earlier merely repeats checks in the OR accumulator without skipping any byte")]
     let mut rest = &bytes[8..];
     while let Some((chunk, tail)) = rest.split_first_chunk::<8>() {
         invalid |= token68_invalid_bits(chunk);
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         rest = tail;
     }
-    if !rest.is_empty() {
+    if
+    // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "The final eight-byte window is already validated when rest is empty, so rechecking it changes no accumulated invalid bit")]
+    !rest.is_empty() {
         let tail = bytes.last_chunk::<8>().unwrap_or(head);
         invalid |= token68_invalid_bits(tail);
     }
@@ -807,6 +825,7 @@ fn parse_scheme<'a>(value: FieldValueRef<'a>, scheme: &Scheme) -> Result<(usize,
     if (u64::from_le_bytes(*head) | scheme.lower) & scheme.keep != scheme.expected {
         return Err(super::invalid_syntax(&FieldName::Authorization));
     }
+    // #[gamma::skip(arith.add_to_mul, literal.int_decrement, tag = "equivalent", reason = "parse_scheme already proved the separator is a space, and credentials_at skips that same space if it starts one byte earlier")]
     credentials_at(bytes, scheme.name.len() + 1)
 }
 
@@ -817,6 +836,7 @@ fn parse_short_scheme<'a>(bytes: &'a [u8], scheme: &Scheme) -> Result<(usize, &'
     if bytes.len() <= scheme_length || bytes[scheme_length] != b' ' || !bytes[..scheme_length].eq_ignore_ascii_case(scheme.name) {
         return Err(super::invalid_syntax(&FieldName::Authorization));
     }
+    // #[gamma::skip(arith.add_to_mul, literal.int_decrement, tag = "equivalent", reason = "The separator was just proved to be a space; credentials_at skips it when starting one byte earlier")]
     credentials_at(bytes, scheme_length + 1)
 }
 
@@ -925,6 +945,29 @@ mod tests {
         reason = "tests classify parser outcomes without needing successful values"
     )]
 
+    std::thread_local! {
+        pub(super) static FAIL_BASIC_LENGTH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        pub(super) static LAST_AUTHORIZATION_CAPACITY: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    }
+
+    #[test]
+    fn gamma_afternoon_public_basic_constructor_propagates_wire_sizing_failure() {
+        FAIL_BASIC_LENGTH.set(true);
+        let result = super::AuthorizationOwned::<super::Basic>::basic(b"user", b"password");
+        assert!(!FAIL_BASIC_LENGTH.get());
+        assert_eq!(result.unwrap_err(), super::authorization_size_error());
+    }
+
+    #[test]
+    fn gamma_round2_basic_length_checks_the_prefix_after_base64_size() {
+        let input_length = (usize::MAX / 4) * 3;
+        assert_eq!(base64::encoded_len(input_length, true), Some(usize::MAX - 3));
+        assert_eq!(
+            super::basic_wire_len(input_length - 1, 0).unwrap_err().kind(),
+            crate::DecodeErrorKind::InvalidNumber
+        );
+    }
+
     use std::sync::{Arc, Mutex};
 
     use base64::Engine as _;
@@ -941,6 +984,53 @@ mod tests {
     use crate::{DecodeErrorKind, FieldName, FieldValue, SingleValueField, TestSink};
 
     type ZeroizationObserver = Arc<Mutex<Vec<(usize, usize, Vec<u8>)>>>;
+
+    #[test]
+    fn gamma_round2_basic_clear_retains_capacity_at_the_exact_limit() {
+        let mut credentials = BasicCredentials::new();
+        credentials.fill(b"dTpw").unwrap();
+        let capacity = credentials.capacity();
+        credentials.retain_limit = capacity;
+        credentials.clear();
+        assert_eq!(credentials.capacity(), capacity);
+        assert!(credentials.username().is_empty());
+        assert!(credentials.password().is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_basic_last_quantum_matches_independent_base64_decoding() {
+        let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=?";
+        for first in [b'O', b'Y', b'd', b'?'] {
+            for &second in alphabet {
+                for &third in alphabet {
+                    for fourth in [b'=', b'A', b'6', b'?'] {
+                        let bytes = [first, second, third, fourth];
+                        let expected = STANDARD.decode(bytes).is_ok_and(|decoded| decoded.contains(&b':'));
+                        assert_eq!(validate_basic_last(&bytes, false).is_ok(), expected, "{bytes:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_scheme_separator_and_leading_credentials_ows_are_distinct() {
+        for (wire, expected) in [
+            (b"Bearer  abc".as_slice(), Some(8)),
+            (b"Bearer \tabc", Some(7)),
+            (b"Bearer   abc", Some(9)),
+            (b"Beareraabc", None),
+            (b"Otherx abc", None),
+        ] {
+            assert_eq!(parse_short_scheme(wire, &BEARER).ok().map(|value| value.0), expected, "{wire:?}");
+            assert_eq!(
+                parse_scheme(crate::FieldValueRef::new(wire), &BEARER).ok().map(|value| value.0),
+                expected,
+                "{wire:?}"
+            );
+        }
+        assert_eq!(credentials_at(b"xx  abc", 2).unwrap(), (4, b"abc".as_slice()));
+    }
 
     // Both sizes preserve base64 quantum alignment and heap-backed header values.
     const CREDENTIAL_BLOCK_LEN: usize = if cfg!(miri) { 64 } else { 1_024 };
@@ -1306,8 +1396,22 @@ mod tests {
 
     #[test]
     fn private_owned_paths_and_credential_reuse_clear_failures() {
+        for (scheme, credentials, expected) in [
+            ("", b"credential".as_slice(), b" credential".as_slice()),
+            ("Custom", b"".as_slice(), b"Custom ".as_slice()),
+            ("", b"".as_slice(), b" ".as_slice()),
+        ] {
+            let value = build_authorization(scheme, credentials).unwrap();
+            assert_eq!(value.as_field_value().as_bytes(), expected);
+        }
+        for (scheme, credentials) in [("Bad\0Scheme", b"credential".as_slice()), ("Custom", b"bad\0credential")] {
+            let error = build_authorization(scheme, credentials).expect_err("NUL is not a legal field-value byte");
+            assert_eq!(error.header(), &FieldName::Authorization);
+            assert_eq!(error.kind(), crate::DecodeErrorKind::InvalidSyntax);
+        }
         let custom = build_authorization("Custom", b"credential").expect("valid wire value");
         assert_eq!(custom.as_field_value().as_bytes(), b"Custom credential");
+        assert_eq!(LAST_AUTHORIZATION_CAPACITY.get(), Some(b"Custom credential".len()));
         assert!(custom.as_field_value().is_sensitive());
         assert!(custom.token().is_err());
 

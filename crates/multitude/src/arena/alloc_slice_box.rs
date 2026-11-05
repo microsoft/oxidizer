@@ -379,6 +379,7 @@ impl<A: Allocator + Clone> Arena<A> {
 /// smart-pointer header recovery. Slice length is full-width in the
 /// chunk prefix.
 #[inline]
+// #[gamma::skip(parameter.default_shadow, reason = "Only element alignment is checked; the unused length is stored at full width in the allocation prefix")]
 fn check_slice_box_layout<T, A: Allocator + Clone>(arena: &Arena<A>, _len: usize) -> Result<(), AllocError> {
     if arena.rejects_smart_ptr_align(mem::align_of::<T>()) {
         return Err(AllocError::ALIGNMENT_TOO_LARGE);

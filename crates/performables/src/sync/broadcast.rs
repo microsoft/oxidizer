@@ -2,9 +2,10 @@
 // Licensed under the MIT License.
 
 use std::mem::replace;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering, fence};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Waker;
 
+use crate::sync::effects::fence;
 use crate::sync::raw_mutex::RawMutex;
 use crate::sync::slot_list::{Key, SlotList};
 
@@ -147,5 +148,88 @@ impl Shard {
             pending: AtomicBool::new(false),
             waiters: RawMutex::new(SlotList::new()),
         }
+    }
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn nov4_drained_broadcast_cancellation_and_empty_broadcast_do_not_lock_shards() {
+        let broadcast = Broadcast::new();
+        let mut registration = None;
+        assert!(!broadcast.register(&mut registration, Waker::noop(), || false));
+        broadcast.wake_all();
+        crate::sync::effects::take();
+        broadcast.cancel(registration.unwrap());
+        assert_eq!(crate::sync::effects::take().locks, 0);
+        broadcast.wake_all();
+        let effects = crate::sync::effects::take();
+        assert_eq!(effects.locks, 0);
+        assert_eq!(effects.fences, 1);
+    }
+
+    #[test]
+    fn nov4_broadcast_registration_and_publication_dispatch_their_fences() {
+        let broadcast = Broadcast::new();
+        let mut registration = None;
+        crate::sync::effects::take();
+        assert!(!broadcast.register(&mut registration, Waker::noop(), || false));
+        assert_eq!(crate::sync::effects::take().fences, 1);
+        broadcast.wake_all();
+        assert_eq!(crate::sync::effects::take().fences, 1);
+    }
+
+    #[test]
+    fn gamma_round2_ready_registration_does_not_hide_an_older_waiter() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        use std::task::Wake;
+
+        #[derive(Default)]
+        struct Count(AtomicUsize);
+
+        impl Wake for Count {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let count = Arc::new(Count::default());
+        let waker = Waker::from(Arc::clone(&count));
+        let broadcast = Broadcast::new();
+        let mut older = None;
+        let mut ready = None;
+        assert!(!broadcast.register(&mut older, &waker, || false));
+        assert!(broadcast.register(&mut ready, &waker, || true));
+        assert!(ready.is_none());
+        assert!(broadcast.has_waiters());
+        broadcast.wake_all();
+        assert_eq!(count.0.load(Ordering::Relaxed), 1);
+        assert!(!broadcast.has_waiters());
+    }
+
+    #[test]
+    fn gamma_survivor_broadcast_pending_hint_matches_live_registrations_after_each_transition() {
+        let broadcast = Broadcast::new();
+        let mut first = None;
+        let mut second = None;
+        assert!(!broadcast.register(&mut first, Waker::noop(), || false));
+        assert!(!broadcast.register(&mut second, Waker::noop(), || false));
+        assert!(broadcast.has_waiters());
+        broadcast.cancel(first.take().unwrap());
+        assert!(broadcast.has_waiters());
+        broadcast.cancel(second.take().unwrap());
+        assert!(!broadcast.has_waiters());
+        assert!(broadcast.register(&mut first, Waker::noop(), || true));
+        assert!(first.is_none());
+        assert!(!broadcast.has_waiters());
+        assert!(!broadcast.register(&mut first, Waker::noop(), || false));
+        assert!(broadcast.has_waiters());
+        broadcast.wake_all();
+        assert!(!broadcast.has_waiters());
+        broadcast.cancel(first.take().unwrap());
+        assert!(!broadcast.has_waiters());
     }
 }

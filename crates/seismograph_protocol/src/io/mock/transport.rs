@@ -60,6 +60,11 @@ impl Listener {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn is_nonblocking(&self) -> bool {
+        self.runtime.state().listeners.get(&self.path).unwrap().nonblocking
+    }
+
     pub(crate) fn accept(&self) -> io::Result<Connection> {
         let mut state = self.runtime.state();
         loop {
@@ -67,10 +72,13 @@ impl Listener {
             if let Some(client) = listener.clients.pop_front() {
                 return Ok(client);
             }
-            if listener.nonblocking {
+            if
+            // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            listener.nonblocking {
                 return Err(io::ErrorKind::WouldBlock.into());
             }
             state.operations.push(IoOperation::Wait);
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             state = self
                 .runtime
                 .shared
@@ -94,7 +102,7 @@ impl Drop for Listener {
 #[derive(Debug)]
 pub(super) struct Channel {
     pub(super) state: Mutex<ChannelState>,
-    pub(super) changed: Condvar,
+    pub(super) changed: Signal,
 }
 
 #[derive(Debug)]
@@ -121,7 +129,7 @@ impl Connection {
                 closed: [false, false],
                 handles: [1, 1],
             }),
-            changed: Condvar::new(),
+            changed: Signal::default(),
         });
         runtime.state().channels.push(Arc::downgrade(&channel));
         let connection = |side| Self {
@@ -149,6 +157,10 @@ impl Connection {
             }
         }
         let (client, server) = Self::pair(runtime);
+        Self::finish_connect(runtime, descriptor, client, server)
+    }
+
+    fn finish_connect(runtime: &Runtime, descriptor: &MonitorDescriptor, client: Self, server: Self) -> io::Result<Self> {
         runtime
             .state()
             .listeners
@@ -238,7 +250,9 @@ impl Connection {
                 for (target, byte) in buf[..count].iter_mut().zip(state.incoming[self.side].iter()) {
                     *target = *byte;
                 }
-                if consume {
+                if
+                // #[gamma::skip(cond.always_true, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                consume {
                     state.incoming[self.side].drain(..count);
                     self.channel.changed.notify_all();
                 }
@@ -247,12 +261,17 @@ impl Connection {
             if state.closed[1 - self.side] {
                 return Ok(0);
             }
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             state = self.wait(state, &runtime, deadline)?;
         }
     }
 
     pub(crate) fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
-        self.read_bytes(buf, false)
+        self.read_bytes(
+            buf,
+            // #[gamma::skip(literal.bool_flip, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            false,
+        )
     }
 
     pub(crate) fn close(&self) {
@@ -304,6 +323,7 @@ impl Write for Connection {
                 self.channel.changed.notify_all();
                 return Ok(count);
             }
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             state = self.wait(state, &runtime, deadline)?;
         }
     }
@@ -321,6 +341,145 @@ impl Write for Connection {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn november_public_clone_propagates_mock_handle_exhaustion_without_panicking() {
+        let (io, controller) = MonitorIo::new_mocked();
+        let (client, _server) = Connection::pair(&controller.runtime);
+        let channel = Arc::clone(&client.channel);
+        channel.state.lock().unwrap().handles[client.side] = usize::MAX;
+        let connection = crate::transport::Connection::from_mocked(io, client);
+        let result = connection.try_clone();
+        channel.state.lock().unwrap().handles[0] = 1;
+        let error = result.unwrap_err();
+        assert_eq!(
+            (error.kind(), error.to_string()),
+            (io::ErrorKind::Other, "mock connection clone count exhausted".into())
+        );
+        assert_eq!(controller.operations(), [IoOperation::Duplicate]);
+    }
+
+    #[test]
+    fn november_mock_consumption_and_last_handle_drop_notify_without_threads() {
+        let runtime = Runtime::new();
+        let (mut client, mut server) = Connection::pair(&runtime);
+        let channel = Arc::clone(&client.channel);
+        client.write_all(b"abc").unwrap();
+        assert_eq!(channel.changed.notification_count(), 1);
+        let mut bytes = [0xff; 2];
+        assert_eq!(server.peek(&mut bytes).unwrap(), 2);
+        assert_eq!(bytes, *b"ab");
+        assert_eq!(channel.changed.notification_count(), 1);
+        assert_eq!(server.read(&mut bytes).unwrap(), 2);
+        assert_eq!(bytes, *b"ab");
+        assert_eq!(channel.changed.notification_count(), 2);
+        let clone = client.try_clone().unwrap();
+        drop(client);
+        assert_eq!(channel.changed.notification_count(), 2);
+        drop(clone);
+        assert_eq!(channel.changed.notification_count(), 3);
+        assert_eq!(server.read(&mut bytes).unwrap(), 1);
+        assert_eq!(bytes[0], b'c');
+        assert_eq!(channel.changed.notification_count(), 4);
+        assert_eq!(server.read(&mut bytes).unwrap(), 0);
+    }
+
+    #[test]
+    fn november_mock_listener_drop_unregisters_before_notifying() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let instance_id = runtime.instance_id();
+        let descriptor = MonitorDescriptor {
+            name: "notification".into(),
+            instance: None,
+            process_id: runtime.process_id(),
+            instance_id,
+            endpoint: crate::monitor::MonitorEndpoint::for_instance(&directory, &owner, runtime.process_id(), instance_id),
+            owner,
+        };
+        let listener = Listener::bind(&runtime, &descriptor).unwrap();
+        assert_eq!(runtime.shared.changed.notification_count(), 0);
+        drop(listener);
+        assert!(!runtime.state().listeners.contains_key(descriptor.endpoint.path()));
+        assert_eq!(runtime.shared.changed.notification_count(), 1);
+    }
+
+    #[test]
+    fn gamma_round2_connection_rechecks_listener_presence_after_the_pair_is_created() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let instance_id = runtime.instance_id();
+        let descriptor = MonitorDescriptor {
+            name: "worker".into(),
+            instance: None,
+            process_id: runtime.process_id(),
+            instance_id,
+            endpoint: crate::monitor::MonitorEndpoint::for_instance(&directory, &owner, runtime.process_id(), instance_id),
+            owner,
+        };
+        let listener = Listener::bind(&runtime, &descriptor).unwrap();
+        let (client, server) = Connection::pair(&runtime);
+        drop(listener);
+        let error = Connection::finish_connect(&runtime, &descriptor, client, server).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ConnectionRefused);
+    }
+
+    #[test]
+    fn gamma_survivor_mock_listener_missing_state_and_unrepresentable_deadlines_return_errors() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let instance_id = crate::monitor::InstanceId::from_bytes([1; 16]);
+        let descriptor = MonitorDescriptor {
+            name: "worker".into(),
+            instance: None,
+            process_id: 42,
+            instance_id,
+            endpoint: crate::monitor::MonitorEndpoint::for_instance(&directory, &owner, 42, instance_id),
+            owner,
+        };
+        let listener = Listener::bind(&runtime, &descriptor).unwrap();
+        assert!(!runtime.state().listeners[&listener.path].nonblocking);
+        runtime.state().listeners.remove(&listener.path);
+        assert_eq!(listener.set_nonblocking(true).unwrap_err().kind(), io::ErrorKind::NotConnected);
+        assert_eq!(listener.accept().unwrap_err().kind(), io::ErrorKind::NotConnected);
+        let (mut connection, _peer) = Connection::pair(&runtime);
+        *connection.read_timeout.lock().unwrap() = Some(Duration::MAX);
+        *connection.write_timeout.lock().unwrap() = Some(Duration::MAX);
+        assert_eq!(connection.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(connection.write(&[1]).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn gamma_survivor_mock_peer_owner_and_clone_overflow_are_rejected() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let instance_id = runtime.instance_id();
+        let mut descriptor = MonitorDescriptor {
+            name: "worker".into(),
+            instance: None,
+            process_id: runtime.process_id(),
+            instance_id,
+            endpoint: crate::monitor::MonitorEndpoint::for_instance(&directory, &owner, runtime.process_id(), instance_id),
+            owner,
+        };
+        let _listener = Listener::bind(&runtime, &descriptor).unwrap();
+        descriptor.owner = MonitorOwner::WindowsSid("S-1-5-21-1-2-3-2002".into());
+        assert_eq!(
+            Connection::connect(&runtime, &descriptor).unwrap_err().to_string(),
+            "connected monitor has a different OS identity"
+        );
+        let (connection, _peer) = Connection::pair(&runtime);
+        connection.channel.state.lock().unwrap().handles[connection.side] = usize::MAX;
+        assert_eq!(
+            connection.try_clone().unwrap_err().to_string(),
+            "mock connection clone count exhausted"
+        );
+        connection.channel.state.lock().unwrap().handles[connection.side] = 1;
+    }
 
     #[test]
     fn blocking_accept_wakes_when_a_connection_arrives() {

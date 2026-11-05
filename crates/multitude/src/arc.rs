@@ -10,13 +10,14 @@ use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
 use core::pin::Pin;
 use core::ptr::{self, NonNull};
-use core::sync::atomic::{Ordering, fence};
+use core::sync::atomic::Ordering;
 
 use allocator_api2::alloc::{Allocator, Global};
 
 use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::constants::refcount_overflow_abort;
 use crate::internal::thin_dst;
+use crate::sync_fence::fence;
 use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
 use crate::vec::Vec;
 use crate::{Coercion, HandleMetadata, SmartPointerPointee};

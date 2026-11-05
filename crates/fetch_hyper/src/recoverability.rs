@@ -66,6 +66,66 @@ mod tests {
     use crate::testing::{TestError, create_hyper_error};
 
     #[test]
+    fn gamma_round2_unknown_wrapper_respects_nested_explicit_recovery() {
+        let nested = HttpError::other(
+            std::io::Error::new(ErrorKind::TimedOut, "inner-timeout"),
+            RecoveryInfo::never(),
+            crate::error_labels::LABEL_CONNECT,
+        );
+        let outer = HttpError::other(nested, RecoveryInfo::unknown(), crate::error_labels::LABEL_CONNECT);
+        assert_eq!(detect_recoverability(&outer), RecoveryInfo::never());
+    }
+
+    #[tokio::test]
+    async fn gamma_round2_dropped_connection_reports_retryable_cancellation() {
+        let (io, _peer) = tokio::io::duplex(128);
+        let (mut sender, connection) =
+            hyper::client::conn::http1::handshake::<_, http_body_util::Empty<bytes::Bytes>>(hyper_util::rt::TokioIo::new(io))
+                .await
+                .unwrap();
+        drop(connection);
+        let error = sender
+            .send_request(http::Request::new(http_body_util::Empty::new()))
+            .await
+            .unwrap_err();
+        assert!(error.is_canceled(), "{error:?}");
+        assert_eq!(from_hyper_error(&error), RecoveryInfo::retry());
+        let error = sender.ready().await.unwrap_err();
+        assert!(error.is_closed(), "{error:?}");
+        assert_eq!(from_hyper_error(&error), RecoveryInfo::retry());
+    }
+
+    #[tokio::test]
+    async fn gamma_round2_short_outgoing_body_is_a_retryable_write_abort() {
+        let body = http_body_util::StreamBody::new(futures::stream::empty::<
+            std::result::Result<hyper::body::Frame<bytes::Bytes>, std::convert::Infallible>,
+        >());
+        let (io, _peer) = tokio::io::duplex(4096);
+        let (mut sender, connection) = hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(io))
+            .await
+            .unwrap();
+        let driver = tokio::spawn(connection);
+        let request = http::Request::builder()
+            .header(http::header::CONTENT_LENGTH, "4")
+            .body(body)
+            .unwrap();
+        let error = sender.send_request(request).await.unwrap_err();
+        assert!(error.is_body_write_aborted(), "{error:?}");
+        assert_eq!(from_hyper_error(&error), RecoveryInfo::retry());
+        driver.await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn gamma_survivor_unknown_http_wrapper_defers_to_inner_recovery() {
+        let error = HttpError::other(
+            std::io::Error::new(ErrorKind::TimedOut, "timeout-marker"),
+            RecoveryInfo::unknown(),
+            crate::error_labels::LABEL_CONNECT,
+        );
+        assert_eq!(detect_recoverability(&error), RecoveryInfo::retry());
+    }
+
+    #[test]
     fn unknown_error_returns_unknown() {
         let err = TestError::new("dummy");
         assert_eq!(detect_recoverability(&err), RecoveryInfo::unknown());

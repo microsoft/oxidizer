@@ -16,6 +16,7 @@ use fetch_options::{SocketOptions, TransportOptions};
 use fetch_tls::{TlsBackend, TlsBackendBuilder};
 use http::uri::Scheme;
 use http_extensions::{HttpError, Result};
+#[cfg(not(test))]
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioIo;
 use seatbelt::RecoveryInfo;
@@ -29,6 +30,12 @@ use crate::error_labels::LABEL_SCHEME_NOT_ALLOWED;
 use crate::handlers::TransportHandler;
 use crate::tls::TlsOptions;
 use crate::{HttpClient, HttpClientBuilder};
+
+#[cfg(test)]
+#[path = "tokio_connector_calls.rs"]
+mod connector_calls;
+#[cfg(test)]
+use connector_calls::HttpConnector;
 
 /// Dependencies for HTTP operations on Tokio.
 ///
@@ -142,7 +149,9 @@ impl HttpClient {
     /// # }
     /// ```
     pub fn builder_tokio_with_options(deps: impl Into<TokioDeps>, options: TokioTransportOptions) -> HttpClientBuilder {
-        create_tokio_builder(deps.into(), move |cx| TransportHandler(build_tokio_handler(cx, &options).into()))
+        create_tokio_builder_with_options(deps.into(), options, |cx, options| {
+            TransportHandler(build_tokio_handler(cx, options).into())
+        })
     }
 
     /// Creates an HTTP client for Tokio.
@@ -156,6 +165,14 @@ impl HttpClient {
     pub fn new_tokio() -> Self {
         Self::builder_tokio(TokioDeps::default()).build()
     }
+}
+
+fn create_tokio_builder_with_options(
+    deps: TokioDeps,
+    options: TokioTransportOptions,
+    factory: impl Fn(CustomContext<TokioDeps>, &TokioTransportOptions) -> TransportHandler + Send + Sync + 'static,
+) -> HttpClientBuilder {
+    create_tokio_builder(deps, move |cx| factory(cx, &options))
 }
 
 /// Shares Tokio dependency forwarding with tests that supply a controlled transport.
@@ -232,12 +249,14 @@ impl layered::Service<BaseUri> for TokioConnector {
         }
 
         // Resolve the port through templated_uri instead of the hyper scheme defaults.
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "the preceding scheme guard permits only http and https, which both have a default effective port")]
         let port = input.try_effective_port()?;
         let uri = http::Uri::from(input.with_port(port));
 
         // HttpConnector needs &mut self. Its clone shares configuration and has no resolver state.
         let mut connector = self.connector.clone();
 
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "the concrete HttpConnector uses GaiResolver whose poll_ready always returns Ready(Ok(())); no readiness error can propagate")]
         std::future::poll_fn(|cx| connector.poll_ready(cx))
             .await
             .map_err(map_connect_error)?;
@@ -339,10 +358,85 @@ mod tests {
     use thread_aware::{Relocator, unaware};
     use tick::Clock;
 
+    use super::{HttpConnector, SocketOptions, TokioConnector, widen_socket_buffer_size};
+
+    #[test]
+    fn november4_public_tokio_builder_forwards_every_socket_option_without_dialing() {
+        for socket in [
+            SocketOptions::default()
+                .no_delay(false)
+                .send_buffer_size(0)
+                .receive_buffer_size(u32::MAX),
+            SocketOptions::default().no_delay(true).send_buffer_size(31).receive_buffer_size(47),
+        ] {
+            let _client = crate::HttpClient::builder_tokio_with_options(
+                super::TokioDeps::with_clock(&Clock::new_frozen()),
+                super::TokioTransportOptions::default().socket(socket),
+            )
+            .minimal_pipeline()
+            .build();
+            let observed = super::connector_calls::observed().unwrap();
+            assert_eq!(observed.no_delay, socket.no_delay);
+            assert_eq!(observed.send_buffer_size, socket.send_buffer_size);
+            assert_eq!(observed.receive_buffer_size, socket.receive_buffer_size);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_tls_backend_preserves_explicit_alpn_preference() {
+        for versions in [vec![http::Version::HTTP_2], vec![http::Version::HTTP_11]] {
+            let mut options = fetch_options::TransportOptions::default();
+            options.supported_http_versions = versions.clone();
+            let backend = super::build_tls_backend(&options, crate::tls::TlsOptions::default());
+            let fetch_tls::TlsBackend::Rustls(config) = backend else {
+                panic!("unit-test configuration selects rustls");
+            };
+            let expected = if versions[0] == http::Version::HTTP_2 {
+                b"h2".as_slice()
+            } else {
+                b"http/1.1".as_slice()
+            };
+            assert_eq!(config.alpn_protocols, [expected]);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_socket_buffer_sizes_are_forwarded_before_connecting() {
+        for options in [
+            SocketOptions::default().send_buffer_size(12_345),
+            SocketOptions::default().receive_buffer_size(23_456),
+        ] {
+            let actual = TokioConnector::new(options);
+            let mut expected = HttpConnector::new();
+            expected.enforce_http(false);
+            expected.set_send_buffer_size(options.send_buffer_size.map(widen_socket_buffer_size));
+            expected.set_recv_buffer_size(options.receive_buffer_size.map(widen_socket_buffer_size));
+            assert_eq!(format!("{:?}", actual.connector), format!("{expected:?}"));
+        }
+    }
+
     use super::{TokioDeps, create_tokio_builder};
     use crate::handlers::TransportHandler;
     use crate::pipeline::Pipeline;
     use crate::{HttpClient, HttpResponseBuilder};
+
+    #[test]
+    fn gamma_round2_tokio_builder_factory_receives_the_nondefault_transport_options() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&seen);
+        let options =
+            super::TokioTransportOptions::default().socket(SocketOptions::default().send_buffer_size(123).receive_buffer_size(456));
+        let _client = super::create_tokio_builder_with_options(TokioDeps::with_clock(&Clock::new_frozen()), options, move |_, actual| {
+            observed
+                .lock()
+                .unwrap()
+                .push((actual.socket.send_buffer_size, actual.socket.receive_buffer_size));
+            TransportHandler::new(FakeHandler::from_fn(|_| HttpResponseBuilder::new_fake().build()))
+        })
+        .minimal_pipeline()
+        .build();
+        assert_eq!(*seen.lock().unwrap(), [(Some(123), Some(456))]);
+    }
 
     /// Observes client allocations through the Tokio dependency conversion in ordinary test builds.
     #[test]

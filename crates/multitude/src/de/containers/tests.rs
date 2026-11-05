@@ -33,6 +33,33 @@ fn vec_reserves_only_when_capacity_is_exhausted() {
     assert!(!super::vec_needs_reserve(3, 4));
 }
 
+struct GammaLargeElement([u8; 1025]);
+
+impl<'de> DeserializeIn<'de, allocator_api2::alloc::Global> for GammaLargeElement {
+    fn deserialize_in<D: Deserializer<'de>>(arena: &Arena, deserializer: D) -> Result<Self, D::Error> {
+        u8::deserialize_in(arena, deserializer).map(|value| Self([value; 1025]))
+    }
+}
+
+#[test]
+fn gamma_survivor_standard_vec_reserves_one_large_element_not_two() {
+    let arena = Arena::new();
+    let values = Vec::<GammaLargeElement>::deserialize_in(&arena, sequence(&[7], None)).unwrap();
+    assert_eq!(values.capacity(), 1);
+    assert_eq!(values[0].0, [7; 1025]);
+}
+
+#[test]
+fn gamma_survivor_array_trailing_access_error_is_returned_unchanged() {
+    let arena = Arena::new();
+    let input = SequenceDeserializer(TestSequence::new(
+        vec![Ok(7), Err(Error::custom("gamma trailing access failed"))],
+        None,
+    ));
+    let error = <[u8; 1]>::deserialize_in(&arena, input).unwrap_err();
+    assert_eq!(error.to_string(), "gamma trailing access failed");
+}
+
 fn from_json<T>(input: &str) -> Result<T, serde_json::Error>
 where
     for<'de> T: DeserializeIn<'de, allocator_api2::alloc::Global>,

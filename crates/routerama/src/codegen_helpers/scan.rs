@@ -155,6 +155,7 @@ fn scan_segments_scalar(body: &str, starts: &mut [usize], ends: &mut [usize]) ->
             count += 1;
             start = idx + 1;
         } else if matches!(byte, b'?' | b'#') {
+            // #[gamma::skip(assign_value.default, reason = "bool::default is exactly the assigned false validity flag")]
             valid = false;
         }
     }
@@ -195,7 +196,9 @@ fn scan_segments_sse2(body: &str, starts: &mut [usize], ends: &mut [usize]) -> S
     let mut valid = true;
 
     let mut i = 0_usize;
-    while i + 16 <= n {
+    while
+    // #[gamma::skip(relational.le_to_lt, literal.int_increment, reason = "Deferring the last complete vector sends those same bytes through the overlapping tail scan with skip zero")]
+    i + 16 <= n {
         // SAFETY: SSE2 is part of the `x86_64` baseline, so these intrinsics are
         // always available; and `i + 16 <= n`, so the 16-byte load reads only
         // bytes that lie within `bytes`.
@@ -217,14 +220,26 @@ fn scan_segments_sse2(body: &str, starts: &mut [usize], ends: &mut [usize]) -> S
             }
             count += 1;
             seg_start = idx + 1;
-            mask &= mask - 1;
+            // #[gamma::skip(assign.and_to_or, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            mask &=
+            // #[gamma::skip(arith.sub_to_add, arith.sub_to_div, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            mask -
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
         }
-        i += 16;
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        i +=
+        // #[gamma::skip(literal.int_to_zero, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        16;
     }
     // Scan the tail with an overlapping load, masking bytes already processed.
     // Inputs shorter than one vector use the scalar loop.
-    if i < n {
-        if n >= 16 {
+    if
+    // #[gamma::skip(cond.always_true, relational.lt_to_le, reason = "When i equals n the extra overlapping load rechecks already-validated bytes and its sixteen-bit skip mask excludes every delimiter")]
+    i < n {
+        if
+        // #[gamma::skip(cond.always_false, relational.ge_to_gt, literal.int_increment, reason = "The scalar tail checks identical suffix bytes; n equal to sixteen never reaches this branch under the unchanged main loop")]
+        n >= 16 {
             let load_at = n - 16;
             // SAFETY: `n >= 16`, so `load_at = n - 16` is in range and the 16-byte
             // load reads only bytes that lie within `bytes`.
@@ -249,7 +264,13 @@ fn scan_segments_sse2(body: &str, starts: &mut [usize], ends: &mut [usize]) -> S
                 }
                 count += 1;
                 seg_start = idx + 1;
-                mask &= mask - 1;
+                // #[gamma::skip(assign.and_to_or, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                mask &=
+                // #[gamma::skip(arith.sub_to_add, arith.sub_to_div, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                mask -
+                // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                // #[gamma::skip(literal.int_increment, reason = "This overlapping tail has skip in 1..16, so mask bit zero is clear; for an even nonzero mask both mask&(mask-1) and mask&(mask-2) clear the same lowest set bit")]
+                1;
             }
         } else {
             while i < n {
@@ -261,9 +282,13 @@ fn scan_segments_sse2(body: &str, starts: &mut [usize], ends: &mut [usize]) -> S
                     count += 1;
                     seg_start = i + 1;
                 } else if matches!(bytes[i], b'?' | b'#') {
+                    // #[gamma::skip(assign_value.default, reason = "bool::default is exactly the assigned false validity flag")]
                     valid = false;
                 }
-                i += 1;
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                i +=
+                // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                1;
             }
         }
     }
@@ -536,6 +561,22 @@ mod tests {
             }
             let trailing: String = once('/').chain(repeat_n('a', len - 1)).chain(once('/')).collect();
             assert_simd_eq(&trailing);
+        }
+    }
+
+    #[test]
+    fn gamma_nov4_scalar_scan_bounds_each_offset_array_independently() {
+        for (starts_len, ends_len) in [(0, 3), (3, 0), (1, 3), (3, 1)] {
+            let mut starts = vec![usize::MAX; starts_len];
+            let mut ends = vec![usize::MAX; ends_len];
+            let result = scan_segments_scalar("/a/b/c", &mut starts, &mut ends);
+            assert_eq!(result.count, 3);
+            assert!(result.valid);
+            let written = starts_len.min(ends_len);
+            assert_eq!(&starts[..written], &[1, 3, 5][..written]);
+            assert_eq!(&ends[..written], &[2, 4, 6][..written]);
+            assert!(starts[written..].iter().all(|&offset| offset == usize::MAX));
+            assert!(ends[written..].iter().all(|&offset| offset == usize::MAX));
         }
     }
 

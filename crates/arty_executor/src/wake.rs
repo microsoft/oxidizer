@@ -77,6 +77,7 @@ impl WakeShared {
                         error.is_empty() || error.is_closed(),
                         "closed remote wake channel reports only empty or closed: {error}"
                     );
+                    // #[gamma::skip(loop.break_to_continue, loop.delete_break, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                     break;
                 }
             }
@@ -109,6 +110,7 @@ impl WakeSignal {
 
     pub(crate) fn retire(&self) {
         let previous = self.schedule_state.swap(0, atomic::Ordering::AcqRel);
+        // #[gamma::skip(cond.always_true, reason = "remove_wake retains all nonmatching entries; when no local notification exists there is nothing to remove.")]
         if previous == TASK_ACTIVE_LOCAL {
             executor_context::remove_wake(self.shared.thread_id(), self.task_ptr);
         }
@@ -266,6 +268,20 @@ fn borrowed_drop(_: *const ()) {
     unreachable!("a borrowed polling waker cannot be dropped");
 }
 
+#[cfg(test)]
+#[test]
+#[should_panic(expected = "a borrowed polling waker cannot be consumed")]
+fn nov4_borrowed_polling_waker_cannot_be_consumed() {
+    borrowed_consume(std::ptr::null());
+}
+
+#[cfg(test)]
+#[test]
+#[should_panic(expected = "a borrowed polling waker cannot be dropped")]
+fn nov4_borrowed_polling_waker_cannot_be_dropped() {
+    borrowed_drop(std::ptr::null());
+}
+
 fn waker_clone(ptr: *const ()) -> RawWaker {
     let signal = signal_from_raw(ptr);
     signal.add_owned_waker();
@@ -304,12 +320,144 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn nov4_executor_shutdown_closes_the_retained_task_wakers_remote_sender() {
+        use std::cell::{Cell, RefCell};
+        use std::rc::Rc;
+        use std::task::Poll;
+
+        #[derive(Debug)]
+        struct Completion(Rc<Cell<usize>>);
+
+        impl crate::TaskCompletion<()> for Completion {
+            fn completed(self, (): ()) {}
+
+            fn panicked(self, panic: crate::TaskPanicPayload, _: Option<crate::ShutdownCause>) {
+                crate::discard_task_panic_payload(panic);
+            }
+
+            fn cancelled(self, _: crate::ShutdownCause) {
+                self.0.set(self.0.get() + 1);
+            }
+        }
+
+        let captured = Rc::new(RefCell::new(None));
+        let saved = Rc::clone(&captured);
+        let cancellations = Rc::new(Cell::new(0));
+        let mut executor = crate::Executor::builder().build();
+        executor.tasks().add(
+            std::future::poll_fn(move |cx| {
+                *saved.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending::<()>
+            }),
+            crate::TaskOptions::default(),
+            Completion(Rc::clone(&cancellations)),
+        );
+        let _ = executor.execute_cycle();
+        let waker = captured.borrow_mut().take().unwrap();
+        // SAFETY: this is an owned polling-waker clone created by this executor's
+        // WakeSignal vtable; retaining it keeps that pinned signal alive.
+        let signal = unsafe { &*waker.data().cast::<WakeSignal>() };
+        let shared = signal.shared.clone();
+        assert!(!shared.inner.remote_wake_tx.is_closed());
+        executor.shutdown().trigger(crate::ShutdownCause::default());
+        assert!(matches!(executor.execute_cycle(), crate::CycleOutcome::Shutdown(_)));
+        assert!(shared.inner.remote_wake_tx.is_closed());
+        assert_eq!(cancellations.get(), 1);
+        assert!(!executor.has_tasks());
+        waker.wake_by_ref();
+        assert!(!shared.has_remote_wakes());
+    }
+
     struct CountingWake(AtomicUsize);
 
     impl Wake for CountingWake {
         fn wake(self: Arc<Self>) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    #[test]
+    fn gamma_survivor_remote_close_drains_ownership_resets_flag_and_rejects_later_wakes() {
+        let pool = MultiPool::new();
+        let task = crate::allocate_test_task_in(&pool);
+        let (shared, receiver) = WakeShared::new(Waker::noop().clone(), thread::current().id());
+        assert!(!shared.has_remote_wakes());
+        let signal = pin!(WakeSignal::new(shared.clone(), task.as_ptr()));
+        assert!(signal.begin_notification(true));
+        signal.schedule_remote();
+        assert!(shared.has_remote_wakes());
+        assert!(signal.promote_remote_notification());
+        assert_eq!(signal.schedule_state.load(atomic::Ordering::Acquire), TASK_ACTIVE_LOCAL);
+        assert!(!signal.promote_remote_notification());
+        shared.close_remote_wakes(&receiver);
+        assert!(!shared.has_remote_wakes());
+        assert!(receiver.try_recv().unwrap_err().is_closed());
+        signal.clear_notification();
+        assert!(signal.begin_notification(true));
+        signal.schedule_remote();
+        assert!(!shared.has_remote_wakes());
+        assert_eq!(signal.schedule_state.load(atomic::Ordering::Acquire), TASK_ACTIVE);
+        signal.retire();
+        assert!(!signal.begin_notification(false));
+        assert!(!signal.promote_remote_notification());
+        drop(task);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn gamma_survivor_draining_a_retired_remote_notification_does_not_requeue_task() {
+        let owner = thread::current().id();
+        executor_context::register(owner);
+        let pool = MultiPool::new();
+        let task = crate::allocate_test_task_in(&pool);
+        let (shared, _receiver) = WakeShared::new(Waker::noop().clone(), owner);
+        // SAFETY: the handle owns its initialized task on this registered owner thread.
+        unsafe { task.as_task() }.initialize(WakeSignal::new(shared, task.as_ptr()));
+        // SAFETY: the handle retains the task while this notification acquires its own owner.
+        let remote = RemoteWake(unsafe { task.as_ptr().retain_remote() });
+        // SAFETY: task is still owned by its original thread.
+        unsafe { task.as_task() }.abort(crate::ShutdownCause::default());
+        remote.schedule_local(owner);
+        assert!(!executor_context::has_wakes(owner));
+        drop(task);
+        assert!(pool.is_empty());
+        executor_context::unregister(owner);
+    }
+
+    #[test]
+    fn gamma_survivor_local_wakes_only_notify_idle_owner_and_retirement_removes_queue_owner() {
+        let owner = thread::current().id();
+        executor_context::register(owner);
+        let pool = MultiPool::new();
+        let task = crate::allocate_test_task_in(&pool);
+        let counter = Arc::new(CountingWake(AtomicUsize::new(0)));
+        let (shared, _receiver) = WakeShared::new(Waker::from(Arc::clone(&counter)), owner);
+        let signal = pin!(WakeSignal::new(shared, task.as_ptr()));
+        assert!(signal.begin_notification(false));
+        signal.schedule_local();
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+        signal.retire();
+        assert!(!executor_context::has_wakes(owner));
+        assert_eq!(signal.schedule_state.load(atomic::Ordering::Acquire), 0);
+
+        let signal = pin!(WakeSignal::new(signal.shared.clone(), task.as_ptr()));
+        let guard = executor_context::enter_cycle(owner);
+        assert!(signal.begin_notification(false));
+        signal.schedule_local();
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+        signal.retire();
+        drop(guard);
+        {
+            let queued = pin!(WakeSignal::new(signal.shared.clone(), task.as_ptr()));
+            assert!(queued.begin_notification(false));
+            queued.schedule_local();
+            assert!(executor_context::has_wakes(owner));
+        }
+        assert!(!executor_context::has_wakes(owner));
+        executor_context::unregister(owner);
+        drop(task);
+        assert!(pool.is_empty());
     }
 
     #[test]

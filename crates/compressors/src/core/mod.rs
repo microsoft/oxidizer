@@ -187,7 +187,12 @@ pub(crate) fn process(mut engine: impl Compression, input: BytesView) -> Result<
         match engine.pull(Destination::Buffer)? {
             Output::Data(chunk) => collected.put_bytes(chunk),
             Output::Progress => {}
-            Output::Done => break,
+            Output::Done =>
+            // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            {
+                // #[gamma::skip(loop.delete_break, tag = "resource", reason = "Deleting the terminal break makes process poll Done forever; the afternoon campaign timed out after 606946 ms")]
+                break;
+            }
             Output::NeedInput => {
                 return Err(crate::Error::invalid_state("the engine requested input after end of input"));
             }
@@ -202,6 +207,20 @@ pub(crate) fn process(mut engine: impl Compression, input: BytesView) -> Result<
 mod tests {
     use super::*;
     use crate::testing::view;
+
+    #[test]
+    fn gamma_survivor_process_reports_need_input_after_eof() {
+        let error = process(NeedsMoreForever, view(b"ignored")).unwrap_err();
+        assert!(error.is_invalid_state());
+        assert_eq!(error.to_string(), "the engine requested input after end of input");
+    }
+
+    #[test]
+    fn gamma_survivor_process_preserves_initial_push_error() {
+        let error = super::process(crate::testing::RejectsPush, view(b"payload")).unwrap_err();
+        assert!(error.is_invalid_state());
+        assert_eq!(error.to_string(), "this fixture always rejects pushed input");
+    }
 
     #[test]
     fn process_forwards_progress_without_producing_data() {
@@ -248,39 +267,39 @@ mod tests {
         assert!(result.is_empty(), "the fixture never reports data");
     }
 
+    #[derive(Debug)]
+    struct NeedsMoreForever;
+    impl Compression for NeedsMoreForever {
+        type Mode = Compress;
+    }
+
+    impl CompressionInternal for NeedsMoreForever {
+        fn push(&mut self, _input: BytesView) -> Result<()> {
+            Ok(())
+        }
+
+        fn end_input(&mut self) {}
+
+        fn pull(&mut self, _into: Destination) -> Result<Output> {
+            Ok(Output::NeedInput)
+        }
+        // No caller on the path under test asks for the byte counters; they exist only because
+        // the trait requires them.
+        #[cfg_attr(coverage_nightly, coverage(off))]
+        #[cfg_attr(test, mutants::skip)]
+        fn total_in(&self) -> u64 {
+            0
+        }
+
+        #[cfg_attr(coverage_nightly, coverage(off))]
+        #[cfg_attr(test, mutants::skip)]
+        fn total_out(&self) -> u64 {
+            0
+        }
+    }
+
     #[test]
     fn process_rejects_a_pull_that_still_requests_input_after_end() {
-        #[derive(Debug)]
-        struct NeedsMoreForever;
-        impl Compression for NeedsMoreForever {
-            type Mode = Compress;
-        }
-
-        impl CompressionInternal for NeedsMoreForever {
-            fn push(&mut self, _input: BytesView) -> Result<()> {
-                Ok(())
-            }
-
-            fn end_input(&mut self) {}
-
-            fn pull(&mut self, _into: Destination) -> Result<Output> {
-                Ok(Output::NeedInput)
-            }
-            // No caller on the tested path asks for the byte counters. They exist only because
-            // the trait requires them.
-            #[cfg_attr(coverage_nightly, coverage(off))]
-            #[cfg_attr(test, mutants::skip)]
-            fn total_in(&self) -> u64 {
-                0
-            }
-
-            #[cfg_attr(coverage_nightly, coverage(off))]
-            #[cfg_attr(test, mutants::skip)]
-            fn total_out(&self) -> u64 {
-                0
-            }
-        }
-
         let error = process(NeedsMoreForever, view(b"ignored")).unwrap_err();
         assert!(error.is_invalid_state());
     }

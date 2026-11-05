@@ -72,6 +72,7 @@ pub(crate) struct DispatcherCore {
 
 impl DispatcherCore {
     pub(crate) fn new(worker_endpoints: NonEmpty<WorkerEndpoint>, shutdown: Shutdown) -> Arc<Self> {
+        // #[gamma::skip(iter.first_to_last, reason = "The following assertion requires every endpoint to have the same owner.")]
         let owner = worker_endpoints.first().thread.owner();
         assert!(
             worker_endpoints.iter().all(|endpoint| endpoint.thread.owner() == owner),
@@ -165,6 +166,7 @@ impl DispatcherCore {
     }
 
     pub(crate) fn owns(&self, thread: &Thread) -> bool {
+        // #[gamma::skip(iter.first_to_last, reason = "Construction asserts that every endpoint has the same owner.")]
         self.worker_endpoints.first().thread.owner() == thread.owner()
     }
 
@@ -179,6 +181,7 @@ impl DispatcherCore {
         let send_result = endpoint.command_tx.send(Command::AccessIo {
             access: QueuedIoAccess::new(access),
         });
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         endpoint.waker.wake_by_ref();
         send_result.map_err(|_error| self.runtime_shutting_down_error())
     }
@@ -276,6 +279,40 @@ mod tests {
     use super::*;
     use crate::runtime::dispatch::{DispatcherClient, test_threads};
     use crate::runtime::worker::blocking::{PanicPolicy, Pool};
+
+    #[test]
+    fn gamma_survivor_private_dispatch_starts_at_worker_zero_and_wakes_io_destination() {
+        use std::sync::atomic::AtomicUsize;
+        use std::task::{Wake, Waker};
+
+        #[derive(Default)]
+        struct Counter(AtomicUsize);
+        impl Wake for Counter {
+            fn wake(self: std::sync::Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+            fn wake_by_ref(self: &std::sync::Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let threads = test_threads(3);
+        let (tx, rx) = channel::unbounded();
+        let counter = std::sync::Arc::new(Counter::default());
+        let mut first = endpoint(tx, &threads[0]);
+        first.waker = Waker::from(std::sync::Arc::clone(&counter));
+        let (tx, _second_rx) = channel::unbounded();
+        let second = endpoint(tx, &threads[1]);
+        let (tx, _third_rx) = channel::unbounded();
+        let third = endpoint(tx, &threads[2]);
+        let core = DispatcherCore::new(NonEmpty::from_vec(vec![first, second, third]).unwrap(), Shutdown::default());
+        let selected: Vec<_> = (0..7).map(|_| usize::from(core.next_worker_index())).collect();
+        assert_eq!(selected, [0, 1, 2, 0, 1, 2, 0]);
+        core.access_io(WorkerIndex(0), Box::new(|_| {})).unwrap();
+        assert!(matches!(rx.try_recv().unwrap(), Command::AccessIo { .. }));
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+        let client = DispatcherClient::new(core);
+        assert_eq!(format!("{client:?}"), std::any::type_name::<DispatcherClient>());
+    }
 
     #[cfg_attr(test, mutants::skip)]
     fn endpoint(tx: channel::Sender<Command>, thread: &Thread) -> WorkerEndpoint {

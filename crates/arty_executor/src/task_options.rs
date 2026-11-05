@@ -86,12 +86,14 @@ impl TaskOptions {
     }
 
     pub(crate) fn report_succeeded(&self, sink: &Sink, polls: u64) {
+        // #[gamma::skip(cond.always_true, reason = "A noop sink never invokes its event factory or processors; the temporary observed context is restored before returning.")]
         if !sink.is_noop() {
             self.with_context(|| telemetry::report_succeeded(sink, polls));
         }
     }
 
     pub(crate) fn report_panicked(&self, sink: &Sink, polls: u64) {
+        // #[gamma::skip(cond.always_true, reason = "A noop sink never invokes its event factory or processors; the temporary observed context is restored before returning.")]
         if !sink.is_noop() {
             self.with_context(|| telemetry::report_panicked(sink, polls));
         }

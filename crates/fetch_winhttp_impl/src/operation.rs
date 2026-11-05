@@ -44,6 +44,10 @@ use crate::error::Result as WinHttpResult;
 use crate::handle::{ConnectHandle, RawHandle, RequestHandle};
 use crate::session::WinHttpSession;
 
+#[cfg(test)]
+#[path = "receiver_drop_calls.rs"]
+mod receiver_drop_calls;
+
 /// Provides stable callback-context storage for one transport instance.
 ///
 /// Each materialized transport owns a separate pool, so contexts are reused
@@ -360,13 +364,13 @@ impl Future for OperationFuture<'_> {
         // remainder of its life.
         let result = unsafe { Pin::new_unchecked(&mut *this.receiver) }.poll(cx);
         if result.is_ready() {
-            // SAFETY: ManuallyDrop::drop requires that the value is never used
+            // SAFETY: destroy_receiver requires that the value is never used
             // again and is dropped at most once. receiver_live is true here and
             // is cleared immediately afterwards, and both the poll assertion
             // and this future's Drop consult that flag, so no path reaches the
             // receiver after this point.
             unsafe {
-                ManuallyDrop::drop(&mut this.receiver);
+                this.destroy_receiver();
             }
             this.receiver_live = false;
 
@@ -383,6 +387,22 @@ impl Future for OperationFuture<'_> {
 }
 
 impl OperationFuture<'_> {
+    /// # Safety
+    ///
+    /// The receiver must still be live unless a test interceptor suppresses this
+    /// attempt before accessing the receiver.
+    unsafe fn destroy_receiver(&mut self) {
+        #[cfg(test)]
+        if receiver_drop_calls::suppress_repeated_drop() {
+            return;
+        }
+        // SAFETY: the caller guarantees a live receiver that will not be used
+        // again; the test interceptor returns before any access on repeat attempts.
+        unsafe {
+            ManuallyDrop::drop(&mut self.receiver);
+        }
+    }
+
     pub(crate) fn cold_connect_state(&self) -> ColdConnectState {
         let _request = self
             .request
@@ -400,19 +420,17 @@ impl OperationFuture<'_> {
 }
 
 impl Drop for OperationFuture<'_> {
-    // The receiver lives in a `ManuallyDrop`, so removing this body leaks the
-    // endpoint and lets the request handle close ahead of it, inverting the
-    // teardown order this type exists to enforce. Neither consequence is
-    // observable from a test assertion; Miri owns that guarantee.
+    // The receiver endpoint must be destroyed before the native request handle closes.
     #[cfg_attr(test, mutants::skip)]
     fn drop(&mut self) {
         if self.receiver_live {
-            // SAFETY: ManuallyDrop::drop requires that the value is never used
+            // SAFETY: destroy_receiver requires that the value is never used
             // again and is dropped at most once. Drop runs once per value, and
             // receiver_live proves poll has not already destroyed the receiver.
             unsafe {
-                ManuallyDrop::drop(&mut self.receiver);
+                self.destroy_receiver();
             }
+            // #[gamma::skip(stmt.delete_assign, literal.bool_flip, tag = "equivalent", reason = "receiver_live is not read again after this assignment in Drop, and bool has no destructor")]
             self.receiver_live = false;
         }
         // The request field drops after this method. Pending cancellation
@@ -453,6 +471,64 @@ mod tests {
         CONNECT, REQUEST, bindings, closing, complete, context_pointer, drive, finish, installed, installed_context, raw_handle, session,
         status_info_len,
     };
+
+    #[test]
+    fn november4_completion_and_cancellation_destroy_the_receiver_exactly_once() {
+        for completed in [false, true] {
+            let attempts = super::receiver_drop_calls::observe(|| {
+                let (mut guard, context, contexts, session, closes) = installed();
+                let mut future = Box::pin(guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(())));
+                let mut cx = Context::from_waker(Waker::noop());
+                assert!(future.as_mut().poll(&mut cx).is_pending());
+                if completed {
+                    // SAFETY: installed keeps this pinned context live; this operation
+                    // takes no payload, and the final callback follows destruction.
+                    unsafe {
+                        complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+                    }
+                    assert!(matches!(
+                        future.as_mut().poll(&mut cx),
+                        Poll::Ready(Ok(CompletionResult::SendRequestComplete))
+                    ));
+                    assert!(!future.as_ref().get_ref().receiver_live);
+                }
+                drop(future);
+                assert_eq!(guard.request.is_some(), completed);
+                // SAFETY: the receiver is destroyed and this is the only final callback,
+                // with no outstanding operation future or overlapping context borrow.
+                unsafe {
+                    finish(guard, context, &contexts, session, &closes);
+                }
+            });
+            assert_eq!(attempts, 1, "completion and cancellation each destroy exactly one receiver");
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_completed_operation_marks_receiver_dead_and_restores_handle() {
+        let (mut guard, context, contexts, session, closes) = installed();
+        let mut future = Box::pin(guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(())));
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(future.as_mut().poll(&mut cx).is_pending());
+        assert!(future.as_ref().get_ref().receiver_live);
+        // SAFETY: installed keeps this context live; send completion has no payload,
+        // and finish owns the final, non-overlapping reclaiming notification.
+        unsafe {
+            complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+        }
+        assert!(matches!(
+            future.as_mut().poll(&mut cx),
+            Poll::Ready(Ok(CompletionResult::SendRequestComplete))
+        ));
+        assert!(!future.as_ref().get_ref().receiver_live);
+        assert!(future.as_ref().get_ref().request.is_none());
+        drop(future);
+        assert!(guard.request.is_some());
+        // SAFETY: the receiver is destroyed and this is the sole terminal cleanup.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
+    }
 
     assert_impl_all!(ContextPool: Send, Sync, std::fmt::Debug, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(ContextInstallation: Send, std::fmt::Debug, UnwindSafe);
@@ -541,6 +617,43 @@ mod tests {
         };
 
         (buffer, releases, address)
+    }
+
+    #[test]
+    fn gamma_survivor_uninstalled_context_drop_releases_active_io_buffer() {
+        for kind in [OperationKind::Read, OperationKind::Write] {
+            let mut mock = crate::bindings::MockBindings::new();
+            mock.expect_close_handle().returning(|_| Ok(()));
+            let facade = crate::bindings::BindingsFacade::mock(Arc::new(mock));
+            let context = Box::pin(RequestContext::new(
+                ConnectHandle::new(raw_handle(CONNECT), facade.clone()),
+                session(facade),
+            ));
+            let (buffer, releases, _) = tracked_operation_buffer(kind);
+            // SAFETY: this standalone context is pinned and unarmed; the receiver is dropped before the context.
+            let receiver = unsafe { context.as_ref().arm(kind, buffer) };
+            drop(receiver);
+            assert_eq!(releases.load(Ordering::SeqCst), 0);
+            drop(context);
+            assert_eq!(releases.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_installation_debug_names_owned_fields() {
+        let mut mock = crate::bindings::MockBindings::new();
+        mock.expect_close_handle().returning(|_| Ok(()));
+        let facade = crate::bindings::BindingsFacade::mock(Arc::new(mock));
+        let contexts = ContextPool::new(Pool::new());
+        let installation = ContextInstallation::new(
+            RequestHandle::new(raw_handle(REQUEST), facade.clone()),
+            ConnectHandle::new(raw_handle(CONNECT), facade.clone()),
+            session(facade),
+            &contexts,
+        );
+        let debug = format!("{installation:?}");
+        assert!(debug.starts_with("ContextInstallation { request:"));
+        assert!(debug.contains("context:"));
     }
 
     /// # Safety

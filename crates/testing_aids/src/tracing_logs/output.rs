@@ -2,7 +2,8 @@
 // Licensed under the MIT License.
 
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
@@ -36,13 +37,20 @@ use crate::is_mutation_testing;
 /// invoked, which means the test binary is missing its `#[ctor::ctor]`
 /// process-initialization function. See `docs/tracing-tests.md`.
 pub fn write_to_stdout() {
-    let mutation_testing = is_mutation_testing();
+    write_to_stdout_mode(is_mutation_testing());
+}
+
+fn write_to_stdout_mode(mutation_testing: bool) {
+    write_to_stdout_initialized(mutation_testing, &INITIALIZER);
+}
+
+fn write_to_stdout_initialized(mutation_testing: bool, initializer: &Once) {
     if mutation_testing {
         // Suppress diagnostic output, but leave the initialized formatter enabled.
         return;
     }
 
-    assert_initialized();
+    assert_initialized_with(initializer);
     enable_stdout(&STDOUT_ENABLED, mutation_testing);
 }
 
@@ -71,13 +79,20 @@ pub fn write_to_stdout() {
 /// is missing its `#[ctor::ctor]` process-initialization function. See
 /// `docs/tracing-tests.md`.
 pub fn write_to_stdout_and_file(file_name: &str) -> FileGuard {
-    let mutation_testing = is_mutation_testing();
+    write_to_stdout_and_file_mode(file_name, is_mutation_testing())
+}
+
+fn write_to_stdout_and_file_mode(file_name: &str, mutation_testing: bool) -> FileGuard {
+    write_to_stdout_and_file_initialized(file_name, mutation_testing, &INITIALIZER)
+}
+
+fn write_to_stdout_and_file_initialized(file_name: &str, mutation_testing: bool, initializer: &Once) -> FileGuard {
     if mutation_testing {
         // Suppress diagnostic output, but leave the initialized formatter enabled.
         return FileGuard::fake();
     }
 
-    assert_initialized();
+    assert_initialized_with(initializer);
     enable_stdout(&STDOUT_ENABLED, mutation_testing);
 
     start_log_file_scope(file_name)
@@ -86,10 +101,12 @@ pub fn write_to_stdout_and_file(file_name: &str) -> FileGuard {
 /// Looks upward in the filesystem from the current directory until it finds a directory with a
 /// "Cargo.lock" file, indicating the root of a Cargo workspace. Returns the path to that directory.
 fn workspace_directory() -> String {
-    let mut dir = std::env::current_dir().unwrap();
+    find_workspace_directory(std::env::current_dir().unwrap(), Path::exists)
+}
 
+fn find_workspace_directory(mut dir: PathBuf, exists: impl Fn(&Path) -> bool) -> String {
     loop {
-        if dir.join("Cargo.lock").exists() {
+        if exists(&dir.join("Cargo.lock")) {
             return dir.to_string_lossy().to_string();
         }
 
@@ -105,10 +122,14 @@ fn workspace_directory() -> String {
 #[must_use]
 fn logs_directory() -> String {
     let workspace_dir = workspace_directory();
+    ensure_logs_directory(&workspace_dir, Path::exists, |path| fs::create_dir_all(path))
+}
+
+fn ensure_logs_directory(workspace_dir: &str, exists: impl FnOnce(&Path) -> bool, create: impl FnOnce(&Path) -> io::Result<()>) -> String {
     let logs_dir = format!("{workspace_dir}/test-logs");
 
-    if !std::path::Path::new(&logs_dir).exists() {
-        fs::create_dir_all(&logs_dir).unwrap();
+    if !exists(Path::new(&logs_dir)) {
+        create(Path::new(&logs_dir)).unwrap();
     }
 
     logs_dir
@@ -200,8 +221,12 @@ static INITIALIZER: Once = Once::new();
 /// Panics if the subscriber was never installed, which means the test binary is missing
 /// its `#[ctor::ctor]` process-initialization function calling [`initialize`].
 pub(crate) fn assert_initialized() {
+    assert_initialized_with(&INITIALIZER);
+}
+
+fn assert_initialized_with(initializer: &Once) {
     assert!(
-        INITIALIZER.is_completed(),
+        initializer.is_completed(),
         "testing_aids tracing was used before initialize() ran; every test binary that \
          explicitly tests tracing or belongs to a package with a direct normal/dev tracing \
          dependency must install the subscriber from a `#[ctor::ctor]` \
@@ -262,6 +287,11 @@ where
 ///
 /// [`docs/tracing-tests.md`]: https://github.com/microsoft/oxidizer/blob/main/docs/tracing-tests.md
 pub fn write_to_stdout_and_buffer() -> BufferGuard {
+    start_buffer_scope(is_mutation_testing)
+}
+
+fn start_buffer_scope(mutation_testing: impl FnOnce() -> bool) -> BufferGuard {
+    // #[gamma::skip(call_result.default, reason = "assert_initialized returns unit; default_after still executes the assertion.")]
     assert_initialized();
 
     // Unlike `write_to_stdout`/`write_to_stdout_and_file`, buffer capture is not
@@ -269,7 +299,8 @@ pub fn write_to_stdout_and_buffer() -> BufferGuard {
     // test, so a disabled buffer would break those tests rather than merely omit
     // diagnostic output. The stdout tee, however, is purely diagnostic, so we silence
     // it under mutation testing to avoid the output overhead.
-    enable_stdout(&STDOUT_ENABLED, is_mutation_testing());
+    // #[gamma::skip(call_result.default, reason = "enable_stdout returns unit; default_after still applies the mode to the flag.")]
+    enable_stdout(&STDOUT_ENABLED, mutation_testing());
 
     let buffer = Arc::new(Mutex::new(Vec::<String>::new()));
 
@@ -547,6 +578,7 @@ fn start_log_file_scope(file_name: &str) -> FileGuard {
                 Ok(file) => {
                     *log_file = Some(file);
                     FILE_ENABLED.store(true, Ordering::Release);
+                    // #[gamma::skip(option.some_to_none, reason = "After successful file creation, unwrapping Some(Ok(())) is a no-op; None skips only that no-op.")]
                     (false, Some(Ok(())))
                 }
                 Err(error) => (false, Some(Err(error))),
@@ -588,25 +620,331 @@ impl<'a> MakeWriter<'a> for LogFileWriter {
 
 /// Could either wrap a `File` or be a no-op placeholder (used when no log file is configured).
 #[derive(Debug)]
-struct LogWriter {
-    file: Option<File>,
+struct LogWriter<W = File> {
+    file: Option<W>,
 }
 
-impl Write for LogWriter {
+impl<W: Write> Write for LogWriter<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.file.as_mut().map_or(Ok(buf.len()), |file| file.write(buf))
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.file.as_mut().map_or(Ok(()), File::flush)
+        self.file.as_mut().map_or(Ok(()), W::flush)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[serial_test::serial]
+    fn nov4_public_stdout_switch_obeys_both_injected_modes_even_in_a_mutation_runner() {
+        for mode in [false, true] {
+            crate::test_hooks::with_mode(mode, || {
+                let original = super::STDOUT_ENABLED.swap(false, super::Ordering::Relaxed);
+                let outcome = std::panic::catch_unwind(super::write_to_stdout);
+                let enabled = super::STDOUT_ENABLED.swap(original, super::Ordering::Relaxed);
+                outcome.unwrap();
+                assert_eq!(enabled, !mode);
+            });
+        }
+    }
+
+    #[test]
+    fn nov4_log_writer_flush_forwards_the_in_memory_failure_instead_of_reporting_success() {
+        struct Fails(std::rc::Rc<std::cell::Cell<usize>>);
+        impl std::io::Write for Fails {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.0.set(self.0.get() + 1);
+                Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+            }
+        }
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut writer = super::LogWriter {
+            file: Some(Fails(std::rc::Rc::clone(&calls))),
+        };
+        assert_eq!(
+            std::io::Write::flush(&mut writer).unwrap_err().kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
+        assert_eq!(calls.get(), 1);
+        writer.file = None;
+        std::io::Write::flush(&mut writer).unwrap();
+        assert_eq!(calls.get(), 1);
+    }
+    #[test]
+    #[serial_test::serial]
+    fn nov4_public_stdout_switch_matches_the_current_mutation_mode_without_writing() {
+        let original = super::STDOUT_ENABLED.swap(false, super::Ordering::Relaxed);
+        let outcome = std::panic::catch_unwind(super::write_to_stdout);
+        let enabled = super::STDOUT_ENABLED.swap(original, super::Ordering::Relaxed);
+        outcome.unwrap();
+        assert_eq!(enabled, !crate::is_mutation_testing());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn nov4_mutation_stdout_mode_does_not_require_initialization_or_enable_output() {
+        let initializer = super::Once::new();
+        let original = super::STDOUT_ENABLED.swap(false, super::Ordering::Relaxed);
+        let outcome = std::panic::catch_unwind(|| super::write_to_stdout_initialized(true, &initializer));
+        let enabled = super::STDOUT_ENABLED.swap(original, super::Ordering::Relaxed);
+        outcome.unwrap();
+        assert!(!enabled);
+        assert!(!initializer.is_completed());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_round2_uninitialized_stdout_and_file_modes_reject_before_publishing_or_writing() {
+        let initializer = super::Once::new();
+        let before = super::STDOUT_ENABLED.load(super::Ordering::Relaxed);
+        let stdout = std::panic::catch_unwind(|| super::write_to_stdout_initialized(false, &initializer)).unwrap_err();
+        let file = std::panic::catch_unwind(|| {
+            super::write_to_stdout_and_file_initialized("gamma_round2_must_not_be_written", false, &initializer)
+        });
+        let Err(file) = file else {
+            panic!("uninitialized file output must be rejected before creating a guard");
+        };
+        for panic in [stdout, file] {
+            let message = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap();
+            assert!(message.starts_with("testing_aids tracing was used before initialize() ran"));
+        }
+        assert_eq!(super::STDOUT_ENABLED.load(super::Ordering::Relaxed), before);
+    }
+
+    use std::cell::RefCell;
+
     use super::*;
 
     #[test]
+    #[serial_test::serial]
+    fn gamma_round2_workspace_search_checks_each_ancestor_for_the_exact_marker() {
+        let root = std::path::PathBuf::from("workspace");
+        let member = root.join("member");
+        let nested = member.join("nested");
+        let visited = RefCell::new(Vec::new());
+        let found = find_workspace_directory(nested.clone(), |path| {
+            visited.borrow_mut().push(path.to_path_buf());
+            path == root.join("Cargo.lock")
+        });
+        assert_eq!(found, root.to_string_lossy());
+        assert_eq!(
+            visited.into_inner(),
+            vec![nested.join("Cargo.lock"), member.join("Cargo.lock"), root.join("Cargo.lock")]
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    #[should_panic(expected = "No Cargo workspace found in ancestors of the working directory")]
+    fn gamma_round2_workspace_search_reports_exhausted_ancestors() {
+        find_workspace_directory(std::path::PathBuf::from("workspace"), |_| false);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_round2_log_directory_creation_is_conditional_and_receives_the_exact_path() {
+        for present in [false, true] {
+            let created = RefCell::new(Vec::new());
+            let path = ensure_logs_directory(
+                "workspace",
+                |path| {
+                    assert_eq!(path, std::path::Path::new("workspace").join("test-logs"));
+                    present
+                },
+                |path| {
+                    created.borrow_mut().push(path.to_path_buf());
+                    Ok(())
+                },
+            );
+            assert_eq!(std::path::Path::new(&path), std::path::Path::new("workspace").join("test-logs"));
+            assert_eq!(
+                created.into_inner(),
+                if present {
+                    Vec::new()
+                } else {
+                    vec![std::path::PathBuf::from("workspace").join("test-logs")]
+                }
+            );
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    #[should_panic(expected = "owned creation failure")]
+    fn gamma_round2_log_directory_creation_propagates_the_injected_error() {
+        ensure_logs_directory("workspace", |_| false, |_| Err(io::Error::other("owned creation failure")));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_round2_stdout_decision_enables_only_nonmutation_diagnostics() {
+        let previous = STDOUT_ENABLED.swap(false, Ordering::AcqRel);
+        write_to_stdout_mode(true);
+        let mutation = STDOUT_ENABLED.load(Ordering::Acquire);
+        write_to_stdout_mode(false);
+        let normal = STDOUT_ENABLED.load(Ordering::Acquire);
+        STDOUT_ENABLED.store(previous, Ordering::Release);
+        assert!(!mutation);
+        assert!(normal);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_round2_workspace_and_log_paths_use_the_actual_workspace_root() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let root = manifest.parent().unwrap().parent().unwrap();
+        assert_eq!(std::path::Path::new(&workspace_directory()), root);
+        assert_eq!(std::path::Path::new(&logs_directory()), root.join("test-logs"));
+        assert_eq!(
+            std::path::Path::new(&log_file("round2.log")),
+            root.join("test-logs").join("round2.log")
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_round2_buffer_guard_drop_and_consumption_clear_the_published_flag() {
+        assert!(!buffer_active());
+        let previous = STDOUT_ENABLED.swap(false, Ordering::AcqRel);
+        let guard = start_buffer_scope(|| false);
+        let normal_stdout = STDOUT_ENABLED.load(Ordering::Acquire);
+        assert!(buffer_active());
+        assert!(LOG_BUFFER.lock().unwrap().is_some());
+        drop(guard);
+        assert!(LOG_BUFFER.lock().unwrap().is_none());
+        assert!(!buffer_active());
+        STDOUT_ENABLED.store(false, Ordering::Release);
+        let guard = start_buffer_scope(|| true);
+        let mutation_stdout = STDOUT_ENABLED.load(Ordering::Acquire);
+        assert!(buffer_active());
+        assert!(guard.into_inner().is_empty());
+        assert!(LOG_BUFFER.lock().unwrap().is_none());
+        assert!(!buffer_active());
+        STDOUT_ENABLED.store(previous, Ordering::Release);
+        assert!(normal_stdout);
+        assert!(!mutation_stdout);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_round2_consumed_guard_drop_does_not_detach_a_replacement_buffer() {
+        let guard = write_to_stdout_and_buffer();
+        // Model a consumed guard finishing Drop after a replacement scope has attached.
+        drop(BufferGuard { buffer: None });
+        assert!(buffer_active());
+        assert!(Arc::ptr_eq(
+            LOG_BUFFER.lock().unwrap().as_ref().unwrap(),
+            guard.buffer.as_ref().unwrap()
+        ));
+        drop(guard);
+        assert!(!buffer_active());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_round2_file_scope_preserves_active_output_and_detaches_all_published_state() {
+        assert!(!file_active());
+        let previous_stdout = STDOUT_ENABLED.swap(false, Ordering::AcqRel);
+        let filename = format!("gamma_round2_owned_output_{}.log", std::process::id());
+        let path = log_file(&filename);
+        let guard = write_to_stdout_and_file_mode(&filename, false);
+        let normal_stdout = STDOUT_ENABLED.load(Ordering::Acquire);
+        assert!(file_active());
+        LOG_FILE.lock().unwrap().as_mut().unwrap().write_all(b"retained").unwrap();
+        let duplicate = std::panic::catch_unwind(|| start_log_file_scope(&filename));
+        let rejected = duplicate.is_err();
+        if let Ok(duplicate) = duplicate {
+            std::mem::forget(duplicate);
+        }
+        let bytes = fs::read(&path).unwrap();
+        drop(guard);
+        let detached = LOG_FILE.lock().unwrap().take();
+        let was_detached = detached.is_none();
+        drop(detached);
+        let active = file_active();
+        let enabled = FILE_ENABLED.swap(false, Ordering::AcqRel);
+        fs::remove_file(path).unwrap();
+        STDOUT_ENABLED.store(false, Ordering::Release);
+        let suppressed = write_to_stdout_and_file_mode(&filename, true);
+        let mutation_stdout = STDOUT_ENABLED.load(Ordering::Acquire);
+        let fake = suppressed.fake;
+        drop(suppressed);
+        STDOUT_ENABLED.store(previous_stdout, Ordering::Release);
+        assert!(rejected);
+        assert_eq!(bytes, b"retained");
+        assert!(was_detached);
+        assert!(!active);
+        assert!(!enabled);
+        assert!(normal_stdout);
+        assert!(!mutation_stdout);
+        assert!(fake);
+        assert!(LOG_FILE.lock().unwrap().is_none());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    #[should_panic(expected = "called `Result::unwrap()` on an `Err` value")]
+    fn gamma_round2_file_creation_error_is_reported_before_returning_a_guard() {
+        let missing = std::path::PathBuf::from(format!("gamma_round2_missing_parent_{}", std::process::id())).join("output.log");
+        let missing = missing.to_str().unwrap();
+        assert!(!std::path::Path::new(&log_file(missing)).parent().unwrap().exists());
+        let _guard = start_log_file_scope(missing);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_survivor_buffer_commit_consumes_final_newline_and_partial_tail_exactly_once() {
+        let (mut writer, buffer) = new_writer();
+        writer.write_all(b"first\n\npartial").unwrap();
+        writer.flush().unwrap();
+        assert_eq!(*buffer.lock().unwrap(), ["first", ""]);
+        assert_eq!(writer.pending, b"partial");
+        writer.commit_final();
+        writer.commit_final();
+        assert_eq!(*buffer.lock().unwrap(), ["first", "", "partial"]);
+        assert_eq!(writer.pending, Vec::<u8>::new());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_survivor_absent_buffer_discards_bytes_and_reports_full_write_length() {
+        let mut writer = BufferWriter {
+            buffer: None,
+            pending: b"stale".to_vec(),
+        };
+        assert_eq!(writer.write(b"new").unwrap(), 3);
+        assert_eq!(writer.pending, b"stale");
+        writer.flush().unwrap();
+        assert_eq!(writer.pending, Vec::<u8>::new());
+        let mut writer: LogWriter = LogWriter { file: None };
+        for bytes in [b"".as_slice(), b"one".as_slice()] {
+            assert_eq!(writer.write(bytes).unwrap(), bytes.len());
+        }
+        writer.flush().unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_survivor_fake_file_guard_drop_never_requires_an_active_file() {
+        assert!(LOG_FILE.lock().unwrap().is_none());
+        let fake = FileGuard::fake();
+        assert!(fake.fake);
+        std::panic::catch_unwind(|| drop(fake)).unwrap();
+        assert!(LOG_FILE.lock().unwrap().is_none());
+        assert!(!FILE_ENABLED.load(Ordering::Acquire));
+    }
+
+    #[test]
+    #[serial_test::serial]
     fn stdout_route_filters_levels_after_activation() {
         assert_stdout_route(
             false,
@@ -619,6 +957,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn stdout_route_stays_silent_during_mutation_testing() {
         assert_stdout_route(true, &[]);
     }
@@ -666,6 +1005,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_splits_on_newlines_into_separate_entries() {
         let (mut writer, buffer) = new_writer();
 
@@ -676,6 +1016,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_does_not_split_a_line_across_multiple_writes() {
         let (mut writer, buffer) = new_writer();
 
@@ -689,6 +1030,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn flush_retains_a_trailing_partial_line_until_terminated() {
         let (mut writer, buffer) = new_writer();
 
@@ -700,6 +1042,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn drop_flushes_a_final_line_without_a_trailing_newline() {
         let (mut writer, buffer) = new_writer();
 

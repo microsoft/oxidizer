@@ -443,6 +443,7 @@ where
                     values.try_reserve(capacity).map_err(S::Error::custom)?;
                 }
                 while let Some(value) = sequence.next_element_seed(DeserializeInSeed::<T, A>::new(self.arena))? {
+                    // #[gamma::skip(cond.always_true, reason = "Vec::try_reserve(1) is a no-op whenever one free slot already exists")]
                     if vec_needs_reserve(values.len(), values.capacity()) {
                         values.try_reserve(1).map_err(S::Error::custom)?;
                     }

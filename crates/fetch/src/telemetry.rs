@@ -50,6 +50,7 @@ pub struct TelemetryAttributes(smallvec::SmallVec<[KeyValue; TELEMETRY_ATTRIBUTE
 impl TelemetryAttributes {
     /// Creates an empty set of telemetry attributes.
     #[must_use]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "Self::default() and inferred Default::default() call the same TelemetryAttributes implementation")]
     pub fn new() -> Self {
         Self::default()
     }
@@ -102,6 +103,24 @@ impl fmt::Debug for Metering {
     }
 }
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_metering_debug_reports_all_fields_and_provider_presence() {
+        let metering = Metering::new("runtime-marker".into(), "transport-marker".into(), "client-marker".into());
+        assert_eq!(
+            format!("{metering:?}"),
+            "Metering { runtime: \"runtime-marker\", transport: \"transport-marker\", client_name: \"client-marker\", custom_provider: false }"
+        );
+        let metering = metering.with_provider(opentelemetry_sdk::metrics::SdkMeterProvider::builder().build());
+        assert_eq!(
+            format!("{metering:?}"),
+            "Metering { runtime: \"runtime-marker\", transport: \"transport-marker\", client_name: \"client-marker\", custom_provider: true }"
+        );
+    }
+}
 impl Metering {
     /// Creates metering that records against the global meter provider.
     pub(crate) fn new(runtime: Cow<'static, str>, transport: Cow<'static, str>, client_name: Cow<'static, str>) -> Self {
@@ -182,6 +201,7 @@ pub(crate) const fn http_method_name(method: &http::Method) -> &'static str {
 
 #[cfg_attr(test, mutants::skip)] // Some branches are for optimization and cannot be feasibly distinguished in tests.
 pub(crate) fn url_scheme(scheme: &Scheme) -> Value {
+    // #[gamma::skip(match_arm.never_matches, tag = "equivalent", reason = "removing either static-string fast path falls through to the identical scheme string; Value equality ignores string storage ownership")]
     match scheme.as_str() {
         "http" => Value::from("http"),
         "https" => Value::from("https"),

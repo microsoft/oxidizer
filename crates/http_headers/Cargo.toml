@@ -80,6 +80,7 @@ smallvec = { workspace = true, features = ["const_new"] }
 zeroize = { workspace = true, optional = true, features = ["alloc"] }
 
 [dev-dependencies]
+alloc_tracker = { workspace = true }
 argh = { workspace = true }
 axum = { workspace = true, features = ["http1", "json", "tokio"] }
 base64 = { workspace = true, features = ["std"] }

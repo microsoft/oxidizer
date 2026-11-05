@@ -3,6 +3,7 @@
 
 /// Non-faulting cache hint; null and otherwise unreadable addresses are allowed.
 #[cfg(target_os = "windows")]
+// #[gamma::skip(fn_value.unit, parameter.default_shadow, reason = "PREFETCHW is explicitly non-faulting and changes only cache residency, not allocator results or ownership")]
 pub(crate) fn prefetch(address: usize) {
     // SAFETY: PrefetchW is part of Windows 10's x64 hardware baseline and is a
     // non-faulting hint; the address need not be readable or dereferenceable.
@@ -30,6 +31,8 @@ pub(crate) fn prefetch(address: usize) {
     }
 }
 
+// #[gamma::skip(fn_value.unit, reason = "The processor spin hint changes scheduling efficiency, not the synchronization protocol")]
 pub(crate) fn pause() {
+    // #[gamma::skip(stmt.delete_call, reason = "spin_loop is a processor hint and does not provide synchronization or change allocator state")]
     std::hint::spin_loop();
 }

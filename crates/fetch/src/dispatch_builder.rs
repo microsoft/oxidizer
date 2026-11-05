@@ -79,6 +79,16 @@ mod decompression {
             None => handler,
         }
     }
+
+    #[cfg(test)]
+    mod gamma_round2 {
+        #[test]
+        fn gamma_round2_no_formats_means_no_decompression_layer() {
+            let mut options = super::ClientOptions::default();
+            options.decompression.formats.clear();
+            assert!(super::layer(&options, &super::HttpBodyBuilder::new_fake()).is_none());
+        }
+    }
 }
 
 /// Decompression support for a build without a compression implementation.

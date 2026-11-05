@@ -36,6 +36,7 @@ impl HttpClone {
     /// default.
     #[cfg_attr(test, mutants::skip)] // SafeOnly is the default, so skip in mutation testing
     #[must_use]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "Derived Default selects the same fieldless SafeOnly variant.")]
     pub fn safe_only() -> Self {
         Self(Inner::SafeOnly)
     }

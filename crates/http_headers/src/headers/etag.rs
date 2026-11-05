@@ -373,12 +373,18 @@ fn construct(opaque: &[u8], weak: bool) -> Result<ETagOwned, DecodeError> {
         return Err(super::invalid_syntax(&FieldName::Etag));
     }
     let prefix: &[u8] = if weak { b"W/\"" } else { b"\"" };
-    let total_len = etag_wire_len(prefix.len(), opaque.len())?;
+    // #[gamma::skip(try.propagate_to_unwrap, expr.increment, tag = "equivalent", reason = "The prefix has one or three bytes and opaque is isize::MAX-bounded, so this sum and its one-byte increases fit usize; only initial Vec capacity observes the result")]
+    let total_len = etag_wire_len(
+        // #[gamma::skip(expr.decrement, tag = "equivalent", reason = "This prefix has one or three bytes, so decrement cannot underflow and only reduces the initial Vec capacity estimate")]
+        prefix.len(),
+        opaque.len(),
+    )?;
     let mut wire = Vec::with_capacity(total_len);
     wire.extend_from_slice(prefix);
     wire.extend_from_slice(opaque);
     wire.push(b'"');
     Ok(ETagOwned {
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The opaque bytes passed etagc validation; the fixed prefix and closing quote introduce no forbidden field-value byte")]
         value: super::value_from_bytes(&FieldName::Etag, wire)?,
     })
 }
@@ -443,21 +449,30 @@ const fn word_is_valid(word: u64) -> bool {
 #[inline]
 pub(super) fn opaque_is_valid(opaque: &[u8]) -> bool {
     let length = opaque.len();
-    if length < 8 {
+    if
+    // #[gamma::skip(cond.always_true, relational.lt_to_le, literal.int_increment, tag = "equivalent", reason = "The scalar byte predicate and overlapping-word validator recognize exactly the same etagc bytes at these cutoffs")]
+    length < 8 {
         return opaque.iter().copied().all(valid_opaque_byte);
     }
     let mut index = 0;
-    while index + 8 < length {
+    while
+    // #[gamma::skip(relational.lt_to_le, literal.int_decrement, tag = "equivalent", reason = "The final overlapping eight-byte word independently covers the suffix; these bounds only repeat an additional in-bounds word")]
+    index + 8 < length {
         if !word_is_valid(read_word(opaque, index)) {
             return false;
         }
-        index += 8;
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        index +=
+        // #[gamma::skip(literal.int_to_zero, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // #[gamma::skip(literal.int_decrement, literal.int_to_one, tag = "equivalent", reason = "Positive strides no larger than eight overlap rather than skip bytes; the final word still covers the suffix")]
+        8;
     }
     word_is_valid(read_word(opaque, length - 8))
 }
 
 /// Reads the eight bytes of `bytes` starting at `index` as a packed word.
 fn read_word(bytes: &[u8], index: usize) -> u64 {
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "copy_from_slice overwrites all eight initialized bytes before the word is read")]
     let mut word = [0; 8];
     word.copy_from_slice(&bytes[index..index + 8]);
     u64::from_ne_bytes(word)
@@ -475,6 +490,33 @@ mod tests {
         reason = "tests classify parser outcomes without needing successful values"
     )]
 
+    #[test]
+    fn gamma_afternoon_tag_comparisons_propagate_the_other_tags_invalid_bounds() {
+        let valid = super::ETagOwned::strong("left").unwrap();
+        let invalid = super::ETagOwned {
+            value: crate::FieldValue::from_static(""),
+        };
+        for error in [valid.strong_eq(&invalid).unwrap_err(), valid.weak_eq(&invalid).unwrap_err()] {
+            assert_eq!(error.header(), &crate::FieldName::Etag);
+            assert_eq!(error.kind(), crate::DecodeErrorKind::InvalidSyntax);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_opaque_word_scan_matches_the_byte_grammar_at_every_offset() {
+        for length in [0, 1, 7, 8, 9, 15, 16, 17, 24, 25] {
+            let valid = vec![b'a'; length];
+            assert!(super::opaque_is_valid(&valid));
+            for position in 0..length {
+                for byte in [0, b' ', b'"', 127, 128, 255] {
+                    let mut candidate = valid.clone();
+                    candidate[position] = byte;
+                    let expected = matches!(byte, b'!' | b'#'..=b'~' | 0x80..=0xff);
+                    assert_eq!(super::opaque_is_valid(&candidate), expected, "{length}, {position}, {byte}");
+                }
+            }
+        }
+    }
     use super::{ETag, ETagOwned, etag_wire_len, opaque_is_valid, parse_with, read_word, valid_opaque_byte, word_is_valid};
     use crate::sink::FieldSink;
     use crate::{DecodeMode, FieldName, FieldValue, SingleValueField, TestSink};

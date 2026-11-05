@@ -84,6 +84,32 @@ mod tests {
     use crate::metrics::create_resilience_event_counter;
 
     #[test]
+    fn gamma_survivor_default_engine_reuses_precreated_identity_without_entering_named_map() {
+        let policy = AbandonedPolicy::default();
+        let engines = Engines::new(
+            EngineOptions {
+                break_duration: Duration::from_secs(5),
+                health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 5, policy.clone()),
+                probes: ProbesOptions::quick(Duration::from_secs(1), &policy),
+            },
+            tick::ClockControl::new().to_clock(),
+            TelemetryHelper {
+                pipeline_name: "gamma".into(),
+                strategy_name: "default".into(),
+                event_reporter: None,
+                logs_enabled: false,
+            },
+        );
+        assert!(Arc::ptr_eq(&engines.get_engine(&BreakerId::default()), &engines.default_engine));
+        assert_eq!(engines.len(), 0);
+        assert!(!Arc::ptr_eq(
+            &engines.get_engine(&BreakerId::from("named")),
+            &engines.default_engine
+        ));
+        assert_eq!(engines.len(), 1);
+    }
+
+    #[test]
     fn get_engine_ok() {
         let telemetry = TelemetryHelper {
             pipeline_name: "pipeline".into(),

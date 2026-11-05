@@ -38,6 +38,10 @@ use windows::Win32::Networking::WinHttp::{
 use crate::bindings::{WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE};
 use crate::options::ProtocolOptions;
 
+#[cfg(test)]
+#[path = "header_capacity_calls.rs"]
+pub(crate) mod header_capacity_calls;
+
 /// Smallest HTTP/2 keep-alive interval WinHTTP accepts.
 ///
 /// The `WINHTTP_OPTION_HTTP2_KEEPALIVE` entry states that callers cannot set a
@@ -207,6 +211,7 @@ fn ceil_millis(duration: Duration) -> u128 {
 }
 
 pub(crate) fn method_to_utf16(method: &Method) -> Result<U16CString, ConversionError> {
+    // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, tag = "equivalent", reason = "http::Method rejects NUL bytes, so converting its token to UTF-16 cannot reach the diagnostic that consumes this label")]
     string_to_utf16(method.as_str(), "HTTP method")
 }
 
@@ -218,6 +223,7 @@ pub(crate) fn path_to_utf16(path: &str) -> Result<U16CString, ConversionError> {
     if path.starts_with('?') {
         // WinHTTP's open-request path must be absolute; a query-only URI has no
         // path component, so supply the root "/" before the query string.
+        // #[gamma::skip(literal.int_decrement, literal.int_increment, tag = "equivalent", reason = "this is only a Vec capacity hint; push and extend grow storage as needed and U16CString receives the same slash and UTF-16 units")]
         let mut units = Vec::with_capacity(path.len().saturating_add(1));
         units.push(u16::from(b'/'));
         units.extend(path.encode_utf16());
@@ -227,19 +233,25 @@ pub(crate) fn path_to_utf16(path: &str) -> Result<U16CString, ConversionError> {
     string_to_utf16(path, "request path")
 }
 
-pub(crate) fn headers_to_utf16(headers: &HeaderMap) -> Result<U16CString, ConversionError> {
-    let unit_count = headers.iter().try_fold(0_usize, |unit_count, (name, value)| {
+fn request_header_capacity(lengths: impl IntoIterator<Item = (usize, usize)>) -> Result<usize, ConversionError> {
+    #[cfg(test)]
+    let lengths = header_capacity_calls::extra_length().into_iter().chain(lengths);
+    let unit_count = lengths.into_iter().try_fold(0_usize, |unit_count, (name, value)| {
         unit_count
-            .checked_add(name.as_str().len())
-            .and_then(|unit_count| unit_count.checked_add(value.as_bytes().len()))
+            .checked_add(name)
+            .and_then(|unit_count| unit_count.checked_add(value))
             // ": " and "\r\n" are appended per field below.
             .and_then(|unit_count| unit_count.checked_add(4))
     });
     let unit_count = unit_count.ok_or_else(|| ConversionError::from(RequestHeadersTooLargeError::new()))?;
     validate_request_header_unit_count(unit_count)?;
-    let capacity = unit_count
+    unit_count
         .checked_add(1)
-        .ok_or_else(|| ConversionError::from(RequestHeadersTooLargeError::new()))?;
+        .ok_or_else(|| ConversionError::from(RequestHeadersTooLargeError::new()))
+}
+
+pub(crate) fn headers_to_utf16(headers: &HeaderMap) -> Result<U16CString, ConversionError> {
+    let capacity = request_header_capacity(headers.iter().map(|(name, value)| (name.as_str().len(), value.as_bytes().len())))?;
     let mut units = Vec::with_capacity(capacity);
 
     for (name, value) in headers {
@@ -249,7 +261,10 @@ pub(crate) fn headers_to_utf16(headers: &HeaderMap) -> Result<U16CString, Conver
         units.extend([u16::from(b'\r'), u16::from(b'\n')]);
     }
 
-    U16CString::from_vec(units).map_err(|_contains_nul| EmbeddedNulError::new("request headers").into())
+    U16CString::from_vec(units).map_err(|_contains_nul| {
+        // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, tag = "equivalent", reason = "HeaderName and HeaderValue reject NUL bytes, and the inserted separators are nonzero; this diagnostic closure cannot run")]
+        EmbeddedNulError::new("request headers").into()
+    })
 }
 
 fn validate_request_header_unit_count(unit_count: usize) -> Result<(), ConversionError> {
@@ -299,6 +314,7 @@ pub(crate) const fn request_open_flags(secure: bool, automatic_chunking: bool) -
 
 pub(crate) fn protocol_options(versions: &[Version]) -> Result<ProtocolOptions, ConversionError> {
     let versions = if versions.is_empty() {
+        // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "protocol_options only unions protocol bits and records HTTP/1.1 presence; the two default versions have no ordering effect")]
         &[Version::HTTP_11, Version::HTTP_2][..]
     } else {
         versions
@@ -388,6 +404,41 @@ mod tests {
     use http::{HeaderMap, HeaderValue, Method, Version};
     use ohno::ErrorExt as _;
     use static_assertions::assert_not_impl_any;
+
+    #[test]
+    fn gamma_round2_header_capacity_counts_separators_and_terminal_zero_exactly() {
+        assert_eq!(super::request_header_capacity([]).unwrap(), 1);
+        assert_eq!(super::request_header_capacity([(2, 3)]).unwrap(), 10);
+        assert_eq!(super::request_header_capacity([(1, 2), (3, 4)]).unwrap(), 19);
+    }
+
+    #[test]
+    fn gamma_round2_header_capacity_rejects_overflow_without_allocating_or_panicking() {
+        super::request_header_capacity([(usize::MAX, 0)]).unwrap_err();
+        super::request_header_capacity([(1, usize::MAX)]).unwrap_err();
+        if let Some(too_large) = (u32::MAX as usize).checked_add(1) {
+            super::request_header_capacity([(0, too_large - 4)]).unwrap_err();
+            assert_eq!(super::request_header_capacity([(0, u32::MAX as usize - 4)]).unwrap(), too_large);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_query_path_nul_and_legacy_protocol_errors() {
+        assert_eq!(super::path_to_utf16("?x=value").unwrap().to_string().unwrap(), "/?x=value");
+        assert!(
+            super::path_to_utf16("?x=\0value")
+                .unwrap_err()
+                .to_string()
+                .contains("request path contains an embedded zero character")
+        );
+        assert_eq!(super::parse_protocol_used(0, Some("HTTP/0.9\0")).unwrap(), Version::HTTP_09);
+        assert!(
+            super::parse_header_buffer(&[65], 1, "marker")
+                .unwrap_err()
+                .to_string()
+                .contains("odd UTF-16 byte length: 1")
+        );
+    }
 
     use super::{
         CONNECTION_IDLE_TIMEOUT_MINIMUM_MS, ConnectionIdleTimeout, ConversionError, EmbeddedNulError, HeaderByteLengthIsOddError,
@@ -640,5 +691,20 @@ mod tests {
             embedded_nul.find_source::<InteriorZeroCodeUnitError>().unwrap().value,
             "header data"
         );
+    }
+    #[test]
+    fn november4_header_capacity_includes_exactly_one_terminator() {
+        assert_eq!(super::request_header_capacity([]).unwrap(), 1);
+        assert_eq!(super::request_header_capacity([(2, 3)]).unwrap(), 10);
+        assert_eq!(super::request_header_capacity([(2, 3), (4, 5)]).unwrap(), 23);
+        let error = super::request_header_capacity([(usize::MAX, 1)]).unwrap_err();
+        assert!(error.to_string().contains("the request headers are too large to materialize"));
+    }
+
+    #[test]
+    fn november4_embedded_host_nul_names_the_rejected_field() {
+        let error = super::host_to_utf16("before\0after").unwrap_err();
+        assert!(error.to_string().contains("host contains an embedded zero character"), "{error}");
+        assert_eq!(super::host_to_utf16("example.test").unwrap().to_string().unwrap(), "example.test");
     }
 }

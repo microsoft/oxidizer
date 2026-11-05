@@ -155,14 +155,18 @@ impl<T> RawResolver<T> {
         let path = path.as_ref();
         let (body, verb) = if self.any_verb { split_verb(path) } else { (path, None) };
 
+        // #[gamma::skip(literal.int_increment, reason = "Scanning overwrites every exposed start offset and ScannedPath hides all unwritten slots")]
         let mut inline_starts = [0_usize; INLINE_SEGMENTS];
+        // #[gamma::skip(literal.int_increment, reason = "Scanning overwrites every exposed end offset and ScannedPath hides all unwritten slots")]
         let mut inline_ends = [0_usize; INLINE_SEGMENTS];
+        // #[gamma::skip(relational.le_to_lt, reason = "At the sixteen-slot boundary the general scan uses the identical inline capacity and bounded offset prefix")]
         if self.max_segments <= INLINE_SEGMENTS {
             let path = scan_path(body, &mut inline_starts[..self.max_segments], &mut inline_ends[..self.max_segments]);
             if !path.is_valid() {
                 return Err(crate::codegen_helpers::InvalidPath);
             }
             let walk = Walk { path: &path, method, verb };
+            // #[gamma::skip(cond.always_true, reason = "When any_verb is false, every leaf's verb and the unsplit request verb are None; enabling the verb equality check therefore preserves every dispatch result")]
             let leaf = if self.any_verb {
                 walk.descend_iterative::<true>(&self.root, 0)
             } else {
@@ -179,6 +183,7 @@ impl<T> RawResolver<T> {
         if !path.is_valid() {
             return Err(crate::codegen_helpers::InvalidPath);
         }
+        // #[gamma::skip(cond.always_true, reason = "The heap fallback rescans into the identical min(segment_count,max_segments) exposed prefix before the same finish callback")]
         if uses_heap_offsets(path.count()) {
             return Ok(self.resolve_with_heap_offsets(method, body, verb, path.count(), finish));
         }
@@ -209,6 +214,7 @@ impl<T> RawResolver<T> {
         finish: impl for<'s> FnOnce(&'p Leaf, &'p T, &ScannedPath<'p, 's>) -> R,
     ) -> Option<R> {
         let walk = Walk { path, method, verb };
+        // #[gamma::skip(cond.always_true, reason = "When any_verb is false, every leaf's verb and the unsplit request verb passed by both callers are None; enabling the verb equality check preserves every dispatch result")]
         let leaf = if self.any_verb {
             walk.descend_iterative::<true>(&self.root, 0)
         } else {
@@ -221,6 +227,7 @@ impl<T> RawResolver<T> {
 
 #[inline]
 fn capture_values<'p>(count: usize) -> SmallVec<[&'p str; INLINE_CAPTURES]> {
+    // #[gamma::skip(cond.always_false, relational.le_to_lt, reason = "At or below inline capacity SmallVec::with_capacity retains inline storage and the identical empty value")]
     if count <= INLINE_CAPTURES {
         SmallVec::new()
     } else {

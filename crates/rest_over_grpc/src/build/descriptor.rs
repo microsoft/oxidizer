@@ -571,6 +571,21 @@ fn root_path(path: &str) -> String {
     if rooted { path.to_owned() } else { format!("::{path}") }
 }
 
+#[test]
+fn gamma_round2_rooted_descriptor_paths_allow_leading_whitespace() {
+    for path in [
+        " ::external::Type",
+        " crate::Type",
+        " super::Type",
+        " self::Type",
+        " $crate::Type",
+        " crate",
+    ] {
+        assert_eq!(root_path(path), path);
+    }
+    assert_eq!(root_path("external::Type"), "::external::Type");
+}
+
 #[cfg(all(test, not(miri)))]
 mod tests {
     use std::path::PathBuf;
@@ -584,6 +599,192 @@ mod tests {
     use crate::build::{Generator, compile_fds};
 
     static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
+
+    fn descriptor_pool_for_round2() -> DescriptorPool {
+        use prost_types::field_descriptor_proto::{Label, Type};
+        use prost_types::{DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet};
+
+        let text_fields = ["get", "body", "response_body"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| FieldDescriptorProto {
+                name: Some(name.to_owned()),
+                number: Some(i32::try_from(index + 1).expect("the three fixture field positions are representable as i32")),
+                label: Some(Label::Optional.into()),
+                r#type: Some(Type::String.into()),
+                ..Default::default()
+            })
+            .collect();
+        DescriptorPool::from_file_descriptor_set(FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                name: Some("round2.proto".to_owned()),
+                package: Some("round2".to_owned()),
+                syntax: Some("proto3".to_owned()),
+                message_type: vec![
+                    DescriptorProto {
+                        name: Some("Input".to_owned()),
+                        field: vec![FieldDescriptorProto {
+                            name: Some("nested".to_owned()),
+                            number: Some(1),
+                            label: Some(Label::Optional.into()),
+                            r#type: Some(Type::Message.into()),
+                            type_name: Some(".round2.Inner".to_owned()),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                    DescriptorProto {
+                        name: Some("Inner".to_owned()),
+                        ..Default::default()
+                    },
+                    DescriptorProto {
+                        name: Some("Rule".to_owned()),
+                        field: text_fields,
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+        })
+        .expect("the fixture declares its referenced Inner message and unique positive field numbers")
+    }
+
+    fn append_descriptor_message(output: &mut Vec<u8>, field: u32, bytes: &[u8]) {
+        for mut value in [
+            (u64::from(field) << 3) | 2,
+            u64::try_from(bytes.len()).expect("the fixture messages are smaller than u64::MAX"),
+        ] {
+            while value >= 128 {
+                output.push(u8::try_from(value & 127).expect("mask bounds the value to seven bits") | 128);
+                value >>= 7;
+            }
+            output.push(u8::try_from(value).expect("the remaining varint value fits seven bits"));
+        }
+        output.extend_from_slice(bytes);
+    }
+
+    #[test]
+    fn gamma_round2_in_memory_unary_descriptors_emit_unary_not_streaming_transcoders() {
+        use prost_reflect::prost::Message as _;
+        use prost_types::descriptor_proto::ExtensionRange;
+        use prost_types::field_descriptor_proto::{Label, Type};
+        use prost_types::{DescriptorProto, FieldDescriptorProto, FileDescriptorProto, MethodDescriptorProto, ServiceDescriptorProto};
+
+        let options_file = FileDescriptorProto {
+            name: Some("descriptor.proto".to_owned()),
+            package: Some("google.protobuf".to_owned()),
+            message_type: vec![DescriptorProto {
+                name: Some("MethodOptions".to_owned()),
+                extension_range: vec![ExtensionRange {
+                    start: Some(1),
+                    end: Some(536_870_912),
+                    options: None,
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let http_file = FileDescriptorProto {
+            name: Some("http.proto".to_owned()),
+            package: Some("google.api".to_owned()),
+            dependency: vec!["descriptor.proto".to_owned()],
+            message_type: vec![DescriptorProto {
+                name: Some("HttpRule".to_owned()),
+                field: vec![FieldDescriptorProto {
+                    name: Some("get".to_owned()),
+                    number: Some(2),
+                    label: Some(Label::Optional.into()),
+                    r#type: Some(Type::String.into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            extension: vec![FieldDescriptorProto {
+                name: Some("http".to_owned()),
+                number: Some(72_295_728),
+                label: Some(Label::Optional.into()),
+                r#type: Some(Type::Message.into()),
+                type_name: Some(".google.api.HttpRule".to_owned()),
+                extendee: Some(".google.protobuf.MethodOptions".to_owned()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut annotation = Vec::new();
+        append_descriptor_message(&mut annotation, 2, b"/plain");
+        let mut options = Vec::new();
+        append_descriptor_message(&mut options, 72_295_728, &annotation);
+        let mut method = MethodDescriptorProto {
+            name: Some("Fetch".to_owned()),
+            input_type: Some(".Input".to_owned()),
+            output_type: Some(".Input".to_owned()),
+            server_streaming: Some(false),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        append_descriptor_message(&mut method, 4, &options);
+        let mut service = ServiceDescriptorProto {
+            name: Some("Fixture".to_owned()),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        append_descriptor_message(&mut service, 2, &method);
+        let mut file = FileDescriptorProto {
+            name: Some("round2_unary.proto".to_owned()),
+            dependency: vec!["http.proto".to_owned()],
+            message_type: vec![DescriptorProto {
+                name: Some("Input".to_owned()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+        .encode_to_vec();
+        append_descriptor_message(&mut file, 6, &service);
+        let mut descriptor_set = Vec::new();
+        for file in [options_file.encode_to_vec(), http_file.encode_to_vec(), file] {
+            append_descriptor_message(&mut descriptor_set, 1, &file);
+        }
+        let definitions = ServiceDefinition::from_fds(&descriptor_set, &opts()).unwrap();
+        assert_eq!(definitions.len(), 1);
+        let output = crate::build::service_definition::generate_transcoder(&definitions);
+        let compact: String = output.to_string().split_whitespace().collect();
+        assert!(compact.contains("TranscodeResponse::Unary(matchresult"), "{compact}");
+        assert_eq!(compact.matches("TranscodeResponse::Streaming(").count(), 1, "{compact}");
+        syn::parse2::<syn::File>(output).unwrap();
+    }
+
+    #[test]
+    fn gamma_round2_missing_nested_descriptor_paths_preserve_the_dotted_diagnostic() {
+        let pool = descriptor_pool_for_round2();
+        let input = pool.get_message_by_name("round2.Input").unwrap();
+        let path = vec!["nested".to_owned(), "absent".to_owned()];
+        let error = validate_path_field("Fetch", &path, &input).unwrap_err().to_string();
+        assert!(error.contains("nested.absent"), "{error}");
+        assert!(error.contains("round2.Inner"), "{error}");
+        assert_eq!(enum_field_rust_type(&input, &path, "round2", &[]), None);
+        assert_eq!(enum_field_rust_type(&input, &["absent".to_owned()], "round2", &[]), None);
+    }
+
+    #[test]
+    fn gamma_round2_binding_parse_failures_remain_recoverable_before_construction() {
+        let pool = descriptor_pool_for_round2();
+        let input = pool.get_message_by_name("round2.Input").unwrap();
+        let descriptor = pool.get_message_by_name("round2.Rule").unwrap();
+        for (fields, diagnostic) in [
+            (vec![], "no URL pattern"),
+            (vec![("get", "/{")], "/{"),
+            (vec![("get", "/ok"), ("body", "missing_body")], "missing_body"),
+            (vec![("get", "/ok"), ("response_body", "missing_response")], "missing_response"),
+        ] {
+            let mut annotation = DynamicMessage::new(descriptor.clone());
+            for (name, value) in fields {
+                annotation.set_field_by_name(name, Value::String(value.to_owned()));
+            }
+            let error = read_binding("Fetch", &annotation, &input, &input).unwrap_err().to_string();
+            assert!(error.contains("Fetch"), "{error}");
+            assert!(error.contains(diagnostic), "{error}");
+        }
+    }
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]

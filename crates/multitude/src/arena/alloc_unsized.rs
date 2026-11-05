@@ -396,12 +396,19 @@ impl<A: Allocator + Clone> Arena<A> {
         let payload_offset = if meta_bytes == 0 { 0 } else { meta_bytes.max(layout.align()) };
         // Keep the payload pointer inside the reservation for ZSTs.
         let value_bytes = layout.size().max(1);
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "A valid Layout has size at most isize::MAX and the preceding smart-pointer alignment check bounds the metadata offset by CHUNK_ALIGN, so their sum fits usize")]
         let total = payload_offset.checked_add(value_bytes).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         // Include alignment slack so the retry fits the chosen chunk.
         let refill_hint = total.saturating_add(layout.align());
         let mut init = Some(init);
         loop {
-            if let Some((reservation, chunk_ptr)) = self.current().try_alloc_with_chunk(total, layout.align().max(1)) {
+            if let Some((reservation, chunk_ptr)) = self.current().try_alloc_with_chunk(
+                total,
+                layout.align().max(
+                    // #[gamma::skip(literal.int_decrement, reason = "Layout guarantees a nonzero alignment, so max with zero and max with one are identical")]
+                    1,
+                ),
+            ) {
                 let init = init.take().expect("init taken twice");
                 let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 // SAFETY: `reservation` is fresh exclusive storage; metadata
@@ -417,7 +424,13 @@ impl<A: Allocator + Clone> Arena<A> {
                 let init = init.take().expect("init taken twice");
                 return self.alloc_oversized_shared_with(refill_hint, |mutator, chunk_ptr| {
                     let (reservation, _chunk) = mutator
-                        .try_alloc_with_chunk(total, layout.align().max(1))
+                        .try_alloc_with_chunk(
+                            total,
+                            layout.align().max(
+                                // #[gamma::skip(literal.int_decrement, literal.int_increment, reason = "Layout alignment is nonzero, making max with zero identical; when alignment is one, max with two preserves the first reservation because the fresh chunk's pointer/AtomicU32 header ends on an even address")]
+                                1,
+                            ),
+                        )
                         .expect("dedicated oversized chunk sized to fit DST value + alignment slack");
                     let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
                     // SAFETY: `reservation` is fresh exclusive storage from the
@@ -480,7 +493,10 @@ impl<A: Allocator + Clone> Arena<A> {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
         let meta_bytes = T::ALLOCATION_METADATA_BYTES;
-        let value_align = layout.align().max(1);
+        let value_align = layout.align().max(
+            // #[gamma::skip(literal.int_decrement, reason = "Layout guarantees a nonzero alignment, so max with zero and max with one are identical")]
+            1,
+        );
         // Keep the payload pointer inside the reservation for ZSTs.
         let payload_bytes = layout.size().max(1);
         let refill_hint = worst_case_strong_dst::<S>(payload_bytes, value_align, meta_bytes);
@@ -847,6 +863,7 @@ unsafe fn write_dst_meta_and_init<T: ?Sized + SmartPointerPointee>(
     // prefix; `write_unaligned` tolerates any alignment. For sized T
     // (meta_bytes == 0) the write is skipped.
     let fat = unsafe {
+        // #[gamma::skip(cond.always_true, literal.int_increment, reason = "Metadata is either zero-sized unit or a pointer-sized word, never one byte; writing unit at the valid payload pointer has no effect")]
         if meta_bytes != 0 {
             let prefix_ptr = value_ptr.as_ptr().sub(meta_bytes).cast::<T::Metadata>();
             ptr::write_unaligned(prefix_ptr, metadata);
@@ -883,6 +900,7 @@ unsafe fn write_dst_prefix_and_init<T: ?Sized + SmartPointerPointee>(
     // == 0) the prefix write is a no-op.
     let (payload_nn, fat) = unsafe {
         let payload_nn = base.byte_add(payload_offset);
+        // #[gamma::skip(cond.always_true, literal.int_increment, reason = "Metadata is either zero-sized unit or a pointer-sized word, never one byte; writing unit at the valid payload pointer has no effect")]
         if meta_bytes != 0 {
             let prefix_ptr = payload_nn.as_ptr().sub(meta_bytes).cast::<T::Metadata>();
             ptr::write_unaligned(prefix_ptr, metadata);
@@ -894,4 +912,63 @@ unsafe fn write_dst_prefix_and_init<T: ?Sized + SmartPointerPointee>(
     // panics, callers' `ChunkRef` guard releases the chunk's `+1`.
     init(fat);
     payload_nn
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use core::mem;
+
+    use super::*;
+
+    #[repr(align(16))]
+    struct Storage([u8; 96]);
+
+    #[test]
+    fn gamma_survivor_dst_prefix_payload_offsets_and_immutable_canaries() {
+        let word = mem::size_of::<usize>();
+        let mut expected = [0xa5_u8; 96];
+        expected[16 - word..16].copy_from_slice(&3_usize.to_ne_bytes());
+        for (index, value) in [11_u64, 22, 33].into_iter().enumerate() {
+            expected[16 + index * 8..24 + index * 8].copy_from_slice(&value.to_ne_bytes());
+        }
+        for prefixed in [false, true] {
+            let mut storage = Storage([0xa5; 96]);
+            let start = storage.0.as_mut_ptr();
+            let initialize = |pointer: *mut [u64]| {
+                assert_eq!(ptr_meta::metadata(pointer), 3);
+                for (index, value) in [11_u64, 22, 33].into_iter().enumerate() {
+                    // SAFETY: the test's aligned storage covers all three values.
+                    unsafe { pointer.cast::<u64>().wrapping_add(index).write_unaligned(value) };
+                }
+            };
+            let pointer = if prefixed {
+                // SAFETY: this base covers an eight-byte prefix and the complete aligned payload.
+                unsafe { write_dst_prefix_and_init::<[u64]>(NonNull::new(start.wrapping_add(8)).unwrap(), 8, word, 3, initialize) }
+            } else {
+                // SAFETY: this base is aligned and has a metadata word immediately before its complete payload.
+                unsafe { write_dst_meta_and_init::<[u64]>(NonNull::new(start.wrapping_add(16)).unwrap(), word, 3, initialize) }
+            };
+            assert_eq!(pointer.as_ptr().addr(), start.addr() + 16);
+            assert_eq!(pointer.as_ptr().addr() % mem::align_of::<u64>(), 0);
+            assert_eq!(storage.0, expected);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_exact_dst_hint_geometry_and_saturation() {
+        for align in [1_usize, 2, 4, 8, 16, 64, 4096] {
+            for metadata in [0_usize, mem::size_of::<usize>()] {
+                for payload in [0_usize, 1, 2, 7, 64, 65536, usize::MAX - 1, usize::MAX] {
+                    let prefix = (4 + metadata).div_ceil(align) * align;
+                    for (actual, slack) in [
+                        (worst_case_strong_dst::<AtomicStrong>(payload, align, metadata), align.max(4)),
+                        (worst_case_strong_dst::<LocalStrong>(payload, align, metadata), align),
+                    ] {
+                        let expected = (prefix as u128) + (payload as u128) + (slack as u128);
+                        assert_eq!(actual, usize::try_from(expected).unwrap_or(usize::MAX));
+                    }
+                }
+            }
+        }
+    }
 }

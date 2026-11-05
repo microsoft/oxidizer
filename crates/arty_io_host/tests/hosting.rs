@@ -456,6 +456,41 @@ fn test_runtime() -> IoRuntime {
     IoRuntime::new(observed::Sink::noop())
 }
 
+#[test]
+fn gamma_survivor_secondary_cycle_failure_prevents_primary_but_allows_next_successful_cycle() {
+    let runtime = test_runtime();
+    let host = host(&runtime);
+    let primary = Arc::new(State::default());
+    let secondary = Arc::new(State::default());
+    let _ = host.context::<Context<false>>(Arc::clone(&primary)).unwrap();
+    let _ = host.context::<Context<true>>(Arc::clone(&secondary)).unwrap();
+    secondary.fail_cycle.store(true, Ordering::SeqCst);
+    assert_eq!(host.execute_cycle(Duration::ZERO).unwrap_err().to_string(), "cycle failed");
+    assert!(primary.cycles.lock().unwrap().is_empty());
+    assert_eq!(*secondary.cycles.lock().unwrap(), [(Kind::Second, Duration::ZERO)]);
+    secondary.fail_cycle.store(false, Ordering::SeqCst);
+    host.context::<Context<false>>(Arc::clone(&primary)).unwrap();
+    host.execute_cycle(Duration::ZERO).unwrap();
+    assert_eq!(*primary.cycles.lock().unwrap(), [(Kind::First, Duration::ZERO)]);
+    assert_eq!(secondary.cycles.lock().unwrap().len(), 2);
+    drop(host);
+    assert_eq!(primary.shutdowns.load(Ordering::SeqCst), 1);
+    assert_eq!(secondary.shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn gamma_survivor_same_type_context_construction_reentry_returns_precise_error() {
+    let runtime = test_runtime();
+    let host = host(&runtime);
+    let state = Arc::new(State::default());
+    host.context::<SameTypeContextReentrantContext>((runtime, Arc::clone(&state)))
+        .unwrap();
+    assert_eq!(
+        *state.nested_context_errors.lock().unwrap(),
+        ["I/O context retrieval cannot reenter initialization of the same context type on one thread"]
+    );
+}
+
 fn telemetry_runtime() -> (IoRuntime, MockProcessor) {
     let (sink, processor) = test_emitter(TEST_ID);
     (IoRuntime::new(sink), processor)

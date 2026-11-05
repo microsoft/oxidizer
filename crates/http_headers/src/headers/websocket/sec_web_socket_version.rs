@@ -97,7 +97,12 @@ impl Iterator for VersionBits {
     fn next(&mut self) -> Option<Self::Item> {
         (self.word != 0).then(|| {
             let bit = self.word.trailing_zeros();
-            self.word &= self.word - 1;
+            // #[gamma::skip(assign.and_to_or, stmt.delete_assign, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+            self.word &=
+            // #[gamma::skip(arith.sub_to_add, arith.sub_to_div, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+            self.word -
+            // #[gamma::skip(literal.int_decrement, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+            1;
             self.base + u8::try_from(bit).expect("a set bit index of a word fits in one byte")
         })
     }
@@ -247,6 +252,7 @@ impl SecWebSocketVersionOwned {
     pub(crate) fn field_value(&self) -> FieldValue {
         let mut versions = self.versions();
         let Some(first) = versions.next() else {
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "FieldValue::default is the same empty, nonsensitive field value as this static empty string")]
             return FieldValue::from_static("");
         };
         let Some(second) = versions.next() else {
@@ -273,6 +279,7 @@ impl Field for SecWebSocketVersion {
         reason = "folding the one-line fast path into the caller removes a full stack frame"
     )]
     #[inline(always)]
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -285,6 +292,7 @@ impl Field for SecWebSocketVersion {
         reason = "folding the one-line fast path into the caller removes a full stack frame"
     )]
     #[inline(always)]
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, _mode: DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -312,10 +320,13 @@ fn decode_versions(values: Option<FieldLines<'_>>) -> Result<Option<SecWebSocket
     };
     values.validate_list_item_limit(b',', true)?;
     let mut lines = values.repeated();
+    // #[gamma::skip(match_arm.never_matches, tag = "equivalent", reason = "The sole non-wildcard arm only selects a singleton shortcut; None makes collect_version_lines parse the same immutable field lines into the identical version set")]
     let lone = match (lines.next(), lines.next()) {
+        // #[gamma::skip(match_arm.never_matches, option.some_to_none, tag = "equivalent", reason = "None only declines singleton shortcuts; collect_version_lines then parses every immutable field line into the same version set")]
         (Some(first), None) => Some(first.as_bytes()),
         _ => None,
     };
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The general version collector parses the same singleton 13 into the identical one-bit version set")]
     let versions = if lone == Some(b"13".as_slice()) {
         VersionSet::one(13)
     } else {
@@ -342,12 +353,14 @@ impl TryFrom<FieldValue> for SecWebSocketVersionOwned {
 )]
 #[cold]
 #[inline(never)]
+// #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "Only lone is defaultable because FieldLines is nonempty and has no Default implementation; None declines only a singleton shortcut and the full line walk collects the same version set")]
 fn collect_version_lines(values: FieldLines<'_>, lone: Option<&[u8]>) -> Result<VersionSet, DecodeError> {
     if let Some(version) = lone.and_then(parse_version_value) {
         return Ok(VersionSet::one(version));
     }
     let mut versions = VersionSet::EMPTY;
     for value in values.repeated() {
+        // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "The delimiter-aware fallback rereads every field line using the same trimmed comma items and version parser; quoted errors, empty-list policy and the collected bitmap are unchanged")]
         if !collect_bare_version_line(value.as_bytes(), &mut versions)? {
             return collect_quoted_version_lines(&values);
         }
@@ -434,6 +447,15 @@ const fn is_leading_digit(byte: u8) -> bool {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_bare_versions_return_recognition_and_the_collected_set() {
+        let mut versions = super::VersionSet::EMPTY;
+        assert!(super::collect_bare_version_line(b"13, 8, 13", &mut versions).unwrap());
+        assert_eq!(versions.iter().collect::<Vec<_>>(), [8, 13]);
+        assert!(!super::collect_bare_version_line(b"\"13\"", &mut versions).unwrap());
+        assert_eq!(versions.iter().collect::<Vec<_>>(), [8, 13]);
+    }
+
     use super::{
         SecWebSocketVersion, SecWebSocketVersionOwned, VersionSet, collect_quoted_version_lines, decode_versions, parse_version,
         parse_version_value,

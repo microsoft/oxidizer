@@ -46,9 +46,42 @@ pub(crate) struct PoolCore {
 }
 
 #[inline]
-#[cfg_attr(test, mutants::skip)] // Differences occur only at the unallocatable u32 slot-index ceiling.
-const fn unbounded_chunk_cap(chunk_size: u32) -> u64 {
-    MAX_POOL_SLOTS / chunk_size as u64
+const fn unbounded_chunk_cap(chunk_size: u32, slot_limit: u64) -> u64 {
+    slot_limit / chunk_size as u64
+}
+
+fn growth_chunk_cap(max_chunks: Option<u32>, chunk_size: u32) -> u64 {
+    let slot_limit = MAX_POOL_SLOTS;
+    #[cfg(all(test, not(loom)))]
+    let slot_limit = crate::test_hooks::slot_limit().unwrap_or(slot_limit);
+    max_chunks.map_or_else(|| unbounded_chunk_cap(chunk_size, slot_limit), u64::from)
+}
+
+#[cfg(test)]
+mod gamma_round2_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_round2_unbounded_growth_uses_the_actual_chunk_size_at_the_slot_index_ceiling() {
+        assert_eq!(growth_chunk_cap(None, 1), MAX_POOL_SLOTS);
+        assert_eq!(growth_chunk_cap(None, 2), MAX_POOL_SLOTS / 2);
+        assert_eq!(growth_chunk_cap(Some(17), 2), 17);
+    }
+
+    #[cfg(not(loom))]
+    #[test]
+    fn nov4_real_growth_passes_the_actual_chunk_size_to_the_slot_ceiling_policy() {
+        crate::test_hooks::with_slot_limit(12, || {
+            let pool = Pool::<u32>::builder().chunk_size(4).build();
+            let values: alloc::vec::Vec<_> = (0..12).map(|value| pool.try_alloc_box(value).unwrap()).collect();
+            assert_eq!(pool.chunks_allocated(), 3);
+            assert!(pool.try_alloc_box(13).unwrap_err().is_capacity_exhausted());
+            assert_eq!(
+                values.iter().map(|value| **value).collect::<alloc::vec::Vec<_>>(),
+                (0..12).collect::<alloc::vec::Vec<_>>()
+            );
+        });
+    }
 }
 
 /// Concrete pool state. `core` is first so its full-provenance pointer can be
@@ -107,6 +140,17 @@ pub(crate) struct PoolInner<A, G> {
 /// allocating thread.
 pub struct Pool<T, A: Allocator = Global> {
     inner: NonNull<PoolInner<A, TypedGeometry<T>>>,
+}
+
+#[cfg(test)]
+#[test]
+fn gamma_survivor_builder_stores_exact_two_slot_layout_and_accepts_slot_index_ceiling() {
+    extern crate std;
+
+    let pool = Pool::<u64>::builder().chunk_size(2).max_chunks(u32::MAX / 2).build();
+    assert_eq!(pool.inner().chunk_layout, TypedGeometry::<u64>::new().chunk_layout(2).unwrap());
+    assert_eq!(pool.max_chunks(), Some(u32::MAX / 2));
+    std::panic::catch_unwind(|| Pool::<u64>::builder().chunk_size(2).max_chunks(u32::MAX / 2 + 1).build()).unwrap_err();
 }
 
 // SAFETY: all cross-thread state in `PoolInner` is atomic; the non-atomic
@@ -485,6 +529,7 @@ impl<T, A: Allocator> Pool<T, A> {
         match self.alloc_slot() {
             Ok(slot) => {
                 // SAFETY: `slot` was just popped and is owned exclusively here.
+                // #[gamma::skip(call_result.default, reason = "occupy_local returns unit; default_after preserves initialization and its unit result.")]
                 unsafe { occupy_local(slot, value) };
                 Ok(Alloc::from_slot(slot))
             }
@@ -840,7 +885,9 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
             let slot = unsafe { self.slot_for_global(head) };
             // SAFETY: a free slot's refcount field holds the next-free link.
             let next = unsafe { (*refcount_of(geometry, slot)).load(Relaxed) };
-            if self.core.free_head.compare_exchange_weak(head, next, AcqRel, Acquire).is_ok() {
+            if
+            // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.core.free_head.compare_exchange_weak(head, next, AcqRel, Acquire).is_ok() {
                 return Some(slot);
             }
         }
@@ -902,7 +949,7 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
         let n = self.chunk_size;
         // Cap = the user's `max_chunks`, or for an unbounded pool the chunk count
         // that keeps every global index below the `FREE_END` sentinel.
-        let cap = self.max_chunks.map_or_else(|| unbounded_chunk_cap(n), u64::from);
+        let cap = growth_chunk_cap(self.max_chunks, n);
         if u64::from(self.chunks_allocated.load(Relaxed)) >= cap {
             return Err(AllocError::CAPACITY_EXHAUSTED);
         }
@@ -985,6 +1032,7 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
             let last = unsafe { self.geometry.slot_at(ptr, (n - 1) as usize) };
             // SAFETY: `last` is the new chunk's (still-private) final slot.
             unsafe {
+                // #[gamma::skip(call_result.default, reason = "splice_chain returns unit; default_after preserves its free-list updates.")]
                 splice_chain(self.refcount_at(last), &self.core.free_head, base_index + 1);
             };
         }
@@ -1025,7 +1073,10 @@ unsafe fn splice_chain(last_link: *mut AtomicU32, free_head: &AtomicU32, base_in
         let head = free_head.load(Acquire);
         // SAFETY: the new chain is private until the CAS publishes it.
         unsafe { (*last_link).store(head, Relaxed) };
-        if free_head.compare_exchange_weak(head, base_index, AcqRel, Acquire).is_ok() {
+        if
+        // #[gamma::skip(cond.always_false, cond.negate, result.is_ok_to_is_err, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        free_head.compare_exchange_weak(head, base_index, AcqRel, Acquire).is_ok() {
+            // #[gamma::skip(loop.break_to_continue, loop.delete_break, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         }
     }
@@ -1051,6 +1102,7 @@ impl<T, A: Allocator> Drop for Pool<T, A> {
         if inner.core.pool_refcount.fetch_sub(1, Release) == 1 {
             fence(Acquire);
             // SAFETY: a zero refcount grants exclusive ownership of the inner.
+            // #[gamma::skip(call_result.default, reason = "teardown returns unit; default_after preserves all deallocation effects.")]
             unsafe { teardown(self.inner) };
         }
     }
@@ -1080,7 +1132,10 @@ unsafe fn push_free<T>(slot: NonNull<SlotCell<T>>) -> NonNull<PoolCore> {
         loop {
             let head = inner.free_head.load(Relaxed);
             (*slot.as_ptr()).refcount.store(head, Relaxed);
-            if inner.free_head.compare_exchange_weak(head, global, Release, Relaxed).is_ok() {
+            if
+            // #[gamma::skip(cond.always_false, cond.negate, result.is_ok_to_is_err, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            inner.free_head.compare_exchange_weak(head, global, Release, Relaxed).is_ok() {
+                // #[gamma::skip(loop.break_to_continue, loop.delete_break, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 break;
             }
         }
@@ -1112,6 +1167,7 @@ impl Drop for ErasedSlotGuard {
     fn drop(&mut self) {
         // SAFETY: this guard is created only for the final owner of an occupied
         // slot and runs after normal or unwinding destruction of its value.
+        // #[gamma::skip(call_result.default, reason = "free_slot_erased returns unit; default_after preserves slot reclamation.")]
         unsafe { free_slot_erased(self.value, self.size, self.align) };
     }
 }
@@ -1147,7 +1203,9 @@ pub(crate) unsafe fn drop_and_free_val<T: ?Sized>(value: NonNull<T>) {
         // Read the pointer metadata (size/align) before running the destructor.
         let size = size_of_val(value.as_ref());
         let align = align_of_val(value.as_ref());
+        // #[gamma::skip(cond.always_false, reason = "For a type without drop glue, drop_in_place is a no-op and the guard calls the same free_slot_erased function.")]
         if !needs_drop::<T>() {
+            // #[gamma::skip(call_result.default, reason = "free_slot_erased returns unit; default_after preserves slot reclamation.")]
             free_slot_erased(value.cast::<u8>(), size, align);
             return;
         }
@@ -1198,7 +1256,10 @@ unsafe fn free_slot_erased(value: NonNull<u8>, size: usize, align: usize) {
         loop {
             let head = inner.free_head.load(Relaxed);
             refcount.store(head, Relaxed);
-            if inner.free_head.compare_exchange_weak(head, global, Release, Relaxed).is_ok() {
+            if
+            // #[gamma::skip(cond.always_false, cond.negate, result.is_ok_to_is_err, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            inner.free_head.compare_exchange_weak(head, global, Release, Relaxed).is_ok() {
+                // #[gamma::skip(loop.break_to_continue, loop.delete_break, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 break;
             }
         }

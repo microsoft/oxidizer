@@ -6,12 +6,13 @@ error[E0277]: `Cell<u64>` cannot be shared between threads safely
    |
    = help: the trait `std::marker::Sync` is not implemented for `Cell<u64>`
    = note: if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicU64` instead
-help: the trait `ThreadAware` is implemented for `performables::arc::Arc<T, S>`
+help: the trait `ThreadAware` is conditionally implemented for `performables::arc::Arc<T, S>`
   --> src/arc/mod.rs
    |
    | / impl<T, S> ThreadAware for Arc<T, S>
    | | where
    | |     T: Send + Sync + ?Sized,
+   | |               ---- unsatisfied requirement introduced here: `Cell<u64>: std::marker::Sync`
    | |     S: Strategy<T> + private::AffinityStrategy,
    | |     S::State: Send,
    | |___________________^
@@ -30,12 +31,13 @@ error[E0277]: `Cell<u64>` cannot be shared between threads safely
    |
    = help: the trait `std::marker::Sync` is not implemented for `Cell<u64>`
    = note: if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicU64` instead
-help: the trait `ThreadAware` is implemented for `performables::arc::Arc<T, S>`
+help: the trait `ThreadAware` is conditionally implemented for `performables::arc::Arc<T, S>`
   --> src/arc/mod.rs
    |
    | / impl<T, S> ThreadAware for Arc<T, S>
    | | where
    | |     T: Send + Sync + ?Sized,
+   | |               ---- unsatisfied requirement introduced here: `Cell<u64>: std::marker::Sync`
    | |     S: Strategy<T> + private::AffinityStrategy,
    | |     S::State: Send,
    | |___________________^

@@ -241,6 +241,96 @@ fn chart_value(value: u64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_survivor_stale_thread_rows_keep_selection_and_hide_old_rates() {
+        use seismograph_protocol::message::ThreadRecorderStatistics;
+
+        use super::super::super::live_activity::{Availability, LiveActivity, ThreadActivity};
+        let mut live = LiveActivity::default();
+        live.availability = Availability::Supported;
+        live.stale = true;
+        live.threads = (1..=3)
+            .map(|id| ThreadActivity {
+                statistics: ThreadRecorderStatistics {
+                    thread_id: id,
+                    name: format!("worker-{id}"),
+                    event_capacity: 10,
+                    retained_events: 5,
+                    ..Default::default()
+                },
+                rate: Some(42),
+                history: [1, 2].into(),
+            })
+            .collect();
+        let mouse = super::MouseRows::default();
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 6)).unwrap();
+        terminal
+            .draw(|frame| {
+                mouse.begin(frame.area());
+                super::draw_threads(frame, &mouse, frame.area(), &live, 1);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let output = buffer.content.iter().map(ratatui::buffer::Cell::symbol).collect::<String>();
+        assert!(output.contains("Thread activity · stale"));
+        assert!(output.contains("2/3 threads"));
+        assert!(output.contains("-/s"));
+        assert!(!output.contains("42/s"));
+        assert_eq!(buffer[(1, 2)].bg, ratatui::style::Color::DarkGray);
+        assert_ne!(buffer[(1, 1)].bg, ratatui::style::Color::DarkGray);
+        assert_ne!(buffer[(1, 3)].bg, ratatui::style::Color::DarkGray);
+        terminal
+            .draw(|frame| super::draw_activity(frame, frame.area(), &live, &VecDeque::default()))
+            .unwrap();
+        let output = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(output.contains("Event-class rates · stale"));
+        assert!(output.contains("Allocations -/s"));
+    }
+
+    #[test]
+    fn gamma_survivor_sparkline_scales_only_visible_history() {
+        use std::collections::VecDeque;
+
+        use ratatui::style::Color;
+        let history = VecDeque::from([1000, 2, 4, 8]);
+        let line = super::rate_sparkline(&history, 3);
+        assert_eq!(line.to_string(), "▂▄█");
+        assert!(line.spans.iter().all(|span| span.style.fg == Some(Color::Cyan)));
+        assert_eq!(super::rate_sparkline(&VecDeque::from([0, 0]), 2).to_string(), "__");
+        assert!(super::rate_sparkline(&history, 0).spans.is_empty());
+    }
+
+    #[test]
+    fn gamma_survivor_activity_legend_wraps_and_reserves_exact_rows_at_the_boundary() {
+        let mut live = LiveActivity::default();
+        live.availability = Availability::Supported;
+        let full = legend(&live, usize::MAX);
+        let width = u16::try_from(full[0].spans[0].width() + full[0].spans[1].width() - 1).unwrap();
+        let expected = legend(&live, usize::from(width));
+        for height in [u16::try_from(expected.len()).unwrap() + 2, 12] {
+            let mut terminal = Terminal::new(TestBackend::new(width + 2, height)).unwrap();
+            terminal
+                .draw(|frame| draw_activity(frame, frame.area(), &live, &VecDeque::new()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            for (index, expected) in expected.iter().enumerate() {
+                let row = (1..=width)
+                    .map(|x| buffer[(x, u16::try_from(index).unwrap() + 1)].symbol())
+                    .collect::<String>();
+                assert_eq!(row.trim_end(), expected.to_string().trim_end());
+            }
+            if height == 12 {
+                assert_eq!(buffer[(1, u16::try_from(expected.len()).unwrap() + 1)].symbol(), "C");
+            }
+        }
+    }
+
     use std::time::{Duration, Instant};
 
     use ratatui::Terminal;

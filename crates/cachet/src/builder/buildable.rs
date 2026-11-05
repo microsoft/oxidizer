@@ -89,3 +89,23 @@ where
 pub(crate) fn type_name<S>(user_name: Option<&'static str>) -> &'static str {
     user_name.unwrap_or_else(|| std::any::type_name::<S>())
 }
+
+#[cfg(test)]
+mod gamma_round2_tests {
+    use super::Buildable;
+    use crate::telemetry::CacheTelemetry;
+    use crate::{Cache, MockCache};
+
+    #[test]
+    fn gamma_round2_nested_fallback_builders_preserve_the_inherited_primary_role() {
+        let clock = tick::Clock::new_frozen();
+        for fallback in [false, true] {
+            let builder = Cache::builder::<i32, i32>(clock.clone())
+                .storage(MockCache::new())
+                .fallback(Cache::builder(clock.clone()).storage(MockCache::new()));
+            let tier = builder.build_tier(clock.clone(), CacheTelemetry::new(), fallback);
+            assert_eq!(tier.inner.primary.fallback, fallback);
+            assert!(tier.inner.fallback.fallback);
+        }
+    }
+}

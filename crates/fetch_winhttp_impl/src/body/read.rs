@@ -96,7 +96,15 @@ impl WinHttpBodyReader {
         // send. Without one, any wait would be open-ended, so the read takes
         // whatever has already arrived.
         let (desired, fill_buffer) = match self.remaining {
-            Some(remaining) if remaining != 0 => (usize::try_from(remaining).unwrap_or(usize::MAX).min(DESIRED_READ_SIZE), true),
+            Some(remaining) if remaining != 0 => (
+                usize::try_from(remaining)
+                    .unwrap_or(
+                        // #[gamma::skip(expr.decrement, tag = "equivalent", reason = "usize::MAX and usize::MAX - 1 both exceed DESIRED_READ_SIZE, so the subsequent min selects the same read size")]
+                        usize::MAX,
+                    )
+                    .min(DESIRED_READ_SIZE),
+                true,
+            ),
             _ => (DESIRED_READ_SIZE, false),
         };
         // A read that waits for a full region wants that region to be worth the
@@ -156,10 +164,14 @@ impl WinHttpBodyReader {
         let (read, mut into) = read_completion(completion)?;
 
         if read == 0 {
-            let trailers = query_raw_trailers(&self.bindings, self.guard_ref()?.raw())
-                .map_err(query_error)?
-                .map(|raw| parse_response_trailers(&raw).map_err(invalid_response))
-                .transpose()?;
+            let trailers = query_raw_trailers(
+                &self.bindings,
+                // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "the completed read borrowed this same guard through guard_mut; no path takes it before this EOF query, and self is exclusively borrowed")]
+                self.guard_ref()?.raw(),
+            )
+            .map_err(query_error)?
+            .map(|raw| parse_response_trailers(&raw).map_err(invalid_response))
+            .transpose()?;
             self.trailers = trailers;
             self.eof = true;
             drop(self.guard.take());
@@ -483,6 +495,94 @@ mod tests {
     const SESSION: usize = 101;
     const CONNECT: usize = 102;
     const REQUEST: usize = 103;
+
+    #[test]
+    fn gamma_round2_pending_read_remains_live_after_another_pending_poll() {
+        let BodyHarness { mut body, context, record } = reader([ReadBehavior::Pending], TrailerBehavior::None).into_body();
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+        assert!(!body.is_end_stream());
+        assert_eq!(record.read_calls.load(Ordering::SeqCst), 1);
+        drop(body);
+        finish_context(context, &record);
+    }
+
+    #[test]
+    fn gamma_round2_disconnected_read_returns_the_protocol_diagnostic() {
+        let mut harness = reader([ReadBehavior::Pending], TrailerBehavior::None);
+        let mut read = Box::pin(harness.reader.read_into(BytesBuf::new()));
+        assert!(read.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
+        // SAFETY: the harness installed this live context. The fake read has
+        // returned without retaining a borrow; no callback overlaps this claim.
+        let active = unsafe { &*harness.context }.take_kind(crate::context::OperationKind::Read).unwrap();
+        drop(active);
+        let error = drive(read).unwrap_err();
+        assert!(error.to_string().contains("the read completion channel disconnected"));
+        harness.finish();
+    }
+
+    #[test]
+    fn gamma_survivor_reader_debug_tracks_pending_and_done() {
+        let BodyHarness { mut body, context, record } = reader([ReadBehavior::Pending], TrailerBehavior::None).into_body();
+        assert_eq!(format!("{body:?}"), "WinHttpResponseBody { state: \"ready\" }");
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+        assert_eq!(format!("{body:?}"), "WinHttpResponseBody { state: \"reading\" }");
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+        assert_eq!(record.read_calls.load(Ordering::SeqCst), 1);
+        drop(body);
+        finish_context(context, &record);
+        let BodyHarness { mut body, context, record } = reader([ReadBehavior::data(Vec::new())], TrailerBehavior::None).into_body();
+        assert!(drive(next_frame(&mut body)).is_none());
+        assert_eq!(format!("{body:?}"), "WinHttpResponseBody { state: \"done\" }");
+        drop(body);
+        finish_context(context, &record);
+    }
+
+    #[test]
+    fn gamma_survivor_declared_read_reserves_even_with_spare_capacity() {
+        let mut harness = reader_with_length([ReadBehavior::data(b"x".to_vec())], TrailerBehavior::None, Some(300_000));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        harness.reader.memory = OpaqueMemory::new(CallbackMemory::new(unaware(Arc::clone(&requests)), |requests, min_bytes| {
+            requests.lock().unwrap().push(min_bytes);
+            GlobalPool::new().reserve(min_bytes)
+        }));
+        let into = harness.memory.reserve(8);
+        let spare = into.remaining_capacity();
+        let (_, into) = drive(harness.reader.read_into(into)).unwrap();
+        assert_eq!(*requests.lock().unwrap(), vec![262_144 - spare]);
+        assert!(into.capacity() >= 262_144);
+        assert_eq!(*harness.record.fill_flags.lock().unwrap(), vec![true]);
+        harness.finish();
+    }
+
+    #[test]
+    fn gamma_survivor_closed_reader_guard_errors_and_opaque_lengths() {
+        let mut harness = reader([ReadBehavior::SyncError], TrailerBehavior::None);
+        drive(harness.reader.read_into(BytesBuf::new())).unwrap_err();
+        assert!(
+            harness
+                .reader
+                .guard_ref()
+                .unwrap_err()
+                .to_string()
+                .contains("the response body request handle is already closed")
+        );
+        assert!(
+            harness
+                .reader
+                .guard_mut()
+                .unwrap_err()
+                .to_string()
+                .contains("the response body request handle is already closed")
+        );
+        drive(harness.reader.read_into(BytesBuf::new())).unwrap_err();
+        harness.finish();
+        let mut headers = HeaderMap::new();
+        headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_bytes(&[0xff]).unwrap());
+        assert_eq!(declared_body_length(&headers), None);
+    }
 
     assert_impl_all!(WinHttpBodyReader: Send, std::fmt::Debug);
     assert_impl_all!(WinHttpResponseBody: Send, std::fmt::Debug, http_body::Body<Data = bytesbuf::BytesView, Error = fetch::HttpError>);

@@ -87,18 +87,13 @@ fn reserve(min_bytes: usize) -> crate::BytesBuf {
         return BytesBuf::default();
     };
 
-    let block_count = min_bytes.get().div_ceil(BlockSize::MAX as usize);
+    let block_count = reservation_block_count(min_bytes.get());
     let mut bytes_remaining = min_bytes.get();
 
     let mut blocks = Vec::with_capacity(block_count);
 
     for _ in 0..block_count {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "the usize never contains a value outside bounds of BlockSize - guarded by min()"
-        )]
-        let bytes_in_block = NonZero::new(bytes_remaining.min(BlockSize::MAX as usize) as BlockSize)
-            .expect("ran out of bytes before calculated block count - the math must be wrong");
+        let bytes_in_block = reservation_block_size(bytes_remaining);
 
         bytes_remaining = bytes_remaining
             .checked_sub(bytes_in_block.get() as usize)
@@ -108,6 +103,48 @@ fn reserve(min_bytes: usize) -> crate::BytesBuf {
     }
 
     BytesBuf::from_blocks(blocks)
+}
+
+fn reservation_block_count(bytes: usize) -> usize {
+    bytes.div_ceil(BlockSize::MAX as usize)
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the usize never contains a value outside bounds of BlockSize - guarded by min()"
+)]
+fn reservation_block_size(bytes_remaining: usize) -> NonZero<BlockSize> {
+    NonZero::new(bytes_remaining.min(BlockSize::MAX as usize) as BlockSize)
+        .expect("ran out of bytes before calculated block count - the math must be wrong")
+}
+
+#[test]
+fn gamma_round2_transparent_reservation_plans_keep_exact_block_counts_and_lengths() {
+    let maximum = BlockSize::MAX as usize;
+    let cases = [
+        Some((1, 1)),
+        Some((maximum - 1, 1)),
+        Some((maximum, 1)),
+        maximum.checked_add(1).map(|bytes| (bytes, 2)),
+        maximum.checked_mul(2).map(|bytes| (bytes, 2)),
+    ];
+    for (bytes, expected_count) in cases.into_iter().flatten() {
+        let count = reservation_block_count(bytes);
+        assert_eq!(count, expected_count);
+        let mut remaining = bytes;
+        let mut blocks = Vec::new();
+        for _ in 0..count {
+            let size = reservation_block_size(remaining).get() as usize;
+            blocks.push(size);
+            remaining -= size;
+        }
+        assert_eq!(remaining, 0);
+        assert_eq!(blocks.iter().sum::<usize>(), bytes);
+        assert_eq!(blocks[0], bytes.min(maximum));
+        if Some(bytes) == maximum.checked_add(1) {
+            assert_eq!(blocks, [maximum, 1]);
+        }
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]

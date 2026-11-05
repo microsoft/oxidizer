@@ -272,6 +272,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             .status(status)
             .version(version)
             .body(body);
+        // #[gamma::skip(try.propagate_to_unwrap, literal.str_to_empty, literal.str_to_xyzzy, tag = "equivalent", reason = "this new response builder received only validated StatusCode and Version values and a body; no fallible header operation can have poisoned headers_mut")]
         *response
             .headers_mut()
             .ok_or_else(|| invalid_response("the HTTP response builder rejected response metadata"))
@@ -364,6 +365,7 @@ impl TranslatedRequest {
                 ))));
             }
         };
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "http::Uri rejects a scheme without an authority in both its parser and from_parts; the scheme was already validated above")]
         let authority = uri
             .authority()
             .ok_or_else(|| invalid_request(RequestTranslationError::from(MissingAuthorityError::new())))?;
@@ -375,7 +377,12 @@ impl TranslatedRequest {
             .filter(|host| !host.is_empty())
             .ok_or_else(|| invalid_request(RequestTranslationError::from(MissingHostError::new())))?;
         let port = authority_port(authority, host, if secure { 443 } else { 80 }).map_err(invalid_request)?;
-        let path = uri.path_and_query().map_or("/", |path| path.as_str());
+        let path = uri.path_and_query().map_or(
+            // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, tag = "equivalent", reason = "a validated http::Uri with a scheme always has path_and_query, so this fallback is unreachable")]
+            "/",
+            |path| path.as_str(),
+        );
+        // #[gamma::skip(cond.always_false, literal.str_to_empty, literal.str_to_xyzzy, tag = "equivalent", reason = "PathAndQuery::as_str normalizes empty storage to slash; neither it nor the slash fallback can yield an empty path")]
         let path = if path.is_empty() { "/" } else { path };
         if !(path.starts_with('/') || path.starts_with('?')) {
             return Err(invalid_request(RequestTranslationError::from(InvalidPathError::new(
@@ -384,9 +391,15 @@ impl TranslatedRequest {
         }
 
         Ok(Self {
-            method: method_to_utf16(request.method()).map_err(invalid_request)?,
-            host: host_to_utf16(host).map_err(invalid_request)?,
-            path: path_to_utf16(path).map_err(invalid_request)?,
+            method:
+                // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "http::Method rejects NUL bytes; embedded NUL is method_to_utf16's only fallible condition")]
+                method_to_utf16(request.method()).map_err(invalid_request)?,
+            host:
+                // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "the validated URI authority cannot contain NUL; embedded NUL is host_to_utf16's only fallible condition")]
+                host_to_utf16(host).map_err(invalid_request)?,
+            path:
+                // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "the validated URI path cannot contain NUL; embedded NUL is path_to_utf16's only fallible condition")]
+                path_to_utf16(path).map_err(invalid_request)?,
             headers: headers_to_utf16(headers).map_err(invalid_request)?,
             port,
             secure,
@@ -651,6 +664,156 @@ mod tests {
         installed_context_value, raw_handle, session, status_info_len,
     };
     use crate::operation::{ContextInstallation, ContextPool};
+
+    #[test]
+    fn november4_header_capacity_failures_escape_request_construction_before_native_io() {
+        for length in [(usize::try_from(u32::MAX).unwrap(), 1), (usize::MAX, 1)] {
+            let clock = Clock::new_frozen();
+            let memory = OpaqueMemory::new(GlobalPool::new());
+            let bodies = HttpBodyBuilder::new(memory.clone(), &clock);
+            let polls = Arc::new(AtomicUsize::new(0));
+            let observed = Arc::clone(&polls);
+            let body = bodies.stream(
+                futures::stream::poll_fn(move |_| {
+                    observed.fetch_add(1, Ordering::SeqCst);
+                    Poll::<Option<fetch::Result<BytesView>>>::Pending
+                }),
+                &HttpBodyOptions::default(),
+            );
+            let mut request = http::Request::builder()
+                .method(Method::POST)
+                .uri("https://example.test/unchanged?q=1")
+                .header("x-preserved", "unchanged")
+                .body(body)
+                .unwrap();
+            let before_uri = request.uri().clone();
+            let before_headers = request.headers().clone();
+            let mut bindings = MockBindings::new();
+            bindings
+                .expect_close_handle()
+                .withf(|handle| *handle == raw_handle(SESSION))
+                .once()
+                .returning(|_| Ok(()));
+            let session = session(BindingsFacade::mock(Arc::new(bindings)));
+            let contexts = ContextPool::new(Pool::new());
+            let error = crate::convert::header_capacity_calls::with_extra_length(length, || {
+                match RequestDriver::new(
+                    &mut request,
+                    Arc::clone(&session),
+                    &bodies,
+                    &clock,
+                    memory,
+                    &contexts,
+                    &TransportOptions::default(),
+                    &WinHttpTlsConfig::default(),
+                ) {
+                    Ok(_) => panic!("oversized encoded headers must fail before constructing the request driver"),
+                    Err(error) => error,
+                }
+            });
+            assert_eq!(error.label(), "invalid_request");
+            assert_eq!(error.recovery(), RecoveryInfo::never());
+            assert!(
+                error.to_string().contains("the request headers are too large to materialize"),
+                "{error}"
+            );
+            assert_eq!(request.uri(), &before_uri);
+            assert_eq!(request.headers(), &before_headers);
+            assert_eq!(polls.load(Ordering::SeqCst), 0);
+            assert_eq!(contexts.lock().unwrap().len(), 0);
+            drop(session);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_invalid_response_status_and_required_options_are_errors() {
+        for status in [99, 65_536] {
+            let (result, record) = run_lifecycle(
+                request(Method::GET, "https://example.test/"),
+                TransportOptions::default(),
+                WinHttpTlsConfig::default(),
+                LifecycleConfig {
+                    status,
+                    ..LifecycleConfig::default()
+                },
+            );
+            let error = result.unwrap_err();
+            assert_eq!(error.label(), "request_winhttp");
+            assert!(
+                error.to_string().contains("WinHTTP returned an invalid HTTP status code"),
+                "{error}"
+            );
+            assert_lifecycle_closed(&record);
+        }
+        for failed_index in 0..5 {
+            let (result, record) = run_lifecycle(
+                request(Method::GET, "https://example.test/"),
+                TransportOptions::default(),
+                WinHttpTlsConfig::default(),
+                LifecycleConfig {
+                    failure: Some(LifecycleFailure::Option(failed_index)),
+                    ..LifecycleConfig::default()
+                },
+            );
+            result.unwrap_err();
+            assert_eq!(record.send_calls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_ambiguous_request_framing_fails_before_native_io() {
+        let mut request = request(Method::POST, "https://example.test/path");
+        request
+            .headers_mut()
+            .insert(http::header::CONTENT_LENGTH, HeaderValue::from_static("7"));
+        let (result, record) = run_lifecycle(
+            request,
+            TransportOptions::default(),
+            WinHttpTlsConfig::default(),
+            LifecycleConfig::default(),
+        );
+        assert!(result.unwrap_err().to_string().contains("Content-Length"));
+        assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn gamma_survivor_unknown_length_request_finishes_with_one_zero_length_write() {
+        let body_builder = HttpBodyBuilder::new_fake();
+        let body = body_builder.stream(
+            futures::stream::iter([Ok::<_, fetch::HttpError>(BytesView::copied_from_slice(b"ab", &body_builder))]),
+            &HttpBodyOptions::default(),
+        );
+        let request = http::Request::post("https://example.test/path").body(body).unwrap();
+        let (result, record) = run_lifecycle(
+            request,
+            TransportOptions::default(),
+            WinHttpTlsConfig::default(),
+            LifecycleConfig::default(),
+        );
+        result.unwrap();
+        let writes = record.writes.lock().unwrap();
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].bytes, b"ab");
+        assert_eq!(record.end_write_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(record.end_write_completions.load(Ordering::SeqCst), 1);
+        assert_eq!(record.receive_calls.load(Ordering::SeqCst), 1);
+        assert_lifecycle_closed(&record);
+    }
+
+    #[test]
+    fn gamma_survivor_authority_translation_rejects_missing_host_and_inconsistent_parts() {
+        let root = request(Method::GET, "https://example.test");
+        let translated = super::TranslatedRequest::new(&root, root.headers(), &RequestFilter::Https).unwrap();
+        assert_eq!(translated.path.to_string().unwrap(), "/");
+        let authority = "example.test:443".parse().unwrap();
+        super::authority_port(&authority, "different.example", 443).unwrap_err();
+        super::authority_port(&authority, "example", 443).unwrap_err();
+        let request = request(Method::GET, "https://:443/path");
+        let Err(error) = super::TranslatedRequest::new(&request, request.headers(), &RequestFilter::Https) else {
+            panic!("an empty authority host must be rejected before opening a native handle");
+        };
+        assert!(error.to_string().contains("host"), "{error}");
+    }
 
     // HttpError contains user-erased error state without unwind-safety bounds.
     assert_not_impl_any!(RequestFailure: UnwindSafe, RefUnwindSafe);
@@ -2098,6 +2261,28 @@ mod tests {
         assert_lifecycle_closed(&record);
     }
 
+    #[test]
+    fn gamma_round2_disconnected_send_and_headers_return_stage_diagnostics() {
+        for (failure, message) in [
+            (LifecycleFailure::SendDisconnected, "the send completion channel disconnected"),
+            (LifecycleFailure::ReceiveDisconnected, "the headers completion channel disconnected"),
+        ] {
+            let (result, record) = run_lifecycle(
+                request(Method::GET, "https://example.com/"),
+                TransportOptions::default(),
+                WinHttpTlsConfig::default(),
+                LifecycleConfig {
+                    failure: Some(failure),
+                    ..LifecycleConfig::default()
+                },
+            );
+            let error = result.unwrap_err();
+            assert!(error.to_string().contains(message), "{error}");
+            assert_eq!(error.recovery(), RecoveryInfo::never());
+            assert_lifecycle_closed(&record);
+        }
+    }
+
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum LifecycleFailure {
         Connect,
@@ -2105,12 +2290,14 @@ mod tests {
         Option(usize),
         SendSync,
         SendCallback,
+        SendDisconnected,
         WriteSync,
         WriteCallback,
         EndWriteSync,
         EndWriteCallback,
         ReceiveSync,
         ReceiveCallback,
+        ReceiveDisconnected,
         QueryStatus,
         QueryHeaders,
         QueryProtocol,
@@ -2316,6 +2503,13 @@ mod tests {
             send_record.send_context.store(context, Ordering::SeqCst);
             send_record.sent_total_length.store(total_len as usize, Ordering::SeqCst);
             *send_record.sent_headers.lock().unwrap() = headers.as_slice().to_vec();
+            if send_config.failure == Some(LifecycleFailure::SendDisconnected) {
+                // SAFETY: this mock is called with the installed, live context
+                // and its freshly armed SendRequest slot, without other callbacks.
+                let context = unsafe { &*recorded_context(&send_record) };
+                drop(context.take_kind(OperationKind::SendRequest).unwrap());
+                return Ok(());
+            }
 
             if send_config.failure == Some(LifecycleFailure::SendSync) {
                 return Err(WinHttpError::new(12029, WinHttpOperation::SendRequest));
@@ -2469,6 +2663,13 @@ mod tests {
         let receive_record = Arc::clone(&record);
         bindings.expect_receive_response().returning(move |_| {
             receive_record.receive_calls.fetch_add(1, Ordering::SeqCst);
+            if receive_config.failure == Some(LifecycleFailure::ReceiveDisconnected) {
+                // SAFETY: this mock is called with the installed live context
+                // and its freshly armed headers slot, without other callbacks.
+                let context = unsafe { &*recorded_context(&receive_record) };
+                drop(context.take_kind(OperationKind::HeadersAvailable).unwrap());
+                return Ok(());
+            }
             assert_eq!(
                 receive_record.write_calls.load(Ordering::SeqCst),
                 receive_config.completed_writes.load(Ordering::SeqCst),
