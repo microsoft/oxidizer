@@ -98,7 +98,6 @@ impl ClientIdentity {
 
     /// Returns the certificate chain as rustls types.
     #[cfg(any(feature = "rustls", test))]
-    #[cfg_attr(test, mutants::skip)] // A public mTLS integration test covers this accessor.
     pub(crate) fn cert_chain(&self) -> &[rustls_pki_types::CertificateDer<'static>] {
         &self.cert_chain
     }

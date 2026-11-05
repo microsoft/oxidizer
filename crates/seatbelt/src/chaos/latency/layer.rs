@@ -132,7 +132,6 @@ impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
     /// If `max_latency` is not greater than `latency`, the layer uses a fixed delay.
     ///
     /// One `config()` call sets both type state parameters to [`Set`].
-    #[cfg_attr(test, mutants::skip)] // produces unkillable mutants
     #[must_use]
     pub fn config(self, config: &LatencyConfig) -> LatencyLayer<In, Out, Set, Set> {
         let with_rate = self.rate(config.rate).enable(config.enabled);

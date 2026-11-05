@@ -39,7 +39,6 @@ alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
-mutants = { workspace = true }
 pin-project-lite = { workspace = true }
 plurality = { path = "../plurality" }
 static_assertions = { workspace = true }

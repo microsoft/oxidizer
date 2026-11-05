@@ -65,7 +65,6 @@ unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
     // A mutant that reports a smaller capacity is not wrong, only slow: zstd writes no more than it
     // is offered, so the same bytes are produced a step at a time and the harness times out instead
     // of reaching a verdict.
-    #[cfg_attr(test, mutants::skip)]
     fn capacity(&self) -> usize {
         self.buffer.len()
     }
@@ -115,7 +114,6 @@ impl UninitOutput<'_> {
 /// count means the engine has more to give and must be driven again.
 // Treating a zero remaining count as anything else leaves a finish that never completes, so that
 // mutant hangs rather than failing and mutation testing records a timeout instead of a verdict.
-#[cfg_attr(test, mutants::skip)]
 fn finish_step(operation: Operation, remaining: usize) -> Step {
     match operation {
         Operation::Finish if remaining == 0 => Step::StreamEnd,
@@ -143,7 +141,6 @@ fn decompression_failed(code: usize) -> Error {
 /// failure normally. An assertion introduces a panic that can unwind or abort, depending on the
 /// build configuration.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 #[cold]
 fn compression_level_rejected(level: i32, code: usize) -> BuildError {
     BuildError::new(format!(
@@ -159,7 +156,6 @@ fn compression_level_rejected(level: i32, code: usize) -> BuildError {
 /// the same reason as [`compression_level_rejected`]: those limits come from the linked zstd, so a
 /// different build can reject a value that this build accepts.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 #[cold]
 fn window_log_rejected(window: u32, code: usize) -> BuildError {
     BuildError::new(format!(
@@ -171,7 +167,6 @@ fn window_log_rejected(window: u32, code: usize) -> BuildError {
 /// Resetting a session has no parameters to validate and no documented failure mode. This
 /// guards against a native error the bundled zstd version has never been observed to return.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 #[cold]
 fn reset_for_next_frame_failed(code: usize) -> Error {
     Error::invalid_state(format!(
@@ -366,10 +361,8 @@ unsafe impl Codec for ZstdDecompress {
         self.limits.check(total_in, total_out, streams)
     }
 
-    // Delegates to `FormatLimits::remaining_output`, and is excluded for the same reason: a mutant
-    // that answers a small constant only shrinks the slice offered per step, so the pump crawls and
-    // the harness times out rather than reaching a verdict.
-    #[cfg_attr(test, mutants::skip)]
+    // A small constant shrinks the slice offered per step without changing the result.
+    // That can exceed the mutation harness's time budget.
     fn remaining_output(&self, total_out: u64) -> Option<u64> {
         self.limits.remaining_output(total_out)
     }

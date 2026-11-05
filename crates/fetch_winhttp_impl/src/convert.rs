@@ -272,14 +272,12 @@ pub(crate) const fn context_bytes(value: usize) -> [u8; size_of::<usize>()] {
 
 /// Every operand is a distinct bit, so `|` and `^` compute the same value and a
 /// mutation between them is equivalent rather than a defect.
-#[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
 pub(crate) const fn disable_feature_mask() -> u32 {
     WINHTTP_DISABLE_COOKIES | WINHTTP_DISABLE_AUTHENTICATION
 }
 
 /// Every operand is a distinct bit, so `|` and `^` compute the same value and a
 /// mutation between them is equivalent rather than a defect.
-#[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
 pub(crate) const fn decompression_mask() -> u32 {
     WINHTTP_DECOMPRESSION_FLAG_GZIP | WINHTTP_DECOMPRESSION_FLAG_DEFLATE
 }

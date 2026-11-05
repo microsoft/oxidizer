@@ -198,7 +198,6 @@ msvc_spectre_libs_build = { path = "crates/msvc_spectre_libs_build", default-fea
 multitude = { path = "crates/multitude", default-features = false, version = "0.14.0" }
 multitude_macros = { path = "crates/multitude_macros", default-features = false, version = "=0.14.0" }
 multitude_macros_impl = { path = "crates/multitude_macros_impl", default-features = false, version = "=0.14.0" }
-mutants = { version = "0.0.3", default-features = false }
 native-tls = { version = "0.2.18", default-features = false }
 new_zealand = { version = "1.0.4", default-features = false }
 nix = { version = "0.31.3", default-features = false }

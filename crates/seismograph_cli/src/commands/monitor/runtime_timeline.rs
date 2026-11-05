@@ -76,7 +76,6 @@ pub(super) fn union(intervals: &[Interval]) -> Vec<Interval> {
 }
 
 /// The union is clipped before summing, so overlapping polls cannot exceed 100 percent.
-#[cfg_attr(test, mutants::skip)] // Floating-point chart occupancy is a defensive visualization projection.
 pub(super) fn occupancy(intervals: &[Interval], window: TimeWindow) -> Option<f64> {
     let span = window.end.checked_sub(window.start).filter(|span| *span > 0)?;
     let clipped = intervals
@@ -95,7 +94,6 @@ pub(super) fn occupancy(intervals: &[Interval], window: TimeWindow) -> Option<f6
 }
 
 /// Equal-width time bins; empty bins are unknown, including source-only legacy captures.
-#[cfg_attr(test, mutants::skip)] // Bin-boundary arithmetic is terminal visualization glue, not retained runtime state.
 pub(super) fn bins(intervals: &[Interval], window: Option<TimeWindow>, count: usize) -> Vec<Option<f64>> {
     let Some(window) = window.filter(|window| window.end > window.start) else {
         return vec![None; count];

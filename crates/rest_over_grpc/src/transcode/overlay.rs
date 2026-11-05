@@ -182,7 +182,6 @@ impl<'de> DeserializeSeed<'de> for BodyTopSeed<'_, '_> {
         impl<'de> Visitor<'de> for TopVisitor<'_, '_> {
             type Value = BodyTop<'de>;
 
-            #[cfg_attr(test, mutants::skip)]
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a JSON object")
             }

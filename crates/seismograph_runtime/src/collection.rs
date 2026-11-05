@@ -258,7 +258,6 @@ fn discard_panic_with(mut panic: Box<dyn std::any::Any + Send>, terminal: impl F
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Terminal repeated-panic disposal aborts the process.
-#[cfg_attr(test, mutants::skip)] // Intentional terminal fallback, not recoverable diagnostic behavior.
 fn abort_repeated_panic(_panic: Box<dyn std::any::Any + Send>) -> ! {
     std::process::abort()
 }

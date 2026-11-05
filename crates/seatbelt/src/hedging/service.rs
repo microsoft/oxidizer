@@ -93,7 +93,6 @@ where
 {
     type Out = Out;
 
-    #[cfg_attr(test, mutants::skip)]
     async fn execute(&self, input: In) -> Self::Out {
         if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
@@ -231,7 +230,6 @@ impl<In, Out> HedgingShared<In, Out> {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // causes test timeouts
     fn launch_hedging_attempt<G>(
         &self,
         futs: &FuturesUnordered<G>,
@@ -249,7 +247,6 @@ impl<In, Out> HedgingShared<In, Out> {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // causes test timeouts
     fn invoke_on_execute(&self, input: &mut In, attempt: Attempt, delay: Duration) {
         if let Some(on_execute) = &self.on_execute {
             on_execute.call(input, OnExecuteArgs { attempt, delay });
@@ -314,7 +311,6 @@ where
         self.inner.poll_ready(cx)
     }
 
-    #[cfg_attr(test, mutants::skip)]
     fn call(&mut self, req: Req) -> Self::Future {
         if !self.shared.enable_if.call(&req) {
             let future = self.inner.call(req);

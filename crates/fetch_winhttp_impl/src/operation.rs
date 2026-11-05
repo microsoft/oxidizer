@@ -404,7 +404,6 @@ impl Drop for OperationFuture<'_> {
     // endpoint and lets the request handle close ahead of it, inverting the
     // teardown order this type exists to enforce. Neither consequence is
     // observable from a test assertion; Miri owns that guarantee.
-    #[cfg_attr(test, mutants::skip)]
     fn drop(&mut self) {
         if self.receiver_live {
             // SAFETY: ManuallyDrop::drop requires that the value is never used

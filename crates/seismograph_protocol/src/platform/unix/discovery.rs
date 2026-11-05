@@ -15,7 +15,6 @@ use crate::monitor::{InstanceId, MonitorEndpoint, MonitorOwner};
 use crate::platform::{DirectoryEntries, DirectoryEntry, RegistryDirectory};
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Login-managed environment selection varies by host; runtime/fallback selection is tested below.
-#[cfg_attr(test, mutants::skip)] // Native startup tests retain this environment boundary; deterministic selection stays measured.
 pub(crate) fn current_directory(owner: &MonitorOwner) -> io::Result<RegistryDirectory> {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
     let directory = current_directory_in(runtime.as_deref(), Path::new("/tmp"), owner)?;
@@ -65,7 +64,6 @@ fn trusted_temporary_root(uid: u32, mode: u32) -> bool {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Unexpected runtime-directory failures require host filesystem faults or external permission races.
-#[cfg_attr(test, mutants::skip)] // Native runtime/fallback tests retain selection; private fallback ownership checks remain measured.
 fn optional_runtime_directory(runtime: &Path, owner: &MonitorOwner) -> io::Result<Option<RegistryDirectory>> {
     match runtime_directory(runtime, owner) {
         Ok(directory) => Ok(Some(directory)),
@@ -106,7 +104,6 @@ fn runtime_directory(runtime: &Path, owner: &MonitorOwner) -> io::Result<Registr
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Enumerating real login sessions and mount namespaces requires host-wide setup.
-#[cfg_attr(test, mutants::skip)] // Native discovery/cross-user tests retain this boundary; path filtering and scanners have fixture tests.
 pub(crate) fn registry_directories() -> io::Result<DirectoryEntries> {
     let MonitorOwner::UnixUser(caller) = current_owner()? else {
         return Err(io::Error::new(
@@ -158,7 +155,6 @@ fn ignorable_discovery_error(caller: u32, kind: io::ErrorKind) -> bool {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // read_dir iterator errors require filesystem failure after enumeration has started.
-#[cfg_attr(test, mutants::skip)] // Native fixture scans retain enumeration; owner filtering and identity parsing remain measured.
 fn scan_runtime_users(root: &Path, caller: u32, paths: &mut BTreeMap<PathBuf, MonitorOwner>, errors: &mut DirectoryEntries) {
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
@@ -185,7 +181,6 @@ fn scan_runtime_users(root: &Path, caller: u32, paths: &mut BTreeMap<PathBuf, Mo
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // read_dir iterator errors require filesystem failure after enumeration has started.
-#[cfg_attr(test, mutants::skip)] // Native fixture scans retain enumeration; temporary-name and owner filtering remain measured.
 fn scan_temporary(root: &Path, caller: u32, paths: &mut BTreeMap<PathBuf, MonitorOwner>, errors: &mut DirectoryEntries) {
     let entries = match fs::canonicalize(root).and_then(fs::read_dir) {
         Ok(entries) => entries,

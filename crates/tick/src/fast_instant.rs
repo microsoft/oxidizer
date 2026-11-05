@@ -47,7 +47,6 @@ fn calibration() -> &'static Calibration {
 }
 
 #[cfg(all(target_os = "linux", not(miri)))]
-#[cfg_attr(test, mutants::skip)] // The feature is disabled by the default mutation-test profile.
 fn platform_time() -> Duration {
     let mut timestamp = std::mem::MaybeUninit::<libc::timespec>::uninit();
 
@@ -64,7 +63,6 @@ fn platform_time() -> Duration {
 }
 
 #[cfg(all(windows, not(miri)))]
-#[cfg_attr(test, mutants::skip)] // The feature is disabled by the default mutation-test profile.
 fn platform_time() -> Duration {
     // SAFETY: GetTickCount64 has no safety requirements.
     Duration::from_millis(unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() })

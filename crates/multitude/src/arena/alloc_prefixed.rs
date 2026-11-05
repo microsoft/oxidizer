@@ -31,7 +31,6 @@ pub(in crate::arena) const PREFIX_BYTES: usize = mem::size_of::<usize>();
 /// Includes the length prefix + payload alignment slack + payload
 /// bytes. Saturates at `usize::MAX` on overflow.
 #[inline]
-#[cfg_attr(test, mutants::skip)] // underestimating refill hint ⇒ refill spin
 pub(in crate::arena) fn worst_case_thin_slice_payload<T>(len: usize) -> usize {
     let elem_size = mem::size_of::<T>();
     let elem_align = mem::align_of::<T>();
@@ -203,7 +202,6 @@ impl<A: Allocator + Clone> Arena<A> {
 /// the `Arc` layout as the superset). Using `S::block_align` keeps the hint
 /// tight for `Rc`'s sub-4-byte alignments instead of over-budgeting at the
 /// `Arc` 4-byte strong-count floor.
-#[cfg_attr(test, mutants::skip)] // underestimating refill hint ⇒ refill spin
 #[inline]
 pub(crate) fn worst_case_strong_slice_payload<S: thin_dst::Strong, T>(len: usize) -> usize {
     let align = mem::align_of::<T>();

@@ -42,7 +42,6 @@ where
 
     // `Poll::from(Ok(()))` is constructed identically to `Poll::Ready(Ok(()))`,
     // so the mutation produces an equivalent program.
-    #[cfg_attr(test, mutants::skip)]
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
         Poll::Ready(Ok(()))
     }

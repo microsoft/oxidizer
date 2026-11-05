@@ -451,7 +451,6 @@ pub(crate) enum DirectoryGuard {
 pub(crate) struct TemporaryDirectory(Option<tempfile::TempDir>);
 
 impl Drop for TemporaryDirectory {
-    #[cfg_attr(test, mutants::skip)] // Field Drop still removes the directory; this body only adds diagnostics for native cleanup failures.
     fn drop(&mut self) {
         if let Some(directory) = self.0.take()
             && let Err(error) = directory.close()
@@ -486,7 +485,6 @@ impl Write for DescriptorFile {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // Both backends are unbuffered: forwarding flush and returning Ok(()) have identical effects.
     fn flush(&mut self) -> std_io::Result<()> {
         match self {
             Self::Native(file) => file.flush(),

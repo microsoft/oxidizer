@@ -42,7 +42,6 @@ const SYSTEM: &str = "S-1-5-18";
 struct LocalAllocation(*mut c_void);
 
 impl Drop for LocalAllocation {
-    #[cfg_attr(test, mutants::skip)] // LocalFree releases an OS allocation; its absence is only observable as a native memory leak.
     fn drop(&mut self) {
         // SAFETY: this pointer is owned and was returned by a LocalAlloc-family API.
         unsafe { LocalFree(self.0) };
@@ -118,7 +117,6 @@ pub(super) fn owned_handle(handle: HANDLE) -> io::Result<OwnedHandle> {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Token-query failures require inaccessible processes or invalidating an owned handle.
-#[cfg_attr(test, mutants::skip)] // Native restricted-token tests retain the OS token boundary.
 fn process_token(process: HANDLE) -> io::Result<OwnedHandle> {
     let mut token = ptr::null_mut();
     // SAFETY: process is valid, and token is a writable output pointer.
@@ -134,7 +132,6 @@ pub(crate) fn current_owner() -> io::Result<MonitorOwner> {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Token buffer/query failures cannot be injected for a valid process token.
-#[cfg_attr(test, mutants::skip)] // Native identity tests retain actual token reads; SID/policy validation stays measured.
 pub(super) fn process_owner(process: HANDLE) -> io::Result<MonitorOwner> {
     let token = process_token(process)?;
     let mut length = 0;
@@ -164,7 +161,6 @@ pub(super) fn process_owner(process: HANDLE) -> io::Result<MonitorOwner> {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // OS-owned SIDs cannot safely be corrupted to force conversion failures.
-#[cfg_attr(test, mutants::skip)] // Native ACL and peer-identity tests retain SID conversion.
 fn sid_string(sid: PSID) -> io::Result<String> {
     let mut text = ptr::null_mut();
     // SAFETY: sid belongs to a live token/security descriptor, and text is writable.
@@ -208,7 +204,6 @@ fn directory_file(path: &Path) -> io::Result<File> {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // DOS-device query failures and malformed kernel mappings require changing machine drive configuration.
-#[cfg_attr(test, mutants::skip)] // Native traversal tests retain this call; local-volume acceptance stays measured separately.
 fn drive_volume(drive: u8) -> io::Result<PathBuf> {
     let device = [u16::from(drive), u16::from(b':'), 0];
     // DOS device queries inspect the local object namespace, not the target filesystem.
@@ -365,7 +360,6 @@ struct NativeAccess {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Security-query/GetAce failures and malformed OS-owned ACL pointers cannot safely be injected.
-#[cfg_attr(test, mutants::skip)] // Native ACL rejection tests retain the boundary; owner/grant authorization stays measured in verify_access.
 fn native_access(file: &File) -> io::Result<NativeAccess> {
     let mut owner = ptr::null_mut();
     let mut acl: *mut ACL = ptr::null_mut();
@@ -446,7 +440,6 @@ pub(crate) fn create_directory(path: &Path, owner: &MonitorOwner) -> io::Result<
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Elevation query failures require invalidating a valid current-process token.
-#[cfg_attr(test, mutants::skip)] // Native discovery retains elevation checks; pure access policy remains measured.
 pub(super) fn is_elevated() -> io::Result<bool> {
     // SAFETY: current-process pseudo-handle is valid for token queries.
     let token = process_token(unsafe { GetCurrentProcess() })?;
@@ -484,7 +477,6 @@ pub(crate) fn create_descriptor(path: &Path, owner: &MonitorOwner) -> io::Result
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Native opens already reject directories/reparse points; post-open metadata failures require external object changes.
-#[cfg_attr(test, mutants::skip)] // Native descriptor/ACL tests retain this boundary; path and grant policy stay measured separately.
 pub(crate) fn read_descriptor(path: &Path) -> io::Result<(File, MonitorOwner)> {
     let parent = path.parent().ok_or_else(|| denied("descriptor needs a directory"))?;
     let directory = directory_file(parent)?;
@@ -508,7 +500,6 @@ pub(crate) fn read_descriptor(path: &Path) -> io::Result<(File, MonitorOwner)> {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // NtCreateFile status and object-manager failure paths depend on native handles and filesystem state.
-#[cfg_attr(test, mutants::skip)] // Native directory, descriptor, and junction tests retain no-reparse/relative-open behavior.
 fn open_native(
     directory: Option<&File>,
     name: &OsStr,
@@ -560,7 +551,6 @@ fn open_native(
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // GetSecurityInfo failure requires a native object/permission failure, not a portable fixture.
-#[cfg_attr(test, mutants::skip)] // Native pipe identity and descriptor ownership tests retain OS-owner verification.
 pub(super) fn handle_owner(handle: HANDLE) -> io::Result<MonitorOwner> {
     let mut owner = ptr::null_mut();
     let mut descriptor = ptr::null_mut();

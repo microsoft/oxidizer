@@ -90,7 +90,6 @@ impl BytesView {
     /// Use a [`BytesBuf`] to create a view over some actual data.
     ///
     /// [`BytesBuf`]: crate::BytesBuf
-    #[cfg_attr(test, mutants::skip)] // Generates no-op mutations, not useful.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -261,7 +260,6 @@ impl BytesView {
     /// # }
     /// # }
     /// ```
-    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     #[must_use]
     pub fn len(&self) -> usize {
         // Sanity check.
@@ -271,7 +269,6 @@ impl BytesView {
     }
 
     /// Whether the view is of a zero-sized byte sequence.
-    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -327,7 +324,6 @@ impl BytesView {
     #[must_use]
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     #[expect(clippy::too_many_lines, reason = "acceptable for now")]
-    #[cfg_attr(test, mutants::skip)] // Mutations include impossible conditions that we cannot test as well as mutations that are functionally equivalent.
     pub fn range_checked<R>(&self, range: R) -> Option<Self>
     where
         R: RangeBounds<usize>,
@@ -610,7 +606,6 @@ impl BytesView {
     /// # }
     /// # }
     /// ```
-    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     #[must_use]
     pub fn first_slice(&self) -> &[u8] {
         self.spans_reversed.last().map_or::<&[u8], _>(&[], |span| span)
@@ -754,7 +749,6 @@ impl BytesView {
     /// # Panics
     ///
     /// Panics if `count` is greater than the number of bytes remaining.
-    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     pub fn advance(&mut self, mut count: usize) {
         self.len = self.len.checked_sub(count).expect("attempted to advance past end of the view");
 
@@ -1119,7 +1113,6 @@ impl<'s> BytesViewSlices<'s> {
 impl<'s> Iterator for BytesViewSlices<'s> {
     type Item = (&'s [u8], Option<&'s dyn BlockMeta>);
 
-    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     fn next(&mut self) -> Option<Self::Item> {
         if self.previous_span_index == 0 {
             return None;
