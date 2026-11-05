@@ -30,6 +30,7 @@ allowed_external_types = [
     "http_extensions::*",
     "layered::service::Service",
     "observed::sink::core::Sink",
+    "templated_uri::base_path::BasePath",
     "tick::simple_clock::SimpleClock",
     "tower_layer::Layer",
 ]
@@ -47,6 +48,7 @@ http_headers = { workspace = true, features = ["headers-content-length", "header
 layered = { workspace = true }
 observed = { workspace = true }
 ohno = { workspace = true }
+templated_uri = { workspace = true }
 tick = { workspace = true }
 
 [dev-dependencies]

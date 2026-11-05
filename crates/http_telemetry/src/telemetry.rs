@@ -10,6 +10,7 @@ use std::sync::Arc;
 use http_extensions::HttpBodyBuilder;
 use layered::Layer;
 use observed::Sink;
+use templated_uri::BasePath;
 use tick::SimpleClock;
 
 /// Produces telemetry about the requests that go through it, in the form of `observed` events.
@@ -56,7 +57,7 @@ impl TelemetryLayer {
         self
     }
 
-    /// Sets request paths to be excluded from telemetry.
+    /// Sets request base paths to be excluded from telemetry.
     ///
     /// # Examples
     ///
@@ -64,15 +65,23 @@ impl TelemetryLayer {
     /// use http_extensions::HttpBodyBuilder;
     /// use http_telemetry::Telemetry;
     /// use observed::Sink;
+    /// use templated_uri::BasePath;
     ///
     /// # fn build(sink: Sink, body_builder: HttpBodyBuilder) {
-    /// let layer = Telemetry::server(sink, body_builder).excluded_paths(["/health", "/metrics"]);
+    /// let layer =
+    ///     Telemetry::server(sink, body_builder).excluded_paths([BasePath::from_static("/health/")]);
     /// # let _ = layer;
     /// # }
     /// ```
     #[must_use]
-    pub fn excluded_paths(mut self, paths: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
-        self.excluded_paths = paths.into_iter().map(|path| path.as_ref().into()).collect();
+    pub fn excluded_paths(mut self, paths: impl IntoIterator<Item = impl Into<BasePath>>) -> Self {
+        self.excluded_paths = paths
+            .into_iter()
+            .map(|path| {
+                let path = path.into();
+                path.as_str().strip_suffix('/').unwrap_or(path.as_str()).into()
+            })
+            .collect();
         self
     }
 }

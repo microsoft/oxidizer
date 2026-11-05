@@ -28,6 +28,7 @@ use observed::context::Transfer;
 use observed::metadata::{EventDescription, FieldDescriptor};
 use observed::processing::{EventProcessor, EventView, FieldValueFn};
 use observed::{FlushError, Sink, SinkId};
+use templated_uri::BasePath;
 use tick::SimpleClock;
 
 const GROUP: &str = "http_telemetry_server/request";
@@ -178,11 +179,11 @@ fn echoing_stack(sink: Sink) -> Telemetry<Echoing> {
     stack
 }
 
-/// The server middleware with the excluded path `/books`, over a sink with one processor
+/// The server middleware with the excluded path `/books/`, over a sink with one processor
 /// that reads every field, in front of [`Responding`]. The stack already got one request.
 fn excluded_stack() -> Telemetry<Responding> {
     let stack = Telemetry::server(reading_sink(1), HttpBodyBuilder::new_fake())
-        .excluded_paths(["/books"])
+        .excluded_paths([BasePath::from_static("/books/")])
         .layer(common::responding(StatusCode::OK));
     drop(send(&stack, common::get()));
     stack

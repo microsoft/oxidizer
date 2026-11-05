@@ -52,6 +52,7 @@ use observed::metadata::{EventDescription, FieldDescriptor};
 use observed::processing::{EventProcessor, EventView, FieldValueFn};
 use observed::{FlushError, Sink, Value};
 use print::PrintProcessor;
+use templated_uri::BasePath;
 use tokio::net::{TcpListener, TcpStream};
 
 /// The time after which the example stops. `just anvil-examples` stops an example after 30
@@ -116,6 +117,10 @@ async fn read(response: hyper::Result<Response<Incoming>>, hang_up: bool) -> Str
 }
 
 #[tokio::main]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the example runs its scenario from top to bottom in one function"
+)]
 async fn main() {
     let (sender, mut request_ends) = mpsc::unbounded();
     // The sink calls its processors in order, so each event is printed before its signal.
@@ -159,7 +164,8 @@ async fn main() {
         .expect("the example builds valid responses");
         async move { Ok::<_, HttpError>(response) }
     });
-    let service = Arc::new((Telemetry::server(sink, body_builder.clone()).excluded_paths([HEALTH_PATH]), handler).into_service());
+    let telemetry = Telemetry::server(sink, body_builder.clone()).excluded_paths([BasePath::from_static("/health/")]);
+    let service = Arc::new((telemetry, handler).into_service());
 
     // hyper serves each connection, and takes HTTP/1.1 and HTTP/2 on the same port.
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("the example can bind a local port");

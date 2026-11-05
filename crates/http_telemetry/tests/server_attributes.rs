@@ -18,6 +18,7 @@ use http_extensions::HttpRequest;
 use http_telemetry::TelemetryLayer;
 use layered::{Layer, Service};
 use observed::Value;
+use templated_uri::BasePath;
 
 /// A `GET` request to `uri`, with the `Host` header `host` if it is `Some`.
 fn get(uri: &'static str, host: Option<&'static str>) -> HttpRequest {
@@ -76,7 +77,7 @@ fn server_address_and_port_come_from_uri_authority_else_host_header() {
 fn excluded_request_reaches_handler_unchanged_and_emits_no_event() {
     let capture = Capture::new(|_| true);
     let service = server(common::sink_with(&capture))
-        .excluded_paths(["/health"])
+        .excluded_paths([BasePath::from_static("/health/")])
         .layer(Echoing(StatusCode::ACCEPTED));
 
     let response = service
@@ -98,28 +99,36 @@ fn excluded_request_reaches_handler_unchanged_and_emits_no_event() {
 }
 
 #[test]
-fn excluded_paths_match_raw_path_start_ignoring_ascii_case() {
-    let rows: [(&[&str], &'static str, bool); 9] = [
-        (&["/health"], "/health", true),
-        (&["/health"], "/HEALTH/live", true),
-        (&["/Health"], "/healthz?probe=1", true),
-        (&["/metrics", "/health"], "/health", true),
-        (&[""], "/books/1", true),
-        (&["/health"], "/api/health", false),
-        (&["/health"], "/%68ealth", false),
-        (&["/health?"], "/health?probe=1", false),
-        (&["/health"], "/hea", false),
+fn excluded_paths_match_raw_path_and_subpaths_ignoring_ascii_case() {
+    let rows: [(&[&'static str], &'static str, bool); 9] = [
+        (&["/health/"], "/health", true),
+        (&["/health/"], "/HEALTH/live", true),
+        (&["/Health/"], "/health?probe=1", true),
+        (&["/metrics/", "/health/"], "/health", true),
+        (&["/"], "/books/1", true),
+        (&["/health/"], "/healths", false),
+        (&["/health/"], "/api/health", false),
+        (&["/health/"], "/%68ealth", false),
+        (&["/health/"], "/hea", false),
     ];
+    let excluded = |paths: &[&'static str], uri| {
+        let configure = |layer: TelemetryLayer| layer.excluded_paths(paths.iter().map(|path| BasePath::from_static(path)));
+        event_names(configure, uri).is_empty()
+    };
 
     assert_eq!(
-        rows.map(|(paths, uri, _)| event_names(|layer| layer.excluded_paths(paths.iter().copied()), uri).is_empty()),
+        rows.map(|(paths, uri, _)| excluded(paths, uri)),
         rows.map(|(.., excluded)| excluded)
     );
 }
 
 #[test]
 fn excluded_paths_replace_earlier_paths() {
-    let configure = |layer: TelemetryLayer| layer.excluded_paths(["/health"]).excluded_paths(["/metrics"]);
+    let configure = |layer: TelemetryLayer| {
+        layer
+            .excluded_paths([BasePath::from_static("/health/")])
+            .excluded_paths([BasePath::from_static("/metrics/")])
+    };
 
     assert_eq!(event_names(configure, "/health"), vec![ACTIVE, COMPLETE, ACTIVE]);
 }

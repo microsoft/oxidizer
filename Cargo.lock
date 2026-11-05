@@ -2798,6 +2798,7 @@ dependencies = [
  "observed",
  "observed_testing",
  "ohno",
+ "templated_uri",
  "tick",
  "tokio",
 ]

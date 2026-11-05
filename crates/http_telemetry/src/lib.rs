@@ -117,7 +117,7 @@
 //!
 //! # When the middleware emits no event
 //!
-//! - The URI path of the request starts with one of the
+//! - The URI path of the request matches one of the
 //!   [`excluded_paths`](TelemetryLayer::excluded_paths).
 //! - The request future or the response body is dropped while its thread panics.
 //! - There is no destination interested in processing the event further.
