@@ -58,6 +58,9 @@ pub fn rolling_file_logs(path: impl AsRef<Path>) -> RollingFileLogDestinationBui
     RollingFileLogDestination::builder().path(path.as_ref().to_path_buf())
 }
 
+/// Policy for retaining rotated log files.
+///
+/// Either a maximum number of files or an age threshold can be specified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileLimit {
     /// Delete the oldest files if the rotated file count exceeds this limit.
@@ -189,7 +192,7 @@ impl<S: rolling_file_log_destination_builder::IsComplete> IntoLogDestination for
 #[cfg(test)]
 mod tests {
     use std::io::{Error, ErrorKind};
-
+    use std::time::Duration;
     use chrono::Duration as ChronoDuration;
     use file_rotate::suffix::FileLimit as RotationFileLimit;
     use observed_destination_core::LoggerProviderBuilderExt;
@@ -210,7 +213,7 @@ mod tests {
             RotationFileLimit::MaxFiles(3)
         ));
         for (age, expected) in [
-            (Duration::from_secs(60), ChronoDuration::seconds(60)),
+            (Duration::from_mins(1), ChronoDuration::minutes(1)),
             (Duration::MAX, ChronoDuration::MAX),
         ] {
             let RotationFileLimit::Age(actual) = RotationFileLimit::from(FileLimit::Age(age)) else {
@@ -263,7 +266,7 @@ mod tests {
     )]
     fn registration_passes_rotation_options_and_applies_level_and_format() {
         let path = Path::new("application.log");
-        for file_limit in [FileLimit::MaxFiles(1), FileLimit::Age(Duration::from_secs(60))] {
+        for file_limit in [FileLimit::MaxFiles(1), FileLimit::Age(Duration::from_mins(1))] {
             for compression in [false, true] {
                 let factory = FakeFileWriterOpener::new("");
                 let destination = rolling_file_logs(path)
