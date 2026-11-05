@@ -155,15 +155,12 @@ Use it to test code that depends on HTTP clients.
 ## Features
 
 * `json` enables JSON serialization and deserialization through [`Json`][__link32].
-* `native-tls` makes [`collect_error_labels`][__link33] label an I/O error that wraps a `native-tls` error
-  as `tls`.
-* `rustls` makes [`collect_error_labels`][__link34] label an I/O error that wraps a `rustls` error as `tls`.
 * `test-util` enables test implementations.
 
 ## Memory Management
 
-Methods that allocate body data use the [`bytesbuf`][__link35] memory provider configured on
-[`HttpBodyBuilder`][__link36].
+Methods that allocate body data use the [`bytesbuf`][__link33] memory provider configured on
+[`HttpBodyBuilder`][__link34].
 Methods that wrap existing body data keep the storage supplied by the caller.
 A pooled provider can reuse memory after the body data is consumed.
 
@@ -173,7 +170,7 @@ A pooled provider can reuse memory after the body data is consumed.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbwlnMuvwTrAsbYFDKGFIDi14b9SgRZmvmNhUbk0U59nBbtRthZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMy4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xNC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb9zpOVazdOWUbz0LoasLuC_EbSXsHWxyT2r0bHcdheDLoihxhZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xMy4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xNC4w
  [__link0]: https://crates.io/crates/http/1.5.0
  [__link1]: https://docs.rs/http_extensions/0.14.0/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=StatusExt
@@ -201,10 +198,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link30]: https://docs.rs/http-body/1.1.0/http_body/?search=Body
  [__link31]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=FakeHandler
  [__link32]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=Json
- [__link33]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=collect_error_labels
- [__link34]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=collect_error_labels
- [__link35]: https://crates.io/crates/bytesbuf/0.13.0
- [__link36]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpBodyBuilder
+ [__link33]: https://crates.io/crates/bytesbuf/0.13.0
+ [__link34]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpBodyBuilder
  [__link4]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpRequestBuilder
  [__link5]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpResponseBuilder
  [__link6]: https://docs.rs/http_extensions/0.14.0/http_extensions/?search=HttpBody

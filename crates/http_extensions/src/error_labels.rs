@@ -44,7 +44,3 @@ pub(crate) const LABEL_JSON: ErrorLabel = ErrorLabel::from_static("json");
 pub(crate) const LABEL_JSON_SERIALIZATION: ErrorLabel = ErrorLabel::from_static("json_serialization");
 #[cfg(any(feature = "json", test))]
 pub(crate) const LABEL_JSON_DESERIALIZATION: ErrorLabel = ErrorLabel::from_static("json_deserialization");
-
-// TLS errors
-#[cfg(any(feature = "rustls", feature = "native-tls", test))]
-pub(crate) const LABEL_TLS: ErrorLabel = ErrorLabel::from_static("tls");

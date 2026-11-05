@@ -5,7 +5,6 @@ use std::fmt::{self, Debug};
 use std::time::Duration;
 
 use futures::FutureExt;
-use http_extensions::collect_error_labels;
 use layered::{Layer, Service};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Histogram, Meter, MeterProvider};
@@ -19,7 +18,7 @@ use performables::arc::Arc;
 use seatbelt::RecoveryInfo;
 use tick::SimpleClock;
 
-use crate::error_labels::LABEL_ABANDONED;
+use crate::error_labels::{LABEL_ABANDONED, collect_error_labels};
 use crate::telemetry::{
     TelemetryAttributes, base_scope, http_method_name, network_protocol_name, network_protocol_version, server_port, url_scheme_or,
 };

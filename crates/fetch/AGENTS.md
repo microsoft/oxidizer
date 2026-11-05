@@ -13,7 +13,7 @@ enough because the hyper transport requires TLS. Enable `rustls` or `native-tls`
 
 If you add a TLS backend, add its feature to the inner `any(...)`.
 
-Some items use one TLS backend or `test`. The TLS re-exports in `src/tls.rs` use this pattern:
+Some items use one TLS backend or `test`. TLS error labels use this pattern:
 
 ```rust
 #[cfg(any(feature = "rustls", test))]

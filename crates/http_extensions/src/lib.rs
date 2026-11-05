@@ -185,9 +185,6 @@
 //! # Features
 //!
 //! - `json` enables JSON serialization and deserialization through [`Json`].
-//! - `native-tls` makes [`collect_error_labels`] label an I/O error that wraps a `native-tls` error
-//!   as `tls`.
-//! - `rustls` makes [`collect_error_labels`] label an I/O error that wraps a `rustls` error as `tls`.
 //! - `test-util` enables test implementations.
 //!
 //! # Memory Management

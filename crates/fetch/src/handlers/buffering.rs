@@ -57,9 +57,10 @@ impl<T: RequestHandler> Service<HttpRequest> for Buffering<T> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http::{StatusCode, Uri};
-    use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequestBuilder, collect_error_labels};
+    use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequestBuilder};
 
     use super::*;
+    use crate::error_labels::collect_error_labels;
     use crate::handlers::Dispatch;
 
     #[cfg_attr(miri, ignore)]
