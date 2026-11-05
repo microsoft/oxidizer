@@ -54,7 +54,7 @@ fn main() {
             }
         }
     });
-    let service = (Telemetry::server(sink), handler).into_service();
+    let service = (Telemetry::server(sink, body_builder.clone()), handler).into_service();
 
     println!("GET /books/1");
     let response = block_on(service.execute(get(&body_builder, "/books/1"))).expect("the handler responds to /books/1");

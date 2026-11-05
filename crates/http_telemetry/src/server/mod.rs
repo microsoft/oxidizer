@@ -85,7 +85,7 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
         };
         Either::Right(async move {
             match AssertUnwindSafe(response).catch_unwind().await {
-                Ok(Ok(response)) => Ok(emit_when_body_ends(guard, response)),
+                Ok(Ok(response)) => Ok(emit_when_body_ends(guard, response, &layer.body_builder)),
                 Ok(Err(error)) => {
                     guard.emit(RequestEnd::Error(&error, None));
                     Err(error)

@@ -10,12 +10,12 @@ use std::task::{Context, Poll};
 use bytesbuf::BytesView;
 use http::{Method, StatusCode, Version};
 use http_body::{Body, Frame, SizeHint};
-use http_extensions::{HttpBody, HttpError, HttpResponse};
+use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpResponse};
 use http_headers::headers::{ContentLength, ContentLengthOwned};
 
 use super::drop_guard::{RequestEnd, TelemetryDropGuard};
 
-pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpResponse) -> HttpResponse {
+pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpResponse, body_builder: &HttpBodyBuilder) -> HttpResponse {
     let status_code = response.status();
     // A server sends no content for a body at its end, nor for these responses (RFC 9110, sections
     // 9.3.2, 9.3.6, 15.2, 15.3.5 and 15.4.5), and can drop their body without a poll. So their
@@ -48,7 +48,7 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
         })
         .flatten();
     response.map(|body| {
-        body.wrap(|inner| TelemetryBody {
+        body_builder.rewrap(body, |inner| TelemetryBody {
             inner,
             guard,
             status_code,

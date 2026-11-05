@@ -1,12 +1,5 @@
 # Changelog
 
-## [Unreleased]
-
-### Added
-
-- `HttpBody::wrap`, which wraps a body in a custom `Body` implementation and keeps the idle timeout and the buffer
-  limit of the body.
-
 ## [0.14.0] - 2026-11-02
 
 - Breaking: Replace `HttpBodyBuilder::with_custom_memory` with

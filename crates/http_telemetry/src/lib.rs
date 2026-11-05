@@ -19,12 +19,12 @@
 //! use observed::Sink;
 //!
 //! # fn build(sink: Sink, body_builder: HttpBodyBuilder) {
+//! let layer = Telemetry::server(sink, body_builder.clone());
 //! let handler = Execute::new(move |_request: HttpRequest| {
 //!     let response = HttpResponse::new(body_builder.empty());
 //!     async move { Ok::<_, HttpError>(response) }
 //! });
 //!
-//! let layer = Telemetry::server(sink);
 //! let service = (layer, handler).into_service();
 //! # let _ = service;
 //! # }
@@ -151,11 +151,12 @@
 //! }
 //!
 //! # async fn serve(sink: Sink, body_builder: HttpBodyBuilder, request: HttpRequest) {
+//! # let layer = Telemetry::server(sink.clone(), body_builder.clone());
 //! # let handler = Execute::new(move |_request: HttpRequest| {
 //! #     let response = HttpResponse::new(body_builder.empty());
 //! #     async move { Ok::<_, HttpError>(response) }
 //! # });
-//! let service = (Telemetry::server(sink.clone()), handler).into_service();
+//! let service = (layer, handler).into_service();
 //!
 //! let response = async { service.execute(request).await }
 //!     .enrich(&sink, Region { region: "westus" })

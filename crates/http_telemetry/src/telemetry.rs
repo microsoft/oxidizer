@@ -7,6 +7,7 @@ use std::any::type_name;
 use std::fmt;
 use std::sync::Arc;
 
+use http_extensions::HttpBodyBuilder;
 use layered::Layer;
 use observed::Sink;
 use tick::SimpleClock;
@@ -27,6 +28,7 @@ pub struct Telemetry<T> {
 #[derive(Clone)]
 pub struct TelemetryLayer {
     pub(crate) sink: Sink,
+    pub(crate) body_builder: HttpBodyBuilder,
     pub(crate) clock: SimpleClock,
     pub(crate) excluded_paths: Arc<[Box<str>]>,
 }
@@ -34,9 +36,10 @@ pub struct TelemetryLayer {
 impl Telemetry<()> {
     /// Creates a [`Layer::layer`] whose middleware produces telemetry about incoming HTTP requests.
     #[must_use]
-    pub fn server(sink: Sink) -> TelemetryLayer {
+    pub fn server(sink: Sink, body_builder: HttpBodyBuilder) -> TelemetryLayer {
         TelemetryLayer {
             sink,
+            body_builder,
             clock: SimpleClock::new_system(),
             excluded_paths: Arc::default(),
         }
@@ -58,11 +61,12 @@ impl TelemetryLayer {
     /// # Examples
     ///
     /// ```
+    /// use http_extensions::HttpBodyBuilder;
     /// use http_telemetry::Telemetry;
     /// use observed::Sink;
     ///
-    /// # fn build(sink: Sink) {
-    /// let layer = Telemetry::server(sink).excluded_paths(["/health", "/metrics"]);
+    /// # fn build(sink: Sink, body_builder: HttpBodyBuilder) {
+    /// let layer = Telemetry::server(sink, body_builder).excluded_paths(["/health", "/metrics"]);
     /// # let _ = layer;
     /// # }
     /// ```

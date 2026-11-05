@@ -159,7 +159,7 @@ async fn main() {
         .expect("the example builds valid responses");
         async move { Ok::<_, HttpError>(response) }
     });
-    let service = Arc::new((Telemetry::server(sink).excluded_paths([HEALTH_PATH]), handler).into_service());
+    let service = Arc::new((Telemetry::server(sink, body_builder.clone()).excluded_paths([HEALTH_PATH]), handler).into_service());
 
     // hyper serves each connection, and takes HTTP/1.1 and HTTP/2 on the same port.
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("the example can bind a local port");
