@@ -193,6 +193,7 @@ impl<S: rolling_file_log_destination_builder::IsComplete> IntoLogDestination for
 mod tests {
     use std::io::{Error, ErrorKind};
     use std::time::Duration;
+
     use chrono::Duration as ChronoDuration;
     use file_rotate::suffix::FileLimit as RotationFileLimit;
     use observed_destination_core::LoggerProviderBuilderExt;
