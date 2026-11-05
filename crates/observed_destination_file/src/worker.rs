@@ -341,7 +341,8 @@ fn write_warning_line(writer: &mut (impl Write + ?Sized), timestamp: SystemTime,
 #[cfg(test)]
 #[cfg(not(miri))]
 mod tests {
-    use std::{io, str};
+    use std::assert_matches;
+use std::{io, str};
 
     use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
     use opentelemetry_sdk::Resource;
@@ -831,6 +832,16 @@ mod tests {
 
         assert!(worker.first_write_error.is_none());
         assert!(worker.flush_pending().unwrap_err().contains("write failed"));
+    }
+
+    #[test]
+    fn direct_write_failure_is_recorded() {
+        let (_log_tx, log_rx) = unbounded();
+        let mut worker = worker_with_buffer(Box::new(FailWriter), log_rx, 0);
+
+        worker.write_log(&queued_log("record"));
+
+        assert_matches!(worker.first_write_error.as_deref(), Some("Operation failed: write failed"));
     }
 
     #[test]
