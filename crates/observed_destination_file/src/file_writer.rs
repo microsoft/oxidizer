@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Native writer creation boundary, replaced by memory-backed writers in tests.
 

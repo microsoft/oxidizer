@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Internal message types exchanged between the log processor front-end and
 //! the background writer thread.

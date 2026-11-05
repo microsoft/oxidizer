@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 // Temporary compatibility: remove as this crate migrates to Anvil defaults.
 #![allow(

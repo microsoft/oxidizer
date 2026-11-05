@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Background writer thread that drains a bounded log channel and writes to a
 //! [`Write`] sink. Shared by both the file and rolling-file destinations.

@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! File logging across registration, processing, and worker lifetime using fake writers.
 

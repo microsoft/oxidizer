@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Buffering for sinks whose failed writes may have committed an unknown prefix.
 

@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! [`LogProcessor`] implementation that forwards records to the background
 //! writer thread via a bounded channel.
