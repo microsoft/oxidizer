@@ -23,17 +23,17 @@ This crate provides two destination flavors:
   Requires the `rolling_file` feature.
 
 Internally, log records are forwarded to a background thread through a
-bounded Performables channel, avoiding mutex contention on the hot (emit)
-path. When the channel is full, the newest records are dropped rather than
-blocking the caller, and drops are periodically reported in the destination
-output.
+bounded [`performables`][__link1] channel, avoiding
+mutex contention on the hot (emit) path. When the channel is full, the newest
+records are dropped rather than blocking the caller, and drops are periodically
+reported in the destination output.
 
 ## Behavior and quirks
 
-* [`file_logs`][__link1] opens the target file only when the destination is
+* [`file_logs`][__link2] opens the target file only when the destination is
   registered (when `FileLogDestination::register`
   is called). By default, it appends to existing contents; call
-  [`FileLogDestinationBuilder::overwrite`][__link2] to truncate the file on open.
+  [`FileLogDestinationBuilder::overwrite`][__link3] to truncate the file on open.
 * `rolling_file_logs` also opens on its
   `RollingFileLogDestination::register` and rotates when the active file
   size exceeds the configured byte limit. Rotation retention can be based on
@@ -60,7 +60,7 @@ output.
   Automatic flushes skip empty buffers and do not add work to the emit path.
   Timing depends on worker scheduling and I/O; flushing makes bytes visible
   to the operating system but does not guarantee durable storage.
-* [`LogProcessor::force_flush`][__link3]
+* [`LogProcessor::force_flush`][__link4]
   sends a control message to the worker and waits for an acknowledgement.
   The wait is bounded by the builder’s `flush_ack_timeout` option.
   A timeout, stopped worker, or write/flush failure is returned
@@ -86,7 +86,7 @@ output.
 
 ## Maintainer guide
 
-See the design and implementation guide in [`docs/design.md`][__link4]
+See the design and implementation guide in [`docs/design.md`][__link5]
 for ownership, failure policy, and testing boundaries.
 
 
@@ -95,9 +95,10 @@ for ownership, failure policy, and testing boundaries.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_file">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbRLbu-DCt4JEbS89Xl3kITHYbF_CKvMmQiwYb_U7XgyZyy-RhZIKCeBlvYnNlcnZlZF9kZXN0aW5hdGlvbl9maWxlZTAuMS4wgnFvcGVudGVsZW1ldHJ5X3Nka2YwLjMzLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbAnSzg003HPQbWJVBMV-GajkbRwY41Jr0jr4b6XC3j3by_HRhZIKCeBlvYnNlcnZlZF9kZXN0aW5hdGlvbl9maWxlZTAuMS4wgnFvcGVudGVsZW1ldHJ5X3Nka2YwLjMzLjE
  [__link0]: https://docs.rs/observed_destination_file/0.1.0/observed_destination_file/?search=file_logs
- [__link1]: https://docs.rs/observed_destination_file/0.1.0/observed_destination_file/?search=file_logs
- [__link2]: https://docs.rs/observed_destination_file/0.1.0/observed_destination_file/?search=FileLogDestinationBuilder::overwrite
- [__link3]: https://docs.rs/opentelemetry_sdk/0.33.1/opentelemetry_sdk/?search=logs::LogProcessor::force_flush
- [__link4]: https://o365exchange.visualstudio.com/O365%20Core/_git/ox-sdk?path=/crates/observed_destination_file/docs/design.md
+ [__link1]: https://docs.rs/performables/
+ [__link2]: https://docs.rs/observed_destination_file/0.1.0/observed_destination_file/?search=file_logs
+ [__link3]: https://docs.rs/observed_destination_file/0.1.0/observed_destination_file/?search=FileLogDestinationBuilder::overwrite
+ [__link4]: https://docs.rs/opentelemetry_sdk/0.33.1/opentelemetry_sdk/?search=logs::LogProcessor::force_flush
+ [__link5]: https://o365exchange.visualstudio.com/O365%20Core/_git/ox-sdk?path=/crates/observed_destination_file/docs/design.md

@@ -18,10 +18,10 @@
 //!   Requires the `rolling_file` feature.
 //!
 //! Internally, log records are forwarded to a background thread through a
-//! bounded Performables channel, avoiding mutex contention on the hot (emit)
-//! path. When the channel is full, the newest records are dropped rather than
-//! blocking the caller, and drops are periodically reported in the destination
-//! output.
+//! bounded [`performables`](https://docs.rs/performables/) channel, avoiding
+//! mutex contention on the hot (emit) path. When the channel is full, the newest
+//! records are dropped rather than blocking the caller, and drops are periodically
+//! reported in the destination output.
 //!
 //! # Behavior and quirks
 //!
