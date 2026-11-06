@@ -3,9 +3,16 @@
 
 //! Arty and Tokio contention benchmarks for common nested-task patterns.
 //!
-//! Each case submits one outer task that starts ten inner operations.
+//! Each direct-admission case submits ten outer tasks that each start ten inner operations.
 //! The relocated-cache case uses `black_box` on each cache access.
 //! This prevents the compiler from removing the operation that the benchmark measures.
+//!
+//! The request-fanout cases first submit one core task. That task uses
+//! `spawn_anywhere` to select workers for ten request tasks. Each request uses
+//! regular `spawn` calls for ten child operations on its selected worker.
+//! This models a server that distributes requests but keeps each request's work local.
+//! The Tokio case uses the same task tree and cache operations, but Tokio chooses
+//! where its child tasks run. The direct-admission cases remain separate controls.
 //!
 //! Each benchmark case creates one runtime before measurement and reuses it for
 //! every measured iteration. The relocated-cache cases also create and reuse
@@ -27,7 +34,12 @@
 //! These workloads do not represent
 //! general runtime performance.
 //!
-//! Gungraun results give a rough view of which instructions run.
+//! Native cases enable Callgrind instrumentation across all threads only while
+//! the workload runs. Runtime construction, warm-up, and destruction stay outside
+//! measurement. The default function-entry collection toggle only measures the
+//! caller thread and excludes the workers that runtime construction starts.
+//! These cases replace that toggle with global instrumentation requests.
+//! Each start resets the simulated caches, so cache metrics include that cold start.
 //! Callgrind cannot model how tasks share workers or compete across workers.
 //! Use Criterion to compare runtime performance for these workloads.
 
@@ -40,7 +52,7 @@ use arty::runtime::{Runtime, WorkersPolicy};
 use arty::task::Context;
 use criterion::{BenchmarkId, Criterion, Throughput};
 #[cfg(target_os = "linux")]
-use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
+use gungraun::{Callgrind, CallgrindMetrics, EntryPoint, LibraryBenchmarkConfig};
 use metabench::benchmark;
 use performables::arc::{Arc, PerThread};
 use performables::sync::mutex::Mutex;
@@ -129,6 +141,31 @@ impl ArtyCase {
         });
         start.elapsed()
     }
+
+    fn run_requests(&self) -> Duration {
+        let start = Instant::now();
+        let core = self.runtime.scheduler().spawn_anywhere(self.cache.clone(), arty_core);
+        futures::executor::block_on(core).expect("benchmark core task finishes before shutdown");
+        start.elapsed()
+    }
+}
+
+async fn arty_core(cx: Context, cache: Cache) {
+    let scheduler = cx.scheduler();
+    let handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| {
+        scheduler.spawn_anywhere((cx.clone(), cache.clone()), |(cx, cache)| arty_outer(cx, cache))
+    });
+    for handle in handles {
+        handle.await.expect("benchmark request task finishes before shutdown");
+    }
+}
+
+fn arty_requests(workers: usize) -> ArtyCase {
+    let case = ArtyCase::new(workers);
+    for _ in 0..workers {
+        black_box(case.run_requests());
+    }
+    case
 }
 
 #[derive(Debug)]
@@ -240,6 +277,28 @@ impl TokioCase {
         });
         start.elapsed()
     }
+
+    fn run_requests(&self) -> Duration {
+        let start = Instant::now();
+        let core = self.runtime.spawn(tokio_core(self.cache.clone()));
+        futures::executor::block_on(core).expect("benchmark core task finishes before shutdown");
+        start.elapsed()
+    }
+}
+
+async fn tokio_core(cache: Cache) {
+    let handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| tokio::spawn(tokio_outer(cache.clone())));
+    for handle in handles {
+        handle.await.expect("benchmark request task finishes before shutdown");
+    }
+}
+
+fn tokio_requests(workers: usize) -> TokioCase {
+    let case = TokioCase::new(workers);
+    for _ in 0..workers {
+        black_box(case.run_requests());
+    }
+    case
 }
 
 #[derive(Debug)]
@@ -336,6 +395,15 @@ fn configured_criterion() -> Criterion {
         .measurement_time(Duration::from_secs(2))
 }
 
+fn measure_native<T>(workload: impl FnOnce() -> T) -> T {
+    #[cfg(target_os = "linux")]
+    gungraun::client_requests::callgrind::start_instrumentation();
+    let result = workload();
+    #[cfg(target_os = "linux")]
+    gungraun::client_requests::callgrind::stop_instrumentation();
+    result
+}
+
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group(ARTY.group_name());
     group.throughput(Throughput::Elements(
@@ -359,6 +427,35 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
                 let mut elapsed = Duration::ZERO;
                 for _ in 0..iterations {
                     elapsed += case.run(CONCURRENCY);
+                }
+                elapsed
+            });
+        });
+    }
+    group.finish();
+
+    let mut group = criterion.benchmark_group(ARTY_REQUEST_FANOUT.group_name());
+    group.throughput(Throughput::Elements(
+        u64::try_from(INNER_OPERATIONS * CONCURRENCY).expect("benchmark operation count fits in u64"),
+    ));
+    for workers in WORKERS {
+        let name = format!("concurrency_w{workers}");
+        group.bench_function(BenchmarkId::new(ARTY_REQUEST_FANOUT.benchmark_name(), &name), |bencher| {
+            let case = arty_requests(workers);
+            bencher.iter_custom(|iterations| {
+                let mut elapsed = Duration::ZERO;
+                for _ in 0..iterations {
+                    elapsed += case.run_requests();
+                }
+                elapsed
+            });
+        });
+        group.bench_function(BenchmarkId::new(TOKIO_REQUEST_FANOUT.benchmark_name(), &name), |bencher| {
+            let case = tokio_requests(workers);
+            bencher.iter_custom(|iterations| {
+                let mut elapsed = Duration::ZERO;
+                for _ in 0..iterations {
+                    elapsed += case.run_requests();
                 }
                 elapsed
             });
@@ -400,10 +497,10 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
 #[bench::concurrency_w1(Box::new(ArtyCase::new(1)), 10)]
 #[bench::concurrency_w8(Box::new(ArtyCase::new(8)), 10)]
 fn arty_workload<S: std::borrow::Borrow<ArtyCase>>(owned_input: S, concurrency: u64) -> (Duration, S) {
-    let result = {
+    let result = measure_native(|| {
         let case = owned_input.borrow();
         case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
-    };
+    });
     (result, owned_input)
 }
 
@@ -411,10 +508,10 @@ fn arty_workload<S: std::borrow::Borrow<ArtyCase>>(owned_input: S, concurrency: 
 #[bench::concurrency_w1(Box::new(TokioCase::new(1)), 10)]
 #[bench::concurrency_w8(Box::new(TokioCase::new(8)), 10)]
 fn tokio_workload<S: std::borrow::Borrow<TokioCase>>(owned_input: S, concurrency: u64) -> (Duration, S) {
-    let result = {
+    let result = measure_native(|| {
         let case = owned_input.borrow();
         case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
-    };
+    });
     (result, owned_input)
 }
 
@@ -425,10 +522,10 @@ fn arty_nested_retained_waker_workload<S: std::borrow::Borrow<ArtyNestedRetained
     owned_input: S,
     concurrency: u64,
 ) -> (Duration, S) {
-    let result = {
+    let result = measure_native(|| {
         let case = owned_input.borrow();
         case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
-    };
+    });
     (result, owned_input)
 }
 
@@ -439,10 +536,26 @@ fn tokio_nested_retained_waker_workload<S: std::borrow::Borrow<TokioNestedRetain
     owned_input: S,
     concurrency: u64,
 ) -> (Duration, S) {
-    let result = {
+    let result = measure_native(|| {
         let case = owned_input.borrow();
         case.run(usize::try_from(concurrency).expect("benchmark concurrency fits in usize"))
-    };
+    });
+    (result, owned_input)
+}
+
+#[benchmark(ARTY_REQUEST_FANOUT, "arty_contention/request_fanout", "Arty")]
+#[bench::concurrency_w1(Box::new(arty_requests(1)))]
+#[bench::concurrency_w8(Box::new(arty_requests(8)))]
+fn arty_request_fanout_workload<S: std::borrow::Borrow<ArtyCase>>(owned_input: S) -> (Duration, S) {
+    let result = measure_native(|| owned_input.borrow().run_requests());
+    (result, owned_input)
+}
+
+#[benchmark(TOKIO_REQUEST_FANOUT, "arty_contention/request_fanout", "Tokio")]
+#[bench::concurrency_w1(Box::new(tokio_requests(1)))]
+#[bench::concurrency_w8(Box::new(tokio_requests(8)))]
+fn tokio_request_fanout_workload<S: std::borrow::Borrow<TokioCase>>(owned_input: S) -> (Duration, S) {
+    let result = measure_native(|| owned_input.borrow().run_requests());
     (result, owned_input)
 }
 
@@ -456,11 +569,19 @@ metabench::main!(
     gungraun = {
         config = LibraryBenchmarkConfig::default().tool(
             Callgrind::default()
-                .args(["--branch-sim=yes"])
+                .entry_point(EntryPoint::None)
+                .args(["--branch-sim=yes", "--instr-atstart=no"])
                 .format([CallgrindMetrics::Default, CallgrindMetrics::BranchSim]),
         );
     },
-    benchmarks = [ARTY, TOKIO, ARTY_NESTED_RETAINED_WAKER, TOKIO_NESTED_RETAINED_WAKER],
+    benchmarks = [
+        ARTY,
+        TOKIO,
+        ARTY_NESTED_RETAINED_WAKER,
+        TOKIO_NESTED_RETAINED_WAKER,
+        ARTY_REQUEST_FANOUT,
+        TOKIO_REQUEST_FANOUT,
+    ],
 );
 
 #[cfg(not(target_os = "linux"))]
@@ -470,5 +591,12 @@ metabench::main!(
         benchmarks = criterion_benchmarks,
         unit = "ns",
     },
-    benchmarks = [ARTY, TOKIO, ARTY_NESTED_RETAINED_WAKER, TOKIO_NESTED_RETAINED_WAKER],
+    benchmarks = [
+        ARTY,
+        TOKIO,
+        ARTY_NESTED_RETAINED_WAKER,
+        TOKIO_NESTED_RETAINED_WAKER,
+        ARTY_REQUEST_FANOUT,
+        TOKIO_REQUEST_FANOUT,
+    ],
 );
