@@ -4,7 +4,7 @@
 [package]
 name = "anyspawn"
 description = "A task spawner for Arty and Tokio."
-version = "0.10.0"
+version = "0.11.0"
 readme = "README.md"
 keywords = ["oxidizer", "async", "runtime", "futures"]
 categories = ["asynchronous"]

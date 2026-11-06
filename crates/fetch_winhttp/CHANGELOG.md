@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.0] - 2026-11-06
+
+- The re-exported `WinHttpDeps::builder` accepts convertible memory providers such as
+  `GlobalPool`, without an explicit conversion to `OpaqueMemory`.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `anyspawn`, `bytesbuf`, `bytesbuf_io`, `compressors`, `fetch`, `fetch_hyper`,
+  `fetch_winhttp_impl`, `http_compression`, `http_extensions`, `performables`, `seatbelt_http`,
+  `seismograph`, `seismograph_io`.
+- Update the local `fetch_winhttp_impl` requirement from `0.5.0` to `0.6.0`.
+
 ## [0.5.0] - 2026-11-02
 
 - Breaking: Pass `OpaqueMemory` instead of `GlobalPool` to the re-exported `WinHttpDeps::builder`.

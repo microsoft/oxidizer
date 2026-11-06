@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] - 2026-11-06
+
+- Update published local dependency requirements. No direct source change.
+- Update the local `arty` requirement from `0.6.0` to `0.6.1`.
+- Update the local `performables` requirement from `0.3.1` to `0.4.0`.
+
 ## [0.2.0] - 2026-11-02
 
 - Breaking: Pass `arty::task::Context` from Arty 0.6.0 to `init`.

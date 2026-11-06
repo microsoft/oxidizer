@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0] - 2026-11-06
+
+- Breaking: Replace per-task diagnostic registration and lifetime counters with bounded
+  requests to native task providers. Remove `TaskHandle` instrumentation APIs.
+- Add `RuntimeHandle::capture` and `CaptureOptions` for collection limits, timeouts, and
+  optional poll-measurement windows.
+- Breaking: Make task creation times optional, remove source-derived creation stacks,
+  and report task collection availability and measurement scope explicitly.
+- Breaking: Emit runtime source schema 8. Continue reading schemas 2 through 6 and 8.
+- Remove the `backtrace` requirement.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `seismograph`.
+- Update the local `seismograph` requirement from `0.4.0` to `0.5.0`.
+- Add the local `tick` requirement at `0.9.1`.
+
 ## [0.4.0] - 2026-11-02
 
 - Store live tasks by task ID so removing a completed task no longer requires a scan of every live

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0] - 2026-11-06
+
+- Breaking: Allow I/O completion events after recording restarts, even when their start
+  event was not retained. Completion is no longer restricted to the starting session.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `seismograph`.
+- Update the local `seismograph` requirement from `0.4.0` to `0.5.0`.
+
 ## [0.4.0] - 2026-11-02
 
 - Update the Seismograph dependency to use the 0.4.0 packages. I/O event APIs do not change.
