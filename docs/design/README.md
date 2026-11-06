@@ -38,6 +38,19 @@ timeout starts. This keeps compilation outside the runtime limit.
 Review this override against the selected template during each upgrade.
 The PR workflow uses the unmodified Anvil template.
 
+The `anvil-setup` action selects Rust 1.97 for tool installation with
+`RUSTUP_TOOLCHAIN` and enables automatic installation with `RUSTUP_AUTO_INSTALL`.
+This narrow override covers the bootstrap and tool-installation steps.
+Anvil 0.25.0 has no input to select a compiler only during setup.
+Its pinned `cargo-coverage-gate` 0.7.4 needs Rust 1.97 to build from source.
+The override does not change local compiler selection or the library MSRV of 1.95.
+After installing tools, the action repeats the selected group's setup without
+the override. This provisions the compiler and components that later checks use.
+Tools already installed at their required versions are reused.
+Without this second pass, a clean runner can lack Rust 1.95 or its Clippy component.
+Later checks keep their own compiler selection, including the pinned nightlies.
+Review this override against the selected template during each upgrade.
+
 ## Verification behavior
 
 Coverage collection uses `cargo coverage-gate run` on the pinned nightly toolchain.

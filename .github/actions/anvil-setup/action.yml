@@ -109,7 +109,11 @@ runs:
 
     # cargo-binstall keeps the cold bootstrap path fast.
     - name: Install cargo-binstall
-      uses: cargo-bins/cargo-binstall@v1.21.0 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
+      uses: cargo-bins/cargo-binstall@851112458b5f28a29e5bc14a690c3f283d9dcc6f # v1.26.2
+      # Repository override: setup tools need Rust 1.97, not the library MSRV.
+      env:
+        RUSTUP_TOOLCHAIN: "1.97"
+        RUSTUP_AUTO_INSTALL: "1"
 
     # cargo-spellcheck links libclang when cargo-binstall falls back to a source
     # build. Install it eagerly on Linux jobs whose selected setup group includes
@@ -123,6 +127,8 @@ runs:
     - name: Install just
       shell: pwsh -NoProfile -Command ". '{0}'"
       env:
+        RUSTUP_TOOLCHAIN: "1.97"
+        RUSTUP_AUTO_INSTALL: "1"
         # cargo-binstall queries GitHub Releases. Use the workflow's built-in
         # token so setup gets the authenticated API quota. Its effective
         # permissions are defined by the calling workflow.
@@ -181,11 +187,21 @@ runs:
           exit 2
         fi
 
-        case "$ANVIL_GROUP" in
-          none) echo "anvil-setup: group=none, skipping tool install" ;;
-          "")   just anvil-setup binstall ;;
-          *)    just "anvil-$ANVIL_GROUP-setup" binstall ;;
-        esac
+        install_group() {
+          case "$ANVIL_GROUP" in
+            none) echo "anvil-setup: group=none, skipping tool install" ;;
+            "")   just anvil-setup binstall ;;
+            *)    just "anvil-$ANVIL_GROUP-setup" binstall ;;
+          esac
+        }
+
+        RUSTUP_TOOLCHAIN=1.97 RUSTUP_AUTO_INSTALL=1 install_group
+        if [[ "$ANVIL_GROUP" != "none" ]]; then
+          # Reuse cached tools, but provision the compiler and components that
+          # checks select after the tool-installation override ends.
+          echo "anvil-setup: preparing check toolchains and components"
+          install_group
+        fi
 
     # Save the cache as the LAST step of setup, regardless of whether
     # any earlier install step partially failed. `actions/cache`
