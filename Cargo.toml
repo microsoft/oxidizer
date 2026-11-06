@@ -89,9 +89,9 @@ axum-core = { version = "0.5.6", default-features = false }
 azure_core = { version = "1.0.0", default-features = false }
 azure_identity = { version = "1.0.0", default-features = false }
 azure_storage_blob = { version = "1.0.0", default-features = false }
-backtrace = { version = "0.3.76", default-features = false }
 base64 = { version = "0.23.0", default-features = false, features = ["alloc"] }
 bolero = { version = "0.13.4", default-features = false }
+bon = { version = "3.10.3", default-features = false }
 brotli = { version = "9.0.0", default-features = false }
 bumpalo = { version = "3.20.2", default-features = false }
 bytemuck = { version = "1.25.0", default-features = false }
@@ -205,6 +205,8 @@ nm = { version = "0.1.21", default-features = false }
 nonempty = { version = "0.12.0", default-features = false }
 object-pool = { version = "0.6.0", default-features = false }
 observed = { path = "crates/observed", default-features = false, version = "0.30.0" }
+observed_destination_core = { path = "crates/observed_destination_core", default-features = false, version = "0.29.1" }
+observed_destination_stdout = { path = "crates/observed_destination_stdout", default-features = false, version = "0.1.0" }
 observed_macros = { path = "crates/observed_macros", default-features = false, version = "=0.30.0" }
 observed_macros_impl = { path = "crates/observed_macros_impl", default-features = false, version = "=0.30.0" }
 observed_perf_counters = { path = "crates/observed_perf_counters", default-features = false, version = "0.1.0" }

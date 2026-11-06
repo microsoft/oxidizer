@@ -14,6 +14,33 @@ use cachet::{Cache, CacheOp, CacheTier, MockCache};
 use thread_aware::{Thread, ThreadAware};
 use tick::Clock;
 
+#[tokio::test]
+async fn serialization_builders_accept_global_pools() {
+    let clock = Clock::new_frozen();
+    let primary = MockCache::<String, String>::new();
+    let fallback = MockCache::<String, String>::new();
+    let serialized = MockCache::<BytesView, BytesView>::new();
+    let cache = Cache::builder(clock.clone())
+        .storage(primary.clone())
+        .fallback(Cache::builder(clock.clone()).storage(fallback.clone()))
+        .serialize(GlobalPool::new())
+        .fallback(Cache::builder(clock.clone()).storage(serialized.clone()))
+        .build();
+
+    let key = "key".to_string();
+    cache.insert(key.clone(), "value".to_string()).await.unwrap();
+    primary.invalidate(&key).await.unwrap();
+    fallback.invalidate(&key).await.unwrap();
+    assert_eq!(cache.get(&key).await.unwrap().unwrap().value(), "value");
+
+    let reader = Cache::builder::<String, String>(clock.clone())
+        .storage(MockCache::new())
+        .serialize(GlobalPool::new())
+        .fallback(Cache::builder(clock).storage(serialized))
+        .build();
+    assert_eq!(reader.get(&key).await.unwrap().unwrap().value(), "value");
+}
+
 /// Test data that records reservations and forwards them to a real memory provider.
 #[derive(Debug)]
 struct CountingMemoryData {

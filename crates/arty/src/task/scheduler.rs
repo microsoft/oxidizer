@@ -32,7 +32,6 @@ use crate::task::preparation::DeferredTask;
 ///
 /// Once shutdown starts, awaiting a new task returns
 /// [`JoinError`](crate::task::JoinError) immediately.
-/// Arty does not call the task factory.
 /// Await required results before shutdown.
 /// Dropping a [`JoinHandle`] does not cancel its task.
 ///
@@ -168,7 +167,9 @@ impl Scheduler {
             let inner = DeferredTask::new(future_factory, context);
             let options = TaskOptions::new(TaskPlacement::SameThread);
             current.tasks().add(inner, options, result_tx);
-            self.dispatcher.wake_worker(self.binding.worker_index);
+            if !current.tasks().is_executing() {
+                self.dispatcher.wake_worker(self.binding.worker_index);
+            }
             Ok(handle)
         })
     }
@@ -182,9 +183,7 @@ impl Scheduler {
     /// them. The data and result must implement [`ThreadAware`] and `'static`.
     /// The future must be `'static` and does not need to implement `Send`.
     /// If you await the result on an Arty async worker, Arty relocates it to that
-    /// worker before returning it. This is normally the worker that submitted the task.
-    /// Awaiting the result on a different worker changes where Arty relocates it.
-    /// Awaiting outside an Arty async worker does not relocate the result.
+    /// worker. Awaiting outside an Arty async worker does not relocate the result.
     ///
     /// # Examples
     ///
@@ -241,11 +240,9 @@ impl Scheduler {
     /// The data and result must implement [`ThreadAware`] and `'static`.
     /// The future must be `'static` and does not need to implement `Send`.
     /// If you await the result on an Arty async worker, Arty relocates it from
-    /// `destination` to that worker before returning it.
-    /// This is normally this scheduler's worker.
+    /// `destination` to that worker.
     /// Awaiting outside an Arty async worker does not relocate the result.
-    /// During shutdown, or if the destination is invalid, Arty rejects the task
-    /// without relocating `data` or calling `f`.
+    /// During shutdown, or if the destination is invalid, Arty rejects the task.
     ///
     /// # Examples
     ///

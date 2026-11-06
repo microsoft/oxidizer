@@ -3,7 +3,7 @@
 
 [package]
 name = "fetch_azure"
-description = "Azure SDK HTTP transport backed by the fetch HTTP client."
+description = "Uses the fetch HTTP client as the HTTP transport for Azure SDK clients."
 version = "0.10.0"
 readme = "README.md"
 keywords = ["oxidizer", "azure", "fetch", "http", "transport"]
@@ -19,10 +19,10 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_azure
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    # Workspace sibling crates
+    # Crates in this workspace
     "fetch::*",
-    # azure_core re-exports its HttpClient trait from this crate;
-    # cargo-check-external-types reports re-exports by their defining crate.
+    # azure_core re-exports HttpClient from typespec_client_core.
+    # cargo-check-external-types reports the crate that defines each re-export.
     "typespec_client_core::*",
 ]
 
@@ -30,7 +30,7 @@ allowed_external_types = [
 all-features = true
 
 [package.metadata.anvil.examples]
-# This example uses a live Azure account and developer credentials.
+# This example needs a live Azure account and developer credentials.
 no-run = ["blob_list"]
 
 [dependencies]

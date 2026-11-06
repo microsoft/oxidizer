@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.4] - 2026-11-02
+
+- Use version 0.5.4 to match the Ohno packages. Macro behavior does not change.
+- Update the requirement for local package `ohno_macros_impl` from `=0.5.3` to `=0.5.4`.
+
 ## [0.5.3] - 2026-10-20
 
 - Refresh published macro documentation and classify the macro crate as private API.

@@ -66,6 +66,27 @@ struct OwnerDropState {
     nested: Rc<RefCell<Option<CompletionHandle<usize>>>>,
 }
 
+#[test]
+fn task_set_execution_state_follows_the_owner_cycle() {
+    let mut executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let observed = Rc::new(Cell::new(false));
+    let task_observed = Rc::clone(&observed);
+    let task_tasks = tasks.clone();
+    assert!(!tasks.is_executing());
+    let _completion = tasks.add_test(
+        async move {
+            task_observed.set(task_tasks.is_executing());
+        },
+        TaskOptions::default(),
+    );
+
+    _ = executor.execute_cycle();
+
+    assert!(observed.get());
+    assert!(!tasks.is_executing());
+}
+
 impl EventProcessor for ReentrantSubmissionProcessor {
     fn is_interested(&self, description: &EventDescription) -> bool {
         description.name() == "arty.rt.task.spawned"

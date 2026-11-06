@@ -5,6 +5,13 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] - 2026-11-02
+
+- Borrow metadata and store small collections inline to reduce allocations during macro expansion,
+  which generates code from macro inputs.
+- Accepted attributes and generated event and enrichment APIs and behavior do not change.
+- Use version 0.30.0 to match the Observed packages.
+
 ## [0.29.0] - 2026-10-20
 
 - Align the macro implementation with the Observed 0.29 release.

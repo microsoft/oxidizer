@@ -24,17 +24,11 @@ use crate::task::Context;
 /// Its [`ThreadAware`] implementation updates its worker assignment.
 ///
 /// Threads outside Arty can call [`context`](Self::context) on a clone.
-/// The call sends a request to the assigned worker and waits for its response.
-/// This is slower than access on that worker.
+/// The call blocks the calling thread until the assigned worker responds.
 ///
 /// Arty creates each context type once per runtime.
-/// The first request creates and stores a context that does not belong to any worker.
-/// Arty clones it and updates the clone's state for the requesting worker.
-/// It then creates that worker's driver.
-/// Other workers create their own driver when they first request that context.
-/// The driver for the first context type registered in the runtime is primary.
-/// It can wait for I/O.
-/// Later drivers are secondary and must not wait for I/O.
+/// I/O libraries implement [`IoContext`]. See
+/// [driver roles](crate::io#driver-roles) for the rules that their drivers follow.
 #[derive(Clone)]
 pub struct Io {
     runtime: IoRuntime,
@@ -53,10 +47,8 @@ impl Io {
 
     /// Returns the runtime's context of type `C`, creating it on the first request.
     ///
-    /// Prepare `options` before this call.
-    /// Arty can clone it while sending the request to the worker or accessing the context there.
-    /// Keep context options inexpensive to clone. The options type must implement `Clone`,
-    /// `Send`, and `'static`.
+    /// The options type must implement `Clone`, `Send`, and `'static`.
+    /// Arty can clone `options`, so keep them inexpensive to clone.
     ///
     /// Arty creates each context type once per runtime. The first call
     /// that creates the context determines its `options`. Later calls
@@ -82,10 +74,8 @@ impl Io {
 
     /// Returns the runtime's context of type `C`, creating it on the first request.
     ///
-    /// Prepare `options` before this call.
-    /// Arty can clone it while sending the request to the worker or accessing the context there.
-    /// Keep context options inexpensive to clone. The options type must implement `Clone`,
-    /// `Send`, and `'static`.
+    /// The options type must implement `Clone`, `Send`, and `'static`.
+    /// Arty can clone `options`, so keep them inexpensive to clone.
     ///
     /// Arty creates each context type once per runtime. The first call
     /// that creates the context determines its `options`. Later calls
