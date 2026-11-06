@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Platform native TLS backend configuration and builder integration.
+//! Configuration for the platform native TLS backend.
 
 use std::collections::HashMap;
 
@@ -13,7 +13,7 @@ use crate::alpn::map_to_alpn;
 use crate::backend::{BackendError, server_name_override_key};
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
 
-/// Platform native TLS backend.
+/// Configuration for the platform native TLS backend.
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct NativeTlsOptions {
@@ -35,7 +35,7 @@ impl NativeTlsOptions {
         Self::default()
     }
 
-    /// Materializes this configuration into a [`native_tls::TlsConnector`].
+    /// Builds a [`native_tls::TlsConnector`] from this configuration.
     pub(crate) fn build(
         self,
         defaults: &TlsBackendBuilder,
@@ -73,18 +73,16 @@ impl TlsOptions {
         }
     }
 
-    /// Creates [`TlsOptions`] for the platform native TLS backend using
-    /// default settings.
+    /// Creates [`TlsOptions`] with default native TLS values.
     ///
-    /// Equivalent to `TlsOptions::builder_native_tls().build()`. Use
-    /// [`TlsOptions::builder_native_tls`] when you need to customize the
-    /// configuration before building.
+    /// This is equivalent to `TlsOptions::builder_native_tls().build()`.
+    /// Use [`TlsOptions::builder_native_tls`] to set custom values.
     pub fn new_native_tls() -> Self {
         Self::builder_native_tls().build()
     }
 }
 
-/// Wraps a pre-built [`native_tls::TlsConnector`] as [`TlsOptions`].
+/// Converts a pre-built [`native_tls::TlsConnector`] to [`TlsOptions`].
 impl From<TlsConnector> for TlsOptions {
     fn from(connector: TlsConnector) -> Self {
         Self {
@@ -101,19 +99,18 @@ impl TlsOptionsBuilder<NativeTlsOptions> {
         self
     }
 
-    /// Overrides the server name used for native TLS certificate validation
-    /// and Server Name Indication (`SNI`) when connecting to `endpoint`.
+    /// Sets the server name for certificate validation and Server Name
+    /// Indication (`SNI`) when the client connects to `endpoint`.
     ///
-    /// `SNI` is the server name sent to the peer during the TLS handshake.
+    /// `SNI` is the server name that the client sends during the TLS handshake.
     ///
-    /// The HTTP request, connection destination, `Host` header, and connection
-    /// pool key continue to use the real endpoint. Only the name passed to
+    /// The request, destination, `Host` header, and connection pool key still
+    /// use the real endpoint. Only the name passed to
     /// [`native_tls::TlsConnector::connect`] is replaced.
     ///
-    /// The endpoint is matched against the request URI authority. An endpoint
-    /// with a port (for example, `localhost:8443`) applies only to that exact
-    /// authority. A host-only endpoint (for example, `localhost`) applies to
-    /// every port unless an exact authority override is also configured.
+    /// The endpoint matches the request URI authority. An endpoint with a port,
+    /// such as `localhost:8443`, matches only that authority. A host-only
+    /// endpoint matches every port unless an exact authority also matches.
     ///
     /// ```
     /// # use fetch_tls::TlsOptions;
@@ -124,9 +121,8 @@ impl TlsOptionsBuilder<NativeTlsOptions> {
     ///
     /// # Panics
     ///
-    /// Panics if `endpoint` is not a valid URI authority, if an explicit port
-    /// cannot be represented as a `u16`, or if `server_name` is empty or
-    /// contains a NUL character.
+    /// Panics if `endpoint` is not a valid URI authority. It also panics if a
+    /// port does not fit in `u16`, or `server_name` is empty or contains NUL.
     pub fn server_name_override<E>(mut self, endpoint: E, server_name: impl Into<String>) -> Self
     where
         E: TryInto<Authority>,
@@ -200,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
     fn tls_options_from_tls_connector_wraps_as_preconfigured() {
         let connector = native_tls::TlsConnector::builder().build().expect("builds");
         let tls = TlsOptions::from(connector);
@@ -227,11 +223,8 @@ mod tests {
         assert!(overrides.is_empty());
     }
 
-    // Self-signed RSA-2048 certificate and matching `PKCS#8` private key,
-    // generated with `openssl req -x509 -newkey rsa:2048 -nodes` and then
-    // `openssl pkcs8 -topk8 -nocrypt`. Used solely to exercise the
-    // `builder.identity(...)` success branch with material that platform
-    // native TLS implementations accept.
+    // This self-signed RSA-2048 certificate has a matching `PKCS#8` key.
+    // The test data exercises the successful `builder.identity(...)` path.
     const TEST_CERT_PEM: &[u8] = b"\
 -----BEGIN CERTIFICATE-----\n\
 MIIDATCCAemgAwIBAgIUeToZ/lJRIo2oAgWVrhsrXAfKhgMwDQYJKoZIhvcNAQEL\n\
@@ -284,16 +277,15 @@ BqPhJRu3mmiSimquZzZdlYs=\n\
 -----END PRIVATE KEY-----\n";
 
     #[test]
-    #[cfg_attr(miri, ignore)] // native-tls touches platform TLS FFI
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
     fn build_applies_valid_client_identity() {
-        // Exercises the `builder.identity(i)` success branch: a valid
-        // certificate/key pair must round-trip through `build_native_identity`
-        // and be installed on the `TlsConnector` builder without error.
-        let identity = ClientIdentity::from_pem(TEST_CERT_PEM, TEST_KEY_PEM).expect("valid PEM should parse");
+        // A valid certificate and key must pass through `build_native_identity`
+        // and install on the `TlsConnector` builder.
+        let identity = ClientIdentity::from_pem(TEST_CERT_PEM, TEST_KEY_PEM).expect("valid PEM parses");
         let tls = TlsOptions::builder_native_tls().client_identity(identity).build();
         crate::TlsBackendBuilder::new()
             .build_backend(tls)
-            .expect("build_backend should succeed for a valid client identity");
+            .expect("build_backend succeeds for a valid client identity");
     }
 
     #[test]
