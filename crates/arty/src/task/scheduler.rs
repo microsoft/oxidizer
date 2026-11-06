@@ -218,10 +218,10 @@ impl Scheduler {
         R: ThreadAware + 'static,
     {
         let source = self.binding.thread.clone();
-        self.dispatcher.spawn_relocating(&self.binding.thread, async move |cx| {
+        self.dispatcher.spawn_relocating(&self.binding.thread, move |cx| {
             let mut data = data;
             data.relocate(Some(&source), cx.thread());
-            f(data).await
+            f(data)
         })
     }
 
@@ -301,10 +301,8 @@ impl Scheduler {
         let source = self.binding.thread.clone();
         self.dispatcher.spawn_at_worker_relocating(worker_index, move |cx| {
             let mut data = data;
-            async move {
-                data.relocate(Some(&source), cx.thread());
-                f(data).await
-            }
+            data.relocate(Some(&source), cx.thread());
+            f(data)
         })
     }
 

@@ -21,6 +21,7 @@ pub(crate) enum DeferredTask<FF, F> {
 }
 
 impl<FF, F> DeferredTask<FF, F> {
+    /// Retains the factory until the first poll, inside the executor's panic boundary.
     pub(crate) fn new(factory: FF, cx: Context) -> Self {
         Self::Factory {
             factory: Some((factory, cx)),

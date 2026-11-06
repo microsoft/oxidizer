@@ -145,6 +145,75 @@ fn local_factory_runs_once_and_preserves_future_borrows() {
 }
 
 #[test]
+fn relocating_factories_remain_deferred_and_preserve_future_borrows() {
+    struct Probe {
+        relocations: Arc<AtomicUsize>,
+        factories: Arc<AtomicUsize>,
+        owner: thread::ThreadId,
+    }
+
+    impl ThreadAware for Probe {
+        fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+            assert_eq!(source.unwrap().id(), self.owner);
+            assert_eq!(destination.id(), self.owner);
+            assert_eq!(thread::current().id(), self.owner);
+            assert_eq!(self.relocations.fetch_add(1, Ordering::Relaxed), 0);
+        }
+    }
+
+    fn create(probe: Probe) -> impl Future<Output = (usize, thread::ThreadId)> {
+        assert_eq!(probe.relocations.load(Ordering::Relaxed), 1);
+        assert_eq!(probe.factories.fetch_add(1, Ordering::Relaxed), 0);
+        let owner = Rc::new(thread::current().id());
+        async move {
+            let mut polls = 0;
+            poll_fn(|cx| {
+                polls += 1;
+                if polls == 1 {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            })
+            .await;
+            (polls, *owner)
+        }
+    }
+
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            for specific in [false, true] {
+                let relocations = Arc::new(AtomicUsize::new(0));
+                let factories = Arc::new(AtomicUsize::new(0));
+                let owner = cx.thread().id();
+                let probe = Probe {
+                    relocations: Arc::clone(&relocations),
+                    factories: Arc::clone(&factories),
+                    owner,
+                };
+                let child = if specific {
+                    cx.scheduler().spawn_at(cx.thread(), probe, create)
+                } else {
+                    cx.scheduler().spawn_anywhere(probe, create)
+                };
+                assert_eq!(relocations.load(Ordering::Relaxed), 0);
+                assert_eq!(factories.load(Ordering::Relaxed), 0);
+                assert_eq!(child.await.unwrap(), (2, owner));
+                assert_eq!(relocations.load(Ordering::Relaxed), 1);
+                assert_eq!(factories.load(Ordering::Relaxed), 1);
+            }
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+}
+
+#[test]
 #[cfg(not(miri))]
 fn test_worker_affinity() {
     if SystemHardware::current().processors().len() < 6 {
