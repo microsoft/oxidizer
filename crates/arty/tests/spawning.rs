@@ -7,10 +7,12 @@
 
 mod support;
 
+use std::future::poll_fn;
 use std::marker::PhantomPinned;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
+use std::task::Poll;
 use std::thread;
 
 use arty::core::{Thread, ThreadAware};
@@ -30,6 +32,33 @@ use thread_aware::Unaware;
 #[test]
 fn assert_send_sync() {
     static_assertions::assert_impl_all!(Scheduler: Send, Sync);
+}
+
+#[test]
+fn spawned_future_preserves_mutable_self_borrows_across_polls() {
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let task = scheduler.spawn(|_| async {
+        let mut polls = 0;
+        // Keep a mutable borrow of the outer future's local across suspension.
+        poll_fn(|cx| {
+            polls += 1;
+            if polls == 1 {
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })
+        .await;
+        polls
+    });
+
+    assert_eq!(task.join().unwrap(), 2);
+    runtime.stop().unwrap();
 }
 
 #[cfg(feature = "macros")]

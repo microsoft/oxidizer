@@ -13,17 +13,13 @@
 
 </div>
 
-A generic task spawner compatible with any async runtime.
+A task spawner for Arty and Tokio.
 
-This crate provides a [`Spawner`][__link0] type that abstracts task spawning across
-different async runtimes without generic infection.
-
-## Design Philosophy
-
-* **Concrete type**: No generics needed in your code
-* **Simple**: Use built-in constructors or implement [`SpawnCustom`][__link1]
-* **Layered**: Compose middleware closures via [`CustomSpawnerBuilder`][__link2]
-* **Flexible**: Works with any async runtime
+[`Spawner`][__link0] provides the same task-spawning API for both runtimes without
+runtime-specific type parameters. Enable `arty` or `tokio` to construct a
+spawner. Both features can be enabled together.
+Without either feature, the public types remain available for adapter crates,
+but no spawner can be constructed.
 
 ## Quick Start
 
@@ -35,7 +31,7 @@ use arty::runtime::Runtime;
 
 let runtime = Runtime::new()?;
 let spawner = Spawner::new_arty(cx.scheduler().clone());
-let result = spawner.spawn(async { 1 + 1 }).await;
+let result = spawner.spawn(async { 1 + 1 }).await?;
 assert_eq!(result, 2);
 runtime.stop()?;
 ```
@@ -45,22 +41,79 @@ runtime.stop()?;
 ```rust
 use anyspawn::Spawner;
 
-let spawner = Spawner::new_tokio();
-let result = spawner.spawn(async { 1 + 1 }).await;
+let spawner = Spawner::new_tokio(None);
+let result = spawner.spawn(async { 1 + 1 }).await?;
 assert_eq!(result, 2);
 ```
 
+`Spawner::new_tokio` accepts a runtime handle, `Some(handle)`, or `None`.
+`None` selects the runtime active at each spawn call.
+`Spawner::new_arty` takes ownership of a scheduler.
+These constructors do not enable enrichment transfer.
+Use `Spawner::builder_tokio` or `Spawner::builder_arty` to configure
+a spawner through [`SpawnerBuilder`][__link1].
+
+Awaiting a [`JoinHandle`][__link2] returns `Result<T, JoinError>`. A task panic,
+cancellation, or shutdown rejection becomes an error rather than another panic
+in the joining task. The runtime’s panic policy still applies.
+A task returning `Result<T, E>` produces `Result<Result<T, E>, JoinError>`.
+
 ## Thread-Aware Support
 
-`Spawner` implements [`ThreadAware`][__link3] and supports
-per-thread state via custom [`SpawnCustom`][__link4] implementations, allowing runtime
-integrations to adapt task dispatch after relocation.
+`Spawner` implements [`ThreadAware`][__link3].
+Arty spawners follow their scheduler’s worker association during relocation.
+Tokio spawners ignore relocation and keep the same runtime selection.
+
+## Observed Enrichment
+
+Enrichment is context attached to events emitted through an `observed::Sink`.
+With the `observed` feature and a runtime feature, call `observed(sink)`
+on the [`SpawnerBuilder`][__link4] to transfer context to spawned work.
+Each spawn call captures the supplied sink’s context. Async tasks restore it
+on each poll, and blocking tasks restore it for the closure call.
+
+`spawn_anywhere` also restores context while its factory creates the future.
+Arty still relocates the task data before calling the factory.
+Spawners without a sink do not transfer context, even when `observed` is enabled.
+
+```rust
+use anyspawn::Spawner;
+use observed::enrichment::EnrichFutureExt;
+use observed::{Enrichment, Sink, event};
+
+#[derive(Clone, Debug, Enrichment)]
+struct Request {
+    #[unredacted]
+    request_id: u64,
+}
+
+#[event("task.started")]
+#[info]
+struct TaskStarted;
+
+let sink = Sink::builder("app").build();
+let spawner = Spawner::builder_tokio(None).observed(sink.clone()).build();
+async {
+    // Events emitted through this sink in the task include request_id.
+    let task_sink = sink.clone();
+    spawner
+        .spawn(async move {
+            observed::emit!(&task_sink, TaskStarted);
+        })
+        .await?;
+    Ok::<(), anyspawn::JoinError>(())
+}
+.enrich(&sink, Request { request_id: 42 })
+.await?;
+```
 
 ## Features
 
-* `arty`: Enables the [`Spawner::new_arty`][__link5] constructor
-* `tokio`: Enables the [`Spawner::new_tokio`][__link6] and
-  [`Spawner::new_tokio_with_handle`][__link7] constructors
+* `arty`: Enables the Arty constructors on `Spawner`.
+* `tokio`: Enables the Tokio constructors on `Spawner`.
+* `observed`: Enables `SpawnerBuilder::observed`, which accepts an `observed::Sink`.
+  Combine it with `arty` or `tokio`. It does not select a runtime.
+* `seismograph`: Enables instrumentation in the optional `observed` dependency.
 
 
 <hr/>
@@ -68,12 +121,9 @@ integrations to adapt task dispatch after relocation.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbw6WnZACa5M0bDba-jT02mz0bvAMR8fjk4OsbKTx8-83BMw1hZIKCaGFueXNwYXduZjAuMTAuMIJsdGhyZWFkX2F3YXJlZjAuMTIuMg
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbV11enGy8VMMblwkYI5s6sAkbWzjDqALeRxQbRxHPnBrMLOphZIKCaGFueXNwYXduZjAuMTAuMIJsdGhyZWFkX2F3YXJlZjAuMTIuMg
  [__link0]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=Spawner
- [__link1]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=SpawnCustom
- [__link2]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=CustomSpawnerBuilder
+ [__link1]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=SpawnerBuilder
+ [__link2]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=JoinHandle
  [__link3]: https://docs.rs/thread_aware/0.12.2/thread_aware/?search=ThreadAware
- [__link4]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=SpawnCustom
- [__link5]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=Spawner::new_arty
- [__link6]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=Spawner::new_tokio
- [__link7]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=Spawner::new_tokio_with_handle
+ [__link4]: https://docs.rs/anyspawn/0.10.0/anyspawn/?search=SpawnerBuilder

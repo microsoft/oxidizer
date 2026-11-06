@@ -27,7 +27,7 @@ This repository contains a set of crates that help you build robust highly scala
 These are the primary crates built out of this repo:
 
 - [`allocation_hints`](./crates/allocation_hints/README.md) - Allocator-independent heap ownership and scoped allocation hints.
-- [`anyspawn`](./crates/anyspawn/README.md) - A generic task spawner compatible with any async runtime.
+- [`anyspawn`](./crates/anyspawn/README.md) - A task spawner for Arty and Tokio.
 - [`anyspawn_azure`](./crates/anyspawn_azure/README.md) - Azure SDK async runtime and process executor backed by an anyspawn spawner and a tick clock.
 - [`arty`](./crates/arty/README.md) - Single-threaded, thread-aware application runtime.
 - [`bytesbuf`](./crates/bytesbuf/README.md) - Types for creating and manipulating byte sequences.
