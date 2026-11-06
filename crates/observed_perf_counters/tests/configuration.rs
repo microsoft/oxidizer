@@ -144,14 +144,20 @@ fn category_selects_an_existing_counter_set_instead_of_creating_one() {
         .build()
         .unwrap_err();
     assert!(error.is_invalid_configuration());
-    assert!(error.to_string().contains("Does not exist"));
+    assert_eq!(
+        error.message().lines().next().unwrap(),
+        "invalid counter manifest: no counter set named \"Does not exist\"",
+    );
 }
 
 #[test]
 fn missing_instrument_name_fails_without_starting_a_provider() {
     let error = builder().bind_event::<Unmapped>().build().unwrap_err();
     assert!(error.is_invalid_configuration());
-    assert!(error.to_string().contains("Not in the manifest"));
+    assert_eq!(
+        error.message().lines().next().unwrap(),
+        format!("invalid counter manifest: bound metric \"Not in the manifest\" does not exist in counter set {CATEGORY:?}"),
+    );
 }
 
 #[test]
