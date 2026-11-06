@@ -1,0 +1,159 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Publish `observed` integer metrics as Windows performance counters.
+//!
+//! An externally authored Windows V2 `.man` file defines the provider, counter
+//! sets, counter IDs, names, and native types. Deployment installs that definition
+//! into Windows' catalog; the application reads the same file at startup and
+//! binds Rust metric names to its declared counters. Multiple processes can
+//! publish the same definitions through separate named instances.
+//!
+//! # Usage
+//!
+//! ```no_run
+//! use std::process::id;
+//!
+//! use observed::{Sink, emit, event};
+//! use observed_perf_counters::PerfCounterProcessor;
+//! use performables::arc::Arc;
+//! use tick::SimpleClock;
+//!
+//! #[event("request.completed")]
+//! #[counter(bytes_sent, name = "Bytes Sent", unit = "By")]
+//! struct RequestCompleted {
+//!     #[unredacted]
+//!     bytes_sent: u32,
+//! }
+//!
+//! # fn main() -> Result<(), ohno::AppError> {
+//! let builder = PerfCounterProcessor::builder()
+//!     .manifest_file("MyServiceCounters.man")?
+//!     .category("MyService")
+//!     .instance(format!("worker-{}", id()))
+//!     .bind_event::<RequestCompleted>();
+//!
+//! // Application startup uses the identities from the supplied definition.
+//! let processor = Arc::into_std_arc(Arc::new(builder.build()?));
+//! let sink = Sink::builder("app")
+//!     .processors(vec![processor])
+//!     .clock(SimpleClock::new_system())
+//!     .build();
+//! emit!(sink, RequestCompleted { bytes_sent: 4096 });
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! `category` selects a counter set by its manifest `name`; it does not create a
+//! category or derive a GUID. `bind_event` maps every instrument on a typed event
+//! by exact instrument-name match, once during startup. Each name must identify
+//! one counter in the selected set, and two instruments cannot bind the same
+//! counter. Counter IDs and GUIDs are never generated from Rust metadata.
+//!
+//! Unbound counters in the selected set remain registered at zero. Application
+//! units and descriptions do not rewrite Windows deployment metadata.
+//!
+//! | Instrument | Value | Meaning |
+//! |------------|-------|---------|
+//! | `counter` | Unsigned integer, or no field | Add to the total; no field adds one. |
+//! | `updown_counter` | Signed integer | Adjust the total, which cannot fall below zero. |
+//! | `gauge` | Unsigned integer | Replace the previous reading. |
+//!
+//! Histograms, floats, and signed gauges are unsupported. Overflow or underflow
+//! leaves that metric unchanged, logs the first error through `tracing`, and
+//! returns it from an explicit `Sink::flush()`. Other valid updates continue.
+//! `flush` does not trigger Windows collection. Use an unsampled sink for deltas.
+//!
+//! # Deployment
+//!
+//! **Use the deployment-owned definition.** Windows cannot infer counter
+//! definitions from Rust events. Supply the `.man` maintained by your deployment,
+//! with instrument names matching its counters. The
+//! [example definition](https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/examples/MyServiceCounters.man)
+//! shows the supported format. This crate reads it; it does not export XML.
+//!
+//! Compile that same supplied manifest's names and descriptions into the resource
+//! binary named by its `applicationIdentity`. For the example definition:
+//!
+//! Run these commands in a Windows SDK Developer Command Prompt:
+//!
+//! ```text
+//! ctrpp -o MyServiceCounters.h -rc MyServiceCounters.rc MyServiceCounters.man
+//! rc /fo MyServiceCounters.res MyServiceCounters.rc
+//! link /dll /noentry /machine:x64 /out:MyServiceCounters.dll /implib:MyServiceCounters.lib MyServiceCounters.res
+//! ```
+//!
+//! Ship the `.man` and DLL with your application. An elevated installer runs
+//! `lodctr /m:"C:\Program Files\MyService\MyServiceCounters.man"` to add these
+//! definitions to Windows' catalog. Register them once on each computer, not
+//! for each running process; repeat when your declared metrics change.
+//! The DLL contains descriptive text, not Rust code or live counter values.
+//! For ARM64, replace `/machine:x64` with `/machine:arm64`.
+//!
+//! **Prepare each process at startup.** `manifest_file` reads UTF-8 XML once.
+//! `build()` validates the selected set and all event mappings, then registers
+//! the supplied GUIDs, IDs, and backing storage on 64-bit Windows. Unknown
+//! categories, missing or conflicting mappings, unsupported definitions, and
+//! malformed files are errors, not new or no-op counters. `emit!` uses numeric
+//! targets with no file access or name matching. Neither call installs metadata.
+//!
+//! The supported manifest profile is user-mode, multiple-instance counter sets
+//! containing between one and 256 inline-named `perf_counter_large_rawcount`
+//! reference counters, with a custom callback, standard detail and zero/default
+//! scale. Parsing checks this backend profile, not the complete SDK schema;
+//! deployment should also validate with `ctrpp`. Other native
+//! types, resource-ID-only names, and unsupported attributes are rejected.
+//! Files must be at most one MiB; document type declarations are rejected.
+//! This imports V2 definitions, not classic .NET custom counter categories.
+//!
+//! For `PerfSpy`, separately configure your deployment's EDS collection service
+//! to collect the category and instances.
+//! This crate exposes local counters; it does not send readings to a server.
+//!
+//! # Behavior
+//!
+//! Emission uses the lazy event-field visitor and prepared numeric indices to
+//! update atomic `u64` storage without string lookup, allocation, redaction, or
+//! Windows API calls. Only bound numeric getters run; other fields are enumerated
+//! without evaluating their values. Windows reads the same aligned atomic
+//! totals through references registered once at startup. There is no separate
+//! publication buffer, collection-time copy, or per-update native call.
+//! Events emitted through a sink follow that
+//! sink's timestamp, context, enrichment, and sampling rules; the backend does
+//! not extract enrichment.
+//!
+//! Values reset when the processor restarts. Readings are per-metric, not
+//! transactional across an event: collection can observe different updates
+//! across counters. The custom callback is a no-op; readings do not depend on
+//! receiving START/END notifications or completing a callback before its deadline.
+//! Storage is retained until native shutdown, including after shutdown failure.
+//!
+//! The conversion to a standard `Arc` above matches the sink builder's processor boundary.
+//! Native state is local to one executable or library image; never unload an
+//! image with a live provider.
+//!
+//! See the Microsoft [provider guide](https://learn.microsoft.com/windows/win32/perfctrs/providing-counter-data-using-version-2-0)
+//! and [resource installation reference](https://learn.microsoft.com/windows/win32/perfctrs/ctrpp).
+//!
+//! # Maintainer guides
+//!
+//! See the [backend design and native access contract](https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/design.md)
+//! and [implementation guide](https://github.com/microsoft/oxidizer/blob/main/crates/observed_perf_counters/docs/implementation.md).
+
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+pub use error::Error;
+pub use processor::{PerfCounterProcessor, PerfCounterProcessorBuilder};
+
+mod error;
+#[cfg(all(windows, target_pointer_width = "64"))]
+mod native;
+mod processor;
+mod schema;
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod testing;
+
+#[cfg(test)]
+testing_aids::init_tracing!();

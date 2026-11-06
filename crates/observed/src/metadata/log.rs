@@ -19,9 +19,8 @@ pub struct LogDescription {
 }
 
 impl LogDescription {
-    /// Creates a new log description.
     #[must_use]
-    pub const fn new(name: &'static str, severity: Severity, body: Option<&'static str>) -> Self {
+    pub(crate) const fn new(name: &'static str, severity: Severity, body: Option<&'static str>) -> Self {
         Self { name, severity, body }
     }
 

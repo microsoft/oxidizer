@@ -148,7 +148,7 @@ mod tests {
     }
 
     fn description() -> EventDescription {
-        EventDescription::new("probe.event", None, None, None, false, false)
+        EventDescription::new("probe.event")
     }
 
     #[test]

@@ -164,11 +164,15 @@ pub(crate) async fn initialize_all_workers(cx: &Context, tokio: TokioHandle) -> 
             }
         })
         .collect::<Vec<_>>();
-    let mut abort_on_drop = AbortOnDrop::new(Arc::clone(&transaction));
+    complete_initialization(&transaction, &mut installers).await
+}
+
+async fn complete_initialization(transaction: &Arc<Transaction>, installers: &mut [Installer]) -> Result<(), InitError> {
+    let mut abort_on_drop = AbortOnDrop::new(Arc::clone(transaction));
 
     let mut failure = None;
     let mut ready = 0;
-    for installer in &mut installers {
+    for installer in &mut *installers {
         match installer.wait_until_started().await {
             Ok(Some(StartupResult::Ready)) => ready += 1,
             Ok(Some(StartupResult::ContextConflict)) => {
@@ -183,13 +187,13 @@ pub(crate) async fn initialize_all_workers(cx: &Context, tokio: TokioHandle) -> 
         }
     }
 
-    if commit_if_started(&transaction, startup_succeeded(failure.as_ref(), ready, installers.len())) {
+    if commit_if_started(transaction, startup_succeeded(failure.as_ref(), ready, installers.len())) {
         abort_on_drop.disarm();
         return Ok(());
     }
 
     transaction.abort();
-    finish_installers(&mut installers, &mut failure).await;
+    finish_installers(installers, &mut failure).await;
     abort_on_drop.disarm();
     Err(failure.unwrap_or_else(initialization_aborted))
 }
@@ -263,7 +267,10 @@ mod tests {
     use performables::sync::channel::oneshot;
     use tokio::runtime::{Builder, Runtime};
 
-    use super::{AbortOnDrop, Installer, Phase, StartupResult, Transaction, commit_if_started, finish_installers, startup_succeeded};
+    use super::{
+        AbortOnDrop, Installer, InstallerData, Phase, StartupResult, Transaction, commit_if_started, complete_initialization,
+        finish_installers, install_worker, startup_succeeded,
+    };
 
     fn transaction() -> (Arc<Transaction>, Runtime) {
         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
@@ -332,6 +339,48 @@ mod tests {
         let result = futures::executor::block_on(installer.wait_until_started()).unwrap();
 
         assert_eq!(result, Some(StartupResult::Ready));
+    }
+
+    #[test]
+    fn installer_that_exits_without_readiness_aborts_the_transaction() {
+        let runtime = ArtyRuntime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+        let join = runtime.scheduler().block_on(async |cx| cx.scheduler().spawn(async |_| {})).unwrap();
+        let (startup, startup_result) = oneshot();
+        drop(startup);
+        let mut installers = [Installer {
+            startup: startup_result,
+            join: Some(join),
+        }];
+        let (transaction, _tokio) = transaction();
+
+        let result = futures::executor::block_on(complete_initialization(&transaction, &mut installers));
+        runtime.stop().unwrap();
+
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Tokio compatibility initialization stopped before commit"
+        );
+        assert_eq!(transaction.phase(), Phase::Aborted);
+        assert!(installers[0].join.is_none());
+    }
+
+    #[test]
+    fn worker_does_not_enter_tokio_after_the_transaction_is_aborted() {
+        let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+        let (transaction, phase_changed) = Transaction::new(runtime.handle().clone());
+        transaction.abort();
+        let (startup, startup_result) = oneshot();
+        let data = InstallerData {
+            transaction: Arc::clone(&transaction),
+            phase_changed,
+            startup,
+        };
+
+        futures::executor::block_on(install_worker(data));
+
+        futures::executor::block_on(startup_result).unwrap_err();
+        assert_eq!(transaction.phase(), Phase::Aborted);
+        tokio::runtime::Handle::try_current().unwrap_err();
     }
 
     #[test]

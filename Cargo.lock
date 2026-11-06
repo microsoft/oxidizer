@@ -3727,6 +3727,7 @@ dependencies = [
 name = "observed"
 version = "0.30.1"
 dependencies = [
+ "alloc_tracker",
  "criterion",
  "data_privacy",
  "metabench",
@@ -3794,6 +3795,24 @@ dependencies = [
  "smallvec",
  "syn 3.0.9",
  "testing_aids",
+]
+
+[[package]]
+name = "observed_perf_counters"
+version = "0.1.0"
+dependencies = [
+ "alloc_tracker",
+ "ctor",
+ "observed",
+ "ohno",
+ "performables",
+ "quick-xml",
+ "static_assertions",
+ "testing_aids",
+ "tick",
+ "tracing",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5419,6 +5438,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6464,6 +6489,7 @@ checksum = "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

@@ -7,35 +7,42 @@ struct Wrapped {
 }
 const _: () = {
     impl ::observed::Event for Wrapped {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "wrapped",
             ::core::option::Option::Some(::core::any::TypeId::of::<Wrapped>()),
             ::core::option::Option::None,
             ::core::option::Option::None,
-            true,
             false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "v",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::__private::metric_field(
+                            "v",
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
+                                    "wrapped",
+                                    ::observed::metadata::InstrumentKind::Counter,
+                                    "",
+                                    "",
+                                    ::observed::metadata::MetricValueKind::U64,
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ]),
         );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "v",
-                    ::core::option::Option::None,
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
-                            "v",
-                            ::observed::metadata::MetricDescription::new(
-                                "wrapped",
-                                ::observed::metadata::InstrumentKind::Counter,
-                                "",
-                                "",
-                            ),
-                        ),
-                    ),
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.v.clone()),
+                )?;
             }
             ::core::ops::ControlFlow::Continue(())
         }

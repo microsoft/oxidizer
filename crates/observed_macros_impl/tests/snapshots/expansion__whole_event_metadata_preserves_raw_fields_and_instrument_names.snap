@@ -1,0 +1,58 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"request\"\"#,\nr#\"\n        #[counter(name = \"123.total\")]\n        #[counter(r#type, name = \"kind\")]\n        struct Request {\n            #[unredacted]\n            r#type: u32,\n        }\n        \"#,)"
+---
+struct Request {
+    r#type: u32,
+}
+const _: () = {
+    impl ::observed::Event for Request {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
+            "request",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Request>()),
+            ::core::option::Option::None,
+            ::core::option::Option::Some(
+                ::observed::__private::metric_description(
+                    "123.total",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                    ::observed::metadata::MetricValueKind::U64,
+                ),
+            ),
+            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "type",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::__private::metric_field(
+                            "type",
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
+                                    "kind",
+                                    ::observed::metadata::InstrumentKind::Counter,
+                                    "",
+                                    "",
+                                    ::observed::metadata::MetricValueKind::U64,
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ]),
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.r#type.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

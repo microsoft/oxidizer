@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<instrumentationManifest xmlns="http://schemas.microsoft.com/win/2004/08/events">
+  <instrumentation>
+    <counters xmlns="http://schemas.microsoft.com/win/2005/12/counters" schemaVersion="1.1">
+      <provider providerGuid="{9fc72d85-9d1e-4c4b-a031-6d9288c3b405}" symbol="CONSUMER_TEST_PROVIDER"
+                providerType="userMode" callback="custom" applicationIdentity="ObservedWindowsTestCounters.dll">
+        <counterSet guid="{1b623456-789a-4bcd-8ef0-123456789abc}" uri="urn:example:consumer-tests"
+                    symbol="CONSUMER_TEST_COUNTERS" name="Observed Windows consumer test &lt;&amp;&quot;&apos;&gt; 中文🦀"
+                    description="Native consumer validation" instances="multiple">
+          <counter id="41" uri="urn:example:requests" symbol="REQUESTS" name="Requests" description="Requests"
+                   type="perf_counter_large_rawcount" detailLevel="standard">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+          <counter id="7" uri="urn:example:bytes" symbol="BYTES_SENT" name="Bytes Sent" description="Bytes sent"
+                   type="perf_counter_large_rawcount" detailLevel="standard">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+          <counter id="31" uri="urn:example:huge" symbol="HUGE" name="Huge" description="Large increments"
+                   type="perf_counter_large_rawcount" detailLevel="standard">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+          <counter id="13" uri="urn:example:disabled" symbol="DISABLED" name="Disabled" description="Disabled event"
+                   type="perf_counter_large_rawcount" detailLevel="standard">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+          <counter id="2" uri="urn:example:active" symbol="ACTIVE" name="Active Requests" description="Active requests"
+                   type="perf_counter_large_rawcount" detailLevel="standard">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+          <counter id="53" uri="urn:example:depth" symbol="DEPTH" name="Queue Depth" description="Queue depth"
+                   type="perf_counter_large_rawcount" detailLevel="standard">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+          <counter id="59" uri="urn:example:malformed" symbol="MALFORMED" name="Malformed" description="Malformed event"
+                   type="perf_counter_large_rawcount" detailLevel="standard">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+        </counterSet>
+        <counterSet guid="{2b623456-789a-4bcd-8ef0-123456789abc}" uri="urn:example:integers"
+                    symbol="INTEGER_TEST_COUNTERS" name="IntegerMetrics" description="Integer metric tests" instances="multiple">
+          <counter id="101" uri="urn:example:integer-bytes" symbol="INTEGER_BYTES" name="Bytes" description="Bytes"
+                   type="perf_counter_large_rawcount" detailLevel="standard">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+          <counter id="77" uri="urn:example:integer-active" symbol="INTEGER_ACTIVE" name="Active" description="Active"
+                   type="perf_counter_large_rawcount" detailLevel="standard">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+          <counter id="201" uri="urn:example:integer-depth" symbol="INTEGER_DEPTH" name="Depth" description="Depth"
+                   type="perf_counter_large_rawcount" detailLevel="standard">
+            <counterAttributes><counterAttribute name="reference"/></counterAttributes>
+          </counter>
+        </counterSet>
+      </provider>
+    </counters>
+  </instrumentation>
+</instrumentationManifest>
