@@ -6,38 +6,33 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_tls/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_tls/favicon.ico")]
 
-//! Backend-agnostic TLS configuration for HTTP clients.
+//! TLS configuration for HTTP clients.
 //!
-//! `fetch_tls` separates *what* TLS behavior an application wants from
-//! *which* TLS implementation actually provides it. Applications describe
-//! their TLS requirements once, and the HTTP client (or other consuming
-//! library) decides which backend to materialize at runtime.
+//! Applications use `fetch_tls` to describe their TLS requirements.
+//! HTTP client libraries use those requirements to build a TLS backend.
 //!
-//! # Two perspectives
+//! # Applications
 //!
-//! Applications work with [`TlsOptions`] (and its builder,
-//! [`TlsOptionsBuilder`]) to describe what they want: leave the backend
-//! choice entirely to the consuming library via
-//! [`TlsOptions::builder`], pick a specific backend, wrap an already-built
-//! backend, or use [`TlsOptions::default`] for backend-agnostic defaults.
+//! Use [`TlsOptions`] or [`TlsOptionsBuilder`] to configure TLS. You can let
+//! the client library select a backend, select a backend, or wrap a backend
+//! that you already built.
 //!
-//! Libraries that adopt `fetch_tls` use [`TlsBackendBuilder`] to turn a
-//! [`TlsOptions`] into a ready-to-use [`TlsBackend`]. The library
-//! contributes the environment-specific pieces (such as the rustls crypto
-//! provider and default certificate verifier) and decides which backend to
-//! use when the application did not pin one.
+//! # HTTP client libraries
+//!
+//! Use [`TlsBackendBuilder`] to convert [`TlsOptions`] into [`TlsBackend`].
+//! The library provides environment-specific values, such as the rustls
+//! crypto provider and default certificate verifier. It also selects the
+//! backend when the application does not select one.
 //!
 //! # Cargo features
 //!
-//! - `rustls` — enables the rustls backend. `fetch_tls` does not bundle a
-//!   crypto provider; the consuming library supplies one along with a
-//!   default server certificate verifier.
-//! - `native-tls` — enables the platform native TLS backend (`SChannel` on
+//! - `rustls` enables the rustls backend. The application or client library
+//!   must provide a crypto provider and server certificate verifier.
+//! - `native-tls` enables the platform native TLS backend (`SChannel` on
 //!   Windows, Security Framework on `macOS`, `OpenSSL` on Linux).
 //!
-//! With neither feature enabled, the API surface is limited to wrapping a
-//! pre-built backend; attempting to build any other configuration returns
-//! a [`BackendError`].
+//! If neither feature is enabled, backend-specific constructors and builders
+//! are unavailable. Building automatic options returns [`BackendError`].
 
 #[cfg(any(feature = "native-tls", feature = "rustls", test))]
 mod alpn;

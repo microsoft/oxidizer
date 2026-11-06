@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Rustls backend configuration and builder integration.
+//! Configuration for the rustls backend.
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use crate::alpn::map_to_alpn;
 use crate::backend::BackendError;
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
 
-/// Rustls TLS backend configuration.
+/// Configuration for the rustls backend.
 #[derive(Clone, Debug)]
 pub struct RustlsOptions {
     crypto_provider: Option<Arc<CryptoProvider>>,
@@ -32,7 +32,7 @@ impl RustlsOptions {
         }
     }
 
-    /// Materializes this configuration into a [`rustls::ClientConfig`].
+    /// Builds a [`rustls::ClientConfig`] from this configuration.
     pub(crate) fn build(self, backend_defaults: &crate::TlsBackendBuilder, shared: &SharedOptions) -> Result<ClientConfig, BackendError> {
         let rustls_defaults = backend_defaults.rustls.as_ref();
         let crypto_provider = self
@@ -40,14 +40,14 @@ impl RustlsOptions {
             .or_else(|| rustls_defaults.map(|d| Arc::clone(&d.crypto_provider)))
             .ok_or_else(|| {
                 BackendError::caused_by(
-                    "rustls crypto provider not supplied; set it via TlsOptionsBuilder::crypto_provider or TlsBackendBuilder::configure_rustls(...)",
+                    "No rustls crypto provider was provided. Call TlsOptionsBuilder::crypto_provider or TlsBackendBuilder::configure_rustls(...)",
                 )
             })?;
         let verifier = match self.verifier_factory {
             Some(factory) => factory.invoke(Arc::clone(&crypto_provider)),
             None => rustls_defaults.map(|d| Arc::clone(&d.verifier)).ok_or_else(|| {
                 BackendError::caused_by(
-                    "rustls server certificate verifier not supplied; set it via TlsOptionsBuilder::server_certificate_verifier or TlsBackendBuilder::configure_rustls(...)",
+                    "No rustls server certificate verifier was provided. Call TlsOptionsBuilder::server_certificate_verifier or TlsBackendBuilder::configure_rustls(...)",
                 )
             })?,
         };
@@ -82,19 +82,20 @@ impl TlsOptions {
         }
     }
 
-    /// Creates [`TlsOptions`] for the rustls backend using default settings.
+    /// Creates [`TlsOptions`] with default rustls values.
     ///
-    /// Equivalent to `TlsOptions::builder_rustls().build()`. The crypto
-    /// provider and server certificate verifier are taken from the
+    /// This is equivalent to `TlsOptions::builder_rustls().build()`. It gets
+    /// the crypto provider and server certificate verifier from the
     /// [`TlsBackendBuilder`](crate::TlsBackendBuilder) passed to
-    /// [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend); use [`TlsOptions::builder_rustls`] when
-    /// you need to override them or supply a client identity resolver.
+    /// [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend).
+    /// Use [`TlsOptions::builder_rustls`] to replace them or set a client
+    /// identity resolver.
     pub fn new_rustls() -> Self {
         Self::builder_rustls().build()
     }
 }
 
-/// Wraps a pre-built [`rustls::ClientConfig`] as [`TlsOptions`].
+/// Converts a pre-built [`rustls::ClientConfig`] to [`TlsOptions`].
 impl From<ClientConfig> for TlsOptions {
     fn from(config: ClientConfig) -> Self {
         Self {
@@ -104,8 +105,9 @@ impl From<ClientConfig> for TlsOptions {
     }
 }
 
-/// Wraps a pre-built `Arc<rustls::ClientConfig>` as [`TlsOptions`], avoiding
-/// a clone when the config is shared across clients.
+/// Converts a pre-built `Arc<rustls::ClientConfig>` to [`TlsOptions`].
+///
+/// This conversion does not clone the `rustls::ClientConfig`.
 impl From<Arc<ClientConfig>> for TlsOptions {
     fn from(config: Arc<ClientConfig>) -> Self {
         Self {
@@ -118,28 +120,31 @@ impl From<Arc<ClientConfig>> for TlsOptions {
 impl TlsOptionsBuilder<RustlsOptions> {
     /// Sets the rustls [`CryptoProvider`](rustls::crypto::CryptoProvider).
     ///
-    /// Overrides the provider supplied by
+    /// This value takes priority over the provider from
     /// [`TlsBackendBuilder::configure_rustls`](crate::TlsBackendBuilder::configure_rustls).
-    /// If neither source supplies one, [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend) returns
-    /// a [`BackendError`](crate::BackendError).
+    /// If neither source provides one,
+    /// [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend)
+    /// returns [`BackendError`](crate::BackendError).
     pub fn crypto_provider(mut self, crypto_provider: Arc<rustls::crypto::CryptoProvider>) -> Self {
         self.backend.crypto_provider = Some(crypto_provider);
         self
     }
 
     /// Sets a factory that builds the server certificate verifier from the
-    /// negotiated [`CryptoProvider`].
+    /// selected [`CryptoProvider`].
     ///
-    /// The factory is invoked during [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend) with the
-    /// provider resolved from this builder or
+    /// [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend)
+    /// calls the factory with the provider from this builder or
     /// [`TlsBackendBuilder::configure_rustls`](crate::TlsBackendBuilder::configure_rustls).
-    /// Callers that don't need the provider can simply ignore the argument
-    /// and return a pre-built verifier (for example, `|_| Arc::new(MyVerifier)`).
+    /// The factory must implement `Fn + Send + Sync + 'static`. It can ignore
+    /// the provider and return a pre-built verifier, such as
+    /// `|_| Arc::new(MyVerifier)`.
     ///
-    /// Overrides the verifier supplied by
+    /// This value takes priority over the verifier from
     /// [`TlsBackendBuilder::configure_rustls`](crate::TlsBackendBuilder::configure_rustls).
-    /// If neither source supplies one, [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend) returns
-    /// a [`BackendError`](crate::BackendError).
+    /// If neither source provides one,
+    /// [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend)
+    /// returns [`BackendError`](crate::BackendError).
     pub fn server_certificate_verifier<F>(mut self, factory: F) -> Self
     where
         F: Fn(Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> + Send + Sync + 'static,
@@ -150,9 +155,9 @@ impl TlsOptionsBuilder<RustlsOptions> {
 
     /// Sets a [`ResolvesClientCert`] for mutual TLS authentication.
     ///
-    /// Use this when the private key lives behind an external signing oracle
-    /// (`HSM`, secure enclave, etc.) instead of in memory. Takes precedence
-    /// over [`TlsOptionsBuilder::client_identity`](crate::TlsOptionsBuilder::client_identity).
+    /// Use this when an external signer, such as an `HSM` or secure enclave,
+    /// holds the private key. This resolver takes priority over
+    /// [`TlsOptionsBuilder::client_identity`](crate::TlsOptionsBuilder::client_identity).
     pub fn client_identity_resolver(mut self, resolver: Arc<dyn ResolvesClientCert>) -> Self {
         self.backend.client_identity_resolver = Some(resolver);
         self
@@ -167,8 +172,7 @@ impl TlsOptionsBuilder<RustlsOptions> {
     }
 }
 
-/// Factory that builds a [`ServerCertVerifier`] from the negotiated
-/// [`CryptoProvider`].
+/// A factory that builds [`ServerCertVerifier`] from [`CryptoProvider`].
 type ServerCertVerifierFactoryType = Arc<dyn Fn(Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> + Send + Sync>;
 
 #[derive(Clone)]
@@ -283,13 +287,12 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)] // crypto provider FFI (aws-lc-rs) does not run under Miri
+    #[cfg_attr(miri, ignore)] // Miri cannot run the aws-lc-rs crypto provider FFI.
     fn build_produces_client_config_without_identity() {
         let _config = TlsOptions::builder_rustls()
             .server_certificate_verifier(|_| Arc::new(AcceptAll))
             .build();
-        // Re-build the underlying backend (since `.build()` consumed it) to
-        // also exercise the path that produces `rustls::ClientConfig`.
+        // Build another backend because `.build()` consumed the first one.
         let rustls_backend = RustlsOptions {
             crypto_provider: None,
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
@@ -340,7 +343,7 @@ mod tests {
                 &shared_with(Some(identity)),
             )
             .unwrap_err();
-        // Surface a debug-format check so we know the underlying rustls error is wrapped.
+        // Make sure that the wrapped rustls error has display text.
         let msg = format!("{err}");
         assert!(!msg.is_empty());
     }
@@ -367,7 +370,7 @@ mod tests {
 
     #[test]
     fn build_without_verifier_returns_error() {
-        // Crypto provider supplied via builder, but no verifier source.
+        // The backend has a crypto provider but no verifier.
         let rustls_backend = RustlsOptions {
             crypto_provider: Some(provider()),
             verifier_factory: None,
@@ -450,9 +453,8 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn build_resolver_takes_precedence_over_identity() {
-        // Identity bytes are intentionally invalid; if precedence is wrong,
-        // build would error trying to parse them. The resolver path skips
-        // identity parsing entirely.
+        // The identity bytes are invalid. The build succeeds only when the
+        // resolver takes priority and skips identity parsing.
         let identity = ClientIdentity::from_der(vec![vec![0x30u8, 0x00]], vec![0x30u8, 0x00]);
         let rustls_backend = RustlsOptions {
             crypto_provider: None,
