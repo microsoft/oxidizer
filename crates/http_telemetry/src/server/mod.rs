@@ -31,13 +31,7 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
     fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
         let layer = &self.layer;
 
-        let path = input.uri().path().as_bytes();
-        let excluded = layer.excluded_paths.iter().any(|excluded_path| {
-            path.get(..excluded_path.len())
-                .is_some_and(|start| start.eq_ignore_ascii_case(excluded_path.as_bytes()))
-                && path.get(excluded_path.len()).is_none_or(|&next| next == b'/')
-        });
-        if excluded {
+        if layer.excluded_paths.contains(input.uri().path()) {
             return Either::Left(self.inner.execute(input));
         }
 
