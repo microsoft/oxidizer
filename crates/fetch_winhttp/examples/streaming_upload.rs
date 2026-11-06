@@ -1,14 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Streams a request body whose length is not known in advance, then shows the one framing
-//! construct the transport refuses.
+//! Streams a request body with an unknown length and shows that request
+//! trailers are not supported.
 //!
-//! WinHTTP frames an unknown-length upload itself, so a streamed body needs no
-//! `Content-Length` and no caller-managed chunking. What WinHTTP offers no API for is
-//! submitting a request *trailer* section, so a body that yields a trailer frame fails the
-//! request outright rather than dropping the trailers silently. Callers that would otherwise
-//! send request trailers must carry that data in headers instead.
+//! WinHTTP frames an unknown-length upload. A streamed body needs no
+//! `Content-Length` or caller-managed chunks. WinHTTP has no API for request
+//! trailers, so a trailer frame fails the request. Put that data in request
+//! headers instead.
 //!
 //! Run with `cargo run -p fetch_winhttp --example streaming_upload`.
 
@@ -59,7 +58,7 @@ mod example {
 
         println!("response: {response}");
         let snapshot = server.finish();
-        // WinHTTP chunked the upload; the peer reassembled the whole body.
+        // WinHTTP used chunked framing. The peer rebuilt the full body.
         println!("body observed on the wire: {:?}", snapshot.requests[0].body);
         println!("Content-Length sent: {:?}", snapshot.requests[0].headers.get(CONTENT_LENGTH));
         Ok(())
@@ -78,7 +77,7 @@ mod example {
         let body = test_client.body_builder.body(body, &HttpBodyOptions::default());
 
         let Err(error) = test_client.client.post(server.url("/trailers")).body(body).fetch().await else {
-            ohno::bail!("request trailers should have been refused");
+            ohno::bail!("the transport accepted unsupported request trailers");
         };
 
         println!("request trailers are refused: {error}");

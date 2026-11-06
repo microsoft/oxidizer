@@ -3,13 +3,12 @@
 
 //! Shows which clients share connections and which do not.
 //!
-//! WinHTTP's process-wide connection pool is disabled, so pooling follows the shape of the
-//! `fetch` client rather than the shape of the process. Cloning a client shares its
-//! connections; building a second client - even from a clone of the same builder - gives it
-//! its own. Splitting a client across several pools with `multiple_pools` isolates those pools
-//! from each other in the same way.
+//! The transport disables WinHTTP's process-wide connection pool. A client and
+//! its clones share connections. Each separate client build has its own pool,
+//! including a build from a cloned builder. `multiple_pools` also creates
+//! isolated pools inside one client.
 //!
-//! The fixture counts accepted connections, which is what makes the difference observable.
+//! The fixture counts accepted connections to show the difference.
 //!
 //! Run with `cargo run -p fetch_winhttp --example connection_pools`.
 

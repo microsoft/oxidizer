@@ -1,12 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Protocol version negotiation and version-specific framing over localhost.
+//! Tests protocol negotiation and version-specific framing over localhost.
 //!
-//! Covers which protocol the transport ends up speaking, that it reports that protocol back to the
-//! caller, and the framing behaviour that differs between versions - chunked uploads on HTTP/1.1,
-//! stream framing and response trailers on HTTP/2 and HTTP/3, and the absence of fallback when
-//! HTTP/3 is required but QUIC is unreachable.
+//! Covers the negotiated protocol, the reported protocol, chunked HTTP/1.1
+//! uploads, HTTP/2 and HTTP/3 stream framing and trailers, and required HTTP/3.
 
 #![cfg(windows)]
 
@@ -47,19 +45,17 @@ fn unknown_length_upload_is_streamed_before_the_response() {
         Some("chunked")
     );
     assert!(!snapshot.requests[0].headers.contains_key("content-length"));
-    // A chunked upload is the one request shape that can carry a trailer section, and the
-    // transport does not offer one, so the terminating chunk must be bare.
+    // A chunked upload can carry trailers, but this transport does not send
+    // them. The final chunk must not contain trailers.
     assert!(snapshot.requests[0].trailers.is_none());
 }
 
 #[cfg_attr(miri, ignore)]
 #[test]
 fn http1_is_negotiated_and_reported() {
-    // `parse_protocol_used` reads a negotiated-protocol value of `0` as "not HTTP/2 or HTTP/3" and
-    // falls back to the `WINHTTP_OPTION_HTTP_VERSION` string query. That fallback is the HTTP/1.1
-    // path, and unit tests only drive it through mock bindings returning a scripted `"HTTP/1.1"`
-    // string, so only a live connection proves that real `WinHTTP` takes that path and returns a
-    // value the parser accepts.
+    // A negotiated-protocol value of `0` makes `parse_protocol_used` query
+    // `WINHTTP_OPTION_HTTP_VERSION`. Unit tests use a scripted `"HTTP/1.1"`
+    // value. This live test proves that WinHTTP returns an accepted value.
     let server = TestServer::https([ResponsePlan::ok("http1")], &["localhost"]);
     let test_client = client(
         &[Version::HTTP_11],
