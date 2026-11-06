@@ -49,7 +49,7 @@
 //!
 //! | Field | Type | Description | Examples | Presence |
 //! |---|---|---|---|---|
-//! | `http.server.request.duration` | int | HTTP request duration in milliseconds. | `12` | Always |
+//! | `http.server.request.duration` | double | HTTP request duration in seconds. | `0.012` | Always |
 //! | `http.request.method_original` | string | The method as the client sent it. | `PURGE` | If `http.request.method` is `_OTHER`. |
 //!
 //! # Metrics
@@ -58,7 +58,7 @@
 //!
 //! | Name | Instrument Type | Unit (UCUM) | Description |
 //! |---|---|---|---|
-//! | `http.server.request.duration` | Histogram | `ms` | Duration of HTTP server requests. |
+//! | `http.server.request.duration` | Histogram | `s` | Duration of HTTP server requests. |
 //!
 //! | Attribute | Type | Description | Examples | Presence |
 //! |---|---|---|---|---|

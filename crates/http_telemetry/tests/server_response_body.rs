@@ -80,7 +80,7 @@ fn request_completes_when_body_ends() {
             complete(Method::CONNECT, StatusCode::PROXY_AUTHENTICATION_REQUIRED)
         ]
         .to_vec(),
-        vec![(true, COMPLETE, Some(Value::U64(50))); 2]
+        vec![(true, COMPLETE, Some(Value::F64(0.05))); 2]
     );
 }
 
@@ -165,7 +165,7 @@ fn body_dropped_before_end_reports_abandoned_with_status() {
                 ("network.protocol.version", Value::from("1.1")),
                 ("http.response.status_code", Value::I64(503)),
                 ("error.type", Value::from("abandoned")),
-                (DURATION, Value::U64(0)),
+                (DURATION, Value::F64(0.0)),
             ],
             dimensions: vec![
                 ("http.request.method", Value::from("GET")),
@@ -173,7 +173,7 @@ fn body_dropped_before_end_reports_abandoned_with_status() {
                 ("http.response.status_code", Value::I64(503)),
                 ("error.type", Value::from("abandoned")),
             ],
-            measurements: vec![duration(0)],
+            measurements: vec![duration(0.0)],
             enrichments: vec![],
         }
     );
@@ -231,7 +231,7 @@ fn body_error_reports_error_event_with_status() {
                     ("network.protocol.version", Value::from("1.1")),
                     ("http.response.status_code", Value::I64(503)),
                     ("error.type", Value::from("validation")),
-                    (DURATION, Value::U64(0)),
+                    (DURATION, Value::F64(0.0)),
                 ],
                 dimensions: vec![
                     ("http.request.method", Value::from("GET")),
@@ -239,7 +239,7 @@ fn body_error_reports_error_event_with_status() {
                     ("http.response.status_code", Value::I64(503)),
                     ("error.type", Value::from("validation")),
                 ],
-                measurements: vec![duration(0)],
+                measurements: vec![duration(0.0)],
                 enrichments: vec![],
             }
         )

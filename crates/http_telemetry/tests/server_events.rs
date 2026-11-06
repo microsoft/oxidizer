@@ -47,7 +47,7 @@ fn server_complete_event_reports_method_scheme_status_version_and_duration() {
                     ("server.address", Value::from("example.com")),
                     ("server.port", Value::I64(443)),
                     ("http.response.status_code", Value::I64(200)),
-                    (DURATION, Value::U64(125)),
+                    (DURATION, Value::F64(0.125)),
                 ],
                 dimensions: vec![
                     ("http.request.method", Value::from("GET")),
@@ -57,7 +57,7 @@ fn server_complete_event_reports_method_scheme_status_version_and_duration() {
                     ("server.port", Value::I64(443)),
                     ("http.response.status_code", Value::I64(200)),
                 ],
-                measurements: vec![duration(125)],
+                measurements: vec![duration(0.125)],
                 enrichments: vec![],
             }
         )
@@ -90,7 +90,7 @@ fn server_dropped_future_reports_abandoned_without_status() {
                 ("server.address", Value::from("example.com")),
                 ("server.port", Value::I64(443)),
                 ("error.type", Value::from("abandoned")),
-                (DURATION, Value::U64(40)),
+                (DURATION, Value::F64(0.04)),
             ],
             dimensions: vec![
                 ("http.request.method", Value::from("GET")),
@@ -100,7 +100,7 @@ fn server_dropped_future_reports_abandoned_without_status() {
                 ("server.port", Value::I64(443)),
                 ("error.type", Value::from("abandoned")),
             ],
-            measurements: vec![duration(40)],
+            measurements: vec![duration(0.04)],
             enrichments: vec![],
         }
     );
@@ -165,7 +165,7 @@ fn unknown_method_meters_other_and_logs_original() {
                 ("http.request.method_original", Value::from("PURGE")),
                 ("network.protocol.version", Value::from("1.1")),
                 ("http.response.status_code", Value::I64(200)),
-                (DURATION, Value::U64(0)),
+                (DURATION, Value::F64(0.0)),
             ],
             vec![
                 ("http.request.method", Value::from("_OTHER")),

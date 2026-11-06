@@ -76,7 +76,7 @@ fn server_handler_error_reports_error_event_without_status() {
                     ("server.address", Value::from("example.com")),
                     ("server.port", Value::I64(443)),
                     ("error.type", Value::from("validation")),
-                    (DURATION, Value::U64(0)),
+                    (DURATION, Value::F64(0.0)),
                 ],
                 dimensions: vec![
                     ("http.request.method", Value::from("GET")),
@@ -86,7 +86,7 @@ fn server_handler_error_reports_error_event_without_status() {
                     ("server.port", Value::I64(443)),
                     ("error.type", Value::from("validation")),
                 ],
-                measurements: vec![duration(0)],
+                measurements: vec![duration(0.0)],
                 enrichments: vec![],
             }
         )

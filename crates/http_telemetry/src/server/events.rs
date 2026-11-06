@@ -10,10 +10,10 @@ use observed::{Text, event};
 #[event("http.server.request.complete")]
 #[info("HTTP server request completed")]
 #[histogram(
-    duration_ms,
+    duration_secs,
     name = "http.server.request.duration",
     desc = "Duration of HTTP server requests.",
-    unit = "ms"
+    unit = "s"
 )]
 pub(crate) struct RequestComplete {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -47,7 +47,7 @@ pub(crate) struct RequestComplete {
     pub(crate) error_type: Option<&'static str>,
     #[dimension(log = "http.server.request.duration")]
     #[unredacted]
-    pub(crate) duration_ms: u64,
+    pub(crate) duration_secs: f64,
 }
 
 /// Produces the event `http.server.request.error` when the handler or the response body returned an error or
@@ -55,10 +55,10 @@ pub(crate) struct RequestComplete {
 #[event("http.server.request.error")]
 #[error("HTTP server request failed")]
 #[histogram(
-    duration_ms,
+    duration_secs,
     name = "http.server.request.duration",
     desc = "Duration of HTTP server requests.",
-    unit = "ms"
+    unit = "s"
 )]
 pub(crate) struct RequestError {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -92,7 +92,7 @@ pub(crate) struct RequestError {
     pub(crate) error_type: Text,
     #[dimension(log = "http.server.request.duration")]
     #[unredacted]
-    pub(crate) duration_ms: u64,
+    pub(crate) duration_secs: f64,
 }
 
 /// Produces the event `http.server.request.abandoned` when the caller dropped the request future before the
@@ -100,10 +100,10 @@ pub(crate) struct RequestError {
 #[event("http.server.request.abandoned")]
 #[warning("HTTP server request abandoned")]
 #[histogram(
-    duration_ms,
+    duration_secs,
     name = "http.server.request.duration",
     desc = "Duration of HTTP server requests.",
-    unit = "ms"
+    unit = "s"
 )]
 pub(crate) struct RequestAbandoned {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
@@ -137,7 +137,7 @@ pub(crate) struct RequestAbandoned {
     pub(crate) error_type: &'static str,
     #[dimension(log = "http.server.request.duration")]
     #[unredacted]
-    pub(crate) duration_ms: u64,
+    pub(crate) duration_secs: f64,
 }
 
 /// Produces the event `http.server.active_requests`, with `delta` `1` when a request starts and `-1`

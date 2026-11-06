@@ -90,11 +90,7 @@ impl TelemetryDropGuard {
             return;
         }
         self.finished = true;
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "observed has no u128 value, and the range of u64 is more than enough for a request duration."
-        )]
-        let duration_ms = self.stopwatch.elapsed().as_millis() as u64;
+        let duration_secs = self.stopwatch.elapsed().as_secs_f64();
         let _enrichment = self.enrichment.apply_current_thread();
         let method = http_method_name(&self.method);
         let protocol_version = match self.version {
@@ -140,7 +136,7 @@ impl TelemetryDropGuard {
                         server_port,
                         status_code: status_code.as_u16(),
                         error_type,
-                        duration_ms,
+                        duration_secs,
                     }
                 );
             }
@@ -155,7 +151,7 @@ impl TelemetryDropGuard {
                     server_port,
                     status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: Text::from(ErrorLabel::from_error_chain(error, resolve_error_label).into_cow()),
-                    duration_ms,
+                    duration_secs,
                 }
             ),
             RequestEnd::Panic(status_code) => emit!(
@@ -169,7 +165,7 @@ impl TelemetryDropGuard {
                     server_port,
                     status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: Text::from("panic"),
-                    duration_ms,
+                    duration_secs,
                 }
             ),
             RequestEnd::Abandoned(status_code) => emit!(
@@ -183,7 +179,7 @@ impl TelemetryDropGuard {
                     server_port,
                     status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: "abandoned",
-                    duration_ms,
+                    duration_secs,
                 }
             ),
         }

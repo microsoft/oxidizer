@@ -51,14 +51,14 @@ pub(crate) struct Measurement {
     pub(crate) value: Value,
 }
 
-/// The value of the duration metric for `value` milliseconds.
-pub(crate) fn duration(value: u64) -> Measurement {
+/// The value of the duration metric for `value` seconds.
+pub(crate) fn duration(value: f64) -> Measurement {
     Measurement {
         instrument: DURATION,
         kind: InstrumentKind::Histogram,
         description: "Duration of HTTP server requests.",
-        unit: "ms",
-        value: Value::U64(value),
+        unit: "s",
+        value: Value::F64(value),
     }
 }
 
