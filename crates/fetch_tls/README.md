@@ -39,7 +39,7 @@ backend when the application does not select one.
   Windows, Security Framework on `macOS`, `OpenSSL` on Linux).
 
 If neither feature is enabled, backend-specific constructors and builders
-are unavailable. Building automatic options returns [`BackendError`][__link5].
+are unavailable. Building an automatic TLS backend returns [`BackendError`][__link5].
 
 
 <hr/>
@@ -47,7 +47,7 @@ are unavailable. Building automatic options returns [`BackendError`][__link5].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_tls">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb9SYGTKXxiAQbR9XXIBdpLNgbu8uSZnjKbg8bG5zrnbrcSKthZIGCaWZldGNoX3Rsc2UwLjUuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTPYJ-LqZC8kbySegBD6GrN8bDvFGDZLqN_Mbf1Cnh80FpOFhZIGCaWZldGNoX3Rsc2UwLjUuMQ
  [__link0]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsOptions
  [__link1]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsOptionsBuilder
  [__link2]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsBackendBuilder

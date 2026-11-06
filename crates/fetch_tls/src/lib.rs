@@ -32,7 +32,7 @@
 //!   Windows, Security Framework on `macOS`, `OpenSSL` on Linux).
 //!
 //! If neither feature is enabled, backend-specific constructors and builders
-//! are unavailable. Building automatic options returns [`BackendError`].
+//! are unavailable. Building an automatic TLS backend returns [`BackendError`].
 
 #[cfg(any(feature = "native-tls", feature = "rustls", test))]
 mod alpn;
