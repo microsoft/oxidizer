@@ -10,7 +10,9 @@ mod common;
 
 use std::time::Duration;
 
-use common::{ABANDONED, ACTIVE, COMPLETE, Capture, Captured, DURATION, Probe, Tenant, duration, server};
+use common::{
+    ABANDONED, ACTIVE, COMPLETE, Capture, Captured, DURATION, Echoing, Probe, Step, Tenant, data, duration, poll_frame, scripted, server,
+};
 use future_assert::{FutureTestExt, poll_once};
 use http::{Method, StatusCode, Version};
 use layered::{Layer, Service};
@@ -210,17 +212,29 @@ fn start_scope_enrichment_reaches_server_events() {
     let sink = common::sink_with(&capture);
     let completing = server(sink.clone()).layer(common::responding(StatusCode::OK));
     let abandoning = server(sink.clone()).layer(common::NeverResponding);
+    let streaming = server(sink.clone()).layer(Echoing(StatusCode::OK));
+    let streamed_request = common::get().map(|_| scripted([data("chunk"), Step::End]));
 
-    let (complete, abandoned) =
-        (|| (completing.execute(common::get()), abandoning.execute(common::get()))).enrich(&sink, Tenant { tenant: "contoso" })();
+    let (complete, abandoned, streamed) = (|| {
+        (
+            completing.execute(common::get()),
+            abandoning.execute(common::get()),
+            streaming.execute(streamed_request),
+        )
+    })
+    .enrich(&sink, Tenant { tenant: "contoso" })();
     complete.unwrap_ready().unwrap();
     drop(abandoned);
+    // The guard moves into the response body, which ends after the scope.
+    let mut body = streamed.unwrap_ready().unwrap().into_body();
+    let _ = poll_frame(&mut body);
+    let _ = poll_frame(&mut body);
 
     let enrichments: Vec<_> = capture.events().into_iter().map(|event| (event.name, event.enrichments)).collect();
     let tenant = vec![("tenant", Value::from("contoso"))];
     assert_eq!(
         enrichments,
-        [ACTIVE, ACTIVE, COMPLETE, ACTIVE, ABANDONED, ACTIVE]
+        [ACTIVE, ACTIVE, ACTIVE, COMPLETE, ACTIVE, ABANDONED, ACTIVE, COMPLETE, ACTIVE]
             .map(|name| (name, tenant.clone()))
             .to_vec()
     );

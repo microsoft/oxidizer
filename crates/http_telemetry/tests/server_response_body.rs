@@ -122,14 +122,15 @@ fn drop_completes_ended_body_and_abandons_unfinished_body() {
         drop(body);
         capture.names()
     };
-    let unfinished = || scripted([data("hello"), Step::Pending, Step::Pending]);
+    let unfinished = || [data("hello"), Step::Pending, Step::Pending];
     let trailers_pending = || [data("hello"), Step::Pending, Step::Trailers];
 
     assert_eq!(
         [
             names(Version::HTTP_11, None, scripted([data("hello"), Step::Pending])),
-            names(Version::HTTP_11, Some((CONTENT_LENGTH, "5")), unfinished()),
-            names(Version::HTTP_11, Some((CONTENT_LENGTH, "10")), unfinished()),
+            names(Version::HTTP_11, Some((CONTENT_LENGTH, "5")), scripted(unfinished())),
+            names(Version::HTTP_11, None, sized_scripted(unfinished())),
+            names(Version::HTTP_11, Some((CONTENT_LENGTH, "10")), sized_scripted(unfinished())),
             names(Version::HTTP_2, Some((CONTENT_LENGTH, "5")), scripted(trailers_pending())),
             names(
                 Version::HTTP_11,
@@ -137,7 +138,14 @@ fn drop_completes_ended_body_and_abandons_unfinished_body() {
                 sized_scripted(trailers_pending())
             ),
         ],
-        [vec![COMPLETE], vec![COMPLETE], vec![ABANDONED], vec![ABANDONED], vec![ABANDONED]]
+        [
+            vec![COMPLETE],
+            vec![COMPLETE],
+            vec![COMPLETE],
+            vec![ABANDONED],
+            vec![ABANDONED],
+            vec![ABANDONED]
+        ]
     );
 }
 
