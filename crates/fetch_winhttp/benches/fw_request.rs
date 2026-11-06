@@ -9,12 +9,13 @@
 //! `get_known_high` with `get_known_low` to measure the per-byte read path.
 //!
 //! Request and response bodies use declared-length and unknown-length cases.
-//! The transport writes a declared-length request in one pass and chunks an
-//! unknown-length request. A declared response length sets the read size. An
-//! unknown-length response reads the available data.
+//! The transport supplies the total length for a declared-length request and
+//! chunks an unknown-length request. A declared response length sets the read
+//! size. An unknown-length response reads the available data.
 //!
-//! The measurements include only the benchmark thread. They exclude WinHTTP
-//! worker threads and fixture runtime threads.
+//! Processor-time and allocation measurements include only the benchmark
+//! thread. They exclude WinHTTP worker threads and fixture runtime threads.
+//! Elapsed time includes waits for WinHTTP and the fixture.
 
 #![allow(clippy::unwrap_used, reason = "benchmark code")]
 #![cfg_attr(
@@ -322,7 +323,7 @@ mod windows {
         assert_eq!(request.body.len(), len, "the transport sent a different payload size");
     }
 
-    /// Uploads a known-length body with `Content-Length` in one write.
+    /// Uploads a known-length body with `Content-Length`.
     fn known_length_upload(
         group: &mut BenchmarkGroup<'_, WallTime>,
         allocs: &AllocSession,

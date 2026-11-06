@@ -4,8 +4,9 @@
 //! Measures work that happens once per client and the cost of a request that
 //! does not reach a server.
 //!
-//! The measurements include only the benchmark thread. They exclude WinHTTP
-//! worker threads and fixture runtime threads.
+//! Processor-time and allocation measurements include only the benchmark
+//! thread. They exclude WinHTTP worker threads and fixture runtime threads.
+//! Elapsed time includes waits for WinHTTP and the fixture.
 
 #![allow(clippy::unwrap_used, reason = "benchmark code")]
 #![cfg_attr(
