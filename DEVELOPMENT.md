@@ -41,14 +41,14 @@ After installing the Rust toolchain, we setup repository-specific tooling:
 2. Switch to the `oxidizer` directory: `cd oxidizer`.
 2. Execute `git config --local include.path ./.gitconfig` to attach the repo-specific Git configuration.
 2. Execute `just anvil-setup` to install all necessary Rust toolchain versions and development tooling.
-2. Execute `Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck` to install the release-script test dependency.
+2. Execute `Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck` to install the repository PowerShell test dependency.
 2. Open `.vscode/settings.template.jsonc` and save a copy as `.vscode/settings.json` to apply repo-specific settings for Visual Studio Code. Part of this file should be the same for everyone but the rest you can customize - refer to inline comments.
 
 ## Validate Windows environment
 
 1. Execute `just anvil-build` to build the workspace. Verify that the build is successful.
 1. Execute `just anvil-pr-test` to execute the test and coverage group. Verify that it succeeds.
-1. Execute `just test-scripts` to run the Pester suite for the release-related PowerShell scripts. Verify that all tests pass.
+1. Execute `just test-scripts` to run the repository Pester suite. Verify that all tests pass.
 1. Validate that debugging works by opening `crates/tick/examples/tick_basic.rs` and pressing the `Debug` link that appears above `main()`. This should successfully launch the example app under the debugger.
 
 # Linux (WSL) environment setup
@@ -76,7 +76,7 @@ Next, we setup repository-specific tooling on Linux:
 
 1. Switch to the `oxidizer` directory you previously cloned on Windows, using a `/mnt/c` style path to access the Windows filesystem: `cd /mnt/c/Users/username/Desktop/oxidizer` (adjusting the path to match your chosen location).
 1. Execute `just anvil-setup` to install all necessary Rust toolchain versions and development tooling.
-1. Execute `Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck` to install the release-script test dependency.
+1. Execute `Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck` to install the repository PowerShell test dependency.
 
 ## Optimize Linux build performance
 
@@ -94,7 +94,7 @@ After installing the Rust toolchains, we setup the build target directory for fa
 
 1. Execute `just anvil-build` to build the workspace. Verify that the build is successful.
 1. Execute `just anvil-pr-test` to execute the test and coverage group. Verify that it succeeds.
-1. Execute `just test-scripts` to run the Pester suite for the release-related PowerShell scripts. Verify that all tests pass.
+1. Execute `just test-scripts` to run the repository Pester suite. Verify that all tests pass.
 
 ## Setup Visual Studio Code integration
 
