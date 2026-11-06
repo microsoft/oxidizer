@@ -37,6 +37,13 @@ fn step_count(delta: u64) -> Result<usize> {
     })
 }
 
+// Native zlib-rs stream errors require invalid slices or an invalid stream order.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cold]
+fn compression_failed(error: flate2::CompressError) -> Error {
+    Error::invalid_state("the compression engine reported a failure").with_source(error)
+}
+
 /// Drives `flate2`'s encoder for one compressed stream.
 ///
 /// Owns the engine for the whole operation and hands it back to the pool on drop, so `compress` is
@@ -91,9 +98,7 @@ unsafe impl Codec for FlateCompress {
         let before_in = compress.total_in();
         let before_out = compress.total_out();
 
-        let status = compress
-            .compress_uninit(input, output, flush)
-            .map_err(|error| Error::invalid_state("the compression engine reported a failure").with_source(error))?;
+        let status = compress.compress_uninit(input, output, flush).map_err(compression_failed)?;
 
         let consumed = step_count(compress.total_in() - before_in)?;
         let produced = step_count(compress.total_out() - before_out)?;

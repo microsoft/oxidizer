@@ -166,7 +166,7 @@ impl OwnerBuffer {
     pub(crate) fn new(capacity: usize) -> Result<Self, seismograph::Error> {
         let capacity = capacity.clamp(1, OWNER_LIMIT);
         let layout = Layout::array::<seismograph_rallocator::native::Owner>(capacity)
-            .map_err(|_error| seismograph::Error::new("rallocator inventory size overflow"))?;
+            .expect("capacity is clamped to OWNER_LIMIT, whose owner array fits within isize::MAX");
         // SAFETY: System bypasses GlobalAlloc; layout describes an array of owner rows.
         let pointer = unsafe { System.alloc(layout) }.cast::<seismograph_rallocator::native::Owner>();
         let pointer =
@@ -255,6 +255,23 @@ pub(crate) fn publish() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unleased_owner_can_be_returned_before_its_first_lease() {
+        let metadata = Metadata::new();
+
+        // SAFETY: This isolated metadata has no concurrent users or live core action.
+        unsafe {
+            metadata.end_lease();
+        }
+        // SAFETY: The metadata still has no concurrent users or live core action.
+        unsafe {
+            metadata.begin_lease();
+        }
+
+        // SAFETY: The test exclusively owns this metadata.
+        assert_eq!(unsafe { metadata.generation() } & 1, 1);
+    }
 
     #[test]
     fn inventory_buffer_stops_exactly_at_its_capacity() {

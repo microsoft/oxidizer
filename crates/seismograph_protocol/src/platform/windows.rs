@@ -560,6 +560,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_closed_pipe_does_not_return_a_handle() {
+        let pipe = Pipe {
+            handle: Mutex::new(None),
+            server: false,
+            closed: AtomicBool::new(true),
+            pending_reads: super::super::PendingReads::default(),
+        };
+
+        assert_eq!(pipe.handle().unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
+    }
+
+    #[test]
     fn disconnection_statuses_do_not_hide_other_native_errors() {
         for code in [ERROR_BROKEN_PIPE, ERROR_NO_DATA, ERROR_PIPE_NOT_CONNECTED] {
             assert!(disconnected(&io::Error::from_raw_os_error(code.cast_signed())));

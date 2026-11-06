@@ -336,7 +336,7 @@ impl<'guard> WinHttpBodyWriter<'guard> {
                 });
             let completion = write
                 .await
-                .map_err(|_disconnected| callback_protocol_error("the write completion channel disconnected"))?;
+                .expect("an armed operation retains its request handle and every claimed completion is sent");
 
             data = write_completion(completion)?;
         }
@@ -369,7 +369,7 @@ impl<'guard> WinHttpBodyWriter<'guard> {
         );
         let completion = write
             .await
-            .map_err(|_disconnected| callback_protocol_error("the final request write completion channel disconnected"))?;
+            .expect("an armed operation retains its request handle and every claimed completion is sent");
 
         end_chunked_completion(completion)
     }
@@ -409,9 +409,11 @@ pub(crate) async fn send_body(body: &mut HttpBody, writer: &mut WinHttpBodyWrite
             Some(Ok(frame)) => match frame.into_data() {
                 Ok(data) => writer.write(data).await?,
                 Err(frame) => {
-                    frame
-                        .into_trailers()
-                        .map_err(|_unsupported| invalid_request(RequestBodyError::from(UnsupportedBodyFrameError::new())))?;
+                    frame.into_trailers().map_err(
+                        #[cfg_attr(coverage_nightly, coverage(off))]
+                        // http-body exposes only data and trailers; retain the error for future frame kinds.
+                        |_unsupported| invalid_request(RequestBodyError::from(UnsupportedBodyFrameError::new())),
+                    )?;
                     return Err(invalid_request(RequestBodyError::from(UnsupportedTrailerFrameError::new())));
                 }
             },

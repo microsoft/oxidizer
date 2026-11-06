@@ -562,6 +562,8 @@ fn field_value_deserialization_covers_sequence_metadata_and_diagnostics() {
     assert_eq!(with_unknown.as_bytes(), b"a");
 
     for invalid in [
+        "[]",
+        "[[97]]",
         r#"{"bytes":[97],"bytes":[98],"sensitivity":"NonSensitive"}"#,
         r#"{"bytes":[97],"sensitivity":"NonSensitive","sensitivity":"Sensitive"}"#,
         r#"{"sensitivity":"NonSensitive"}"#,
@@ -572,6 +574,8 @@ fn field_value_deserialization_covers_sequence_metadata_and_diagnostics() {
     }
     assert!(serde_json::from_str::<FieldValue>(r#"{"bytes":"not bytes","sensitivity":"NonSensitive"}"#).is_err());
     assert!(serde_json::from_str::<EncodedValues>("null").is_err());
+    let absent = serde_json::from_str::<AcceptOwned>("[]").unwrap_err();
+    assert!(absent.to_string().contains("at least one field value"));
 
     for byte_count in [65_536, MAX_CUSTOM_FIELD_BYTES] {
         let boundary = UserAgentOwned::deserialize(HostileValuesDeserializer {

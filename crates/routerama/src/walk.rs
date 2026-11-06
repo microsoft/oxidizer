@@ -93,9 +93,11 @@ impl<'p> Walk<'_, 'p> {
             }
 
             if let Some(single) = single {
-                if count >= depth && !node.rest.is_empty() {
-                    pending.push(WalkAction::Leaves(&node.rest));
-                }
+                debug_assert!(
+                    count >= depth && !node.rest.is_empty(),
+                    "a matching single edge has a segment, and single-only nodes without rest edges take the fast path above"
+                );
+                pending.push(WalkAction::Leaves(&node.rest));
                 node = single;
                 depth += 1;
                 continue;

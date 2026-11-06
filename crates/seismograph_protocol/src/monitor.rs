@@ -192,13 +192,7 @@ impl MonitorDescriptor {
     pub fn read_file(io: &MonitorIo, path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
         let (file, owner) = io.read_descriptor(path).map_err(|source| registry_error(path, source))?;
-        let mut bytes = Vec::new();
-        file.take(MAX_DESCRIPTOR_BYTES as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|source| registry_error(path, source))?;
-        if bytes.len() > MAX_DESCRIPTOR_BYTES {
-            return Err(Error::MessageTooLarge);
-        }
+        let bytes = read_descriptor_bytes(file, path)?;
         let descriptor = decode_descriptor(&bytes)?;
         let expected_endpoint = MonitorEndpoint::for_instance(
             path.parent().ok_or(Error::InvalidDescriptor)?,
@@ -236,6 +230,18 @@ impl MonitorDescriptor {
         };
         self.endpoint == MonitorEndpoint::for_instance(directory, &self.owner, self.process_id, self.instance_id)
     }
+}
+
+fn read_descriptor_bytes(reader: impl Read, path: &Path) -> Result<Vec<u8>, Error> {
+    let mut bytes = Vec::new();
+    reader
+        .take(MAX_DESCRIPTOR_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|source| registry_error(path, source))?;
+    if bytes.len() > MAX_DESCRIPTOR_BYTES {
+        return Err(Error::MessageTooLarge);
+    }
+    Ok(bytes)
 }
 
 fn registry_error(path: &Path, source: io::Error) -> Error {
@@ -331,6 +337,25 @@ fn decode_descriptor(bytes: &[u8]) -> Result<MonitorDescriptor, Error> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn descriptor_byte_read_failure_preserves_the_path_and_source() {
+        struct FailingReader;
+
+        impl Read for FailingReader {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::new(io::ErrorKind::PermissionDenied, "injected read failure"))
+            }
+        }
+
+        let path = Path::new("descriptor.monitor");
+        let Error::Registry { path: failed_path, source } = read_descriptor_bytes(FailingReader, path).unwrap_err() else {
+            panic!("descriptor read errors must retain their registry context");
+        };
+        assert_eq!(failed_path, path);
+        assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(source.to_string(), "injected read failure");
+    }
 
     fn descriptor() -> MonitorDescriptor {
         let owner = MonitorOwner::UnixUser(1001);

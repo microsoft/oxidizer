@@ -378,8 +378,10 @@ pub(crate) fn configure(configuration: Configuration) {
 
 #[cfg(feature = "monitor")]
 pub(crate) fn try_configure(configuration: Configuration) -> Result<(), crate::Error> {
-    let _lock = ConfigurationLock::acquire_until(wait_deadline())
-        .ok_or_else(|| crate::Error::new("seismograph recording configuration timed out waiting for another operation"))?;
+    let _lock = ConfigurationLock::acquire_until_or_error(
+        wait_deadline(),
+        "seismograph recording configuration timed out waiting for another operation",
+    )?;
     configure_locked(configuration);
     Ok(())
 }
@@ -476,8 +478,8 @@ fn read_activity(include_threads: bool) -> Result<Activity, crate::Error> {
     let deadline = wait_deadline();
     // Keep counters, policies, and session identity on the same side of every
     // configuration/reset boundary, without quiescing concurrent event writers.
-    let _configuration = ConfigurationLock::acquire_until(deadline)
-        .ok_or_else(|| crate::Error::new("seismograph recorder statistics timed out waiting for configuration"))?;
+    let _configuration =
+        ConfigurationLock::acquire_until_or_error(deadline, "seismograph recorder statistics timed out waiting for configuration")?;
     let session = LAST_SESSION.load(Ordering::Acquire);
     let capacity = configuration().event_capacity_per_thread;
     let mut activity = Activity {
@@ -610,8 +612,8 @@ pub(crate) fn try_snapshot(disposition: crate::snapshot::EventBufferDisposition)
     if disposition != crate::snapshot::EventBufferDisposition::Retain {
         return reset_event_buffers(disposition, true);
     }
-    let _configuration = ConfigurationLock::acquire_until(wait_deadline())
-        .ok_or_else(|| crate::Error::new("seismograph snapshot timed out waiting for configuration"))?;
+    let _configuration =
+        ConfigurationLock::acquire_until_or_error(wait_deadline(), "seismograph snapshot timed out waiting for configuration")?;
     let session = LAST_SESSION.load(Ordering::Acquire);
     if session == 0 {
         return Ok(None);
@@ -1206,6 +1208,10 @@ impl ConfigurationLock {
         }
         Some(Self)
     }
+
+    fn acquire_until_or_error(deadline: Instant, message: &'static str) -> Result<Self, crate::Error> {
+        Self::acquire_until(deadline).ok_or_else(|| crate::Error::new(message))
+    }
 }
 
 impl Drop for ConfigurationLock {
@@ -1305,8 +1311,7 @@ fn reset_event_buffers_with_writer_wait(
     writer_wait_expired: impl FnMut(Instant) -> bool,
 ) -> Result<Option<Events>, crate::Error> {
     let deadline = wait_deadline();
-    let _configuration = ConfigurationLock::acquire_until(deadline)
-        .ok_or_else(|| crate::Error::new("seismograph recorder timed out waiting for configuration"))?;
+    let _configuration = ConfigurationLock::acquire_until_or_error(deadline, "seismograph recorder timed out waiting for configuration")?;
     let stop = disposition == crate::snapshot::EventBufferDisposition::Stop;
     let allocation_policy = ALLOCATION_POLICY.load(Ordering::SeqCst);
     let general_policy = GENERAL_POLICY.load(Ordering::SeqCst);
@@ -2189,6 +2194,21 @@ mod tests {
         drop(lock);
         let acquired = ConfigurationLock::acquire_until(Instant::now()).is_some();
         assert_eq!((blocked, acquired), (true, true));
+    }
+
+    #[test]
+    fn expired_configuration_acquisition_preserves_error_context_and_lock_ownership() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let lock = ConfigurationLock::acquire();
+        let message = "test acquisition timed out";
+        let Err(error) = ConfigurationLock::acquire_until_or_error(Instant::now(), message) else {
+            panic!("a held configuration lock must reject an expired acquisition");
+        };
+
+        assert!(error.to_string().contains(message));
+        assert!(ConfigurationLock::acquire_until(Instant::now()).is_none());
+        drop(lock);
+        let _lock = ConfigurationLock::acquire_until_or_error(Instant::now(), message).unwrap();
     }
 
     #[test]

@@ -211,9 +211,8 @@ pub(crate) fn append_headers(dst: &mut HeaderMap, src: HeaderMap) {
         if name.is_some() {
             current = name;
         }
-        if let Some(name) = current.clone() {
-            dst.append(name, value);
-        }
+        let name = current.clone().expect("HeaderMap iteration supplies a name before repeated values");
+        dst.append(name, value);
     }
 }
 

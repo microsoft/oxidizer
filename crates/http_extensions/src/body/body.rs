@@ -313,10 +313,11 @@ impl HttpBody {
     /// #     example(HttpBodyBuilder::new_fake().text("test")).await.unwrap();
     /// # }
     /// ```
+    #[expect(clippy::missing_panics_doc, reason = "the buffered-body invariant makes the panic unreachable")]
     pub fn into_bytes(self) -> impl Future<Output = Result<BytesView>> + Send {
         self.into_buffered().map_ok(|body| {
             body.into_bytes_no_buffering()
-                .unwrap_or_else(|| unreachable!("once body is buffered, it must be a view over a byte sequence"))
+                .expect("once body is buffered, it must be a view over a byte sequence")
         })
     }
 

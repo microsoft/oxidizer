@@ -235,11 +235,9 @@ pub(crate) fn headers_to_utf16(headers: &HeaderMap) -> Result<U16CString, Conver
             // ": " and "\r\n" are appended per field below.
             .and_then(|unit_count| unit_count.checked_add(4))
     });
-    let unit_count = unit_count.ok_or_else(|| ConversionError::from(RequestHeadersTooLargeError::new()))?;
+    let unit_count = unit_count.ok_or_else(RequestHeadersTooLargeError::new)?;
     validate_request_header_unit_count(unit_count)?;
-    let capacity = unit_count
-        .checked_add(1)
-        .ok_or_else(|| ConversionError::from(RequestHeadersTooLargeError::new()))?;
+    let capacity = unit_count.checked_add(1).ok_or_else(RequestHeadersTooLargeError::new)?;
     let mut units = Vec::with_capacity(capacity);
 
     for (name, value) in headers {
@@ -601,6 +599,7 @@ mod tests {
 
     #[test]
     fn negotiated_legacy_protocol_uses_version_query_value() {
+        assert_eq!(parse_protocol_used(0, Some("HTTP/0.9")).unwrap(), Version::HTTP_09);
         assert_eq!(parse_protocol_used(0, Some("HTTP/1.0")).unwrap(), Version::HTTP_10);
         assert_eq!(parse_protocol_used(0, Some("HTTP/1.1")).unwrap(), Version::HTTP_11);
 

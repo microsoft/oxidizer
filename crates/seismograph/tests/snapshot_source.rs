@@ -28,3 +28,21 @@ fn source_payload_survives_capture() {
         }]
     );
 }
+
+#[test]
+fn invalid_utf8_source_name_is_rejected() {
+    // Version 1 uses a 32-byte snapshot header and a 24-byte source header.
+    let mut bytes = vec![0; 56];
+    bytes[..8].copy_from_slice(b"SEISMOG\0");
+    bytes[8..10].copy_from_slice(&1_u16.to_le_bytes());
+    bytes[28..32].copy_from_slice(&1_u32.to_le_bytes());
+    bytes[32..40].copy_from_slice(&1_u64.to_le_bytes());
+    bytes[40..42].copy_from_slice(&1_u16.to_le_bytes());
+    bytes[42..44].copy_from_slice(&1_u16.to_le_bytes());
+    bytes.push(b'a');
+    assert_eq!(snapshot::decode(&bytes).unwrap().sources[0].name, "a");
+
+    *bytes.last_mut().unwrap() = 0xff;
+
+    snapshot::decode(&bytes).unwrap_err();
+}

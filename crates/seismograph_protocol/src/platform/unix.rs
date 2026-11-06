@@ -582,6 +582,13 @@ mod tests {
             io::ErrorKind::InvalidInput
         );
         assert_eq!(read_descriptor(Path::new("/")).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        let directory_file = directory_file(directory.path()).unwrap();
+        for path in [Path::new("/"), Path::new("bad\0descriptor")] {
+            assert_eq!(
+                open_relative(&directory_file, path, libc::O_RDONLY).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
         let mut unsupported = descriptor.clone();
         unsupported.endpoint = MonitorEndpoint::NamedPipe("unsupported".into());
         assert_eq!(Listener::bind(&unsupported).unwrap_err().kind(), io::ErrorKind::Unsupported);

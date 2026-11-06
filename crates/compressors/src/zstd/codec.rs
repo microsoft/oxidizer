@@ -137,16 +137,19 @@ fn decompression_failed(code: usize) -> Error {
 /// This is therefore defensive against the bundled native library's contract rather than a check on
 /// this crate's own invariants: the bounds are queried from `zstd_safe` at run time, so a future
 /// zstd can narrow them or add validation that `set_parameter` does not perform today. Therefore,
-/// this function reports an error instead of asserting. A caller can handle a dependency build
+/// the returned mapper reports an error instead of asserting. A caller can handle a dependency build
 /// failure normally. An assertion introduces a panic that can unwind or abort, depending on the
 /// build configuration.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cold]
-fn compression_level_rejected(level: i32, code: usize) -> BuildError {
-    BuildError::new(format!(
-        "zstd rejected compression level {level}: {}",
-        zstd_safe::get_error_name(code)
-    ))
+fn compression_level_rejected(level: i32) -> impl FnOnce(usize) -> BuildError {
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cold]
+    move |code| {
+        BuildError::new(format!(
+            "zstd rejected compression level {level}: {}",
+            zstd_safe::get_error_name(code)
+        ))
+    }
 }
 
 /// zstd clamps `WindowLogMax` to `ZSTD_WINDOWLOG_MIN..=ZSTD_WINDOWLOG_MAX`, and
@@ -156,12 +159,15 @@ fn compression_level_rejected(level: i32, code: usize) -> BuildError {
 /// the same reason as [`compression_level_rejected`]: those limits come from the linked zstd, so a
 /// different build can reject a value that this build accepts.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cold]
-fn window_log_rejected(window: u32, code: usize) -> BuildError {
-    BuildError::new(format!(
-        "zstd rejected maximum window log {window}: {}",
-        zstd_safe::get_error_name(code)
-    ))
+fn window_log_rejected(window: u32) -> impl FnOnce(usize) -> BuildError {
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cold]
+    move |code| {
+        BuildError::new(format!(
+            "zstd rejected maximum window log {window}: {}",
+            zstd_safe::get_error_name(code)
+        ))
+    }
 }
 
 /// Resetting a session has no parameters to validate and no documented failure mode. This
@@ -197,7 +203,7 @@ impl ZstdCompress {
         // that a recycled compressor is indistinguishable from a fresh one.
         context
             .set_parameter(CParameter::CompressionLevel(level))
-            .map_err(|code| compression_level_rejected(level, code))?;
+            .map_err(compression_level_rejected(level))?;
 
         Ok(Self {
             context: Some(context),
@@ -283,7 +289,7 @@ impl ZstdDecompress {
         if let Some(window) = options.max_window_log {
             context
                 .set_parameter(DParameter::WindowLogMax(window.get()))
-                .map_err(|code| window_log_rejected(window.get(), code))?;
+                .map_err(window_log_rejected(window.get()))?;
         }
 
         Ok(Self {

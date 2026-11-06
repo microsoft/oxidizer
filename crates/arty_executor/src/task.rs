@@ -624,6 +624,29 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "inspection")]
+    #[test]
+    fn uninitialized_task_can_be_aborted_and_has_no_description() {
+        let pool = MultiPool::new();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let handle = allocate_task(
+            &pool,
+            DropCountingFuture(Arc::clone(&drops)),
+            TaskOptions::default(),
+            Sink::noop(),
+            TestCompletion,
+        );
+        let task = handle.as_ref();
+        let mut descriptions = 0;
+
+        task.abort(ShutdownCause::default());
+        task.inspect(TaskState::Ready, &mut |_| descriptions += 1);
+        drop(handle);
+
+        assert_eq!((drops.load(Ordering::Relaxed), descriptions), (1, 0));
+        assert!(pool.is_empty());
+    }
+
     #[test]
     fn future_storage_destroys_the_future_exactly_once() {
         let drops = Arc::new(AtomicUsize::new(0));

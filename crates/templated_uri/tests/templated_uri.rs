@@ -58,6 +58,11 @@ fn templated_uri() {
 }
 
 #[test]
+fn empty_uri_debug() {
+    assert!(!format!("{:?}", Uri::new()).is_empty());
+}
+
+#[test]
 fn uri_with_template() {
     let test = TemplatedTestPath {
         param: "value1".to_string(),

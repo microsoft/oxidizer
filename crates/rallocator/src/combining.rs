@@ -127,12 +127,9 @@ impl<T: Send> Combining<T> {
             }
             crate::hal::pause();
         }
-        if status
+        let _ = status
             .compare_exchange(WAITING, SLEEPING, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
-            crate::hal::wait(status, SLEEPING);
-        }
+            .inspect(|_| crate::hal::wait(status, SLEEPING));
     }
 
     unsafe fn attach(&self, node: *mut Node<T>) {

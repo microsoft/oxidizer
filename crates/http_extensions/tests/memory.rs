@@ -22,6 +22,15 @@ fn body_builder_accepts_a_global_pool() {
     assert!(builder.reserve(17).capacity() >= 17);
 }
 
+#[cfg(feature = "json")]
+#[tokio::test]
+async fn lazy_json_can_be_read_repeatedly() {
+    let builder = HttpBodyBuilder::new(OpaqueMemory::new(TransparentMemory::new()), &Clock::new_frozen());
+    let mut json = builder.text(r#""payload""#).into_json_ref::<String>().await.unwrap();
+    assert_eq!(json.read().unwrap(), "payload");
+    assert_eq!(json.read().unwrap(), "payload");
+}
+
 /// Records which provider instance serves each body allocation.
 #[derive(Debug)]
 struct ObservedMemory {

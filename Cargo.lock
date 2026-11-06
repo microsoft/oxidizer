@@ -1480,6 +1480,7 @@ name = "data_privacy_macros"
 version = "0.13.2"
 dependencies = [
  "data_privacy_macros_impl",
+ "syn 3.0.9",
 ]
 
 [[package]]

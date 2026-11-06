@@ -648,4 +648,21 @@ mod tests {
             finish(guard, context, &contexts, session, &closes);
         }
     }
+
+    #[test]
+    fn missing_secure_failure_flags_leave_diagnostics_unset() {
+        let (guard, context, contexts, session, closes) = installed();
+
+        // SAFETY: The context remains installed, this status allows a null
+        // payload, and no notification or exclusive borrow overlaps this call.
+        unsafe {
+            complete(context, WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, std::ptr::null_mut(), 0);
+        }
+        // SAFETY: The returned notification left the context installed and unborrowed.
+        assert_eq!(unsafe { (*context).secure_failure_flags() }, None);
+        // SAFETY: This installed context has no overlapping notification or borrow.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
+    }
 }

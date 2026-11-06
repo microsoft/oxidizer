@@ -451,6 +451,29 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn a_mutator_can_outlive_its_provider_and_release_the_backing_allocator() {
+        use crate::internal::chunk_mutator::ChunkMutator;
+        use crate::internal::chunk_provider::ChunkProviderConfig;
+        use crate::internal::constants::SizeClass;
+
+        let provider = ChunkProvider::new(Global, ChunkProviderConfig::default());
+        let provider_lifetime = Arc::downgrade(&provider);
+        let chunk = provider.acquire(16, SizeClass::ZERO).unwrap();
+        // SAFETY: acquire returns a live chunk whose owned reference is held here.
+        let allocator_lifetime = unsafe { Arc::downgrade(&(*chunk.as_ptr()).allocator) };
+        // SAFETY: The mutator takes that reference without copying or releasing it.
+        let mutator = unsafe { ChunkMutator::from_owned(chunk) };
+
+        drop(provider);
+        assert!(provider_lifetime.upgrade().is_none());
+        assert!(allocator_lifetime.upgrade().is_some());
+        assert!(mutator.try_alloc_bytes(8).is_some());
+
+        drop(mutator);
+        assert!(allocator_lifetime.upgrade().is_none());
+    }
+
     /// `header_size` is `offset_of!(<last field>) + size_of::<<last field>>()`.
     /// Every fixed header field is pointer-sized and pointer-aligned, so the
     /// header packs without padding. It contains the allocator `Arc`, provider

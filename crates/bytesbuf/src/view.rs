@@ -958,14 +958,11 @@ impl PartialEq<&[u8]> for BytesView {
         // We iterate over spans_reversed using an index to avoid cloning the view,
         // which would increment atomic reference counts for every span.
         let mut span_idx = self.spans_reversed.len();
-        let mut span_offset: usize = 0;
         let mut remaining_bytes = self.len();
 
         while remaining_bytes > 0 {
             let span: &[u8] = &self.spans_reversed[span_idx - 1];
-            let self_slice = span
-                .get(span_offset..)
-                .expect("offset only advances within span length, reset to 0 on span boundary");
+            let self_slice = span;
 
             let slice_size = NonZero::new(self_slice.len())
                 .expect("both sides of the comparison said there are remaining bytes but we got an empty slice from at least one of them");
@@ -977,16 +974,7 @@ impl PartialEq<&[u8]> for BytesView {
                 return false;
             }
 
-            // Advance within or past the current span.
-            span_offset += slice_size.get();
-            debug_assert!(
-                span_offset <= span.len(),
-                "guarded by (..slice_size) logic above to never exceed span length"
-            );
-            if span_offset == span.len() {
-                span_idx -= 1;
-                span_offset = 0;
-            }
+            span_idx -= 1;
 
             other = other.get(slice_size.get()..).expect("guarded by length check above");
 

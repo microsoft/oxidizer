@@ -736,6 +736,28 @@ mod tests {
     }
 
     #[test]
+    fn inline_completion_wins_over_a_later_submission_error() {
+        let (mut guard, context, contexts, session, closes) = installed();
+        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| {
+            // SAFETY: The context remains installed, this status has no
+            // payload, and submission holds no exclusive context borrow.
+            // The notification runs synchronously and overlaps no other.
+            unsafe {
+                complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+            }
+            Err(WinHttpError::new(12004, WinHttpOperation::SendRequest))
+        });
+
+        assert!(matches!(drive(future).unwrap(), CompletionResult::SendRequestComplete));
+
+        // SAFETY: The notification has returned, the context is still
+        // installed, and consuming the guard prevents later access.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
+    }
+
+    #[test]
     fn foreign_thread_completion_wakes_send_future() {
         /// Records whether the awaiting future's waker was invoked.
         struct RecordingWaker(AtomicBool);

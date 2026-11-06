@@ -337,3 +337,10 @@ fn ordinary_serde_seed_default_and_deserialize_paths_are_covered() {
     let seed = DeserializeInSeed::<u64, _>::new(&arena);
     assert_eq!(seed.deserialize(U64Deserializer::<ValueError>::new(43)).unwrap(), 43);
 }
+
+#[test]
+fn json_alloc_reports_root_allocation_failure() {
+    let arena = Arena::new_in(FailingAllocator::new(0));
+    let error = arena.deserialize_json_alloc_with_limits::<u64, _>("42", unlimited()).unwrap_err();
+    assert!(error.as_json_error().is_data());
+}
