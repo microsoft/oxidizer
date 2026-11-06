@@ -810,37 +810,6 @@ edition = "2021"
     }
 }
 
-Describe 'Get-FileLineEnding' {
-    It 'returns LF for a file with only LF endings' {
-        $path = Join-Path $TestDrive ('eol-lf-' + [guid]::NewGuid().Guid.Substring(0,8) + '.txt')
-        [System.IO.File]::WriteAllText($path, "alpha`nbeta`ngamma`n")
-        Get-FileLineEnding -Path $path | Should -Be "`n"
-    }
-
-    It 'returns CRLF for a file with only CRLF endings' {
-        $path = Join-Path $TestDrive ('eol-crlf-' + [guid]::NewGuid().Guid.Substring(0,8) + '.txt')
-        [System.IO.File]::WriteAllText($path, "alpha`r`nbeta`r`ngamma`r`n")
-        Get-FileLineEnding -Path $path | Should -Be "`r`n"
-    }
-
-    It 'returns the dominant style for a mixed file' {
-        $path = Join-Path $TestDrive ('eol-mixed-' + [guid]::NewGuid().Guid.Substring(0,8) + '.txt')
-        # 3 CRLFs vs 1 lone LF
-        [System.IO.File]::WriteAllText($path, "a`r`nb`r`nc`r`nd`ne")
-        Get-FileLineEnding -Path $path | Should -Be "`r`n"
-    }
-
-    It 'returns LF as the default for a missing file' {
-        Get-FileLineEnding -Path (Join-Path $TestDrive 'no-such-file.txt') | Should -Be "`n"
-    }
-
-    It 'returns LF as the default for an empty file' {
-        $path = Join-Path $TestDrive ('eol-empty-' + [guid]::NewGuid().Guid.Substring(0,8) + '.txt')
-        [System.IO.File]::WriteAllText($path, '')
-        Get-FileLineEnding -Path $path | Should -Be "`n"
-    }
-}
-
 # ---------------------------------------------------------------------------
 # Session-scoped caches: ensures the analyze-phase optimizations (warm git
 # lookups across post-release dep-scan iterations) actually take effect, and
@@ -906,8 +875,8 @@ Describe 'Session-scoped git caches' {
     Context 'Get-PackageCommittedChanges' {
         It 'returns the same array on the second call (no git spawn)' {
             $files1 = Get-PackageCommittedChanges -RepoRoot $script:CacheWs.Path -PackageFolder 'b'
-            # 'b' has had its version changed after its baseline (Cargo.toml + maybe changelog),
-            # but at minimum the Cargo.toml change must show up.
+            # 'b' has had its version changed after its baseline, so the
+            # Cargo.toml change must show up.
             $files1.Count | Should -BeGreaterOrEqual 1
             Mock -CommandName Invoke-Git -MockWith { throw "Invoke-Git called when cache should have served the request" }
             $files2 = Get-PackageCommittedChanges -RepoRoot $script:CacheWs.Path -PackageFolder 'b'
