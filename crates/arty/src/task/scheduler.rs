@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty_executor::{TaskOptions, TaskPlacement};
+use arty_executor::TaskPlacement;
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
@@ -10,7 +10,6 @@ use crate::runtime::worker::asynchronous;
 use crate::runtime::worker::blocking::Worker;
 use crate::task::Context;
 use crate::task::handle::JoinHandle;
-use crate::task::preparation::DeferredTask;
 
 /// Submits async tasks and blocking functions for one worker.
 ///
@@ -162,11 +161,7 @@ impl Scheduler {
             if current.thread() != &self.binding.thread {
                 return Err(future_factory);
             }
-            let context = current.context().clone();
-            let (handle, result_tx) = current.results().handle();
-            let inner = DeferredTask::new(future_factory, context);
-            let options = TaskOptions::new(TaskPlacement::SameThread);
-            current.tasks().add(inner, options, result_tx);
+            let handle = current.spawn(future_factory, TaskPlacement::SameThread);
             if !current.tasks().is_executing() {
                 self.dispatcher.wake_worker(self.binding.worker_index);
             }
@@ -223,7 +218,7 @@ impl Scheduler {
         R: ThreadAware + 'static,
     {
         let source = self.binding.thread.clone();
-        self.dispatcher.spawn_relocating(async move |cx| {
+        self.dispatcher.spawn_relocating(&self.binding.thread, async move |cx| {
             let mut data = data;
             data.relocate(Some(&source), cx.thread());
             f(data).await
