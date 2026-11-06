@@ -14,6 +14,13 @@
 //! The Tokio case uses the same task tree and cache operations, but Tokio chooses
 //! where its child tasks run. The direct-admission cases remain separate controls.
 //!
+//! The request-work cases keep that task tree and one cache access per child.
+//! Each child then runs 16 or 256 dependent integer-mixing rounds.
+//! Both runtimes use the same function and await all 100 children.
+//! These bounded synthetic sizes expose how useful work changes the share of
+//! runtime overhead. They do not model a specific server or replace the
+//! original single-access request-fanout controls.
+//!
 //! Each benchmark case creates one runtime before measurement and reuses it for
 //! every measured iteration. The relocated-cache cases also create and reuse
 //! one cache.
@@ -62,6 +69,7 @@ const INNER_OPERATIONS: usize = 10;
 const CONCURRENCY: usize = 10;
 const CACHE_ENTRIES: usize = 8;
 const WORKERS: [usize; 2] = [1, 8];
+const REQUEST_WORK: [usize; 2] = [16, 256];
 
 #[derive(Debug, Default)]
 struct CacheState {
@@ -148,6 +156,58 @@ impl ArtyCase {
         futures::executor::block_on(core).expect("benchmark core task finishes before shutdown");
         start.elapsed()
     }
+
+    fn run_request_work(&self, rounds: usize) -> Duration {
+        let start = Instant::now();
+        let core = self
+            .runtime
+            .scheduler()
+            .spawn_anywhere((self.cache.clone(), rounds), arty_work_core);
+        futures::executor::block_on(core).expect("benchmark core task finishes before shutdown");
+        start.elapsed()
+    }
+}
+
+async fn arty_work_core(cx: Context, (cache, rounds): (Cache, usize)) {
+    let scheduler = cx.scheduler();
+    let handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| {
+        scheduler.spawn_anywhere((cx.clone(), cache.clone(), rounds), |(cx, cache, rounds)| {
+            arty_work_outer(cx, cache, rounds)
+        })
+    });
+    for handle in handles {
+        handle.await.expect("benchmark request task finishes before shutdown");
+    }
+}
+
+async fn arty_work_outer(cx: Context, cache: Cache, rounds: usize) {
+    let scheduler = cx.scheduler();
+    let handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|operation| {
+        let cache = cache.clone();
+        scheduler.spawn(move |_| async move { request_work(&cache, operation, rounds) })
+    });
+    for handle in handles {
+        black_box(handle.await.expect("benchmark inner task finishes before shutdown"));
+    }
+}
+
+fn request_work(cache: &Cache, operation: usize, rounds: usize) -> u64 {
+    let mut value = cache.touch(operation);
+    for round in 0..black_box(rounds) {
+        value = value
+            .rotate_left(7)
+            .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            .wrapping_add(u64::try_from(round).expect("bounded benchmark round fits in u64"));
+    }
+    black_box(value)
+}
+
+fn arty_request_work(workers: usize, rounds: usize) -> ArtyCase {
+    let case = ArtyCase::new(workers);
+    for _ in 0..workers {
+        black_box(case.run_request_work(rounds));
+    }
+    case
 }
 
 async fn arty_core(cx: Context, cache: Cache) {
@@ -284,6 +344,38 @@ impl TokioCase {
         futures::executor::block_on(core).expect("benchmark core task finishes before shutdown");
         start.elapsed()
     }
+
+    fn run_request_work(&self, rounds: usize) -> Duration {
+        let start = Instant::now();
+        let core = self.runtime.spawn(tokio_work_core(self.cache.clone(), rounds));
+        futures::executor::block_on(core).expect("benchmark core task finishes before shutdown");
+        start.elapsed()
+    }
+}
+
+async fn tokio_work_core(cache: Cache, rounds: usize) {
+    let handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| tokio::spawn(tokio_work_outer(cache.clone(), rounds)));
+    for handle in handles {
+        handle.await.expect("benchmark request task finishes before shutdown");
+    }
+}
+
+async fn tokio_work_outer(cache: Cache, rounds: usize) {
+    let handles = std::array::from_fn::<_, INNER_OPERATIONS, _>(|operation| {
+        let cache = cache.clone();
+        tokio::spawn(async move { request_work(&cache, operation, rounds) })
+    });
+    for handle in handles {
+        black_box(handle.await.expect("benchmark inner task finishes before shutdown"));
+    }
+}
+
+fn tokio_request_work(workers: usize, rounds: usize) -> TokioCase {
+    let case = TokioCase::new(workers);
+    for _ in 0..workers {
+        black_box(case.run_request_work(rounds));
+    }
+    case
 }
 
 async fn tokio_core(cache: Cache) {
@@ -463,6 +555,37 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     }
     group.finish();
 
+    let mut group = criterion.benchmark_group(ARTY_REQUEST_WORK.group_name());
+    group.throughput(Throughput::Elements(
+        u64::try_from(INNER_OPERATIONS * CONCURRENCY).expect("benchmark operation count fits in u64"),
+    ));
+    for rounds in REQUEST_WORK {
+        for workers in WORKERS {
+            let name = format!("work{rounds}_w{workers}");
+            group.bench_function(BenchmarkId::new(ARTY_REQUEST_WORK.benchmark_name(), &name), |bencher| {
+                let case = arty_request_work(workers, rounds);
+                bencher.iter_custom(|iterations| {
+                    let mut elapsed = Duration::ZERO;
+                    for _ in 0..iterations {
+                        elapsed += case.run_request_work(rounds);
+                    }
+                    elapsed
+                });
+            });
+            group.bench_function(BenchmarkId::new(TOKIO_REQUEST_WORK.benchmark_name(), &name), |bencher| {
+                let case = tokio_request_work(workers, rounds);
+                bencher.iter_custom(|iterations| {
+                    let mut elapsed = Duration::ZERO;
+                    for _ in 0..iterations {
+                        elapsed += case.run_request_work(rounds);
+                    }
+                    elapsed
+                });
+            });
+        }
+    }
+    group.finish();
+
     let mut group = criterion.benchmark_group(ARTY_NESTED_RETAINED_WAKER.group_name());
     group.throughput(Throughput::Elements(
         u64::try_from(INNER_OPERATIONS * CONCURRENCY).expect("benchmark operation count fits in u64"),
@@ -559,6 +682,26 @@ fn tokio_request_fanout_workload<S: std::borrow::Borrow<TokioCase>>(owned_input:
     (result, owned_input)
 }
 
+#[benchmark(ARTY_REQUEST_WORK, "arty_contention/request_work", "Arty")]
+#[bench::work16_w1(Box::new(arty_request_work(1, 16)), 16)]
+#[bench::work16_w8(Box::new(arty_request_work(8, 16)), 16)]
+#[bench::work256_w1(Box::new(arty_request_work(1, 256)), 256)]
+#[bench::work256_w8(Box::new(arty_request_work(8, 256)), 256)]
+fn arty_request_work_workload<S: std::borrow::Borrow<ArtyCase>>(owned_input: S, rounds: usize) -> (Duration, S) {
+    let result = measure_native(|| owned_input.borrow().run_request_work(rounds));
+    (result, owned_input)
+}
+
+#[benchmark(TOKIO_REQUEST_WORK, "arty_contention/request_work", "Tokio")]
+#[bench::work16_w1(Box::new(tokio_request_work(1, 16)), 16)]
+#[bench::work16_w8(Box::new(tokio_request_work(8, 16)), 16)]
+#[bench::work256_w1(Box::new(tokio_request_work(1, 256)), 256)]
+#[bench::work256_w8(Box::new(tokio_request_work(8, 256)), 256)]
+fn tokio_request_work_workload<S: std::borrow::Borrow<TokioCase>>(owned_input: S, rounds: usize) -> (Duration, S) {
+    let result = measure_native(|| owned_input.borrow().run_request_work(rounds));
+    (result, owned_input)
+}
+
 #[cfg(target_os = "linux")]
 metabench::main!(
     criterion = {
@@ -581,6 +724,8 @@ metabench::main!(
         TOKIO_NESTED_RETAINED_WAKER,
         ARTY_REQUEST_FANOUT,
         TOKIO_REQUEST_FANOUT,
+        ARTY_REQUEST_WORK,
+        TOKIO_REQUEST_WORK,
     ],
 );
 
@@ -598,5 +743,7 @@ metabench::main!(
         TOKIO_NESTED_RETAINED_WAKER,
         ARTY_REQUEST_FANOUT,
         TOKIO_REQUEST_FANOUT,
+        ARTY_REQUEST_WORK,
+        TOKIO_REQUEST_WORK,
     ],
 );
