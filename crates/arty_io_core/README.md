@@ -43,7 +43,7 @@ impl IoContext for Context {
     type ContextOptions = ();
     type Driver = ExampleDriver;
 
-    fn context((): Self::ContextOptions) -> Self {
+    fn new((): Self::ContextOptions) -> Self {
         Self
     }
 
@@ -116,7 +116,7 @@ runtime from attempting to shut down the remaining drivers.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_io_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbq3wfiIjrbZkbFC4kg-Vxd30b0g54DQtqtFIb-3RcROqvnEFhZIKCbGFydHlfaW9fY29yZWUwLjQuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjM
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbaJCG0eghz1Ybh7fImhWPoxUbF0C5MrsEjF8bFLYZCYJ_L_VhZIKCbGFydHlfaW9fY29yZWUwLjQuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjM
  [__link0]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=IoContext
  [__link1]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=Driver
  [__link10]: https://docs.rs/arty_io_core/0.4.0/arty_io_core/?search=DriverOptions

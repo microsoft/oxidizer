@@ -37,7 +37,7 @@ pub trait IoContext: Clone + ThreadAware + 'static {
     /// The runtime calls this method once per registration. It passes the caller's options. The
     /// returned context supplies the clones for [worker-local initialization](Self#initialization).
     #[must_use]
-    fn context(options: Self::ContextOptions) -> Self;
+    fn new(options: Self::ContextOptions) -> Self;
 
     /// Creates a driver for the async worker described by `options`.
     ///

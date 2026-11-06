@@ -265,7 +265,7 @@ mod tests {
         type ContextOptions = ();
         type Driver = TestDriver;
 
-        fn context((): Self::ContextOptions) -> Self {
+        fn new((): Self::ContextOptions) -> Self {
             Self
         }
 
