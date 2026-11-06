@@ -167,6 +167,7 @@ http_extensions = { path = "crates/http_extensions", default-features = false, v
 http_headers = { path = "crates/http_headers", default-features = false, version = "0.1.2" }
 http_headers_simd = { path = "crates/http_headers_simd", default-features = false, version = "=0.1.2" }
 http_path_template = { path = "crates/http_path_template", default-features = false, version = "0.2.3" }
+http_telemetry = { path = "crates/http_telemetry", default-features = false, version = "0.1.0" }
 httpdate = { version = "1.0.3", default-features = false }
 hyper = { version = "1.10.1", default-features = false }
 hyper-rustls = { version = "0.27.9", default-features = false }
