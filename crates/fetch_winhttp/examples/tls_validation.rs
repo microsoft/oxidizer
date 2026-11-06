@@ -3,10 +3,12 @@
 
 //! Configures TLS certificate validation for the WinHTTP transport.
 //!
-//! Windows manages the certificate store and client certificates, so this
-//! transport ignores the generic `TlsOptions`. Use `WinHttpTlsConfig` on
-//! `WinHttpDeps` for supported TLS configuration. The default uses strict
-//! validation. Each relaxation is independent.
+//! Generic `TlsOptions` can describe certificate stores and client identities
+//! for other transports. WinHTTP uses the Windows certificate store, but this
+//! transport ignores generic `TlsOptions` and does not support client
+//! certificates. Use `WinHttpTlsConfig` on `WinHttpDeps` for supported TLS
+//! configuration. The default uses strict validation. Each relaxation is
+//! independent.
 //!
 //! The example serves three certificates from a localhost fixture to show each combination.
 //!

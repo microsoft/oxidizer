@@ -277,18 +277,19 @@ crates/fetch_winhttp/benches/
   fw_request.rs  // fw_request/roundtrip  - per-request cost by request and response shape
                  // fw_request/protocol   - the same round trip over h1, h1+TLS, h2, h3
   fw_client.rs   // fw_client/construction - client build, clone, and first (cold) request
-                 // fw_client/error_path   - a request that never reaches a server
+                 // fw_client/error_path   - an established connection reset before a response
 ```
 
 The public API cannot isolate transport work from WinHTTP work. `MockBindings`
 is available only in tests. Publishing it behind a feature exposes test support
 in the public API.
-Compare nearby scenarios in one group. `get_headers_high` minus `get_minimal` is header
-translation, `get_known_high` minus `get_known_low` is the per-byte read path,
-`get_unknown_high` minus `get_known_high` is reading a body whose length the
-headers never declared, `post_unknown_high` minus `post_known_high` is automatic
-chunking, and `first_request` minus `get_minimal` is session creation plus
-connection setup.
+Compare nearby scenarios in one group. `get_headers_high` adds request-header
+work to `get_minimal`. `get_known_high` adds payload size to `get_known_low`.
+`get_unknown_high` uses an unknown-length response instead of the
+declared-length response in `get_known_high`. `post_unknown_high` and
+`post_known_high` compare complete caller paths. Their difference includes body
+construction, headers, and request framing. `first_request` adds client and
+session construction plus connection setup to the warm `get_minimal` path.
 Parameterized declared-length cases use one low and one high value. This
 separates fixed cost from scaling cost. Unknown-length upload and download
 scenarios have only a high case. Compare each with its declared-length high
@@ -296,24 +297,24 @@ case.
 
 Two properties make the in-process fixture usable:
 
-- Measurements use `measure_thread()`, not `measure_process()`. WinHTTP completes
-  I/O on its own worker threads and the fixture serves on Tokio runtime threads, so
-  neither the callback trampoline's own cost nor the server's appears in the
-  numbers. What remains is the cost the *caller's* thread pays, which is the figure
-  a caller can act on.
+- Processor-time and allocation measurements use `measure_thread()`, not
+  `measure_process()`. They exclude WinHTTP worker threads and fixture runtime
+  threads. Criterion elapsed time includes waits for WinHTTP and the fixture.
 - Fixtures use `ResponseScript::Repeat`, which answers every request
   from one cloned plan and records nothing. A `Sequence` fixture runs out of
   scripted responses after a few iterations and adds a `RecordedRequest` per
   request. Its memory use scales with the iteration count and pollutes the
   allocation figures.
 
-Benchmarks measure warm paths unless the scenario is explicitly about a cold one:
-`warmed_client` issues one request before the measured region so the pooled
-connection is already established. `fw_client/construction/first_request` is the
-deliberate exception.
+Benchmarks measure warm paths unless the scenario is about a cold or failed
+connection. `warmed_client` sends one request before the measured region so the
+pooled connection is established. `fw_client/construction/first_request` creates
+the client and connection in each iteration. `fw_client/error_path/connection_reset`
+creates a connection in each iteration before the fixture resets it.
 
-No benchmark waits for real time. `connection_reset` uses a fixture that accepts
-and resets the connection. The request fails on the reset instead of a timeout.
+No scenario depends on a timer or timeout. `connection_reset` uses a fixture
+that accepts and resets the connection. The request fails on the reset instead
+of a timeout.
 
 There is no Callgrind (`_cg.rs`) benchmark. Gungraun requires Valgrind, which
 does not run on Windows. System calls and cross-thread wakeups also dominate

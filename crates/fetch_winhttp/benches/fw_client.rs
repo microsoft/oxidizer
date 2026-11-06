@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Measures work that happens once per client and the cost of a request that
-//! does not reach a server.
+//! Measures work that happens once per client and the cost of an established
+//! connection that resets before the response.
 //!
 //! Processor-time and allocation measurements include only the benchmark
 //! thread. They exclude WinHTTP worker threads and fixture runtime threads.
