@@ -9,18 +9,21 @@ use pin_project::pin_project;
 use crate::runtime::ShutdownState;
 use crate::task::Context;
 
-#[pin_project]
-pub(crate) struct DeferredTask<FF, F> {
-    factory: Option<(FF, Context)>,
-    #[pin]
-    future: Option<F>,
+#[pin_project(project = DeferredTaskProj)]
+pub(crate) enum DeferredTask<FF, F> {
+    Factory {
+        factory: Option<(FF, Context)>,
+    },
+    Future {
+        #[pin]
+        future: F,
+    },
 }
 
 impl<FF, F> DeferredTask<FF, F> {
     pub(crate) fn new(factory: FF, cx: Context) -> Self {
-        Self {
+        Self::Factory {
             factory: Some((factory, cx)),
-            future: None,
         }
     }
 }
@@ -32,12 +35,11 @@ where
 {
     type Output = F::Output;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<Self::Output> {
         // Inspect unpinned state without reborrowing a future that can hold self-references.
-        if this.factory.is_some() {
+        if let DeferredTaskProj::Factory { factory } = self.as_mut().project() {
             if matches!(
-                this.factory
+                factory
                     .as_ref()
                     .expect("an uninitialized deferred task retains its factory")
                     .1
@@ -48,13 +50,12 @@ where
             ) {
                 return Poll::Pending;
             }
-            let (factory, cx) = this.factory.take().expect("a deferred task factory is invoked exactly once");
-            this.future.set(Some(factory(cx)));
+            let (factory, context) = factory.take().expect("a deferred task factory is invoked exactly once");
+            self.set(Self::Future { future: factory(context) });
         }
-        this.future
-            .as_mut()
-            .as_pin_mut()
-            .expect("the deferred future is initialized above")
-            .poll(cx)
+        match self.project() {
+            DeferredTaskProj::Future { future } => future.poll(cx),
+            DeferredTaskProj::Factory { .. } => unreachable!("the deferred factory is replaced by its future above"),
+        }
     }
 }

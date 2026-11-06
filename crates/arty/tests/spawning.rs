@@ -106,6 +106,45 @@ async fn spawn_some_tasks(cx: Context) {
 }
 
 #[test]
+fn local_factory_runs_once_and_preserves_future_borrows() {
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let factory_calls = Arc::clone(&calls);
+            let owner = cx.thread().id();
+            let child = cx.scheduler().spawn(move |child| {
+                assert_eq!(factory_calls.fetch_add(1, Ordering::Relaxed), 0);
+                assert_eq!(child.thread().id(), owner);
+                async move {
+                    let value = Rc::new(42);
+                    let mut polls = 0;
+                    poll_fn(|cx| {
+                        polls += 1;
+                        if polls == 1 {
+                            cx.waker().wake_by_ref();
+                            Poll::Pending
+                        } else {
+                            Poll::Ready(())
+                        }
+                    })
+                    .await;
+                    (*value, polls, thread::current().id())
+                }
+            });
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+            assert_eq!(child.await.unwrap(), (42, 2, owner));
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+}
+
+#[test]
 #[cfg(not(miri))]
 fn test_worker_affinity() {
     if SystemHardware::current().processors().len() < 6 {
