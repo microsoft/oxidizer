@@ -9,6 +9,34 @@ use pin_project::pin_project;
 use crate::runtime::ShutdownState;
 use crate::task::Context;
 
+/// Carries only initialized admission state until the executor converts it.
+///
+/// Passing `DeferredTask` directly copies space reserved for its future before
+/// that future exists. `IntoFuture` keeps those copies out of task submission.
+pub(crate) struct DeferredTaskFactory<FF> {
+    factory: FF,
+    context: Context,
+}
+
+impl<FF> DeferredTaskFactory<FF> {
+    pub(crate) fn new(factory: FF, context: Context) -> Self {
+        Self { factory, context }
+    }
+}
+
+impl<FF, F> IntoFuture for DeferredTaskFactory<FF>
+where
+    FF: FnOnce(Context) -> F,
+    F: Future,
+{
+    type Output = F::Output;
+    type IntoFuture = DeferredTask<FF, F>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        DeferredTask::new(self.factory, self.context)
+    }
+}
+
 #[pin_project(project = DeferredTaskProj)]
 pub(crate) enum DeferredTask<FF, F> {
     Factory {

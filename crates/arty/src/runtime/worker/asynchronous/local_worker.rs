@@ -11,7 +11,7 @@ use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-use crate::task::preparation::DeferredTask;
+use crate::task::preparation::DeferredTaskFactory;
 
 thread_local! {
     static CURRENT: RefCell<Option<LocalWorker>> = const { RefCell::new(None) };
@@ -165,7 +165,7 @@ impl SchedulerContext {
         R: Send + 'static,
     {
         let (handle, result_tx) = self.results.handle();
-        let inner = DeferredTask::new(future_factory, self.context.clone());
+        let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
         self.tasks.add(inner, TaskOptions::new(placement), result_tx);
         handle
     }
