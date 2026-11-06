@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.12.1] - 2026-11-06
+
+- Update published local dependency requirements. No direct source change.
+- Update the local `tick` requirement from `0.9.0` to `0.9.1`.
+
 ## [0.12.0] - 2026-11-02
 
 - Simplify public resilience documentation. Middleware signatures, serialization, and execution

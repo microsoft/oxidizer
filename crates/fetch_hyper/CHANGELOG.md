@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0] - 2026-11-06
+
+- Use the Tokio runtime active at each spawn call for background transport tasks.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `anyspawn`, `bytesbuf`, `http_extensions`, `seismograph`, `seismograph_io`.
+- Update the local `anyspawn` requirement from `0.10.0` to `0.11.0`.
+- Update the local `bytesbuf` requirement from `0.13.0` to `0.14.0`.
+- Update the local `http_extensions` requirement from `0.14.0` to `0.15.0`.
+- Update the local `seatbelt` requirement from `0.12.0` to `0.12.1`.
+- Update the local `tick` requirement from `0.9.0` to `0.9.1`.
+
 ## [0.11.0] - 2026-11-02
 
 - Use `OpaqueMemory` to construct body builders. Keep `GlobalPool` as the default provider.

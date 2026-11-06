@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.0] - 2026-11-06
+
+- Align the version with the `multitude` package group. No independent source
+  or macro expansion change.
+- Update the local `multitude_macros_impl` requirement from `0.13.0` to `0.14.0`.
+
 ## [0.13.0] - 2026-11-02
 
 - Use version 0.13.0 to match the Multitude packages. Macro behavior does not change.
