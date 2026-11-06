@@ -5,13 +5,22 @@
 
 use std::any::type_name;
 use std::fmt;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::Arc;
 
-use http_extensions::HttpBodyBuilder;
-use layered::Layer;
-use observed::Sink;
+use futures::FutureExt;
+use futures::future::Either;
+use http::header::HOST;
+use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, RequestHandler, Result};
+use layered::{Layer, Service};
+use observed::{Event, Sink};
 use templated_uri::BasePath;
 use tick::SimpleClock;
+
+use crate::server::{
+    ActiveRequests, OTHER, RequestAbandoned, RequestComplete, RequestEnd, RequestError, TelemetryDropGuard, UriAuthority,
+    emit_when_body_ends,
+};
 
 /// Produces telemetry about the requests that go through it, in the form of `observed` events.
 ///
@@ -33,6 +42,75 @@ impl Telemetry<()> {
             clock: SimpleClock::new_system(),
             excluded_paths: ExcludedPaths::default(),
         }
+    }
+}
+
+impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
+    type Out = Result<HttpResponse>;
+
+    fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
+        let layer = &self.layer;
+
+        if layer.excluded_paths.contains(input.uri().path()) {
+            return Either::Left(self.inner.execute(input));
+        }
+
+        let interested = [
+            RequestComplete::DESCRIPTION,
+            RequestError::DESCRIPTION,
+            RequestAbandoned::DESCRIPTION,
+            ActiveRequests::DESCRIPTION,
+        ]
+        .iter()
+        .any(|description| layer.sink.is_interested(description));
+        if !interested {
+            return Either::Left(self.inner.execute(input));
+        }
+
+        let (scheme, default_port) = match input.uri().scheme_str() {
+            Some("http") => (Some("http"), Some(80)),
+            Some("https") => (Some("https"), Some(443)),
+            Some(_) => (Some(OTHER), None),
+            None => (None, None),
+        };
+
+        let mut guard = TelemetryDropGuard {
+            sink: layer.sink.clone(),
+            stopwatch: layer.clock.stopwatch(),
+            enrichment: layer.sink.transfer_context(),
+            method: input.method().clone(),
+            version: input.version(),
+            scheme,
+            uri_authority: match input.uri().authority() {
+                Some(authority) => Some(UriAuthority::Uri(authority.clone(), default_port)),
+                None => input.headers().get(HOST).cloned().map(UriAuthority::Host),
+            },
+            finished: false,
+        };
+        guard.add_active_request(1);
+        // The middleware resumes each panic that it catches and never polls the handler again, so the
+        // handler does not need to be unwind safe. The handler can panic in the call too, because
+        // `Execute` runs the handler closure in `execute`.
+        let response = match catch_unwind(AssertUnwindSafe(|| self.inner.execute(input))) {
+            Ok(response) => response,
+            Err(payload) => {
+                guard.emit(RequestEnd::Panic(None));
+                resume_unwind(payload)
+            }
+        };
+        Either::Right(async move {
+            match AssertUnwindSafe(response).catch_unwind().await {
+                Ok(Ok(response)) => Ok(emit_when_body_ends(guard, response, &layer.body_builder)),
+                Ok(Err(error)) => {
+                    guard.emit(RequestEnd::Error(&error, None));
+                    Err(error)
+                }
+                Err(payload) => {
+                    guard.emit(RequestEnd::Panic(None));
+                    resume_unwind(payload)
+                }
+            }
+        })
     }
 }
 
