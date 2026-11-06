@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - 2026-11-06
+
+- Breaking: Seal `MakeMutTarget`. Downstream crates can no longer implement this trait.
+- Breaking: Remove the hidden public `Arc::telemetry_object_id` method.
+- Update the local `seismograph` requirement from `0.4.0` to `0.5.0`.
+
 ## [0.3.1] - 2026-11-02
 
 - Add `Notify` for blocking, timed, and async waits. It retains at most one notification permit, a

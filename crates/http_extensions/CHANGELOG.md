@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.15.0] - 2026-11-06
+
+- Accept `impl Into<OpaqueMemory>` in `HttpBodyBuilder::new`. Callers can pass
+  `GlobalPool` directly without an explicit conversion.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `bytesbuf`, `seismograph`, `seismograph_io`.
+- Update the local `bytesbuf` requirement from `0.13.0` to `0.14.0`.
+- Update the local `tick` requirement from `0.9.0` to `0.9.1`.
+
 ## [0.14.0] - 2026-11-02
 
 - Breaking: Replace `HttpBodyBuilder::with_custom_memory` with

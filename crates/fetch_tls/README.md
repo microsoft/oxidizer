@@ -13,38 +13,33 @@
 
 </div>
 
-Backend-agnostic TLS configuration for HTTP clients.
+TLS configuration for HTTP clients.
 
-`fetch_tls` separates *what* TLS behavior an application wants from
-*which* TLS implementation actually provides it. Applications describe
-their TLS requirements once, and the HTTP client (or other consuming
-library) decides which backend to materialize at runtime.
+Applications use `fetch_tls` to describe their TLS requirements.
+HTTP client libraries use those requirements to build a TLS backend.
 
-## Two perspectives
+## Applications
 
-Applications work with [`TlsOptions`][__link0] (and its builder,
-[`TlsOptionsBuilder`][__link1]) to describe what they want: leave the backend
-choice entirely to the consuming library via
-[`TlsOptions::builder`][__link2], pick a specific backend, wrap an already-built
-backend, or use [`TlsOptions::default`][__link3] for backend-agnostic defaults.
+Use [`TlsOptions`][__link0] or [`TlsOptionsBuilder`][__link1] to configure TLS. You can let
+the client library select a backend, select a backend, or wrap a backend
+that you already built.
 
-Libraries that adopt `fetch_tls` use [`TlsBackendBuilder`][__link4] to turn a
-[`TlsOptions`][__link5] into a ready-to-use [`TlsBackend`][__link6]. The library
-contributes the environment-specific pieces (such as the rustls crypto
-provider and default certificate verifier) and decides which backend to
-use when the application did not pin one.
+## HTTP client libraries
+
+Use [`TlsBackendBuilder`][__link2] to convert [`TlsOptions`][__link3] into [`TlsBackend`][__link4].
+The library provides environment-specific values, such as the rustls
+crypto provider and default certificate verifier. It also selects the
+backend when the application does not select one.
 
 ## Cargo features
 
-* `rustls` — enables the rustls backend. `fetch_tls` does not bundle a
-  crypto provider; the consuming library supplies one along with a
-  default server certificate verifier.
-* `native-tls` — enables the platform native TLS backend (`SChannel` on
+* `rustls` enables the rustls backend. The application or client library
+  must provide a crypto provider and server certificate verifier.
+* `native-tls` enables the platform native TLS backend (`SChannel` on
   Windows, Security Framework on `macOS`, `OpenSSL` on Linux).
 
-With neither feature enabled, the API surface is limited to wrapping a
-pre-built backend; attempting to build any other configuration returns
-a [`BackendError`][__link7].
+If neither feature is enabled, backend-specific constructors and builders
+are unavailable. Building an automatic TLS backend returns [`BackendError`][__link5].
 
 
 <hr/>
@@ -52,12 +47,10 @@ a [`BackendError`][__link7].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_tls">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQA960tEbzWQbaOpko_VXWgAbMI3Hi90EGwIb3WsswbPp-xVhZIGCaWZldGNoX3Rsc2UwLjUuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTPYJ-LqZC8kbySegBD6GrN8bDvFGDZLqN_Mbf1Cnh80FpOFhZIGCaWZldGNoX3Rsc2UwLjUuMQ
  [__link0]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsOptions
  [__link1]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsOptionsBuilder
- [__link2]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsOptions::builder
- [__link3]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsOptions::default
- [__link4]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsBackendBuilder
- [__link5]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsOptions
- [__link6]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsBackend
- [__link7]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=BackendError
+ [__link2]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsBackendBuilder
+ [__link3]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsOptions
+ [__link4]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsBackend
+ [__link5]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=BackendError

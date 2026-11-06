@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.30.1] - 2026-11-06
+
+- Update published local dependency requirements. No direct source change.
+- Keep the `observed` macro companions at the same version.
+- Update the local `observed_macros` requirement from `0.30.0` to `0.30.1`.
+- Update the local `performables` requirement from `0.3.1` to `0.4.0`.
+- Update the local `tick` requirement from `0.9.0` to `0.9.1`.
+
 ## [0.30.0] - 2026-11-02
 
 - Reuse enrichment nodes, which hold extra event context, and storage used to restore that context

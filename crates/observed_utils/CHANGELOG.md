@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.1] - 2026-11-06
+
+- Update published local dependency requirements. No direct source change.
+- Update the local `observed` requirement from `0.30.0` to `0.30.1`.
+
 ## [0.6.0] - 2026-11-02
 
 - Update dependencies to use Observed 0.30.0 and its public tick types. This release does not change

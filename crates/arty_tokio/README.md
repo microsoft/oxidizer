@@ -118,17 +118,17 @@ The application remains responsible for Tokio shutdown.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGG2THYMLM6QbMRQmSDhwv64bDWqspKlcO7UbRgLoR-etjQNhZIOCZGFydHllMC42LjCCamFydHlfdG9raW9lMC4yLjCCZXRva2lvZjEuNTQuMQ
- [__link0]: https://crates.io/crates/arty/0.6.0
- [__link1]: https://docs.rs/arty_tokio/0.2.0/arty_tokio/fn.init.html
- [__link10]: https://docs.rs/arty/0.6.0/arty/?search=task::Context
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGG2THYMLM6QbMRQmSDhwv64bDWqspKlcO7UbRgLoR-etjQNhZIOCZGFydHllMC42LjGCamFydHlfdG9raW9lMC4yLjGCZXRva2lvZjEuNTQuMQ
+ [__link0]: https://crates.io/crates/arty/0.6.1
+ [__link1]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/fn.init.html
+ [__link10]: https://docs.rs/arty/0.6.1/arty/?search=task::Context
  [__link11]: https://docs.rs/tokio/1.54.1/tokio/?search=task::JoinHandle
  [__link12]: https://docs.rs/tokio/1.54.1/tokio/?search=task::JoinError
  [__link13]: https://docs.rs/tokio/1.54.1/tokio/?search=spawn
- [__link2]: https://docs.rs/arty_tokio/0.2.0/arty_tokio/fn.init.html
- [__link3]: https://docs.rs/arty_tokio/0.2.0/arty_tokio/fn.init.html
- [__link4]: https://docs.rs/arty_tokio/0.2.0/arty_tokio/fn.init.html
- [__link5]: https://docs.rs/arty_tokio/0.2.0/arty_tokio/fn.init.html
+ [__link2]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/fn.init.html
+ [__link3]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/fn.init.html
+ [__link4]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/fn.init.html
+ [__link5]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/fn.init.html
  [__link6]: https://docs.rs/tokio/1.54.1/tokio/?search=runtime::Handle::current
  [__link7]: https://docs.rs/tokio/1.54.1/tokio/?search=runtime::Handle::try_current
  [__link8]: https://docs.rs/tokio/1.54.1/tokio/?search=spawn
