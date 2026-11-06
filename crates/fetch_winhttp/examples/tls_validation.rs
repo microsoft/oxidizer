@@ -3,11 +3,10 @@
 
 //! Configures TLS certificate validation for the WinHTTP transport.
 //!
-//! `fetch`'s generic `TlsOptions` describe a certificate store and client certificates that
-//! Windows manages itself, so this transport does not act on them. TLS behavior it can control
-//! is configured through `WinHttpTlsConfig` on `WinHttpDeps` instead. The default validates
-//! strictly, and each relaxation is a separate opt-in: accepting an untrusted certificate does
-//! not also accept a hostname mismatch.
+//! Windows manages the certificate store and client certificates, so this
+//! transport ignores the generic `TlsOptions`. Use `WinHttpTlsConfig` on
+//! `WinHttpDeps` for supported TLS configuration. The default uses strict
+//! validation. Each relaxation is independent.
 //!
 //! The example serves three certificates from a localhost fixture to show each combination.
 //!
@@ -32,7 +31,8 @@ mod example {
     use tick::Clock;
 
     pub(super) async fn run() -> Result<(), ohno::AppError> {
-        // A self-signed certificate for the right host: only the trust check needs relaxing.
+        // This self-signed certificate uses the correct host name. Only trust
+        // validation must be relaxed.
         report(
             "strict validation, self-signed certificate",
             &["localhost"],
@@ -46,8 +46,8 @@ mod example {
         )
         .await?;
 
-        // A certificate issued for another name: trust and hostname are distinct faults, so
-        // relaxing only one of them still fails.
+        // This certificate uses another host name. Trust and host-name
+        // validation are separate, so relaxing only one still fails.
         report(
             "untrusted accepted, hostname still checked",
             &["other.example"],

@@ -1,47 +1,44 @@
 # `fetch_winhttp` implementation
 
-This document describes the implementation strategy of the `fetch_winhttp` crate:
-the OS bindings facade, the WinHTTP asynchronous model, the threading and
-cancellation/FFI-ownership machinery, object pooling, body-streaming mechanics,
-and the testing strategy. The higher-level architecture, behavior, and design tenets are
-documented separately in [design.md](design.md).
+This document describes the `fetch_winhttp` implementation. It covers the
+operating-system bindings, asynchronous I/O, threading, FFI ownership, object
+pooling, body streaming, and testing. [design.md](design.md) defines the public
+behavior.
 
 ## Architecture at a glance
 
-This is the whole design in one picture; the numbered chapters below elaborate each part.
+The implementation uses these main parts:
 
-- **One OS session per (thread × pool slot), scoped to the built client.** Each materialized
-  transport instance owns one session. Independently built clients, including builds from
-  cloned builders, never share a session or connection pool; cloned `HttpClient` values
-  share their original client's resources (§3.2).
-- **One transport instance per (thread × pool slot).** `fetch` clones and relocates the
+- Each built client has one operating-system session for each thread and pool
+  slot. Each transport instance owns one session. Separate client builds do not
+  share sessions or connection pools. Cloned `HttpClient` values share the
+  original client resources (§3.2).
+- Each thread and pool slot has one transport instance. `fetch` relocates the
   transport per thread (`Isolation::Isolated`, §3.2), then materializes one factory result
   for each configured pool slot. Each instance owns its context pool (§5) and one session
   `Arc`.
-- **One `RequestDriver` future per request** (§4.4). It owns a `RequestGuard`
+- Each request has one `RequestDriver` future (§4.4). It owns a `RequestGuard`
   containing the request handle and rents a pooled `RequestContext` - the slot
   WinHTTP calls back into, which retains the connect handle and session owner
   through the request handle's final callback (§4.1).
-- **WinHTTP drives the I/O on its own threads** (§3). The transport issues
+- WinHTTP drives I/O on its own threads (§3). The transport issues
   asynchronous calls and each one signals completion back to the awaiting future
   through an `events_once` one-shot (§3.3). A completion runs either inline on the
   submitting thread (keeping work on that thread) or on a WinHTTP worker thread.
-- **No blocking pool and no Tokio.** Every setup call is synchronous but performs no
-  I/O, so it runs inline on the executor; only WinHTTP's own async steps defer
+- The transport does not use a blocking pool or Tokio. Setup calls are
+  synchronous and do not perform I/O. Only WinHTTP asynchronous steps defer
   (§2.1).
-- **Ownership across FFI is callback-driven** (§4). Dropping the guard closes the
+- Callbacks control FFI ownership (§4). Dropping the guard closes the
   request handle synchronously, but the `RequestContext` and its retained parents
   are freed only on WinHTTP's final `HANDLE_CLOSING` callback, which guarantees no
   use-after-free or premature parent invalidation under cancellation.
 
 ## 1. The bindings facade (OS abstraction for testability)
 
-Following the reference pattern in `oxidizer_io`
-(`ox-sdk/crates/oxidizer_io/src/pal/windows/bindings/*`), every WinHTTP OS call
-goes through a `Bindings` trait, never a direct `windows`-crate call from
-business logic. This is the single most important structural decision because it
-is what makes the transport unit-testable without a network or even a real OS
-handle.
+Every WinHTTP call goes through the `Bindings` trait. Transport logic does not
+call the `windows` crate directly. This follows the `oxidizer_io` pattern in
+`ox-sdk/crates/oxidizer_io/src/pal/windows/bindings/*`. Tests can replace the
+bindings without a network or real operating-system handle.
 
 ```rust,ignore
 /// Every WinHTTP OS entry point the transport uses, and nothing else.
@@ -70,41 +67,39 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
 }
 ```
 
-- **Production impl** (`RealBindings`) wraps the `windows`-crate calls one-to-one
+- `RealBindings` wraps the `windows` crate calls one-to-one
   with `// SAFETY:` notes, like `oxidizer_io`'s build-target bindings. Every
   referenced symbol exists in `windows` `0.62.2`. `open` always uses
   `WINHTTP_ACCESS_TYPE_NO_PROXY`, which is the sole reason the transport never
   reaches a proxy (design.md §2.3). Because the access type is baked into
   `RealBindings` rather than passed through the `Bindings` trait, mock tests
   cannot observe it; only a live request can.
-- **Test impl** is `mockall`'s generated `MockBindings`, wrapped in a
+- Tests use the generated `MockBindings`, wrapped in a
   `BindingsFacade` enum (`Real` / `Mock(Arc<MockBindings>)`), matching
   `oxidizer_io`'s bindings facade.
 - The status callback cannot itself be a trait method (WinHTTP calls a bare
   `extern "system"` fn pointer). Tests therefore synthesize callbacks by invoking the
   crate-internal `dispatch_completion(context, status, status_info, status_info_len)`
-  directly. That entry point is a plain fn precisely because it needs no captured state: all
+  directly. That entry point needs no captured state. All
   per-request state is reached through the `context` pointer (the `*mut
   RequestContext`, §4.2), and all recording/expectation state lives in the
-  `Arc<MockBindings>` the harness owns via the `BindingsFacade`. Nothing is a global
-  singleton. See §7.
+  `Arc<MockBindings>` that the harness owns through `BindingsFacade`. No state is
+  global. See §7.
 
-**Safety contract of the `Bindings` API.** Because callers drive raw OS handles and
-async buffer lifetimes through this trait, a small set of caller-side invariants
-must hold for every impl (production or mock) to be sound. They are stated once here
-and relied on throughout §4 and §6:
+The `Bindings` safety contract has these requirements for production and test
+implementations:
 
 - A buffer handed to `write_data` must contain at least the submitted number of
   initialized readable bytes. A buffer handed to `read_data` must expose at least
   the submitted number of writable bytes. Both must stay valid and untouched until
-  `WRITE_COMPLETE`/`READ_COMPLETE`, `REQUEST_ERROR`, or the request handle's final
+  `WRITE_COMPLETE`, `READ_COMPLETE`, `REQUEST_ERROR`, or the request handle's final
   `HANDLE_CLOSING` callback terminates that operation (WinHTTP borrows them
   asynchronously). `send_request` always passes a null optional buffer; request
   bodies use sequential `write_data` calls.
 - The `RequestContext` must be fully populated before the async call is issued, and no
-  exclusive borrow of it may be outstanding across the submission, so that a possibly
+  exclusive borrow of it can exist during the submission, so that a possibly
   reentrant completion (§2.1) can take its own shared borrow and atomically claim the
-  operation payload. Shared borrows may be held across a submission (§4.5).
+  operation payload. Shared borrows can remain across a submission (§4.5).
 - Every session is opened with `WINHTTP_FLAG_ASYNC`, and every child handle
   inherits the asynchronous callback behavior required by operations that omit
   synchronous output pointers.
@@ -209,26 +204,19 @@ crates/fetch_winhttp_impl/src/
     recording.rs       // ResponsePlan/RecordedRequest scripting and observation vocabulary
 ```
 
-The split exists because the fixtures cannot live in a package of their own. A
-dev-dependency from `fetch_winhttp` onto a package that depends on it forms a
-dependency cycle, which the workspace forbids (root `Cargo.toml`,
-`[workspace.dependencies]` preamble) and CI rejects through
-`cargo ensure-no-cyclic-deps`. Hosting them in `fetch_winhttp_impl` instead
-leaves both edges pointing the same way - the facade depends on the
-implementation, and dev-depends on it again with `private-test-util` enabled -
-so the consumers stay beside the API they exercise while the fixtures' server
-ecosystem (Tokio, hyper, quinn, rustls) never reaches a consumer's build. The
-pattern is documented in full in
+The fixtures cannot live in a separate package because that package must
+depend on `fetch_winhttp`. A development dependency back to that package can
+form a cycle. The workspace and `cargo ensure-no-cyclic-deps` reject this
+cycle. The fixtures instead live in `fetch_winhttp_impl` behind
+`private-test-util`. This keeps Tokio, hyper, quinn, and rustls out of consumer
+builds. The pattern is documented in
 [`docs/private-test-utils.md`](../../../docs/private-test-utils.md).
 
-Neither package carries instrumented code on every platform: the facade is
-re-exports, and the implementation is configured out entirely off Windows. A
-library with no instrumented code is indistinguishable from a failed
-measurement to the coverage tooling, so each package keeps one trivially
-exercised placeholder per platform it would otherwise be empty on. The files
-are named for the platform they are gated to. Platform mutation exclusions are
-explicit: complete host configurations use file/crate globs and function patterns
-rather than relying on cargo-mutants to evaluate Rust `cfg` expressions. See
+Neither package has instrumented code on every platform. The facade contains
+re-exports, and the implementation does not compile off Windows. Coverage tools
+can treat an empty result as a failed measurement. Each package therefore keeps
+one tested coverage anchor for an otherwise empty platform build. Platform
+mutation exclusions use file or crate globs and function patterns. See
 [`docs/design/README.md`](../../../docs/design/README.md) for the current policy.
 
 The integration tests are split by concern rather than by protocol version, so
@@ -272,17 +260,17 @@ crates/fetch_winhttp/examples/
 
 Run one with `cargo run -p fetch_winhttp --example quick_start`.
 
-Each example is a `fn main` shim that delegates to a `#[cfg(windows)]` module and
-prints an explanatory line elsewhere, so `cargo check --all-targets` stays green on
-non-Windows targets where the crate itself is empty. They drive futures with
-`futures::executor::block_on` rather than a runtime macro, which doubles as a
-demonstration that the transport is runtime-neutral.
+Each example delegates from `fn main` to a `#[cfg(windows)]` module. Other
+platforms print an explanatory line. This lets `cargo check --all-targets` pass
+when the crate API is empty. The examples use Tokio for their async entry points
+and clocks. The transport remains runtime-neutral because WinHTTP drives its
+I/O on operating-system worker threads.
 
 ### 1.4 Benchmarks
 
-`crates/fetch_winhttp/benches/` holds two Criterion benchmark binaries,
-each also reporting allocation counts through `alloc_tracker` and processor time
-through `all_the_time` (../../../docs/benchmarks.md):
+`crates/fetch_winhttp/benches/` contains two Criterion benchmarks. Each reports
+allocation counts through `alloc_tracker` and processor time through
+`all_the_time` (../../../docs/benchmarks.md):
 
 ```text
 crates/fetch_winhttp/benches/
@@ -292,31 +280,31 @@ crates/fetch_winhttp/benches/
                  // fw_client/error_path   - a request that never reaches a server
 ```
 
-The transport's own work cannot be isolated from WinHTTP's through the public
-API - `MockBindings` is `cfg(test)`-only and unreachable from a benchmark
-target, and exposing it through a published feature would put test scaffolding in
-the public surface. Scenarios are therefore designed to be read by **differencing**
-neighbours within a group: `get_headers_high` minus `get_minimal` is header
+The public API cannot isolate transport work from WinHTTP work. `MockBindings`
+is available only in tests. Publishing it behind a feature exposes test support
+in the public API.
+Compare nearby scenarios in one group. `get_headers_high` minus `get_minimal` is header
 translation, `get_known_high` minus `get_known_low` is the per-byte read path,
 `get_unknown_high` minus `get_known_high` is reading a body whose length the
 headers never declared, `post_unknown_high` minus `post_known_high` is automatic
 chunking, and `first_request` minus `get_minimal` is session creation plus
 connection setup.
-Each leg is parameterized with one low and one high value only, which is enough to
-separate the fixed cost from the scaling cost.
+Parameterized declared-length cases use one low and one high value. This
+separates fixed cost from scaling cost. Unknown-length upload and download
+scenarios have only a high case. Compare each with its declared-length high
+case.
 
-Two properties make an in-process fixture usable despite the transport's
-cross-thread nature:
+Two properties make the in-process fixture usable:
 
-- Measurement uses `measure_thread()`, not `measure_process()`. WinHTTP completes
+- Measurements use `measure_thread()`, not `measure_process()`. WinHTTP completes
   I/O on its own worker threads and the fixture serves on Tokio runtime threads, so
   neither the callback trampoline's own cost nor the server's appears in the
   numbers. What remains is the cost the *caller's* thread pays, which is the figure
   a caller can act on.
-- Fixtures are built from `ResponseScript::Repeat`, which answers every request
-  from one cloned plan and records nothing. A `Sequence` fixture would run out of
-  scripted responses after a few iterations and would grow a `RecordedRequest` per
-  request, so fixture memory would scale with the iteration count and pollute the
+- Fixtures use `ResponseScript::Repeat`, which answers every request
+  from one cloned plan and records nothing. A `Sequence` fixture runs out of
+  scripted responses after a few iterations and adds a `RecordedRequest` per
+  request. Its memory use scales with the iteration count and pollutes the
   allocation figures.
 
 Benchmarks measure warm paths unless the scenario is explicitly about a cold one:
@@ -324,14 +312,12 @@ Benchmarks measure warm paths unless the scenario is explicitly about a cold one
 connection is already established. `fw_client/construction/first_request` is the
 deliberate exception.
 
-No benchmark waits for elapsed real time. `connect_refused` targets a port that was
-bound and immediately released, so loopback answers with an immediate reset rather
-than a timeout.
+No benchmark waits for real time. `connection_reset` uses a fixture that accepts
+and resets the connection. The request fails on the reset instead of a timeout.
 
-There is no paired Callgrind (`_cg.rs`) file. Gungraun requires Valgrind, which
-does not run on Windows, and every scenario here is dominated by syscalls and
-cross-thread wakeups that instruction counting would not model faithfully in any
-case (../../../docs/naming.md).
+There is no Callgrind (`_cg.rs`) benchmark. Gungraun requires Valgrind, which
+does not run on Windows. System calls and cross-thread wakeups also dominate
+these scenarios (../../../docs/naming.md).
 
 ## 2. WinHTTP asynchronous model primer
 
@@ -354,7 +340,7 @@ per request.
 | R9 | `WinHttpCloseHandle` | sync | `HANDLE_CLOSING` (final callback) |
 
 Errors on any async step arrive as `REQUEST_ERROR` carrying a
-`WINHTTP_ASYNC_RESULT { dwResult, dwError }`. TLS validation problems may also raise
+`WINHTTP_ASYNC_RESULT { dwResult, dwError }`. TLS validation problems can also raise
 `SECURE_FAILURE`. No correctness or classification logic depends on those
 notifications arriving in a particular order.
 
@@ -365,7 +351,7 @@ completion callback" - not "blocks on I/O". The setup calls the transport makes
 (`WinHttpConnect`, `WinHttpOpenRequest`, the `WinHttpSetOption`/`WinHttpSetTimeouts`
 family, `WinHttpQueryHeaders`) do no network, DNS, or socket work; they allocate and
 configure handles, deferring all I/O to the async steps. They are therefore safe to
-run inline on an executor thread, and the transport needs **no** `anyspawn::Spawner`
+run inline on an executor thread, and the transport needs no `anyspawn::Spawner`
 and no blocking pool.
 
 The sole exception is the very first `WinHttpOpen` in a process, which runs
@@ -376,8 +362,8 @@ per-thread construction cost off the request path; the process-wide global
 initialization runs only on the first such open.
 
 The session sets `WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS`: we promise our
-completion callbacks never block, and in return WinHTTP may invoke a callback
-**inline** on the submitting thread whenever an operation completes immediately
+completion callbacks never block. WinHTTP can invoke a callback inline on the
+submitting thread when an operation completes immediately
 (e.g. a read served from an internal buffer), instead of hopping to a thread-pool
 worker. We want this - it removes a thread-pool hop on the hot path (§3.1).
 
@@ -403,7 +389,7 @@ from no other in-flight call. WinHTTP requires only that no other thread is
 calling WinHTTP with a handle while it is closed, which the per-request ownership
 of the connect handle and the reference counting of the session handle both
 establish (see
-[Concurrency in WinHTTP](https://learn.microsoft.com/en-us/windows/win32/winhttp/programming-considerations#concurrency-in-winhttp)).
+[Concurrency in WinHTTP](https://learn.microsoft.com/en-us/windows/win32/winhttp/concurrency-in-winhttp)).
 
 Reentrancy is sound because of one submitting-side rule (§4.5): the driver fully
 populates the `RequestContext` before issuing the async call and holds no exclusive
@@ -415,10 +401,10 @@ claims only the active operation payload through the shared context pointer, and
 
 The design is about moving data safely between the kinds of threads in play:
 
-1. **Async executor threads** (the caller's runtime). `WinHttpTransport::execute`
+1. Async executor threads in the caller's runtime. `WinHttpTransport::execute`
    runs here and the returned future is polled here. Every setup call (§2.1) runs
    inline on these threads; `fetch` requires the returned future to be `Send`.
-2. **WinHTTP's own worker threads.** When a completion cannot be produced
+2. WinHTTP worker threads. When a completion cannot be produced
    immediately, WinHTTP delivers it later on a thread it owns. The application
    neither creates, sizes, nor owns these threads.
 
@@ -431,7 +417,7 @@ there is no additional "blocking pool" tier - no request-path call can block.
 WinHTTP does not run a bespoke thread pool; it posts async completions to the
 process-global Win32 thread pool, from which a worker dispatches our callback. There
 is no per-request or per-handle fixed-thread placement: successive completions for one
-request can land on different workers, so no callback may assume it runs on the
+request can land on different workers, so a callback cannot assume that it runs on the
 thread that submitted the operation or on the same worker as the previous completion.
 Soundness rests on documented properties: "exactly one completion per async
 operation", "one operation outstanding per handle", and "`HANDLE_CLOSING` is the final
@@ -459,7 +445,7 @@ it, clones and relocates the configuration to that thread. Within that
 thread it invokes the factory once for every configured `multiple_pools`
 slot, caching each resulting `WinHttpTransport` separately. Each
 (thread × pool slot) therefore has its own transport, session, and context
-pool (§5). (`Isolation::Shared` would instead share materialized handlers
+pool (§5). `Isolation::Shared` instead shares materialized handlers
 across threads.)
 
 `Isolated` is a design principle rather than a workaround: thread-isolated
@@ -473,7 +459,7 @@ The OS session - which owns session-scoped state, most importantly the connectio
 (keep-alive) pool - is opened by the factory when `fetch` materializes a per-thread
 transport instance, from the finalized `CustomContext`, not eagerly in `builder_winhttp`.
 This is deliberate: `HttpClientBuilder` is `Clone`, so a session opened up front and
-captured in the (clone-shared) factory closure would be shared by every client built from
+captured in the clone-shared factory closure is shared by every client built from
 that builder or any clone of it, letting two independently built clients reuse each
 other's pooled connections - violating the pool-isolation boundary of design.md §2.
 Opening it inside the factory (exactly as the Tokio transport builds its hyper client in
@@ -498,23 +484,23 @@ instance's in-flight requests suffices. The instance-local context pool is the
 only mutable shared state owned by the transport (`Mutex`-guarded, §5).
 The read-buffer provider satisfies `MemoryShared`, which requires thread-safe access.
 
-**Contrast with `fetch_hyper`.** `fetch_hyper` uses `Isolation::Shared`: one
+`fetch_hyper` uses `Isolation::Shared`: one
 hyper client, already fully thread-safe, shared across threads, so its pool is
 process-wide by construction. `fetch_winhttp` instead keeps a session (and
 therefore a connection pool) per thread, trading a single cross-thread pool
 for warmer, thread-local pools that need no cross-thread coordination.
 
-**Future exploration.** The per-thread session baseline is open to revision
-after performance analysis: a future design could consolidate to one session
+The per-thread session model can change after performance analysis. A future
+design can consolidate to one session
 shared across a client's threads - recovering cross-thread connection reuse
 and enabling session-granularity connection recycling (the connection-lifetime
 control the transport does not offer today, design.md §2.2) - but doing so
 cleanly needs a `fetch` per-built-client shared-state hook (or accepting
 `Isolation::Shared` at the cost of thread-local object pools). It is not
 obvious either beats per-thread sessions with warmer, thread-local pools,
-so v2 may revisit it. Relatedly, whether per-thread instancing is the right
-default at all could become a knob: a low-traffic client has no need for
-per-thread instances and might prefer a single shared instance. This is left
+so version 2 can revisit it. Whether per-thread instancing is the right
+default can also become configurable. A low-traffic client has no need for
+per-thread instances and can prefer a single shared instance. This is left
 unconfigurable in v1 - a knob earns its place only with demonstrated value, and
 per-thread is a sound default - but is a candidate future opportunity if
 profiling shows it matters.
@@ -533,7 +519,7 @@ the async call through `Bindings`, and awaits the receiver. The receiver
 exclusively borrows the `RequestGuard`. This is the invariant the design defines:
 another operation cannot reuse the embedded storage
 until the event has reached its terminal state: either the value was received or
-the receiver was destroyed after the sender disconnected. The sender may still be
+the receiver was destroyed after the sender disconnected. The sender can still be
 returning from its send at that point, because `events_once` permits the storage
 to be reused once the value has been delivered. When WinHTTP later invokes the
 callback trampoline,
@@ -547,8 +533,8 @@ enum CompletionResult {
     WriteComplete { buffer: bytesbuf::BytesView, len: u32 },
     HeadersAvailable,
     // Ownership of the read buffer is returned to the future here. `len` is the
-    // number of bytes WinHTTP appended (metadata; the buffer may have carried
-    // earlier bytes, since a BytesBuf need not be empty to be appended to).
+    // number of bytes WinHTTP appended. The buffer can have carried earlier
+    // bytes because a BytesBuf need not be empty before an append.
     ReadComplete { buffer: bytesbuf::BytesBuf, len: u32 },
     Error {
         error: WinHttpError,
@@ -583,14 +569,14 @@ token, so no wrapper repeats the assertion; a wrapper instead *withdraws* what i
 offer, by holding a `PhantomData<Cell<()>>` that removes `Sync`. The tiers differ because
 their sharing needs differ:
 
-- **Request and connect handles are `Send` but not `Sync`.** Each belongs to one
+- Request and connect handles are `Send` but not `Sync`. Each belongs to one
   request; the handle is only ever *moved* between threads (the future migrates
-  across executor threads, and a completion may arrive on a different thread than
+  across executor threads, and a completion can arrive on a different thread than
   the submit), never shared by reference from two threads at once. The driver keeps
   at most one operation outstanding per handle and holds the only reference, so
   `Send` alone is what we need, and the `not_sync` marker on `ConnectHandle` and
   `RequestHandle` is what holds them to it.
-- **The session handle is `Send + Sync`.** A session `Arc` is cloned into every
+- The session handle is `Send + Sync`. A session `Arc` is cloned into every
   in-flight request on its thread and is touched by WinHTTP's process-global callback
   threads (§3.1), so it is shared by reference across threads.
   The handler that holds it must be `Send + Sync` (a `fetch` requirement), so the session
@@ -609,7 +595,7 @@ and the request guard, while the context owns the parent handles. This satisfies
 This is the subtlest part of the design and the most likely source of unsafety if
 done naively, so it gets its own chapter.
 
-**The hazard.** For `WinHttpReadDataEx`/`WinHttpWriteData`, the caller-supplied
+For `WinHttpReadDataEx` and `WinHttpWriteData`, the caller-supplied
 buffer must remain valid until the corresponding `READ_COMPLETE`/`WRITE_COMPLETE`
 callback fires; WinHTTP reads from or writes into that memory asynchronously on
 its own thread. Likewise the request context that the callback dereferences must
@@ -689,7 +675,7 @@ struct CallbackOperationSlot {
     // Pinned in RequestContext and reused only after the previous event reached
     // its terminal state: value received, or receiver destroyed after the sender
     // disconnected. events_once permits reuse from that point, so the previous
-    // sender may still be returning from its send.
+    // sender can still be returning from its send.
     completion: core::cell::UnsafeCell<events_once::EmbeddedEvent<CompletionResult>>,
 }
 ```
@@ -739,9 +725,9 @@ reclaim it on `HANDLE_CLOSING`); we use the same shape with a pooled context
 
 A `RequestContext` is a `plurality::Box<RequestContext>` rented from an instance-owned
 pool (§5) and handed to WinHTTP as the opaque handle context. One rule governs its
-lifetime: **the driver owns the `Box` until `WinHttpSetOption(CONTEXT_VALUE)`
-succeeds; after that WinHTTP owns it and the callback reclaims it on the final
-`HANDLE_CLOSING`.**
+lifetime: the driver owns the `Box` until
+`WinHttpSetOption(CONTEXT_VALUE)` succeeds. WinHTTP then owns it, and the
+callback reclaims it on the final `HANDLE_CLOSING`.
 
 The status callback is registered once on the session handle at build time (§2,
 step S2) with mask
@@ -755,12 +741,12 @@ notifications used by cold-connect telemetry (§13). The only per-request handof
 is installing the context pointer via
 `WinHttpSetOption(WINHTTP_OPTION_CONTEXT_VALUE, ptr)`.
 
-**Ordering:** the driver issues this `SetOption` *before* the first async call
+The driver issues this `SetOption` before the first async call
 (`WinHttpSendRequest`). This guards the window where an async call fails
 synchronously: because the context is already installed, closing the handle still
 delivers a `HANDLE_CLOSING` that carries the pointer, so the callback reclaims the
 `Box` on the normal path instead of the driver needing a second, racy free path. Were
-the context installed *after* the send, a synchronous send failure could close the
+the context installed after the send, a synchronous send failure can close the
 handle with a null context and strand the `Box`.
 
 The driver applies the other synchronous request options before allocating the
@@ -773,11 +759,11 @@ context to null, and the trampoline ignores any callback (including
 `HANDLE_CLOSING`) whose context is null. That null check is correctness-critical
 rather than defensive: this is precisely the path where the request handle is closed
 while its context has already been reclaimed, and dereferencing the echoed value
-would be a use-after-free.
+causes a use-after-free.
 
 After `SetOption` succeeds, dropping the `RequestGuard` owner (the driver or the
 `WinHttpBodyReader` it moves into, §6.3) synchronously closes only the request
-handle, but does **not** free the context or its retained parents. Closing the
+handle, but does not free the context or its retained parents. Closing the
 request handle aborts any outstanding operation and makes WinHTTP deliver one final
 `HANDLE_CLOSING`, where the trampoline reclaims the `Box`; dropping that box then
 closes the connect handle and releases the session `Arc`. Microsoft documents that
@@ -811,7 +797,7 @@ The buffers and sender in `RequestContext` are shared between the driver and cal
 with no application lock. Safe API sequencing and payload ownership have separate
 enforcement mechanisms:
 
-- **The driver arms before issuing the async call.** The mutable `RequestGuard`
+- The driver arms before it issues the asynchronous call. The mutable `RequestGuard`
   borrow held by the returned future prevents direct guard access. More
   importantly, submission moves the request handle into the future and leaves
   the guard's handle slot empty. Completion destroys the receiver endpoint
@@ -819,12 +805,12 @@ enforcement mechanisms:
   closing the handle. Even forgetting the future cannot expose a usable guard.
   The driver writes the completion sender and optional buffer, then publishes
   the operation kind with a release store.
-- **No exclusive borrow of the `RequestContext` is outstanding across a submission.**
+- No exclusive borrow of `RequestContext` exists during a submission.
   This is the aliasing rule the whole design rests on, and it is what §1's `Bindings`
-  contract and §2.1's reentrancy argument refer to. WinHTTP may complete an operation
+  contract and §2.1's reentrancy argument refer to. WinHTTP can complete an operation
   inline and reenter the callback on the submitting thread (§2.1), and that callback
   takes its own shared borrow of the same context; two shared borrows coexist, while a
-  shared borrow alongside an exclusive one is undefined behavior. The submitter may
+  shared borrow alongside an exclusive one is undefined behavior. The submitter can
   therefore keep a shared borrow across the call - and does, to arm the slot and pass the
   installed context value - because every state change the submitter and the callback
   share travels through interior mutability: the context's atomic fields and the
@@ -832,14 +818,14 @@ enforcement mechanisms:
 - From the submit call until the `events_once` receiver resolves, the driver
   does not access the operation payload. The context pointer remains shared for
   request diagnostics and callback dispatch throughout the operation (§4.2).
-- A **completion** - inline on the submitting thread or later on a worker - validates
+- A completion, inline on the submitting thread or later on a worker, validates
   that its status matches the published operation kind and uses compare-exchange
   to claim the payload. Only the winner moves out the sender and buffer and returns
   the slot to `Idle`. We do not expect competing error/success notifications to
   occur at all - WinHTTP serializes callbacks for one request handle - so the claim
   is a correctness backstop, not a race the design plans around. A loser observes a
   failed claim and returns without touching the payload.
-- **`HANDLE_CLOSING` must not overlap another callback for the same handle.** The
+- `HANDLE_CLOSING` must not overlap another callback for the same handle. The
   atomic tag deliberately does not cover final reclamation: the claim is not atomic
   with the read-out of the payload, and the claimed `events_once` sender points into
   the `EmbeddedEvent` stored inline in the context, so a claimant still touches
@@ -859,7 +845,7 @@ payload under its atomic ownership tag. `HANDLE_CLOSING`, documented as the fina
 notification with no later callbacks, is the only path that reconstructs and drops
 the owning box.
 
-**The one field that is not covered by the temporal handoff** is the packed
+The packed diagnostics field is not covered by the temporal handoff. It is the
 `RequestContext::secure_failure` atomic. WinHTTP serializes callbacks for a single
 request handle, and `SECURE_FAILURE` in practice precedes the `REQUEST_ERROR` raised
 by the same send: both are emitted from the send-completion path, the secure-failure
@@ -867,7 +853,7 @@ flags being already-cached handshake results rather than a schannel worker's lat
 report. The field is nevertheless atomic rather than a `Cell` because successive
 callbacks for one handle run on *different* WinHTTP worker threads. The
 happens-before edge that orders them lives inside WinHTTP's own lock, which is
-invisible to the Rust memory model, so a `Cell` would be both unsound and `!Sync`.
+invisible to the Rust memory model, so a `Cell` is unsound and `!Sync`.
 A `SECURE_FAILURE` status publishes its certificate-error bitmask into that atomic
 with a `Release` store and touches nothing else. `REQUEST_ERROR` classifies the failure
 from its WinHTTP error code - never from callback order - and reads the atomic through
@@ -905,7 +891,7 @@ mutex used by `events_once::EventPool`. The receiver's mutable borrow of
 from reinitializing the embedded storage before the current receiver endpoint
 has been destroyed.
 
-- **`plurality::Pool<RequestContext>` behind a `Mutex`.** A request rents one
+- `plurality::Pool<RequestContext>` behind a `Mutex`. A request rents one
   `plurality::Box<RequestContext>` at start and holds it for its whole lifetime
   (reclaimed when the callback drops it on `HANDLE_CLOSING`, §4.3). `plurality::Pool`
   is `Send + !Sync`, so it is the one field we wrap in a `std::sync::Mutex`. That lock
@@ -957,14 +943,14 @@ impl bytesbuf_io::Write for WinHttpBodyWriter {
 }
 ```
 
-The sending strategy is chosen by the request driver's upload stage. In **either** case
+The request driver's upload stage selects the sending strategy. In either case,
 `WinHttpSendRequest` is called with a `NULL`/zero `lpOptional` buffer; the request
 body is never passed inline to `WinHttpSendRequest` and is always streamed with
 `WinHttpWriteData`. This sidesteps the `lpOptional` lifetime rule (an inline
-optional buffer would have to stay valid through `WinHttpReceiveResponse` or
+optional buffer must stay valid through `WinHttpReceiveResponse` or
 cancellation completion) and keeps a single body-writing path:
 
-- **Known length** (buffered body / `Content-Length`): the total length passed to
+- Known length (buffered body or `Content-Length`): the total length passed to
   `WinHttpSendRequest` (`dwTotalLength`) is a `DWORD`. When the known length fits
   in `u32`, pass it directly and stream frames through `WinHttpBodyWriter`. When it
   exceeds `u32::MAX`, `dwTotalLength` cannot represent it, so instead pass
@@ -980,7 +966,7 @@ cancellation completion) and keeps a single body-writing path:
   zero length describes. A caller who wants the explicit header still gets it,
   because a supplied `Content-Length: 0` reconciles and survives to the wire like
   any other agreeing value - which is what `fetch` populates for an empty body.
-- **Unknown length** (streaming body): open the request with
+- Unknown length (streaming body): open the request with
   `WINHTTP_FLAG_AUTOMATIC_CHUNKING`, then call `WinHttpSendRequest` with
   `WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH` and a `NULL` optional buffer. Each
   `poll_frame` data chunk is pulled and written sequentially. After the body reaches
@@ -989,13 +975,13 @@ cancellation completion) and keeps a single body-writing path:
   its protocol-appropriate HTTP/1.1, HTTP/2, or HTTP/3 framing. The transport never has
   send and receive operations outstanding together.
 
-`HttpBody` may also yield a trailer frame. WinHTTP has no API for submitting request
+`HttpBody` can also yield a trailer frame. WinHTTP has no API for submitting request
 trailers after the body, so the writer returns an `HttpError` when it encounters one; it
 never silently discards the frame or writes trailer bytes as body data.
 
 Each individual `WinHttpWriteData` length is also a `DWORD`, so a single
 `BytesView` larger than `u32::MAX` is written across successive `WRITE_COMPLETE` steps,
-independently of how the total length is declared above. `BytesView` may be segmented:
+independently of how the total length is declared above. `BytesView` can be segmented:
 every call receives exactly one contiguous span, further bounded by `u32::MAX`; the
 writer advances through all spans without pairing an aggregate length with only the first
 span's pointer.
@@ -1012,7 +998,7 @@ originates in WinHTTP:
 
 - A caller-supplied `Transfer-Encoding` fails with `UnsupportedTransferEncodingError` in
   every framing mode. WinHTTP performs all request framing itself, so an already-encoded
-  body would be encoded a second time, and forwarding the header would put a second
+  body is encoded a second time, and forwarding the header puts a second
   framing directive next to WinHTTP's own - a combination RFC 9112 resolves in favor of
   `Transfer-Encoding`, and the classic request-smuggling primitive.
 - When the body reports no length of its own, `Content-Length` supplies it, and the value
@@ -1020,7 +1006,7 @@ originates in WinHTTP:
   check it against. A value that is empty, non-decimal, or overflows `u64`, and duplicate
   values that disagree with each other, leave the declared length ambiguous and fail with
   `InconsistentContentLengthError`.
-- For **every** known length, not only lengths above `u32::MAX`, each present
+- For every known length, not only lengths above `u32::MAX`, each present
   `Content-Length` value must equal the length the framing uses. A disagreement fails with
   `MismatchedContentLengthError` below the `DWORD` boundary and
   `LargeContentLengthMismatchError` above it, the latter naming the exact 64-bit length
@@ -1057,9 +1043,9 @@ impl WinHttpBodyReader {
 }
 ```
 
-EOF is taken from a **zero-length `READ_COMPLETE`** and from nothing else. In
+Only a zero-length `READ_COMPLETE` indicates EOF. In
 particular the declared response length never ends the stream: WinHTTP decodes
-the body, and a peer may in any case send more or fewer bytes than it declared,
+the body, and a peer can send more or fewer bytes than it declared,
 so a length is only ever a sizing hint. The authoritative "body finished"
 decision is a `READ_COMPLETE` with `len == 0`.
 
@@ -1084,7 +1070,7 @@ a thread-local `plurality::MultiPool` and unsizes the handle to
 a thread reuses the same slot, which keeps a streaming download's allocation
 count flat in the payload size. The pool is thread-local because it is not
 shareable, while the handles it hands out are: a body is produced on the thread
-that issued the request and may be polled and dropped on another.
+that issued the request and can be polled and dropped on another.
 
 The resulting `HttpBody` is pull-based:
 WinHTTP reads are issued lazily as the consumer polls, so backpressure is natural and
@@ -1105,10 +1091,10 @@ is yielded as a zero-copy `BytesView`.
 `WINHTTP_READ_DATA_EX_FLAG_FILL_BUFFER` flag selects between two completion
 rules, and choosing correctly between them is what the sizing logic exists for:
 
-- **With the flag**, the call completes only once the submitted region is full or
+- With the flag, the call completes only once the submitted region is full or
   the response ends - the behavior of `WinHttpReadData`. Asking for more bytes
   than the peer will send therefore waits.
-- **Without the flag**, the call completes as soon as any bytes have been written,
+- Without the flag, the call completes as soon as any bytes have been written,
   so a trickling peer is streamed rather than waited on.
 
 The transport passes the flag exactly when the response declared how many bytes
@@ -1120,7 +1106,7 @@ length counts bytes the reader never sees. The remainder is decremented by each
 completed read; once it reaches zero the reads revert to the unflagged form,
 which is what lets a body that outruns its own declaration keep streaming.
 
-**Waiting for a full region is intended, including when it ends in a timeout.** A
+Waiting for a full region is expected, including when the wait ends in a timeout. A
 flagged read does not surface bytes the peer has already sent until the region
 fills or the response ends, so a peer that trickles out a body whose length it
 declared can leave the body idle timeout to fire rather than produce a short
@@ -1129,39 +1115,39 @@ arrive at link speed, and a peer that declares a length and then dribbles it out
 is misbehaving; treating the body as idle is the correct response, however
 briskly the peer believes it is sending. Short fills are not a supported
 delivery mode for declared-length content, so there is no case in which one
-should be produced instead. Content whose arrival rate is genuinely unknown is
+is produced instead. Content with an unknown arrival rate is
 exactly the content that arrives without a declared length, and that content
 takes the unflagged path.
 
 Three further constraints shape how much memory a read reserves and how much of it
 a single call receives.
 
-**WinHTTP writes into one contiguous region.** A `BytesBuf` reservation may be
+WinHTTP writes into one contiguous region. A `BytesBuf` reservation can be
 segmented across several pooled blocks, so each call is given
 `BytesBuf::first_unfilled_slice()` and a length bounded by that region and by
 `u32::MAX`. The reader never pairs a logical buffer length with a pointer into only
 its first block. Nothing here assumes a particular block size: the bound is read from
 the buffer at runtime, so providers can supply different block sizes.
 
-**Large reads are preferred.** `DESIRED_READ_SIZE` is 256 KiB, matching the
+`DESIRED_READ_SIZE` is 256 KiB, which matches the
 default I/O size used across related projects. It caps every reservation, and it
 is the size used outright when no declared length narrows it. Larger submissions
 amortize the cost of the WinHTTP call and its worker-thread handoff over more
 bytes.
 
-**Leftover capacity becomes a local reserve.** A reservation that exceeds the first
+Capacity after the first contiguous region becomes a local reserve. A reservation that exceeds the first
 contiguous region leaves the remaining blocks in the `BytesBuf`, and subsequent reads
 take their region from that reserve. A flagged read tops the buffer back up to the
-desired size, because a read that waits for a full region should be given a region
+desired size because a read that waits for a full region needs a region
 worth waiting for. An unflagged read does not: it takes whatever spare capacity is
 there and reaches the memory provider again only once the buffer has none left. Topping up
-an unflagged read would rent memory on every delivery to replace bytes the response
-may never send.
+an unflagged read rents memory on every delivery to replace bytes that the response
+can omit.
 
-**Retaining the buffer across frames is a security property, not only an
-efficiency one.** A pooled block stays rented for as long as any `BytesView` cut
+Retaining the buffer across frames limits retained memory and improves
+efficiency. A pooled block stays rented for as long as any `BytesView` cut
 from it is alive, so handing each emitted frame the whole buffer it was read into
-would let a peer that trickles bytes rent one block per byte delivered - retained
+lets a peer that trickles bytes rent one block per delivered byte. This makes retained
 memory bounded by the attacker's frame count rather than by the payload. The adapter
 instead detaches only the filled prefix and keeps the buffer, so consecutive small
 reads refill capacity the outstanding frames already pin. A response therefore holds
@@ -1254,7 +1240,7 @@ integration tests exercise the real OS against a localhost server (§1.2).
 Production code and mock unit tests do not depend on Tokio; the localhost TLS,
 HTTP/2, and HTTP/3 fixtures use Tokio as a dev-only dependency.
 
-**Miri.** The FFI path cannot run under Miri, so the cancellation/leak invariants
+The FFI path cannot run under Miri, so the cancellation and leak invariants
 (§4) are asserted on the mock path.
 The mock path exercises the same allocate/leak/reclaim code as production so that
 "free exactly once on `HANDLE_CLOSING`" is verified where Miri is available;
@@ -1291,7 +1277,7 @@ after the table.
 | Connection management (design.md §2) | connect handle opened per request and retained until the request's final close callback; finite `max_connections` causes no max-conns option call; `ConnectionKeepAlive` maps to `HTTP2/3_KEEPALIVE`, with the 5000 ms floor applied to HTTP/2 (§10.3); `connection_idle_timeout` maps to `CONNECTION_IDLE_TIMEOUT` on the session, with the same 5000 ms floor and `Unlimited` encoded as the largest `DWORD`; `DISABLE_GLOBAL_POOLING` on the session | generic lifetime settings are accepted and ignored without diagnostics |
 | Timeouts (design.md §6) | native timers initialize to unlimited and stay there; frozen-clock connect deadline (design.md §6.2); `ResponseTimeout` remains owned by `fetch`; `BodyTimeout` is passed to `HttpBodyBuilder` | a connect completing first drops its timer unfired; request body options override client body defaults through the existing merge rules |
 
-- **Inline / reentrant completion.** `MockBindings` is configured so an async call
+- Inline or reentrant completion. `MockBindings` is configured so an async call
   (e.g. `read_data`) fires its completion *synchronously, inline, on the submitting
   thread* before returning - the reentrant case `ASSURED_NON_BLOCKING_CALLBACKS`
   permits (§2.1). The tests assert the driver still observes the result correctly (the
@@ -1300,25 +1286,19 @@ after the table.
   callback borrow of one `RequestContext` are live together. Both
   `SECURE_FAILURE`/`REQUEST_ERROR` orders run, and error-code classification never
   depends on which notification arrived first.
-- **Cancellation and FFI ownership.** The centerpiece. (1) The response
-  body is dropped while a `READ_COMPLETE` is outstanding; `close_handle` is called and the pooled
-  `RequestContext` is not returned to the pool until the harness fires the
-  synthetic `HANDLE_CLOSING`, after which it is returned exactly once (the mock
-  records alloc/free; this runs under Miri where available). (2) Cancellation with an outstanding
-  write. (3) `ERROR_WINHTTP_OPERATION_CANCELLED` delivered after close is swallowed
-  (no waiter) without UB. (4) The pooled `Box` and rented `events_once` events return
-  to their instance-owned pools. (5) **Setup-failure leak-freedom:** the context
-  set-option (`WINHTTP_OPTION_CONTEXT_VALUE`) fails; the `Box` returns to the pool inline,
-  no leak. (6) **Null-context guard:** a `HANDLE_CLOSING` for a handle whose context
-  was never installed (early-failed request, or a connect/session handle) is ignored
-  and reconstructs no `Box`. (7) The session-level status callback is registered once
-  with the full notification mask (§4.3). (8) **Session lifetime:** the last
-  transport instance / session `Arc` is dropped while a response body is mid-read; the
+- Cancellation and FFI ownership. Tests drop the response body while a
+  `READ_COMPLETE` is outstanding. The context returns to its pool only after
+  the synthetic `HANDLE_CLOSING`, and it returns exactly once. Other tests cover
+  an outstanding write, a late `ERROR_WINHTTP_OPERATION_CANCELLED`, and return
+  of pooled events. A failed `WINHTTP_OPTION_CONTEXT_VALUE` call returns the
+  context without a leak. A null-context `HANDLE_CLOSING` does not reconstruct
+  a `Box`. The session callback uses the full notification mask (§4.3). The last
+  transport instance or session `Arc` can also drop during a body read. The
   context's retained session `Arc` keeps the session wrapper alive so the in-flight
   read completes, and request-guard drop closes only the request. The synthetic
   `HANDLE_CLOSING` then reclaims the context, closes the connect handle, and releases
   the session owner exactly once (this runs under Miri where available).
-- **Body streaming.** The response body reader is driven with a scripted
+- Body streaming. The response body reader is driven with a scripted
   `READ_COMPLETE` sequence: EOF is taken from a zero-length `READ_COMPLETE` and
   never from the declared length, `ReadComplete`
   returns the same pooled `BytesBuf` (ownership round-trip) with the correct appended
@@ -1401,7 +1381,7 @@ path end to end:
   WinHTTP timers are left unlimited, so no `fetch`-layer or transport-scheduled
   deadline can fire during a run and a timing race can never masquerade as a failure.
   No integration test asserts a timeout *firing* against a slow/black-hole endpoint,
-  because that would depend on real wall-clock timing and be flaky.
+  because it depends on real wall-clock timing and is flaky.
 - Real cancellation: an in-flight download future is dropped and teardown is clean
   (no panic, no leak), the integration counterpart to the unit cancellation tests.
 - Lifecycle soak: a large batch mixes normal completion, pending-body cancellation,
@@ -1472,11 +1452,11 @@ session (§3.2), and because pooling is per-session (`DISABLE_GLOBAL_POOLING`, �
 sessions already hold distinct pools. Distinct `PoolIndex` slots therefore land in distinct
 sessions/pools structurally, without the transport keying anything on the index. The real
 v1 resource profile is one session/pool per (thread × pool slot). Whether connection-pool
-ownership belongs on `fetch` at all or entirely on the transport is unresolved and may
+ownership belongs on `fetch` or entirely on the transport is unresolved and can
 retire the `PoolIndex` surface in its current shape (../../fetch/docs/stabilization.md,
 connection-management item).
 
-`builder_winhttp` does **not** open the session; it just calls `create_builder` with the
+`builder_winhttp` does not open the session. It calls `create_builder` with the
 factory. Each materialized (thread × pool-slot) transport instance opens its own session
 inside the factory when
 `fetch` materializes it (§3.2), so the session is scoped to the built client and never
@@ -1540,10 +1520,9 @@ owned and pooled by the session's WebIO layer, keyed by authority. Consequences:
 
 Because a connect handle is cheap, non-blocking, and carries no connection state,
 `fetch_winhttp` opens one per request via `WinHttpConnect` and retains it until
-the request handle's final `HANDLE_CLOSING` callback. There is **no**
-connect-handle cache. Caching would add shared
-mutable state (a per-authority map, which would need
-synchronization) to save a call that does no I/O, and it would buy no connection
+the request handle's final `HANDLE_CLOSING` callback. There is no
+connect-handle cache. Caching adds shared
+mutable state and needs synchronization. It saves a call that does no I/O and adds no connection
 reuse: reuse is keyed by authority in the session's pool and is independent of
 which connect handle a request used. Dropping the cache keeps the transport's
 shared state limited to the read-only session (§3.2).
@@ -1554,7 +1533,7 @@ For HTTP/1.1 there is no multiplexing: concurrent requests to the same authority
 are serviced by separate pooled connections under WinHTTP's own limits. The transport
 does not set `WINHTTP_OPTION_MAX_CONNS_PER_SERVER`: `fetch`'s finite
 `max_connections` value limits idle retained connections, while the WinHTTP option
-limits all physical connections and could throttle active requests. Finite values are
+limits all physical connections and can throttle active requests. Finite values are
 therefore ignored without a runtime warning, as documented in design.md §2.1.
 HTTP/2 and HTTP/3 multiplex many requests over a single connection, also handled by
 WinHTTP.
@@ -1566,9 +1545,9 @@ To get connection reuse we must: keep one session (§3.2) and not set
 keyed by authority, independent of connect-handle identity (§9.1), so opening a
 fresh connect handle per request costs nothing in reuse terms.
 
-**We do set `WINHTTP_OPTION_DISABLE_GLOBAL_POOLING` on the session at creation.**
-By default WinHTTP may share pooled connections process-wide across sessions. That
-would let two independent `fetch_winhttp` clients - for instance a strict one and
+The session sets `WINHTTP_OPTION_DISABLE_GLOBAL_POOLING` during creation.
+By default, WinHTTP can share pooled connections across sessions in one process. This
+lets two independent `fetch_winhttp` clients, for instance a strict one and
 one built with `accept_invalid_certs` (design.md §4) - reuse each other's pooled
 connections, collapsing the security boundary between them. Disabling global
 pooling scopes the connection pool to this session, so each `HttpClient` gets its
@@ -1590,7 +1569,7 @@ identity alone does not make a single connection closable. The v1 transport keep
 exactly one session for its whole lifetime and does not recycle it.
 Connection-lifetime handling under those controls is covered in design.md §2.2.
 
-**Deferred (v2): stale-connection retry.** WinHTTP offers
+Version 2 can consider stale-connection retry. WinHTTP offers
 `WINHTTP_OPTION_FAILED_CONNECTION_RETRIES` scoped to
 `WINHTTP_CONNECTION_RETRY_CONDITION_STALE_CONNECTION`, which makes WinHTTP
 transparently reconnect and retry a request that lands on a pooled connection the
@@ -1629,7 +1608,7 @@ wiring. The negotiated version is read back after `HEADERS_AVAILABLE` via
 `WINHTTP_OPTION_HTTP_PROTOCOL_USED` and set on the `HttpResponse`, so upstream
 telemetry reflects what was actually negotiated rather than what was requested.
 
-**Version-set semantics** (`supported_http_versions` -> options):
+`supported_http_versions` maps to options as follows:
 
 - Contains `HTTP_11`: baseline allowed.
 - Contains `HTTP_2`: set the HTTP/2 flag.
@@ -1646,8 +1625,8 @@ telemetry reflects what was actually negotiated rather than what was requested.
 - Unmappable entries: WinHTTP speaks only HTTP/1.1, /2, and /3. A version WinHTTP
   cannot express (`HTTP/0.9`, `HTTP/1.0`) is rejected at request construction with
   an `invalid_request` error rather than being silently dropped - silently
-  ignoring it could, for a single-element list like `[HTTP_10]`, leave *no*
-  protocol selected. A list containing only unmappable versions is likewise an
+  ignoring it can leave no protocol selected for a list such as `[HTTP_10]`.
+  A list containing only unmappable versions is likewise an
   error, not a fall-through to the default.
 
 ### 10.2 TLS flags
@@ -1655,13 +1634,13 @@ telemetry reflects what was actually negotiated rather than what was requested.
 The `WinHttpTlsConfig` knobs from design.md §4 reach Schannel as follows. Knobs are
 applied with `WinHttpSetOption` on the request handle before `WinHttpSendRequest`:
 
-- **`https` selection.** `WINHTTP_FLAG_SECURE` on `WinHttpOpenRequest` for
+- `https` selection. `WINHTTP_FLAG_SECURE` on `WinHttpOpenRequest` for
   `https://` targets.
-- **Insecure mode.** `accept_invalid_certs` / `accept_invalid_hostnames` set
+- Insecure mode. `accept_invalid_certs` and `accept_invalid_hostnames` set
   `WINHTTP_OPTION_SECURITY_FLAGS` with the relevant
   `SECURITY_FLAG_IGNORE_UNKNOWN_CA | IGNORE_CERT_CN_INVALID |
   IGNORE_CERT_DATE_INVALID | IGNORE_CERT_WRONG_USAGE` bits.
-- **Revocation checking.** WinHTTP performs no revocation check unless the
+- Revocation checking. WinHTTP performs no revocation check unless the
   request asks for one, so secure requests set
   `WINHTTP_OPTION_ENABLE_FEATURE` to `WINHTTP_ENABLE_SSL_REVOCATION`. The
   option accepts only a request handle, which is why it is applied alongside
@@ -1670,9 +1649,9 @@ applied with `WinHttpSetOption` on the request handle before `WinHttpSendRequest
   `accept_invalid_certs` suppresses the opt-in. That configuration exists to
   reach hosts presenting self-signed or privately issued certificates, which
   generally publish no reachable revocation endpoint, and WinHTTP has no
-  security flag that forgives a revocation check it could not complete - the
+  security flag that ignores an incomplete revocation check. The
   `SECURITY_FLAG_IGNORE_*` set covers chain, name, validity, and usage only.
-  Asking for a check could therefore only fail a request whose certificate the
+  Asking for a check can therefore fail a request whose certificate the
   caller already chose to trust. `accept_invalid_hostnames` is unrelated and
   leaves the opt-in in place, because a certificate naming the wrong host is
   still issued by an authority whose revocation endpoint answers.
@@ -1681,10 +1660,10 @@ applied with `WinHttpSetOption` on the request handle before `WinHttpSendRequest
   is accepted: it is a per-connection cost on the connection-establishment
   path, not a per-request cost on the steady-state path this transport
   optimizes for.
-- **Server certificate inspection / pinning.** Not offered in v1. If needed later
+- Server certificate inspection and pinning. Version 1 does not offer these. If needed later,
   it hooks the `SECURE_FAILURE` callback and a post-handshake
   `WINHTTP_OPTION_SERVER_CERT_CONTEXT` query.
-- **Client certificates (mTLS).** Out of scope for v1 (design.md §4.1). Wiring them
+- Client certificates (mTLS). Version 1 does not support them (design.md §4.1). Wiring them
   into Schannel means importing a DER chain plus PKCS#8 key into an in-memory store,
   producing a `PCCERT_CONTEXT`, attaching it with
   `WINHTTP_OPTION_CLIENT_CERT_CONTEXT`, and managing hardware-backed identities.
@@ -1693,21 +1672,21 @@ applied with `WinHttpSetOption` on the request handle before `WinHttpSendRequest
 
 The behaviors in design.md §5 are configured through these options.
 
-- **Automatic decompression.**
+- Automatic decompression.
   `WinHttpSetOption(WINHTTP_OPTION_DECOMPRESSION, WINHTTP_DECOMPRESSION_FLAG_GZIP
   | WINHTTP_DECOMPRESSION_FLAG_DEFLATE)` makes WinHTTP advertise
   `Accept-Encoding: gzip, deflate`, transparently decode the response, and strip
   `Content-Encoding`/`Content-Length`.
-- **Redirects.**
+- Redirects.
   `WINHTTP_OPTION_REDIRECT_POLICY = WINHTTP_OPTION_REDIRECT_POLICY_NEVER`, so
   redirect responses (3xx) are surfaced to the caller unchanged rather than
   followed.
-- **Cookies and automatic authentication.** Each request sets
+- Cookies and automatic authentication. Each request sets
   `WINHTTP_OPTION_DISABLE_FEATURE` with `WINHTTP_DISABLE_COOKIES` (WinHTTP neither
   stores `Set-Cookie` nor auto-attaches `Cookie`) and
   `WINHTTP_OPTION_DISABLE_FEATURE` with `WINHTTP_DISABLE_AUTHENTICATION` (WinHTTP
   does not intercept 401/407 or attach credentials).
-- **Idle connection reuse window.** `fetch`'s `connection_idle_timeout` (design.md §2.1)
+- Idle connection reuse window. `fetch`'s `connection_idle_timeout` (design.md §2.1)
   maps to the session-scoped `WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT`, applied during
   transport materialization before any connect or request handle is created, because
   WinHTTP rejects the option once a session has children. This option is absent from the
@@ -1719,7 +1698,7 @@ The behaviors in design.md §5 are configured through these options.
   governs reuse eligibility for every protocol the transport negotiates; no per-protocol
   qualification applies. `Limited(d)` sets `d` rounded up to whole milliseconds, raised
   to WinHTTP's 5000 ms minimum when shorter - WinHTTP rejects a shorter window outright
-  rather than clamping it, and a rejected option would fail session construction, so an
+  rather than clamping it. A rejected option fails session construction, so an
   aggressive idle policy must not become an unbuildable transport. `Unlimited` sets the
   largest representable `DWORD`, because the option's value is a plain unsigned
   millisecond count with no reserved "never expire" encoding. That window is finite - a
@@ -1734,7 +1713,7 @@ The behaviors in design.md §5 are configured through these options.
   neither of which is prompt, so this is not a promise of timely socket release. Failure
   to apply the option leaves the materialized transport in its initialization-failure
   state, like every other required session option.
-- **Keep-alive probes.** `fetch`'s `ConnectionKeepAlive` (design.md §2.1) maps to
+- Keep-alive probes. `fetch`'s `ConnectionKeepAlive` (design.md §2.1) maps to
   session-scoped `WINHTTP_OPTION_HTTP2_KEEPALIVE` /
   `WINHTTP_OPTION_HTTP3_KEEPALIVE` settings applied during transport
   materialization, before any connect or request handle is created. They make
@@ -1747,7 +1726,7 @@ The behaviors in design.md §5 are configured through these options.
   documented 5000 ms minimum are raised to 5000 ms. HTTP/3 has no documented minimum;
   values there are raised to a transport-chosen 1 ms floor. That floor exists only so a
   zero-length interval never reaches an option whose zero value WinHTTP leaves undefined:
-  "keep-alive disabled" is a plausible reading of zero, and it would invert a caller that
+  Zero can mean "keep-alive disabled," which reverses a caller that
   explicitly asked for probes. The fit is imperfect and is documented rather than
   diagnosed at runtime: WinHTTP PINGs idle pooled connections and has no separate
   "active-only" mode (so `ActiveConnections` and `ActiveAndIdleConnections` behave
@@ -1821,7 +1800,7 @@ reintroduces the feature also reintroduces the obligation.
 | Basic authentication needs a secure connection | Not applicable. The transport never supplies credentials and never answers a challenge; a 401 is returned to the caller as an ordinary response (§10.3). |
 | A low auto-logon policy is a risk | Not applicable. The transport sets no auto-logon policy and sends no credentials, so the default policy governs and no site is authenticated against. |
 | SSL 2.0 is not used unless enabled | The transport never sets `WINHTTP_OPTION_SECURE_PROTOCOLS`, so the OS default protocol set applies and SSL 2.0 stays off. Protocol version policy is deliberately left to OS and administrator configuration. |
-| Revocation checking must be requested | Secure requests set `WINHTTP_OPTION_ENABLE_FEATURE` to `WINHTTP_ENABLE_SSL_REVOCATION` (§10.2). **Deliberate deviation:** `accept_invalid_certs` withdraws the request, because that configuration targets certificates with no reachable revocation endpoint and WinHTTP cannot forgive a check it could not complete. |
+| Revocation checking must be requested | Secure requests set `WINHTTP_OPTION_ENABLE_FEATURE` to `WINHTTP_ENABLE_SSL_REVOCATION` (§10.2). `accept_invalid_certs` withdraws the request because these certificates often have no reachable revocation endpoint. WinHTTP cannot ignore an incomplete check. |
 | A session maps to a single identity | Sessions are anonymous and carry no identity: credentials are never set, automatic authentication is disabled, and cookies are disabled through `WINHTTP_DISABLE_COOKIES` (§10.3), so no state links one caller's request to another's. |
 | Operations on a request handle must be synchronized | A request handle carries at most one outstanding operation at a time, enforced by the single operation slot in the request context (§4). `RequestGuard` is the sole close authority and closes exactly once; cancellation closes the handle and waits for the final `HANDLE_CLOSING` callback rather than racing an in-flight operation. |
 | Trace files contain sensitive information | Not applicable. The transport never enables WinHTTP tracing. |
@@ -1853,21 +1832,21 @@ The transport reports through the `observed::Sink` supplied in its dependencies
 surface listed in design.md §8; this chapter covers how they are produced. The kinds of
 signal emitted are deliberately distinct:
 
-- **Metrics** (counters) stay low-cardinality: request count and error count. No
+- Metrics stay low-cardinality: request count and error count. No
   per-request or per-connection attribute is attached to a metric.
-- **Log events** may carry richer, higher-cardinality context that is useful for
-  diagnosing a single failure but would be spam as a metric dimension.
+- Log events can carry higher-cardinality context that helps diagnose
+  one failure but creates too many metric dimensions.
 
-**Session setup step identifiers.** The `winhttp.operation` field on the
+The `winhttp.operation` field on the
 initialization-failure event carries one of `open`, `set_timeouts`,
 `disable_global_pooling`, `connection_idle_timeout`, `assured_non_blocking_callbacks`,
 `http2_keep_alive`, `http3_keep_alive`, or `set_status_callback`. These name the session
 setup calls made when a session is opened (§3.2) one for one, so adding or removing a
 setup call changes
 the set. That is why design.md §8 declares the field but not its values: pinning the
-value set would freeze the internal sequence of setup calls into the crate's contract.
+value set freezes the internal setup sequence into the crate contract.
 
-**Cold-connect error attribution (log only).** WinHTTP fires
+Cold-connect error attribution is log-only. WinHTTP fires
 `CONNECTING_TO_SERVER` when a request establishes a *new* physical connection
 rather than reusing a pooled one. When a request then fails (connect timeout,
 `REQUEST_ERROR`, `SECURE_FAILURE`), the transport annotates the failure's log event
@@ -1878,7 +1857,7 @@ their send failed. Attribution turns on `CONNECTING_TO_SERVER` rather than
 that is the case an operator most needs to see. This lets an operator distinguish "the
 server/pool is unhealthy" from "cold-connection establishment is slow or failing" - these
 have different remediations. This attribution is attached only to the log event; it is
-**not** promoted to a metric label, to keep connection-establishment noise out of the
+not promoted to a metric label. This keeps connection-establishment noise out of the
 metric cardinality.
 
 ## 14. Future opportunities
@@ -1886,7 +1865,7 @@ metric cardinality.
 Design points deliberately deferred in v1, recorded here so they are revisited when
 the `fetch` API or profiling data makes them actionable:
 
-- **Consolidate per-thread sessions into one session per client.** v1 opens one WinHTTP
+- Consolidate per-thread sessions into one session per client. Version 1 opens one WinHTTP
   session (and therefore one connection pool) per thread - and per `multiple_pools` slot
   within a thread (§3.2) - because that is the only shape the
   current `fetch` custom-transport API expresses while still isolating independently built
@@ -1898,19 +1877,19 @@ the `fetch` API or profiling data makes them actionable:
   revisit whether one shared session per client is the better default. Tracked as `fetch`
   API feedback (../../fetch/docs/stabilization.md, connection-management item) so the
   divergence is not forgotten when that API becomes more expressive.
-- **Per-thread vs shared instancing as a knob.** Whether per-thread instancing is the right
-  default at all could become configurable: a low-traffic client gains nothing from
-  per-thread instances and might prefer a single shared instance (§3.2). Left unconfigurable
+- Make per-thread or shared instancing configurable. Whether per-thread instancing is the right
+  default can become configurable. A low-traffic client gains nothing from
+  per-thread instances and can prefer a single shared instance (§3.2). Left unconfigurable
   in v1 - a knob earns its place only with demonstrated value - but a candidate if
   profiling shows it matters.
-- **Session-keyed connection pools (`PoolIndex`).** v1 does not key anything on `fetch`'s
+- Session-keyed connection pools (`PoolIndex`). Version 1 does not key anything on `fetch`'s
   `PoolIndex` value. It does not need to: `fetch` invokes the factory once per pool slot, so
   each slot already opens its own session/pool (§8), giving a resource profile of one
   session/pool per (thread × pool slot) rather than a single collapsed OS pool. If pool
   ownership stays a transport concern after the v2 sessions/pools discussion, revisit
   whether to interpret `PoolIndex` explicitly (../../fetch/docs/stabilization.md,
   connection-management item).
-- **Per-connection identity through connection GUIDs.** WinHTTP exposes a pair of
+- Per-connection identity through connection GUIDs. WinHTTP exposes a pair of
   public request-scoped options, `WINHTTP_OPTION_CONNECTION_GUID` and
   `WINHTTP_OPTION_MATCH_CONNECTION_GUID`, that together give a connection an identity
   the transport currently assumes it cannot have: the first tags the connection serving
@@ -1918,33 +1897,33 @@ the `fetch` API or profiling data makes them actionable:
   served it, and the second steers a request onto a connection bearing a given tag,
   optionally forcing a new connection when no tagged match exists. Deferred design points
   become reachable with them, and each is a separate decision:
-  - **`connection_lifetime` for `Fixed`/`PerConnection`** (design.md §2.2). Tagging
+  - `connection_lifetime` for `Fixed` or `PerConnection` (design.md §2.2). Tagging
     connections with a generation GUID and rotating that generation on a schedule
     retires connections by age: requests demand the current generation, so a rotation
     forces fresh connections and the previous generation ages out through the idle
     timeout. A single rotating generation retires the whole pool at once, which is the
     synchronized-reconnect behavior `PerConnection` exists to prevent, so a faithful
     implementation needs several staggered generations rather than one.
-  - **Cold-connect attribution on success.** §13 records connection establishment only
+  - Cold-connect attribution on success. §13 records connection establishment only
     on the failure path, so a client that silently reconnects on every request - the
     pathology an idle window that is too short produces - looks healthy in telemetry.
     Counting distinct connection GUIDs across requests measures it directly.
-  - **`ConnectionInfo` on responses** (design.md §2.1). Recording when each GUID was
+  - `ConnectionInfo` on responses (design.md §2.1). Recording when each GUID was
     first seen yields connection age, which is the input `fetch_hyper`'s
     `ConnectionInfo` reports and which this transport currently declares it does not
     track.
-- **Distinguishing a near-zero idle window from "do not pool".** The idle window's
+- Distinguish a near-zero idle window from "do not pool." The idle window's
   5000 ms floor means a caller asking for a very short window gets five seconds, which is
   the mapping's largest semantic stretch: such a caller most plausibly means "do not pool
   at all", and §9.3 already documents the per-request
   `WINHTTP_OPTION_DISABLE_FEATURE | WINHTTP_DISABLE_KEEP_ALIVE` that expresses exactly
-  that. Treating a sub-floor window as pooling-off would honor the intent more closely
+  that. Treating a sub-floor window as pooling-off honors the intent more closely
   than raising it, but it reads intent into a duration rather than taking it at face
   value, so it needs a deliberate decision rather than an inference.
-- **Native performance knobs.** WinHTTP carries further options covering socket send
+- Native performance configuration. WinHTTP has more options for socket send
   buffer sizing, TCP autotuning and initial retransmission timeout, allocation
-  lookasides and heap extension, and response-body fast-forwarding that may bear on the
-  read path in §6.2. None maps onto a generic `fetch` option, so adopting any would mean
+  lookasides and heap extension, and response-body fast-forwarding that can affect the
+  read path in §6.2. None maps onto a generic `fetch` option, so adopting one means
   either a new transport-specific knob or an unconditional transport policy, and a knob
   earns its place only with demonstrated value. Recorded here so the option surface is known
   the next time profiling identifies a bottleneck rather than rediscovered then.

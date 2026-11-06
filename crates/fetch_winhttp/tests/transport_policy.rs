@@ -1,14 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Transport policy decisions observed on the wire over localhost.
+//! Tests transport policy on the wire over localhost.
 //!
-//! Covers what the transport is contractually required to put on - or keep off - the wire and to
-//! surface unchanged to the caller: server addressing, request method and body framing, the
-//! rejection of request trailers, the selective decoding of response content encodings, and the
-//! deliberate absence of redirect following, cookie handling and authentication retries. These
-//! behaviours hold for every protocol version; plaintext HTTP/1.1 is simply the cheapest fixture
-//! to observe them through.
+//! Covers server addressing, request methods, body framing, request-trailer
+//! rejection, selective response decoding, redirects, cookies, and
+//! authentication. These rules apply to every protocol. Plaintext HTTP/1.1 is
+//! the smallest fixture that shows them.
 
 #![cfg(windows)]
 
@@ -82,25 +80,20 @@ fn a_bracketed_ipv6_authority_reaches_the_server() {
 #[cfg_attr(miri, ignore)]
 #[test]
 fn a_caller_supplied_content_length_reaches_the_wire_exactly_once() {
-    // Eleven bytes, comfortably below the `DWORD` boundary, so the transport takes the
-    // `dwTotalLength` framing path rather than the ignore-total sentinel path.
+    // Eleven bytes fit below the `DWORD` limit, so the transport uses
+    // `dwTotalLength` instead of the ignore-total sentinel.
     const BODY: &str = "framed body";
 
     let server = TestServer::http([ResponsePlan::ok("declared length received")]);
     let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
 
-    // Below the `DWORD` boundary the transport keeps an agreeing caller-supplied
-    // `Content-Length` header *and* passes the same length as `dwTotalLength` to
-    // `WinHttpSendRequest`, because MSDN requires the application to specify the length in the
-    // call whenever the declared length is below 2^32. Two framing inputs describe one body, yet
-    // the crate promises that exactly one framing directive reaches the wire
-    // (implementation.md section 6.1). Only a server-side observation can confirm that, because
-    // `WinHTTP` - not this crate - decides what it finally writes when both are supplied.
+    // Below the `DWORD` limit, the transport keeps an agreeing
+    // `Content-Length` and passes the same value as `dwTotalLength`. MSDN
+    // requires both inputs. Only the server can prove that WinHTTP sends one
+    // framing directive.
     //
-    // The header is supplied in a non-canonical form so it cannot be confused with the one
-    // `HttpRequestBuilder::build` auto-populates from the body length: only a caller-supplied
-    // header can arrive at the transport as `0011`, and only a length that survived
-    // reconciliation and `WinHTTP` framing can leave as `11`.
+    // The non-canonical `0011` value proves that the caller supplied this
+    // header. A received `11` proves that reconciliation normalized it.
     let response = futures::executor::block_on(
         test_client
             .client
@@ -117,9 +110,8 @@ fn a_caller_supplied_content_length_reaches_the_wire_exactly_once() {
     assert_eq!(snapshot.requests.len(), 1);
     let request = &snapshot.requests[0];
     assert_eq!(request.body, Bytes::from_static(BODY.as_bytes()));
-    // `hyper` accepts repeated identical `Content-Length` values silently, so looking the header
-    // up singly would not notice a second copy travelling next to the caller's. Count every
-    // received value instead.
+    // `hyper` accepts repeated identical `Content-Length` values. Count every
+    // received value so a second copy cannot pass unnoticed.
     assert_eq!(
         request.headers.get_all(CONTENT_LENGTH).iter().count(),
         1,
@@ -130,18 +122,16 @@ fn a_caller_supplied_content_length_reaches_the_wire_exactly_once() {
         request.headers.get(CONTENT_LENGTH).unwrap().to_str().unwrap(),
         BODY.len().to_string()
     );
-    // The other framing directive must be absent: a length and a transfer coding together are
-    // the two-directive shape RFC 9112 section 6.1 resolves in favor of the coding.
+    // The other framing directive must be absent. RFC 9112 section 6.1 gives
+    // transfer coding priority when both directives are present.
     assert!(!request.headers.contains_key(TRANSFER_ENCODING));
 }
 
 #[cfg_attr(miri, ignore)]
 #[test]
 fn an_empty_request_body_is_framed_as_a_zero_length() {
-    // A zero-length body is the one known length whose `dwTotalLength` encoding collides with
-    // `WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH`, which is also zero. Framing therefore cannot be
-    // read off the value the transport passes, and only a server-side observation shows whether
-    // an empty POST is framed as a zero length or as no body at all.
+    // A zero-length body and `WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH` both use
+    // zero. Only the server can show how WinHTTP frames an empty POST.
     let server = TestServer::http([ResponsePlan::ok("no body received"), ResponsePlan::ok("empty body received")]);
     let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
 
@@ -170,10 +160,9 @@ fn an_empty_request_body_is_framed_as_a_zero_length() {
 #[cfg_attr(miri, ignore)]
 #[test]
 fn a_disagreeing_caller_supplied_content_length_never_reaches_the_wire() {
-    // Deliberately shorter than the body rather than longer. A caller length that exceeds the
-    // body would leave the server waiting for bytes that never arrive, so a regression in the
-    // reconciliation would turn this test into an indefinite hang instead of a failure. A
-    // shorter length can only ever produce a prompt error.
+    // Use a value shorter than the body. A longer value can leave the server
+    // waiting forever if reconciliation regresses. A shorter value fails
+    // promptly.
     const DECLARED: &str = "4";
     const BODY: &str = "framed body";
 
@@ -222,10 +211,9 @@ fn request_trailers_fail_explicitly() {
     )
     .unwrap_err();
     assert!(error.to_string().contains("cannot submit request trailer frames"));
-    // The transport writes the data frame and only then rejects the trailer frame, so the upload
-    // is abandoned mid-body. The fixture records a request only once it has collected a complete
-    // body, which requires a terminating chunk that never arrives, so an empty recording is the
-    // available proof that no trailer section reached the peer.
+    // The transport writes the data frame before it rejects the trailer frame.
+    // The fixture records only complete requests. An empty recording proves
+    // that no final chunk or trailer section reached the peer.
     assert!(request_server.finish().requests.is_empty());
 }
 
@@ -259,9 +247,7 @@ fn compression_redirects_and_cookies_follow_transport_policy() {
     futures::executor::block_on(test_client.client.get(server.url("/set-cookie")).fetch_text_body()).unwrap();
     futures::executor::block_on(test_client.client.get(server.url("/check-cookie")).fetch_text_body()).unwrap();
 
-    // Transparent decoding strips the encoding metadata so callers never see a
-    // Content-Encoding that no longer describes the body, or a Content-Length
-    // that still measures the compressed wire form.
+    // Automatic decoding removes metadata that describes the encoded body.
     assert!(gzip.headers().get(CONTENT_ENCODING).is_none());
     assert!(gzip.headers().get(CONTENT_LENGTH).is_none());
     assert!(deflate.headers().get(CONTENT_ENCODING).is_none());

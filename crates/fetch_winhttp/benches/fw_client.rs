@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Client-lifecycle cost of the `fetch_winhttp` transport: the work that happens once per client
-//! rather than once per request, plus the cost of a request that never reaches a server.
+//! Measures work that happens once per client and the cost of a request that
+//! does not reach a server.
 //!
-//! Only the benchmark thread is measured, so WinHTTP's own worker threads and the fixture's runtime
-//! threads are excluded from the processor-time and allocation figures.
+//! The measurements include only the benchmark thread. They exclude WinHTTP
+//! worker threads and fixture runtime threads.
 
 #![allow(clippy::unwrap_used, reason = "benchmark code")]
 #![cfg_attr(
@@ -75,10 +75,9 @@ mod windows {
         });
         drop(template);
 
-        // Building a fresh client materializes the initial per-thread transport (and
-        // its WinHTTP session) immediately; the first request then additionally pays
-        // connection setup. The difference against `fw_request/roundtrip/get_minimal`
-        // is that whole cold path.
+        // A fresh client creates the first per-thread transport and WinHTTP
+        // session. The first request also creates a connection. Compare this
+        // result with `fw_request/roundtrip/get_minimal` for the full cold path.
         let server = TestServer::http_repeating(ResponsePlan::ok(""));
         let url = server.url("/first");
         measure_async(&mut group, allocs, time, "first_request", |_| async {
@@ -93,8 +92,8 @@ mod windows {
     fn error_path(c: &mut Criterion, allocs: &AllocSession, time: &TimeSession) {
         let mut group = c.benchmark_group("fw_client/error_path");
 
-        // The fixture accepts the connection and resets it, so the request fails
-        // on a reset that is already in flight rather than on any timer.
+        // The fixture accepts and resets the connection. The request fails on
+        // that reset instead of a timer.
         let server = ResetServer::start();
         let url = server.url("/reset");
 
@@ -144,7 +143,8 @@ mod windows {
                 let _allocs = allocs_operation.measure_thread().iterations(iters);
                 let _time = time_operation.measure_thread().iterations(iters);
 
-                // One executor entry for the whole sample; each iteration only awaits the request.
+                // Enter the executor once per sample. Each iteration awaits one
+                // request.
                 let mut pool = LocalPool::new();
                 pool.run_until(time_sample_async(iters, operation))
             });
