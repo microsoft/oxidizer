@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.1] - 2026-11-06
+
+- Simplify driver-hosting documentation and the package description.
+- Update the local `observed` requirement from `0.30.0` to `0.30.1`.
+
 ## [0.6.0] - 2026-11-02
 
 - Add `DriverHost::has_primary` so a runtime can select how each worker waits for I/O.

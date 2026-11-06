@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.1] - 2026-11-06
+
+- Preserve self-borrows in deferred futures by keeping their storage stable while polling.
+- Avoid notifying the worker again when a task running on that worker wakes itself.
+- Clarify task creation, worker scheduling, and transfer behavior in the documentation.
+- Update the local `arty_executor` requirement from `0.6.0` to `0.6.1`.
+- Update the local `arty_io_host` requirement from `0.6.0` to `0.6.1`.
+- Update the local `arty_macros` requirement from `0.6.0` to `0.6.1`.
+- Update the local `observed` requirement from `0.30.0` to `0.30.1`.
+- Update the local `performables` requirement from `0.3.1` to `0.4.0`.
+- Update the local `seismograph` requirement from `0.4.0` to `0.5.0`.
+- Update the local `tick` requirement from `0.9.0` to `0.9.1`.
+
 ## [0.6.0] - 2026-11-02
 
 - Breaking: Replace `arty::task::Builtins` with `arty::task::Context` in task factories and macro

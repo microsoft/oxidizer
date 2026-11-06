@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0] - 2026-11-06
+
+- Update published local dependency requirements. No direct source change.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `performables`.
+- Update the local `performables` requirement from `0.3.1` to `0.4.0`.
+
 ## [0.8.1] - 2026-11-02
 
 - Update synchronization and published Tokio test requirements. The behavior that combines

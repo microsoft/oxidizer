@@ -1,29 +1,26 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! [`TlsBackendBuilder`] — materializes [`TlsOptions`] into a [`TlsBackend`].
+//! Builds [`TlsBackend`] values from [`TlsOptions`].
 
 use http::Version;
 
 use crate::backend::{BackendError, TlsBackend};
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsKind};
 
-/// Builds a [`TlsBackend`] from a [`TlsOptions`] using environment-supplied
-/// defaults.
+/// Builds a [`TlsBackend`] from [`TlsOptions`] and environment defaults.
 ///
-/// Lets HTTP client crates own platform and policy choices (such as which
-/// crypto provider, root store, or default backend to use) without baking
-/// them into `fetch_tls`. Each backend that needs environment state has its
-/// own setter; the native-tls and pre-configured backends do not consult
-/// these defaults.
+/// HTTP client crates provide platform and policy values, such as the crypto
+/// provider, root store, and default backend. Each backend that needs these
+/// values has a separate method. Native TLS and pre-configured backends do not
+/// use rustls defaults.
 ///
-/// In addition to backend-specific defaults, a `TlsBackendBuilder` carries:
+/// A `TlsBackendBuilder` also contains:
 ///
-/// - the default backend used when a [`TlsOptions`] does not pin one, and
-/// - the default list of supported HTTP versions used when the options
-///   builder did not set them.
+/// - The default backend for [`TlsOptions`] that does not select one.
+/// - The default HTTP versions when the options builder does not set them.
 ///
-/// Use [`new`](Self::new) when no backend-specific state is required.
+/// Use [`new`](Self::new) when you do not need rustls defaults.
 #[derive(Clone, Debug)]
 pub struct TlsBackendBuilder {
     #[cfg(any(feature = "rustls", test))]
@@ -33,7 +30,7 @@ pub struct TlsBackendBuilder {
     pub(crate) supported_http_versions: Vec<Version>,
 }
 
-/// Environment-supplied defaults specific to the rustls backend.
+/// Environment defaults for the rustls backend.
 #[cfg(any(feature = "rustls", test))]
 #[derive(Clone, Debug)]
 pub(crate) struct RustlsDefaults {
@@ -44,16 +41,16 @@ pub(crate) struct RustlsDefaults {
 impl TlsBackendBuilder {
     /// Creates an empty builder.
     ///
-    /// Sufficient for the native-tls and pre-configured backends.
-    /// Materializing a rustls backend from an empty builder returns a
-    /// [`BackendError`].
+    /// An empty builder can build pre-configured backends. If the `native-tls`
+    /// feature is enabled, it can also build native TLS options. Rustls returns
+    /// [`BackendError`] unless the options or this builder provide a crypto
+    /// provider and server certificate verifier.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets the default HTTP versions used when the options builder did not
-    /// set them.
+    /// Sets the default HTTP versions for options that do not set them.
     ///
     /// # Panics
     ///
@@ -62,21 +59,18 @@ impl TlsBackendBuilder {
     pub fn supported_http_versions(mut self, versions: &[Version]) -> Self {
         assert!(
             !versions.is_empty(),
-            "supported_http_versions cannot be empty; configure at least one HTTP version (for example HTTP/1.1 or HTTP/2)"
+            "supported_http_versions cannot be empty. Configure at least one HTTP version, such as HTTP/1.1 or HTTP/2"
         );
         self.supported_http_versions = versions.to_vec();
         self
     }
 
-    /// Configures the rustls crypto provider and a fallback server
-    /// certificate verifier.
+    /// Sets the rustls crypto provider and default server certificate verifier.
     ///
-    /// The verifier is used only when the application did not supply one of
-    /// its own on the options builder.
+    /// The builder uses this verifier when the application does not provide one.
     ///
-    /// If no default backend has been selected yet, this call also promotes
-    /// rustls to be the default backend. Call `defaults_to_native_tls`
-    /// afterwards to override that promotion.
+    /// If no default backend is selected, this method selects rustls. Call
+    /// `defaults_to_native_tls` afterward to select native TLS instead.
     #[cfg(any(feature = "rustls", test))]
     #[must_use]
     pub fn configure_rustls(
@@ -95,8 +89,7 @@ impl TlsBackendBuilder {
 
     /// Sets the default backend to native-tls.
     ///
-    /// This default applies to any [`TlsOptions`] that did not pin a
-    /// backend itself.
+    /// This default applies when [`TlsOptions`] does not select a backend.
     #[cfg(any(feature = "native-tls", test))]
     #[must_use]
     pub fn defaults_to_native_tls(mut self) -> Self {
@@ -106,10 +99,10 @@ impl TlsBackendBuilder {
 
     /// Sets the default backend to rustls.
     ///
-    /// This default applies to any [`TlsOptions`] that did not pin a
-    /// backend itself. rustls still requires `configure_rustls` to be
-    /// called; selecting rustls without configuring it makes
-    /// [`build_backend`](Self::build_backend) fail with a [`BackendError`].
+    /// This default applies when [`TlsOptions`] does not select a backend.
+    /// You must also call [`configure_rustls`](Self::configure_rustls).
+    /// Otherwise, [`build_backend`](Self::build_backend) returns
+    /// [`BackendError`].
     #[cfg(any(feature = "rustls", test))]
     #[must_use]
     pub fn defaults_to_rustls(mut self) -> Self {
@@ -117,23 +110,25 @@ impl TlsBackendBuilder {
         self
     }
 
-    /// Materializes `options` into a [`TlsBackend`] using this builder.
+    /// Builds a [`TlsBackend`] from `options`.
     ///
-    /// Behavior depends on how `options` was constructed:
+    /// The result depends on how the caller constructed `options`:
     ///
-    /// - default (no backend pinned) — uses this builder's configured
-    ///   default backend.
-    /// - rustls — requires `configure_rustls` to have been called;
-    ///   values set on the options builder take precedence over the
-    ///   defaults on this builder.
-    /// - native-tls — this builder is ignored.
-    /// - pre-configured — the wrapped backend is returned unchanged.
+    /// - Default options use the backend selected on this builder.
+    /// - Rustls options use their values before this builder's rustls defaults.
+    /// - Native TLS options do not use this builder's backend defaults.
+    /// - Pre-configured options return the wrapped backend without changes.
     ///
     /// # Errors
     ///
-    /// Returns [`BackendError`] if no backend is selected, if required
-    /// rustls defaults are missing, or if backend construction fails (for
-    /// example, invalid client identity material).
+    /// Returns [`BackendError`] when no backend is selected, required rustls
+    /// defaults are missing, or the backend cannot use the provided values.
+    ///
+    /// # Panics
+    ///
+    /// Panics on Apple platforms other than macOS when native TLS options
+    /// contain a client identity. `native_tls` does not support client
+    /// identities on those platforms.
     pub fn build_backend(&self, options: TlsOptions) -> Result<TlsBackend, BackendError> {
         match options.inner {
             TlsOptionsKind::Auto => self.build_auto_backend(options.shared),
@@ -157,7 +152,7 @@ impl TlsBackendBuilder {
     #[allow(
         clippy::allow_attributes,
         clippy::no_effect_underscore_binding,
-        reason = "`shared` is used by feature-gated arms; with neither rustls nor native-tls enabled only Unselected is reachable"
+        reason = "feature-gated arms use `shared`. Only Unselected is available when both backend features are disabled"
     )]
     fn build_auto_backend(&self, shared: SharedOptions) -> Result<TlsBackend, BackendError> {
         match self.default {
@@ -175,11 +170,11 @@ impl TlsBackendBuilder {
                 )))
             }
             DefaultBackend::Unselected => {
-                // use the shared options
+                // Keep shared options in builds where backend features are disabled.
                 let _shared = shared;
 
                 Err(BackendError::caused_by(
-                    "no default TLS backend is configured on TlsBackendBuilder; call defaults_to_rustls() / defaults_to_native_tls() (or configure_rustls(), which implies rustls), or construct TlsOptions via one of its builders",
+                    "TlsBackendBuilder has no default TLS backend. Enable a backend feature if needed, then select that backend as the default before building automatic TlsOptions",
                 ))
             }
         }
@@ -197,11 +192,12 @@ impl Default for TlsBackendBuilder {
     }
 }
 
-/// Default TLS backend used when a [`TlsOptions`] does not pin one.
+/// The default TLS backend when [`TlsOptions`] does not select one.
 #[derive(Debug, Clone, Default)]
 pub(crate) enum DefaultBackend {
-    /// No default backend chosen. Building an unpinned [`TlsOptions`]
-    /// against such a builder returns a [`BackendError`].
+    /// No default backend is selected.
+    ///
+    /// Building automatic [`TlsOptions`] returns [`BackendError`].
     #[default]
     Unselected,
 

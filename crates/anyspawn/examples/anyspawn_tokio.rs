@@ -1,24 +1,25 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Spawning tasks with Tokio.
+//! Spawning tasks with a Tokio runtime.
 
 use anyspawn::Spawner;
 
 #[tokio::main]
-async fn main() {
-    let spawner = Spawner::new_tokio();
+async fn main() -> Result<(), anyspawn::JoinError> {
+    let spawner = Spawner::new_tokio(None);
 
-    // Fire-and-forget: spawn a task without waiting for its result
+    // Wait for the task and propagate a runtime failure.
     let () = spawner
         .spawn({
             async move {
                 println!("Background task completed!");
             }
         })
-        .await;
+        .await?;
 
     // Retrieve a result by awaiting the JoinHandle
-    let value = spawner.spawn(async { 1 + 1 }).await;
+    let value = spawner.spawn(async { 1 + 1 }).await?;
     println!("Got result: {value}");
+    Ok(())
 }

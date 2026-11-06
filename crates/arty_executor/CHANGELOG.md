@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.1] - 2026-11-06
+
+- Add the optional `inspection` feature. A runtime can request bounded task descriptions
+  from native storage and enable poll measurements during an observation window.
+- Add execution-state queries for the Arty scheduler. Keep inspection disabled in Arty.
+  This package remains a private implementation API.
+- Update the local `observed` requirement from `0.30.0` to `0.30.1`.
+- Update the local `performables` requirement from `0.3.1` to `0.4.0`.
+- Update the local `tick` requirement from `0.9.0` to `0.9.1`.
+
 ## [0.6.0] - 2026-11-02
 
 - Breaking: Supply a `TaskCompletion` target when registering a task. This replaces the executor's

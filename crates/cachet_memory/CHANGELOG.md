@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.9.2] - 2026-11-06
+
+- Update published local dependency requirements. No direct source change.
+- Update the local `performables` requirement from `0.3.1` to `0.4.0`.
+
 ## [0.9.1] - 2026-11-02
 
 - Update cache-tier, synchronization, and test dependencies. This release does not change the memory

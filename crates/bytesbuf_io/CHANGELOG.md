@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0] - 2026-11-06
+
+- Accept convertible memory providers in the public `FakeRead`, `FakeWrite`, `Null`,
+  and `Pending` test builders. Callers can pass `GlobalPool` directly.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `bytesbuf`, `seismograph`, `seismograph_io`.
+- Update the local `bytesbuf` requirement from `0.13.0` to `0.14.0`.
+
 ## [0.13.0] - 2026-11-02
 
 - Update the I/O adapters to use Bytesbuf 0.13.0 and the Seismograph 0.4.0 packages. This release

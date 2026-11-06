@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0] - 2026-11-06
+
+- Breaking: Support Arty and Tokio explicitly. Remove custom spawner and layering APIs,
+  `SpawnCustom`, and `new_tokio_with_handle`. Pass `Some(handle)` or `None` to `new_tokio`.
+- Breaking: Awaiting `JoinHandle` returns `Result<T, JoinError>`. Task panic, cancellation,
+  and shutdown rejection become errors in the joining task.
+- Add `SpawnerBuilder` and the optional `observed` feature for event-context transfer.
+  Without `arty` or `tokio`, public types remain available, but no spawner can be constructed.
+- Add local package `ohno` at `0.5.4`. Remove the local `performables` requirement.
+- Update the local `arty` requirement from `0.6.0` to `0.6.1`.
+- Add the local `observed` requirement at `0.30.1`.
+
 ## [0.10.0] - 2026-11-02
 
 - Add the `arty` feature so `Spawner` can submit tasks to an Arty runtime.
