@@ -148,7 +148,7 @@ where
     T: TaskCompletion<R>,
     I: Inspector<F>,
 {
-    TaskHandle::new(pool.alloc_arc_pin(Task::new_inspected(future, completion, options, sink, inspector)))
+    TaskHandle::new(pool.alloc_arc_pin_with(|| Task::new_inspected(future, completion, options, sink, inspector)))
 }
 
 pub(crate) fn allocate_task<F, R, T>(pool: &MultiPool, future: F, options: TaskOptions, sink: Sink, completion: T) -> TaskHandle
@@ -157,7 +157,7 @@ where
     R: 'static,
     T: TaskCompletion<R>,
 {
-    TaskHandle::new(pool.alloc_arc_pin(Task::new_with_target(future, completion, options, sink)))
+    TaskHandle::new(pool.alloc_arc_pin_with(|| Task::new_with_target(future, completion, options, sink)))
 }
 
 #[cfg(test)]
