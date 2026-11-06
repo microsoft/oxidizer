@@ -75,6 +75,8 @@ where
 // metadata. Completion and cancellation empty the non-Send payload before the owner releases its
 // final scheduling reference, so remote final reclamation cannot drop user state.
 // The optional inspector belongs to that payload and is also retired on the owner thread.
+// The owner initializes the handle cell before publishing pointers. Remote owners read only
+// its immutable template through those pointers, never the cell's initialization state.
 unsafe impl<F, R, T, I> Send for Task<F, R, T, I>
 where
     F: Future<Output = R> + 'static,
