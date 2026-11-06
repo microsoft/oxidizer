@@ -2,7 +2,7 @@
 
 ## [0.15.0] - 2026-11-06
 
-- Accept `impl Into<OpaqueMemory>` in `HttpBodyBuilder::with_memory`. Callers can pass
+- Accept `impl Into<OpaqueMemory>` in `HttpBodyBuilder::new`. Callers can pass
   `GlobalPool` directly without an explicit conversion.
 - Breaking: Public APIs expose types from packages with incompatible releases:
   `bytesbuf`, `seismograph`, `seismograph_io`.
