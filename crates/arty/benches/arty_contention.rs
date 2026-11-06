@@ -21,6 +21,15 @@
 //! runtime overhead. They do not model a specific server or replace the
 //! original single-access request-fanout controls.
 //!
+//! The request-suspend cases keep that task tree and one cache access per child.
+//! Each child registers a pending receive before it signals its request task.
+//! The request waits for all ten signals, then releases all ten children.
+//! Each child resumes, runs 16 dependent integer-mixing rounds, and returns its result.
+//! Both runtimes use the same futures channels and await every child.
+//! The channels and their allocations are part of the measured work.
+//! This bounded synthetic workload measures suspension and wake overhead.
+//! It does not model network I/O, timer delays, or production request sizes.
+//!
 //! Each benchmark case creates one runtime before measurement and reuses it for
 //! every measured iteration. The relocated-cache cases also create and reuse
 //! one cache.
@@ -50,6 +59,7 @@
 //! Callgrind cannot model how tasks share workers or compete across workers.
 //! Use Criterion to compare runtime performance for these workloads.
 
+use std::future::poll_fn;
 use std::hint::black_box;
 use std::pin::Pin;
 use std::task::{Context as PollContext, Poll, Waker};
@@ -58,6 +68,7 @@ use std::time::{Duration, Instant};
 use arty::runtime::{Runtime, WorkersPolicy};
 use arty::task::Context;
 use criterion::{BenchmarkId, Criterion, Throughput};
+use futures::channel::oneshot;
 #[cfg(target_os = "linux")]
 use gungraun::{Callgrind, CallgrindMetrics, EntryPoint, LibraryBenchmarkConfig};
 use metabench::benchmark;
@@ -70,6 +81,7 @@ const CONCURRENCY: usize = 10;
 const CACHE_ENTRIES: usize = 8;
 const WORKERS: [usize; 2] = [1, 8];
 const REQUEST_WORK: [usize; 2] = [16, 256];
+const SUSPENDED_WORK: usize = 16;
 
 #[derive(Debug, Default)]
 struct CacheState {
@@ -166,6 +178,13 @@ impl ArtyCase {
         futures::executor::block_on(core).expect("benchmark core task finishes before shutdown");
         start.elapsed()
     }
+
+    fn run_request_suspend(&self) -> Duration {
+        let start = Instant::now();
+        let core = self.runtime.scheduler().spawn_anywhere(self.cache.clone(), arty_suspended_core);
+        futures::executor::block_on(core).expect("benchmark core task finishes before shutdown");
+        start.elapsed()
+    }
 }
 
 async fn arty_work_core(cx: Context, (cache, rounds): (Cache, usize)) {
@@ -192,7 +211,10 @@ async fn arty_work_outer(cx: Context, cache: Cache, rounds: usize) {
 }
 
 fn request_work(cache: &Cache, operation: usize, rounds: usize) -> u64 {
-    let mut value = cache.touch(operation);
+    mix_request_work(cache.touch(operation), rounds)
+}
+
+fn mix_request_work(mut value: u64, rounds: usize) -> u64 {
     for round in 0..black_box(rounds) {
         value = value
             .rotate_left(7)
@@ -200,6 +222,67 @@ fn request_work(cache: &Cache, operation: usize, rounds: usize) -> u64 {
             .wrapping_add(u64::try_from(round).expect("bounded benchmark round fits in u64"));
     }
     black_box(value)
+}
+
+async fn suspended_request_work(cache: Cache, operation: usize, suspended: oneshot::Sender<()>, mut resumed: oneshot::Receiver<()>) -> u64 {
+    let value = cache.touch(operation);
+    let mut suspended = Some(suspended);
+    poll_fn(|cx| {
+        let result = Pin::new(&mut resumed).poll(cx);
+        if result.is_pending()
+            && let Some(suspended) = suspended.take()
+        {
+            // Signal only after registering the child waker. This poll still
+            // returns Pending if another worker releases the child immediately.
+            suspended.send(()).expect("request waits for every child to suspend");
+        }
+        result
+    })
+    .await
+    .expect("request releases every child before it finishes");
+    mix_request_work(value, SUSPENDED_WORK)
+}
+
+async fn resume_children<H>(mut children: [(H, oneshot::Receiver<()>, oneshot::Sender<()>); INNER_OPERATIONS]) -> [H; INNER_OPERATIONS] {
+    for (_, suspended, _) in &mut children {
+        suspended.await.expect("every child signals after registering its waker");
+    }
+    children.map(|(handle, _, resume)| {
+        resume.send(()).expect("child waits until its request releases it");
+        handle
+    })
+}
+
+async fn arty_suspended_core(cx: Context, cache: Cache) {
+    let scheduler = cx.scheduler();
+    let handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| {
+        scheduler.spawn_anywhere((cx.clone(), cache.clone()), |(cx, cache)| arty_suspended_outer(cx, cache))
+    });
+    for handle in handles {
+        handle.await.expect("benchmark request task finishes before shutdown");
+    }
+}
+
+async fn arty_suspended_outer(cx: Context, cache: Cache) {
+    let scheduler = cx.scheduler();
+    let children = std::array::from_fn::<_, INNER_OPERATIONS, _>(|operation| {
+        let (suspend, suspended) = oneshot::channel();
+        let (resume, resumed) = oneshot::channel();
+        let cache = cache.clone();
+        let handle = scheduler.spawn(move |_| suspended_request_work(cache, operation, suspend, resumed));
+        (handle, suspended, resume)
+    });
+    for handle in resume_children(children).await {
+        black_box(handle.await.expect("benchmark inner task finishes before shutdown"));
+    }
+}
+
+fn arty_request_suspend(workers: usize) -> ArtyCase {
+    let case = ArtyCase::new(workers);
+    for _ in 0..workers {
+        black_box(case.run_request_suspend());
+    }
+    case
 }
 
 fn arty_request_work(workers: usize, rounds: usize) -> ArtyCase {
@@ -351,6 +434,40 @@ impl TokioCase {
         futures::executor::block_on(core).expect("benchmark core task finishes before shutdown");
         start.elapsed()
     }
+
+    fn run_request_suspend(&self) -> Duration {
+        let start = Instant::now();
+        let core = self.runtime.spawn(tokio_suspended_core(self.cache.clone()));
+        futures::executor::block_on(core).expect("benchmark core task finishes before shutdown");
+        start.elapsed()
+    }
+}
+
+async fn tokio_suspended_core(cache: Cache) {
+    let handles = std::array::from_fn::<_, CONCURRENCY, _>(|_| tokio::spawn(tokio_suspended_outer(cache.clone())));
+    for handle in handles {
+        handle.await.expect("benchmark request task finishes before shutdown");
+    }
+}
+
+async fn tokio_suspended_outer(cache: Cache) {
+    let children = std::array::from_fn::<_, INNER_OPERATIONS, _>(|operation| {
+        let (suspend, suspended) = oneshot::channel();
+        let (resume, resumed) = oneshot::channel();
+        let handle = tokio::spawn(suspended_request_work(cache.clone(), operation, suspend, resumed));
+        (handle, suspended, resume)
+    });
+    for handle in resume_children(children).await {
+        black_box(handle.await.expect("benchmark inner task finishes before shutdown"));
+    }
+}
+
+fn tokio_request_suspend(workers: usize) -> TokioCase {
+    let case = TokioCase::new(workers);
+    for _ in 0..workers {
+        black_box(case.run_request_suspend());
+    }
+    case
 }
 
 async fn tokio_work_core(cache: Cache, rounds: usize) {
@@ -586,6 +703,35 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
     }
     group.finish();
 
+    let mut group = criterion.benchmark_group(ARTY_REQUEST_SUSPEND.group_name());
+    group.throughput(Throughput::Elements(
+        u64::try_from(INNER_OPERATIONS * CONCURRENCY).expect("benchmark operation count fits in u64"),
+    ));
+    for workers in WORKERS {
+        let name = format!("concurrency_w{workers}");
+        group.bench_function(BenchmarkId::new(ARTY_REQUEST_SUSPEND.benchmark_name(), &name), |bencher| {
+            let case = arty_request_suspend(workers);
+            bencher.iter_custom(|iterations| {
+                let mut elapsed = Duration::ZERO;
+                for _ in 0..iterations {
+                    elapsed += case.run_request_suspend();
+                }
+                elapsed
+            });
+        });
+        group.bench_function(BenchmarkId::new(TOKIO_REQUEST_SUSPEND.benchmark_name(), &name), |bencher| {
+            let case = tokio_request_suspend(workers);
+            bencher.iter_custom(|iterations| {
+                let mut elapsed = Duration::ZERO;
+                for _ in 0..iterations {
+                    elapsed += case.run_request_suspend();
+                }
+                elapsed
+            });
+        });
+    }
+    group.finish();
+
     let mut group = criterion.benchmark_group(ARTY_NESTED_RETAINED_WAKER.group_name());
     group.throughput(Throughput::Elements(
         u64::try_from(INNER_OPERATIONS * CONCURRENCY).expect("benchmark operation count fits in u64"),
@@ -702,6 +848,22 @@ fn tokio_request_work_workload<S: std::borrow::Borrow<TokioCase>>(owned_input: S
     (result, owned_input)
 }
 
+#[benchmark(ARTY_REQUEST_SUSPEND, "arty_contention/request_suspend", "Arty")]
+#[bench::concurrency_w1(Box::new(arty_request_suspend(1)))]
+#[bench::concurrency_w8(Box::new(arty_request_suspend(8)))]
+fn arty_request_suspend_workload<S: std::borrow::Borrow<ArtyCase>>(owned_input: S) -> (Duration, S) {
+    let result = measure_native(|| owned_input.borrow().run_request_suspend());
+    (result, owned_input)
+}
+
+#[benchmark(TOKIO_REQUEST_SUSPEND, "arty_contention/request_suspend", "Tokio")]
+#[bench::concurrency_w1(Box::new(tokio_request_suspend(1)))]
+#[bench::concurrency_w8(Box::new(tokio_request_suspend(8)))]
+fn tokio_request_suspend_workload<S: std::borrow::Borrow<TokioCase>>(owned_input: S) -> (Duration, S) {
+    let result = measure_native(|| owned_input.borrow().run_request_suspend());
+    (result, owned_input)
+}
+
 #[cfg(target_os = "linux")]
 metabench::main!(
     criterion = {
@@ -726,6 +888,8 @@ metabench::main!(
         TOKIO_REQUEST_FANOUT,
         ARTY_REQUEST_WORK,
         TOKIO_REQUEST_WORK,
+        ARTY_REQUEST_SUSPEND,
+        TOKIO_REQUEST_SUSPEND,
     ],
 );
 
@@ -745,5 +909,7 @@ metabench::main!(
         TOKIO_REQUEST_FANOUT,
         ARTY_REQUEST_WORK,
         TOKIO_REQUEST_WORK,
+        ARTY_REQUEST_SUSPEND,
+        TOKIO_REQUEST_SUSPEND,
     ],
 );
