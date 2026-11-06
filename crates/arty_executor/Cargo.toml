@@ -4,7 +4,7 @@
 [package]
 name = "arty_executor"
 description = "Single-threaded async task executor for the Arty runtime."
-version = "0.6.0"
+version = "0.6.1"
 edition = { workspace = true }
 rust-version = { workspace = true }
 authors = { workspace = true }
@@ -25,6 +25,9 @@ allowed_external_types = [
     "observed::sink::core::Sink",
     "thread_aware_core::thread::Thread",
 ]
+
+[features]
+inspection = []
 
 [dependencies]
 data_privacy = { workspace = true }
@@ -47,6 +50,10 @@ mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }
 static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["std"] }
+
+[[test]]
+name = "inspection"
+required-features = ["inspection"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

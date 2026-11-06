@@ -988,7 +988,7 @@ fn draw_info(
     let event_capacity = u64::from(recording.event_capacity_per_thread);
     let capacity = usize::try_from(recording.event_capacity_per_thread)
         .ok()
-        .and_then(seismograph::recorder::EventBufferCapacity::new);
+        .and_then(|capacity| seismograph::recorder::EventBufferCapacity::try_from(capacity).ok());
     let memory_per_thread = capacity
         .map(seismograph::recorder::EventBufferCapacity::memory_bytes_per_thread)
         .and_then(|bytes| u64::try_from(bytes).ok())
@@ -1947,7 +1947,7 @@ mod tests {
 
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use seismograph::recorder::RecordingPolicies;
+    use seismograph::recorder::Policies;
     use seismograph::recorder::event::{
         Address, Event, EventClock, EventKind, EventPayload, EventSequence, EventTimestamp, Events, NumericEvent, ObjectId,
     };
@@ -2130,7 +2130,7 @@ mod tests {
             clock: EventClock::ProcessMonotonic,
             total_events: 10,
             lost_events: 1,
-            recording: RecordingPolicies::default(),
+            recording: Policies::default(),
             threads: vec![
                 ThreadLog {
                     thread_id: ThreadId::new(1),
@@ -3582,10 +3582,10 @@ mod tests {
             events: Events {
                 clock: EventClock::ProcessMonotonic,
                 total_events: 8,
-                recording: RecordingPolicies {
-                    runtime_tasks: seismograph::recorder::RecordingPolicy::all(true),
-                    general_events: seismograph::recorder::RecordingPolicy::all(true),
-                    ..RecordingPolicies::default()
+                recording: Policies {
+                    runtime_tasks: seismograph::recorder::Policy::all(true),
+                    general_events: seismograph::recorder::Policy::all(true),
+                    ..Policies::default()
                 },
                 threads: vec![ThreadLog {
                     thread_id: ThreadId::new(1),

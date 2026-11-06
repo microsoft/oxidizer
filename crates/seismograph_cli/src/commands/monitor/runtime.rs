@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use seismograph::recorder::event::{EventKind, Events};
-use seismograph_runtime::snapshot::{Snapshot, TaskActivity, TaskActivityState};
+use seismograph_runtime::snapshot::{Snapshot, TaskActivity, TaskActivityState, TaskCollection, WorkerState};
 
 use super::data::{AllocationStackFilter, primitive_stack};
 use super::runtime_timeline::{ExecutionMetrics, Interval, TimeWindow, occupancy, union};
@@ -204,7 +204,7 @@ impl RuntimeMonitorSnapshot {
         let lookups = addresses.iter().map(|lookup| (lookup.address, lookup)).collect::<HashMap<_, _>>();
         let mut workers = Workers::new();
         let mut tasks = BTreeMap::<(u64, u64), TaskBuilder>::new();
-        import_source(source, &lookups, &mut workers, &mut tasks);
+        import_source(source, &mut workers, &mut tasks);
         for event in &events.events {
             let Some(runtime) = event.runtime() else { continue };
             let runtime_id = runtime.runtime_id.get();
@@ -349,12 +349,7 @@ fn worker_row(runtime_id: u64, worker_id: Option<u64>) -> RuntimeWorkerSummary {
     }
 }
 
-fn import_source(
-    source: Option<&Snapshot>,
-    lookups: &HashMap<u64, &seismograph_rallocator::callers::AddressLookup>,
-    workers: &mut Workers,
-    tasks: &mut BTreeMap<(u64, u64), TaskBuilder>,
-) {
+fn import_source(source: Option<&Snapshot>, workers: &mut Workers, tasks: &mut BTreeMap<(u64, u64), TaskBuilder>) {
     let Some(source) = source else { return };
     for runtime in &source.runtimes {
         let runtime_id = runtime.id.get();
@@ -365,7 +360,7 @@ fn import_source(
                     runtime_id,
                     worker_id: Some(worker.id.get()),
                     role: format!("{:?}", worker.role),
-                    state: format!("{:?}", worker.state),
+                    state: worker_state(worker.state, worker.task_collection),
                     thread_id: worker.thread_id.map(seismograph::recorder::thread::ThreadId::get),
                     current_task: worker.current_task.map(seismograph::recorder::runtime::TaskId::get),
                     ..RuntimeWorkerSummary::default()
@@ -374,14 +369,12 @@ fn import_source(
         }
         for source_task in &runtime.tasks {
             let task = tasks.entry((runtime_id, source_task.id.get())).or_default();
-            let stack = source_task.spawn_backtrace.iter().map(|address| address.get()).collect::<Vec<_>>();
             task.row = RuntimeTaskSummary {
                 runtime_id,
                 task_id: source_task.id.get(),
                 parent_id: source_task.parent.map(seismograph::recorder::runtime::TaskId::get),
                 type_descriptor_id: Some(source_task.type_descriptor.get()),
                 future_size_bytes: source_task.future_size_bytes,
-                spawn_stack: primitive_stack(&stack, lookups, AllocationStackFilter::All),
                 ..RuntimeTaskSummary::default()
             };
             if let Some(worker) = source_task.last_worker_id {
@@ -407,83 +400,9 @@ fn import_source(
 fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
     task.row.state = "Unknown".into();
     let Some(activity) = activity else { return };
-    let observed = activity.observed_at.ticks();
-    if observed == 0 {
-        return;
-    }
-    match activity.state {
-        TaskActivityState::Running => {
-            let Some(started_at) = activity.poll_started_at.map(seismograph::recorder::event::EventTimestamp::ticks) else {
-                return;
-            };
-            if activity.queued_since.is_some() {
-                return;
-            }
-            if started_at > observed {
-                return;
-            }
-            if let Some(ready_at) = activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks) {
-                if ready_at < started_at {
-                    return;
-                }
-                if ready_at > observed {
-                    return;
-                }
-            }
-            let running_for = observed - started_at;
-            task.row.activity = TaskActivitySummary {
-                state: "Running".into(),
-                running_for: Some(running_for),
-                ready_for: None,
-                poll_worker_id: activity.poll_worker_id.map(seismograph::recorder::runtime::WorkerId::get),
-                repoll_requested: activity.ready_since.is_some(),
-            };
-            // Only the worker identity inside the coherent activity is evidence
-            // of this poll's placement; last_worker/current_task can race.
-            if let Some(worker_id) = task.row.activity.poll_worker_id {
-                task.workers.insert(worker_id);
-                task.executed.insert(Some(worker_id));
-                task.metrics.entry(Some(worker_id)).or_default().polls.push(Interval {
-                    start: started_at,
-                    end: observed,
-                });
-            } else {
-                task.unassigned_poll = Some(Interval {
-                    start: started_at,
-                    end: observed,
-                });
-            }
-        }
-        TaskActivityState::Ready => {
-            let (Some(ready_at), Some(queued_at)) = (
-                activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks),
-                activity.queued_since.map(seismograph::recorder::event::EventTimestamp::ticks),
-            ) else {
-                return;
-            };
-            if activity.poll_started_at.is_some() {
-                return;
-            }
-            if activity.poll_worker_id.is_some() {
-                return;
-            }
-            if ready_at > queued_at {
-                return;
-            }
-            if queued_at > observed {
-                return;
-            }
-            let ready_for = observed - queued_at;
-            task.row.activity = TaskActivitySummary {
-                state: "Ready".into(),
-                ready_for: Some(ready_for),
-                ..TaskActivitySummary::default()
-            };
-            task.ready.push(Interval {
-                start: queued_at,
-                end: observed,
-            });
-        }
+    let coherent = match activity.state {
+        TaskActivityState::Running => apply_running_activity(task, activity),
+        TaskActivityState::Ready => apply_ready_activity(task, activity),
         TaskActivityState::Waiting => {
             if matches!(
                 (
@@ -496,10 +415,112 @@ fn apply_activity(task: &mut TaskBuilder, activity: Option<TaskActivity>) {
             ) {
                 task.row.activity.state = "Waiting".into();
             }
+            true
         }
-        _ => {}
+        _ => true,
+    };
+    if coherent {
+        task.row.state.clone_from(&task.row.activity.state);
     }
-    task.row.state.clone_from(&task.row.activity.state);
+}
+
+fn apply_running_activity(task: &mut TaskBuilder, activity: TaskActivity) -> bool {
+    let observed = activity.observed_at.ticks();
+    let Some(started_at) = activity.poll_started_at.map(seismograph::recorder::event::EventTimestamp::ticks) else {
+        if activity.ready_since.is_some() || activity.queued_since.is_some() {
+            return false;
+        }
+        task.row.activity = TaskActivitySummary {
+            state: "Running".into(),
+            poll_worker_id: activity.poll_worker_id.map(seismograph::recorder::runtime::WorkerId::get),
+            ..TaskActivitySummary::default()
+        };
+        if let Some(worker_id) = task.row.activity.poll_worker_id {
+            task.workers.insert(worker_id);
+        }
+        return true;
+    };
+    if activity.queued_since.is_some() || started_at > observed {
+        return false;
+    }
+    if let Some(ready_at) = activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks)
+        && (ready_at < started_at || ready_at > observed)
+    {
+        return false;
+    }
+    task.row.activity = TaskActivitySummary {
+        state: "Running".into(),
+        running_for: Some(observed - started_at),
+        ready_for: None,
+        poll_worker_id: activity.poll_worker_id.map(seismograph::recorder::runtime::WorkerId::get),
+        repoll_requested: activity.ready_since.is_some(),
+    };
+    // Only the coherent activity identifies this poll's worker.
+    // last_worker/current_task can race with the activity capture.
+    let interval = Interval {
+        start: started_at,
+        end: observed,
+    };
+    if let Some(worker_id) = task.row.activity.poll_worker_id {
+        task.workers.insert(worker_id);
+        task.executed.insert(Some(worker_id));
+        task.metrics.entry(Some(worker_id)).or_default().polls.push(interval);
+    } else {
+        task.unassigned_poll = Some(interval);
+    }
+    true
+}
+
+fn apply_ready_activity(task: &mut TaskBuilder, activity: TaskActivity) -> bool {
+    if activity.poll_started_at.is_some() || activity.poll_worker_id.is_some() {
+        return false;
+    }
+    if activity.ready_since.is_none() && activity.queued_since.is_none() {
+        task.row.activity = TaskActivitySummary {
+            state: "Ready".into(),
+            ..TaskActivitySummary::default()
+        };
+        return true;
+    }
+    let (Some(ready_at), Some(queued_at)) = (
+        activity.ready_since.map(seismograph::recorder::event::EventTimestamp::ticks),
+        activity.queued_since.map(seismograph::recorder::event::EventTimestamp::ticks),
+    ) else {
+        return false;
+    };
+    let observed = activity.observed_at.ticks();
+    if ready_at > queued_at || queued_at > observed {
+        return false;
+    }
+    task.row.activity = TaskActivitySummary {
+        state: "Ready".into(),
+        ready_for: Some(observed - queued_at),
+        ..TaskActivitySummary::default()
+    };
+    task.ready.push(Interval {
+        start: queued_at,
+        end: observed,
+    });
+    true
+}
+
+fn worker_state(state: WorkerState, collection: TaskCollection) -> String {
+    let state = match state {
+        WorkerState::Running => "Running",
+        WorkerState::Parked => "Parked",
+        WorkerState::Stopped => "Stopped",
+        _ => "Unknown",
+    };
+    let availability = match collection {
+        TaskCollection::Retained | TaskCollection::Complete => return state.into(),
+        TaskCollection::Truncated => "truncated",
+        TaskCollection::Busy => "busy",
+        TaskCollection::TimedOut => "timed out",
+        TaskCollection::Stopped => "stopped",
+        TaskCollection::Failed => "failed",
+        TaskCollection::Unavailable => "unavailable",
+    };
+    format!("{state} (tasks {availability})")
 }
 
 pub(super) fn display_windows(events: &Events, source: Option<&Snapshot>) -> BTreeMap<u64, TimeWindow> {
@@ -570,7 +591,7 @@ mod tests {
     use seismograph::recorder::event::{Address, BacktraceCapture, Event, EventPayload, EventSequence, EventTimestamp};
     use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
     use seismograph::recorder::thread::ThreadId;
-    use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskMetrics, Worker, WorkerState};
+    use seismograph_runtime::snapshot::{Counters, Runtime, RuntimeState, Task, TaskMetrics, Worker};
     use seismograph_runtime::worker::WorkerRole;
 
     use super::*;
@@ -604,6 +625,7 @@ mod tests {
                 created_at: EventTimestamp::from_ticks(1),
                 retired_at: None,
                 counters: Counters::default(),
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 workers: vec![Worker {
                     id: WorkerId::from_raw(1).unwrap(),
                     role: WorkerRole::Core,
@@ -611,20 +633,21 @@ mod tests {
                     processor_index: None,
                     thread_id: Some(ThreadId::new(1)),
                     current_task: Some(TaskId::from_raw(1).unwrap()),
+                    task_collection: TaskCollection::Retained,
                 }],
                 tasks: vec![Task {
                     id: TaskId::from_raw(1).unwrap(),
                     parent: None,
                     type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
                     future_size_bytes: None,
-                    spawned_at: EventTimestamp::from_ticks(1),
+                    spawned_at: Some(EventTimestamp::from_ticks(1)),
+                    metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                     last_worker_id: WorkerId::from_raw(1),
                     metrics: TaskMetrics {
                         poll_count: 100_000,
                         ..TaskMetrics::default()
                     },
                     activity,
-                    spawn_backtrace: Vec::new(),
                 }],
             }],
             addresses: Vec::new(),
@@ -644,6 +667,97 @@ mod tests {
             RuntimeMonitorSnapshot::from_events(&events, None, &[]).workers[0].tasks[0].future_size_bytes
         });
         assert_eq!(sizes, [None, Some(0), Some(16_384)]);
+    }
+
+    #[test]
+    fn native_ready_state_does_not_invent_a_queue_age() {
+        let native = source(Some(TaskActivity {
+            observed_at: EventTimestamp::from_ticks(0),
+            state: TaskActivityState::Ready,
+            ready_since: None,
+            poll_started_at: None,
+            poll_worker_id: None,
+            queued_since: None,
+        }));
+
+        let captured = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&native), &[]);
+        let task = &captured.workers[0].tasks[0];
+
+        assert_eq!(
+            (task.state.as_str(), task.activity.ready_for, task.activity.running_for),
+            ("Ready", None, None)
+        );
+    }
+
+    #[test]
+    fn native_running_state_does_not_invent_execution_intervals() {
+        for poll_worker_id in [None, WorkerId::from_raw(1)] {
+            let mut native = source(Some(TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Running,
+                ready_since: None,
+                poll_started_at: None,
+                poll_worker_id,
+                queued_since: None,
+            }));
+            native.runtimes[0].tasks[0].last_worker_id = None;
+            native.runtimes[0].workers[0].current_task = None;
+
+            let captured = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&native), &[]);
+            let tasks = captured
+                .workers
+                .iter()
+                .flat_map(|worker| {
+                    worker.tasks.iter().map(move |task| {
+                        (
+                            worker.worker_id,
+                            task.state.as_str(),
+                            task.activity.clone(),
+                            task.metrics.polls.as_slice(),
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                tasks,
+                vec![(
+                    poll_worker_id.map(WorkerId::get),
+                    "Running",
+                    TaskActivitySummary {
+                        state: "Running".into(),
+                        poll_worker_id: poll_worker_id.map(WorkerId::get),
+                        ..TaskActivitySummary::default()
+                    },
+                    &[][..]
+                )]
+            );
+        }
+    }
+
+    #[test]
+    fn retired_workers_remain_explicitly_stopped() {
+        let mut native = source(None);
+        native.runtimes[0].tasks.clear();
+        native.runtimes[0].workers[0].state = WorkerState::Stopped;
+        native.runtimes[0].workers[0].task_collection = TaskCollection::Stopped;
+        native.runtimes[0].workers[0].current_task = None;
+
+        let captured = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&native), &[]);
+
+        assert_eq!(captured.workers[0].state, "Stopped (tasks stopped)");
+    }
+
+    #[test]
+    fn unavailable_native_tasks_are_visible_in_worker_status() {
+        let mut native = source(None);
+        native.runtimes[0].tasks.clear();
+        native.runtimes[0].workers[0].task_collection = TaskCollection::TimedOut;
+        native.runtimes[0].workers[0].current_task = None;
+
+        let captured = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&native), &[]);
+
+        assert_eq!(captured.workers[0].state, "Running (tasks timed out)");
     }
 
     #[test]
@@ -735,7 +849,7 @@ mod tests {
                 ready_since: None,
                 poll_started_at: None,
                 poll_worker_id: WorkerId::from_raw(1),
-                queued_since: None,
+                queued_since: Some(EventTimestamp::from_ticks(90)),
             },
             TaskActivity {
                 observed_at: EventTimestamp::from_ticks(100),
@@ -1013,7 +1127,6 @@ mod tests {
         source.runtimes[0].tasks[0].parent = TaskId::from_raw(7);
         source.runtimes[0].tasks[0].type_descriptor = TypeDescriptorId::from_raw(9).unwrap();
         source.runtimes[0].tasks[0].last_worker_id = None;
-        source.runtimes[0].tasks[0].spawn_backtrace = vec![Address::new(0x1234)];
         let snapshot = RuntimeMonitorSnapshot::from_events(&Events::default(), Some(&source), &[]);
         let worker = &snapshot.workers[0];
         let task = &worker.tasks[0];
@@ -1027,7 +1140,40 @@ mod tests {
                 task.type_descriptor_id,
                 task.spawn_stack.len(),
             ),
-            (1, "named-runtime", 1, 1, Some(7), Some(9), 1)
+            (1, "named-runtime", 1, 1, Some(7), Some(9), 0)
+        );
+    }
+
+    #[test]
+    fn creation_location_requires_a_retained_spawn_event_with_frames() {
+        let source = source(None);
+        let addresses = [seismograph_rallocator::callers::AddressLookup::from_fields(
+            seismograph_rallocator::callers::AddressLookupFields {
+                address: 0x1234,
+                symbol: Some("app::spawn".into()),
+                filename: Some("server.rs".into()),
+                line: Some(120),
+                column: None,
+            },
+        )];
+        let stacks = [None, Some(Vec::new()), Some(vec![Address::new(0x1234)])].map(|frames| {
+            let events = Events {
+                events: frames
+                    .map(|call_stack| Event {
+                        call_stack,
+                        ..event(EventKind::TaskSpawned, None, 2, 1, 0)
+                    })
+                    .into_iter()
+                    .collect(),
+                ..Events::default()
+            };
+            let snapshot = RuntimeMonitorSnapshot::from_events(&events, Some(&source), &addresses);
+            snapshot.workers[0].tasks[0].spawn_stack.clone()
+        });
+
+        assert_eq!(
+            stacks,
+            [Vec::<String>::new(), Vec::new(), vec!["app::spawn (server.rs:120)".into()]]
         );
     }
 

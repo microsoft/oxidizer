@@ -90,7 +90,7 @@ impl TaskHandle {
 ///
 /// Copying a pointer never acquires ownership. A counted strong reference must protect every
 /// dereference. Raw wakers and the intrusive list separately account for their owned references.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct TaskPtr {
     template: NonNull<TaskHandleTemplate>,
 }
@@ -196,14 +196,6 @@ impl RemoteTaskHandle {
 unsafe impl Send for TaskPtr {}
 // SAFETY: Same invariant as `Send`.
 unsafe impl Sync for TaskPtr {}
-
-impl PartialEq for TaskPtr {
-    fn eq(&self, other: &Self) -> bool {
-        self.template == other.template
-    }
-}
-
-impl Eq for TaskPtr {}
 
 impl std::fmt::Debug for TaskHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

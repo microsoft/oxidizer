@@ -22,9 +22,7 @@
 //! can request shutdown without calling `Runtime::stop`.
 //!
 //! Keep the `Runtime` value alive until required tasks finish.
-//! Shutdown cancels pending tasks and waits for blocking functions that have
-//! already started.
-//! Keeping a scheduler does not keep the runtime running.
+//! See [Shutdown](#shutdown) for what happens when the runtime stops.
 //!
 //! # Configuration
 //!

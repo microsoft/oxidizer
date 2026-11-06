@@ -218,23 +218,23 @@ fn flush_for_teardown(core: &mut crate::core::Core) {
 }
 
 fn with_owner<R>(failure: R, action: impl FnOnce(&mut crate::core::Core) -> R) -> R {
-    CURRENT.with(|current| {
-        let owner = current.get();
-        if owner == 0 {
-            return with_owner_slow(current, failure, action);
-        }
-        // SAFETY: CURRENT exclusively owns the core.
-        // Allocator internals never invoke user code or allocate through GlobalAlloc.
-        let core = unsafe { (*(owner as *const Owner)).core_ptr() };
-        // SAFETY: CURRENT holds the only core lease for this action.
-        unsafe { action(&mut *core) }
-    })
+    // Keep the core action outside LocalKey::with: otherwise its closure can
+    // remain outlined and add a call to every allocation or free.
+    let owner = CURRENT.get();
+    if owner == 0 {
+        return with_owner_slow(failure, action);
+    }
+    // SAFETY: CURRENT exclusively owns the core.
+    // Allocator internals never invoke user code or allocate through GlobalAlloc.
+    let core = unsafe { (*(owner as *const Owner)).core_ptr() };
+    // SAFETY: CURRENT holds the only core lease for this action.
+    unsafe { action(&mut *core) }
 }
 
 // TLS registration and temporary-lease cleanup otherwise force saved registers
 // and a stack frame onto operations that already have an owner.
 #[inline(never)]
-fn with_owner_slow<R>(current: &Cell<usize>, failure: R, action: impl FnOnce(&mut crate::core::Core) -> R) -> R {
+fn with_owner_slow<R>(failure: R, action: impl FnOnce(&mut crate::core::Core) -> R) -> R {
     let owner = acquire();
     if owner == 0 {
         return failure;
@@ -245,10 +245,10 @@ fn with_owner_slow<R>(current: &Cell<usize>, failure: R, action: impl FnOnce(&mu
     fence(Ordering::Release);
     // Publish before registration: platform TLS registration can allocate,
     // but no core borrow exists yet if it re-enters through CURRENT.
-    current.set(owner);
+    CURRENT.set(owner);
     let temporary = EXPIRED.with(Cell::get) || REGISTRATION.try_with(|_| ()).is_err();
     if temporary {
-        current.set(0);
+        CURRENT.set(0);
     }
     // SAFETY: CURRENT or this temporary lease exclusively owns the core.
     let core = unsafe { (*(owner as *const Owner)).core_ptr() };
@@ -270,7 +270,7 @@ pub(crate) fn allocate(layout: Layout) -> *mut u8 {
 
 #[inline]
 pub(crate) fn allocate_request(request: Request) -> *mut u8 {
-    with_owner(std::ptr::null_mut(), |owner| owner.allocate(request))
+    with_owner(std::ptr::null_mut(), move |owner| owner.allocate(request))
 }
 
 pub(crate) fn allocate_zeroed(layout: Layout) -> *mut u8 {
@@ -303,7 +303,7 @@ pub(crate) unsafe fn deallocate(ptr: *mut u8) {
     if ptr.is_null() {
         return;
     }
-    let processed = with_owner(false, |owner| {
+    let processed = with_owner(false, move |owner| {
         // SAFETY: The caller transfers its live allocation to this owner lease.
         unsafe { owner.deallocate(ptr as usize) };
         true
@@ -399,12 +399,12 @@ mod tests {
         CURRENT.with(|current| {
             assert_eq!(current.get(), 0);
             crate::hal::fail_next(crate::hal::Failure::Reserve);
-            assert_eq!(with_owner_slow(current, -1, action), -1);
+            assert_eq!(with_owner_slow(-1, action), -1);
             assert!(!called.get());
             assert_eq!(current.get(), 0);
             assert_eq!(lock_pool().count, 0);
 
-            assert_eq!(with_owner_slow(current, -1, action), 123);
+            assert_eq!(with_owner_slow(-1, action), 123);
             assert!(called.get());
             assert_ne!(current.get(), 0);
             assert_eq!(lock_pool().count, 1);

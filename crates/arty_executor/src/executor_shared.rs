@@ -4,6 +4,10 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::mem;
+#[cfg(feature = "inspection")]
+use std::ops::ControlFlow;
+#[cfg(feature = "inspection")]
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::task::Waker;
 use std::thread::ThreadId;
@@ -12,6 +16,8 @@ use observed::Sink;
 use performables::sync::channel;
 use plurality::MultiPool;
 
+#[cfg(feature = "inspection")]
+use crate::discard_task_panic_payload;
 use crate::wake::RemoteWake;
 use crate::{PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskOptions, WakeShared, WakeSignal, allocate_task};
 
@@ -35,6 +41,42 @@ struct ExecutorSharedInner {
 }
 
 impl ExecutorShared {
+    #[cfg(feature = "inspection")]
+    pub(crate) fn add_inspected_task<F, R, T, I>(&self, future: F, options: TaskOptions, completion: T, inspector: I)
+    where
+        F: Future<Output = R> + 'static,
+        R: 'static,
+        T: TaskCompletion<R>,
+        I: crate::inspection::Inspector<F>,
+    {
+        if self.shutdown().is_triggered() {
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(inspector))) {
+                discard_task_panic_payload(panic);
+            }
+            completion.cancelled(self.shutdown().cause());
+            return;
+        }
+        self.register_task(crate::task::allocate_inspected_task(
+            &self.inner.task_storage,
+            future,
+            options,
+            self.inner.sink.clone(),
+            completion,
+            inspector,
+        ));
+    }
+
+    #[cfg(feature = "inspection")]
+    pub(crate) fn inspect_new_tasks(&self, mut visit: impl FnMut(&TaskHandle) -> ControlFlow<()>) -> Result<(), crate::InspectionError> {
+        let tasks = self.inner.new_tasks.try_borrow().map_err(|_borrow| crate::InspectionError::Busy)?;
+        for task in tasks.iter() {
+            if visit(task).is_break() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn new(owner_waker: Waker, sink: Sink, thread_id: ThreadId, panic_policy: PanicPolicy) -> Self {
         let shutdown = Shutdown::new(owner_waker.clone());
         let (wake, remote_wakes) = WakeShared::new(owner_waker, thread_id);
@@ -169,5 +211,23 @@ mod tests {
         assert!(!shared.shutdown_complete());
         shared.shutdown().trigger(ShutdownCause::default());
         assert!(shared.shutdown_complete());
+    }
+
+    #[cfg(feature = "inspection")]
+    #[test]
+    fn borrowed_submission_storage_reports_busy_and_recovers_after_release() {
+        let shared = ExecutorShared::new(
+            Waker::noop().clone(),
+            Sink::noop(),
+            std::thread::current().id(),
+            PanicPolicy::default(),
+        );
+        let borrowed = shared.inner.new_tasks.borrow_mut();
+
+        let busy = shared.inspect_new_tasks(|_| ControlFlow::Continue(()));
+        drop(borrowed);
+        let released = shared.inspect_new_tasks(|_| ControlFlow::Continue(()));
+
+        assert_eq!((busy, released), (Err(crate::InspectionError::Busy), Ok(())));
     }
 }

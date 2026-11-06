@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 use std::marker::PhantomData;
+#[cfg(feature = "inspection")]
+use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use crate::{TaskHandle, TaskPtr};
@@ -15,6 +17,19 @@ pub(crate) struct TaskList {
 }
 
 impl TaskList {
+    #[cfg(feature = "inspection")]
+    pub(crate) fn inspect_until(&self, mut visit: impl FnMut(TaskPtr) -> ControlFlow<()>) {
+        let mut next = self.head;
+        while let Some(task) = next {
+            // SAFETY: The list owns these live tasks. Inspection cannot mutate the
+            // list, and a cycle cannot run while its owner borrows it for inspection.
+            next = unsafe { task.as_task() }.links().next.get();
+            if visit(task).is_break() {
+                break;
+            }
+        }
+    }
+
     pub(crate) fn insert(&mut self, task_handle: TaskHandle) -> TaskPtr {
         let pointer = task_handle.as_ptr();
         // SAFETY: `task_handle` keeps the pinned allocation alive on its owner thread.

@@ -1,14 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `ALPN` protocol mapping from supported HTTP versions.
+//! Maps supported HTTP versions to `ALPN` protocols.
 
 use http::Version;
 
 const HTTP_11_ALPN: &str = "http/1.1";
 const HTTP_2_ALPN: &str = "h2";
 
-/// Maps configured HTTP versions to the advertised `ALPN` identifiers.
+/// Maps HTTP versions to the `ALPN` identifiers that the client advertises.
 pub(crate) fn map_to_alpn(versions: &[Version]) -> &[&str] {
     let http1 = supports_http1(versions);
     let http2 = supports_http2(versions);

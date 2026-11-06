@@ -1,8 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(feature = "inspection")]
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
+#[cfg(feature = "inspection")]
+use std::ops::ControlFlow;
+#[cfg(feature = "inspection")]
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use std::pin::Pin;
 use std::task;
 use std::thread::ThreadId;
 use std::time::Instant;
@@ -11,7 +18,11 @@ use nm::{Event, Magnitude, MetricsPusher, Push};
 use observed::Sink;
 use tick::SimpleClock;
 
-use crate::{CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskSet, executor_context};
+use crate::{
+    CycleOutcome, ExecutorBuilder, ExecutorShared, Shutdown, ShutdownCause, TaskHandle, TaskList, TaskSet, TypeErasedTask, executor_context,
+};
+#[cfg(feature = "inspection")]
+use crate::{InspectionError, InspectionStatus, PollObserver, TaskPtr, TaskState, discard_task_panic_payload};
 
 /// An async task executor that runs on one thread.
 ///
@@ -70,6 +81,49 @@ pub struct Executor {
     pending: TaskList,
     clock: SimpleClock,
     last_cycle_ended: Option<Instant>,
+}
+
+/// Selects ordinary or observed polling at monomorphization, not inside the poll loop.
+trait ObservePoll: Copy {
+    fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()>;
+}
+
+impl ObservePoll for () {
+    fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()> {
+        task.poll(shared)
+    }
+}
+
+#[cfg(feature = "inspection")]
+impl ObservePoll for &dyn PollObserver {
+    fn poll(self, task: Pin<&dyn TypeErasedTask>, shared: &ExecutorShared) -> task::Poll<()> {
+        let mut observed = false;
+        let mut in_callback = false;
+        let description = catch_unwind(AssertUnwindSafe(|| {
+            task.inspect(TaskState::Running, &mut |description| {
+                in_callback = true;
+                self.poll_started(description);
+                in_callback = false;
+                observed = true;
+            });
+        }));
+        match description {
+            Ok(()) => {}
+            Err(panic) if in_callback => resume_unwind(panic),
+            Err(panic) => {
+                // Observer failures propagate; inspector and description-drop failures
+                // cancel the observation before the task itself is polled.
+                observed = false;
+                discard_task_panic_payload(panic);
+                self.inspection_failed(InspectionError::Panicked);
+            }
+        }
+        let outcome = task.poll(shared);
+        if observed {
+            self.poll_finished(outcome.is_ready());
+        }
+        outcome
+    }
 }
 
 impl Executor {
@@ -132,15 +186,101 @@ impl Executor {
     /// continue to use the executor after such a panic.
     #[must_use]
     pub fn execute_cycle(&mut self) -> CycleOutcome {
+        self.execute_cycle_with(())
+    }
+
+    /// Executes one cycle with runtime-owned poll observation.
+    ///
+    /// Select this entry point only when diagnostics are requested. The ordinary
+    /// [`execute_cycle`](Self::execute_cycle) path does not check or call an observer.
+    ///
+    /// # Panics
+    ///
+    /// Observer panics propagate. An inspector panic is reported through
+    /// [`PollObserver::inspection_failed`](crate::PollObserver::inspection_failed)
+    /// and does not prevent the affected task from running.
+    #[cfg(feature = "inspection")]
+    #[must_use]
+    pub fn execute_cycle_observed(&mut self, observer: &dyn PollObserver) -> CycleOutcome {
+        self.execute_cycle_with(observer)
+    }
+
+    fn execute_cycle_with(&mut self, observer: impl ObservePoll) -> CycleOutcome {
         let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
         let cycle_started = self.start_cycle();
         self.accept_new_tasks();
         self.activate_awakened_tasks();
-        self.poll_active_tasks();
+        self.poll_active_tasks(observer);
         self.cancel_if_shutting_down();
         let outcome = self.cycle_outcome();
         self.finish_cycle(cycle_started);
         outcome
+    }
+
+    /// Visits at most `limit` native live tasks between execution cycles.
+    ///
+    /// Tasks without a matching description still count toward the work limit.
+    /// Inspection does not consume wakes or move futures. The visitor must not
+    /// submit tasks or recursively enter this executor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a zero limit, borrowed submission storage, or a panic
+    /// from a task inspector or the visitor.
+    #[cfg(feature = "inspection")]
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "exclusive owner access prevents inspection from overlapping a poll"
+    )]
+    pub fn inspect<D: 'static>(&mut self, limit: usize, mut visitor: impl FnMut(&D)) -> Result<InspectionStatus, InspectionError> {
+        if limit == 0 {
+            return Err(InspectionError::InvalidLimit);
+        }
+        let _cycle = executor_context::enter_cycle(self.shared.wake().thread_id());
+        let inspected = catch_unwind(AssertUnwindSafe(|| {
+            let mut count = 0;
+            let mut visited = HashSet::new();
+            let truncated = std::cell::Cell::new(false);
+            let mut inspect = |pointer: TaskPtr, state| {
+                // An unwinding observer can leave a runnable task linked in pending.
+                if !visited.insert(pointer) {
+                    return ControlFlow::Continue(());
+                }
+                if count == limit {
+                    truncated.set(true);
+                    return ControlFlow::Break(());
+                }
+                count += 1;
+                // SAFETY: Each queue retains the task throughout this owner-only visit.
+                let task = unsafe { pointer.as_task() };
+                let state = if task.is_notified() { TaskState::Ready } else { state };
+                task.inspect(state, &mut |description| {
+                    if let Some(description) = description.downcast_ref::<D>() {
+                        visitor(description);
+                    }
+                });
+                ControlFlow::Continue(())
+            };
+            self.shared.inspect_new_tasks(|handle| inspect(handle.as_ptr(), TaskState::Ready))?;
+            if !truncated.get() {
+                let _traversal = self.active.iter().try_for_each(|handle| inspect(handle.as_ptr(), TaskState::Ready));
+            }
+            if !truncated.get() {
+                self.pending.inspect_until(|pointer| inspect(pointer, TaskState::Waiting));
+            }
+            Ok(if truncated.get() {
+                InspectionStatus::Truncated
+            } else {
+                InspectionStatus::Complete
+            })
+        }));
+        match inspected {
+            Ok(result) => result,
+            Err(panic) => {
+                discard_task_panic_payload(panic);
+                Err(InspectionError::Panicked)
+            }
+        }
     }
 
     fn start_cycle(&self) -> Instant {
@@ -201,7 +341,7 @@ impl Executor {
         }
     }
 
-    fn poll_active_tasks(&mut self) {
+    fn poll_active_tasks(&mut self, observer: impl ObservePoll) {
         let mut completed_count: usize = 0;
         let mut pending_count: usize = 0;
 
@@ -225,7 +365,7 @@ impl Executor {
                 continue;
             }
 
-            let outcome = task.poll(&self.shared);
+            let outcome = observer.poll(task, &self.shared);
             let task_handle = self.active.pop_front().expect("the task remains active until its poll returns");
             match outcome {
                 task::Poll::Ready(()) => {

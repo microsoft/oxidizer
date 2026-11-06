@@ -11,9 +11,9 @@ static PUBLICATION_ENABLED: AtomicBool = AtomicBool::new(true);
 static OBSERVATION_ROUND: AtomicU64 = AtomicU64::new(1);
 static EPOCH: OnceLock<Instant> = OnceLock::new();
 
-/// Whether accepted recorded allocation/free operations may publish observations.
+/// Whether allocation/free operations with an enabled policy can publish observations.
 ///
-/// Sampled-out operations and merely enabled recording attempts do not publish.
+/// Event sampling does not control native-state publication.
 #[must_use]
 pub fn publication_enabled() -> bool {
     PUBLICATION_ENABLED.load(Ordering::Relaxed)
@@ -30,7 +30,7 @@ pub fn observation_round() -> u64 {
     OBSERVATION_ROUND.load(Ordering::Relaxed)
 }
 
-/// Requests another observation on the next accepted recorded allocation/free.
+/// Requests another observation on the next allocation/free with an enabled policy.
 ///
 /// Collectors request the next round only after collection. Monitor polling
 /// drives successive rounds; applications can also schedule requests explicitly.
@@ -136,7 +136,7 @@ pub struct RemoteState {
 pub struct Observation {
     /// Lease generation to which this observation belongs.
     pub generation: u64,
-    /// Recorder session accepting the contributing operation; zero for idle inspection.
+    /// Historical recorder session, or zero for recording-independent observations.
     pub session_id: u64,
     /// Observation round.
     pub round: u64,
@@ -252,7 +252,7 @@ pub struct GlobalState {
 pub struct Snapshot {
     /// Process-relative monotonic collection time.
     pub captured_nanos: u64,
-    /// Recorder session represented by the surrounding container.
+    /// Historical recorder session, or zero for recording-independent observations.
     pub session_id: u64,
     /// Round requested before this collection.
     pub round: u64,
@@ -275,13 +275,13 @@ pub enum Freshness {
     Unknown,
     /// Independently inspected idle owner in this capture.
     IdleInspection,
-    /// Same session, lease and requested round: contributed this round, not a current census.
+    /// Matching lease and requested round: a contribution, not a current census.
     Current,
     /// Publication belongs to a prior lease; contributor is not the current actor.
     PreviousLease,
-    /// Publication belongs to another recording session.
+    /// Historical publication belongs to another recording session.
     PreviousSession,
-    /// Same lease/session but from an older requested round.
+    /// Publication uses the current lease but an older requested round.
     PreviousRound,
     /// Publication is newer than the capture's round or monotonic time.
     NewerThanCapture,
@@ -316,7 +316,7 @@ impl Owner {
         if self.source == ObservationSource::IdleInspection {
             return Freshness::IdleInspection;
         }
-        if observation.session_id == 0 || observation.session_id != snapshot.session_id {
+        if observation.session_id != snapshot.session_id {
             return Freshness::PreviousSession;
         }
         if observation.round > snapshot.round || observation.captured_nanos > snapshot.captured_nanos {

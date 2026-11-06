@@ -13,15 +13,15 @@
 
 </div>
 
-Token expansion for Arty’s entry-point attributes.
+Expands Arty’s runtime entry-point attributes.
 
-This companion crate provides the expansion functions used by
-[`arty_macros`][__link0]. Application code should enable
-Arty’s `macros` feature and use its `main` and `test` attributes instead.
+This crate implements the attributes from
+[`arty_macros`][__link0]. Application code uses Arty’s
+`macros` feature and its `main` and `test` attributes.
 
-[`main()`][__link1] expands an async entry point; [`test()`][__link2] additionally registers
-the function with Rust’s test harness. Invalid input produces compiler
-diagnostic tokens rather than a runtime error.
+[`main()`][__link1] turns an async function into a synchronous entry point. [`test()`][__link2]
+also registers the function with Rust’s test harness. Invalid input produces
+compiler diagnostic tokens.
 
 
 <hr/>
@@ -29,7 +29,7 @@ diagnostic tokens rather than a runtime error.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_macros_impl">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb-s_rkDIcRvkbj9SsImV103sbhxFnbgMVxuwbSFgcfFJ0JtlhZIGCcGFydHlfbWFjcm9zX2ltcGxlMC42LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbHO6d1u3kh8Yb2OIRyiQ1n-EbwxjHx3oKg-MbH3IJL5nTfNZhZIGCcGFydHlfbWFjcm9zX2ltcGxlMC42LjE
  [__link0]: https://docs.rs/arty_macros
- [__link1]: https://docs.rs/arty_macros_impl/0.6.0/arty_macros_impl/fn.main.html
- [__link2]: https://docs.rs/arty_macros_impl/0.6.0/arty_macros_impl/fn.test.html
+ [__link1]: https://docs.rs/arty_macros_impl/0.6.1/arty_macros_impl/fn.main.html
+ [__link2]: https://docs.rs/arty_macros_impl/0.6.1/arty_macros_impl/fn.test.html

@@ -107,7 +107,6 @@ pub(super) struct FilterIndex {
     runtime: Option<RuntimeSource>,
     runtime_windows: BTreeMap<u64, TimeWindow>,
     task_stacks: HashMap<(u64, u64), StackId>,
-    source_task_stacks: HashMap<(u64, u64), StackId>,
     io_stacks: HashMap<u64, StackId>,
     task_events: super::task_events::TaskEventsSnapshot,
 }
@@ -128,7 +127,7 @@ impl FilterIndex {
     pub(super) fn with_task_events(
         mut decoded: DecodedSnapshot,
         mut allocator: Option<AllocatorSource>,
-        mut runtime: Option<RuntimeSource>,
+        runtime: Option<RuntimeSource>,
         addresses: Vec<AddressLookup>,
         deallocated: HashSet<(u64, u64)>,
         task_events: super::task_events::TaskEventsSnapshot,
@@ -155,13 +154,10 @@ impl FilterIndex {
         // Stack zero represents missing provenance for partial lifecycle records.
         intern(Vec::new());
         let mut task_stacks = HashMap::new();
-        let mut source_task_stacks = HashMap::new();
-        if let Some(source) = &mut runtime {
-            for runtime in &mut source.runtimes {
-                for task in &mut runtime.tasks {
-                    let stack = intern(std::mem::take(&mut task.spawn_backtrace).into_iter().map(Address::get).collect());
-                    task_stacks.insert((runtime.id.get(), task.id.get()), stack);
-                    source_task_stacks.insert((runtime.id.get(), task.id.get()), stack);
+        if let Some(source) = &runtime {
+            for runtime in &source.runtimes {
+                for task in &runtime.tasks {
+                    task_stacks.entry((runtime.id.get(), task.id.get())).or_default();
                 }
                 for worker in &runtime.workers {
                     if let Some(task) = worker.current_task {
@@ -230,7 +226,6 @@ impl FilterIndex {
             runtime,
             runtime_windows,
             task_stacks,
-            source_task_stacks,
             io_stacks,
             task_events,
         }
@@ -454,14 +449,6 @@ impl FilterIndex {
                     .workers
                     .retain(|worker| worker.current_task.is_some() || visible_workers.contains(&(runtime.id.get(), worker.id.get())));
             }
-            for task in &mut runtime.tasks {
-                let stack = self
-                    .source_task_stacks
-                    .get(&(runtime.id.get(), task.id.get()))
-                    .copied()
-                    .unwrap_or_default();
-                task.spawn_backtrace = self.stacks[stack.0].addresses.iter().copied().map(Address::new).collect();
-            }
         }
         Some(source)
     }
@@ -472,7 +459,7 @@ mod tests {
     use seismograph::recorder::event::{EventClock, Events, ObjectId};
     use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
     use seismograph::recorder::thread::ThreadLog;
-    use seismograph::recorder::{RecordingPolicies, RecordingPolicy};
+    use seismograph::recorder::{Policies, Policy};
     use seismograph_rallocator::callers::{AddressLookupFields, Callers};
 
     use super::*;
@@ -694,6 +681,7 @@ mod tests {
                 created_at: EventTimestamp::from_ticks(1),
                 retired_at: None,
                 counters: Counters::default(),
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 workers: [Some(TaskId::from_raw(1).unwrap()), None]
                     .into_iter()
                     .enumerate()
@@ -704,6 +692,7 @@ mod tests {
                         processor_index: None,
                         thread_id: None,
                         current_task,
+                        task_collection: seismograph_runtime::snapshot::TaskCollection::Retained,
                     })
                     .collect(),
                 tasks: vec![Task {
@@ -711,11 +700,11 @@ mod tests {
                     parent: None,
                     type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
                     future_size_bytes: None,
-                    spawned_at: EventTimestamp::from_ticks(1),
+                    spawned_at: Some(EventTimestamp::from_ticks(1)),
+                    metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                     last_worker_id: None,
                     activity: None,
                     metrics: TaskMetrics::default(),
-                    spawn_backtrace: Vec::new(),
                 }],
             }],
             addresses: Vec::new(),
@@ -778,10 +767,10 @@ mod tests {
         let events = Events {
             clock: EventClock::ProcessMonotonic,
             total_events: 3,
-            recording: RecordingPolicies {
-                runtime_tasks: RecordingPolicy::all(true),
-                general_events: RecordingPolicy::all(true),
-                ..RecordingPolicies::default()
+            recording: Policies {
+                runtime_tasks: Policy::all(true),
+                general_events: Policy::all(true),
+                ..Policies::default()
             },
             threads: vec![ThreadLog {
                 thread_id: ThreadId::new(1),
@@ -878,6 +867,7 @@ mod tests {
                 created_at: EventTimestamp::from_ticks(0),
                 retired_at: None,
                 counters: Counters::default(),
+                counters_scope: seismograph_runtime::snapshot::CountersScope::Lifetime,
                 workers: vec![Worker {
                     id: WorkerId::from_raw(1).unwrap(),
                     role: WorkerRole::Core,
@@ -885,6 +875,7 @@ mod tests {
                     processor_index: None,
                     thread_id: Some(ThreadId::new(1)),
                     current_task: Some(TaskId::from_raw(1).unwrap()),
+                    task_collection: seismograph_runtime::snapshot::TaskCollection::Retained,
                 }],
                 tasks: [1, 2]
                     .into_iter()
@@ -893,7 +884,8 @@ mod tests {
                         parent: None,
                         type_descriptor: TypeDescriptorId::from_raw(1).unwrap(),
                         future_size_bytes: None,
-                        spawned_at: EventTimestamp::from_ticks(1),
+                        spawned_at: Some(EventTimestamp::from_ticks(1)),
+                        metrics_scope: seismograph_runtime::snapshot::TaskMetricsScope::Lifetime,
                         last_worker_id: Some(WorkerId::from_raw(1).unwrap()),
                         activity: (id == 2).then_some(TaskActivity {
                             poll_worker_id: Some(WorkerId::from_raw(1).unwrap()),
@@ -907,7 +899,6 @@ mod tests {
                             poll_count: 7,
                             ..TaskMetrics::default()
                         },
-                        spawn_backtrace: vec![Address::new(id)],
                     })
                     .collect(),
             }],
@@ -926,8 +917,35 @@ mod tests {
         });
         let decoded = DecodedSnapshot {
             events: Events {
-                total_events: 2,
-                events: vec![event(1, Some(1)), runtime_without_worker],
+                total_events: 4,
+                events: vec![
+                    Event {
+                        kind: EventKind::TaskSpawned,
+                        payload: EventPayload::Runtime(RuntimeEvent {
+                            runtime_id: RuntimeId::from_raw(1).unwrap(),
+                            worker_id: None,
+                            subject_id: 1,
+                            related_id: 0,
+                            value_0: 1,
+                            value_1: 0,
+                        }),
+                        ..event(3, Some(1))
+                    },
+                    Event {
+                        kind: EventKind::TaskSpawned,
+                        payload: EventPayload::Runtime(RuntimeEvent {
+                            runtime_id: RuntimeId::from_raw(1).unwrap(),
+                            worker_id: None,
+                            subject_id: 2,
+                            related_id: 0,
+                            value_0: 1,
+                            value_1: 0,
+                        }),
+                        ..event(4, Some(2))
+                    },
+                    event(1, Some(1)),
+                    runtime_without_worker,
+                ],
                 ..Events::default()
             },
             ..DecodedSnapshot::default()

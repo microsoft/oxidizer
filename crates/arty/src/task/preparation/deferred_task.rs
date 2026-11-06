@@ -34,7 +34,8 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
-        if this.future.as_ref().get_ref().is_none() {
+        // Inspect unpinned state without reborrowing a future that can hold self-references.
+        if this.factory.is_some() {
             if matches!(
                 this.factory
                     .as_ref()

@@ -3,7 +3,7 @@
 
 [package]
 name = "seismograph_runtime"
-version = "0.4.0"
+version = "0.5.0"
 description = "Process-wide multi-runtime telemetry source for seismograph."
 readme = "README.md"
 keywords = ["runtime", "telemetry", "diagnostics", "profiling"]
@@ -26,8 +26,13 @@ exclude = true
 allowed_external_types = ["seismograph::*"]
 
 [dependencies]
-backtrace = { workspace = true, features = ["std"] }
 seismograph.workspace = true
+tick.workspace = true
+
+[dev-dependencies]
+mutants.workspace = true
+static_assertions.workspace = true
+tick = { path = "../tick", features = ["test-util"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]

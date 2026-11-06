@@ -3,8 +3,8 @@
 
 [package]
 name = "arty_macros_impl"
-description = "Implementation of Arty runtime entry-point macros."
-version = "0.6.0"
+description = "Expands Arty runtime entry-point macros."
+version = "0.6.1"
 readme = "README.md"
 keywords = ["arty", "async", "runtime", "proc-macro"]
 categories = ["asynchronous"]
