@@ -16,7 +16,7 @@ impl IoContext for ExampleContext {
     type ContextOptions = ();
     type Driver = ExampleDriver;
 
-    fn context((): Self::ContextOptions) -> Self {
+    fn new((): Self::ContextOptions) -> Self {
         Self
     }
 

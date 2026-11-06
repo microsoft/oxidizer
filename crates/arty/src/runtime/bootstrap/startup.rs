@@ -143,7 +143,7 @@ mod tests {
         type ContextOptions = DriverCounts;
         type Driver = TestDriver;
 
-        fn context(options: Self::ContextOptions) -> Self {
+        fn new(options: Self::ContextOptions) -> Self {
             Self { counts: options }
         }
 

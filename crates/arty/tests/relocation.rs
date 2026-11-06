@@ -36,7 +36,7 @@ impl IoContext for RelocationIoContext {
     type ContextOptions = RelocationIoOptions;
     type Driver = RelocationIoDriver;
 
-    fn context(options: Self::ContextOptions) -> Self {
+    fn new(options: Self::ContextOptions) -> Self {
         Self(options)
     }
 

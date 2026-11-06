@@ -408,7 +408,7 @@ mod tests {
         type ContextOptions = Arc<std::sync::Mutex<Vec<Duration>>>;
         type Driver = WaitRecordingDriver;
 
-        fn context(options: Self::ContextOptions) -> Self {
+        fn new(options: Self::ContextOptions) -> Self {
             Self(options)
         }
 
