@@ -5,17 +5,17 @@
 
 <#
 .SYNOPSIS
-    Runs the Pester test suite for the release-related PowerShell scripts.
+    Runs the repository Pester test suite.
 
 .DESCRIPTION
     Validates that Pester 5.7.1 is available, then runs every *.Tests.ps1 file
     under scripts/tests/Pester/. Optionally limits to a single subtree
-    (unit|integration|scenarios). Emits NUnit XML if -OutputPath is provided
+    (e.g. unit). Emits NUnit XML if -OutputPath is provided
     (CI consumes this).
 
 .PARAMETER Path
-    Optional sub-path under scripts/tests/Pester/ to scope the run (e.g. 'unit',
-    'integration', 'scenarios'). Default is to run everything.
+    Optional sub-path under scripts/tests/Pester/ to scope the run (e.g. 'unit').
+    Default is to run everything.
 
 .PARAMETER OutputPath
     Optional path for NUnit XML output. Skipped when not provided.
@@ -43,7 +43,7 @@ $pester = Get-Module Pester -ListAvailable |
     Where-Object Version -EQ $requiredPesterVersion |
     Select-Object -First 1
 if ($null -eq $pester) {
-    Write-Host "ERROR: Pester $requiredPesterVersion is required to run the release-script test suite." -ForegroundColor Red
+    Write-Host "ERROR: Pester $requiredPesterVersion is required to run the repository test suite." -ForegroundColor Red
     Write-Host ""
     Write-Host "Install with:"   -ForegroundColor Yellow
     Write-Host "  Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck"
