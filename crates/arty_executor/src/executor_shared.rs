@@ -168,6 +168,7 @@ impl ExecutorShared {
         ));
     }
 
+    #[inline]
     fn register_task(&self, task_handle: TaskHandle) {
         let wake_signal = WakeSignal::new(self.inner.wake.clone(), task_handle.as_ptr());
 
