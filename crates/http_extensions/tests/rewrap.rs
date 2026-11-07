@@ -216,8 +216,10 @@ fn memory_and_empty_sources_do_not_add_a_timeout_to_transformed_output() {
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock())
             .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(100)));
         let source = if empty { builder.empty() } else { builder.text("memory") };
+        let expected = if empty { "" } else { "memory" };
         let (release, gate) = oneshot::channel();
         let mut body = builder.rewrap(source, |source| {
+            assert_eq!(BytesView::try_from(source.try_clone().unwrap()).unwrap(), expected.as_bytes());
             StreamBody::new(stream::once(async move {
                 let bytes = source.into_bytes().await?;
                 gate.await.unwrap();
@@ -232,7 +234,6 @@ fn memory_and_empty_sources_do_not_add_a_timeout_to_transformed_output() {
         let Poll::Ready(Some(Ok(frame))) = poll_frame(&mut body) else {
             panic!("in-memory sources must not time the transformation");
         };
-        let expected = if empty { "" } else { "memory" };
         assert_eq!(frame.into_data().unwrap(), expected.as_bytes());
         assert!(matches!(poll_frame(&mut body), Poll::Ready(None)));
     }
