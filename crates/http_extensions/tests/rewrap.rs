@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use bytesbuf::mem::GlobalPool;
 use bytesbuf::BytesView;
+use bytesbuf::mem::GlobalPool;
 use futures::channel::{mpsc, oneshot};
 use futures::executor::block_on;
 use futures::stream;
@@ -140,10 +140,7 @@ fn source_timeout_wins_over_both_shorter_and_longer_builder_timeouts() {
         let builder = source_builder
             .clone()
             .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(builder_ms)));
-        let source = source_builder.stream(
-            stream::pending(),
-            &HttpBodyOptions::new().timeout(Duration::from_millis(source_ms)),
-        );
+        let source = source_builder.stream(stream::pending(), &HttpBodyOptions::new().timeout(Duration::from_millis(source_ms)));
         let mut body = builder.rewrap(source, |source| source);
 
         assert!(poll_frame(&mut body).is_pending());
@@ -201,7 +198,9 @@ fn a_wholly_untimed_stream_can_resume_after_a_long_pause() {
     assert!(poll_frame(&mut body).is_pending());
     control.advance(Duration::from_secs(60));
     assert!(poll_frame(&mut body).is_pending());
-    sender.unbounded_send(Ok(BytesView::copied_from_slice(b"resumed", &builder))).unwrap();
+    sender
+        .unbounded_send(Ok(BytesView::copied_from_slice(b"resumed", &builder)))
+        .unwrap();
     drop(sender);
     let Poll::Ready(Some(Ok(frame))) = poll_frame(&mut body) else {
         panic!("an untimed source must remain readable after a pause");
