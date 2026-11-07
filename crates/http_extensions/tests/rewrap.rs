@@ -240,6 +240,28 @@ fn memory_and_empty_sources_do_not_add_a_timeout_to_transformed_output() {
 }
 
 #[test]
+fn inherited_timeout_preserves_source_buffering_when_a_transform_shrinks_output() {
+    let control = ClockControl::new();
+    let source_builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
+    let builder = source_builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(100)).buffer_limit(3));
+    let source = source_builder.stream(
+        stream::iter([Ok(BytesView::copied_from_slice(b"1234", &source_builder))]),
+        &HttpBodyOptions::new(),
+    );
+    let body = builder.rewrap(source, |source| {
+        StreamBody::new(stream::once(async move {
+            let bytes = source.into_bytes().await?;
+            assert_eq!(bytes, b"1234");
+            Ok::<_, HttpError>(Frame::data(BytesView::copied_from_slice(b"x", &source_builder)))
+        }))
+    });
+
+    assert_eq!(block_on(body.into_bytes()).unwrap(), b"x");
+}
+
+#[test]
 fn later_buffering_enforces_the_source_limit_or_the_builder_fallback() {
     for (source_limit, payload, expected_limit, succeeds) in [
         (Some(7), "12345", 7, true),
@@ -272,7 +294,7 @@ fn later_buffering_enforces_the_source_limit_or_the_builder_fallback() {
             } else {
                 let error = result.unwrap_err();
                 assert_eq!(error.label(), "body_size_limit");
-                assert!(error.message().contains(&format!("limit of {expected_limit} bytes")));
+                assert_eq!(error.message(), format!("body size exceeds the limit of {expected_limit} bytes"));
             }
         }
     }

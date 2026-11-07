@@ -192,7 +192,7 @@ impl HttpBodyBuilder {
         let options = own.merge(&self.options);
         let body = match (own.timeout, options.timeout) {
             (None, Some(timeout)) if matches!(&body.kind, super::Kind::Body(..)) => {
-                HttpBody::from_streaming(Box::pin(TimeoutBody::new(body, timeout, &self.clock)), options)
+                HttpBody::from_streaming(Box::pin(TimeoutBody::new(body, timeout, &self.clock)), own.timeout(timeout))
             }
             _ => body,
         };
