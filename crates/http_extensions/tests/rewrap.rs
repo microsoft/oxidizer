@@ -177,7 +177,7 @@ fn an_existing_source_timeout_does_not_time_delayed_transformed_output() {
     });
 
     assert!(poll_frame(&mut body).is_pending());
-    control.advance(Duration::from_millis(1000));
+    control.advance(Duration::from_secs(1));
     assert!(poll_frame(&mut body).is_pending());
     release.send(()).unwrap();
     let Poll::Ready(Some(Ok(frame))) = poll_frame(&mut body) else {
@@ -196,7 +196,7 @@ fn a_wholly_untimed_stream_can_resume_after_a_long_pause() {
     let mut body = builder.rewrap(source, |source| source);
 
     assert!(poll_frame(&mut body).is_pending());
-    control.advance(Duration::from_secs(60));
+    control.advance(Duration::from_mins(1));
     assert!(poll_frame(&mut body).is_pending());
     sender
         .unbounded_send(Ok(BytesView::copied_from_slice(b"resumed", &builder)))
@@ -226,7 +226,7 @@ fn memory_and_empty_sources_do_not_add_a_timeout_to_transformed_output() {
         });
 
         assert!(poll_frame(&mut body).is_pending());
-        control.advance(Duration::from_millis(1000));
+        control.advance(Duration::from_secs(1));
         assert!(poll_frame(&mut body).is_pending());
         release.send(()).unwrap();
         let Poll::Ready(Some(Ok(frame))) = poll_frame(&mut body) else {
