@@ -26,6 +26,7 @@ use crate::trailing::TrailingData;
 /// stays monotonic.
 fn portable_quality(level: Level) -> u32 {
     let scaled = (u32::from(level.get()) * 11 + 4) / 9;
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Level is bounded by 9, so the rounded scale is already at most 11 before this clamp")]
     scaled.min(11)
 }
 
@@ -144,7 +145,7 @@ unsafe impl Codec for BrotliCompress {
         self.finished = self.state.is_finished();
         let step = if self.finished {
             Step::StreamEnd
-        } else if operation == Operation::Flush && available_in == 0 && !self.state.has_more_output() {
+        } else if flush_complete(operation, available_in, self.state.has_more_output()) {
             Step::FlushComplete
         } else {
             Step::Continue
@@ -156,6 +157,10 @@ unsafe impl Codec for BrotliCompress {
     fn stream_ended(&mut self) -> Result<StreamEnd> {
         Ok(StreamEnd::Complete)
     }
+}
+
+fn flush_complete(operation: Operation, available_in: usize, has_more_output: bool) -> bool {
+    operation == Operation::Flush && available_in == 0 && !has_more_output
 }
 
 /// Drives the `brotli` crate's decoder, across as many concatenated streams as the configuration
@@ -274,6 +279,119 @@ unsafe impl Codec for BrotliDecompress {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_afternoon_flush_completion_requires_the_flush_operation_consumed_input_and_no_pending_output() {
+        use crate::engine::Operation;
+
+        for (operation, available_in, pending, expected) in [
+            (Operation::Process, 0, false, false),
+            (Operation::Finish, 0, false, false),
+            (Operation::Flush, 0, false, true),
+            (Operation::Flush, 1, false, false),
+            (Operation::Flush, 0, true, false),
+            (Operation::Flush, 1, true, false),
+        ] {
+            assert_eq!(super::flush_complete(operation, available_in, pending), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_strict_decoder_workspaces_are_zero_initialized() {
+        use brotli::{Allocator as _, SliceWrapper as _};
+
+        let mut state = super::BrotliDecompress::state();
+        let bytes = state.alloc_u8.alloc_cell(17);
+        assert_eq!(bytes.slice(), [0; 17]);
+        state.alloc_u8.free_cell(bytes);
+        let words = state.alloc_u32.alloc_cell(19);
+        assert_eq!(words.slice(), [0; 19]);
+        state.alloc_u32.free_cell(words);
+    }
+
+    #[test]
+    fn gamma_round2_finished_encoder_rejects_new_input_without_panicking() {
+        use super::*;
+
+        let mut codec = BrotliCompress::new(Level::DEFAULT, &Brotli::new());
+        let mut output = [MaybeUninit::uninit(); 128];
+        let (step, consumed, _) = codec.step(b"first", &mut output, Operation::Finish).unwrap();
+        assert_eq!(step, Step::StreamEnd);
+        assert_eq!(consumed, 5);
+        let error = codec.step(b"second", &mut output, Operation::Process).unwrap_err();
+        assert!(error.is_invalid_state());
+        assert_eq!(error.to_string(), "the brotli compression engine reported a failure");
+    }
+
+    #[test]
+    fn gamma_round2_flush_waits_until_pending_output_is_drained() {
+        use super::*;
+
+        let mut codec = BrotliCompress::new(Level::DEFAULT, &Brotli::new());
+        let mut tiny = [MaybeUninit::uninit(); 1];
+        let (step, consumed, produced) = codec.step(b"flush payload", &mut tiny, Operation::Flush).unwrap();
+        assert_eq!(consumed, 13);
+        assert_eq!(produced, 1);
+        assert!(codec.state.has_more_output());
+        assert_eq!(step, Step::Continue);
+        let mut output = [MaybeUninit::uninit(); 128];
+        assert_eq!(codec.step(b"", &mut output, Operation::Flush).unwrap().0, Step::FlushComplete);
+    }
+
+    #[test]
+    fn gamma_survivor_brotli_reset_and_limit_forwarding() {
+        use crate::engine::Codec as _;
+        let limits = crate::limits::FormatLimits::new(Some(1), None, Some(2));
+        let mut decoder = super::BrotliDecompress::new(limits, true, crate::TrailingData::Reject);
+        decoder.check_limits(40_000, 40_000, 2).unwrap();
+        assert!(decoder.check_limits(40_000, 40_001, 2).unwrap_err().is_limit_exceeded());
+        assert!(decoder.check_limits(40_000, 40_000, 3).unwrap_err().is_limit_exceeded());
+        decoder.needs_reset = true;
+        decoder.total_out = 17;
+        let mut output = [std::mem::MaybeUninit::uninit(); 16];
+        decoder.step(&[], &mut output, crate::engine::Operation::Process).unwrap();
+        assert!(!decoder.needs_reset);
+        assert_eq!(decoder.total_out, 0);
+    }
+
+    #[test]
+    fn gamma_survivor_brotli_encoder_parameters_and_decoder_initial_state() {
+        use crate::brotli::{Brotli, Mode, WindowSize};
+        for (mode, expected_mode) in [(Mode::Generic, 0), (Mode::Text, 1), (Mode::Font, 2)] {
+            let options = Brotli {
+                window_size: WindowSize::new(18).unwrap(),
+                mode,
+                ..Brotli::new()
+            };
+            let encoder = super::BrotliCompress::new(crate::Level::FAST, &options);
+            assert_eq!(encoder.state.params.lgwin, 18);
+            assert_eq!(super::mode(mode), expected_mode);
+            assert_eq!(encoder.state.params.mode as u32, expected_mode);
+            assert!(!encoder.finished);
+        }
+        let decoder = super::BrotliDecompress::new(
+            crate::limits::FormatLimits::new(None, None, None),
+            true,
+            crate::TrailingData::Reject,
+        );
+        assert!(!decoder.needs_reset);
+        assert_eq!(decoder.total_out, 0);
+        let debug = format!("{decoder:?}");
+        assert!(debug.starts_with("BrotliDecompress { limits: "));
+        assert!(debug.contains("multi_stream: true"));
+    }
+
+    #[test]
+    fn gamma_survivor_portable_quality_rounding_and_output_initialization() {
+        for (level, expected) in [0, 1, 2, 4, 5, 6, 7, 9, 10, 11].into_iter().enumerate() {
+            assert_eq!(
+                super::portable_quality(crate::Level::new(u8::try_from(level).unwrap()).unwrap()),
+                expected
+            );
+        }
+        let mut output = [std::mem::MaybeUninit::new(0xaa); 17];
+        assert_eq!(super::initialize(&mut output), &[0; 17]);
+    }
+
     use super::*;
 
     #[test]

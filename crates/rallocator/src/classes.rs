@@ -74,7 +74,13 @@ static SIZE_LOOKUP: [u8; SMALL_MAX / 16] = make_lookup();
 
 #[inline]
 pub(crate) fn index(size: usize) -> usize {
-    usize::from(SIZE_LOOKUP[(size.max(1) - 1) >> 4])
+    usize::from(
+        SIZE_LOOKUP[(size.max(
+            // #[gamma::skip(literal.int_increment, reason = "Promoting the minimum size from one to two leaves both values in the same sixteen-byte lookup bucket")]
+            1,
+        ) - 1)
+            >> 4],
+    )
 }
 
 /// A validated class, constructed only from a valid `Layout`. Keeping the tag
@@ -96,7 +102,13 @@ impl Request {
     #[inline]
     pub(crate) fn with_size(layout: Layout, size: usize) -> Option<Self> {
         let alignment = layout.align();
-        let padded = size.max(1).checked_add(alignment - 1)? & !(alignment - 1);
+        let padded = size
+            .max(
+                // #[gamma::skip(literal.int_increment, reason = "Promoting sizes zero and one to two selects the same first size class, or the same padded alignment when alignment exceeds one")]
+                1,
+            )
+            .checked_add(alignment - 1)?
+            & !(alignment - 1);
         if padded <= SMALL_MAX {
             // Class steps are powers of two, preserving padded alignment.
             #[expect(clippy::cast_possible_truncation, reason = "64 plus a small-class index is at most 107")]
@@ -130,6 +142,43 @@ pub(crate) fn size(tag: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gamma_round2_zero_and_every_size_class_transition_select_exact_index() {
+        assert_eq!(index(0), 0);
+        for (selected, class) in CLASSES.iter().enumerate() {
+            assert_eq!(index(class.size), selected);
+            assert_eq!(
+                Request::new(Layout::from_size_align(class.size, 1).unwrap()).unwrap().tag(),
+                SMALL_TAG + selected
+            );
+            if selected + 1 < COUNT {
+                assert_eq!(index(class.size + 1), selected + 1);
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_request_overflow_alignment_and_class_boundaries() {
+        for alignment in [1, 16, 64, 4096, 65536] {
+            let layout = Layout::from_size_align(1, alignment).unwrap();
+            for size in [0, 1, 15, 16, 17, 48, 49, 65_536, 65_537, 131_073] {
+                let request = Request::with_size(layout, size).unwrap();
+                assert!(request.size() >= size.max(1));
+                assert_eq!(request.size() % alignment, 0);
+            }
+            assert!(Request::with_size(layout, usize::MAX).is_none());
+            assert!(Request::with_size(layout, isize::MAX as usize).is_none());
+        }
+        for size in 1..=SMALL_MAX {
+            let request = Request::new(Layout::from_size_align(size, 1).unwrap()).unwrap();
+            let selected = request.tag() - SMALL_TAG;
+            assert!(CLASSES[selected].size >= size);
+            if selected != 0 {
+                assert!(CLASSES[selected - 1].size < size);
+            }
+        }
+    }
 
     #[test]
     fn runtime_table_generation_matches_compiled_tables() {

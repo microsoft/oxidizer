@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, MutexGuard as PhaseGuard};
 use std::task::{Context, Poll};
 
 use super::wait_queue::{WaitQueue, Waiter, block_on};
@@ -92,6 +92,10 @@ impl Barrier<Sync> {
     #[inline]
     #[cfg_attr(test, mutants::skip)] // Mutating barrier progress conditions turns tests into unbounded scheduler waits.
     pub fn wait(&self) -> BarrierWaitOutcome {
+        self.wait_with(|phase| self.raw.changed.wait(phase).expect("barrier state is never held across user code"))
+    }
+
+    fn wait_with<'a>(&'a self, mut wait: impl FnMut(PhaseGuard<'a, Phase>) -> PhaseGuard<'a, Phase>) -> BarrierWaitOutcome {
         if self.raw.parties == 1 {
             self.record(EventKind::BarrierAccess);
             self.record(EventKind::BarrierRelease);
@@ -113,7 +117,7 @@ impl Barrier<Sync> {
         } else {
             self.record(EventKind::BarrierContention);
             while phase.generation == generation {
-                phase = self.raw.changed.wait(phase).expect("barrier state is never held across user code");
+                phase = wait(phase);
             }
             self.record(EventKind::BarrierAccess);
         }
@@ -297,11 +301,138 @@ impl BarrierWaitOutcome {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn nov4_blocking_async_barrier_cancels_the_arrival_when_its_injected_parker_unwinds() {
+        let barrier = super::Barrier::<crate::sync::Async>::new(2);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::sync::effects::with_park(
+                || panic!("injected parker failure"),
+                || {
+                    barrier.wait();
+                },
+            );
+        }));
+        let panic = outcome.unwrap_err();
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"injected parker failure"));
+        assert_eq!(
+            super::Barrier::<crate::sync::Async>::count(barrier.raw.state.load(std::sync::atomic::Ordering::Acquire)),
+            0
+        );
+        let mut next = std::pin::pin!(barrier.wait_async());
+        assert!(
+            next.as_mut()
+                .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+                .is_pending()
+        );
+    }
+    #[test]
+    #[cfg(feature = "seismograph")]
+    fn gamma_round2_native_barrier_tracks_each_phase_transition_and_completion_without_parking() {
+        use seismograph::recorder::event::EventKind as RecordedKind;
+
+        crate::gamma_round2_telemetry::enable_recording();
+        for leader in [false, true] {
+            let barrier = super::Barrier::<Sync>::new(2);
+            if leader {
+                barrier.raw.phase.lock().unwrap().arrived = 1;
+            }
+            let accesses = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::BarrierAccess);
+            let releases = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::BarrierRelease);
+            let contentions = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::BarrierContention);
+            let mut waits = 0;
+            let outcome = barrier.wait_with(|mut phase| {
+                waits += 1;
+                phase.arrived = 0;
+                phase.generation = phase.generation.wrapping_add(1);
+                phase
+            });
+            assert_eq!(outcome.is_leader(), leader);
+            assert_eq!(waits, usize::from(!leader));
+            let phase = barrier.raw.phase.lock().unwrap();
+            assert_eq!(phase.arrived, 0);
+            assert_eq!(phase.generation, 1);
+            drop(phase);
+            assert_eq!(
+                crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::BarrierAccess),
+                accesses + 1
+            );
+            assert_eq!(
+                crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::BarrierRelease),
+                releases + usize::from(leader)
+            );
+            assert_eq!(
+                crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::BarrierContention),
+                contentions + usize::from(!leader)
+            );
+        }
+    }
+
     use std::pin::pin;
     use std::task::Waker;
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn gamma_round2_registration_completion_marks_the_barrier_wait_terminal() {
+        let barrier = Barrier::<Async>::new(2);
+        let mut wait = barrier.wait_async();
+        let context = Context::from_waker(Waker::noop());
+        assert!(Pin::new(&mut wait).poll(&mut Context::from_waker(Waker::noop())).is_pending());
+        let generation = wait.generation.unwrap();
+        assert!(barrier.wait().is_leader());
+        assert_eq!(
+            wait.poll_registered(&context, generation),
+            Poll::Ready(BarrierWaitOutcome { leader: false })
+        );
+        assert!(wait.completed);
+        assert!(wait.waiter.is_none());
+    }
+
+    #[test]
+    fn gamma_round2_single_party_arrival_does_not_change_the_packed_state() {
+        let barrier = Barrier::<Async>::new(1);
+        let before = barrier.raw.state.load(Ordering::Acquire);
+        assert!(barrier.wait().is_leader());
+        assert_eq!(barrier.raw.state.load(Ordering::Acquire), before);
+    }
+
+    #[test]
+    fn gamma_survivor_barrier_terminal_metadata_and_native_generation_wrap_are_exact() {
+        let single = Barrier::<Sync>::new(1);
+        assert!(single.wait().is_leader());
+        assert_eq!(single.raw.phase.lock().unwrap().generation, 0);
+        let native = Barrier::<Sync>::new(2);
+        {
+            let mut phase = native.raw.phase.lock().unwrap();
+            phase.arrived = 1;
+            phase.generation = u64::MAX;
+        }
+        assert!(native.wait().is_leader());
+        {
+            let phase = native.raw.phase.lock().unwrap();
+            assert_eq!(phase.arrived, 0);
+            assert_eq!(phase.generation, 0);
+        }
+        let asynchronous = Barrier::<Async>::new(2);
+        let mut first = asynchronous.wait_async();
+        let mut last = asynchronous.wait_async();
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(Pin::new(&mut first).poll(&mut cx).is_pending());
+        assert!(first.waiter.is_some());
+        assert!(Pin::new(&mut last).poll(&mut cx).is_ready());
+        assert!(last.completed);
+        assert!(Pin::new(&mut first).poll(&mut cx).is_ready());
+        assert!(first.completed);
+        assert!(first.waiter.is_some());
+        let racing = Barrier::<Async>::new(2);
+        let mut follower = racing.wait_async();
+        assert!(Pin::new(&mut follower).poll(&mut cx).is_pending());
+        let generation = follower.generation.unwrap();
+        assert!(Pin::new(&mut racing.wait_async()).poll(&mut cx).is_ready());
+        assert!(follower.poll_registered(&cx, generation).is_ready());
+        assert!(follower.waiter.is_none());
+    }
 
     #[test]
     fn generation_change_during_waiter_registration_completes_wait() {

@@ -198,6 +198,85 @@ mod tests {
     use crate::HyperTransport;
     use crate::testing::{FakeConnector, create_hyper_error, fake_body_builder};
 
+    #[tokio::test]
+    async fn gamma_round2_expired_connection_poisons_hyper_pool_metadata() {
+        let control = tick::ClockControl::new();
+        let clock = control.to_clock();
+        let now = clock.clone();
+        let info = ConnectionInfo::new(move || now.instant(), PoolIndex::new(0), Some(Duration::from_secs(1)));
+        let connector = FakeConnector::new_success(http_response_bytes(), clock);
+        let client =
+            legacy::Client::builder(crate::builder::SpawnerExecutor(Spawner::new_tokio(None))).build(HyperConnectorAdapter::new(connector));
+        let mut request = test_request();
+        let capture = capture_connection::<HttpBody>(&mut request);
+        let _response = client.request(request).await.unwrap();
+        let mut extensions = Extensions::new();
+        extensions.insert(info.clone());
+        assert!(format!("{:?}", capture.connection_metadata().as_ref().unwrap()).contains("poisoned: false"));
+        control.advance(Duration::from_secs(2));
+        assert!(info.is_expired());
+        handle_poisoning(&capture, &extensions);
+        assert!(info.is_poisoned());
+        assert!(format!("{:?}", capture.connection_metadata().as_ref().unwrap()).contains("poisoned: true"));
+    }
+
+    struct GammaBoundedWriter {
+        remaining: usize,
+        output: String,
+    }
+
+    impl std::fmt::Write for GammaBoundedWriter {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            if s.len() > self.remaining {
+                return Err(std::fmt::Error);
+            }
+            self.remaining -= s.len();
+            self.output.push_str(s);
+            Ok(())
+        }
+    }
+
+    fn gamma_check_error_display(error: &HyperError) {
+        use std::fmt::Write as _;
+
+        let mut writer = GammaBoundedWriter {
+            remaining: 4096,
+            output: String::new(),
+        };
+        let mut expected = error.source().unwrap().to_string();
+        let mut source = error.source();
+        while let Some(current) = source {
+            write!(expected, "\ncaused by: {current}").unwrap();
+            source = current.source();
+        }
+        write!(writer, "{error}").unwrap();
+        assert_eq!(writer.output, expected);
+        for remaining in 0..expected.len() {
+            let mut writer = GammaBoundedWriter {
+                remaining,
+                output: String::new(),
+            };
+            write!(writer, "{error}").unwrap_err();
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_hyper_display_preserves_chain_and_formatter_errors() {
+        gamma_check_error_display(&HyperError::Hyper(create_hyper_error()));
+    }
+
+    #[tokio::test]
+    async fn gamma_survivor_legacy_display_preserves_chain_and_formatter_errors() {
+        let clock = tick::Clock::new_frozen();
+        let connector = FakeConnector::new_success(Bytes::from_static(b"NOT HTTP"), clock.clone());
+        let mut options = fetch_options::TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        let builder = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock, options);
+        let handler = build_hyper_handler(builder, tls(), fake_body_builder(), &opentelemetry::global::meter("test"));
+        let error = handler.client.request(test_request()).await.unwrap_err();
+        gamma_check_error_display(&HyperError::Legacy(error));
+    }
+
     fn tls() -> TlsBackend {
         native_tls::TlsConnector::new().unwrap().into()
     }

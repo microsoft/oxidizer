@@ -166,7 +166,9 @@ impl Pool {
     /// cannot leak its state into the next user.
     #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
     pub(crate) fn take_compressor(&self, key: EngineKey) -> Option<flate2::Compress> {
-        if self.is_disabled() {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "A zero-capacity pool cannot store any engine, so looking in its empty map also returns None")]
+        self.is_disabled() {
             return None;
         }
 
@@ -186,7 +188,9 @@ impl Pool {
     /// forbid.
     #[cfg(any(test, feature = "deflate", feature = "gzip", feature = "zlib"))]
     pub(crate) fn return_compressor(&self, key: EngineKey, engine: &mut Option<flate2::Compress>) {
-        if self.is_disabled() {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The later len < capacity check is false for zero capacity and leaves the supplied engine untouched")]
+        self.is_disabled() {
             return;
         }
 
@@ -207,7 +211,9 @@ impl Pool {
     /// [`Wrapper::reset_restores_framing`].
     #[cfg(any(test, feature = "deflate", feature = "zlib"))]
     pub(crate) fn take_decompressor(&self, wrapper: Wrapper) -> Option<flate2::Decompress> {
-        if self.is_disabled() {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "A zero-capacity pool cannot store any engine, so looking in its empty map also returns None")]
+        self.is_disabled() {
             return None;
         }
 
@@ -221,7 +227,9 @@ impl Pool {
     /// See [`Self::return_compressor`].
     #[cfg(any(test, feature = "deflate", feature = "zlib"))]
     pub(crate) fn return_decompressor(&self, wrapper: Wrapper, engine: &mut Option<flate2::Decompress>) {
-        if self.is_disabled() {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The later len < capacity check is false for zero capacity and leaves the supplied engine untouched")]
+        self.is_disabled() {
             return;
         }
 
@@ -241,12 +249,15 @@ impl Pool {
     /// which is where the saving comes from.
     #[cfg(any(test, feature = "zstd"))]
     pub(crate) fn take_zstd_compressor(&self) -> Option<zstd_safe::CCtx<'static>> {
-        if self.is_disabled() {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "A zero-capacity pool cannot retain contexts, so popping its empty vector also returns None")]
+        self.is_disabled() {
             return None;
         }
 
         let mut context = self.inner.zstd_compressors.lock_result().ok()?.pop()?;
 
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Pinned zstd SessionAndParameters first restores the init stage, then clears dictionaries and resets scalar parameters without any fallible allocation or remaining stage failure")]
         context.reset(zstd_safe::ResetDirective::SessionAndParameters).ok()?;
         Some(context)
     }
@@ -254,7 +265,9 @@ impl Pool {
     /// Takes `context` for reuse, leaving it in place when the pool cannot keep it, for the reason given on `return_compressor`.
     #[cfg(any(test, feature = "zstd"))]
     pub(crate) fn return_zstd_compressor(&self, context: &mut Option<zstd_safe::CCtx<'static>>) {
-        if self.is_disabled() {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The later len < capacity check is false for zero capacity and leaves the supplied context untouched")]
+        self.is_disabled() {
             return;
         }
 
@@ -269,12 +282,15 @@ impl Pool {
     /// Takes an idle zstd decompressor, or reports that one must be built.
     #[cfg(any(test, feature = "zstd"))]
     pub(crate) fn take_zstd_decompressor(&self) -> Option<zstd_safe::DCtx<'static>> {
-        if self.is_disabled() {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "A zero-capacity pool cannot retain contexts, so popping its empty vector also returns None")]
+        self.is_disabled() {
             return None;
         }
 
         let mut context = self.inner.zstd_decompressors.lock_result().ok()?.pop()?;
 
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Pinned zstd SessionAndParameters first restores the init stage, then resets scalar parameters without any fallible allocation or remaining stage failure")]
         context.reset(zstd_safe::ResetDirective::SessionAndParameters).ok()?;
         Some(context)
     }
@@ -282,7 +298,9 @@ impl Pool {
     /// Takes `context` for reuse, leaving it in place when the pool cannot keep it, for the reason given on `return_compressor`.
     #[cfg(any(test, feature = "zstd"))]
     pub(crate) fn return_zstd_decompressor(&self, context: &mut Option<zstd_safe::DCtx<'static>>) {
-        if self.is_disabled() {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The later len < capacity check is false for zero capacity and leaves the supplied context untouched")]
+        self.is_disabled() {
             return;
         }
 
@@ -313,6 +331,49 @@ impl fmt::Debug for Pool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nov6_zero_capacity_resources_reuse_the_process_wide_disabled_pool() {
+        let first = crate::Resources::default().with_pool_capacity(0);
+        let second = crate::Resources::default().with_pool_capacity(0);
+        assert!(Arc::ptr_eq(&first.pool().inner, &Pool::disabled().inner));
+        assert!(Arc::ptr_eq(&first.pool().inner, &second.pool().inner));
+        assert_eq!(first.pool().capacity(), 0);
+    }
+
+    #[test]
+    fn gamma_survivor_poisoned_zstd_checkout_is_a_cache_miss() {
+        let pool = Pool::new();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = pool.inner.zstd_decompressors.lock();
+            panic!("poison the existing pool lock");
+        }));
+        assert!(result.is_err());
+        assert!(pool.inner.zstd_decompressors.is_poisoned());
+        assert!(pool.take_zstd_decompressor().is_none());
+    }
+
+    #[test]
+    fn gamma_survivor_first_idle_engine_fills_capacity_one() {
+        let pool = Pool::with_capacity(1);
+        assert!(!pool.is_disabled());
+        assert!(Pool::disabled().is_disabled());
+        let key = EngineKey {
+            wrapper: Wrapper::Zlib,
+            level: 1,
+        };
+        let mut compressor = Some(flate2::Compress::new(flate2::Compression::fast(), true));
+        pool.return_compressor(key, &mut compressor);
+        assert!(compressor.is_none());
+        assert!(pool.take_compressor(key).is_some());
+        assert!(pool.take_compressor(key).is_none());
+        let mut decompressor = Some(flate2::Decompress::new(true));
+        pool.return_decompressor(Wrapper::Zlib, &mut decompressor);
+        assert!(decompressor.is_none());
+        assert!(pool.take_decompressor(Wrapper::Zlib).is_some());
+        assert!(pool.take_decompressor(Wrapper::Zlib).is_none());
+        assert_eq!(format!("{pool:?}"), "Pool { capacity: 1, .. }");
+    }
 
     #[test]
     fn default_capacity_is_applied() {

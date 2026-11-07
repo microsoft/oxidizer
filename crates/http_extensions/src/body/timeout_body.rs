@@ -107,6 +107,21 @@ mod tests {
     use crate::{HttpBodyBuilder, HttpBodyOptions, HttpError, Result};
 
     #[test]
+    fn gamma_survivor_timeout_clears_cached_delay_and_inner_body() {
+        let control = ClockControl::new();
+        let mut body = super::TimeoutBody::new(PendingBody, Duration::from_millis(100), &control.to_clock());
+        let mut context = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(Pin::new(&mut body).poll_frame(&mut context).is_pending());
+        assert!(body.current_delay.is_some());
+        control.advance(Duration::from_millis(100));
+        assert!(matches!(Pin::new(&mut body).poll_frame(&mut context), Poll::Ready(Some(Err(_)))));
+        assert!(body.current_delay.is_none());
+        assert!(body.inner.is_none());
+        assert!(body.is_end_stream());
+        assert!(matches!(Pin::new(&mut body).poll_frame(&mut context), Poll::Ready(None)));
+    }
+
+    #[test]
     fn stream_body_returns_data_before_timeout() {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);

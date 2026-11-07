@@ -86,6 +86,7 @@ impl RequestBodyFraming {
                         // `dwTotalLength` cannot represent this length, so the
                         // header is the only framing source and must be present
                         // even when the caller supplied none.
+                        // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "reconcile_content_length already replaced any existing field with this same canonical value; inserting it again leaves the HeaderMap unchanged")]
                         if !headers.contains_key(CONTENT_LENGTH) {
                             headers.insert(CONTENT_LENGTH, canonical_content_length(length));
                         }
@@ -409,6 +410,7 @@ pub(crate) async fn send_body(body: &mut HttpBody, writer: &mut WinHttpBodyWrite
             Some(Ok(frame)) => match frame.into_data() {
                 Ok(data) => writer.write(data).await?,
                 Err(frame) => {
+                    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "http_body::Frame has only data and trailers; after into_data fails, into_trailers must succeed")]
                     frame
                         .into_trailers()
                         .map_err(|_unsupported| invalid_request(RequestBodyError::from(UnsupportedBodyFrameError::new())))?;
@@ -468,6 +470,127 @@ mod tests {
     use crate::bindings::{BindingsFacade, MockBindings, WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH};
     use crate::context::{CompletionResult, OperationBuffer};
     use crate::mocks::{finish, installed};
+
+    #[test]
+    fn november6_final_chunk_rejects_a_one_byte_callback_as_invalid_status_information() {
+        let (mut guard, context, contexts, session, closes) = installed();
+        let address = context.addr();
+        let mut bindings = MockBindings::new();
+        bindings.expect_write_data().once().returning(move |_, buffer, len| {
+            assert!(buffer.is_none());
+            assert_eq!(len, 0);
+            let context = crate::mocks::context_pointer(address);
+            let mut written = 1_u32;
+            // SAFETY: the installed context owns one armed write. The DWORD
+            // stays initialized and readable for this synchronous callback.
+            unsafe {
+                crate::mocks::complete(
+                    context,
+                    windows::Win32::Networking::WinHttp::WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+                    (&raw mut written).cast(),
+                    4,
+                );
+            }
+            Ok(())
+        });
+        let memory = OpaqueMemory::new(GlobalPool::new());
+        let mut writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(bindings)), &memory);
+        let error = crate::mocks::drive(writer.end_automatic_chunking()).unwrap_err();
+        assert!(error.to_string().contains("invalid status information"), "{error}");
+        assert!(!error.to_string().contains("reported 1 bytes"), "{error}");
+        // SAFETY: the write completed, the guard borrow ended, and this is
+        // the sole final callback for the installed context.
+        unsafe { finish(guard, context, &contexts, session, &closes) };
+    }
+
+    #[test]
+    fn november4_final_chunk_write_omits_buffer_and_submits_exactly_zero_bytes() {
+        let (mut guard, context, contexts, session, closes) = installed();
+        let address = context.addr();
+        let mut bindings = MockBindings::new();
+        bindings.expect_write_data().times(2).returning(move |_, buffer, len| {
+            assert!(buffer.is_none());
+            assert_eq!(len, 0);
+            let context = crate::mocks::context_pointer(address);
+            let mut written = 0_u32;
+            // SAFETY: this installed context has exactly one armed write;
+            // the DWORD payload stays live through the synchronous callback.
+            unsafe {
+                crate::mocks::complete(
+                    context,
+                    windows::Win32::Networking::WinHttp::WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+                    (&raw mut written).cast(),
+                    4,
+                );
+            }
+            Ok(())
+        });
+        let memory = OpaqueMemory::new(GlobalPool::new());
+        let mut writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(bindings)), &memory);
+        for _ in 0..2 {
+            crate::mocks::drive(writer.end_automatic_chunking()).unwrap();
+        }
+        // SAFETY: both sequential writes completed and this is the only
+        // final callback; the writer's mutable guard borrow has ended.
+        unsafe { finish(guard, context, &contexts, session, &closes) };
+    }
+
+    #[test]
+    fn gamma_round2_disconnected_writes_return_specific_protocol_diagnostics() {
+        for final_write in [false, true] {
+            let (mut guard, context, contexts, session, closes) = installed();
+            let address = context.addr();
+            let mut bindings = MockBindings::new();
+            bindings.expect_write_data().once().returning(move |_, buffer, len| {
+                if final_write {
+                    assert!(buffer.is_none());
+                    assert_eq!(len, 0);
+                } else {
+                    assert!(buffer.is_some());
+                    assert_eq!(len, 4);
+                }
+                let context = crate::mocks::context_pointer(address);
+                // SAFETY: installed retains the context until finish below.
+                // This synchronous fake owns the only outstanding submission.
+                let active = unsafe { &*context }.take_kind(crate::context::OperationKind::Write).unwrap();
+                drop(active);
+                Ok(())
+            });
+            let memory = OpaqueMemory::new(GlobalPool::new());
+            let mut writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(bindings)), &memory);
+            let error = if final_write {
+                crate::mocks::drive(writer.end_automatic_chunking()).unwrap_err()
+            } else {
+                crate::mocks::drive(writer.write_view(BytesView::copied_from_slice(b"data", &GlobalPool::new()))).unwrap_err()
+            };
+            let expected = if final_write {
+                "the final request write completion channel disconnected"
+            } else {
+                "the write completion channel disconnected"
+            };
+            assert!(error.to_string().contains(expected), "{error}");
+            // SAFETY: no submission or callback is live, and this is the sole
+            // final notification for the context returned by installed.
+            unsafe { finish(guard, context, &contexts, session, &closes) };
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_duplicate_declared_lengths_are_normalized_and_conflicts_rejected() {
+        let mut headers = http::HeaderMap::new();
+        headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("0007"));
+        headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("7"));
+        let framing = RequestBodyFraming::new(&mut headers, None).unwrap();
+        assert_eq!(framing.total_length(), 7);
+        assert!(!framing.automatic_chunking());
+        assert_eq!(headers.get_all(http::header::CONTENT_LENGTH).iter().count(), 1);
+        assert_eq!(headers[http::header::CONTENT_LENGTH], "7");
+        headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("8"));
+        RequestBodyFraming::new(&mut headers, None).unwrap_err();
+        headers.clear();
+        headers.insert(http::header::TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+        RequestBodyFraming::new(&mut headers, Some(7)).unwrap_err();
+    }
 
     assert_impl_all!(RequestBodyFraming: UnwindSafe, RefUnwindSafe);
     // Every `ohno` error owns a boxed source without unwind-safety bounds.

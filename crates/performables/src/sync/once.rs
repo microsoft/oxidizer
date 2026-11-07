@@ -232,6 +232,50 @@ mod tests {
 
     use super::OnceLock;
 
+    #[cfg(feature = "seismograph")]
+    #[test]
+    fn gamma_survivor_initializing_private_flag_records_exactly_one_contention_event() {
+        use seismograph::recorder::event::EventKind;
+
+        crate::gamma_round2_telemetry::enable_recording();
+        let count = || {
+            let thread = seismograph::recorder::thread_id();
+            seismograph::snapshot::decode(
+                seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default())
+                    .unwrap()
+                    .as_bytes(),
+            )
+            .unwrap()
+            .events
+            .events
+            .iter()
+            .filter(|event| event.thread_id == thread && event.kind == EventKind::OnceContention)
+            .count()
+        };
+        let before = count();
+        let cell = OnceLock::new();
+        cell.initializing.store(true, Ordering::Release);
+        assert_eq!(cell.get_or_init(|| 7), &7);
+        assert!(!cell.initializing.load(Ordering::Acquire));
+        assert_eq!(count() - before, 1);
+        assert_eq!(cell.get_or_init(|| panic!("the initialized value must be reused")), &7);
+        assert_eq!(count() - before, 1);
+    }
+
+    #[test]
+    fn gamma_survivor_once_initializing_flag_is_true_only_during_initializer() {
+        let cell = OnceLock::new();
+        assert!(!cell.initializing.load(Ordering::Acquire));
+        assert_eq!(
+            *cell.get_or_init(|| {
+                assert!(cell.initializing.load(Ordering::Acquire));
+                7
+            }),
+            7
+        );
+        assert!(!cell.initializing.load(Ordering::Acquire));
+    }
+
     #[test]
     fn successful_set_stores_the_value_and_rejects_replacement() {
         let once = OnceLock::new();

@@ -81,6 +81,26 @@ pub(crate) fn is_capture_cow(ty: &Type) -> bool {
         && arguments.next().is_none()
 }
 
+#[test]
+fn gamma_round2_capture_types_reject_other_referents_containers_and_extra_arguments() {
+    assert!(is_capture_str_reference(&syn::parse_quote!(&'p str)));
+    for ty in [
+        syn::parse_quote!(&'p u32),
+        syn::parse_quote!(&'p mut str),
+        syn::parse_quote!(&'q str),
+    ] {
+        assert!(!is_capture_str_reference(&ty));
+    }
+    assert!(is_capture_cow(&syn::parse_quote!(Cow<'p, str>)));
+    for ty in [
+        syn::parse_quote!(Other<'p, str>),
+        syn::parse_quote!(Cow<'p, str, u32>),
+        syn::parse_quote!(Cow<'q, str>),
+    ] {
+        assert!(!is_capture_cow(&ty));
+    }
+}
+
 /// Whether `ty` mentions the request lifetime `'p`.
 pub(crate) fn uses_capture_lifetime(ty: &Type) -> bool {
     struct Finder {
@@ -122,6 +142,7 @@ fn option_inner(ty: &Type) -> Option<&Type> {
     ) {
         return None;
     }
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "path_is_any above has matched a nonempty standard Option path")]
     let segment = type_path.path.segments.last()?;
     let PathArguments::AngleBracketed(args) = &segment.arguments else {
         return None;

@@ -148,6 +148,7 @@ impl<T: CircuitEngine> EngineTelemetry<T> {
                     );
                 }
 
+                // #[gamma::skip(stmt.delete_assign, reason = "This wildcard assignment only suppresses unused-variable diagnostics; it does not move or drop health.")]
                 _ = health;
             }
             ExitCircuitResult::Closed(stats) => {
@@ -183,6 +184,7 @@ impl<T: CircuitEngine> EngineTelemetry<T> {
                     );
                 }
 
+                // #[gamma::skip(stmt.delete_assign, reason = "This wildcard assignment only suppresses unused-variable diagnostics; it does not move or drop stats.")]
                 _ = stats;
             }
             ExitCircuitResult::Reopened | ExitCircuitResult::Unchanged => {

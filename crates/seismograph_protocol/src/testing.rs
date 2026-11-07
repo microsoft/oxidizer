@@ -13,9 +13,10 @@
     reason = "native test fixtures intentionally panic when test setup or assertions fail"
 )]
 
+use std::io;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -24,6 +25,7 @@ use crate::transport::{Connection, Listener};
 use crate::{discovery, platform};
 
 static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Temporary directory protected like production user entries.
 #[derive(Debug)]
@@ -56,7 +58,7 @@ impl Directory {
             .unwrap();
         #[cfg(windows)]
         let temporary = tempfile::tempdir().unwrap();
-        let path = temporary.path().join("monitor");
+        let path = fixture_directory_path(temporary.path());
         let owner = MonitorOwner::current().unwrap();
         platform::create_directory(&path, &owner).unwrap();
         let directory = discovery::Directory::open(&crate::io::MonitorIo::new_native(), &path, &owner).unwrap();
@@ -89,19 +91,36 @@ impl Directory {
     /// Panics when the OS cannot provide the current user identity.
     #[must_use]
     pub fn descriptor(&self) -> MonitorDescriptor {
-        let mut bytes = [0; 16];
-        bytes[..8].copy_from_slice(&NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed).to_le_bytes());
-        let instance_id = InstanceId::from_bytes(bytes);
-        let owner = MonitorOwner::current().unwrap();
-        let process_id = std::process::id();
-        MonitorDescriptor {
-            name: "worker".into(),
-            instance: None,
-            process_id,
-            instance_id,
-            endpoint: MonitorEndpoint::for_instance(self.path(), &owner, process_id, instance_id),
-            owner,
-        }
+        fixture_descriptor(self.path(), &NEXT_INSTANCE, || MonitorOwner::current().unwrap(), std::process::id)
+    }
+}
+
+fn fixture_directory_path(root: &Path) -> PathBuf {
+    root.join("monitor")
+}
+
+fn retain_fixture<D>(slot: &mut Option<D>, directory: D) {
+    *slot = Some(directory);
+}
+
+fn fixture_descriptor(
+    path: &Path,
+    sequence: &AtomicU64,
+    owner: impl FnOnce() -> MonitorOwner,
+    process_id: impl FnOnce() -> u32,
+) -> MonitorDescriptor {
+    let mut bytes = [0; 16];
+    bytes[..8].copy_from_slice(&sequence.fetch_add(1, Ordering::Relaxed).to_le_bytes());
+    let instance_id = InstanceId::from_bytes(bytes);
+    let owner = owner();
+    let process_id = process_id();
+    MonitorDescriptor {
+        name: "worker".into(),
+        instance: None,
+        process_id,
+        instance_id,
+        endpoint: MonitorEndpoint::for_instance(path, &owner, process_id, instance_id),
+        owner,
     }
 }
 
@@ -112,10 +131,23 @@ impl Directory {
 /// Panics when native fixture setup or endpoint binding fails.
 #[must_use]
 pub fn listener() -> Listener {
-    let directory = Directory::new();
-    let mut listener = Listener::bind(&crate::io::MonitorIo::new_native(), &directory.descriptor()).unwrap();
-    listener.fixture = Some(directory);
-    listener
+    listener_with(
+        Directory::new,
+        |directory| Listener::bind(&crate::io::MonitorIo::new_native(), &directory.descriptor()),
+        |listener| &mut listener.fixture,
+    )
+    .unwrap()
+}
+
+fn listener_with<D, L>(
+    directory: impl FnOnce() -> D,
+    bind: impl FnOnce(&D) -> io::Result<L>,
+    fixture: impl FnOnce(&mut L) -> &mut Option<D>,
+) -> io::Result<L> {
+    let directory = directory();
+    let mut listener = bind(&directory)?;
+    retain_fixture(fixture(&mut listener), directory);
+    Ok(listener)
 }
 
 /// Creates a connected native client/server pair, without a TCP fallback.
@@ -126,7 +158,7 @@ pub fn listener() -> Listener {
 #[must_use]
 pub fn connected_pair() -> (Connection, Connection) {
     let listener = listener();
-    let client = Connection::connect(&crate::io::MonitorIo::new_native(), listener.descriptor(), Duration::from_secs(2)).unwrap();
+    let client = Connection::connect(&crate::io::MonitorIo::new_native(), listener.descriptor(), CONNECT_TIMEOUT).unwrap();
     let server = listener.accept().unwrap();
     (client, server)
 }
@@ -157,4 +189,143 @@ pub fn bytes_read(connection: &Connection) -> usize {
 #[must_use]
 pub fn close_calls(connection: &Connection) -> usize {
     connection.close_calls()
+}
+
+#[cfg(test)]
+mod gamma_round2_tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct DirectoryProbe {
+        identity: u32,
+        drops: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl Drop for DirectoryProbe {
+        fn drop(&mut self) {
+            self.drops.set(self.drops.get() + 1);
+        }
+    }
+
+    #[derive(Debug)]
+    struct ListenerProbe {
+        bound_directory: u32,
+        fixture: Option<DirectoryProbe>,
+    }
+
+    #[test]
+    fn nov6_actual_fixture_orchestration_retains_the_bound_directory_until_listener_drop() {
+        let drops = std::rc::Rc::new(std::cell::Cell::new(0));
+        let calls = std::cell::RefCell::new(Vec::new());
+        let listener = listener_with(
+            || {
+                calls.borrow_mut().push("directory");
+                DirectoryProbe {
+                    identity: 37,
+                    drops: std::rc::Rc::clone(&drops),
+                }
+            },
+            |directory| {
+                assert_eq!(*calls.borrow(), ["directory"]);
+                assert_eq!(directory.identity, 37);
+                assert_eq!(drops.get(), 0);
+                calls.borrow_mut().push("bind");
+                Ok(ListenerProbe {
+                    bound_directory: directory.identity,
+                    fixture: None,
+                })
+            },
+            |listener| {
+                assert_eq!(*calls.borrow(), ["directory", "bind"]);
+                calls.borrow_mut().push("retention");
+                &mut listener.fixture
+            },
+        )
+        .unwrap();
+        assert_eq!(*calls.borrow(), ["directory", "bind", "retention"]);
+        assert_eq!(listener.bound_directory, 37);
+        assert_eq!(listener.fixture.as_ref().unwrap().identity, 37);
+        assert_eq!(drops.get(), 0);
+        drop(listener);
+        assert_eq!(drops.get(), 1);
+    }
+
+    #[test]
+    fn nov6_actual_fixture_orchestration_drops_the_directory_once_after_binding_failure() {
+        let drops = std::rc::Rc::new(std::cell::Cell::new(0));
+        let error = listener_with(
+            || DirectoryProbe {
+                identity: 37,
+                drops: std::rc::Rc::clone(&drops),
+            },
+            |directory| {
+                assert_eq!(directory.identity, 37);
+                assert_eq!(drops.get(), 0);
+                Err(io::Error::new(io::ErrorKind::PermissionDenied, "injected fixture bind failure"))
+            },
+            |_listener: &mut ListenerProbe| panic!("failed binding must not access a listener's storage"),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(error.to_string(), "injected fixture bind failure");
+        assert_eq!(drops.get(), 1);
+    }
+
+    #[test]
+    fn november_native_fixture_policies_retain_the_directory_until_listener_drop_and_preserve_exact_namespace_and_timeout() {
+        struct Owned(std::rc::Rc<std::cell::Cell<usize>>);
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() + 1);
+            }
+        }
+        let drops = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut fixture = None;
+        retain_fixture(&mut fixture, Owned(std::rc::Rc::clone(&drops)));
+        assert!(fixture.is_some());
+        assert_eq!(drops.get(), 0, "a bound listener must retain its directory owner");
+        drop(fixture);
+        assert_eq!(drops.get(), 1);
+        assert_eq!(
+            fixture_directory_path(Path::new("owned-root")),
+            Path::new("owned-root").join("monitor")
+        );
+        assert_eq!(CONNECT_TIMEOUT, Duration::from_secs(2));
+    }
+
+    #[test]
+    fn gamma_round2_fixture_metadata_uses_exact_sequence_bytes_without_native_fixture_setup() {
+        let (io, _) = crate::io::MonitorIo::new_mocked();
+        let owner = io.current_owner().unwrap();
+        let path = Path::new("in-memory-registry");
+        let sequence = AtomicU64::new(17);
+        let calls = std::cell::RefCell::new(Vec::new());
+        for expected in [17, 18] {
+            let descriptor = fixture_descriptor(
+                path,
+                &sequence,
+                || {
+                    calls.borrow_mut().push("owner");
+                    owner.clone()
+                },
+                || {
+                    calls.borrow_mut().push("pid");
+                    31_337
+                },
+            );
+            assert_eq!(descriptor.name, "worker");
+            assert_eq!(descriptor.instance, None);
+            assert_eq!(descriptor.owner, owner);
+            assert_eq!(descriptor.process_id, 31_337);
+            let bytes = descriptor.instance_id.as_bytes();
+            assert_eq!(bytes[0], expected);
+            assert_eq!(&bytes[1..], &[0; 15]);
+            assert_eq!(
+                descriptor.endpoint,
+                MonitorEndpoint::for_instance(path, &owner, 31_337, descriptor.instance_id)
+            );
+        }
+        assert_eq!(sequence.load(Ordering::Relaxed), 19);
+        assert_eq!(calls.into_inner(), ["owner", "pid", "owner", "pid"]);
+    }
 }

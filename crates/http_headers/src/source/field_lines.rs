@@ -456,6 +456,7 @@ impl<'a> FieldLines<'a> {
     /// Debug builds recheck the caller's precondition.
     #[cfg(any(test, feature = "headers-negotiation"))]
     pub(crate) fn validated_comma_items(&self) -> DelimitedItems<'a> {
+        // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "The caller must retain lines whose preflight already succeeded; the debug assertion only repeats that validated invariant")]
         #[cfg(debug_assertions)]
         self.validate_custom_source()
             .expect("the caller must retain the exact lines whose source preflight is known to succeed");
@@ -510,10 +511,12 @@ impl<'a> FieldLines<'a> {
         let mut total_bytes = 0_usize;
         for value in self.repeated() {
             let bytes = value.as_bytes();
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The previous iteration caps the accumulator at 64 KiB; a safe slice is at most isize::MAX bytes, so their sum fits usize on supported 32/64-bit targets")]
             total_bytes = total_bytes.checked_add(bytes.len()).ok_or_else(limit)?;
             if total_bytes > MAX_CUSTOM_FIELD_BYTES {
                 return Err(limit());
             }
+            // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "The omitted flag only bypasses redundant validation for safe FieldValue and HTTP HeaderValue storage, whose constructors already enforce field-value grammar")]
             if validate_bytes && !crate::validate::field_value(bytes) {
                 return Err(DecodeError::new(self.name, DecodeErrorKind::InvalidSyntax));
             }
@@ -554,10 +557,12 @@ impl<'a> FieldLines<'a> {
         let mut item_count = 0_usize;
         for value in self.repeated() {
             let bytes = value.as_bytes();
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The previous iteration caps the accumulator at 64 KiB; a safe slice is at most isize::MAX bytes, so their sum fits usize on supported 32/64-bit targets")]
             total_bytes = total_bytes.checked_add(bytes.len()).ok_or_else(limit)?;
             if total_bytes > MAX_CUSTOM_FIELD_BYTES {
                 return Err(limit());
             }
+            // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "The omitted flag only bypasses redundant validation for safe FieldValue and HTTP HeaderValue storage, whose constructors already enforce field-value grammar")]
             if validate_bytes && !crate::validate::field_value(bytes) {
                 return Err(DecodeError::new(self.name, DecodeErrorKind::InvalidSyntax));
             }
@@ -786,6 +791,20 @@ impl FusedIterator for FieldLinesOwnedIter<'_> {}
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_field_line_limits_preserve_quote_escapes_and_exact_budget() {
+        let wire = format!("\"\\\"{}\"", ",a".repeat(1025));
+        let lines = super::FieldLines::single(&crate::FieldName::Vary, wire.as_bytes());
+        lines.validate_list_item_limit(b',', true).unwrap();
+        for count in [1024, 1025] {
+            let wire = std::iter::repeat_n("a", count).collect::<Vec<_>>().join(",");
+            let lines = super::FieldLines::single(&crate::FieldName::Vary, wire.as_bytes());
+            assert_eq!(
+                lines.validate_list_item_limit(b',', true).err().map(|error| error.kind()),
+                (count == 1025).then_some(crate::DecodeErrorKind::SourceLimitExceeded)
+            );
+        }
+    }
     use super::{FieldLines, Repr, update_list_item_count};
     use crate::headers::SetCookie;
     use crate::source::FieldSource;

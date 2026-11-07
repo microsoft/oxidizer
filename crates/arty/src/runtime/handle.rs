@@ -175,15 +175,23 @@ impl Runtime {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn stop(mut self) -> Result<(), Error> {
-        if crate::runtime::worker::WorkerMarker::is_current() {
+        self.stop_with(crate::runtime::worker::WorkerMarker::is_current(), Self::wait)
+    }
+
+    // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "The November 4 afternoon campaign timed out when resetting current_worker made a worker try to join itself.")]
+    fn stop_with(&mut self, current_worker: bool, wait: impl FnOnce(&Self) -> Result<(), Error>) -> Result<(), Error> {
+        if
+        // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        current_worker {
             let cause = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
             crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(&self.scheduler.dispatcher, cause);
             self.shutdown_on_drop = false;
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             panic_shutdown_from_worker("Runtime::stop");
         }
         _ = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
         self.shutdown_on_drop = false;
-        self.wait()
+        wait(self)
     }
 
     fn wait(&self) -> Result<(), Error> {
@@ -212,6 +220,7 @@ impl Drop for Runtime {
         let cause = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
         if crate::runtime::worker::WorkerMarker::is_current() {
             crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(&self.scheduler.dispatcher, cause);
+            // #[gamma::skip(cond.always_false, tag = "oom", reason = "The November 4 afternoon campaign exceeded its memory limit when this guard no longer prevented another panic during worker unwinding.")]
             if std::thread::panicking() {
                 return;
             }
@@ -231,6 +240,26 @@ fn panic_shutdown_from_worker(operation: &str) -> ! {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_worker_stop_disarms_drop_shutdown_before_reporting_the_programming_error() {
+        let shutdown = crate::runtime::shutdown::Shutdown::default();
+        let endpoint = WorkerEndpoint {
+            command_tx: channel::unbounded().0,
+            waker: Waker::noop().clone(),
+            thread: ThreadBuilder::default().build(thread::current().id()),
+            blocking_worker: Worker::new(Pool::new(None), shutdown.clone(), PanicPolicy::Ignore),
+        };
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown));
+        let mut runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(Vec::new()));
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.stop_with(true, |_| panic!("worker stop must not join its own workers"))
+        }));
+        let armed = runtime.shutdown_on_drop;
+        runtime.shutdown_on_drop = false;
+        _ = panic.unwrap_err();
+        assert!(!armed);
+    }
+
     use std::cell::RefCell;
     use std::future::poll_fn;
     use std::task::{Poll, Waker};

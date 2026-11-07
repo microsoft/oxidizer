@@ -2222,6 +2222,135 @@ fn escape_html(value: &str) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn gamma_survivor_report_contention_orders_one_thread_without_inventing_cross_thread_holders() {
+        use super::*;
+        let access = runtime_event(1, 1, RuntimeEventKind::RwLockReadAccess, 7, &[10]);
+        let contention = runtime_event(1, 2, RuntimeEventKind::RwLockWriteContention, 7, &[20]);
+        let pairs = runtime_contention_pairs(&[&contention, &access]);
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].holder, Some(vec![10]));
+        assert_eq!(pairs[0].blocked, [20]);
+        let mut other = contention.clone();
+        other.thread_id = seismograph::recorder::thread::ThreadId::new(2);
+        let pairs = runtime_contention_pairs(&[&access, &other]);
+        assert_eq!(pairs[0].holder, None);
+        let mutex_access = runtime_event(1, 1, RuntimeEventKind::MutexAccess, 7, &[10]);
+        let mutex_contention = runtime_event(1, 2, RuntimeEventKind::MutexContention, 7, &[20]);
+        let second = runtime_event(1, 3, RuntimeEventKind::MutexContention, 7, &[20]);
+        let pairs = runtime_contention_pairs(&[&contention, &access, &second, &mutex_contention, &mutex_access]);
+        assert_eq!(pairs.iter().map(|pair| pair.count).collect::<Vec<_>>(), [2, 1]);
+    }
+
+    #[test]
+    fn gamma_survivor_event_only_report_keeps_no_runtime_evidence_explanation() {
+        let snapshot = crate::allocator_view::Snapshot::event_only(crate::allocator_view::Version::new(0, 1, 0));
+        let html = super::render_html(&snapshot);
+        assert!(html.contains("<p class=\"muted\">No common runtime event data was supplied; this does not establish whether recording was enabled.</p></details></section>"));
+    }
+
+    #[test]
+    fn gamma_survivor_report_callers_rank_and_limit_eight_unmatched_stacks() {
+        use seismograph_rallocator::callers::{CallersFields, EventFields};
+
+        use super::*;
+        let events = (1..=10)
+            .map(|id| {
+                Event::from_fields(EventFields {
+                    thread_log_id: 1,
+                    event_thread_id: 1,
+                    sequence: id,
+                    allocation_id: id,
+                    kind: EventKind::Allocated,
+                    heap_id: 1,
+                    heap_kind: HeapKind::General,
+                    freed_after_heap_release: false,
+                    address: id * 16,
+                    size: id * 10,
+                    align: 8,
+                    call_stack: vec![id],
+                })
+            })
+            .collect();
+        let callers = Callers::from_fields(CallersFields {
+            session_id: 1,
+            total_events: 10,
+            lost_events: 0,
+            threads: Vec::new(),
+            thread_names: Vec::new(),
+            events,
+        });
+        let mut html = String::new();
+        render_callers(&mut html, &callers, &[]);
+        assert!(html.contains("showing 8 of 10"));
+        assert_eq!(html.matches("<li><strong>").count(), 8);
+        assert_eq!(html.matches("</li>").count(), 8);
+        let first = html.find("0x000000000000000a").unwrap();
+        let second = html.find("0x0000000000000009").unwrap();
+        assert!(first < second);
+        assert!(!html.contains("0x0000000000000002"));
+        assert!(!html.contains("No retained unmatched allocation stacks."));
+        assert!(html.ends_with("</ol></details>"));
+        let mut html = String::new();
+        let empty = Callers::from_fields(CallersFields {
+            session_id: 1,
+            total_events: 0,
+            lost_events: 0,
+            threads: Vec::new(),
+            thread_names: Vec::new(),
+            events: Vec::new(),
+        });
+        render_callers(&mut html, &empty, &[]);
+        assert!(html.contains("<li class=\"muted\">No retained unmatched allocation stacks.</li>"));
+    }
+
+    #[test]
+    fn gamma_survivor_legacy_region_bitmap_fallback_segment_bytes_and_empty_flow_markup() {
+        use seismograph_rallocator::callers::CallersFields;
+
+        use super::*;
+        use crate::allocator_topology::{Segment, Slice, SliceKind, TopologyRegion};
+        let region = TopologyRegion {
+            region_index: 1,
+            used_bitmap: vec![u64::MAX, u64::MAX],
+            ..TopologyRegion::default()
+        };
+        let mut html = String::new();
+        render_region(&mut html, &region, None);
+        assert_eq!(html.matches("<rect class=").count(), 128);
+        assert!(html.contains("<td>128</td>"));
+        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(0, 1, 0));
+        snapshot.topology.push(TopologyRegion {
+            slice_bytes: 65_536,
+            slices: vec![Slice {
+                kind: SliceKind::Small,
+                segments: vec![Segment {
+                    class_index: 1,
+                    ..Segment::default()
+                }],
+                ..Slice::default()
+            }],
+            ..TopologyRegion::default()
+        });
+        html.clear();
+        render_allocator_structures(&mut html, &snapshot);
+        assert!(html.contains("<td>32.00 KiB</td>"));
+        let empty = Callers::from_fields(CallersFields {
+            session_id: 1,
+            total_events: 0,
+            lost_events: 0,
+            threads: Vec::new(),
+            thread_names: Vec::new(),
+            events: Vec::new(),
+        });
+        html.clear();
+        render_thread_flow_diagram(&mut html, &empty, &BTreeMap::new());
+        assert_eq!(
+            html,
+            "<details><summary>Allocation → free thread flow</summary><p class=\"muted\">No retained frees.</p></details>"
+        );
+    }
+
+    #[test]
     fn estimate_totals_sum_each_bound_and_saturate_independently() {
         let values = [
             super::Estimate {

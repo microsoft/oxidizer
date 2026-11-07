@@ -41,6 +41,7 @@ fn resolve_field(input: &ItemStruct) -> SynResult<(TokenStream, TokenStream)> {
             if unnamed_fields.unnamed.len() != 1 {
                 return Err(syn::Error::new_spanned(unnamed_fields, "Tuple struct must have exactly one field"));
             }
+            // #[gamma::skip(iter.first_to_last, tag = "equivalent", reason = "The preceding length check requires exactly one tuple field, so first and last are identical.")]
             let field_type = &unnamed_fields.unnamed.first().unwrap().ty;
             Ok((quote!(self.0), quote!(#field_type)))
         }
@@ -49,6 +50,7 @@ fn resolve_field(input: &ItemStruct) -> SynResult<(TokenStream, TokenStream)> {
             if named_fields.named.len() != 1 {
                 return Err(syn::Error::new_spanned(named_fields, "Struct must have exactly one field"));
             }
+            // #[gamma::skip(iter.first_to_last, tag = "equivalent", reason = "The preceding length check requires exactly one named field, so first and last are identical.")]
             let field = named_fields.named.first().unwrap();
             let field_name = field.ident.as_ref().unwrap();
             let field_type = &field.ty;

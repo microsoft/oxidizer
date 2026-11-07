@@ -338,7 +338,10 @@ impl SecWebSocketExtensionsBuilder {
             self.wire.extend_from_slice(b", ");
         }
         self.wire.extend_from_slice(name.as_bytes());
-        if let Some(count) = self.extension_count.checked_add(1) {
+        if let Some(count) = self.extension_count.checked_add(
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only zero versus nonzero is observed; the Vec needs at least two separator bytes per later extension, so even doubled counts cannot overflow before Vec length becomes unrepresentable")]
+            1,
+        ) {
             self.extension_count = count;
         } else {
             self.record_error(DecodeErrorKind::InvalidNumber);
@@ -501,6 +504,7 @@ impl SecWebSocketExtensionsBuilder {
         if let Some(kind) = self.pending_error {
             return Err(DecodeError::new(&FieldName::SecWebSocketExtensions, kind));
         }
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "With no extension and no pending error the wire is empty; SecWebSocketExtensionsOwned::try_from rejects it with the identical InvalidSyntax error")]
         if self.extension_count == 0 {
             return Err(invalid_syntax(&FieldName::SecWebSocketExtensions));
         }
@@ -765,6 +769,7 @@ impl Field for SecWebSocketExtensions {
         &FieldName::SecWebSocketExtensions
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -776,6 +781,7 @@ impl Field for SecWebSocketExtensions {
         Ok(Some(SecWebSocketExtensionsView { values: lines }))
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, _mode: DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -787,7 +793,10 @@ impl Field for SecWebSocketExtensions {
         lines.validate_list_item_limit(b';', false)?;
         let mut copied = FieldLinesIter::empty();
         let mut present = false;
-        for (value_index, (value, owned)) in lines.repeated_owned()?.enumerate() {
+        for (value_index, (value, owned)) in
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Both preceding list-budget checks already validated the same immutable field lines; repeated_owned repeats their source admission check")]
+            lines.repeated_owned()?.enumerate()
+        {
             present |= validate_extension_header_value(value).map_err(|error| {
                 if error.kind() == DecodeErrorKind::UnterminatedQuote {
                     error.at_value(value_index)
@@ -861,6 +870,7 @@ fn validate_plain_extension_line(bytes: &[u8]) -> Result<Option<bool>, DecodeErr
     const TAKEOVER: &[u8; 74] = b"permessage-deflate; server_no_context_takeover; client_no_context_takeover";
 
     // Keep early prefix rejection; bounded suffix comparisons avoid an outlined byte comparison.
+    // #[gamma::skip(match_guard.always_false, range.exclusive_to_inclusive, literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "Each changed slice bound changes its length against an unchanged literal slice; a failed shortcut runs the same complete extension validator below")]
     match bytes.len() {
         74 if bytes[..2] == *b"pe"
             && bytes[2..18] == TAKEOVER[2..18]
@@ -883,18 +893,28 @@ fn validate_plain_extension_line(bytes: &[u8]) -> Result<Option<bool>, DecodeErr
         18 if bytes[..2] == *b"pe" && bytes[2..] == *b"rmessage-deflate" => return Ok(Some(true)),
         _ => {}
     }
-    if http_headers_simd::find_either(bytes, b'"', b'"').is_some() {
+    if
+    // #[gamma::skip(cond.always_false, literal.byte_to_nul, tag = "equivalent", reason = "The plain scanner below independently returns None upon a quote or backslash at every grammar boundary; a NUL cannot form any valid extension token")]
+    http_headers_simd::find_either(bytes, b'"', b'"').is_some() {
         return Ok(None);
     }
     let mut position = 0_usize;
     let mut present = false;
     loop {
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves all skip_ows side effects and replaces unit with unit")]
         skip_ows(bytes, &mut position);
-        while bytes.get(position) == Some(&b',') {
-            position += 1;
+        while
+        // #[gamma::skip(cond.negate, relational.eq_to_ne, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        bytes.get(position) == Some(&b',') {
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            position +=
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
+            // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves all skip_ows side effects and replaces unit with unit")]
             skip_ows(bytes, &mut position);
         }
         if position == bytes.len() {
+            // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         }
         if matches!(bytes.get(position), Some(b'"' | b'\\')) {
@@ -906,16 +926,21 @@ fn validate_plain_extension_line(bytes: &[u8]) -> Result<Option<bool>, DecodeErr
         present = true;
 
         loop {
+            // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves all skip_ows side effects and replaces unit with unit")]
             skip_ows(bytes, &mut position);
             match bytes.get(position) {
                 None => return Ok(Some(present)),
                 Some(b',') => {
+                    // #[gamma::skip(assign.add_to_sub, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    // #[gamma::skip(stmt.delete_assign, literal.int_decrement, tag = "equivalent", reason = "The outer loop consumes leading commas before parsing the next extension, so leaving this comma unconsumed only moves that same increment there")]
                     position += 1;
                     break;
                 }
                 Some(b'"' | b'\\') => return Ok(None),
                 Some(b';') => {
+                    // #[gamma::skip(assign.add_to_sub, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                     position += 1;
+                    // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves all skip_ows side effects and replaces unit with unit")]
                     skip_ows(bytes, &mut position);
                     if matches!(bytes.get(position), Some(b'"' | b'\\')) {
                         return Ok(None);
@@ -956,7 +981,10 @@ fn validate_extension(bytes: &[u8]) -> Result<(), DecodeError> {
 fn take_plain_extension_token(bytes: &[u8], position: &mut usize) -> bool {
     let start = *position;
     while bytes.get(*position).is_some_and(|byte| validate::token_byte(*byte)) {
-        *position += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        *position +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
     start != *position
 }
@@ -965,7 +993,9 @@ fn parse_extension(bytes: &[u8]) -> Result<WebSocketExtensionView<'_>, DecodeErr
     let mut position = 0_usize;
     let name_range = take_token(bytes, &mut position)?;
     let parameter_start = position;
-    while take_extension_parameter(bytes, &mut position)?.is_some() {}
+    while
+    // #[gamma::skip(cond.negate, option.is_some_to_is_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+    take_extension_parameter(bytes, &mut position)?.is_some() {}
     let name = str::from_utf8(&bytes[name_range]).expect("HTTP token parsing guarantees an in-bounds ASCII range");
     Ok(WebSocketExtensionView {
         raw: bytes,
@@ -975,6 +1005,7 @@ fn parse_extension(bytes: &[u8]) -> Result<WebSocketExtensionView<'_>, DecodeErr
 }
 
 fn take_extension_parameter<'a>(bytes: &'a [u8], position: &mut usize) -> Result<Option<WebSocketExtensionParameterView<'a>>, DecodeError> {
+    // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves all skip_ows side effects and replaces unit with unit")]
     skip_ows(bytes, position);
     if *position == bytes.len() {
         return Ok(None);
@@ -984,6 +1015,7 @@ fn take_extension_parameter<'a>(bytes: &'a [u8], position: &mut usize) -> Result
     }
     let raw_start = *position;
     *position += 1;
+    // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves all skip_ows side effects and replaces unit with unit")]
     skip_ows(bytes, position);
     let name_range = take_token(bytes, position)?;
     let (value, quoted) = if bytes.get(*position) == Some(&b'=') {
@@ -1010,7 +1042,10 @@ fn take_extension_parameter<'a>(bytes: &'a [u8], position: &mut usize) -> Result
 fn take_token(bytes: &[u8], position: &mut usize) -> Result<Range<usize>, DecodeError> {
     let start = *position;
     while bytes.get(*position).is_some_and(|byte| validate::token_byte(*byte)) {
-        *position += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        *position +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
     if start == *position {
         Err(DecodeError::new(&FieldName::SecWebSocketExtensions, DecodeErrorKind::InvalidToken))
@@ -1025,12 +1060,17 @@ fn take_quoted_string(bytes: &[u8], position: &mut usize) -> Result<Range<usize>
     let mut escaped = false;
     let mut value_length = 0_usize;
     while let Some(byte) = bytes.get(*position).copied() {
-        *position += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        *position +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
         if escaped {
             if !validate::token_byte(byte) {
                 return Err(invalid_syntax(&FieldName::SecWebSocketExtensions));
             }
+            // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
             escaped = false;
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only value_length == 0 is observed; doubling the count stays nonzero and cannot overflow because there is at most one increment per byte of an isize-bounded slice")]
             value_length += 1;
         } else if byte == b'\\' {
             escaped = true;
@@ -1043,6 +1083,7 @@ fn take_quoted_string(bytes: &[u8], position: &mut usize) -> Result<Range<usize>
         } else if !validate::token_byte(byte) {
             return Err(invalid_syntax(&FieldName::SecWebSocketExtensions));
         } else {
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only value_length == 0 is observed; doubling the count stays nonzero and cannot overflow because there is at most one increment per byte of an isize-bounded slice")]
             value_length += 1;
         }
     }
@@ -1054,13 +1095,48 @@ fn take_quoted_string(bytes: &[u8], position: &mut usize) -> Result<Range<usize>
 
 fn skip_ows(bytes: &[u8], position: &mut usize) {
     while bytes.get(*position).is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
-        *position += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        *position +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_cached_extension_lines_return_recognized_presence() {
+        for wire in [
+            b"permessage-deflate".as_slice(),
+            b"permessage-deflate; client_max_window_bits",
+            b"permessage-deflate; server_no_context_takeover; client_no_context_takeover",
+        ] {
+            assert_eq!(super::validate_plain_extension_line(wire).unwrap(), Some(true));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_plain_parameter_value_reports_its_own_cursor_and_fallback() {
+        for (wire, expected, end) in [
+            (b"".as_slice(), true, 0),
+            (b"=a".as_slice(), true, 2),
+            (b"=\"a\"".as_slice(), false, 1),
+        ] {
+            let mut position = 0;
+            assert_eq!(super::take_plain_parameter_value(wire, &mut position).unwrap(), expected);
+            assert_eq!(position, end);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_builder_records_only_the_first_error() {
+        let mut builder = super::SecWebSocketExtensionsOwned::builder();
+        builder.record_error(crate::DecodeErrorKind::InvalidToken);
+        builder.record_error(crate::DecodeErrorKind::InvalidNumber);
+        assert_eq!(builder.build().unwrap_err().kind(), crate::DecodeErrorKind::InvalidToken);
+    }
+
     use super::{
         CommaItems, SecWebSocketExtensions, SecWebSocketExtensionsOwned, WebSocketExtensionParameterView, WebSocketExtensionParameters,
         WebSocketExtensionView, parse_extension, take_quoted_string, validate_plain_extension_line,

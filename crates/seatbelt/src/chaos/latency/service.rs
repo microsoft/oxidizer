@@ -265,6 +265,22 @@ mod tests {
     use super::*;
     use crate::testing::FailReadyService;
 
+    #[test]
+    fn gamma_survivor_latency_zero_random_boundary_does_not_inject_zero_rate() {
+        let clock = tick::ClockControl::new().to_clock();
+        let context = ResilienceContext::<(), ()>::new(&clock);
+        let shared: LatencyShared<(), ()> = LatencyShared::new(
+            clock,
+            LatencyRate::new(|(): &(), _| 0.0),
+            EnableIf::new(true),
+            LatencyDuration::new(|(): &(), _| Duration::from_millis(1)),
+            Rnd::new_fixed(0.0),
+            context.create_telemetry("boundary".into()),
+        );
+        assert!(matches!(&shared.rnd, Rnd::Test(_)));
+        assert!(!shared.should_inject(&()));
+    }
+
     // The tokio runtime builds an IO driver (mio IOCP/epoll) under `--all-features`
     // feature unification (tokio `net`), which is unsupported under Miri.
     #[cfg_attr(miri, ignore)]

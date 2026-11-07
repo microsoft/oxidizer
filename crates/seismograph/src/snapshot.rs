@@ -10,7 +10,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{fmt, ptr};
 
 use crate::Error;
@@ -21,7 +21,7 @@ use crate::recorder::event::{
 use crate::recorder::io::{BufferId, IoEvent, IoOperationId, IoOutcome, IoResourceId, IoResourceKind};
 use crate::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
 use crate::recorder::thread::{ThreadId, ThreadLog};
-use crate::recorder::{self, EventSampling, MAX_STACK_FRAMES, Policies, Policy, SuppressionGuard};
+use crate::recorder::{self, EventSampling, MAX_EVENT_SAMPLING_ONE_IN, MAX_STACK_FRAMES, Policies, Policy, SuppressionGuard};
 use crate::system::SystemSlice;
 
 const MAGIC: [u8; 8] = *b"SEISMOG\0";
@@ -34,6 +34,10 @@ const LEGACY_EVENT_V2_FIXED_LEN: usize = 76;
 const THREAD_FIXED_LEN: usize = 24;
 const THREAD_NAMED_FIXED_LEN: usize = 26;
 static SOURCES: AtomicPtr<Source> = AtomicPtr::new(ptr::null_mut());
+
+fn write_snapshot_count(value: usize, write: impl FnOnce(u32) -> Result<(), Error>) -> Result<(), Error> {
+    write(snapshot_wire_count(value)?)
+}
 
 /// Treatment of recorder event buffers after a snapshot captures them.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -297,17 +301,38 @@ impl fmt::Debug for Snapshot {
 /// Returns an error when a source fails, source identities conflict, or the
 /// output buffer cannot be allocated.
 pub(crate) fn snapshot(options: SnapshotOptions) -> Result<Snapshot, Error> {
+    snapshot_with_recording(options, recorder::try_snapshot)
+}
+
+fn snapshot_with_recording(
+    options: SnapshotOptions,
+    recording: impl FnOnce(EventBufferDisposition) -> Result<Option<Events>, Error>,
+) -> Result<Snapshot, Error> {
     let _suppression = SuppressionGuard::enter();
     let started_at = Instant::now();
-    let events = recorder::try_snapshot(options.event_buffers)?;
+    let decoded = prepare_snapshot_with(options, recording, || started_at.elapsed(), capture_sources)?;
+    encode_snapshot(&decoded)
+}
+
+fn prepare_snapshot_with(
+    options: SnapshotOptions,
+    recording: impl FnOnce(EventBufferDisposition) -> Result<Option<Events>, Error>,
+    elapsed: impl FnOnce() -> Duration,
+    sources: impl FnOnce(SnapshotContext<'_>) -> Result<Vec<SourceSnapshot>, Error>,
+) -> Result<DecodedSnapshot, Error> {
+    let events = recording(options.event_buffers)?;
     let mut events = events.unwrap_or_default();
     events.clock = EventClock::CURRENT;
-    let sources = capture_sources(SnapshotContext { events: &events })?;
-    encode_snapshot(&DecodedSnapshot {
-        capture_duration_nanos: u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX),
+    let sources = sources(SnapshotContext { events: &events })?;
+    Ok(DecodedSnapshot {
+        capture_duration_nanos: snapshot_duration(elapsed),
         events,
         sources,
     })
+}
+
+fn snapshot_duration(elapsed: impl FnOnce() -> Duration) -> u64 {
+    u64::try_from(elapsed().as_nanos()).unwrap_or(u64::MAX)
 }
 
 /// Decodes a seismograph snapshot.
@@ -316,7 +341,10 @@ pub(crate) fn snapshot(options: SnapshotOptions) -> Result<Snapshot, Error> {
 ///
 /// Returns an error when the bytes are malformed or use an unsupported format.
 pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
-    let mut reader = Reader::new(bytes);
+    decode_reader(&mut Reader::new(bytes))
+}
+
+fn decode_reader(reader: &mut Reader<'_>) -> Result<DecodedSnapshot, Error> {
     if reader.read(8)? != MAGIC {
         return Err(Error::invalid_format());
     }
@@ -328,11 +356,11 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
     let thread_count = reader.u32()? as usize;
     let event_count = reader.u32()? as usize;
     let source_count = reader.u32()? as usize;
-    let recording = decode_recording_policies(&mut reader, format_version)?;
-    let clock = decode_clock(&mut reader, format_version)?;
+    let recording = decode_recording_policies(reader, format_version)?;
+    let clock = decode_clock(reader, format_version)?;
 
     validate_count_fits(thread_count, reader.remaining().len(), thread_fixed_len(format_version))?;
-    let threads = decode_threads(&mut reader, thread_count, format_version)?;
+    let threads = decode_threads(reader, thread_count, format_version)?;
 
     validate_count_fits(event_count, reader.remaining().len(), event_fixed_len(format_version))?;
     let mut events = Vec::with_capacity(event_count);
@@ -340,9 +368,9 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
         let thread_id = ThreadId::new(reader.u64()?);
         let sequence = EventSequence::new(reader.u64()?);
         let (timestamp, kind, payload, frame_count) = if format_version >= 4 {
-            decode_event_v4(&mut reader)?
+            decode_event_v4(reader)?
         } else {
-            decode_legacy_event(&mut reader, format_version)?
+            decode_legacy_event(reader, format_version)?
         };
         let mut call_stack = Vec::with_capacity(frame_count);
         for _ in 0..frame_count {
@@ -368,13 +396,16 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
         }
         let schema_version = reader.u16()?;
         let name_len = reader.u16()? as usize;
-        let data_len = usize::try_from(reader.u64()?).map_err(|_error| Error::invalid_format())?;
+        let data_len = reader.u64()?;
+        // #[gamma::skip(expr.decrement, literal.int_decrement, literal.int_to_one, literal.int_to_zero, reason = "reducing the reserved name/header extent only weakens this admission check; the following checked reserved-field, name, and data reads reject the same truncated source with the same invalid-format error")]
+        let data_len = snapshot_usize(data_len, reader.remaining().len().saturating_sub(4 + name_len))?;
         if reader.u32()? != 0 {
             return Err(Error::invalid_format());
         }
         let name = std::str::from_utf8(reader.read(name_len)?)
             .map_err(|_error| Error::invalid_format())?
             .to_owned();
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "snapshot_usize bounded data_len by the remainder after the reserved field and name; those preceding reads succeeded, so the data extent is available")]
         let data = reader.read(data_len)?.to_vec();
         sources.push(SourceSnapshot {
             id,
@@ -407,10 +438,15 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
     })
 }
 
+// #[gamma::skip(fn_value.ok, parameter.default_shadow, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
 fn validate_count_fits(count: usize, remaining_bytes: usize, minimum_item_bytes: usize) -> Result<(), Error> {
     debug_assert!(minimum_item_bytes != 0);
-    if count > remaining_bytes / minimum_item_bytes {
-        return Err(Error::invalid_format());
+    if
+    // #[gamma::skip(cond.always_false, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+    count > remaining_bytes / minimum_item_bytes {
+        return
+        // #[gamma::skip(result.err_to_ok, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+        Err(Error::invalid_format());
     }
     Ok(())
 }
@@ -443,9 +479,11 @@ fn decode_sampling(reader: &mut Reader<'_>, format_version: u16) -> Result<u64, 
 
 fn decode_recording_policies(reader: &mut Reader<'_>, format_version: u16) -> Result<Policies, Error> {
     if format_version < 5 {
-        let sampling =
-            EventSampling::one_in(usize::try_from(decode_sampling(reader, format_version)?).map_err(|_error| Error::invalid_format())?)
-                .ok_or_else(Error::invalid_format)?;
+        let sampling = decode_sampling(reader, format_version)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "decode_sampling returns 1 for legacy data or a validated value at most 1048576, fitting usize on the supported 32/64-bit targets")]
+        let sampling = usize::try_from(sampling).map_err(|_error| Error::invalid_format())?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "decode_sampling already validated the identical nonzero EventSampling bound")]
+        let sampling = EventSampling::one_in(sampling).ok_or_else(Error::invalid_format)?;
         let policy = Policy {
             enabled: true,
             capture_backtraces: false,
@@ -495,8 +533,9 @@ fn decode_recording_policy(reader: &mut Reader<'_>) -> Result<Policy, Error> {
         return Err(Error::invalid_format());
     }
     let sampling = reader.u32()?;
-    let event_sampling =
-        EventSampling::one_in(usize::try_from(sampling).map_err(|_error| Error::invalid_format())?).ok_or_else(Error::invalid_format)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "u32 fits usize on the supported 32/64-bit targets; raw sampling-policy validation remains outside the guard")]
+    let sampling = usize::try_from(sampling).map_err(|_error| Error::invalid_format())?;
+    let event_sampling = EventSampling::one_in(sampling).ok_or_else(Error::invalid_format)?;
     Ok(Policy {
         enabled: enabled != 0,
         capture_backtraces: capture_backtraces != 0,
@@ -523,6 +562,7 @@ fn decode_event_v4(reader: &mut Reader<'_>) -> Result<(EventTimestamp, EventKind
     if reader.u8()? != 0 || frame_count > MAX_STACK_FRAMES {
         return Err(Error::invalid_format());
     }
+    // #[gamma::skip(literal.int_increment, reason = "the following loop overwrites all eight fields before any decoded payload reads them")]
     let mut fields = [0_u64; 8];
     for field in &mut fields {
         *field = reader.u64()?;
@@ -599,6 +639,7 @@ fn decode_payload(tag: u8, fields: [u64; 8]) -> Result<EventPayload, Error> {
             let worker_id = if fields[1] == 0 {
                 None
             } else {
+                // #[gamma::skip(try.propagate_to_unwrap, reason = "the zero branch was excluded and WorkerId::from_raw accepts every nonzero u64")]
                 Some(WorkerId::from_raw(fields[1]).ok_or_else(Error::invalid_format)?)
             };
             Ok(EventPayload::Runtime(RuntimeEvent {
@@ -610,10 +651,15 @@ fn decode_payload(tag: u8, fields: [u64; 8]) -> Result<EventPayload, Error> {
                 value_1: fields[5],
             }))
         }
-        5 if fields[5] == 0 && fields[7] >> 48 == 0 => {
+        5 if fields[5] == 0 && {
+            // #[gamma::skip(literal.int_decrement, reason = "IoOutcome accepts only wire values one through five; bit 47 would make that byte at least 128 and is independently rejected below")]
+            fields[7] >> 48 == 0
+        } =>
+        {
             let metadata = fields[7];
             let buffer_id = match fields[2] {
                 0 => None,
+                // #[gamma::skip(try.propagate_to_unwrap, reason = "the zero arm was excluded and BufferId::from_raw accepts every nonzero u64")]
                 value => Some(BufferId::from_raw(value).ok_or_else(Error::invalid_format)?),
             };
             Ok(EventPayload::Io(IoEvent {
@@ -623,12 +669,15 @@ fn decode_payload(tag: u8, fields: [u64; 8]) -> Result<EventPayload, Error> {
                 requested_bytes: fields[3],
                 completed_bytes: fields[4],
                 buffer_len: fields[6],
+                // #[gamma::skip(try.propagate_to_unwrap, reason = "masking by u32::MAX proves the converted value fits u32")]
                 buffer_span_count: u32::try_from(metadata & u64::from(u32::MAX)).map_err(|_error| Error::invalid_format())?,
                 resource_kind: IoResourceKind::from_wire_value(
+                    // #[gamma::skip(try.propagate_to_unwrap, reason = "masking by u8::MAX proves the converted value fits u8; invalid enum values remain separately rejected")]
                     u8::try_from((metadata >> 32) & u64::from(u8::MAX)).map_err(|_error| Error::invalid_format())?,
                 )
                 .ok_or_else(Error::invalid_format)?,
                 outcome: IoOutcome::from_wire_value(
+                    // #[gamma::skip(try.propagate_to_unwrap, reason = "masking by u8::MAX proves the converted value fits u8; invalid enum values remain separately rejected")]
                     u8::try_from((metadata >> 40) & u64::from(u8::MAX)).map_err(|_error| Error::invalid_format())?,
                 )
                 .ok_or_else(Error::invalid_format)?,
@@ -654,7 +703,7 @@ fn validate_payload(kind: EventKind, payload: EventPayload) -> Result<(), Error>
 }
 
 fn validated_sampling(value: u64) -> Result<u32, Error> {
-    let value = usize::try_from(value).map_err(|_error| Error::invalid_format())?;
+    let value = snapshot_usize(value, MAX_EVENT_SAMPLING_ONE_IN)?;
     let sampling = EventSampling::one_in(value).ok_or_else(Error::invalid_format)?;
     u32::try_from(sampling.get()).map_err(|_error| Error::invalid_format())
 }
@@ -704,77 +753,161 @@ fn capture_sources_from(mut source: *mut Source, context: SnapshotContext<'_>) -
     Ok(snapshots)
 }
 
-fn encode_snapshot(snapshot: &DecodedSnapshot) -> Result<Snapshot, Error> {
-    let events_len = snapshot.events.events.iter().try_fold(0usize, |total, event| {
+fn snapshot_encoded_len(
+    event_frame_counts: impl IntoIterator<Item = usize>,
+    source_sizes: impl IntoIterator<Item = (usize, usize)>,
+    thread_name_lengths: impl IntoIterator<Item = usize>,
+) -> Result<usize, Error> {
+    let events_len = event_frame_counts.into_iter().try_fold(0usize, |total, frame_count| {
         EVENT_FIXED_LEN
-            .checked_add(event.call_stack.len().checked_mul(8)?)
+            .checked_add(frame_count.checked_mul(8)?)
             .and_then(|len| total.checked_add(len))
     });
-    let sources_len = snapshot.sources.iter().try_fold(0usize, |total, source| {
-        let len = SOURCE_HEADER_LEN.checked_add(source.name.len())?.checked_add(source.data.len())?;
+    let sources_len = source_sizes.into_iter().try_fold(0usize, |total, (name_len, data_len)| {
+        let len = SOURCE_HEADER_LEN.checked_add(name_len)?.checked_add(data_len)?;
         total.checked_add(len)
     });
-    let threads_len = snapshot
-        .events
-        .threads
-        .iter()
-        .try_fold(0usize, |total, thread| total.checked_add(26)?.checked_add(thread.name.len()));
-    let len = HEADER_LEN
+    let threads_len = thread_name_lengths
+        .into_iter()
+        .try_fold(0usize, |total, name_len| total.checked_add(26)?.checked_add(name_len));
+    HEADER_LEN
         .checked_add(threads_len.ok_or_else(Error::allocation_failed)?)
         .and_then(|len| len.checked_add(events_len?))
         .and_then(|len| len.checked_add(sources_len?))
-        .ok_or_else(Error::allocation_failed)?;
-    let mut encoded = Snapshot::zeroed(len)?;
+        .ok_or_else(Error::allocation_failed)
+}
+
+fn snapshot_wire_count(value: usize) -> Result<u32, Error> {
+    u32::try_from(value).map_err(|_error| Error::invalid_format())
+}
+
+fn snapshot_usize(value: u64, maximum: usize) -> Result<usize, Error> {
+    if value > maximum as u64 {
+        return Err(Error::invalid_format());
+    }
+    usize::try_from(value).map_err(|_error| Error::invalid_format())
+}
+
+fn encode_snapshot(snapshot: &DecodedSnapshot) -> Result<Snapshot, Error> {
+    encode_snapshot_with(
+        snapshot,
+        |snapshot| {
+            snapshot_encoded_len(
+                snapshot.events.events.iter().map(|event| event.call_stack.len()),
+                snapshot.sources.iter().map(|source| (source.name.len(), source.data.len())),
+                snapshot.events.threads.iter().map(|thread| thread.name.len()),
+            )
+        },
+        Snapshot::zeroed,
+    )
+}
+
+fn encode_snapshot_with(
+    snapshot: &DecodedSnapshot,
+    length: impl FnOnce(&DecodedSnapshot) -> Result<usize, Error>,
+    allocate: impl FnOnce(usize) -> Result<Snapshot, Error>,
+) -> Result<Snapshot, Error> {
+    encode_snapshot_with_counts(snapshot, length, allocate, |writer, count| {
+        write_snapshot_count(count, |count| writer.u32(count))
+    })
+}
+
+fn encode_snapshot_with_counts(
+    snapshot: &DecodedSnapshot,
+    length: impl FnOnce(&DecodedSnapshot) -> Result<usize, Error>,
+    allocate: impl FnOnce(usize) -> Result<Snapshot, Error>,
+    mut write_count: impl FnMut(&mut Writer<'_>, usize) -> Result<(), Error>,
+) -> Result<Snapshot, Error> {
+    let len = length(snapshot)?;
+    let mut encoded = allocate(len)?;
     let mut writer = Writer::new(&mut encoded.bytes);
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "snapshot_encoded_len and zeroed provide the complete exact output buffer before this fixed-size write")]
     writer.write(&MAGIC)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed version field")]
     writer.u16(FORMAT_VERSION)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed reserved field")]
     writer.u16(0)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed duration field")]
     writer.u64(snapshot.capture_duration_nanos)?;
-    writer.u32(u32::try_from(snapshot.events.threads.len()).map_err(|_error| Error::invalid_format())?)?;
-    writer.u32(u32::try_from(snapshot.events.events.len()).map_err(|_error| Error::invalid_format())?)?;
-    writer.u32(u32::try_from(snapshot.sources.len()).map_err(|_error| Error::invalid_format())?)?;
+    write_count(&mut writer, snapshot.events.threads.len())?;
+    write_count(&mut writer, snapshot.events.events.len())?;
+    write_count(&mut writer, snapshot.sources.len())?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "RecordingPolicy contains constructor-validated EventSampling at most 1048576 and the exact output length includes all eight policy bytes")]
     encode_recording_policy(&mut writer, snapshot.events.recording.allocations)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "RecordingPolicy contains constructor-validated EventSampling at most 1048576 and the exact output length includes all eight policy bytes")]
     encode_recording_policy(&mut writer, snapshot.events.recording.general_events)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "RecordingPolicy contains constructor-validated EventSampling at most 1048576 and the exact output length includes all eight policy bytes")]
     encode_recording_policy(&mut writer, snapshot.events.recording.arc_dereferences)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "RecordingPolicy contains constructor-validated EventSampling at most 1048576 and the exact output length includes all eight policy bytes")]
     encode_recording_policy(&mut writer, snapshot.events.recording.runtime_tasks)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "RecordingPolicy contains constructor-validated EventSampling at most 1048576 and the exact output length includes all eight policy bytes")]
     encode_recording_policy(&mut writer, snapshot.events.recording.io)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "RecordingPolicy contains constructor-validated EventSampling at most 1048576 and the exact output length includes all eight policy bytes")]
     encode_recording_policy(&mut writer, snapshot.events.recording.cache)?;
+    // #[gamma::skip(cond.always_false, reason = "Unspecified is the only non-CURRENT clock and the following required ticks_per_second still rejects it with the same invalid-format error")]
     if snapshot.events.clock != EventClock::CURRENT {
         return Err(Error::invalid_format());
     }
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed clock field")]
     writer.u16(snapshot.events.clock.wire_value())?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed reserved field")]
     writer.u16(0)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding CURRENT clock check proves a frequency exists, and the exact encoded length includes its fixed field")]
     writer.u64(snapshot.events.clock.ticks_per_second().ok_or_else(Error::invalid_format)?)?;
     for thread in &snapshot.events.threads {
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "snapshot_encoded_len includes each thread record and name before allocating the exact output buffer")]
         writer.u64(thread.thread_id.get())?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes every thread counter")]
         writer.u64(thread.total_events)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes every thread counter")]
         writer.u64(thread.lost_events)?;
-        writer.u16(u16::try_from(thread.name.len()).map_err(|_error| Error::invalid_format())?)?;
+        let name_len = u16::try_from(thread.name.len()).map_err(|_error| Error::invalid_format())?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed name-length field; the fallible u16 narrowing remains outside the guard")]
+        writer.u16(name_len)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "snapshot_encoded_len includes this exact thread name byte length")]
         writer.write(thread.name.as_bytes())?;
     }
     for event in &snapshot.events.events {
         validate_payload(event.kind, event.payload)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "snapshot_encoded_len includes each fixed event record and its exact stack length")]
         writer.u64(event.thread_id.get())?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed event sequence")]
         writer.u64(event.sequence.get())?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed event timestamp")]
         writer.u64(event.timestamp.ticks())?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed event kind")]
         writer.u8(event.kind.wire_value())?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed payload tag")]
         writer.u8(payload_tag(event.payload))?;
-        writer.u8(u8::try_from(event.call_stack.len()).map_err(|_error| Error::invalid_format())?)?;
+        let stack_len = u8::try_from(event.call_stack.len()).map_err(|_error| Error::invalid_format())?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed stack-length field; the fallible u8 narrowing remains outside the guard")]
+        writer.u8(stack_len)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed reserved byte")]
         writer.u8(0)?;
         for field in encode_payload(event.payload) {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "the fixed event length includes all eight payload fields")]
             writer.u64(field)?;
         }
         for &frame in &event.call_stack {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "snapshot_encoded_len counted this exact stack length before output allocation")]
             writer.u64(frame.get())?;
         }
     }
     for source in &snapshot.sources {
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "snapshot_encoded_len includes each source header and exact name and data lengths")]
         writer.u64(source.id.get())?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed source schema field")]
         writer.u16(source.schema_version)?;
-        writer.u16(u16::try_from(source.name.len()).map_err(|_error| Error::invalid_format())?)?;
+        let name_len = u16::try_from(source.name.len()).map_err(|_error| Error::invalid_format())?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed name-length field; the fallible u16 narrowing remains outside the guard")]
+        writer.u16(name_len)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "usize fits u64 on supported targets and the exact encoded length includes this fixed source-data length field")]
         writer.u64(u64::try_from(source.data.len()).map_err(|_error| Error::invalid_format())?)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded length includes this fixed source reserved field")]
         writer.u32(0)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "snapshot_encoded_len includes this exact source name length")]
         writer.write(source.name.as_bytes())?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "snapshot_encoded_len includes this exact source data length")]
         writer.write(&source.data)?;
     }
     debug_assert!(writer.remaining().is_empty(), "encoded length accounts for every written field");
@@ -785,7 +918,13 @@ fn encode_recording_policy(writer: &mut Writer<'_>, policy: Policy) -> Result<()
     writer.u8(u8::from(policy.enabled))?;
     writer.u8(u8::from(policy.capture_backtraces))?;
     writer.u16(0)?;
-    writer.u32(validated_sampling(u64::try_from(policy.event_sampling.get()).unwrap_or(u64::MAX))?)
+    let sampling = u64::try_from(policy.event_sampling.get()).unwrap_or(
+        // #[gamma::skip(expr.decrement, reason = "EventSampling::one_in caps this private-field type at 1048576, which always fits u64")]
+        u64::MAX,
+    );
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "EventSampling::one_in guarantees 1 through 1048576, so validated_sampling cannot fail; the writer operation is outside this guard")]
+    let sampling = validated_sampling(sampling)?;
+    writer.u32(sampling)
 }
 
 fn event_kind(value: u8) -> Result<EventKind, Error> {
@@ -872,7 +1011,11 @@ impl SystemBytes {
     }
 
     fn copy_from(bytes: &[u8]) -> Option<Self> {
-        let mut result = Self::zeroed(bytes.len())?;
+        Self::copy_from_with(bytes, Self::zeroed)
+    }
+
+    fn copy_from_with(bytes: &[u8], allocate: impl FnOnce(usize) -> Option<Self>) -> Option<Self> {
+        let mut result = allocate(bytes.len())?;
         result.as_mut_slice().copy_from_slice(bytes);
         Some(result)
     }
@@ -928,11 +1071,17 @@ impl<'a> Writer<'a> {
 
 struct Reader<'a> {
     remaining: &'a [u8],
+    #[cfg(test)]
+    requested_bytes: usize,
 }
 
 impl<'a> Reader<'a> {
     const fn new(bytes: &'a [u8]) -> Self {
-        Self { remaining: bytes }
+        Self {
+            remaining: bytes,
+            #[cfg(test)]
+            requested_bytes: 0,
+        }
     }
 
     const fn remaining(&self) -> &'a [u8] {
@@ -940,6 +1089,10 @@ impl<'a> Reader<'a> {
     }
 
     fn read(&mut self, len: usize) -> Result<&'a [u8], Error> {
+        #[cfg(test)]
+        {
+            self.requested_bytes = self.requested_bytes.saturating_add(len);
+        }
         let Some((value, remaining)) = self.remaining.split_at_checked(len) else {
             return Err(Error::invalid_format());
         };
@@ -977,6 +1130,501 @@ mod tests {
     )]
 
     use super::*;
+    use crate::recorder::{Policies as RecordingPolicies, Policy as RecordingPolicy};
+
+    #[test]
+    fn nov6_encoder_returns_each_header_count_error_before_writing_later_fields() {
+        for rejected in 0..3 {
+            let mut calls = 0;
+            let error = encode_snapshot_with_counts(
+                &DecodedSnapshot::default(),
+                |_| Ok(HEADER_LEN),
+                Snapshot::zeroed,
+                |writer, value| {
+                    assert_eq!(value, 0);
+                    let index = calls;
+                    calls += 1;
+                    if index == rejected {
+                        Err(Error::new("count destination refused"))
+                    } else {
+                        writer.u32(0)
+                    }
+                },
+            )
+            .unwrap_err();
+            assert_eq!(error.to_string(), "count destination refused");
+            assert_eq!(calls, rejected + 1);
+        }
+    }
+
+    #[test]
+    fn nov6_sampling_admission_accepts_its_exact_limit_and_returns_errors_above_it() {
+        assert_eq!(
+            validated_sampling(MAX_EVENT_SAMPLING_ONE_IN as u64).unwrap(),
+            u32::try_from(MAX_EVENT_SAMPLING_ONE_IN).unwrap()
+        );
+        for invalid in [0, MAX_EVENT_SAMPLING_ONE_IN as u64 + 1, usize::MAX as u64, u64::MAX] {
+            assert_eq!(
+                validated_sampling(invalid).unwrap_err().to_string(),
+                Error::invalid_format().to_string()
+            );
+        }
+    }
+
+    #[test]
+    fn november_snapshot_preparation_preserves_injected_duration_and_source_context_without_clock_or_global_state() {
+        for (duration, expected) in [(Duration::ZERO, 0), (Duration::from_nanos(37), 37), (Duration::MAX, u64::MAX)] {
+            let calls = std::cell::RefCell::new(Vec::new());
+            let decoded = prepare_snapshot_with(
+                SnapshotOptions {
+                    event_buffers: EventBufferDisposition::Clear,
+                },
+                |disposition| {
+                    assert_eq!(disposition, EventBufferDisposition::Clear);
+                    calls.borrow_mut().push("record");
+                    Ok(None)
+                },
+                || {
+                    assert_eq!(*calls.borrow(), ["record", "sources"]);
+                    calls.borrow_mut().push("elapsed");
+                    duration
+                },
+                |context| {
+                    assert_eq!(*calls.borrow(), ["record"]);
+                    assert_eq!(context.events.clock, EventClock::CURRENT);
+                    assert!(context.events.threads.is_empty());
+                    assert!(context.events.events.is_empty());
+                    calls.borrow_mut().push("sources");
+                    Ok(Vec::new())
+                },
+            )
+            .unwrap();
+            assert_eq!(decoded.capture_duration_nanos, expected);
+            assert_eq!(decoded.events.clock, EventClock::CURRENT);
+            assert!(decoded.sources.is_empty());
+            assert_eq!(*calls.borrow(), ["record", "sources", "elapsed"]);
+        }
+    }
+
+    #[test]
+    fn november_snapshot_preparation_propagates_recording_and_source_errors_before_duration_observation() {
+        for fail_recording in [false, true] {
+            let error = prepare_snapshot_with(
+                SnapshotOptions {
+                    event_buffers: EventBufferDisposition::Clear,
+                },
+                |_| {
+                    if fail_recording {
+                        Err(Error::new("recording refused"))
+                    } else {
+                        Ok(None)
+                    }
+                },
+                || panic!("failed preparation must not observe duration"),
+                |_| {
+                    assert!(!fail_recording);
+                    Err(Error::new("source refused"))
+                },
+            )
+            .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                if fail_recording { "recording refused" } else { "source refused" }
+            );
+        }
+    }
+
+    #[test]
+    fn november_snapshot_count_writes_preserve_admission_and_destination_errors_without_large_vectors() {
+        for count in [0_u32, 1, 0x1234_5678, u32::MAX] {
+            let mut observed = None;
+            write_snapshot_count(count as usize, |value| {
+                observed = Some(value);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(observed, Some(count));
+            let error = write_snapshot_count(count as usize, |_| Err(Error::new("writer refused"))).unwrap_err();
+            assert_eq!(error.to_string(), "writer refused");
+        }
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(
+            write_snapshot_count(u32::MAX as usize + 1, |_| panic!("unrepresentable count must not reach writer"))
+                .unwrap_err()
+                .to_string(),
+            Error::invalid_format().to_string()
+        );
+    }
+
+    #[test]
+    fn november_snapshot_encoding_preserves_sizing_and_allocator_errors_before_writing() {
+        let snapshot = DecodedSnapshot::default();
+        let error = encode_snapshot_with(
+            &snapshot,
+            |actual| {
+                assert!(ptr::eq(actual, &raw const snapshot));
+                Err(Error::new("size overflow"))
+            },
+            |_| panic!("size failure must not allocate"),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "size overflow");
+        let error = encode_snapshot_with(
+            &snapshot,
+            |_| Ok(137),
+            |length| {
+                assert_eq!(length, 137);
+                Err(Error::new("allocator refused"))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "allocator refused");
+    }
+
+    #[test]
+    fn november_snapshot_platform_lengths_model_32_bit_admission_without_allocating_or_truncating() {
+        for value in [0, 1, u64::from(u32::MAX)] {
+            assert_eq!(snapshot_usize(value, u32::MAX as usize).unwrap() as u64, value);
+        }
+        for value in [u64::from(u32::MAX) + 1, u64::MAX] {
+            assert_eq!(
+                snapshot_usize(value, u32::MAX as usize).unwrap_err().to_string(),
+                Error::invalid_format().to_string()
+            );
+        }
+        assert_eq!(snapshot_usize(usize::MAX as u64, usize::MAX).unwrap(), usize::MAX);
+        assert_eq!(snapshot_usize(8, 7).unwrap_err().to_string(), Error::invalid_format().to_string());
+        assert_eq!(snapshot_usize(7, 7).unwrap(), 7);
+    }
+
+    #[test]
+    fn november_system_byte_copy_propagates_allocation_failure_and_copies_exact_payload_after_success() {
+        assert!(
+            SystemBytes::copy_from_with(b"ABC", |length| {
+                assert_eq!(length, 3);
+                None
+            })
+            .is_none()
+        );
+        let copied = SystemBytes::copy_from_with(b"ABC", |length| {
+            assert_eq!(length, 3);
+            SystemBytes::zeroed(length)
+        })
+        .unwrap();
+        assert_eq!(copied.as_slice(), b"ABC");
+    }
+
+    fn snapshot_count_header(version: u16) -> Vec<u8> {
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&version.to_le_bytes());
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes());
+        bytes.extend_from_slice(&[0; 12]);
+        if version >= 5 {
+            let policies = match version {
+                5 => 3,
+                6 => 4,
+                7 => 5,
+                _ => 6,
+            };
+            for _ in 0..policies {
+                bytes.extend_from_slice(&[0, 0, 0, 0, 1, 0, 0, 0]);
+            }
+        } else if version >= 3 {
+            bytes.extend_from_slice(&1_u32.to_le_bytes());
+        }
+        if version >= 4 {
+            bytes.extend_from_slice(&EventClock::ProcessMonotonic.wire_value().to_le_bytes());
+            bytes.extend_from_slice(&0_u16.to_le_bytes());
+            bytes.extend_from_slice(&1_000_000_000_u64.to_le_bytes());
+        }
+        bytes
+    }
+
+    #[test]
+    fn november_snapshot_count_admission_uses_exact_versioned_lengths_before_any_row_reads() {
+        for (version, header_len, thread_len, event_len) in [
+            (1, 32, 24, 28),
+            (2, 32, 26, 76),
+            (3, 36, 26, 76),
+            (4, 48, 26, 92),
+            (5, 68, 26, 92),
+            (6, 76, 26, 92),
+            (7, 84, 26, 92),
+            (8, 92, 26, 92),
+        ] {
+            for (offset, record_len) in [(20, thread_len), (24, event_len), (28, 24)] {
+                let mut bytes = snapshot_count_header(version);
+                assert_eq!(bytes.len(), header_len);
+                bytes[offset..offset + 4].copy_from_slice(&1_u32.to_le_bytes());
+                bytes.resize(header_len + record_len - 1, 0);
+                let mut reader = Reader::new(&bytes);
+                assert!(matches!(
+                    decode_reader(&mut reader).unwrap_err().kind,
+                    crate::ErrorKind::InvalidFormat
+                ));
+                assert_eq!(reader.requested_bytes, header_len, "version {version}, count offset {offset}");
+                assert_eq!(reader.remaining().len(), record_len - 1);
+                bytes.push(0);
+                let mut reader = Reader::new(&bytes);
+                let _ = decode_reader(&mut reader);
+                assert!(
+                    reader.requested_bytes > header_len,
+                    "an exactly fitting row must pass count admission"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_policy_writer_returns_short_buffer_errors_at_each_field() {
+        for length in 0..8 {
+            let mut output = vec![0xa5; length];
+            assert!(matches!(
+                encode_recording_policy(&mut Writer::new(&mut output), RecordingPolicy::all(true))
+                    .unwrap_err()
+                    .kind,
+                crate::ErrorKind::InvalidFormat
+            ));
+        }
+    }
+
+    fn gamma_payloads() -> [(EventKind, EventPayload, u8, [u64; 8]); 5] {
+        [
+            (
+                EventKind::MutexAccess,
+                EventPayload::Object(ObjectId::new(13)),
+                1,
+                [13, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                EventKind::ChannelHighWatermark,
+                EventPayload::Numeric(NumericEvent {
+                    object_id: ObjectId::new(13),
+                    value: 17,
+                }),
+                2,
+                [13, 17, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                EventKind::Allocation,
+                EventPayload::Allocation(Allocation {
+                    allocation_id: AllocationId::new(13),
+                    event_thread_id: EventThreadId::new(17),
+                    heap_id: HeapId::new(19),
+                    heap_kind: HeapKind::Bump,
+                    freed_after_heap_release: true,
+                    address: Address::new(23),
+                    size: 29,
+                    alignment: 32,
+                }),
+                3,
+                [13, 17, 19, 23, 29, 32, 258, 0],
+            ),
+            (
+                EventKind::TaskSpawned,
+                EventPayload::Runtime(RuntimeEvent {
+                    runtime_id: RuntimeId::from_raw(13).unwrap(),
+                    worker_id: Some(WorkerId::from_raw(17).unwrap()),
+                    subject_id: 19,
+                    related_id: 23,
+                    value_0: 29,
+                    value_1: 31,
+                }),
+                4,
+                [13, 17, 19, 23, 29, 31, 0, 0],
+            ),
+            (
+                EventKind::IoWriteFinished,
+                EventPayload::Io(IoEvent {
+                    operation_id: IoOperationId::from_raw(13).unwrap(),
+                    resource_id: IoResourceId::from_raw(17).unwrap(),
+                    buffer_id: Some(BufferId::from_raw(19).unwrap()),
+                    requested_bytes: 23,
+                    completed_bytes: 29,
+                    buffer_len: 31,
+                    buffer_span_count: 37,
+                    resource_kind: IoResourceKind::File,
+                    outcome: IoOutcome::Success,
+                }),
+                5,
+                [13, 17, 19, 23, 29, 0, 31, 0x25 | (1 << 32) | (2 << 40)],
+            ),
+        ]
+    }
+
+    #[test]
+    fn gamma_survivor_source_registry_keeps_links_and_registration_is_idempotent() {
+        fn capture(_: SnapshotContext<'_>) -> Result<SourceData, Error> {
+            SourceData::copy_from(b"data")
+        }
+        static FIRST: Source = Source::new(SourceId::new(0x0067_616d_6d61), "gamma-first", 1, capture);
+        static SECOND: Source = Source::new(SourceId::new(0x0067_616d_6d62), "gamma-second", 1, capture);
+        struct Restore(*mut Source);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                SOURCES.store(self.0, Ordering::Release);
+                for source in [&FIRST, &SECOND] {
+                    source.registered.store(false, Ordering::Release);
+                    source.next.store(ptr::null_mut(), Ordering::Release);
+                }
+            }
+        }
+        let _test = recorder::TEST_LOCK.lock().unwrap();
+        let old = SOURCES.load(Ordering::Acquire);
+        let _restore = Restore(old);
+        register_source(&FIRST);
+        assert_eq!(FIRST.next.load(Ordering::Acquire), old);
+        register_source(&SECOND);
+        assert_eq!(SECOND.next.load(Ordering::Acquire), ptr::from_ref(&FIRST).cast_mut());
+        register_source(&SECOND);
+        assert_eq!(SOURCES.load(Ordering::Acquire), ptr::from_ref(&SECOND).cast_mut());
+        assert_eq!(SECOND.next.load(Ordering::Acquire), ptr::from_ref(&FIRST).cast_mut());
+    }
+
+    #[test]
+    fn gamma_survivor_source_panic_preserves_exact_failure_context() {
+        fn capture(_: SnapshotContext<'_>) -> Result<SourceData, Error> {
+            panic!("scripted capture failure");
+        }
+        let mut source = Source::new(SourceId::new(13), "gamma-panics", 1, capture);
+        let events = Events::default();
+        let error = capture_sources_from(ptr::from_mut(&mut source), SnapshotContext { events: &events }).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "seismograph source 13 failed: seismograph source panicked during snapshot capture"
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_encoder_rejects_representable_invalid_models() {
+        let model = DecodedSnapshot {
+            events: Events {
+                clock: EventClock::CURRENT,
+                ..Events::default()
+            },
+            ..DecodedSnapshot::default()
+        };
+        let mut invalid = model.clone();
+        invalid.events.clock = EventClock::Unspecified;
+        assert!(encode_snapshot(&invalid).is_err());
+        let mut invalid = model.clone();
+        invalid.events.threads.push(ThreadLog {
+            thread_id: ThreadId::new(1),
+            name: "x".repeat(65536),
+            total_events: 0,
+            lost_events: 0,
+        });
+        assert!(encode_snapshot(&invalid).is_err());
+        let mut invalid = model.clone();
+        invalid.sources.push(SourceSnapshot {
+            id: SourceId::new(1),
+            name: "x".repeat(65536),
+            schema_version: 1,
+            data: Vec::new(),
+        });
+        assert!(encode_snapshot(&invalid).is_err());
+        let mut invalid = model;
+        invalid.events.events.push(Event {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(1),
+            timestamp: EventTimestamp::from_ticks(1),
+            kind: EventKind::MutexAccess,
+            payload: EventPayload::Numeric(NumericEvent {
+                object_id: ObjectId::new(1),
+                value: 2,
+            }),
+            call_stack: Vec::new(),
+        });
+        assert!(encode_snapshot(&invalid).is_err());
+        invalid.events.events[0].payload = EventPayload::Object(ObjectId::new(1));
+        invalid.events.events[0].call_stack = vec![Address::new(2); 256];
+        assert!(encode_snapshot(&invalid).is_err());
+    }
+
+    #[test]
+    fn gamma_survivor_encoder_matches_independent_full_wire_image() {
+        let policies = std::array::from_fn::<_, 6, _>(|index| RecordingPolicy {
+            enabled: index % 2 == 0,
+            capture_backtraces: index % 2 != 0,
+            event_sampling: EventSampling::one_in(index + 3).unwrap(),
+        });
+        let model = DecodedSnapshot {
+            capture_duration_nanos: 0x0807_0605_0403_0201,
+            events: Events {
+                clock: EventClock::CURRENT,
+                total_events: 29,
+                lost_events: 11,
+                recording: RecordingPolicies {
+                    allocations: policies[0],
+                    general_events: policies[1],
+                    arc_dereferences: policies[2],
+                    runtime_tasks: policies[3],
+                    io: policies[4],
+                    cache: policies[5],
+                },
+                threads: vec![ThreadLog {
+                    thread_id: ThreadId::new(0x102),
+                    total_events: 29,
+                    lost_events: 11,
+                    name: "λab".into(),
+                }],
+                events: gamma_payloads()
+                    .into_iter()
+                    .map(|(kind, payload, _, _)| Event {
+                        thread_id: ThreadId::new(0x102),
+                        sequence: EventSequence::new(0x304),
+                        timestamp: EventTimestamp::from_ticks(0x506),
+                        kind,
+                        payload,
+                        call_stack: vec![Address::new(0x708), Address::new(0x90a)],
+                    })
+                    .collect(),
+            },
+            sources: vec![SourceSnapshot {
+                id: SourceId::new(17),
+                name: "α".into(),
+                schema_version: 0x201,
+                data: vec![1, 3, 5],
+            }],
+        };
+        let mut expected = b"SEISMOG\0".to_vec();
+        expected.extend_from_slice(&[8, 0, 0, 0]);
+        expected.extend_from_slice(&0x0807_0605_0403_0201_u64.to_le_bytes());
+        for count in [1_u32, 5, 1] {
+            expected.extend_from_slice(&count.to_le_bytes());
+        }
+        for index in 0_u32..6 {
+            expected.extend_from_slice(&[u8::from(index % 2 == 0), u8::from(index % 2 != 0), 0, 0]);
+            expected.extend_from_slice(&(index + 3).to_le_bytes());
+        }
+        expected.extend_from_slice(&[1, 0, 0, 0]);
+        expected.extend_from_slice(&1_000_000_000_u64.to_le_bytes());
+        for value in [0x102_u64, 29, 11] {
+            expected.extend_from_slice(&value.to_le_bytes());
+        }
+        expected.extend_from_slice(&[4, 0]);
+        expected.extend_from_slice("λab".as_bytes());
+        for (kind, _, tag, fields) in gamma_payloads() {
+            for value in [0x102_u64, 0x304, 0x506] {
+                expected.extend_from_slice(&value.to_le_bytes());
+            }
+            expected.extend_from_slice(&[kind.wire_value(), tag, 2, 0]);
+            for value in fields.into_iter().chain([0x708, 0x90a]) {
+                expected.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        expected.extend_from_slice(&17_u64.to_le_bytes());
+        expected.extend_from_slice(&[1, 2, 2, 0]);
+        expected.extend_from_slice(&3_u64.to_le_bytes());
+        expected.extend_from_slice(&[0; 4]);
+        expected.extend_from_slice("α".as_bytes());
+        expected.extend_from_slice(&[1, 3, 5]);
+        let encoded = encode_snapshot(&model).unwrap();
+        assert_eq!(encoded.as_bytes(), expected);
+        assert_eq!(decode(&expected).unwrap(), model);
+        assert_eq!(format!("{encoded:?}"), format!("Snapshot {{ bytes: {}, .. }}", expected.len()));
+    }
 
     #[test]
     fn snapshot_storage_is_zeroed_and_moves_without_copying() {
@@ -1927,5 +2575,44 @@ mod tests {
                 },
             ]
         );
+    }
+    #[test]
+    fn gamma_round2_snapshot_lengths_preserve_all_scripted_overflow_errors() {
+        assert_eq!(snapshot_encoded_len([], [], []).unwrap(), HEADER_LEN);
+        for result in [
+            snapshot_encoded_len([usize::MAX], [], []),
+            snapshot_encoded_len([], [(usize::MAX, 0)], []),
+            snapshot_encoded_len([], [(0, usize::MAX)], []),
+            snapshot_encoded_len([], [], [usize::MAX]),
+            snapshot_encoded_len([], [], [usize::MAX - 26, 0]),
+            snapshot_encoded_len([], [], [usize::MAX - 26]),
+        ] {
+            assert_eq!(result.unwrap_err().to_string(), Error::allocation_failed().to_string());
+        }
+        assert_eq!(snapshot_wire_count(37).unwrap(), 37);
+        if let Some(overflow) = (u32::MAX as usize).checked_add(1) {
+            assert_eq!(
+                snapshot_wire_count(overflow).unwrap_err().to_string(),
+                Error::invalid_format().to_string()
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_round2_snapshot_duration_is_exact_and_recorder_failure_is_propagated() {
+        assert_eq!(snapshot_duration(|| Duration::from_nanos(37)), 37);
+        assert_eq!(snapshot_duration(|| Duration::MAX), u64::MAX);
+        let error = snapshot_with_recording(
+            SnapshotOptions {
+                event_buffers: EventBufferDisposition::Clear,
+            },
+            |disposition| {
+                assert_eq!(disposition, EventBufferDisposition::Clear);
+                Err(Error::new("scripted recorder failure"))
+            },
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.to_string(), "scripted recorder failure");
     }
 }

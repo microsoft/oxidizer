@@ -281,6 +281,106 @@ mod tests {
     }
 
     #[test]
+    fn gamma_survivor_task_operation_paging_and_complete_stack_order() {
+        use seismograph::recorder::event::Address;
+        let mut operation = event(3, EventKind::MutexAccess, EventPayload::Object(ObjectId::new(7)));
+        operation.call_stack = vec![Address::new(0x1234)];
+        let events = Events {
+            clock: EventClock::ProcessMonotonic,
+            total_events: 6,
+            recording: Policies {
+                runtime_tasks: Policy::all(true),
+                general_events: Policy::all(true),
+                arc_dereferences: Policy::all(true),
+                ..Policies::default()
+            },
+            threads: vec![ThreadLog {
+                thread_id: ThreadId::new(1),
+                total_events: 6,
+                ..ThreadLog::default()
+            }],
+            events: vec![
+                task_event(1, EventKind::TaskPollStarted, 0),
+                event(2, EventKind::ArcClone, EventPayload::Object(ObjectId::new(8))),
+                operation,
+                event(4, EventKind::MutexAccess, EventPayload::Object(ObjectId::new(7))),
+                event(5, EventKind::MutexRelease, EventPayload::Object(ObjectId::new(7))),
+                task_event(6, EventKind::TaskPollFinished, 50),
+            ],
+            ..Events::default()
+        };
+        let snapshot = TaskEventsSnapshot::from_events(&events, &[], None);
+        let task = &snapshot.tasks[&(1, 1)];
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let mut view = super::super::super::app::App::with_io(io).runtime_view.events;
+        view.operation_selected = 1;
+        let mouse = MouseRows::default();
+        let mut terminal = Terminal::new(TestBackend::new(100, 5)).unwrap();
+        terminal
+            .draw(|frame| {
+                mouse.begin(frame.area());
+                draw_operations(frame, &mouse, frame.area(), Some(task), view, true);
+            })
+            .unwrap();
+        assert_eq!(
+            mouse.at(terminal.backend().buffer().area, 1, 2),
+            Some((ListTarget::TaskOperations, 0))
+        );
+        assert_eq!(
+            mouse.at(terminal.backend().buffer().area, 1, 3),
+            Some((ListTarget::TaskOperations, 1))
+        );
+        assert_eq!(terminal.backend().buffer()[(1, 3)].bg, Color::Cyan);
+        view.focus = TaskEventsFocus::Occurrences;
+        view.event_selected = 1;
+        let operation = task
+            .operations
+            .iter()
+            .find(|operation| operation.kind == super::super::super::data::ThreadOperationKind::MutexAccess)
+            .unwrap();
+        terminal
+            .draw(|frame| {
+                mouse.begin(frame.area());
+                draw_occurrences(frame, &mouse, frame.area(), Some(operation), view, true);
+            })
+            .unwrap();
+        assert_eq!(terminal.backend().buffer()[(1, 3)].bg, Color::Cyan);
+        let occurrence = operation.occurrence(0).unwrap();
+        view.stack_filter = AllocationStackFilter::All;
+        let mut terminal = Terminal::new(TestBackend::new(100, 9)).unwrap();
+        terminal
+            .draw(|frame| draw_stack(frame, frame.area(), Some(occurrence), view))
+            .unwrap();
+        let rows = terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(100)
+            .map(|row| row.iter().map(ratatui::buffer::Cell::symbol).collect::<String>())
+            .collect::<Vec<_>>();
+        assert!(rows[1].contains("Thread 1 / sequence 3 / 30ns"));
+        assert!(rows[2].contains("MutexAccess"));
+        assert!(rows[3].contains("Same-family address observations"));
+        assert!(rows[4].contains("Complete captured stack"));
+        assert!(rows[5].contains("0x0000000000001234"));
+        view.stack_scroll = usize::MAX;
+        terminal = Terminal::new(TestBackend::new(100, 5)).unwrap();
+        terminal
+            .draw(|frame| draw_stack(frame, frame.area(), Some(occurrence), view))
+            .unwrap();
+        let last = (0..100).map(|x| terminal.backend().buffer()[(x, 3)].symbol()).collect::<String>();
+        assert!(last.contains("0x0000000000001234"));
+        view.stack_scroll = 0;
+        view.stack_horizontal_scroll = u16::MAX;
+        terminal = Terminal::new(TestBackend::new(60, 9)).unwrap();
+        terminal
+            .draw(|frame| draw_stack(frame, frame.area(), Some(occurrence), view))
+            .unwrap();
+        let first = (1..59).map(|x| terminal.backend().buffer()[(x, 1)].symbol()).collect::<String>();
+        assert!(first.trim().is_empty());
+    }
+
+    #[test]
     fn wide_event_columns_stay_side_by_side_even_in_short_rows() {
         let area = Rect::new(2, 30, 180, 10);
         for focus in [TaskEventsFocus::Operations, TaskEventsFocus::Occurrences] {

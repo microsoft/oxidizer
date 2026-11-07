@@ -65,6 +65,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_survivor_default_placement_has_exact_any_label() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        report_created(&sink, TaskPlacement::Any);
+        assert_eq!(processor.single_event().dimensions(), [("placement".to_owned(), "any".into())]);
+    }
+
+    #[test]
     fn lifecycle_events_include_placement_and_poll_count() {
         let (sink, processor) = test_emitter(TEST_ID);
 

@@ -106,6 +106,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_survivor_private_sender_disposal_contains_a_panicking_panic_payload() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Payload(Arc<AtomicUsize>);
+        impl Drop for Payload {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                panic!("sender disposal panic payload");
+            }
+        }
+        let drops = Arc::new(AtomicUsize::new(0));
+        std::panic::catch_unwind(|| discard_unwind(|| std::panic::panic_any(Payload(Arc::clone(&drops))))).unwrap();
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn gamma_survivor_cancelled_sender_publishes_error_and_completed_handle_cannot_be_repolled() {
+        let pool = JoinHandlePool::new(Shutdown::default());
+        let (mut handle, sender) = pool.handle::<u32>();
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(Pin::new(&mut handle).poll(&mut context).is_pending());
+        sender.cancelled(ShutdownCause::default());
+        let Poll::Ready(Err(error)) = Pin::new(&mut handle).poll(&mut context) else {
+            panic!("cancellation must publish its terminal result");
+        };
+        assert!(error.is_shutdown());
+        assert!(!error.is_panic());
+        let panic = std::panic::catch_unwind(AssertUnwindSafe(|| Pin::new(&mut handle).poll(&mut context))).unwrap_err();
+        let message = panic
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+            .unwrap();
+        assert!(message.ends_with("JoinHandle polled after completion"), "{message}");
+        for (error, panic, invalid) in [
+            (JoinError::panicked(Box::new(17)), true, false),
+            (JoinError::shutdown(None), false, false),
+            (JoinError::invalid_destination(), false, true),
+        ] {
+            let output = format!("{error:?}");
+            assert!(output.contains(&format!("is_panic: {panic}")), "{output}");
+            assert!(output.contains(&format!("is_invalid_destination: {invalid}")), "{output}");
+        }
+    }
+
+    #[test]
     fn completion_delivers_the_result_to_the_handle() {
         let pool = JoinHandlePool::new(Shutdown::default());
         let (mut handle, sender) = pool.handle::<u32>();

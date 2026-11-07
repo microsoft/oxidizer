@@ -16,10 +16,10 @@ mod args;
 mod lifetimes;
 
 use args::FakeableArgs;
+#[cfg(any(test, feature = "mockall"))]
+use lifetimes::add_explicit_lifetimes;
 #[cfg(feature = "mockall")]
-use lifetimes::{
-    add_explicit_lifetimes, count_nested_elided_references, type_contains_bound_lifetimes, type_contains_implicit_higher_ranked_elision,
-};
+use lifetimes::{count_nested_elided_references, type_contains_bound_lifetimes, type_contains_implicit_higher_ranked_elision};
 
 /// Gates fakes on unit tests and, optionally, a consumer feature.
 fn fakes_cfg_attr(fakes_feature: Option<&str>) -> proc_macro2::TokenStream {
@@ -487,10 +487,9 @@ fn meta_applies_attribute(meta: &Meta, attribute_name: &str) -> bool {
 
 /// Extracts the final type path segment from an impl block.
 fn extract_struct_segment(item_impl: &ItemImpl) -> Result<syn::PathSegment, syn::Error> {
+    // Parsed qualified-self paths have a leading `::` or multiple segments.
     match &*item_impl.self_ty {
-        syn::Type::Path(type_path)
-            if type_path.qself.is_none() && type_path.path.leading_colon.is_none() && type_path.path.segments.len() == 1 =>
-        {
+        syn::Type::Path(type_path) if type_path.path.leading_colon.is_none() && type_path.path.segments.len() == 1 => {
             Ok(type_path.path.segments[0].clone())
         }
         syn::Type::Path(_) => Err(syn::Error::new_spanned(
@@ -632,6 +631,7 @@ fn generate_delegation_method(
             ));
         }
 
+        // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "Syn stores reference mutability inside ReceiverKind::Reference, leaving receiver.mutability empty; typed receivers already returned above.")]
         if matches!(receiver.kind, syn::ReceiverKind::Value) && receiver.mutability.is_some() {
             return Err(syn::Error::new_spanned(
                 method_sig,
@@ -982,6 +982,7 @@ fn unknown_receiver_kind() -> ! {
 }
 
 fn fresh_binding(base: &str, param_names: &[proc_macro2::Ident]) -> proc_macro2::Ident {
+    // #[gamma::skip(expr.increment, tag = "equivalent", reason = "N parameter names cannot occupy all N + 1 distinct candidates, so extending the range cannot change the first free binding.")]
     (0..=param_names.len())
         .map(|suffix| {
             let candidate = if suffix == 0 {
@@ -1444,6 +1445,7 @@ fn rewrite_expect_in_tokens(tokens: TokenStream) -> TokenStream {
     };
 
     for meta in metas.iter_mut().skip(1) {
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "The helper returns unit; default_after preserves its metadata rewrite and replaces unit with unit.")]
         rewrite_expect_meta(meta);
     }
 
@@ -1465,6 +1467,12 @@ fn rewrite_expect_meta(meta: &mut Meta) {
 #[cfg(all(test, feature = "mockall"))]
 #[path = "../tests/output_verification.rs"]
 mod output_verification;
+
+#[cfg(test)]
+mod gamma_survivor_tests;
+
+#[cfg(test)]
+mod gamma_round2;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

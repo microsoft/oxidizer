@@ -56,6 +56,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_survivor_private_joiner_disposes_panicking_payload_and_joins_remaining_worker() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Payload(Arc<AtomicUsize>);
+        impl Drop for Payload {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                panic!("joined worker panic payload");
+            }
+        }
+        let drops = Arc::new(AtomicUsize::new(0));
+        let panicking = thread::spawn({
+            let drops = Arc::clone(&drops);
+            move || std::panic::panic_any(Payload(drops))
+        });
+        let (completed, observed) = mpsc::sync_channel(1);
+        let remaining = thread::spawn(move || completed.send(17).unwrap());
+        let joiner = WorkerJoiner::new(vec![panicking, remaining]);
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| joiner.join()))
+                .unwrap()
+                .is_err()
+        );
+        assert_eq!(observed.recv().unwrap(), 17);
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
     fn joins_every_worker() {
         let (completed, observed) = mpsc::channel();
         let workers = (0..2)

@@ -1,14 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+mod signal;
 mod transport;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use signal::Signal;
 use transport::{Channel, PendingListener};
 pub(crate) use transport::{Connection, Listener};
 
@@ -23,7 +25,7 @@ pub(crate) struct Runtime {
 #[derive(Debug)]
 struct Shared {
     state: Mutex<State>,
-    changed: Condvar,
+    changed: Signal,
 }
 
 #[derive(Debug)]
@@ -95,7 +97,7 @@ impl Runtime {
                     channels: Vec::new(),
                     max_chunk: usize::MAX,
                 }),
-                changed: Condvar::new(),
+                changed: Signal::default(),
             }),
         }
     }
@@ -549,6 +551,199 @@ fn access_denied() -> io::Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn november_mock_wait_passes_the_exact_handoff_duration_without_waiting() {
+        let runtime = Runtime::new();
+        runtime.shared.changed.bypass_timed_wait();
+        let before = runtime.system_time();
+        runtime.wait();
+        assert_eq!(runtime.shared.changed.timed_waits(), [Duration::from_millis(1)]);
+        assert_eq!(runtime.system_time(), before);
+    }
+
+    #[test]
+    fn november_mock_failure_and_time_changes_notify_exactly_the_affected_waiters() {
+        let runtime = Runtime::new();
+        let controller = MonitorIoControl::new(runtime.clone());
+        let (_first, _second) = Connection::pair(&runtime);
+        let channel = runtime.state().channels[0].upgrade().unwrap();
+        controller.fail_next(IoOperation::Read, io::Error::new(io::ErrorKind::BrokenPipe, "scheduled read"));
+        assert_eq!(runtime.shared.changed.notification_count(), 1);
+        assert_eq!(channel.changed.notification_count(), 0);
+        let error = runtime.checkpoint(IoOperation::Read).unwrap_err();
+        assert_eq!(
+            (error.kind(), error.to_string()),
+            (io::ErrorKind::BrokenPipe, "scheduled read".into())
+        );
+        for (elapsed, expected) in [
+            (Duration::ZERO, Duration::ZERO),
+            (Duration::from_nanos(17), Duration::from_nanos(17)),
+        ] {
+            controller.advance_time(elapsed);
+            assert_eq!(runtime.system_time(), UNIX_EPOCH + expected);
+        }
+        assert_eq!(runtime.shared.changed.notification_count(), 3);
+        assert_eq!(channel.changed.notification_count(), 2);
+    }
+
+    #[test]
+    fn gamma_round2_file_parent_owner_is_checked_independently_of_caller_access() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let other = MonitorOwner::WindowsSid("S-1-5-21-9-8-7-1002".into());
+        assert_eq!(
+            runtime.create_file(&directory.join("new"), &other).err().unwrap().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        let control = MonitorIoControl::new(runtime.clone());
+        let path = directory.join("mismatch");
+        control.put_file(&path, other.clone(), b"payload".to_vec());
+        assert_eq!(runtime.read_file(&path).err().unwrap().kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            runtime.current_directory(&other).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        let state = runtime.state();
+        assert!(!state.entries.contains_key(&state.root.join(other.to_string())));
+    }
+
+    #[test]
+    fn gamma_survivor_mock_private_file_paths_return_errors_without_unwrapping() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let missing = directory.join("missing");
+        assert_eq!(runtime.open_directory(&missing, None).unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(runtime.entries(&missing).unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(
+            runtime.create_file(Path::new(""), &owner).err().unwrap().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(runtime.read_file(Path::new("")).err().unwrap().kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(runtime.remove_file(Path::new("")).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            runtime.write_snapshot(Path::new(""), b"x").unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            runtime.create_file(&missing.join("child"), &owner).err().unwrap().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            runtime.remove_file(&missing.join("child")).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            runtime.rename_file(&missing, &directory.join("other")).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        let control = MonitorIoControl::new(runtime.clone());
+        let file = directory.join("file");
+        control.put_file(&file, owner.clone(), b"x".to_vec());
+        assert_eq!(
+            runtime.rename_file(&file.join("child"), Path::new("")).unwrap_err().kind(),
+            io::ErrorKind::NotADirectory
+        );
+        assert_eq!(
+            runtime.rename_file(Path::new(""), &file).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        control.set_secure(&directory, false);
+        assert_eq!(
+            runtime.read_file(&file).err().unwrap().to_string(),
+            "monitor directory has unsafe ownership or permissions"
+        );
+        assert_eq!(
+            runtime.create_file(&directory.join("other"), &owner).err().unwrap().to_string(),
+            "monitor directory has unsafe ownership or permissions"
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_mock_owner_guards_include_expected_owner_and_root_admin() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let control = MonitorIoControl::new(runtime.clone());
+        let other = MonitorOwner::WindowsSid("S-1-5-21-1-2-3-2002".into());
+        assert_eq!(
+            runtime.open_directory(&directory, Some(&other)).unwrap_err().to_string(),
+            "monitor directory has unsafe ownership or permissions"
+        );
+        assert_eq!(
+            runtime.current_directory(&other).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        control.set_owner(MonitorOwner::UnixUser(0));
+        runtime.open_directory(&directory, Some(&owner)).unwrap();
+        runtime.entries(&directory).unwrap();
+    }
+
+    #[test]
+    fn gamma_survivor_mock_root_listing_existing_directory_and_snapshot_security() {
+        let runtime = Runtime::new();
+        let owner = runtime.owner();
+        runtime.open_directory(Path::new("."), Some(&owner)).unwrap();
+        let directory = runtime.current_directory(&owner).unwrap();
+        let control = MonitorIoControl::new(runtime.clone());
+        let root = runtime.state().root.clone();
+        control.set_owner(MonitorOwner::WindowsSid("S-1-5-21-1-2-3-2002".into()));
+        assert_eq!(runtime.entries(&root).unwrap().len(), 1);
+        assert_eq!(runtime.entries(&directory).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        control.set_administrator(true);
+        runtime.entries(&directory).unwrap();
+        control.set_owner(owner.clone());
+        control.set_administrator(false);
+        runtime.state().entries.get_mut(&directory).unwrap().owner = MonitorOwner::UnixUser(7);
+        assert_eq!(
+            runtime.current_directory(&owner).unwrap_err().to_string(),
+            "monitor directory has unsafe ownership or permissions"
+        );
+        runtime.state().entries.get_mut(&directory).unwrap().owner = owner.clone();
+        let path = directory.join("snapshot");
+        runtime.write_snapshot(&path, b"abc").unwrap();
+        let (mut file, actual_owner) = runtime.read_file(&path).unwrap();
+        assert_eq!(actual_owner, owner);
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"abc");
+        assert_eq!(
+            runtime.read_file(&directory).err().unwrap().to_string(),
+            "monitor descriptor must be a private regular file"
+        );
+        let missing = root.join("not-an-owner");
+        runtime.state().entries.insert(
+            missing,
+            Entry {
+                owner,
+                secure: true,
+                data: None,
+            },
+        );
+        assert!(runtime.registry_directories().into_iter().any(|entry| entry.is_err()));
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            let invalid = root.join(std::ffi::OsString::from_wide(&[0xd800]));
+            let owner = runtime.owner();
+            runtime.state().entries.insert(
+                invalid,
+                Entry {
+                    owner,
+                    secure: true,
+                    data: None,
+                },
+            );
+            assert!(runtime.registry_directories().into_iter().any(|entry| entry.is_err()));
+        }
+        runtime.state().entries.remove(&root);
+        assert_eq!(
+            runtime.current_directory(&runtime.owner()).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+    }
 
     #[test]
     fn partial_descriptor_transfers_advance_the_cursor_and_preserve_the_chunk_limit() {

@@ -137,6 +137,7 @@ impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
     pub fn config(self, config: &LatencyConfig) -> LatencyLayer<In, Out, Set, Set> {
         let with_rate = self.rate(config.rate).enable(config.enabled);
         match config.max_latency {
+            // #[gamma::skip(relational.gt_to_ge, reason = "latency_range with equal bounds delegates to the same fixed latency.")]
             Some(max) if max > config.latency => with_rate.latency_range(config.latency..max),
             _ => with_rate.latency(config.latency),
         }
@@ -213,6 +214,25 @@ mod tests {
     use tick::Clock;
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_equal_latency_bounds_do_not_consume_random_stream() {
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let captured = std::sync::Arc::clone(&count);
+        let context = create_test_context();
+        let mut layer = LatencyLayer::new("equal".into(), &context);
+        layer.rnd = Rnd::new_function(move || {
+            captured.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            0.5
+        });
+        let duration = Duration::from_millis(7);
+        let layer = layer.latency_range(duration..duration);
+        assert_eq!(
+            layer.latency_duration.unwrap().call(&"input".to_owned(), LatencyDurationArgs {}),
+            duration
+        );
+        assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
 
     #[test]
     #[cfg_attr(miri, ignore)]

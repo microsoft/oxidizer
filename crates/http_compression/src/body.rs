@@ -206,6 +206,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_survivor_failed_body_releases_chain_and_becomes_terminal() {
+        let body = http_extensions::HttpBodyBuilder::new_fake().text("invalid gzip");
+        let chain = CompressionChain::new(body).decompress(compressors::gzip::Decompressor::new(compressors::Resources::global()));
+        let mut body = CompressionBody::new(chain);
+        let waker = futures::task::noop_waker();
+        let mut context = Context::from_waker(&waker);
+        let Poll::Ready(Some(Err(error))) = Pin::new(&mut body).poll_frame(&mut context) else {
+            panic!("invalid gzip must fail while polling the transformed body");
+        };
+        assert_eq!(error.label(), "compression_invalid");
+        assert!(body.chain.is_none());
+        assert!(body.is_end_stream());
+        assert!(matches!(Pin::new(&mut body).poll_frame(&mut context), Poll::Ready(None)));
+    }
+
+    #[test]
     fn a_foreign_source_error_uses_the_generic_compression_failure() {
         let error = to_http_error(compressors::Error::other(
             "source failed",

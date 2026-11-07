@@ -25,15 +25,43 @@ fn build_with_processors(
     thread_builder: &ThreadBuilder,
     available: &ProcessorSet,
 ) -> Result<Runtime, Error> {
+    let (workers, shutdown) = prepare_workers(
+        processor_config,
+        clock,
+        thread_builder,
+        available,
+        |name| std::env::var(name).ok(),
+        asynchronous::start,
+    )?;
+
+    let dispatcher = DispatcherCore::new(
+        NonEmpty::from_vec(workers.iter().map(|worker| worker.endpoint().clone()).collect())
+            .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
+        shutdown,
+    );
+    let dispatcher_client = DispatcherClient::new(dispatcher);
+    let mut join_handles = Vec::with_capacity(workers.len());
+    for worker in workers {
+        join_handles.push(worker.activate(dispatcher_client.clone()));
+    }
+    let worker_joiner = WorkerJoiner::new(join_handles);
+    Ok(Runtime::with_dispatcher(dispatcher_client, worker_joiner))
+}
+
+fn prepare_workers<W>(
+    processor_config: RuntimeConfig,
+    clock: &InactiveClock,
+    thread_builder: &ThreadBuilder,
+    available: &ProcessorSet,
+    environment: impl FnOnce(&str) -> Option<String>,
+    mut start: impl FnMut(asynchronous::StartOptions) -> W,
+) -> Result<(Vec<W>, Shutdown), Error> {
     let processors = processor_config.workers_policy.select(available)?;
 
     let mut workers = Vec::with_capacity(processors.len());
 
     // Respect the RUST_MIN_STACK environment variable if set and larger than the configured stack size.
-    let stack_size = processor_config
-        .stack_size
-        .get()
-        .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
+    let stack_size = select_stack_size(processor_config.stack_size, environment);
     let monitor_options = processor_config.monitor_options;
     let panic_policy = processor_config.panic_policy;
 
@@ -42,7 +70,7 @@ fn build_with_processors(
     let blocking_pools = processor_config.blocking_pool_policy.into_pools()?;
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
-        workers.push(asynchronous::start(asynchronous::StartOptions {
+        workers.push(start(asynchronous::StartOptions {
             stack_size,
             inactive_clock: clock.clone(),
             processor,
@@ -56,21 +84,14 @@ fn build_with_processors(
         }));
     }
 
-    let dispatcher = DispatcherCore::new(
-        NonEmpty::from_vec(workers.iter().map(|worker| worker.endpoint().clone()).collect())
-            .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
-        shutdown,
-    );
+    Ok((workers, shutdown))
+}
 
-    let dispatcher_client = DispatcherClient::new(dispatcher);
-
-    let mut join_handles = Vec::with_capacity(workers.len());
-    for worker in workers {
-        join_handles.push(worker.activate(dispatcher_client.clone()));
-    }
-    let worker_joiner = WorkerJoiner::new(join_handles);
-
-    Ok(Runtime::with_dispatcher(dispatcher_client, worker_joiner))
+fn select_stack_size(configured: std::num::NonZeroUsize, environment: impl FnOnce(&str) -> Option<String>) -> usize {
+    configured
+        .get()
+        // #[gamma::skip(literal.int_increment, reason = "configured is NonZeroUsize, so max(configured, 0) and max(configured, 1) coincide.")]
+        .max(environment("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0))
 }
 
 fn available_processors() -> ProcessorSet {
@@ -99,6 +120,59 @@ mod tests {
     use std::task::Waker;
     use std::thread;
     use std::thread::ThreadId;
+
+    #[test]
+    fn nov4_startup_passes_the_selected_stack_size_to_each_native_worker_request() {
+        let hardware = many_cpus::SystemHardware::fake(HardwareBuilder::from_counts(NonZero::new(2).unwrap(), NonZero::new(1).unwrap()));
+        for environment in [None, Some("32769")] {
+            let (requests, shutdown) = prepare_workers(
+                RuntimeConfig {
+                    workers_policy: WorkersPolicy::at_most(2),
+                    stack_size: NonZero::new(16_385).unwrap(),
+                    blocking_pool_policy: BlockingPoolPolicy::shared(),
+                    monitor_options: MonitorOptions::default(),
+                    panic_policy: PanicPolicy::default(),
+                },
+                &InactiveClock::new_isolated(),
+                &ThreadBuilder::default(),
+                &hardware.processors(),
+                |name| {
+                    assert_eq!(name, "RUST_MIN_STACK");
+                    environment.map(str::to_owned)
+                },
+                |request| request,
+            )
+            .unwrap();
+            assert_eq!(requests.len(), 2);
+            assert!(
+                requests
+                    .iter()
+                    .all(|request| request.stack_size == if environment.is_some() { 32_769 } else { 16_385 })
+            );
+            assert!(matches!(shutdown.state(), crate::runtime::shutdown::ShutdownState::Running));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_stack_selection_uses_the_named_environment_lower_bound() {
+        let configured = NonZero::new(16_384).unwrap();
+        for (environment, expected) in [
+            (None, 16_384),
+            (Some(""), 16_384),
+            (Some("invalid"), 16_384),
+            (Some("1"), 16_384),
+            (Some("32768"), 32_768),
+            (Some("99999999999999999999999999999999999999"), 16_384),
+        ] {
+            assert_eq!(
+                super::select_stack_size(configured, |name| {
+                    assert_eq!(name, "RUST_MIN_STACK");
+                    environment.map(str::to_owned)
+                }),
+                expected
+            );
+        }
+    }
 
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use many_cpus::fake::HardwareBuilder;

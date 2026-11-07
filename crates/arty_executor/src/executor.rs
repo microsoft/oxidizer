@@ -103,6 +103,7 @@ impl ObservePoll for &dyn PollObserver {
             task.inspect(TaskState::Running, &mut |description| {
                 in_callback = true;
                 self.poll_started(description);
+                // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
                 in_callback = false;
                 observed = true;
             });
@@ -113,6 +114,7 @@ impl ObservePoll for &dyn PollObserver {
             Err(panic) => {
                 // Observer failures propagate; inspector and description-drop failures
                 // cancel the observation before the task itself is polled.
+                // #[gamma::skip(assign_value.default, reason = "The assigned bool is false, which is exactly bool::default().")]
                 observed = false;
                 discard_task_panic_payload(panic);
                 self.inspection_failed(InspectionError::Panicked);
@@ -261,10 +263,13 @@ impl Executor {
                 });
                 ControlFlow::Continue(())
             };
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "The owner-only submission queue has no mutable borrow at entry: all queue mutations release their borrows before callbacks, and inspection has not invoked a callback yet.")]
             self.shared.inspect_new_tasks(|handle| inspect(handle.as_ptr(), TaskState::Ready))?;
+            // #[gamma::skip(cond.always_true, reason = "After truncation, count equals limit; inspect returns Break before invoking any inspector or visitor, so traversing the next queue cannot change the result.")]
             if !truncated.get() {
                 let _traversal = self.active.iter().try_for_each(|handle| inspect(handle.as_ptr(), TaskState::Ready));
             }
+            // #[gamma::skip(cond.always_true, reason = "After truncation, count equals limit; inspect returns Break before invoking any inspector or visitor, so traversing the next queue cannot change the result.")]
             if !truncated.get() {
                 self.pending.inspect_until(|pointer| inspect(pointer, TaskState::Waiting));
             }
@@ -369,6 +374,7 @@ impl Executor {
             let task_handle = self.active.pop_front().expect("the task remains active until its poll returns");
             match outcome {
                 task::Poll::Ready(()) => {
+                    // #[gamma::skip(cond.always_true, reason = "TaskList::remove returns None without modifying the list when the task is not linked.")]
                     if linked {
                         // SAFETY: `linked` was read from the live active task, whose list ownership
                         // belongs to this executor and is accessed on the task owner thread.
@@ -388,6 +394,7 @@ impl Executor {
             }
         }
 
+        // #[gamma::skip(call_result.default, reason = "The metrics function returns unit and default_after still executes it.")]
         record_poll_metrics(pending_count, completed_count);
     }
 
@@ -444,6 +451,16 @@ impl Executor {
 
         self.shared.shutdown_complete()
     }
+
+    fn finish_drop(&mut self, panicking: bool) {
+        if panicking {
+            // Retire remaining payloads on their owner if cancellation unwinds.
+            let cause = self.shared.shutdown().cause();
+            let aborted_count = self.prepare_task_abort();
+            self.abort_prepared_tasks(aborted_count, false, &cause);
+        }
+        executor_context::unregister(self.shared.wake().thread_id());
+    }
 }
 
 impl Drop for Executor {
@@ -453,13 +470,7 @@ impl Drop for Executor {
         impl Drop for FinishDrop<'_> {
             #[cfg_attr(coverage_nightly, coverage(off))] // A second panic during unwinding aborts before a test can observe this safety fallback.
             fn drop(&mut self) {
-                if std::thread::panicking() {
-                    // Retire remaining payloads on their owner if cancellation unwinds.
-                    let cause = self.0.shared.shutdown().cause();
-                    let aborted_count = self.0.prepare_task_abort();
-                    self.0.abort_prepared_tasks(aborted_count, false, &cause);
-                }
-                executor_context::unregister(self.0.shared.wake().thread_id());
+                self.0.finish_drop(std::thread::panicking());
             }
         }
 
@@ -468,6 +479,7 @@ impl Drop for Executor {
         let guard = FinishDrop(self);
         let aborted_count = guard.0.prepare_task_abort();
         guard.0.abort_prepared_tasks(aborted_count, false, &cause);
+        // #[gamma::skip(cond.negate, result.is_err_to_is_ok, reason = "The branch body is empty; either predicate still executes the same try_with call.")]
         if EXECUTOR_PUSHER.try_with(MetricsPusher::push).is_err() {
             // Executor cleanup must remain safe after destruction of metrics TLS.
         }
@@ -489,6 +501,376 @@ fn record_poll_metrics(pending_count: usize, completed_count: usize) {
 const MILLIS_BUCKETS: &[Magnitude] = &[0, 1, 20, 50, 100, 1_000, 10_000];
 const TASKS_TOUCHED_PER_CYCLE_BUCKETS: &[Magnitude] = &[0, 1, 10, 100, 1_000];
 const TASKS_MANAGED_PER_CYCLE_BUCKETS: &[Magnitude] = &[0, 1, 10, 100, 1_000];
+
+#[cfg(test)]
+mod gamma_round2_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::task::Poll;
+    use std::time::{Duration, SystemTime};
+
+    use super::*;
+
+    #[test]
+    fn nov4_finish_drop_cancels_only_during_unwinding_without_recording_drop_metrics() {
+        #[derive(Debug)]
+        struct CountCancellation(Rc<std::cell::Cell<usize>>);
+        impl crate::TaskCompletion<()> for CountCancellation {
+            fn completed(self, (): ()) {
+                panic!("pending task cannot complete");
+            }
+            fn panicked(self, _: crate::TaskPanicPayload, _: Option<ShutdownCause>) {
+                panic!("pending task cannot panic");
+            }
+            fn cancelled(self, _: ShutdownCause) {
+                self.0.set(self.0.get() + 1);
+            }
+        }
+
+        for panicking in [false, true] {
+            let cancelled = Rc::new(std::cell::Cell::new(0));
+            let mut executor = Executor::builder().build();
+            executor.tasks().add(
+                std::future::pending(),
+                crate::TaskOptions::default(),
+                CountCancellation(Rc::clone(&cancelled)),
+            );
+            let dropped_before = metric(&TASKS_DROPPED);
+            executor.finish_drop(panicking);
+            executor_context::register(executor.shared.wake().thread_id());
+            let observed_cancellations = cancelled.get();
+            let observed_drop_metric = metric(&TASKS_DROPPED);
+            if !executor.active.is_empty() {
+                let cause = executor.shared.shutdown().cause();
+                executor.abort_prepared_tasks(0, false, &cause);
+            }
+            drop(executor);
+            assert_eq!(observed_cancellations, usize::from(panicking));
+            assert_eq!(observed_drop_metric, dropped_before);
+            assert_eq!(cancelled.get(), 1);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_new_executor_selects_the_fast_system_instant_source() {
+        let executor = Executor::builder().build();
+        assert_eq!(format!("{:?}", executor.clock), "SimpleClock(SystemFast)");
+    }
+
+    #[test]
+    fn gamma_round2_empty_accept_preserves_the_active_queue_allocation() {
+        let executor = Executor::builder().build();
+        let mut active = VecDeque::with_capacity(23);
+        assert_eq!(executor.shared.accept_new_tasks(&mut active), 0);
+        assert_eq!(active.capacity(), 23);
+    }
+
+    // Inspect owner-thread observations, not process-wide reports that parallel tests also update.
+    fn metric(event: &'static std::thread::LocalKey<Event<Push>>) -> (u64, i64) {
+        event.with(|event| {
+            let debug = format!("{event:?}");
+            let count = debug
+                .split_once("count: Cell { value: ")
+                .unwrap()
+                .1
+                .split_once('}')
+                .unwrap()
+                .0
+                .trim()
+                .parse()
+                .unwrap();
+            let sum = debug
+                .split_once("sum: Cell { value: ")
+                .unwrap()
+                .1
+                .split_once('}')
+                .unwrap()
+                .0
+                .trim()
+                .parse()
+                .unwrap();
+            (count, sum)
+        })
+    }
+
+    fn assert_delta(event: &'static std::thread::LocalKey<Event<Push>>, before: (u64, i64), count: u64, sum: i64) {
+        assert_eq!(metric(event), (before.0 + count, before.1 + sum));
+    }
+
+    fn assert_all_observations_pushed() {
+        EXECUTOR_PUSHER.with(|pusher| {
+            let debug = format!("{pusher:?}");
+            let mut pairs = 0;
+            for pair in debug.split("LocalGlobalPair {").skip(1) {
+                let count = pair
+                    .split_once("count: Cell { value: ")
+                    .unwrap()
+                    .1
+                    .split_once('}')
+                    .unwrap()
+                    .0
+                    .trim()
+                    .parse::<u64>()
+                    .unwrap();
+                let pushed = pair
+                    .split_once("last_pushed_count: Cell { value: ")
+                    .unwrap()
+                    .1
+                    .split_once('}')
+                    .unwrap()
+                    .0
+                    .trim()
+                    .parse::<u64>()
+                    .unwrap();
+                assert_eq!(pushed, count, "{pair}");
+                pairs += 1;
+            }
+            assert!(pairs > 0);
+        });
+    }
+
+    #[derive(Debug)]
+    struct Completion;
+
+    impl crate::TaskCompletion<()> for Completion {
+        fn completed(self, (): ()) {}
+
+        fn panicked(self, _: crate::TaskPanicPayload, _: Option<ShutdownCause>) {
+            panic!("the controlled pending task must not panic");
+        }
+
+        fn cancelled(self, _: ShutdownCause) {}
+    }
+
+    #[test]
+    fn gamma_round2_poll_metric_counts_and_magnitudes_are_exact_including_zero() {
+        for (pending, completed) in [(0, 0), (1, 0), (0, 1), (3, 2)] {
+            let inactive_before = metric(&TASKS_INACTIVATED);
+            let completed_before = metric(&TASKS_COMPLETED);
+            let dropped_before = metric(&TASKS_DROPPED);
+            record_poll_metrics(pending, completed);
+            assert_delta(
+                &TASKS_INACTIVATED,
+                inactive_before,
+                u64::from(pending != 0),
+                i64::try_from(pending).unwrap(),
+            );
+            assert_delta(
+                &TASKS_COMPLETED,
+                completed_before,
+                u64::from(completed != 0),
+                i64::try_from(completed).unwrap(),
+            );
+            assert_delta(
+                &TASKS_DROPPED,
+                dropped_before,
+                u64::from(completed != 0),
+                i64::try_from(completed).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_round2_accept_poll_reactivate_and_abort_each_report_exact_task_totals() {
+        let mut executor = Executor::builder().build();
+        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        let captured = Rc::new(RefCell::new(None));
+        let observed = Rc::clone(&captured);
+        executor.tasks().add(
+            std::future::poll_fn(move |cx| {
+                *observed.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending
+            }),
+            crate::TaskOptions::default(),
+            Completion,
+        );
+        executor
+            .tasks()
+            .add(std::future::pending(), crate::TaskOptions::default(), Completion);
+        executor
+            .tasks()
+            .add(std::future::ready(()), crate::TaskOptions::default(), Completion);
+        let accepted = metric(&TASKS_ACCEPTED);
+        let inactive = metric(&TASKS_INACTIVATED);
+        let completed = metric(&TASKS_COMPLETED);
+        let dropped = metric(&TASKS_DROPPED);
+        let suspended = metric(&CYCLE_OUTCOME_SUSPEND);
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        assert_delta(&TASKS_ACCEPTED, accepted, 1, 3);
+        assert_delta(&TASKS_INACTIVATED, inactive, 1, 2);
+        assert_delta(&TASKS_COMPLETED, completed, 1, 1);
+        assert_delta(&TASKS_DROPPED, dropped, 1, 1);
+        assert_delta(&CYCLE_OUTCOME_SUSPEND, suspended, 1, 1);
+        let activated = metric(&TASKS_ACTIVATED_VIA_AWAKENED_SET);
+        captured.borrow().as_ref().unwrap().wake_by_ref();
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        assert_delta(&TASKS_ACTIVATED_VIA_AWAKENED_SET, activated, 1, 1);
+        let continued = metric(&CYCLE_OUTCOME_CONTINUE);
+        executor
+            .tasks()
+            .add(std::future::pending(), crate::TaskOptions::default(), Completion);
+        assert!(matches!(executor.cycle_outcome(), CycleOutcome::Continue));
+        assert_delta(&CYCLE_OUTCOME_CONTINUE, continued, 1, 1);
+        let aborted = metric(&TASKS_ABORTED_ON_SHUTDOWN);
+        let prepared = executor.prepare_task_abort();
+        let dropped = metric(&TASKS_DROPPED);
+        executor.abort_prepared_tasks(prepared, true, &ShutdownCause::default());
+        assert_eq!(prepared, 3);
+        assert_delta(&TASKS_ABORTED_ON_SHUTDOWN, aborted, 3, 3);
+        assert_delta(&TASKS_DROPPED, dropped, 1, 3);
+        assert!(executor.active.is_empty());
+        assert!(executor.pending.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_shutdown_during_poll_counts_and_cancels_every_remaining_task() {
+        let mut executor = Executor::builder().build();
+        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        let shutdown = executor.shutdown();
+        executor.tasks().add(
+            async move { shutdown.trigger(ShutdownCause::default()) },
+            crate::TaskOptions::default(),
+            Completion,
+        );
+        let polled = Rc::new(std::cell::Cell::new(0));
+        for _ in 0..2 {
+            let polled = Rc::clone(&polled);
+            executor.tasks().add(
+                async move { polled.set(polled.get() + 1) },
+                crate::TaskOptions::default(),
+                Completion,
+            );
+        }
+        executor.accept_new_tasks();
+        let completed = metric(&TASKS_COMPLETED);
+        let dropped = metric(&TASKS_DROPPED);
+        executor.poll_active_tasks(());
+        assert_eq!(polled.get(), 0);
+        assert!(executor.active.is_empty());
+        assert!(executor.pending.is_empty());
+        assert_delta(&TASKS_COMPLETED, completed, 1, 3);
+        assert_delta(&TASKS_DROPPED, dropped, 1, 3);
+    }
+
+    #[test]
+    fn gamma_round2_executor_drop_flushes_abort_metrics_without_counting_them_as_normal_drops() {
+        let mut executor = Executor::builder().build();
+        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        executor
+            .tasks()
+            .add(std::future::pending(), crate::TaskOptions::default(), Completion);
+        executor
+            .tasks()
+            .add(std::future::pending(), crate::TaskOptions::default(), Completion);
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        let aborted = metric(&TASKS_ABORTED_ON_SHUTDOWN);
+        let dropped = metric(&TASKS_DROPPED);
+        drop(executor);
+        assert_delta(&TASKS_ABORTED_ON_SHUTDOWN, aborted, 2, 2);
+        assert_delta(&TASKS_DROPPED, dropped, 0, 0);
+        assert_all_observations_pushed();
+    }
+
+    #[test]
+    fn gamma_round2_finish_cycle_records_the_exact_frozen_end_instant() {
+        let control = tick::ClockControl::new_at(SystemTime::UNIX_EPOCH);
+        let mut executor = Executor::builder().build();
+        executor.clock = control.to_simple_clock();
+        let duration = metric(&CYCLE_DURATION_MILLIS);
+        let gap = metric(&CYCLE_GAP_MILLIS);
+        assert!(executor.last_cycle_ended.is_none());
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        assert_eq!(executor.last_cycle_ended, Some(control.to_simple_clock().instant()));
+        assert_delta(&CYCLE_DURATION_MILLIS, duration, 1, 0);
+        assert_delta(&CYCLE_GAP_MILLIS, gap, 0, 0);
+        assert_all_observations_pushed();
+        control.advance(Duration::from_millis(7));
+        let expected = control.to_simple_clock().instant();
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        assert_eq!(executor.last_cycle_ended, Some(expected));
+        assert_delta(&CYCLE_DURATION_MILLIS, duration, 2, 0);
+        assert_delta(&CYCLE_GAP_MILLIS, gap, 1, 7);
+        assert_all_observations_pushed();
+    }
+
+    #[test]
+    fn gamma_round2_abort_preparation_clears_queued_wakes_before_task_retirement() {
+        let mut executor = Executor::builder().build();
+        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        let captured = Rc::new(RefCell::new(None));
+        let observed = Rc::clone(&captured);
+        executor.tasks().add(
+            std::future::poll_fn(move |cx| {
+                *observed.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending
+            }),
+            crate::TaskOptions::default(),
+            Completion,
+        );
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        captured.borrow().as_ref().unwrap().wake_by_ref();
+        assert!(executor_context::has_wakes(std::thread::current().id()));
+        let aborted = executor.prepare_task_abort();
+        assert_eq!(aborted, 1);
+        assert!(!executor_context::has_wakes(std::thread::current().id()));
+        assert_eq!(executor.active.len(), 1);
+        assert!(executor.pending.is_empty());
+        let owner = std::thread::current().id();
+        executor_context::unregister(owner);
+        captured.borrow().as_ref().unwrap().wake_by_ref();
+        let remote_wake_pending = executor.shared.wake().has_remote_wakes();
+        executor_context::register(owner);
+        assert!(!remote_wake_pending);
+        executor.abort_prepared_tasks(aborted, false, &ShutdownCause::default());
+        assert!(executor.active.is_empty());
+        captured.borrow().as_ref().unwrap().wake_by_ref();
+        assert!(!executor_context::has_wakes(std::thread::current().id()));
+    }
+
+    #[test]
+    fn gamma_round2_shutdown_cancellation_reports_its_normal_drop_metric() {
+        let mut executor = Executor::builder().build();
+        executor
+            .tasks()
+            .add(std::future::pending(), crate::TaskOptions::default(), Completion);
+        executor
+            .tasks()
+            .add(std::future::pending(), crate::TaskOptions::default(), Completion);
+        executor.shutdown().trigger(ShutdownCause::default());
+        let dropped = metric(&TASKS_DROPPED);
+        executor.cancel_if_shutting_down();
+        let still_queued = executor.shared.has_new_tasks();
+        drop(executor);
+        assert!(!still_queued);
+        assert_delta(&TASKS_DROPPED, dropped, 1, 2);
+    }
+
+    #[test]
+    fn gamma_round2_remote_only_wakes_keep_the_executor_runnable() {
+        let mut executor = Executor::builder().build();
+        executor.clock = SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH);
+        let captured = Rc::new(RefCell::new(None));
+        let observed = Rc::clone(&captured);
+        executor.tasks().add(
+            std::future::poll_fn(move |cx| {
+                *observed.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending
+            }),
+            crate::TaskOptions::default(),
+            Completion,
+        );
+        assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+        let owner = std::thread::current().id();
+        executor_context::unregister(owner);
+        captured.borrow().as_ref().unwrap().wake_by_ref();
+        executor_context::register(owner);
+        let remote_only = executor.shared.wake().has_remote_wakes() && !executor_context::has_wakes(owner);
+        let runnable = executor.has_work_to_do();
+        drop(executor);
+        assert!(remote_only);
+        assert!(runnable);
+    }
+}
 
 thread_local! {
     static EXECUTOR_PUSHER: MetricsPusher = MetricsPusher::new();

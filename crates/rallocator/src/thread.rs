@@ -8,7 +8,7 @@
 
 use std::alloc::Layout;
 use std::cell::Cell;
-use std::sync::atomic::{Ordering, fence};
+use std::sync::atomic::Ordering;
 #[cfg(not(target_os = "macos"))]
 use std::sync::{Mutex, MutexGuard};
 
@@ -17,6 +17,7 @@ use crate::classes::Request;
 use crate::core::Owner;
 #[cfg(target_os = "macos")]
 use crate::hal::{Mutex, MutexGuard};
+use crate::sync_fence::fence;
 
 std::thread_local! {
     static CURRENT: Cell<usize> = const { Cell::new(0) };
@@ -34,6 +35,7 @@ impl Drop for Registration {
             let owner = current.replace(0);
             if owner != 0 {
                 // SAFETY: This thread relinquishes its sole owner lease.
+                // #[gamma::skip(call_result.default, reason = "The owner release still executes and its result is unit")]
                 unsafe { release(owner) };
             }
         });
@@ -118,7 +120,8 @@ fn create_owner(pool: &mut Pool) -> usize {
     // SAFETY: map is the unique backend map in which global refills register.
     let metadata = pool.metadata.get_or_insert_with(|| unsafe { backend::Local::new(map) });
     let address = metadata.alloc_meta(Owner::ALLOC_SIZE);
-    if address != 0 {
+    // #[gamma::skip(call_result.default, reason = "Owner initialization still executes and the helper returns unit")]
+    with_nonzero_owner(address, |address| {
         // SAFETY: Fresh, committed ALLOC_SIZE-aligned envelope backing remains
         // live permanently. Only this creation path initializes and donates;
         // acquire returns existing pool entries without reinitialization.
@@ -132,8 +135,14 @@ fn create_owner(pool: &mut Pool) -> usize {
         pool.all = address;
         pool.count += 1;
         crate::recording::register_source();
-    }
+    });
     address
+}
+
+fn with_nonzero_owner(address: usize, action: impl FnOnce(usize)) {
+    if address != 0 {
+        action(address);
+    }
 }
 
 /// Lends only an existing current-thread lease; observation never creates one.
@@ -141,23 +150,37 @@ pub(crate) fn observe_current(action: impl FnOnce(&Owner)) {
     // Non-dropping CURRENT may be unavailable during platform TLS teardown.
     let _ = CURRENT.try_with(|current| {
         let address = current.get();
-        if address != 0 {
+        // #[gamma::skip(call_result.default, reason = "The observation callback still executes and the helper returns unit")]
+        with_nonzero_owner(address, |address| {
             // SAFETY: CURRENT holds the native owner lease, outside any core action.
             action(unsafe { &*(address as *const Owner) });
-        }
+        });
     });
 }
 
 pub(crate) fn inventory(
     round: u64,
     captured_nanos: u64,
+    budget: usize,
+) -> Result<(crate::observation::OwnerBuffer, u64, bool), seismograph::Error> {
+    inventory_with_buffer(round, captured_nanos, budget, crate::observation::OwnerBuffer::new)
+}
+
+fn inventory_capacity(count: usize) -> usize {
+    count.saturating_add(8).min(crate::observation::OWNER_LIMIT)
+}
+
+fn inventory_with_buffer(
+    round: u64,
+    captured_nanos: u64,
     mut budget: usize,
+    buffer: impl FnOnce(usize) -> Result<crate::observation::OwnerBuffer, seismograph::Error>,
 ) -> Result<(crate::observation::OwnerBuffer, u64, bool), seismograph::Error> {
     let capacity = {
         let pool = lock_pool();
-        pool.count.saturating_add(8).min(crate::observation::OWNER_LIMIT)
+        inventory_capacity(pool.count)
     };
-    let mut rows = crate::observation::OwnerBuffer::new(capacity)?;
+    let mut rows = buffer(capacity)?;
     let pool = lock_pool();
     let total = pool.count as u64;
     let mut address = pool.all;
@@ -197,6 +220,7 @@ unsafe fn release(address: usize) {
     // SAFETY: Endpoint is stable; its core is uniquely leased by this caller.
     let owner = unsafe { &*(address as *const Owner) };
     // SAFETY: Queue publishers do not access the disjoint UnsafeCell core.
+    // #[gamma::skip(call_result.default, reason = "The teardown flush still executes and its result is unit")]
     unsafe { flush_for_teardown(&mut *owner.core_ptr()) };
     let mut pool = lock_pool();
     // SAFETY: pool_next is accessed only under this lock and is not published
@@ -212,6 +236,7 @@ fn flush_for_teardown(core: &mut crate::core::Core) {
         counter.set(count);
         count
     });
+    // #[gamma::skip(relational.lt_to_le, literal.int_increment, reason = "The only additional value is 128, which already satisfies the unchanged power-of-two alternative")]
     if count < 128 || count.is_power_of_two() {
         core.flush();
     }
@@ -242,10 +267,12 @@ fn with_owner_slow<R>(failure: R, action: impl FnOnce(&mut crate::core::Core) ->
     // A throttled teardown may leave prepared fast lists in this reused owner.
     // Publish everything inherited through the pool mutex before this new lease
     // can return one of those objects for a relaxed free-only handoff.
-    fence(Ordering::Release);
     // Publish before registration: platform TLS registration can allocate,
     // but no core borrow exists yet if it re-enters through CURRENT.
-    CURRENT.set(owner);
+    CURRENT.with(|current| {
+        // #[gamma::skip(call_result.default, reason = "publish_owner returns unit; default_after still executes the release fence and TLS store")]
+        publish_owner(current, owner);
+    });
     let temporary = EXPIRED.with(Cell::get) || REGISTRATION.try_with(|_| ()).is_err();
     if temporary {
         CURRENT.set(0);
@@ -256,9 +283,27 @@ fn with_owner_slow<R>(failure: R, action: impl FnOnce(&mut crate::core::Core) ->
     let result = unsafe { action(&mut *core) };
     if temporary {
         // SAFETY: The action ended and no core borrow is retained by its result.
+        // #[gamma::skip(call_result.default, reason = "The owner release still executes and its result is unit")]
         unsafe { release(owner) };
     }
     result
+}
+
+fn publish_owner(current: &Cell<usize>, owner: usize) {
+    fence(Ordering::Release);
+    current.set(owner);
+    #[cfg(test)]
+    crate::sync_fence::trace::record(Ordering::Relaxed);
+}
+
+#[cfg(test)]
+#[test]
+fn gamma_nov4_owner_publication_releases_before_exposing_the_new_tls_lease() {
+    let current = Cell::new(0);
+    let trace = crate::sync_fence::trace::Trace::start();
+    publish_owner(&current, 0x10000);
+    assert_eq!(current.get(), 0x10000);
+    assert_eq!(trace.events(), [Ordering::Release, Ordering::Relaxed]);
 }
 
 pub(crate) fn allocate(layout: Layout) -> *mut u8 {
@@ -300,17 +345,28 @@ pub(crate) unsafe fn reallocate(ptr: *mut u8, request: Request, copy_len: usize)
 /// # Safety
 /// ptr is a live allocation belonging to this allocator instance.
 pub(crate) unsafe fn deallocate(ptr: *mut u8) {
+    // #[gamma::skip(call_result.default, reason = "Deallocation still executes and the helper returns unit")]
+    deallocate_with(
+        ptr,
+        |ptr, failure| {
+            with_owner(failure, |owner| {
+                // SAFETY: The caller transfers its live allocation to this owner lease.
+                unsafe { owner.deallocate(ptr as usize) };
+                true
+            })
+        },
+        crate::abort::require,
+    );
+}
+
+fn deallocate_with(ptr: *mut u8, process: impl FnOnce(*mut u8, bool) -> bool, require: impl FnOnce(bool)) {
     if ptr.is_null() {
         return;
     }
-    let processed = with_owner(false, move |owner| {
-        // SAFETY: The caller transfers its live allocation to this owner lease.
-        unsafe { owner.deallocate(ptr as usize) };
-        true
-    });
+    let processed = process(ptr, false);
     // Deallocation cannot fail. An inability to acquire even allocator metadata
     // is fatal rather than silently leaking the allocation.
-    crate::abort::require(processed);
+    require(processed);
 }
 
 #[cfg(test)]
@@ -355,6 +411,90 @@ pub(crate) unsafe fn usable_size(ptr: *mut u8) -> usize {
 mod tests {
     use super::*;
     use crate::classes;
+
+    #[test]
+    fn gamma_round2_deallocation_dispatch_requires_success_without_hiding_metadata_failure() {
+        deallocate_with(
+            std::ptr::null_mut(),
+            |_, _| panic!("null must not acquire an owner"),
+            |_| panic!("null must not require success"),
+        );
+        let mut byte = 0u8;
+        let pointer = std::ptr::from_mut(&mut byte);
+        for processed in [false, true] {
+            let mut required = None;
+            deallocate_with(
+                pointer,
+                |actual, failure| {
+                    assert_eq!(actual, pointer);
+                    assert!(!failure, "owner acquisition failure must not report successful processing");
+                    processed
+                },
+                |success| required = Some(success),
+            );
+            assert_eq!(required, Some(processed));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_owner_address_guard_does_not_dispatch_null_and_forwards_exact_identity() {
+        for address in [0, 1, 16_384] {
+            let mut observed = None;
+            with_nonzero_owner(address, |value| observed = Some(value));
+            assert_eq!(observed, (address != 0).then_some(address));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_inventory_capacity_failure_and_truncation_are_explicit() {
+        let limit = crate::observation::OWNER_LIMIT;
+        for (count, expected) in [(0, 8), (1, 9), (limit - 8, limit), (limit, limit), (usize::MAX, limit)] {
+            assert_eq!(inventory_capacity(count), expected);
+        }
+        let Err(error) = inventory_with_buffer(17, 29, 0, |_| Err(seismograph::Error::new("inventory exhausted"))) else {
+            panic!("inventory storage failure must be returned");
+        };
+        assert_eq!(error.to_string(), "inventory exhausted");
+        let (first, second) = {
+            let mut pool = lock_pool();
+            (create_owner(&mut pool), create_owner(&mut pool))
+        };
+        assert_ne!(first, 0);
+        assert_ne!(second, 0);
+        let (rows, total, complete) = inventory_with_buffer(17, 29, 0, |_| crate::observation::OwnerBuffer::new(1)).unwrap();
+        assert_eq!(rows.as_slice().len(), 1);
+        assert!(total >= 2);
+        assert!(!complete);
+        // SAFETY: this test holds the first fresh owner's sole lease and has no live allocations.
+        unsafe { release(first) };
+        // SAFETY: this test holds the second fresh owner's sole lease and has no live allocations.
+        unsafe { release(second) };
+    }
+
+    #[test]
+    fn gamma_survivor_inventory_uses_supplied_round_and_timestamp() {
+        let address = fresh_owner();
+        assert_ne!(address, 0);
+        // SAFETY: This fresh persistent endpoint is initialized and remains live.
+        let owner = unsafe { &*(address as *const Owner) };
+        {
+            let _pool = lock_pool();
+            // SAFETY: The fresh owner has no core borrows, and this lock serializes lease-state updates.
+            // It stays out of the reusable FIFO so another test cannot acquire it during capture.
+            unsafe { owner.observation().end_lease() };
+        }
+        let (rows, total, complete) = inventory(77, 123_456, usize::MAX).unwrap();
+        assert!(total > 0);
+        assert!(complete);
+        let row = rows.as_slice().iter().find(|row| row.id == address as u64).unwrap();
+        assert!(!row.leased);
+        assert_eq!(row.generation % 2, 0);
+        assert_eq!(row.source, seismograph_rallocator::native::ObservationSource::IdleInspection);
+        let observed = row.observation.unwrap();
+        assert_eq!(observed.generation, row.generation);
+        assert_eq!(observed.round, 77);
+        assert_eq!(observed.captured_nanos, 123_456);
+    }
 
     #[test]
     fn poisoned_pool_aborts_before_lending_an_owner() {

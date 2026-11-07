@@ -77,6 +77,7 @@ fn normalized_key(key: &str) -> Cow<'_, str> {
             uppercase_next = true;
         } else if uppercase_next {
             normalized.push(ch.to_ascii_uppercase());
+            // #[gamma::skip(assign_value.default, reason = "bool::default is exactly the assigned false state")]
             uppercase_next = false;
         } else {
             normalized.push(ch);
@@ -123,6 +124,7 @@ fn group_flat_query<'de>(query: &[(&'de str, &'de str)]) -> Result<GroupedFlatQu
             overlay[index].1.push(decoded);
         } else {
             query_norms.insert(normalized_key(key));
+            // #[gamma::skip(logical.and_remove_left, reason = "The overlay only grows: its inline-size equality occurs once, when the optional index has not yet been created")]
             if overlay_index.is_none() && overlay.len() == overlay.inline_size() {
                 let mut index = HashMap::with_capacity(query.len());
                 index.extend(overlay.iter().enumerate().map(|(position, (existing, _))| (*existing, position)));
@@ -331,6 +333,10 @@ fn looks_like_noncanonical_number(value: &str) -> bool {
         )
 }
 
+fn visit_query_number<'de, V: Visitor<'de>>(number: Option<f64>, visitor: V) -> Result<V::Value, JsonError> {
+    visitor.visit_f64(number.ok_or_else(|| serde::de::Error::custom("number is out of range"))?)
+}
+
 impl<'de> Deserializer<'de> for QueryValue<'de> {
     type Error = JsonError;
 
@@ -347,7 +353,7 @@ impl<'de> Deserializer<'de> for QueryValue<'de> {
         } else if value == "-Infinity" {
             visitor.visit_f64(f64::NEG_INFINITY)
         } else if let Ok(number) = from_str::<Number>(&value) {
-            visitor.visit_f64(number.as_f64().ok_or_else(|| serde::de::Error::custom("number is out of range"))?)
+            visit_query_number(number.as_f64(), visitor)
         } else if looks_like_noncanonical_number(&value) {
             Err(serde::de::Error::custom("query number is not in canonical protobuf JSON form"))
         } else {
@@ -472,6 +478,25 @@ enum QueryNode {
 /// The cap is fixed and deliberately not configurable — a depth a caller could
 /// raise would not bound anything.
 const MAX_QUERY_FIELD_DEPTH: usize = 64;
+
+#[test]
+fn gamma_round2_empty_query_path_iterator_returns_structure_error() {
+    let mut map = Vec::new();
+    let error = insert_query_node(&mut map, std::iter::empty(), "value".to_owned(), 64).unwrap_err();
+    assert!(error.to_string().contains("query parameter has an empty field path"), "{error}");
+    assert!(map.is_empty());
+}
+
+#[test]
+fn gamma_round2_body_seed_duplicate_error_survives_without_public_reclassification() {
+    use serde::de::DeserializeSeed as _;
+
+    let mut deserializer = serde_json::Deserializer::from_str(r#"{"foo_bar":1,"fooBar":2}"#);
+    let Err(error) = (BodyTopSeed { overrides: None }).deserialize(&mut deserializer) else {
+        panic!("normalized duplicate fields must be rejected");
+    };
+    assert!(error.to_string().starts_with("request body contains a duplicate field"), "{error}");
+}
 /// The caller checks pair, name, and value budgets before constructing this
 /// vector-backed tree; percent-decoding cannot increase the name byte length.
 fn decode_tree<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)]) -> Result<T, TranscodeError> {
@@ -628,12 +653,54 @@ impl<'de> MapAccess<'de> for TreeMap<'de> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_nov6_flat_overlay_reports_query_failure_before_body_failure() {
+        let result = super::try_decode_overlay::<serde_json::Value>(&super::RequestBodyKind::Whole, &[("value", "%ZZ")], b"{").unwrap();
+        let error = result.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            super::TranscodeError::invalid_encoding("query parameter value").to_string()
+        );
+        assert!(std::error::Error::source(&error).is_none());
+    }
+
     use serde::Deserialize;
 
     use super::*;
     use crate::codegen_helpers::decode_request;
     use crate::handling::Code;
     use crate::path::{MAX_QUERY_KEY_BYTES, MAX_QUERY_PAIRS};
+
+    #[test]
+    fn gamma_nov4_number_conversion_errors_preserve_the_exact_diagnostic_without_calling_the_visitor() {
+        struct NumericVisitor<'a>(&'a std::cell::Cell<usize>);
+        impl Visitor<'_> for NumericVisitor<'_> {
+            type Value = f64;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a representable query number")
+            }
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<f64, E> {
+                self.0.set(self.0.get() + 1);
+                Ok(v)
+            }
+        }
+        let visits = std::cell::Cell::new(0);
+        let error = visit_query_number(None, NumericVisitor(&visits)).unwrap_err();
+        assert_eq!(error.to_string(), "number is out of range");
+        assert_eq!(visits.get(), 0);
+        assert_eq!(
+            visit_query_number(Some(-17.25), NumericVisitor(&visits)).unwrap().to_bits(),
+            (-17.25f64).to_bits()
+        );
+        assert_eq!(visits.get(), 1);
+    }
+
+    #[test]
+    fn gamma_round2_duplicate_query_strings_return_the_cardinality_error() {
+        let values = smallvec![Cow::Borrowed("first"), Cow::Borrowed("second")];
+        let error = <&str>::deserialize(QueryValue { values }).unwrap_err();
+        assert!(error.to_string().contains("repeated"), "{error}");
+    }
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct Shelf {

@@ -94,6 +94,7 @@ impl<T: Serialize + DeserializeOwned + Send + Sync> Codec<T, BytesView> for Post
 
 fn encode<T: Serialize + Send + Sync>(value: &T, memory: &OpaqueMemory) -> Result<BytesView, Error> {
     let mut writer = BytesBuf::new().into_writer(memory);
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "BytesBufWriter::write reserves capacity and returns Ok(buf.len()); this one-byte write_all cannot return an error or WriteZero. Reservation failures panic or abort instead of returning io::Error.")]
     writer.write_all(&[FORMAT_VERSION]).map_err(Error::from_source)?;
     postcard::to_io(value, &mut writer).map_err(Error::from_source)?;
     Ok(writer.into_inner().peek())
@@ -123,6 +124,15 @@ mod tests {
     use thread_aware::unaware;
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_contiguous_decode_input_borrows_original_backing() {
+        let view = BytesView::from(vec![1, 13, 17]);
+        let contiguous = to_contiguous(&view);
+        assert!(matches!(contiguous, Cow::Borrowed(_)));
+        assert_eq!(contiguous.as_ref(), [1, 13, 17]);
+        assert_eq!(contiguous.as_ptr(), view.first_slice().as_ptr());
+    }
 
     /// A type whose Serialize impl always fails, used to test the encode error path.
     struct FailSerialize;

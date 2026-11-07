@@ -25,6 +25,7 @@ impl EvictionPolicy {
     /// `TinyLFU` combines frequency and recency tracking to achieve high cache
     /// hit rates across a wide range of workloads.
     #[must_use]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "Both derived Default implementations select the same fieldless TinyLfu variant.")]
     pub fn tiny_lfu() -> Self {
         Self {
             inner: EvictionPolicyInner::TinyLfu,

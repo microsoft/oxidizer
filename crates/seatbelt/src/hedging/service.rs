@@ -204,7 +204,10 @@ impl<In, Out> HedgingShared<In, Out> {
                         // The result was recoverable. Start a hedged attempt now.
                         // instead of waiting for the delay timer again.
                         self.launch_hedging_attempt(futs, input, next_attempt, Duration::ZERO, &mut guarded_launch);
-                        attempt = next_attempt;
+                        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                        attempt =
+                        // #[gamma::skip(assign_value.default, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                        next_attempt;
                     }
                     SelectOutcome::Result(None) => {
                         return last_result.expect("at least one attempt was launched");
@@ -350,6 +353,76 @@ mod tests {
     use crate::hedging::HedgingLayer;
     use crate::testing::{FailReadyService, MetricTester};
     use crate::{RecoveryInfo, ResilienceContext};
+
+    #[test]
+    fn gamma_round2_delay_loop_disarms_an_accepted_completed_attempt_while_another_is_pending() {
+        use futures_util::FutureExt;
+
+        type Guarded = Pin<Box<dyn Future<Output = (String, TelemetryGuard)>>>;
+
+        let metrics = MetricTester::new();
+        let context = ResilienceContext::<String, String>::new(Clock::new_frozen())
+            .name("round2-accept")
+            .use_metrics(metrics.meter_provider());
+        let service = Hedging::layer("hedging", &context)
+            .clone_input()
+            .recovery_with(|_, _| RecoveryInfo::never())
+            .hedging_delay(Duration::from_secs(47))
+            .layer(Execute::new(|value: String| async move { value }));
+        let mut futures = FuturesUnordered::<Guarded>::new();
+        futures.push(Box::pin(std::future::pending()));
+        futures.push(Box::pin(std::future::ready((
+            "accepted".to_owned(),
+            TelemetryGuard::new(Attempt::new(0, false), Duration::ZERO, service.shared.telemetry.clone()),
+        ))));
+        let output = service
+            .shared
+            .run_delay_loop(&mut futures, &mut String::new(), Attempt::new(0, false), 2, |_, _| {
+                panic!("an accepted completed attempt must not launch another request")
+            })
+            .now_or_never()
+            .unwrap();
+        assert_eq!(output, "accepted");
+        assert!(metrics.collect_attributes().is_empty());
+        assert_eq!(futures.len(), 1);
+    }
+
+    #[test]
+    fn gamma_round2_exhausted_delay_loop_retains_the_original_attempt_and_reports_retry_not_abandonment() {
+        use futures_util::FutureExt;
+
+        let metrics = MetricTester::new();
+        let context = ResilienceContext::<String, String>::new(Clock::new_frozen())
+            .name("round2-drain")
+            .use_metrics(metrics.meter_provider());
+        let service = Hedging::layer("hedging", &context)
+            .clone_input()
+            .recovery_with(|_, _| RecoveryInfo::retry())
+            .hedging_delay(Duration::from_secs(47))
+            .layer(Execute::new(|value: String| async move { value }));
+        let attempt = Attempt::new(1, true);
+        let mut futures = FuturesUnordered::new();
+        futures.push(std::future::ready((
+            "retry-result".to_owned(),
+            TelemetryGuard::new(attempt, Duration::ZERO, service.shared.telemetry.clone()),
+        )));
+        let output = service
+            .shared
+            .run_delay_loop(&mut futures, &mut String::new(), attempt, 2, |_, _| {
+                panic!("the supplied last attempt exhausts the launch budget")
+            })
+            .now_or_never()
+            .unwrap();
+        assert_eq!(output, "retry-result");
+        metrics.assert_attributes(
+            &[
+                KeyValue::new("resilience.attempt.index", 1i64),
+                KeyValue::new("resilience.attempt.is_last", true),
+                KeyValue::new("resilience.attempt.recovery.kind", "retry"),
+            ],
+            Some(6),
+        );
+    }
 
     #[test]
     #[cfg_attr(miri, ignore)]

@@ -271,6 +271,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         T: Copy,
     {
         let src = other.as_ref();
+        // #[gamma::skip(cond.always_true, reason = "When the slice already fits, the slow helper's try_reserve returns immediately without allocation, mutation, or error")]
         if extend_needs_growth(self.buf.remaining_cap(), src.len()) {
             self.extend_from_slice_slow(src.len());
         }
@@ -401,6 +402,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     #[inline(never)]
     fn try_grow_one(&mut self) -> Result<(), AllocError> {
         let cur = self.buf.cap();
+        // #[gamma::skip(literal.int_increment, reason = "min-four doubled growth covers both cur plus one and cur plus two; either overflow path returns CAPACITY_OVERFLOW")]
         let target = grow_target(cur, cur.checked_add(1).ok_or(AllocError::CAPACITY_OVERFLOW)?);
         self.try_grow_to(target)
     }
@@ -418,4 +420,20 @@ fn grow_target(cur: usize, needed: usize) -> usize {
 #[cfg_attr(test, mutants::skip)] // `<` → `<=` only calls the cold no-op reserve path at exact capacity
 const fn extend_needs_growth(remaining: usize, additional: usize) -> bool {
     remaining < additional
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_growth_policy_exact_floor_and_saturation() {
+        for current in [0_usize, 1, 2, 3, 4, 127, usize::MAX / 2, usize::MAX] {
+            for needed in [0_usize, 1, 2, 3, 4, 5, 128, usize::MAX] {
+                let wide = ((current as u128) * 2).max(needed as u128).max(4);
+                assert_eq!(grow_target(current, needed), usize::try_from(wide).unwrap_or(usize::MAX));
+                assert_eq!(extend_needs_growth(current, needed), needed > current);
+            }
+        }
+    }
 }

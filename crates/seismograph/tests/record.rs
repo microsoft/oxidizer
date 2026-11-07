@@ -132,6 +132,63 @@ fn category_queries_follow_thread_suppression() {
 }
 
 #[test]
+fn each_recording_category_alone_starts_a_session_and_invokes_its_builder() {
+    let enabled = Policy::all(false);
+    for (class, configuration) in [
+        (
+            EventClass::Allocation,
+            Configuration {
+                allocations: enabled,
+                ..Configuration::default()
+            },
+        ),
+        (
+            EventClass::General,
+            Configuration {
+                general_events: enabled,
+                ..Configuration::default()
+            },
+        ),
+        (
+            EventClass::ArcDereference,
+            Configuration {
+                arc_dereferences: enabled,
+                ..Configuration::default()
+            },
+        ),
+        (
+            EventClass::RuntimeTask,
+            Configuration {
+                runtime_tasks: enabled,
+                ..Configuration::default()
+            },
+        ),
+        (
+            EventClass::Io,
+            Configuration {
+                io: enabled,
+                ..Configuration::default()
+            },
+        ),
+        (
+            EventClass::Cache,
+            Configuration {
+                cache: enabled,
+                ..Configuration::default()
+            },
+        ),
+    ] {
+        let _recording = Recording::start(configuration);
+        let constructed = Cell::new(0);
+        seismograph::record(class, || {
+            constructed.set(constructed.get() + 1);
+            None
+        });
+        assert_eq!(constructed.get(), 1, "{class:?}");
+    }
+}
+
+#[test]
 #[cfg_attr(coverage_nightly, coverage(off))] // Disabled and stopped recording deliberately skips these builders.
 fn disabled_and_stopped_recording_skip_builders() {
     let _recording = Recording::start(Configuration::default());

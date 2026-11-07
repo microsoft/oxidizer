@@ -158,6 +158,29 @@ mod tests {
     use crate::io::IoOperation;
     use crate::monitor::{InstanceId, MonitorEndpoint};
 
+    #[test]
+    fn gamma_survivor_directory_cached_owner_mismatch_reports_exact_error() {
+        let (io, _) = MonitorIo::new_mocked();
+        let mut directory = Directory::current(&io).unwrap();
+        let instance_id = InstanceId::from_bytes([8; 16]);
+        let descriptor = MonitorDescriptor {
+            name: "worker".into(),
+            instance: None,
+            process_id: 42,
+            instance_id,
+            endpoint: MonitorEndpoint::for_instance(directory.path(), directory.owner(), 42, instance_id),
+            owner: directory.owner.clone(),
+        };
+        let path = io.publish_descriptor(&directory, &descriptor).unwrap();
+        directory.owner = other_owner(&directory.owner);
+        let Error::Registry { path: actual_path, source } = directory.descriptor_entry(Ok(path.clone())).unwrap().unwrap_err() else {
+            panic!("directory failures must retain their registry context");
+        };
+        assert_eq!(actual_path, path);
+        assert_eq!(source.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(source.to_string(), "descriptor owner differs from its directory");
+    }
+
     fn other_owner(owner: &MonitorOwner) -> MonitorOwner {
         match owner {
             MonitorOwner::UnixUser(_) => MonitorOwner::UnixUser(2002),

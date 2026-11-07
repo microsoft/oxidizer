@@ -196,13 +196,33 @@ impl Owner {
     /// The owner is unique: no other owner in this process compares equal to it.
     #[must_use]
     pub(crate) fn new() -> Self {
+        Self::from_counter(&NEXT_OWNER)
+    }
+
+    fn from_counter(next: &AtomicUsize) -> Self {
         Self {
             // The atomic read-modify-write order makes each returned identity distinct. Refuse to
             // wrap rather than allowing a future runtime to compare equal to an earlier one.
-            id: NEXT_OWNER
+            id: next
                 .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
                 .expect("owner identity space exhausted before allocating a unique runtime owner"),
         }
+    }
+}
+
+#[cfg(test)]
+mod gamma_round2_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_round2_owner_identity_reserves_exactly_one_counter_value_including_the_last_available_slot() {
+        let next = AtomicUsize::new(41);
+        assert_eq!(Owner::from_counter(&next).id, 41);
+        assert_eq!(Owner::from_counter(&next).id, 42);
+        assert_eq!(next.load(Ordering::Relaxed), 43);
+        let last = AtomicUsize::new(usize::MAX - 1);
+        assert_eq!(Owner::from_counter(&last).id, usize::MAX - 1);
+        assert_eq!(last.load(Ordering::Relaxed), usize::MAX);
     }
 }
 

@@ -392,6 +392,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_survivor_ratio_and_stream_limit_diagnostics_keep_counts() {
+        let output = RATIO_FLOOR_BYTES + 17;
+        let input = output / 3;
+        let ratio = FormatLimits::new(Some(2), None, None).check(input, output, 0).unwrap_err();
+        assert_eq!(
+            ratio.to_string(),
+            format!("decompressed output reached {output} bytes from {input} compressed bytes, exceeding the expansion limit of 2x")
+        );
+        let limits = FormatLimits::new(None, None, Some(2));
+        limits.check(0, 0, 2).unwrap();
+        assert_eq!(
+            limits.check(0, 0, 3).unwrap_err().to_string(),
+            "decoded stream count reached 3, exceeding the limit of 2"
+        );
+    }
+
+    #[test]
     fn the_shared_defaults_are_the_documented_values() {
         // Pinned as literals rather than by reference to the constants, so moving either one is a
         // deliberate edit here and there. The documentation table that quotes these numbers

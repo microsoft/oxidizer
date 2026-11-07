@@ -64,8 +64,13 @@ impl EnvValue {
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // Reads the process environment; the three-way outcome is exercised through `BuildEnvironment`.
     #[cfg_attr(coverage_nightly, coverage(off))] // Pure I/O; the decisions it feeds are covered through `plan`.
+    // #[gamma::skip(fn_value.default, tag = "adapter", reason = "This thin adapter reads real process state; deterministic tests exercise all environment outcomes through from_result and the injected environment reader.")]
     pub fn read(name: &str) -> Self {
-        match env::var(name) {
+        Self::from_result(env::var(name))
+    }
+
+    fn from_result(value: Result<String, VarError>) -> Self {
+        match value {
             Ok(value) => Self::Present(value),
             Err(VarError::NotPresent) => Self::Absent,
             Err(VarError::NotUnicode(_)) => Self::NotUnicode,
@@ -124,19 +129,24 @@ impl BuildEnvironment {
     /// made.
     #[cfg_attr(test, mutants::skip)] // Pure capture of the process environment; the decisions it feeds are tested directly.
     #[cfg_attr(coverage_nightly, coverage(off))] // Pure I/O; the decisions it feeds are covered through `plan`.
+    // #[gamma::skip(fn_value.ok_default, tag = "adapter", reason = "This thin adapter reads Cargo's real process environment; deterministic tests exercise missing, invalid, and present values through from_reader.")]
     pub fn from_env() -> Result<Self, AppError> {
-        let target = required_cargo_var("TARGET")?;
+        Self::from_reader(|name| env::var(name))
+    }
+
+    fn from_reader(mut read: impl FnMut(&str) -> Result<String, VarError>) -> Result<Self, AppError> {
+        let target = required_cargo_var("TARGET", &mut read)?;
 
         Ok(Self {
-            target_lib_dir: EnvValue::read(&resolve::override_var_name(&target)),
-            generic_lib_dir: EnvValue::read(GENERIC_LIB_DIR_VAR),
-            vc_tools_install_dir: EnvValue::read(VC_TOOLS_INSTALL_DIR_VAR),
-            target_required_link_args: EnvValue::read(&flags::required_link_args_var_name(&target)),
-            generic_required_link_args: EnvValue::read(flags::REQUIRED_LINK_ARGS_VAR),
-            encoded_rustflags: EnvValue::read(flags::CARGO_ENCODED_RUSTFLAGS_VAR),
-            target_os: required_cargo_var("CARGO_CFG_TARGET_OS")?,
-            target_env: required_cargo_var("CARGO_CFG_TARGET_ENV")?,
-            target_arch: required_cargo_var("CARGO_CFG_TARGET_ARCH")?,
+            target_lib_dir: EnvValue::from_result(read(&resolve::override_var_name(&target))),
+            generic_lib_dir: EnvValue::from_result(read(GENERIC_LIB_DIR_VAR)),
+            vc_tools_install_dir: EnvValue::from_result(read(VC_TOOLS_INSTALL_DIR_VAR)),
+            target_required_link_args: EnvValue::from_result(read(&flags::required_link_args_var_name(&target))),
+            generic_required_link_args: EnvValue::from_result(read(flags::REQUIRED_LINK_ARGS_VAR)),
+            encoded_rustflags: EnvValue::from_result(read(flags::CARGO_ENCODED_RUSTFLAGS_VAR)),
+            target_os: required_cargo_var("CARGO_CFG_TARGET_OS", &mut read)?,
+            target_env: required_cargo_var("CARGO_CFG_TARGET_ENV", &mut read)?,
+            target_arch: required_cargo_var("CARGO_CFG_TARGET_ARCH", &mut read)?,
             target,
         })
     }
@@ -149,8 +159,8 @@ impl BuildEnvironment {
 /// Returns an error when the variable is missing or not valid Unicode.
 #[cfg_attr(test, mutants::skip)] // Reads the process environment, which the tests deliberately do not depend on.
 #[cfg_attr(coverage_nightly, coverage(off))] // Pure I/O; the decisions it feeds are covered through `plan`.
-fn required_cargo_var(name: &str) -> Result<String, AppError> {
-    env::var(name).map_err(|error| match error {
+fn required_cargo_var(name: &str, read: &mut impl FnMut(&str) -> Result<String, VarError>) -> Result<String, AppError> {
+    read(name).map_err(|error| match error {
         VarError::NotPresent => app_err!("`{name}` is not set; this code must run as a cargo build script"),
         VarError::NotUnicode(_) => app_err!("`{name}` is not valid Unicode"),
     })
@@ -205,6 +215,7 @@ impl Plan {
     pub fn warnings(&self) -> Vec<String> {
         self.diagnostics
             .iter()
+            // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "A character-array replacement pattern is a membership set; its order does not change which line endings are replaced.")]
             .map(|diagnostic| diagnostic.to_string().replace(['\n', '\r'], " "))
             .collect()
     }
@@ -500,6 +511,7 @@ fn push_link_search(plan: &mut Plan, toolchain: &dyn Toolchain, dir: &Path) -> R
 /// another directive. Environment variables and filesystem paths can both
 /// carry one, so no value derived from them is written out unchecked.
 fn is_single_line(text: &str) -> bool {
+    // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "A character-array search pattern is a membership set; its order does not change whether a line ending is present.")]
     !text.contains(['\n', '\r'])
 }
 
@@ -508,6 +520,107 @@ fn toolchain_root(cl_exe: &Path) -> Option<&Path> {
     // `<root>\bin\Host<arch>\<arch>\cl.exe`: drop the file name, the target and
     // host compiler directories, and `bin`.
     cl_exe.parent()?.parent()?.parent()?.parent()
+}
+
+#[cfg(test)]
+mod gamma_round2 {
+    use std::env::VarError;
+    use std::ffi::OsString;
+
+    use super::{BuildEnvironment, EnvValue, required_cargo_var};
+
+    #[test]
+    fn gamma_round2_environment_capture_uses_exact_cargo_and_override_keys() {
+        let values = [
+            ("TARGET", "aarch64-pc-windows-msvc"),
+            ("CARGO_CFG_TARGET_OS", "windows"),
+            ("CARGO_CFG_TARGET_ENV", "msvc"),
+            ("CARGO_CFG_TARGET_ARCH", "aarch64"),
+            ("MSVC_SPECTRE_LIB_DIR_aarch64_pc_windows_msvc", "target-libs"),
+            ("MSVC_SPECTRE_LIB_DIR", "generic-libs"),
+            ("VCToolsInstallDir", "tools"),
+            ("MSVC_SPECTRE_REQUIRED_LINK_ARGS_aarch64_pc_windows_msvc", "/target"),
+            ("MSVC_SPECTRE_REQUIRED_LINK_ARGS", "/generic"),
+            ("CARGO_ENCODED_RUSTFLAGS", "-Clink-arg=/marker"),
+        ];
+        let mut reads = Vec::new();
+        let environment = BuildEnvironment::from_reader(|name| {
+            reads.push(name.to_owned());
+            values
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| (*value).to_owned())
+                .ok_or(VarError::NotPresent)
+        })
+        .unwrap();
+        assert_eq!(environment.target, "aarch64-pc-windows-msvc");
+        assert_eq!(environment.target_os, "windows");
+        assert_eq!(environment.target_env, "msvc");
+        assert_eq!(environment.target_arch, "aarch64");
+        assert_eq!(environment.target_lib_dir, EnvValue::Present("target-libs".to_owned()));
+        assert_eq!(environment.generic_lib_dir, EnvValue::Present("generic-libs".to_owned()));
+        assert_eq!(environment.vc_tools_install_dir, EnvValue::Present("tools".to_owned()));
+        assert_eq!(environment.target_required_link_args, EnvValue::Present("/target".to_owned()));
+        assert_eq!(environment.generic_required_link_args, EnvValue::Present("/generic".to_owned()));
+        assert_eq!(environment.encoded_rustflags, EnvValue::Present("-Clink-arg=/marker".to_owned()));
+        assert_eq!(
+            reads,
+            [
+                "TARGET",
+                "MSVC_SPECTRE_LIB_DIR_aarch64_pc_windows_msvc",
+                "MSVC_SPECTRE_LIB_DIR",
+                "VCToolsInstallDir",
+                "MSVC_SPECTRE_REQUIRED_LINK_ARGS_aarch64_pc_windows_msvc",
+                "MSVC_SPECTRE_REQUIRED_LINK_ARGS",
+                "CARGO_ENCODED_RUSTFLAGS",
+                "CARGO_CFG_TARGET_OS",
+                "CARGO_CFG_TARGET_ENV",
+                "CARGO_CFG_TARGET_ARCH",
+            ]
+        );
+    }
+
+    #[test]
+    fn gamma_round2_required_environment_errors_propagate_without_panicking() {
+        for missing in ["TARGET", "CARGO_CFG_TARGET_OS", "CARGO_CFG_TARGET_ENV", "CARGO_CFG_TARGET_ARCH"] {
+            let error = BuildEnvironment::from_reader(|name| {
+                if name == missing {
+                    Err(VarError::NotPresent)
+                } else {
+                    Ok("aarch64-pc-windows-msvc".to_owned())
+                }
+            })
+            .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                format!("`{missing}` is not set; this code must run as a cargo build script")
+            );
+        }
+        let error = required_cargo_var("TARGET", &mut |_| Err(VarError::NotUnicode(OsString::new()))).unwrap_err();
+        assert_eq!(error.to_string(), "`TARGET` is not valid Unicode");
+        assert_eq!(
+            required_cargo_var("TARGET", &mut |_| Ok("exact-target".to_owned())).unwrap(),
+            "exact-target"
+        );
+    }
+
+    #[test]
+    fn gamma_round2_environment_value_classification_preserves_all_three_states() {
+        assert_eq!(
+            EnvValue::from_result(Ok("chosen".to_owned())),
+            EnvValue::Present("chosen".to_owned())
+        );
+        assert_eq!(EnvValue::from_result(Err(VarError::NotPresent)), EnvValue::Absent);
+        assert_eq!(
+            EnvValue::from_result(Err(VarError::NotUnicode(OsString::new()))),
+            EnvValue::NotUnicode
+        );
+    }
+
+    #[test]
+    fn gamma_round2_toolchain_root_accepts_absent_parent() {
+        assert!(super::toolchain_root(std::path::Path::new("")).is_none());
+    }
 }
 
 /// Builds the diagnostic for a configured variable that cannot be read.

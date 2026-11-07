@@ -370,6 +370,7 @@ impl Scheduler {
 }
 
 impl ThreadAware for Scheduler {
+    // #[gamma::skip(parameter.default_shadow, reason = "The source argument is unused; the binding and destination determine relocation.")]
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
         if self.binding.thread == *destination {
             return;

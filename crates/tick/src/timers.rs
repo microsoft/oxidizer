@@ -98,6 +98,7 @@ impl Timers {
             return (false, replacement);
         };
 
+        // #[gamma::skip(cond.always_false, reason = "will_wake identifies the same raw waker data and vtable; replacing it stores an equivalent owned waker.")]
         if current.will_wake(&replacement) {
             return (true, replacement);
         }
@@ -120,9 +121,11 @@ impl Timers {
         let mut count = 0;
         while count < ready.len() {
             let Some(entry) = self.wakers.first_entry() else {
+                // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 break;
             };
             if entry.key().tick() > now {
+                // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 break;
             }
 
@@ -175,6 +178,78 @@ mod tests {
     use super::*;
     use crate::Clock;
     use crate::state::ClockState;
+
+    #[global_allocator]
+    static ALLOCATOR: alloc_tracker::Allocator<std::alloc::System> = alloc_tracker::Allocator::system();
+
+    #[test]
+    fn gamma_round2_split_keeps_a_zero_discriminator_at_the_next_nanosecond() {
+        let now = crate::ClockControl::new().to_clock().instant();
+        let next = now + Duration::from_nanos(1);
+        let mut timers = Timers {
+            last_discriminator: u32::MAX,
+            ..Timers::default()
+        };
+        let next_key = timers.register(next, Waker::noop().clone());
+        let due_key = timers.register(now, Waker::noop().clone());
+        let mut ready = ReadyWakers::new();
+        assert_eq!(timers.advance_timers(now, &mut ready), Some(next));
+        assert_eq!(ready.keys().copied().collect::<Vec<_>>(), [due_key]);
+        assert!(timers.contains(next_key));
+        assert_eq!(timers.advance_timers(next, &mut ready), None);
+        assert_eq!(ready.len(), 2);
+    }
+
+    #[test]
+    fn gamma_survivor_future_only_timer_advance_does_not_allocate_split_storage() {
+        let now = crate::ClockControl::new().to_clock().instant();
+        let next = now + Duration::from_nanos(1);
+        let mut timers = Timers::default();
+        let key = timers.register(next, Waker::noop().clone());
+        let mut ready = ReadyWakers::new();
+        let session = alloc_tracker::Session::new().no_stdout().no_file();
+        let operation = session.operation("gamma_future_only");
+        let deadline = {
+            let _span = operation.measure_thread().iterations(1);
+            timers.advance_timers(now, &mut ready)
+        };
+        assert_eq!(deadline, Some(next));
+        assert!(ready.is_empty());
+        assert!(timers.contains(key));
+        assert_eq!(session.to_report().operations().next().unwrap().1.total_allocations_count(), 0);
+    }
+
+    #[test]
+    fn gamma_survivor_timer_storage_preserves_alive_count_and_next_nanosecond_boundary() {
+        let now = crate::ClockControl::new().to_clock().instant();
+        let mut timers = Timers::default();
+        assert!(!timers.alive());
+        let ready_key = timers.register(now, Waker::noop().clone());
+        let next = now + Duration::from_nanos(1);
+        let next_key = timers.register(next, Waker::noop().clone());
+        let mut ready = ReadyWakers::new();
+        assert_eq!(timers.advance_timers(now, &mut ready), Some(next));
+        assert!(timers.alive());
+        assert_eq!(ready.keys().copied().collect::<Vec<_>>(), [ready_key]);
+        assert!(timers.contains(next_key));
+        assert_eq!(timers.advance_timers(next, &mut ready), None);
+        assert_eq!(ready.len(), 2);
+
+        let mut batch = Timers::default();
+        for _ in 0..3 {
+            let _ = batch.register(now, Waker::noop().clone());
+        }
+        let _ = batch.register(next, Waker::noop().clone());
+        let mut slots = [None, None];
+        assert_eq!(batch.pop_ready_into(now, &mut slots), (2, Some(now)));
+        assert_eq!(slots.iter().filter(|waker| waker.is_some()).count(), 2);
+        let mut last = [None, None];
+        assert_eq!(batch.pop_ready_into(now, &mut last), (1, Some(next)));
+        assert!(last[0].is_some());
+        assert!(last[1].is_none());
+        let mut empty = [None];
+        assert_eq!(batch.pop_ready_into(now, &mut empty), (0, Some(next)));
+    }
 
     #[test]
     fn two_timers_same_instant() {

@@ -92,6 +92,25 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn gamma_survivor_engine_constructor_compacts_retained_redactor_capacity() {
+        let mut inner = RedactionEngineInner {
+            redactors: FxHashMap::with_capacity_and_hasher(42, FxBuildHasher),
+            ..Default::default()
+        };
+        let class = DataClass::new("gamma", "capacity");
+        inner.insert(class.clone(), SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
+        let capacity = inner.redactors.capacity();
+        assert!(capacity >= 42);
+        let engine = crate::RedactionEngine::new(inner);
+        let retained = crate::RedactionEngine::gamma_survivor_inner(&engine);
+        assert_eq!(retained.redactors.len(), 1);
+        assert!(retained.redactors.capacity() < capacity);
+        let mut output = String::new();
+        retained.resolve(&class).unwrap().redact(&class, "value", &mut output).unwrap();
+        assert_eq!(output, "value");
+    }
+
     #[taxonomy(test)]
     enum TestTaxonomy {
         Sensitive,

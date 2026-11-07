@@ -28,6 +28,7 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream
         ));
     }
 
+    // #[gamma::skip(iter.first_to_last, tag = "equivalent", reason = "The preceding validation requires exactly one tuple field, so first and last select the same type.")]
     let inner_type = &fields
         .unnamed
         .first()

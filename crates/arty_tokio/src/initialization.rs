@@ -164,14 +164,24 @@ pub(crate) async fn initialize_all_workers(cx: &Context, tokio: TokioHandle) -> 
             }
         })
         .collect::<Vec<_>>();
-    let mut abort_on_drop = AbortOnDrop::new(Arc::clone(&transaction));
+    coordinate_installers(&transaction, &mut installers, Installer::wait_until_started, finish_installers).await
+}
+
+async fn coordinate_installers<I>(
+    transaction: &Arc<Transaction>,
+    installers: &mut [I],
+    mut wait_until_started: impl AsyncFnMut(&mut I) -> Result<Option<StartupResult>, InitError>,
+    finish: impl AsyncFnOnce(&mut [I], &mut Option<InitError>),
+) -> Result<(), InitError> {
+    let mut abort_on_drop = AbortOnDrop::new(Arc::clone(transaction));
 
     let mut failure = None;
     let mut ready = 0;
-    for installer in &mut installers {
-        match installer.wait_until_started().await {
+    for installer in installers.iter_mut() {
+        match wait_until_started(installer).await {
             Ok(Some(StartupResult::Ready)) => ready += 1,
             Ok(Some(StartupResult::ContextConflict)) => {
+                // #[gamma::skip(stmt.delete_call, reason = "install_worker aborts the transaction before sending ContextConflict.")]
                 transaction.abort();
                 failure.get_or_insert_with(context_conflict);
             }
@@ -183,13 +193,17 @@ pub(crate) async fn initialize_all_workers(cx: &Context, tokio: TokioHandle) -> 
         }
     }
 
-    if commit_if_started(&transaction, startup_succeeded(failure.as_ref(), ready, installers.len())) {
+    if
+    // #[gamma::skip(call_result.default, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+    commit_if_started(transaction, startup_succeeded(failure.as_ref(), ready, installers.len())) {
+        // #[gamma::skip(stmt.delete_call, reason = "The successful commit already made the transaction terminal; another abort cannot change it.")]
         abort_on_drop.disarm();
         return Ok(());
     }
 
     transaction.abort();
-    finish_installers(&mut installers, &mut failure).await;
+    finish(installers, &mut failure).await;
+    // #[gamma::skip(stmt.delete_call, reason = "The transaction is already aborted; the drop guard's abort cannot change a terminal phase.")]
     abort_on_drop.disarm();
     Err(failure.unwrap_or_else(initialization_aborted))
 }
@@ -220,12 +234,14 @@ fn commit_if_started(transaction: &Transaction, started: bool) -> bool {
 async fn install_worker(data: InstallerData) {
     let mut abort_on_drop = AbortOnDrop::new(Arc::clone(&data.transaction));
     if data.transaction.phase() != Phase::Preparing {
+        // #[gamma::skip(stmt.delete_call, reason = "A non-preparing transaction is terminal, so dropping an armed guard cannot change its phase.")]
         abort_on_drop.disarm();
         return;
     }
     if Handle::try_current().is_ok() {
         data.transaction.abort();
         let _send_result = data.startup.send(StartupResult::ContextConflict);
+        // #[gamma::skip(stmt.delete_call, reason = "The context-conflict branch already aborted the transaction.")]
         abort_on_drop.disarm();
         return;
     }
@@ -236,16 +252,19 @@ async fn install_worker(data: InstallerData) {
     loop {
         match data.transaction.phase() {
             Phase::Preparing => {
+                // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 data.phase_changed
                     .changed_async()
                     .await
                     .expect("each installer retains the transaction phase sender");
             }
             Phase::Committed => {
+                // #[gamma::skip(stmt.delete_call, reason = "Committed is terminal; abort on later cancellation cannot change it.")]
                 abort_on_drop.disarm();
                 pending::<()>().await;
             }
             Phase::Aborted => {
+                // #[gamma::skip(stmt.delete_call, reason = "Aborted is terminal; aborting again on drop has no effect.")]
                 abort_on_drop.disarm();
                 return;
             }
@@ -256,6 +275,42 @@ async fn install_worker(data: InstallerData) {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_coordinator_publishes_abort_before_next_startup_and_before_finishing() {
+        use std::cell::Cell;
+
+        for startup_error in [false, true] {
+            let runtime = Builder::new_current_thread().build().unwrap();
+            let (transaction, observer) = Transaction::new(runtime.handle().clone());
+            let mut installers = [0, 1];
+            let finished = Cell::new(0);
+            let result = futures::executor::block_on(super::coordinate_installers(
+                &transaction,
+                &mut installers,
+                async |index: &mut i32| {
+                    if *index == 0 && startup_error {
+                        Err(crate::error::initialization_aborted())
+                    } else {
+                        if startup_error {
+                            assert_eq!(transaction.phase(), Phase::Aborted);
+                            assert!(observer.has_changed().unwrap());
+                        }
+                        Ok(None)
+                    }
+                },
+                async |_: &mut [i32], failure: &mut Option<crate::InitError>| {
+                    assert_eq!(transaction.phase(), Phase::Aborted);
+                    assert!(observer.has_changed().unwrap());
+                    assert_eq!(failure.is_some(), startup_error);
+                    finished.set(finished.get() + 1);
+                },
+            ));
+            assert!(result.is_err());
+            assert_eq!(finished.get(), 1);
+            assert_eq!(transaction.phase(), Phase::Aborted);
+        }
+    }
+
     use std::future::pending;
     use std::sync::Arc;
 
@@ -265,10 +320,91 @@ mod tests {
 
     use super::{AbortOnDrop, Installer, Phase, StartupResult, Transaction, commit_if_started, finish_installers, startup_succeeded};
 
+    #[test]
+    fn gamma_survivor_worker_preparing_cancellation_aborts_but_terminal_start_sends_no_ready() {
+        use std::future::Future;
+        use std::task::{Context, Waker};
+
+        let runtime = Builder::new_current_thread().build().unwrap();
+        let (transaction, phase_changed) = Transaction::new(runtime.handle().clone());
+        let (startup, startup_result) = oneshot();
+        let mut worker = Box::pin(super::install_worker(super::InstallerData {
+            transaction: Arc::clone(&transaction),
+            phase_changed,
+            startup,
+        }));
+        assert!(worker.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
+        assert!(matches!(futures::executor::block_on(startup_result), Ok(StartupResult::Ready)));
+        assert_eq!(transaction.phase(), Phase::Preparing);
+        drop(worker);
+        assert_eq!(transaction.phase(), Phase::Aborted);
+        tokio::runtime::Handle::try_current().unwrap_err();
+
+        let (transaction, phase_changed) = Transaction::new(runtime.handle().clone());
+        transaction.abort();
+        let (startup, startup_result) = oneshot();
+        let mut worker = Box::pin(super::install_worker(super::InstallerData {
+            transaction: Arc::clone(&transaction),
+            phase_changed,
+            startup,
+        }));
+        assert!(worker.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_ready());
+        futures::executor::block_on(startup_result).unwrap_err();
+        assert_eq!(transaction.phase(), Phase::Aborted);
+    }
+
+    #[test]
+    fn gamma_survivor_worker_context_conflict_aborts_and_reports_exact_startup_result() {
+        use std::future::Future;
+        use std::task::{Context, Waker};
+
+        let runtime = Builder::new_current_thread().build().unwrap();
+        let _entered = runtime.enter();
+        let (transaction, phase_changed) = Transaction::new(runtime.handle().clone());
+        let (startup, startup_result) = oneshot();
+        let mut worker = Box::pin(super::install_worker(super::InstallerData {
+            transaction: Arc::clone(&transaction),
+            phase_changed,
+            startup,
+        }));
+        assert!(worker.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_ready());
+        assert!(matches!(
+            futures::executor::block_on(startup_result),
+            Ok(StartupResult::ContextConflict)
+        ));
+        assert_eq!(transaction.phase(), Phase::Aborted);
+    }
+
     fn transaction() -> (Arc<Transaction>, Runtime) {
         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
         let handle = runtime.handle().clone();
         (Transaction::new(handle).0, runtime)
+    }
+
+    #[test]
+    fn gamma_survivor_transaction_has_one_terminal_transition_and_one_notification() {
+        let runtime = Builder::new_current_thread().build().unwrap();
+        for commit in [false, true] {
+            let (transaction, receiver) = Transaction::new(runtime.handle().clone());
+            assert_eq!(transaction.phase(), Phase::Preparing);
+            if commit {
+                assert!(transaction.commit());
+            } else {
+                transaction.abort();
+            }
+            assert_eq!(receiver.changed(), Ok(()));
+            let terminal = transaction.phase();
+            assert!(!transaction.commit());
+            transaction.abort();
+            assert_eq!(transaction.phase(), terminal);
+            let mut changed = std::pin::pin!(receiver.changed_async());
+            assert!(
+                changed
+                    .as_mut()
+                    .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+                    .is_pending()
+            );
+        }
     }
 
     #[test]

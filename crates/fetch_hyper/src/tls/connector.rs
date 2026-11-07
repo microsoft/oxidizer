@@ -148,6 +148,7 @@ where
             #[cfg(any(feature = "rustls", test))]
             Self::Rustls(c, _) => {
                 let mut c = c.clone();
+                // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "hyper-rustls delegates readiness to HyperConnectorAdapter, which always returns Ready(Ok(()))")]
                 std::future::poll_fn(|cx| c.poll_ready(cx)).await.map_err(handle_tls_error)?;
                 c.call(input.into())
                     .await
@@ -157,6 +158,7 @@ where
             #[cfg(any(feature = "native-tls", test))]
             Self::NativeTls(c) => {
                 let mut c = c.clone();
+                // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "NativeTlsConnector delegates readiness to HyperConnectorAdapter, which always returns Ready(Ok(()))")]
                 std::future::poll_fn(|cx| c.poll_ready(cx)).await.map_err(handle_tls_error)?;
                 c.call(input.into())
                     .await
@@ -190,6 +192,21 @@ mod tests {
     use super::*;
     use crate::testing::{FakeConnector, FakeStream, TestError};
 
+    #[test]
+    fn gamma_survivor_preconfigured_rustls_alpn_is_cleared_before_wrapping() {
+        let TlsBackend::Rustls(config) = rustls_backend() else {
+            panic!("rustls fixture must use rustls");
+        };
+        let mut config = (*config).clone();
+        config.alpn_protocols = vec![b"caller-protocol".to_vec()];
+        let _ = build_rustls_connector(
+            config,
+            fake_connector(),
+            &RequestFilter::HttpAndHttps,
+            &[Version::HTTP_11, Version::HTTP_2],
+        );
+    }
+
     fn rustls_backend() -> TlsBackend {
         let provider = rustls::crypto::CryptoProvider::get_default()
             .cloned()
@@ -205,6 +222,131 @@ mod tests {
 
     fn fake_connector() -> FakeConnector {
         FakeConnector::new_success(Bytes::new(), Clock::new_frozen())
+    }
+
+    #[derive(Clone, Debug)]
+    struct CapturingConnector {
+        inner: FakeConnector,
+        written: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    }
+
+    impl layered::Service<templated_uri::BaseUri> for CapturingConnector {
+        type Out = http_extensions::Result<CapturingStream>;
+
+        async fn execute(&self, input: templated_uri::BaseUri) -> Self::Out {
+            Ok(CapturingStream {
+                inner: self.inner.execute(input).await?,
+                written: std::sync::Arc::clone(&self.written),
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct CapturingStream {
+        inner: FakeStream,
+        written: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    }
+
+    impl hyper::rt::Read for CapturingStream {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: hyper::rt::ReadBufCursor<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
+        }
+    }
+
+    impl hyper::rt::Write for CapturingStream {
+        fn poll_write(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &[u8]) -> std::task::Poll<std::io::Result<usize>> {
+            let this = self.get_mut();
+            let result = Pin::new(&mut this.inner).poll_write(cx, buf);
+            if let std::task::Poll::Ready(Ok(count)) = result {
+                this.written.lock().unwrap().extend_from_slice(&buf[..count]);
+            }
+            result
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+            Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+            Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+        }
+    }
+
+    impl hyper_util::client::legacy::connect::Connection for CapturingStream {
+        fn connected(&self) -> hyper_util::client::legacy::connect::Connected {
+            self.inner.connected()
+        }
+    }
+
+    fn client_hello_alpn(record: &[u8]) -> Vec<Vec<u8>> {
+        fn take<'a>(bytes: &mut &'a [u8], length: usize) -> &'a [u8] {
+            let (head, tail) = bytes.split_at(length);
+            *bytes = tail;
+            head
+        }
+
+        fn u16_length(bytes: &mut &[u8]) -> usize {
+            let value = take(bytes, 2);
+            usize::from(u16::from_be_bytes([value[0], value[1]]))
+        }
+
+        assert_eq!(record[0], 22, "the fake must capture a TLS handshake record");
+        let mut payload = &record[5..];
+        assert_eq!(take(&mut payload, 1), [1], "the handshake must be ClientHello");
+        take(&mut payload, 3 + 2 + 32);
+        let session_id_length = usize::from(take(&mut payload, 1)[0]);
+        take(&mut payload, session_id_length);
+        let cipher_length = u16_length(&mut payload);
+        take(&mut payload, cipher_length);
+        let compression_length = usize::from(take(&mut payload, 1)[0]);
+        take(&mut payload, compression_length);
+        let extensions_length = u16_length(&mut payload);
+        let mut extensions = take(&mut payload, extensions_length);
+        while !extensions.is_empty() {
+            let kind = u16_length(&mut extensions);
+            let length = u16_length(&mut extensions);
+            let mut extension = take(&mut extensions, length);
+            if kind == 16 {
+                let protocol_length = u16_length(&mut extension);
+                assert_eq!(extension.len(), protocol_length);
+                let mut protocols = Vec::new();
+                while !extension.is_empty() {
+                    let length = usize::from(take(&mut extension, 1)[0]);
+                    protocols.push(take(&mut extension, length).to_vec());
+                }
+                return protocols;
+            }
+        }
+        Vec::new()
+    }
+
+    #[tokio::test]
+    async fn gamma_survivor_rustls_client_hello_alpn_matches_supported_versions() {
+        let cases = [
+            (vec![Version::HTTP_11, Version::HTTP_2], vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
+            (vec![Version::HTTP_10, Version::HTTP_2], vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
+            (vec![Version::HTTP_2], vec![b"h2".to_vec()]),
+            (vec![Version::HTTP_11], vec![]),
+            (vec![Version::HTTP_10], vec![]),
+        ];
+        for (versions, expected) in cases {
+            let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let connector = CapturingConnector {
+                inner: fake_connector(),
+                written: std::sync::Arc::clone(&written),
+            };
+            let tls = TlsConnector::new(rustls_backend(), connector, RequestFilter::Https, &versions);
+            assert!(
+                tls.execute(templated_uri::BaseUri::from_static("https://example.invalid"))
+                    .await
+                    .is_err()
+            );
+            assert_eq!(client_hello_alpn(&written.lock().unwrap()), expected, "{versions:?}");
+        }
     }
 
     #[test]

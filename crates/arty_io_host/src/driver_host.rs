@@ -378,6 +378,8 @@ impl Drop for DriverHost {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::Waker;
 
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
@@ -434,5 +436,75 @@ mod tests {
         };
 
         assert_eq!(error.to_string(), "I/O context retrieval cannot be nested during initialization");
+    }
+
+    #[test]
+    fn gamma_survivor_context_returns_borrow_conflict_without_poisoning_runtime() {
+        let thread = ThreadBuilder::default().build(std::thread::current().id());
+        let runtime = IoRuntime::new(Sink::noop());
+        let host = runtime.driver_host(thread, Waker::noop().clone()).unwrap();
+        // The live driver-container borrow is not exposed by the public host.
+        let executing = host.drivers.borrow_mut();
+        let error = host.context::<TestContext>(()).err().unwrap();
+        assert_eq!(error.to_string(), "I/O context retrieval cannot overlap driver cycle execution");
+        drop(executing);
+        host.context::<TestContext>(()).unwrap();
+    }
+
+    #[test]
+    fn gamma_survivor_initialization_returns_mutable_borrow_conflict_and_restores_initializing_flag() {
+        let thread = ThreadBuilder::default().build(std::thread::current().id());
+        let runtime = IoRuntime::new(Sink::noop());
+        let host = runtime.driver_host(thread, Waker::noop().clone()).unwrap();
+        let executing = host.drivers.borrow();
+        let error = host.context::<TestContext>(()).err().unwrap();
+        assert_eq!(error.to_string(), "I/O driver initialization cannot overlap cycle execution");
+        assert!(!host.initializing.get());
+        drop(executing);
+        assert!(host.drivers.borrow().primary.is_none());
+    }
+
+    #[test]
+    fn gamma_survivor_cached_context_rechecks_failure_created_by_its_clone() {
+        struct FailingClone {
+            runtime: IoRuntime,
+            fail: Arc<AtomicBool>,
+        }
+        impl Clone for FailingClone {
+            fn clone(&self) -> Self {
+                if self.fail.load(Ordering::Relaxed) {
+                    self.runtime.fail(&DriverError::from_message("clone failed"));
+                }
+                Self {
+                    runtime: self.runtime.clone(),
+                    fail: Arc::clone(&self.fail),
+                }
+            }
+        }
+        impl thread_aware::ThreadAware for FailingClone {
+            fn relocate(&mut self, _: Option<&thread_aware::Thread>, _: &thread_aware::Thread) {}
+        }
+        impl IoContext for FailingClone {
+            type ContextOptions = Self;
+            type Driver = TestDriver;
+            fn context(options: Self) -> Self {
+                options
+            }
+            fn driver(&mut self, _: DriverOptions) -> Result<TestDriver, DriverError> {
+                Ok(TestDriver)
+            }
+        }
+        let runtime = IoRuntime::new(Sink::noop());
+        let thread = ThreadBuilder::default().build(std::thread::current().id());
+        let host = runtime.clone().driver_host(thread, Waker::noop().clone()).unwrap();
+        let fail = Arc::new(AtomicBool::new(false));
+        let options = FailingClone {
+            runtime,
+            fail: Arc::clone(&fail),
+        };
+        host.context::<FailingClone>(options.clone()).unwrap();
+        fail.store(true, Ordering::Relaxed);
+        let error = host.context::<FailingClone>(options).err().unwrap();
+        assert_eq!(error.to_string(), "clone failed");
     }
 }

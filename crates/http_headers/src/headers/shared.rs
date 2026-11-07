@@ -37,6 +37,7 @@ impl FieldLinesIter {
         match self {
             Self::Empty => *self = Self::One(value),
             Self::One(first) => {
+                // #[gamma::skip(literal.str_to_xyzzy, tag = "equivalent", reason = "mem::replace returns the original first value; this temporary replacement is immediately overwritten by Many and never read")]
                 let first = mem::replace(first, FieldValue::from_static(""));
                 *self = Self::Many(vec![first, value]);
             }
@@ -346,6 +347,7 @@ pub(super) fn trim_ows(bytes: &[u8]) -> &[u8] {
 #[inline]
 pub(super) fn has_non_ows(bytes: &[u8]) -> bool {
     match bytes.first() {
+        // #[gamma::skip(literal.int_decrement, tag = "equivalent", reason = "The matched first byte is already OWS, so rescanning it cannot make the non-OWS any predicate succeed")]
         Some(b' ' | b'\t') => bytes[1..].iter().any(|byte| !matches!(byte, b' ' | b'\t')),
         Some(_) => true,
         None => false,
@@ -448,6 +450,13 @@ mod tests {
             fmt::write(&mut output, format_args!("{}", DisplayValues(&invalid))),
             Err(fmt::Error)
         );
+        output.clear();
+        let invalid_later = [FieldValueRef::new(b"valid"), FieldValueRef::new(b"\xff")];
+        assert_eq!(
+            fmt::write(&mut output, format_args!("{}", DisplayValues(&invalid_later))),
+            Err(fmt::Error)
+        );
+        assert_eq!(output, "valid, ");
     }
 
     #[test]

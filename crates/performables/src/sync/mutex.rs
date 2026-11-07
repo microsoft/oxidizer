@@ -220,8 +220,12 @@ impl<T: ?Sized> Mutex<T, Async> {
             return self.acquired();
         }
 
+        self.wait_with_recorded_contention(block_on)
+    }
+
+    fn wait_with_recorded_contention<'a, R>(&'a self, wait: impl FnOnce(MutexLockFuture<'a, T>) -> R) -> R {
         self.record(EventKind::MutexContention);
-        block_on(MutexLockFuture {
+        wait(MutexLockFuture {
             mutex: self,
             waiter: None,
             contention_recorded: true,
@@ -530,14 +534,66 @@ impl<T: ?Sized + fmt::Display, M: Mode> fmt::Display for MutexGuard<'_, T, M> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    #[cfg(feature = "seismograph")]
+    fn gamma_round2_blocking_async_mutex_pre_records_contention_once_before_waiting() {
+        use seismograph::recorder::event::EventKind as RecordedKind;
+
+        crate::gamma_round2_telemetry::enable_recording();
+        let mutex = super::Mutex::<_, crate::sync::Async>::new(7);
+        let held = mutex.lock();
+        let before = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::MutexContention);
+        mutex.wait_with_recorded_contention(|mut future| {
+            assert!(future.contention_recorded);
+            let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(std::pin::Pin::new(&mut future).poll(&mut context).is_pending());
+            assert!(std::pin::Pin::new(&mut future).poll(&mut context).is_pending());
+        });
+        drop(held);
+        assert_eq!(
+            crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::MutexContention),
+            before + 1
+        );
+    }
+
     use std::sync::Arc as StdArc;
     use std::sync::atomic::AtomicUsize;
     use std::task::{Wake, Waker};
 
     use super::*;
 
+    #[test]
+    fn gamma_survivor_mutex_ready_completion_drops_private_waiter_before_future_drop() {
+        let mutex = Mutex::<u32, Async>::new(7);
+        let held = mutex.lock();
+        let mut future = mutex.lock_async();
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(Pin::new(&mut future).poll(&mut cx).is_pending());
+        assert!(future.result.waiter.is_some());
+        drop(held);
+        let Poll::Ready(guard) = Pin::new(&mut future).poll(&mut cx) else {
+            panic!("released mutex must complete its queued acquisition");
+        };
+        assert!(future.result.waiter.is_none());
+        drop(guard);
+    }
+
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
+
+    #[test]
+    fn gamma_round2_registration_success_releases_the_private_waiter_handle() {
+        let mutex = Mutex::<_, Async>::new(17);
+        let mut future = MutexLockFuture::new(&mutex);
+        let Poll::Ready(Ok(guard)) = future.poll_registered(&Context::from_waker(Waker::noop())) else {
+            panic!("registration must acquire an unlocked mutex");
+        };
+        assert_eq!(*guard, 17);
+        assert!(future.waiter.is_none());
+        assert_eq!(mutex.raw.state.load(Ordering::Acquire), LOCKED);
+        drop(guard);
+        assert_eq!(mutex.raw.state.load(Ordering::Acquire), 0);
+    }
 
     #[test]
     fn synchronous_state_provides_reusable_exclusive_ownership() {

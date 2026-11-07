@@ -69,25 +69,115 @@ pub(in crate::internal) fn alloc_chunk_raw<A: Allocator>(
     value_align: usize,
     base_align: usize,
 ) -> Result<(*mut u8, Layout), AllocError> {
+    alloc_chunk_raw_with_address(allocator, header_size, payload_size, value_align, base_align, |pointer| {
+        pointer as usize
+    })
+}
+
+pub(in crate::internal) fn alloc_chunk_raw_with_address<A: Allocator>(
+    allocator: &A,
+    header_size: usize,
+    payload_size: usize,
+    value_align: usize,
+    base_align: usize,
+    address: impl FnOnce(*mut u8) -> usize,
+) -> Result<(*mut u8, Layout), AllocError> {
     let layout = chunk_layout(header_size, payload_size, value_align, base_align)?;
-    let raw = allocator.allocate(layout)?;
-    let raw_u8_ptr: *mut u8 = raw.cast::<u8>().as_ptr();
-    let start_addr = raw_u8_ptr as usize;
-    let end_addr = start_addr.checked_add(layout.size()).ok_or(AllocError::CAPACITY_OVERFLOW)?;
+    let raw_u8_ptr = checked_allocation_with(
+        layout,
+        |layout| Ok(allocator.allocate(layout)?.cast::<u8>().as_ptr()),
+        address,
+        |pointer, layout| {
+            // SAFETY: Rejection returns the unchanged exclusively owned allocation and layout.
+            unsafe { allocator.deallocate(NonNull::new_unchecked(pointer), layout) };
+        },
+    )?;
+    Ok((raw_u8_ptr, layout))
+}
+
+fn checked_allocation_with<T: Copy>(
+    layout: Layout,
+    allocate: impl FnOnce(Layout) -> Result<T, AllocError>,
+    address: impl FnOnce(T) -> usize,
+    release: impl FnOnce(T, Layout),
+) -> Result<T, AllocError> {
+    let raw = allocate(layout)?;
+    let start_addr = address(raw);
+    validate_allocation_end_with(start_addr, layout.size(), || {
+        release(raw, layout);
+    })?;
+    Ok(raw)
+}
+
+fn validate_allocation_end_with(start_addr: usize, size: usize, release: impl FnOnce()) -> Result<(), AllocError> {
+    let end_addr = start_addr.checked_add(size).ok_or(AllocError::CAPACITY_OVERFLOW)?;
     if end_addr > isize::MAX as usize {
-        // SAFETY: matches the `allocator.allocate` pair; nothing has
-        // been stored in the allocation yet.
-        unsafe {
-            allocator.deallocate(NonNull::new_unchecked(raw_u8_ptr), layout);
-        }
+        release();
         return Err(AllocError::CAPACITY_OVERFLOW);
     }
-    Ok((raw_u8_ptr, layout))
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::chunk_layout;
+    use super::{checked_allocation_with, chunk_layout, validate_allocation_end_with};
+    use crate::AllocError;
+
+    #[test]
+    fn gamma_nov4_checked_allocation_preserves_exact_address_layout_and_release_order() {
+        let layout = core::alloc::Layout::from_size_align(8, 8).unwrap();
+        for (start, accepted, released) in [(isize::MAX as usize - 8, true, false), (isize::MAX as usize - 7, false, true)] {
+            let events = core::cell::RefCell::new(alloc::vec::Vec::new());
+            let result = checked_allocation_with(
+                layout,
+                |actual| {
+                    assert_eq!(actual, layout);
+                    events.borrow_mut().push(("allocate", 71, actual.size()));
+                    Ok(71usize)
+                },
+                |token| {
+                    assert_eq!(token, 71);
+                    events.borrow_mut().push(("address", token, start));
+                    start
+                },
+                |token, actual| {
+                    assert_eq!(actual, layout);
+                    events.borrow_mut().push(("release", token, actual.size()));
+                },
+            );
+            assert_eq!(result, if accepted { Ok(71) } else { Err(AllocError::CAPACITY_OVERFLOW) });
+            let mut expected = alloc::vec![("allocate", 71, 8), ("address", 71, start)];
+            if released {
+                expected.push(("release", 71, 8));
+            }
+            assert_eq!(*events.borrow(), expected);
+        }
+        assert_eq!(
+            checked_allocation_with(
+                layout,
+                |_| Err::<usize, _>(AllocError::CAPACITY_OVERFLOW),
+                |_| panic!("failed allocation has no address"),
+                |_, _| panic!("failed allocation cannot release"),
+            )
+            .unwrap_err(),
+            AllocError::CAPACITY_OVERFLOW
+        );
+    }
+
+    #[test]
+    fn gamma_round2_address_validation_releases_only_the_rejected_high_range() {
+        for (start, size, accepted, expected_releases) in [
+            (64, 8, true, 0),
+            (isize::MAX as usize - 8, 8, true, 0),
+            (isize::MAX as usize - 8, 9, false, 1),
+            (usize::MAX, 1, false, 0),
+        ] {
+            let mut releases = 0;
+            let result = validate_allocation_end_with(start, size, || releases += 1);
+            assert_eq!(result.is_ok(), accepted, "start={start}, size={size}");
+            assert_eq!(releases, expected_releases, "start={start}, size={size}");
+        }
+    }
 
     /// `chunk_layout` must round allocation size up to `value_align`.
     #[test]
@@ -122,4 +212,42 @@ mod tests {
         let layout = chunk_layout(8, 8, 8, BASE).expect("layout fits"); // total 16
         assert_eq!(layout.size(), 16);
     }
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_chunk_layout_independent_integer_oracle() {
+        for align in [1_usize, 2, 4, 8, 16, 64, 4096] {
+            for header in [0_usize, 1, 7, 16, 33, usize::MAX - 7, usize::MAX] {
+                for payload in [0_usize, 1, 7, 64, 511, usize::MAX] {
+                    let wide = (header as u128) + (payload as u128);
+                    let rounded = wide.div_ceil(align as u128) * (align as u128);
+                    let actual = chunk_alloc_size(header, payload, align);
+                    if let Ok(expected) = usize::try_from(rounded) {
+                        assert_eq!(actual.unwrap(), expected);
+                        let layout = chunk_layout(header, payload, align, 65536);
+                        let expected_layout = Layout::from_size_align(expected, 65536);
+                        match expected_layout {
+                            Ok(expected_layout) => assert_eq!(layout.unwrap(), expected_layout),
+                            Err(_) => gamma_survivor_expect_error(layout),
+                        }
+                    } else {
+                        gamma_survivor_expect_error(actual);
+                        gamma_survivor_expect_error(chunk_layout(header, payload, align, 65536));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+fn gamma_survivor_expect_error<T, E>(result: Result<T, E>) {
+    let Err(_) = result else {
+        panic!("the fixture requires this operation to return its injected error");
+    };
+    drop(result);
 }

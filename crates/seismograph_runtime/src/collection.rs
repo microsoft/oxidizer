@@ -128,6 +128,7 @@ fn capture_with(
     }
     let window = runtime.timing_window.load(Ordering::Acquire);
     let workers = lock(&runtime.workers).clone();
+    // #[gamma::skip(literal.int_decrement, literal.int_increment, reason = "the minimum channel capacity is used only with zero workers (no sends), or at most one response for one worker; both neighboring capacities preserve all observable collection results")]
     let (sender, receiver) = mpsc::sync_channel(workers.len().max(1));
     let canceled = Arc::new(AtomicBool::new(false));
     let deadline = clock.instant() + options.timeout;
@@ -143,6 +144,7 @@ fn capture_with(
     drop(sender);
     let unavailable = loop {
         if pending.is_empty() {
+            // #[gamma::skip(loop.break_value_default, reason = "unavailable is used only for pending workers; that set is empty on this break, so the selected collection tag is never observed")]
             break TaskCollection::Complete;
         }
         match receive(&receiver, deadline.saturating_duration_since(clock.instant())) {
@@ -230,6 +232,7 @@ fn dispatch(
     };
     let provider = provider.expect("only workers with a provider reach request dispatch");
     if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| provider(request))) {
+        // #[gamma::skip(call_result.default, reason = "discard_panic returns unit and default_after still disposes the complete panic payload chain")]
         discard_panic(panic);
         return Some(Batch {
             worker: worker.id,
@@ -243,6 +246,7 @@ fn dispatch(
 // A diagnostic callback can panic with a payload whose destructor also panics.
 // Bound replacement disposal just as the executor does; never leak user unwinds.
 fn discard_panic(panic: Box<dyn std::any::Any + Send>) {
+    // #[gamma::skip(call_result.default, reason = "discard_panic_with returns unit and default_after still executes disposal and the terminal callback when needed")]
     discard_panic_with(panic, |panic| abort_repeated_panic(panic));
 }
 
@@ -288,6 +292,157 @@ mod tests {
     use crate::snapshot::{TaskActivityState, TaskMetricsScope};
     use crate::worker::{WorkerMetadata, WorkerRole};
     use crate::{RuntimeMetadata, allocate_task_id, allocate_type_descriptor_id, register_runtime};
+
+    #[test]
+    fn joining_a_timed_observation_keeps_measurements_already_collected_by_its_first_user() {
+        seismograph::recorder::without_recording(|| {
+            let runtime = register_runtime(RuntimeMetadata::new("joined-measurements", 1));
+            let registration = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+            let handle = registration.handle();
+            let task = allocate_task_id();
+            let descriptor = allocate_type_descriptor_id();
+            handle
+                .register_task_provider(move |request| {
+                    request.respond(
+                        vec![Task::new(task, descriptor, TaskActivityState::Waiting)],
+                        TaskCollection::Complete,
+                    );
+                })
+                .unwrap();
+            let first = Observation::new(&runtime.handle.control, true);
+            let poll = handle.poll_started_with(task, || EventTimestamp::from_ticks(10));
+            handle.poll_finished_with(poll, || EventTimestamp::from_ticks(47));
+            let second = Observation::new(&runtime.handle.control, true);
+
+            assert_eq!(capture_state(&runtime.handle.control).tasks[0].metrics.poll_duration_nanos, 37);
+            drop(first);
+            assert_eq!(capture_state(&runtime.handle.control).tasks[0].metrics.poll_duration_nanos, 37);
+            drop(second);
+            assert_eq!(runtime.handle.control.timing_window.load(Ordering::Acquire), 0);
+            assert!(!handle.is_observed());
+        });
+    }
+
+    #[test]
+    fn final_measurement_window_is_usable_and_exhaustion_cannot_reuse_an_identity() {
+        seismograph::recorder::without_recording(|| {
+            let runtime = register_runtime(RuntimeMetadata::new("last-window", 0));
+            lock(&runtime.handle.control.timing).next = u64::MAX - 1;
+            let observation = Observation::new(&runtime.handle.control, true);
+            assert_eq!(runtime.handle.control.timing_window.load(Ordering::Acquire), u64::MAX);
+            drop(observation);
+            assert_eq!(runtime.handle.control.timing_window.load(Ordering::Acquire), 0);
+            assert_eq!(runtime.handle.control.requests.load(Ordering::Relaxed), 0);
+            let exhausted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Observation::new(&runtime.handle.control, true)));
+            drop(exhausted.err().unwrap());
+        });
+    }
+
+    #[test]
+    fn changing_measurement_windows_discards_old_tasks_and_restarts_shared_task_totals() {
+        let mut measurements = Measurements::default();
+        let old = allocate_task_id();
+        let shared = allocate_task_id();
+        measurements.add(1, old, EventTimestamp::from_ticks(10), 30);
+        measurements.add(1, shared, EventTimestamp::from_ticks(20), 40);
+        measurements.add(2, shared, EventTimestamp::from_ticks(50), 7);
+
+        assert_eq!(measurements.tasks.len(), 1);
+        assert!(!measurements.tasks.contains_key(&old));
+        assert_eq!(measurements.tasks[&shared].since, EventTimestamp::from_ticks(50));
+        assert_eq!(
+            measurements.tasks[&shared].metrics,
+            TaskMetrics {
+                poll_count: 1,
+                poll_duration_nanos: 7,
+                max_poll_duration_nanos: 7,
+                ..TaskMetrics::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_capture_without_pending_workers_never_waits_for_a_response() {
+        seismograph::recorder::without_recording(|| {
+            let runtime = register_runtime(RuntimeMetadata::new("no-pending-workers", 0));
+            let snapshot = capture_with(
+                &runtime.handle.control,
+                CaptureOptions::default(),
+                &SimpleClock::new_frozen(),
+                |_| panic!("untimed capture"),
+                |_, _| panic!("there are no outstanding responses"),
+            );
+            assert!(snapshot.workers.is_empty());
+            assert!(snapshot.tasks.is_empty());
+            assert_eq!(runtime.handle.control.requests.load(Ordering::Relaxed), 0);
+        });
+    }
+
+    #[test]
+    fn canceled_requests_never_publish_tasks_or_failure_responses() {
+        seismograph::recorder::without_recording(|| {
+            let runtime = register_runtime(RuntimeMetadata::new("canceled-response", 1));
+            let _registration = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+            let worker = Arc::clone(&lock(&runtime.handle.control.workers)[0]);
+            let (sender, receiver) = mpsc::sync_channel(2);
+            let request = || TaskRequest {
+                worker: Arc::clone(&worker),
+                sender: sender.clone(),
+                canceled: Arc::new(AtomicBool::new(true)),
+                limit: 1,
+                window: 0,
+                answered: false,
+            };
+            request().respond(
+                vec![Task::new(
+                    allocate_task_id(),
+                    allocate_type_descriptor_id(),
+                    TaskActivityState::Ready,
+                )],
+                TaskCollection::Complete,
+            );
+            drop(request());
+            assert!(matches!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        });
+    }
+
+    #[test]
+    fn responses_use_only_measurements_from_their_nonzero_window() {
+        seismograph::recorder::without_recording(|| {
+            let runtime = register_runtime(RuntimeMetadata::new("response-window", 1));
+            let _registration = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+            let worker = Arc::clone(&lock(&runtime.handle.control.workers)[0]);
+            let task = allocate_task_id();
+            let descriptor = allocate_type_descriptor_id();
+            for (request_window, measured_window, expected_count) in [(0, 0, 0), (1, 2, 0), (2, 2, 1)] {
+                lock(&worker.measurements).add(measured_window, task, EventTimestamp::from_ticks(10), 37);
+                let (sender, receiver) = mpsc::sync_channel(1);
+                TaskRequest {
+                    worker: Arc::clone(&worker),
+                    sender,
+                    canceled: Arc::new(AtomicBool::new(false)),
+                    limit: 1,
+                    window: request_window,
+                    answered: false,
+                }
+                .respond(
+                    vec![Task::new(task, descriptor, TaskActivityState::Waiting)],
+                    TaskCollection::Complete,
+                );
+                let batch = receiver.try_recv().unwrap();
+                assert_eq!(batch.tasks[0].metrics.poll_count, expected_count);
+                assert_eq!(
+                    batch.tasks[0].metrics_scope,
+                    if expected_count == 0 {
+                        TaskMetricsScope::Uncollected
+                    } else {
+                        TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(10))
+                    }
+                );
+                lock(&worker.measurements).tasks.clear();
+            }
+        });
+    }
 
     fn ready(receiver: &mpsc::Receiver<Batch>, _remaining: Duration) -> Result<Batch, mpsc::RecvTimeoutError> {
         receiver.try_recv().map_err(|error| match error {
@@ -467,35 +622,38 @@ mod tests {
 
     #[test]
     fn response_receiver_gets_the_configured_deadline_budget() {
-        let runtime = register_runtime(RuntimeMetadata::new("response-deadline", 1));
-        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-        let (sender, receiver) = mpsc::channel();
-        worker
-            .handle()
-            .register_task_provider(move |request| sender.send(request).unwrap())
-            .unwrap();
-        let timeout = Duration::from_millis(42);
-        let mut budget = None;
+        for configured in [None, Some(Duration::from_millis(42))] {
+            let runtime = register_runtime(RuntimeMetadata::new("response-deadline", 1));
+            let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+            let (sender, receiver) = mpsc::channel();
+            worker
+                .handle()
+                .register_task_provider(move |request| sender.send(request).unwrap())
+                .unwrap();
+            let mut options = CaptureOptions::default();
+            if let Some(timeout) = configured {
+                options.timeout = timeout;
+            }
+            let expected = configured.unwrap_or(Duration::from_millis(50));
+            let mut budget = None;
 
-        let captured = capture_with(
-            &runtime.handle.control,
-            CaptureOptions {
-                timeout,
-                ..CaptureOptions::default()
-            },
-            &SimpleClock::new_frozen(),
-            |_| panic!("untimed capture"),
-            |_, remaining| {
-                budget = Some(remaining);
-                Err(mpsc::RecvTimeoutError::Timeout)
-            },
-        );
-        let canceled = receiver.try_recv().unwrap().is_canceled();
+            let captured = capture_with(
+                &runtime.handle.control,
+                options,
+                &SimpleClock::new_frozen(),
+                |_| panic!("untimed capture"),
+                |_, remaining| {
+                    budget = Some(remaining);
+                    Err(mpsc::RecvTimeoutError::Timeout)
+                },
+            );
+            let canceled = receiver.try_recv().unwrap().is_canceled();
 
-        assert_eq!(
-            (budget, captured.workers[0].task_collection, canceled),
-            (Some(timeout), TaskCollection::TimedOut, true)
-        );
+            assert_eq!(
+                (budget, captured.workers[0].task_collection, canceled),
+                (Some(expected), TaskCollection::TimedOut, true)
+            );
+        }
     }
 
     #[test]
@@ -797,17 +955,23 @@ mod tests {
                 false
             )
         );
-        assert!(!format!("{measured:?}").is_empty());
-        assert!(
-            !format!(
+        assert_eq!(
+            format!("{measured:?}"),
+            format!("{} {{ window: 1, tasks: 4096 }}", std::any::type_name::<Measurements>())
+        );
+        assert_eq!(
+            format!(
                 "{:?}",
                 Batch {
                     worker: WorkerId::from_raw(1).unwrap(),
                     tasks: Vec::new(),
                     collection: TaskCollection::Complete
                 }
+            ),
+            format!(
+                "{} {{ worker: WorkerId(1), collection: Complete, tasks: 0 }}",
+                std::any::type_name::<Batch>()
             )
-            .is_empty()
         );
     }
 }

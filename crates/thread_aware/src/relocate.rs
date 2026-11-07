@@ -62,6 +62,7 @@ impl Relocator {
         (source, self.destination.clone())
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Both callers pass source_numa_node = 0, which is already its default value.")]
     fn new(source_numa_node: u32, destination_numa_node: u32) -> Self {
         let builder = THREAD_BUILDER.get_or_init(ThreadBuilder::default);
         Self {
