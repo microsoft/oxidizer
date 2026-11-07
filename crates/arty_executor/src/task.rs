@@ -220,7 +220,7 @@ where
     }
 
     fn created_reporter(&self) -> Option<TaskCreatedReporter> {
-        self.options.created_reporter(self.sink.clone())
+        self.options.created_reporter(&self.sink)
     }
 
     fn links(&self) -> &TaskLinks {
