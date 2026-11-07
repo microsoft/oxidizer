@@ -165,6 +165,10 @@ impl HttpBodyBuilder {
     /// A later [`into_buffered`](HttpBody::into_buffered) still applies the original buffer limit.
     /// If the body has no policy, this method uses the builder defaults.
     ///
+    /// An inherited idle timeout applies to the streamed source before `wrap`.
+    /// The wrapper receives timeout errors, and source frames reset the timeout even when the wrapper combines them.
+    /// This method adds no timeout to transformed output or to in-memory and empty sources.
+    ///
     /// # Examples
     ///
     /// ```
@@ -186,18 +190,15 @@ impl HttpBodyBuilder {
     {
         let own = body.options();
         let options = own.merge(&self.options);
+        let body = match (own.timeout, options.timeout) {
+            (None, Some(timeout)) if matches!(&body.kind, super::Kind::Body(..)) => {
+                HttpBody::from_streaming(Box::pin(TimeoutBody::new(body, timeout, &self.clock)), own.timeout(timeout))
+            }
+            _ => body,
+        };
         let wrapped = wrap(body).map_err(Into::into);
 
-        match (own.timeout, options.timeout) {
-            // The body carried no timeout of its own, so this builder's is not
-            // yet enforced anywhere: install it rather than record a policy
-            // nothing applies.
-            (None, Some(timeout)) => HttpBody::from_streaming(Box::pin(TimeoutBody::new(wrapped, timeout, &self.clock)), options),
-            // The wrapped body already applies this timeout.
-            // Another timeout measures the transformed frames.
-            // A transformation that combines many input frames can then time out.
-            _ => HttpBody::from_streaming(Box::pin(wrapped), options),
-        }
+        HttpBody::from_streaming(Box::pin(wrapped), options)
     }
 
     /// Creates a body from a stream of byte chunks.
@@ -496,32 +497,30 @@ mod tests {
 
     #[test]
     fn rewrapping_installs_the_builder_timeout_when_the_body_has_none() {
-        #[derive(Debug)]
-        struct PendingBody;
-
-        impl Body for PendingBody {
-            type Data = BytesView;
-            type Error = HttpError;
-
-            fn poll_frame(
-                self: std::pin::Pin<&mut Self>,
-                _: &mut std::task::Context<'_>,
-            ) -> std::task::Poll<Option<Result<Frame<Self::Data>>>> {
-                std::task::Poll::Pending
-            }
-        }
-
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let control = ClockControl::new();
+        let source_builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock).with_options(options);
-        let mut body = Box::pin(builder.rewrap(builder.text("source"), |_| PendingBody));
+        let builder = source_builder.clone().with_options(options);
+        let source = source_builder.stream(stream::pending(), &HttpBodyOptions::default());
+        let observed = Arc::new(Mutex::new(None));
+        let observation = Arc::clone(&observed);
+        let mut body = pin!(builder.rewrap(source, |body| {
+            body.map_err(move |error| {
+                *observation.lock().unwrap() = Some(error.label().to_string());
+                error
+            })
+        }));
         let waker = futures::task::noop_waker();
-        let mut cx = std::task::Context::from_waker(&waker);
+        let mut cx = Context::from_waker(&waker);
 
         assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+        control.advance(Duration::from_millis(101));
 
-        let result = body.as_mut().poll_frame(&mut cx);
-        assert!(matches!(result, std::task::Poll::Ready(Some(Err(_)))));
+        let Poll::Ready(Some(Err(error))) = body.as_mut().poll_frame(&mut cx) else {
+            panic!("the inherited source timeout must reach the consumer");
+        };
+        assert_eq!(error.label(), "body_timeout");
+        assert_eq!(*observed.lock().unwrap(), Some(error.label().to_string()));
     }
 
     use crate::testing::{create_stream_body, create_stream_body_from_chunks};
