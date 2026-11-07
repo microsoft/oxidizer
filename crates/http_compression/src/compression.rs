@@ -5,19 +5,19 @@
 
 use std::num::NonZeroU64;
 
-use bytesbuf::mem::HasMemory as _;
 use compressors::format::Format;
 use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources};
 use futures::FutureExt as _;
 use futures::future::{Either, ready};
-use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, RANGE, VARY};
+use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, RANGE, TRANSFER_ENCODING, VARY};
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
-use http_extensions::{HttpBody, HttpBodyBuilder, HttpRequest, HttpResponse, RequestHandler, Result};
+use http_extensions::transform::{Content, StreamingBody};
+use http_extensions::{HttpBody, HttpRequest, HttpResponse, RequestHandler, Result};
 use layered::{Layer, Service};
 use mime::Mime;
 use smallvec::SmallVec;
 
-use crate::error::{CompressibleTypeError, invalid, too_many_content_codings, unsupported};
+use crate::error::{CompressibleTypeError, invalid, not_acceptable, too_many_content_codings, unsupported};
 use crate::{CONTENT_DIGEST_HEADER, REPR_DIGEST_HEADER, body, negotiate};
 
 /// A short list of formats: a stacked `Content-Encoding` is rare.
@@ -66,9 +66,9 @@ pub enum UnsupportedCompression {
 
 /// Metadata describing a body as it traveled on the wire, before decompression.
 ///
-/// Decompression removes `Content-Encoding` and `Content-Length`, because neither
-/// describes the body that is now held. This keeps what they said, and is
-/// attached to the message only when its body was actually decompressed.
+/// Decompression removes `Content-Encoding` and replaces or removes `Content-Length`.
+/// This extension keeps their original values.
+/// The layer attaches it when it sets up decompression.
 ///
 /// Servers attach it to the decompressed request's extensions; clients attach it to
 /// the decompressed response's extensions. It does not retain the compressed body bytes.
@@ -108,8 +108,7 @@ impl OriginalBody {
 ///
 /// ```compile_fail,E0599
 /// # use http_compression::Compression;
-/// # use http_extensions::HttpBodyBuilder;
-/// Compression::client(HttpBodyBuilder::new_fake()).compress_responses(&[]);
+/// Compression::client().compress_responses(&[]);
 /// ```
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -129,8 +128,7 @@ pub struct Client {
 ///
 /// ```compile_fail,E0599
 /// # use http_compression::Compression;
-/// # use http_extensions::HttpBodyBuilder;
-/// Compression::server(HttpBodyBuilder::new_fake()).decompress_responses(&[]);
+/// Compression::server().decompress_responses(&[]);
 /// ```
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -165,9 +163,9 @@ enum Role {
 /// received, and a server cannot advertise `Accept-Encoding` on a request that
 /// is arriving rather than leaving.
 ///
-/// All three are lazy. Bodies are wrapped as the message passes, and the work
-/// happens as the body is polled, so a malformed or oversized body fails when
-/// it is read rather than when its headers arrive.
+/// The layer compresses buffered bodies before it passes the message onward.
+/// Buffered compression errors fail the handler call.
+/// Decompression and streaming compression run as the body is polled, so their data errors fail the body read.
 ///
 /// Apply its layer with [`Layer::layer`].
 #[derive(Debug)]
@@ -188,15 +186,15 @@ pub struct CompressionLayer<R> {
 }
 
 impl Compression<()> {
-    /// Creates a client-side layer drawing output from `body_builder`.
+    /// Creates a client-side compression layer.
     ///
-    /// Transformed bytes are allocated from the same memory the builder uses
-    /// for every other body, and a wrapped body keeps the policies the original
-    /// carried.
+    /// The layer uses the shared process-wide [`Resources`] by default.
+    /// Use [`CompressionLayer::resources`] to select a custom memory provider and engine pool.
+    /// Streaming transformations keep the original body's policies.
     #[must_use]
-    pub fn client(body_builder: HttpBodyBuilder) -> CompressionLayer<Client> {
+    pub fn client() -> CompressionLayer<Client> {
         CompressionLayer {
-            config: Config::new(body_builder),
+            config: Config::new(),
             role: Client {
                 decompress_responses: Formats::new(),
                 advertise: true,
@@ -205,13 +203,13 @@ impl Compression<()> {
         }
     }
 
-    /// Creates a server-side layer drawing output from `body_builder`.
+    /// Creates a server-side compression layer.
     ///
     /// See [`client`][Self::client] for where the bytes come from.
     #[must_use]
-    pub fn server(body_builder: HttpBodyBuilder) -> CompressionLayer<Server> {
+    pub fn server() -> CompressionLayer<Server> {
         CompressionLayer {
-            config: Config::new(body_builder),
+            config: Config::new(),
             role: Server {
                 decompress_requests: Formats::new(),
                 compress_responses: Formats::new(),
@@ -264,7 +262,7 @@ impl<R> CompressionLayer<R> {
         self
     }
 
-    /// Draws transformed output from `resources` instead of the body builder's memory.
+    /// Draws transformed output from `resources` instead of the shared process-wide resources.
     #[must_use]
     pub fn resources(mut self, resources: Resources) -> Self {
         self.config.resources = resources;
@@ -359,14 +357,10 @@ impl CompressionLayer<Server> {
     /// use compressors::Level;
     /// use compressors::format::Format;
     /// use http_compression::Compression;
-    /// use http_extensions::HttpBodyBuilder;
-    ///
-    /// # fn configure(body_builder: HttpBodyBuilder) {
-    /// let layer = Compression::server(body_builder)
+    /// let layer = Compression::server()
     ///     .compress_responses(&[Format::Gzip])
     ///     .level(Level::DEFAULT);
     /// # let _ = layer;
-    /// # }
     /// # }
     /// ```
     #[must_use]
@@ -395,14 +389,11 @@ impl CompressionLayer<Server> {
     /// # #[cfg(feature = "gzip")] {
     /// # use compressors::format::Format;
     /// # use http_compression::{Compression, DEFAULT_COMPRESSIBLE_TYPES};
-    /// # use http_extensions::HttpBodyBuilder;
-    /// # fn configure(body_builder: HttpBodyBuilder) {
-    /// let layer = Compression::server(body_builder)
+    /// let layer = Compression::server()
     ///     .compress_responses(&[Format::Gzip])
     ///     .compressible_types(DEFAULT_COMPRESSIBLE_TYPES.iter().copied())
     ///     .unwrap();
     /// # let _ = layer;
-    /// # }
     /// # }
     /// ```
     ///
@@ -783,7 +774,7 @@ impl Server {
             return if negotiate::content_encoding_acceptable(&negotiation.accept_encoding, response.headers()) {
                 Ok(response)
             } else {
-                Ok(not_acceptable(config, response))
+                Err(not_acceptable())
             };
         }
 
@@ -793,7 +784,7 @@ impl Server {
                 if negotiate::identity_acceptable(&negotiation.accept_encoding) {
                     return Ok(response);
                 }
-                return Ok(not_acceptable(config, response));
+                return Err(not_acceptable());
             }
             negotiate::Selection::Identity => return Ok(response),
         };
@@ -815,7 +806,7 @@ impl Server {
         Ok(HttpRequest::from_parts(parts, body))
     }
 
-    /// Replaces `body` with one that compresses as it is read.
+    /// Compresses buffered data directly and wraps streaming data.
     fn compress(&self, config: &Config, headers: &mut HeaderMap, body: HttpBody, format: Format) -> Result<HttpBody> {
         let Some(token) = format.content_encoding() else {
             return Ok(body);
@@ -827,15 +818,26 @@ impl Server {
             .map_err(invalid)?;
 
         headers.insert(CONTENT_ENCODING, HeaderValue::from_static(token));
-        // The compressed length is not known until the body has been read.
         headers.remove(CONTENT_LENGTH);
         headers.remove(CONTENT_DIGEST_HEADER);
         headers.remove(REPR_DIGEST_HEADER);
         weaken_etag(headers);
 
-        Ok(config.body_builder.rewrap(body, move |body| {
-            body::CompressionBody::new(body::CompressionChain::new(body).compress(compressor))
-        }))
+        body.transform(|content| {
+            Ok(match content {
+                Content::Streaming(inner) => {
+                    Content::Streaming(StreamingBody::new(body::CompressionBody::new(
+                        body::CompressionChain::new(inner).compress(compressor),
+                    )))
+                }
+                Content::Bytes(bytes) => {
+                    let bytes = compressors::compress(bytes, compressor).map_err(body::to_http_error)?;
+                    headers.remove(TRANSFER_ENCODING);
+                    headers.insert(CONTENT_LENGTH, HeaderValue::from(bytes.len()));
+                    Content::Bytes(bytes)
+                }
+            })
+        })
     }
 
     /// Applies the built-in exclusions and optional allowlist to one parsed content type.
@@ -856,40 +858,24 @@ impl Server {
     }
 }
 
-fn not_acceptable(config: &Config, response: HttpResponse) -> HttpResponse {
-    let (mut parts, _) = response.into_parts();
-    parts.status = StatusCode::NOT_ACCEPTABLE;
-    parts.headers.remove(CONTENT_ENCODING);
-    parts.headers.remove(CONTENT_LENGTH);
-    parts.headers.remove(CONTENT_RANGE);
-    parts.headers.remove(CONTENT_TYPE);
-    parts.headers.remove(ETAG);
-    parts.headers.remove(CONTENT_DIGEST_HEADER);
-    parts.headers.remove(REPR_DIGEST_HEADER);
-
-    HttpResponse::from_parts(parts, config.body_builder.empty())
-}
-
 /// Settings shared by both roles.
 #[derive(Debug, Clone)]
 struct Config {
     limits: DecompressorLimits,
     resources: Resources,
-    body_builder: HttpBodyBuilder,
     on_unsupported: UnsupportedCompression,
 }
 
 impl Config {
-    fn new(body_builder: HttpBodyBuilder) -> Self {
+    fn new() -> Self {
         Self {
             limits: default_decompressor_limits(),
-            resources: Resources::new(body_builder.memory()),
-            body_builder,
+            resources: Resources::default(),
             on_unsupported: UnsupportedCompression::default(),
         }
     }
 
-    /// Replaces `body` with one that decompresses as it is read.
+    /// Decompresses both buffered and streaming input through a streaming body.
     fn decompress(
         &self,
         headers: &mut HeaderMap,
@@ -935,19 +921,17 @@ impl Config {
             })
             .collect::<Result<SmallVec<[_; 2]>>>()?;
 
-        // `rewrap` rather than `body`: the body already applies its own idle
-        // timeout to the frames coming off the transport, and timing the decompressed
-        // frames as well would trip on a body that decompresses many input frames
-        // into few output ones.
-        let decompressed = self.body_builder.rewrap(body, move |body| {
-            let mut chain = body::CompressionChain::new(body);
-
+        let decompressed = body.transform(|content| {
+            let inner = match content {
+                Content::Streaming(inner) => inner,
+                Content::Bytes(bytes) => StreamingBody::new(http_body_util::Full::new(bytes)),
+            };
+            let mut chain = body::CompressionChain::new(inner);
             for decompressor in decompressors {
                 chain = chain.decompress(decompressor);
             }
-
-            body::CompressionBody::new(chain)
-        });
+            Ok(Content::Streaming(StreamingBody::new(body::CompressionBody::new(chain))))
+        })?;
 
         extensions.insert(OriginalBody { formats, content_length });
 
@@ -1017,9 +1001,9 @@ mod tests {
 
     #[test]
     fn raw_deflate_has_no_http_content_encoding() {
-        let layer = Compression::server(HttpBodyBuilder::new_fake());
+        let layer = Compression::server();
         let mut headers = HeaderMap::new();
-        let body = HttpBodyBuilder::new_fake().text("unchanged");
+        let body = http_extensions::HttpResponseBuilder::new_fake().text("unchanged").build().unwrap().into_body();
 
         let body = layer.role.compress(&layer.config, &mut headers, body, Format::Deflate).unwrap();
 

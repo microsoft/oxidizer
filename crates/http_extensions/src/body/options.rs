@@ -43,6 +43,8 @@ impl HttpBodyOptions {
     /// The timeout limits how long the consumer will wait between frames while
     /// polling the body. The timer resets every time the body yields a frame, so
     /// only idle periods (no progress) count toward the timeout.
+    /// After [`HttpBody::transform`][super::HttpBody::transform],
+    /// only the transformed output frames reset the timer.
     #[must_use]
     pub const fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
@@ -52,7 +54,8 @@ impl HttpBodyOptions {
     /// Sets the maximum buffered payload size.
     ///
     /// [`HttpBody::into_buffered`][super::HttpBody::into_buffered] returns an error
-    /// if the body contains more bytes than this limit.
+    /// if streaming content contains more bytes than this limit.
+    /// Buffered bodies keep this limit for later streaming transformations.
     #[must_use]
     pub const fn buffer_limit(mut self, limit: usize) -> Self {
         self.buffer_limit = Some(limit);

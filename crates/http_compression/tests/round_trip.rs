@@ -13,10 +13,10 @@ use bytesbuf::BytesView;
 use compressors::format::Format;
 use compressors::{CompressionStream, CompressorBuilder, DecompressorLimits, Level, Resources};
 use futures::StreamExt as _;
-use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, RANGE, VARY};
+use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, RANGE, TRANSFER_ENCODING, VARY};
 use http::{HeaderValue, StatusCode};
 use http_compression::{Client, Compression, CompressionLayer, OriginalBody, Server, UnsupportedCompression};
-use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, Result};
+use http_extensions::{FakeHandler, HttpBodyBuilder, HttpBodyOptions, HttpRequest, HttpResponse, HttpResponseBuilder, Result};
 use layered::{Layer, Service};
 use ohno::Labeled as _;
 
@@ -36,11 +36,11 @@ fn compress(format: Format, data: &[u8]) -> BytesView {
 }
 
 fn client() -> CompressionLayer<Client> {
-    Compression::client(builder())
+    Compression::client()
 }
 
 fn server() -> CompressionLayer<Server> {
-    Compression::server(builder())
+    Compression::server()
 }
 
 fn request(body: BytesView, format_token: Option<&'static str>) -> HttpRequest {
@@ -76,6 +76,88 @@ fn responds_with(response: impl Fn() -> Result<HttpResponse> + Send + Sync + 'st
 // Client: response decompression
 
 #[tokio::test]
+async fn buffered_decompression_returns_a_streaming_body() {
+    let expected = payload();
+    let compressed = compress(Format::Gzip, expected.as_bytes());
+    let handler = client().decompress_responses(&[Format::Gzip]).layer(responds_with(move || {
+        HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .header(CONTENT_ENCODING, HeaderValue::from_static("gzip"))
+            .bytes(compressed.clone())
+            .build()
+    }));
+
+    let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+    assert!(response.headers().get(CONTENT_LENGTH).is_none());
+    assert!(response.body().try_clone().is_none());
+    assert_eq!(response.body().content_length(), None);
+    let bytes = response.into_body().into_bytes().await.unwrap();
+    assert_eq!(bytes.to_vec(), expected.as_bytes());
+}
+
+#[tokio::test]
+async fn buffered_compression_returns_a_buffered_body() {
+    let expected = payload();
+    let handler = server().compress_responses(&[Format::Gzip]).layer(echo());
+    let mut input = request(bytes(&expected), None);
+    input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
+
+    let response = handler.execute(input).await.unwrap();
+    assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
+    let length = response.headers().get(CONTENT_LENGTH).unwrap().clone();
+    let wire = BytesView::try_from(response.into_body()).unwrap();
+    assert_eq!(length, HeaderValue::from(wire.len()));
+    assert_eq!(
+        compressors::gzip::decompress(wire, Resources::global()).unwrap().to_vec(),
+        expected.as_bytes()
+    );
+}
+
+#[tokio::test]
+async fn compression_adds_buffered_length_and_decompression_remains_streamed() {
+    let expected = payload();
+    for decompress in [false, true] {
+        let response_bytes = if decompress {
+            compress(Format::Gzip, expected.as_bytes())
+        } else {
+            bytes(&expected)
+        };
+        let inner = responds_with(move || {
+            let mut response = HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .bytes(response_bytes.clone())
+                .build()?;
+            response.headers_mut().remove(CONTENT_LENGTH);
+            response.headers_mut().insert(TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+            if decompress {
+                response.headers_mut().insert(CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+            }
+            Ok(response)
+        });
+        let mut input = request(BytesView::default(), None);
+        input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
+        let response = if decompress {
+            client().decompress_responses(&[Format::Gzip]).layer(inner).execute(input).await.unwrap()
+        } else {
+            server().compress_responses(&[Format::Gzip]).layer(inner).execute(input).await.unwrap()
+        };
+
+        if decompress {
+            assert!(response.headers().get(CONTENT_LENGTH).is_none());
+            assert!(response.body().try_clone().is_none());
+            assert_eq!(response.into_body().into_text().await.unwrap(), expected);
+        } else {
+            assert_eq!(
+                response.headers().get(CONTENT_LENGTH).unwrap(),
+                &HeaderValue::from(response.body().content_length().unwrap())
+            );
+            assert!(response.headers().get(TRANSFER_ENCODING).is_none());
+            assert!(response.into_body().try_clone().is_some());
+        }
+    }
+}
+
+#[tokio::test]
 async fn a_client_decompresses_the_response_it_gets_back() {
     let expected = payload();
     let compressed = compress(Format::Gzip, expected.as_bytes());
@@ -91,7 +173,6 @@ async fn a_client_decompresses_the_response_it_gets_back() {
 
     let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
 
-    // Neither header describes the decompressed body any more.
     assert!(response.headers().get(CONTENT_ENCODING).is_none());
     assert!(response.headers().get(CONTENT_LENGTH).is_none());
 
@@ -450,36 +531,54 @@ async fn response_compression_defaults_to_fast_and_honours_the_configured_level(
             (Some(Level::DEFAULT), Level::DEFAULT),
             (Some(Level::HIGH), Level::HIGH),
         ] {
-            let layer = server().compress_responses(&[format]);
-            let layer = match configured {
-                Some(level) => layer.level(level),
-                None => layer,
-            };
-            let handler = layer.layer(echo());
-            let expected = payload();
-            let mut input = request(bytes(&expected), None);
-            input
-                .headers_mut()
-                .insert(ACCEPT_ENCODING, HeaderValue::from_static(format.content_encoding().unwrap()));
+            for buffered in [true, false] {
+                let layer = server().compress_responses(&[format]);
+                let layer = match configured {
+                    Some(level) => layer.level(level),
+                    None => layer,
+                };
+                let handler = layer.layer(FakeHandler::from_async_fn(move |request: HttpRequest| async move {
+                    let bytes = request.into_body().into_bytes().await?;
+                    let body = if buffered {
+                        builder().bytes(bytes)
+                    } else {
+                        builder().stream(futures::stream::iter([Ok(bytes)]), &HttpBodyOptions::new())
+                    };
+                    HttpResponseBuilder::new_fake().status(StatusCode::OK).body(body).build()
+                }));
+                let expected = payload();
+                let mut input = request(bytes(&expected), None);
+                input
+                    .headers_mut()
+                    .insert(ACCEPT_ENCODING, HeaderValue::from_static(format.content_encoding().unwrap()));
 
-            let response = handler.execute(input).await.unwrap();
-            let actual = response.into_body().into_bytes().await.unwrap();
+                let response = handler.execute(input).await.unwrap();
+                let actual = response.into_body().into_bytes().await.unwrap();
 
-            let compressor = CompressorBuilder::new()
-                .level(expected_level)
-                .build_format(format, Resources::global())
-                .unwrap();
-            let source = futures::stream::iter([Ok::<_, std::io::Error>(bytes(&expected))]);
-            let chunks = CompressionStream::compress(source, compressor).collect::<Vec<_>>().await;
-            let reference = BytesView::from_views(chunks.into_iter().map(std::result::Result::unwrap));
+                let compressor = CompressorBuilder::new()
+                    .level(expected_level)
+                    .build_format(format, Resources::global())
+                    .unwrap();
+                let reference = if buffered {
+                    compressors::compress(bytes(&expected), compressor).unwrap()
+                } else {
+                    let source = futures::stream::iter([Ok::<_, std::io::Error>(bytes(&expected))]);
+                    let chunks = CompressionStream::compress(source, compressor).collect::<Vec<_>>().await;
+                    BytesView::from_views(chunks.into_iter().map(std::result::Result::unwrap))
+                };
 
-            assert_eq!(actual.to_vec(), reference.to_vec(), "{format:?}, {configured:?}");
-            assert_eq!(
-                compressors::format::decompress(format, actual, Resources::global())
-                    .unwrap()
-                    .to_vec(),
-                expected.as_bytes()
-            );
+                assert_eq!(
+                    actual.to_vec(),
+                    reference.to_vec(),
+                    "{format:?}, {configured:?}, buffered={buffered}"
+                );
+                assert_eq!(
+                    compressors::format::decompress(format, actual, Resources::global())
+                        .unwrap()
+                        .to_vec(),
+                    expected.as_bytes()
+                );
+            }
         }
     }
 }
@@ -553,19 +652,27 @@ async fn decompression_limits_use_the_same_error_label_in_both_roles() {
     let response_body = compressed.clone();
     let limits = DecompressorLimits::new().max_output_len(NonZeroU64::new(16).unwrap());
 
-    let client = client()
-        .decompress_responses(&[Format::Gzip])
-        .limits(limits)
-        .layer(responds_with(move || {
-            HttpResponseBuilder::new_fake()
-                .status(StatusCode::OK)
-                .header(CONTENT_ENCODING, HeaderValue::from_static("gzip"))
-                .bytes(response_body.clone())
-                .build()
-        }));
-    let response = client.execute(request(BytesView::default(), None)).await.unwrap();
-    let error = response.into_body().into_bytes().await.unwrap_err();
-    assert_eq!(error.label(), "compression_limit_exceeded");
+    for buffered in [true, false] {
+        let response_body = response_body.clone();
+        let client = client()
+            .decompress_responses(&[Format::Gzip])
+            .limits(limits)
+            .layer(responds_with(move || {
+                let body = if buffered {
+                    builder().bytes(response_body.clone())
+                } else {
+                    builder().stream(futures::stream::iter([Ok(response_body.clone())]), &HttpBodyOptions::new())
+                };
+                HttpResponseBuilder::new_fake()
+                    .status(StatusCode::OK)
+                    .header(CONTENT_ENCODING, HeaderValue::from_static("gzip"))
+                    .body(body)
+                    .build()
+            }));
+        let response = client.execute(request(BytesView::default(), None)).await.unwrap();
+        let error = response.into_body().into_bytes().await.unwrap_err();
+        assert_eq!(error.label(), "compression_limit_exceeded");
+    }
 
     let server = server().decompress_requests(&[Format::Gzip]).limits(limits).layer(echo());
     let error = server.execute(request(compressed, Some("gzip"))).await.unwrap_err();
@@ -601,7 +708,6 @@ async fn decompressed_body_limit_can_be_raised_or_removed() {
 
         let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
         let result = response.into_body().into_bytes().await;
-
         if succeeds {
             assert_eq!(result.unwrap().len(), output_len);
         } else {
@@ -642,11 +748,39 @@ async fn compressed_stream_limit_is_inclusive_and_can_be_raised_or_removed() {
 
         let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
         let result = response.into_body().into_bytes().await;
-
         if succeeds {
             assert!(result.unwrap().is_empty());
         } else {
             assert_eq!(result.unwrap_err().label(), "compression_limit_exceeded");
+        }
+    }
+}
+
+#[tokio::test]
+async fn buffered_decompression_preserves_the_body_buffer_limit() {
+    let expected = payload();
+    let compressed = compress(Format::Gzip, expected.as_bytes());
+
+    for limit in [expected.len(), expected.len() - 1] {
+        let response_body = compressed.clone();
+        let body_builder = builder().with_options(HttpBodyOptions::new().buffer_limit(limit));
+        let handler = client().decompress_responses(&[Format::Gzip]).layer(responds_with(move || {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .header(CONTENT_ENCODING, HeaderValue::from_static("gzip"))
+                .body(body_builder.bytes(response_body.clone()))
+                .build()
+        }));
+
+        let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
+        assert!(response.body().try_clone().is_none());
+        let result = response.into_body().into_buffered().await;
+        if limit == expected.len() {
+            assert_eq!(result.unwrap().into_bytes().await.unwrap().to_vec(), expected.as_bytes());
+        } else {
+            let error = result.unwrap_err();
+            assert_eq!(error.label(), "body_size_limit");
+            assert!(error.to_string().contains(&format!("body size exceeds the limit of {limit} bytes")));
         }
     }
 }
@@ -755,7 +889,7 @@ async fn an_uncompressed_response_still_says_it_varies() {
 }
 
 #[tokio::test]
-async fn a_body_is_not_returned_when_no_representation_is_acceptable() {
+async fn no_acceptable_representation_returns_an_error() {
     for accept_encoding in ["gzip;q=0, identity;q=0", "*;q=0"] {
         let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
             HttpResponseBuilder::new_fake()
@@ -772,16 +906,11 @@ async fn a_body_is_not_returned_when_no_representation_is_acceptable() {
             .headers_mut()
             .insert(ACCEPT_ENCODING, HeaderValue::from_static(accept_encoding));
 
-        let response = handler.execute(input).await.unwrap();
+        let error = handler.execute(input).await.unwrap_err();
 
-        assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE, "{accept_encoding}");
-        assert_eq!(response.headers().get(VARY).unwrap(), "accept-encoding");
-        assert!(response.headers().get(CONTENT_ENCODING).is_none(), "{accept_encoding}");
-        assert!(response.headers().get(CONTENT_TYPE).is_none(), "{accept_encoding}");
-        assert!(response.headers().get(ETAG).is_none(), "{accept_encoding}");
-        assert!(response.headers().get("content-digest").is_none(), "{accept_encoding}");
-        assert!(response.headers().get("repr-digest").is_none(), "{accept_encoding}");
-        assert!(response.into_body().into_bytes().await.unwrap().is_empty(), "{accept_encoding}");
+        assert_eq!(error.label(), "compression_not_acceptable", "{accept_encoding}");
+        assert_eq!(error.status_code(), Some(StatusCode::NOT_ACCEPTABLE), "{accept_encoding}");
+        assert!(error.to_string().contains("no acceptable content encoding"), "{accept_encoding}");
     }
 }
 
@@ -826,7 +955,7 @@ async fn empty_content_encoding_members_do_not_make_an_acceptable_response_fail(
 }
 
 #[tokio::test]
-async fn an_unacceptable_pre_encoded_response_is_replaced_with_406() {
+async fn an_unacceptable_pre_encoded_response_returns_an_error() {
     let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
         HttpResponseBuilder::new_fake()
             .status(StatusCode::OK)
@@ -839,14 +968,14 @@ async fn an_unacceptable_pre_encoded_response_is_replaced_with_406() {
         .headers_mut()
         .insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, identity;q=0"));
 
-    let response = handler.execute(input).await.unwrap();
+    let error = handler.execute(input).await.unwrap_err();
 
-    assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
-    assert!(response.into_body().into_bytes().await.unwrap().is_empty());
+    assert_eq!(error.label(), "compression_not_acceptable");
+    assert_eq!(error.status_code(), Some(StatusCode::NOT_ACCEPTABLE));
 }
 
 #[tokio::test]
-async fn an_error_response_is_not_hidden_by_406() {
+async fn an_error_response_is_not_hidden_by_negotiation_failure() {
     let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
         HttpResponseBuilder::new_fake()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -878,10 +1007,10 @@ async fn rejected_identity_is_not_used_for_a_non_compressible_response() {
         .headers_mut()
         .insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, identity;q=0"));
 
-    let response = handler.execute(input).await.unwrap();
+    let error = handler.execute(input).await.unwrap_err();
 
-    assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
-    assert!(response.into_body().into_bytes().await.unwrap().is_empty());
+    assert_eq!(error.label(), "compression_not_acceptable");
+    assert_eq!(error.status_code(), Some(StatusCode::NOT_ACCEPTABLE));
 }
 
 #[tokio::test]

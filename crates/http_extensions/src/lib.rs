@@ -212,7 +212,7 @@ pub use error::{HttpError, Result};
 mod error_labels;
 
 mod body;
-pub use body::{HttpBody, HttpBodyBuilder, HttpBodyOptions};
+pub use body::{HttpBody, HttpBodyBuilder, HttpBodyOptions, transform};
 
 #[cfg(any(feature = "json", test))]
 mod json;

@@ -7,12 +7,8 @@
 //! # #[cfg(feature = "gzip")] {
 //! use compressors::format::Format;
 //! use http_compression::Compression;
-//! use http_extensions::HttpBodyBuilder;
-//!
-//! # fn configure(body_builder: HttpBodyBuilder) {
-//! let layer = Compression::client(body_builder).decompress_responses(&[Format::Gzip]);
+//! let layer = Compression::client().decompress_responses(&[Format::Gzip]);
 //! # let _ = layer;
-//! # }
 //! # }
 //! ```
 
@@ -25,7 +21,8 @@
 
 //! [`compressors`] transforms a stream of bytes. This crate applies that to
 //! HTTP messages: reading `Content-Encoding`, negotiating `Accept-Encoding`,
-//! and replacing a body with one that compresses or decompresses as it is read.
+//! and compressing buffered bodies directly or transforming streaming bodies as they are read.
+//! Decompression always returns a streaming body, including for buffered input.
 //! The policies and trailer fields the body already carried travel through,
 //! except stale `Content-Digest` and `Repr-Digest` values removed after a
 //! transformation.
@@ -67,26 +64,21 @@
 //! use compressors::DecompressorLimits;
 //! use compressors::format::Format;
 //! use http_compression::Compression;
-//! use http_extensions::HttpBodyBuilder;
-//!
-//! # fn configure(body_builder: HttpBodyBuilder) {
-//! let client = Compression::client(body_builder.clone())
+//! let client = Compression::client()
 //!     .decompress_responses(&[Format::Gzip])
 //!     .limits(
 //!         DecompressorLimits::new().max_output_len(NonZeroU64::new(16 * 1024 * 1024).unwrap()),
 //!     );
 //!
-//! let server = Compression::server(body_builder)
+//! let server = Compression::server()
 //!     .decompress_requests(&[Format::Gzip])
 //!     .compress_responses(&[Format::Gzip]);
 //! # let _ = (client, server);
 //! # }
-//! # }
 //! ```
 //!
 //! Decompressed messages carry [`OriginalBody`] in their extensions. It records the
-//! original compression formats and `Content-Length` after those headers have been
-//! removed from the decompressed request or response.
+//! original compression formats and `Content-Length` before the layer changes or removes those headers.
 //!
 //! # Which formats
 //!
@@ -109,13 +101,16 @@
 //!
 //! # Errors
 //!
-//! Every transformation is lazy, so a malformed or oversized body fails when it
-//! is read rather than when its headers arrive. Failures carry one of three labels:
+//! Buffered compression sets `Content-Length` to the final byte count and removes `Transfer-Encoding`.
+//! Decompression and streaming compression remove `Content-Length` because the final size is not known yet.
+//! Buffered compression errors fail the handler call. Other data errors fail the body read.
+//! Failures carry one of four labels:
 //!
 //! | Label | What happened |
 //! |-------|---------------|
 //! | `compression_invalid` | The body was malformed for its declared compression format |
 //! | `compression_limit_exceeded` | Decompression would have exceeded the configured limits |
+//! | `compression_not_acceptable` | No response representation satisfies `Accept-Encoding`; status code 406 |
 //! | `compression_unsupported` | An unavailable format was seen under [`UnsupportedCompression::Fail`] |
 //!
 //! A `Content-Encoding` that cannot be parsed is not an error: the body is left

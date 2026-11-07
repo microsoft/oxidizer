@@ -6,7 +6,8 @@
 //! [`Dispatch`] owns the transports and their wrappers. It wraps each transport once when it builds
 //! the dispatch pool. The wrapper runs inside retries, so it processes the response from every
 //! attempt. It also runs inside attempt logging and metrics. Those layers receive the response
-//! after removal of its encoding metadata, and their timing excludes lazy decompression work.
+//! after its encoding metadata is updated. Their timing excludes decompression,
+//! which runs when the consumer reads the body.
 
 use http_extensions::HttpBodyBuilder;
 use opentelemetry::metrics::Meter;
@@ -52,6 +53,8 @@ pub(crate) fn create_dispatch_handler(
     feature = "compression-zstd"
 ))]
 mod decompression {
+    use bytesbuf::mem::HasMemory as _;
+    use compressors::Resources;
     use http_compression::{Client, Compression, CompressionLayer};
     use layered::Layer as _;
 
@@ -68,7 +71,9 @@ mod decompression {
         }
 
         let formats = options.formats.iter().map(|format| format.format()).collect::<Vec<_>>();
-        let layer = Compression::client(body_builder.clone()).decompress_responses(&formats);
+        let layer = Compression::client()
+            .resources(Resources::new(body_builder.memory()))
+            .decompress_responses(&formats);
         let layer = layer.limits(options.limits());
         Some(layer)
     }

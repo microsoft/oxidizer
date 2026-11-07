@@ -44,6 +44,7 @@ compressors = { workspace = true, features = ["futures-stream"] }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
+http-body-util.workspace = true
 http_extensions = { workspace = true }
 layered = { workspace = true }
 mime = { workspace = true }

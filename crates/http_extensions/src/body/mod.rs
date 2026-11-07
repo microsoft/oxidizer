@@ -15,7 +15,6 @@
 //! Create bodies with [`HttpBodyBuilder`].
 //! All bodies implement the standard `http_body::Body` trait.
 
-use std::fmt::{Debug, Formatter};
 use std::future::ready;
 use std::io::Read;
 use std::pin::Pin;
@@ -29,6 +28,7 @@ use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
 use pin_project::pin_project;
 use thread_aware::ThreadAware;
+use tick::{Clock, Delay};
 
 use crate::constants::DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES;
 use crate::error_labels::{LABEL_BODY_CONSUMED, LABEL_BODY_NOT_BUFFERED, LABEL_BODY_SIZE_LIMIT, LABEL_BODY_UTF8_INVALID};
@@ -36,10 +36,10 @@ use crate::{HttpError, Result};
 
 mod builder;
 pub(crate) mod options;
+pub mod transform;
 pub use builder::HttpBodyBuilder;
 pub use options::HttpBodyOptions;
-
-pub(crate) mod timeout_body;
+use transform::StreamingBody;
 
 /// An HTTP body that can contain several data types.
 ///
@@ -99,6 +99,10 @@ pub(crate) mod timeout_body;
 /// Use a stream for large response bodies, such as file downloads.
 /// A stream has no buffering limit because it does not store the complete body.
 ///
+/// An idle timeout limits the wait for the next frame while the body is polled.
+/// Set it with [`HttpBodyOptions::timeout`].
+/// [`HttpBody::transform`] keeps the timeout and applies it to the transformed output frames.
+///
 /// The following example writes a downloaded file to disk:
 ///
 /// ```
@@ -142,46 +146,100 @@ pub(crate) mod timeout_body;
 ///
 /// [http-body-util]: https://docs.rs/http-body-util/latest/http_body_util/
 /// [futures]: https://docs.rs/futures/latest/futures/
-#[derive(Debug, ThreadAware)]
+#[derive(derive_more::Debug, ThreadAware)]
 #[pin_project]
 #[must_use]
 pub struct HttpBody {
     #[pin]
     #[thread_aware(skip)]
     kind: Kind,
+    options: HttpBodyOptions,
+    clock: Clock,
 }
 
 // HttpBody implementations.
 
 impl HttpBody {
-    /// Creates an empty body (zero bytes).
-    pub(crate) const fn empty() -> Self {
-        Self { kind: Kind::Empty }
+    pub(crate) fn from_empty(options: HttpBodyOptions, clock: Clock) -> Self {
+        Self {
+            kind: Kind::Empty,
+            options,
+            clock,
+        }
     }
 
     /// Creates a body backed by an in-memory byte sequence.
-    pub(crate) fn from_bytes(bytes: BytesView) -> Self {
+    pub(crate) fn from_bytes(bytes: BytesView, options: HttpBodyOptions, clock: Clock) -> Self {
         Self {
             kind: Kind::Bytes(Some(bytes)),
+            options,
+            clock,
         }
     }
 
     /// The policies this body was created with.
     ///
-    /// A buffered body has none of its own: it has nothing left to time out and
-    /// nothing left to buffer.
+    /// Buffering and transformations keep these policies for later streaming output.
     pub(crate) const fn options(&self) -> HttpBodyOptions {
-        match &self.kind {
-            Kind::Body(_, options) => *options,
-            Kind::Bytes(_) | Kind::Empty => HttpBodyOptions::new(),
-        }
+        self.options
     }
 
     /// Creates a streaming body backed by a boxed [`Body`] implementation.
-    pub(crate) fn from_streaming(body: Pin<Box<dyn Body<Data = BytesView, Error = HttpError> + Send>>, options: HttpBodyOptions) -> Self {
+    fn from_streaming(body: StreamingBody, options: HttpBodyOptions, clock: Clock, current_delay: Option<Delay>) -> Self {
         Self {
-            kind: Kind::Body(body, options),
+            kind: Kind::Body(body, current_delay),
+            options,
+            clock,
         }
+    }
+
+    /// Transforms body content while preserving its policies.
+    ///
+    /// Match both [`Content`][transform::Content] variants to handle buffered bytes and streaming frames.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from `transform_content` without changing it.
+    /// If a buffered body was already consumed, returns an error without calling `transform_content`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), http_extensions::HttpError> {
+    /// # #[cfg(feature = "test-util")] {
+    /// # use http_extensions::HttpBodyBuilder;
+    /// # use http_extensions::transform::{Content, StreamingBody};
+    /// # use http_body_util::BodyExt;
+    /// let body = HttpBodyBuilder::new_fake().text("hello");
+    /// let transformed = body.transform(|content| {
+    ///     Ok(match content {
+    ///         Content::Bytes(bytes) => Content::Bytes(bytes),
+    ///         Content::Streaming(inner) => {
+    ///             Content::Streaming(StreamingBody::new(inner.map_frame(|frame| frame)))
+    ///         }
+    ///     })
+    /// })?;
+    /// # }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// A match must also handle the bytes path:
+    ///
+    /// ```compile_fail,E0004
+    /// # use http_extensions::{HttpBody, Result};
+    /// # use http_extensions::transform::Content;
+    /// # fn example(body: HttpBody) -> Result<HttpBody> {
+    /// body.transform(|content| Ok(match content {
+    ///     Content::Streaming(inner) => Content::Streaming(inner),
+    /// }))
+    /// # }
+    /// ```
+    pub fn transform(
+        self,
+        transform_content: impl FnOnce(transform::Content) -> Result<transform::Content>,
+    ) -> Result<Self> {
+        transform::transform_body(self, transform_content)
     }
 
     /// Converts the body into a memory-efficient view over a byte sequence.
@@ -273,6 +331,7 @@ impl HttpBody {
     ///
     /// Set the payload size limit with [`HttpBodyOptions::buffer_limit`] on the builder.
     /// The default limit is 2 GB.
+    /// The buffered body keeps its policies for later transformations.
     ///
     /// # Caveats
     ///
@@ -305,16 +364,20 @@ impl HttpBody {
     /// # }
     /// ```
     pub fn into_buffered(self) -> impl Future<Output = Result<Self>> + Send {
+        let options = self.options;
         match self.kind {
-            Kind::Bytes(Some(data)) => Either::Left(ready(Ok(Self::from_bytes(data)))),
+            Kind::Bytes(Some(_)) => Either::Left(ready(Ok(self))),
             Kind::Bytes(None) => Either::Left(ready(Err(HttpError::validation_with_label(
                 "body cannot be buffered because it is already consumed",
                 LABEL_BODY_CONSUMED,
             )))),
-            Kind::Empty => Either::Left(ready(Ok(Self::empty()))),
-            Kind::Body(b, options) => {
-                let limit = options.buffer_limit;
-                Either::Right(collect_with_limit(b.into_data_stream(), limit).map_ok(Self::from_bytes))
+            Kind::Empty => Either::Left(ready(Ok(self))),
+            Kind::Body(..) => {
+                let clock = self.clock.clone();
+                Either::Right(
+                    collect_with_limit(self.into_data_stream(), options.buffer_limit)
+                        .map_ok(move |bytes| Self::from_bytes(bytes, options, clock)),
+                )
             }
         }
     }
@@ -452,7 +515,7 @@ impl HttpBody {
         match &self.kind {
             Kind::Bytes(Some(bytes)) => Some(bytes.len() as u64),
             Kind::Bytes(None) | Kind::Empty => Some(0),
-            Kind::Body(b, _) => b.size_hint().exact(),
+            Kind::Body(b, ..) => b.size_hint().exact(),
         }
     }
 
@@ -492,8 +555,8 @@ impl HttpBody {
     #[must_use]
     pub fn try_clone(&self) -> Option<Self> {
         match &self.kind {
-            Kind::Bytes(Some(bytes)) => Some(Self::from_bytes(bytes.clone())),
-            Kind::Empty => Some(Self::empty()),
+            Kind::Bytes(Some(bytes)) => Some(Self::from_bytes(bytes.clone(), self.options, self.clock.clone())),
+            Kind::Empty => Some(Self::from_empty(self.options, self.clock.clone())),
             Kind::Body(..) | Kind::Bytes(None) => None,
         }
     }
@@ -554,14 +617,34 @@ impl Body for HttpBody {
     type Error = HttpError;
 
     fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>>>> {
-        let this = self.project();
+        let mut this = self.project();
 
-        match this.kind.project() {
+        match this.kind.as_mut().project() {
             BodyInnerProj::Bytes(bytes) => bytes
                 .take()
                 .map_or_else(|| Ready(None), |bytes| Ready((!bytes.is_empty()).then(|| Ok(Frame::data(bytes))))),
             BodyInnerProj::Empty => Ready(None),
-            BodyInnerProj::Body(body, _) => body.as_mut().poll_frame(cx),
+            BodyInnerProj::Body(body, current_delay) => {
+                let result = Pin::new(body).poll_frame(cx);
+                if result.is_ready() {
+                    *current_delay = None;
+                    return result;
+                }
+
+                let Some(duration) = this.options.timeout else {
+                    return Poll::Pending;
+                };
+                let clock = this.clock;
+                let delay = current_delay.get_or_insert_with(|| Delay::new(clock, duration));
+
+                if Pin::new(delay).poll(cx).is_ready() {
+                    let error = HttpError::timeout_for_body(duration);
+                    this.kind.set(Kind::Empty);
+                    return Ready(Some(Err(error)));
+                }
+
+                Poll::Pending
+            }
         }
     }
 
@@ -569,7 +652,7 @@ impl Body for HttpBody {
         match &self.kind {
             Kind::Bytes(Some(bytes)) => SizeHint::with_exact(bytes.len() as u64),
             Kind::Bytes(None) | Kind::Empty => SizeHint::with_exact(0),
-            Kind::Body(b, _) => b.size_hint(),
+            Kind::Body(b, ..) => b.size_hint(),
         }
     }
 
@@ -577,30 +660,20 @@ impl Body for HttpBody {
         match &self.kind {
             Kind::Bytes(Some(x)) => x.is_empty(),
             Kind::Bytes(None) | Kind::Empty => true,
-            Kind::Body(b, _) => b.is_end_stream(),
+            Kind::Body(b, ..) => b.is_end_stream(),
         }
     }
 }
 
-#[expect(
-    clippy::large_enum_variant,
-    reason = "BytesView is intentionally large, though future optimizations may decrease size"
-)]
+#[derive(derive_more::Debug)]
 #[pin_project(project = BodyInnerProj)]
 enum Kind {
+    #[debug("Bytes")]
     Bytes(Option<BytesView>),
+    #[debug("Empty")]
     Empty,
-    Body(Pin<Box<dyn Body<Data = BytesView, Error = HttpError> + Send>>, HttpBodyOptions),
-}
-
-impl Debug for Kind {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Bytes(_) => f.debug_struct("Bytes").finish(),
-            Self::Empty => f.debug_struct("Empty").finish(),
-            Self::Body(_, _) => f.debug_struct("Body").finish(),
-        }
-    }
+    #[debug("Body")]
+    Body(StreamingBody, Option<Delay>),
 }
 
 fn collect_with_limit(
@@ -637,6 +710,7 @@ fn check_size_limit(current_size: usize, additional: usize, limit: usize) -> Res
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::fmt::Debug;
     use std::pin::pin;
     use std::task::Waker;
 

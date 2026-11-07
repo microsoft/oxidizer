@@ -64,6 +64,7 @@ test-util = ["tick/test-util"]
 [dependencies]
 bytes = { workspace = true, features = ["std"] }
 bytesbuf = { workspace = true, features = ["bytes-compat", "std"] }
+derive_more = { workspace = true, features = ["debug"] }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
