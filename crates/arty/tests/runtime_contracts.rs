@@ -33,6 +33,7 @@ use tick::FutureExt;
 #[cfg(test)]
 fn runtime(workers: usize) -> Runtime {
     Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(workers))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .build()
@@ -320,6 +321,7 @@ fn factory_and_poll_panics_return_errors_and_preserve_runtime_usability() {
         panic_any(Payload(1))
     }
     let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .panic(PanicPolicy::ignore())
@@ -369,6 +371,7 @@ fn scoped_borrowed_storage_is_destroyed_before_success_or_error() {
 fn dropping_a_runtime_on_a_blocking_worker_panics() {
     for policy in [BlockingPoolPolicy::per_worker(), BlockingPoolPolicy::shared().max(1)] {
         let runtime = Runtime::builder()
+            .monitor(arty::runtime::MonitorPolicy::disabled())
             .workers(WorkersPolicy::exactly(1))
             .blocking_pool(policy)
             .build()
@@ -385,7 +388,11 @@ fn dropping_a_runtime_on_a_blocking_worker_panics() {
 
 #[test]
 fn repeated_stop_requests_do_not_break_shutdown() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
     let control = support::runtime_control(&runtime);
     control.request_stop();
     control.request_stop();

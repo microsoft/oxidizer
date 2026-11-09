@@ -46,7 +46,7 @@ use crate::runtime::worker::blocking::{LocalWorker as BlockingLocalWorker, PoolI
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// # #[arty::main]
+/// # #[arty::main(monitor = disabled)]
 /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 /// let task = cx.scheduler().spawn(async |_| 42);
 /// assert_eq!(task.await?, 42);

@@ -70,7 +70,7 @@
 //! use std::rc::Rc;
 //!
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! # #[arty::main]
+//! # #[arty::main(monitor = disabled)]
 //! # async fn main(
 //! #     cx: arty::task::Context,
 //! # ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

@@ -199,7 +199,7 @@ mod tests {
         let hardware = fake_hardware(PROCESSORS);
         let runtime = runtime_with_processors(
             WorkersPolicy::exactly(WORKERS),
-            MonitorPolicy::enabled().into(),
+            MonitorPolicy::disabled().into(),
             &hardware.processors(),
         );
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();

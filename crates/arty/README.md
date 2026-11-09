@@ -34,7 +34,7 @@ cargo add arty
 ```rust
 use arty::task::{Context, JoinError};
 
-#[arty::main]
+#[arty::main(monitor = disabled)]
 async fn main(cx: Context) -> Result<(), JoinError> {
     let answer = cx.scheduler().spawn(async |_| 6 * 7).await?;
     println!("{answer}");
@@ -80,7 +80,7 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbpjTzkOovhJgb4j8Xd8b5dycb1Kf_wRXWtfYbr0QtKZVggRRhZIKCZGFydHllMC42LjGCa2FydHlfbWFjcm9zZTAuNi4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb94geMR9_5x8bD0NI7vWvQU8bjBeZnbfaMTgbnBA2qp7TcJRhZIKCZGFydHllMC42LjGCa2FydHlfbWFjcm9zZTAuNi4x
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/0.6.1/arty/?search=core::ThreadAware
  [__link10]: https://docs.rs/arty/0.6.1/arty/core/index.html

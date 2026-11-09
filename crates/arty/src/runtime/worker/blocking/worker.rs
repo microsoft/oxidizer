@@ -489,6 +489,7 @@ mod tests {
     fn runtime_releases_pool_even_when_a_scheduler_is_retained() {
         execute_or_abandon(|| {
             let runtime = crate::runtime::Runtime::builder()
+                .monitor(crate::runtime::MonitorPolicy::disabled())
                 .workers(crate::runtime::WorkersPolicy::exactly(1))
                 .build()
                 .unwrap();

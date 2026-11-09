@@ -183,17 +183,28 @@ fn task_identity_survives_repeated_collection_and_recording_changes() {
     });
     ready.recv_timeout(TEST_TIMEOUT).unwrap();
     let first = capture(&runtime);
+    runtime.scheduler().block_on(async |_| ()).unwrap();
 
     seismograph::recorder(Configuration {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
     let second = capture(&runtime);
+    runtime.scheduler().block_on(async |_| ()).unwrap();
     seismograph::recorder(Configuration::default());
     let third = capture(&runtime);
     runtime.stop().unwrap();
     assert!(task.join().unwrap_err().is_shutdown());
 
+    for snapshot in [&first, &second, &third] {
+        assert_eq!(snapshot.tasks.len(), 1);
+        assert!(
+            snapshot
+                .workers
+                .iter()
+                .all(|worker| worker.task_collection == TaskCollection::Complete)
+        );
+    }
     assert_eq!(
         (second.tasks[0].id, third.tasks[0].id, second.tasks[0].spawned_at),
         (first.tasks[0].id, first.tasks[0].id, None)

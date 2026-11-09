@@ -105,7 +105,9 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let mut message = String::from("Hello");
     /// runtime
     ///     .scheduler()
@@ -164,7 +166,9 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let task = runtime
     ///     .scheduler()
     ///     .spawn_anywhere(String::from("Arty"), |_, name| async move { name.len() });
@@ -179,7 +183,9 @@ impl RuntimeScheduler {
     /// use arty::runtime::Runtime;
     ///
     /// struct SendOnly(u32);
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let task = runtime
     ///     .scheduler()
     ///     .spawn_anywhere((), |_, ()| async { SendOnly(42) });
@@ -221,7 +227,9 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let task = runtime.scheduler().spawn_blocking(|| 6 * 7);
     /// assert_eq!(futures::executor::block_on(task)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -416,6 +424,7 @@ mod tests {
     #[cfg(not(miri))]
     fn check_borrowed_future_completion(panics: bool) {
         let runtime = Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .panic(crate::runtime::PanicPolicy::ignore())
             .build()

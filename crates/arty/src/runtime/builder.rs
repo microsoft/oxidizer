@@ -27,6 +27,7 @@ use crate::runtime::handle::Runtime;
 /// use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 ///
 /// let runtime = Runtime::builder()
+///     .monitor(arty::runtime::MonitorPolicy::disabled())
 ///     .workers(WorkersPolicy::at_most(4))
 ///     .blocking_pool(BlockingPoolPolicy::shared().max(4))
 ///     .build()?;
@@ -164,7 +165,10 @@ impl RuntimeBuilder {
     /// # #[cfg(all(feature = "rt", feature = "test-util"))]
     /// # fn sequential_delay() -> Result<(), Box<dyn std::error::Error>> {
     /// let control = arty::time::ClockControl::new().auto_advance_timers(true);
-    /// let runtime = arty::runtime::Runtime::builder().clock(control).build()?;
+    /// let runtime = arty::runtime::Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .clock(control)
+    ///     .build()?;
     /// runtime.scheduler().block_on(async |cx| {
     ///     let duration = std::time::Duration::from_secs(30);
     ///     let watch = cx.clock().stopwatch();
@@ -205,7 +209,9 @@ impl RuntimeBuilder {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// assert_eq!(runtime.scheduler().block_on(async |_| 42)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -328,7 +334,11 @@ mod tests {
     #[test]
     fn build_and_stop_inside_futures_executor() {
         futures::executor::block_on(async {
-            let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+            let runtime = Runtime::builder()
+                .monitor(MonitorPolicy::disabled())
+                .workers(WorkersPolicy::exactly(1))
+                .build()
+                .unwrap();
 
             let (value, scheduler) = runtime
                 .scheduler()

@@ -37,7 +37,7 @@
 //! use arty::task::{Context, JoinError};
 //!
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! #[arty::main]
+//! #[arty::main(monitor = disabled)]
 //! async fn main(cx: Context) -> Result<(), JoinError> {
 //!     let answer = cx.scheduler().spawn(async |_| 6 * 7).await?;
 //! #   assert_eq!(answer, 42);
@@ -142,7 +142,7 @@ use arty_io_core as _;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// # #[arty::main]
+/// # #[arty::main(monitor = disabled)]
 /// # async fn main(cx: arty::task::Context) {
 /// cx.clock().delay(std::time::Duration::from_millis(1)).await;
 /// println!("Hello from Arty!");
@@ -163,7 +163,7 @@ use arty_io_core as _;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main(panic = ignore)]
+/// #[arty::main(panic = ignore, monitor = disabled)]
 /// async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 ///     assert!(
 ///         cx.scheduler()
@@ -182,7 +182,7 @@ use arty_io_core as _;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main(workers = 4)]
+/// #[arty::main(workers = 4, monitor = disabled)]
 /// async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 ///     let answer = cx.scheduler().spawn(async |_| 42).await?;
 ///     assert_eq!(answer, 42);
@@ -262,7 +262,7 @@ pub use arty_macros::main;
 ///
 /// Enable monitoring for a test that exercises monitoring behavior:
 ///
-/// ```test_harness
+/// ```no_run,test_harness
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::test(monitor = enabled)]
 /// async fn monitored(_cx: arty::task::Context) {}
@@ -326,7 +326,7 @@ pub mod task;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// # #[arty::main]
+/// # #[arty::main(monitor = disabled)]
 /// # async fn main(cx: arty::task::Context) {
 /// let worker: &arty::core::Thread = cx.thread();
 /// assert_eq!(worker.id(), std::thread::current().id());
@@ -358,7 +358,7 @@ pub mod core {
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// # #[arty::main]
+/// # #[arty::main(monitor = disabled)]
 /// # async fn main(cx: arty::task::Context) {
 /// use std::future::pending;
 /// use std::time::Duration;

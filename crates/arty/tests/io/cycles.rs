@@ -214,6 +214,7 @@ fn notification_during_first_driver_construction_prevents_primary_wait() {
 fn controlled_timer_fires_while_a_primary_driver_is_initialized() {
     let control = tick::ClockControl::new();
     let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .clock(control.clone())
         .build()

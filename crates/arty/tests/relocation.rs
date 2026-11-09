@@ -65,7 +65,11 @@ impl Driver for RelocationIoDriver {
 
 #[test]
 fn relocating_context_leaves_shared_source_clones_on_the_source_worker() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .unwrap();
     let (source, original, scheduler) = runtime
         .scheduler()
         .spawn_anywhere(
@@ -119,7 +123,11 @@ impl ThreadAware for ReturnedProbe {
 
 #[test]
 fn spawn_anywhere_keeps_round_robin_selection_and_local_children() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .unwrap();
     runtime
         .scheduler()
         .block_on(async |cx| {
@@ -155,8 +163,21 @@ fn spawn_anywhere_keeps_round_robin_selection_and_local_children() {
 #[test]
 fn spawn_anywhere_relocates_results_on_the_source_worker() {
     for (runtime, workers) in [
-        (Runtime::new().unwrap(), 1),
-        (Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap(), 2),
+        (
+            Runtime::builder()
+                .monitor(arty::runtime::MonitorPolicy::disabled())
+                .build()
+                .unwrap(),
+            1,
+        ),
+        (
+            Runtime::builder()
+                .monitor(arty::runtime::MonitorPolicy::disabled())
+                .workers(WorkersPolicy::exactly(2))
+                .build()
+                .unwrap(),
+            2,
+        ),
     ] {
         runtime
             .scheduler()
@@ -197,7 +218,11 @@ fn spawn_anywhere_relocates_results_on_the_source_worker() {
 
 #[test]
 fn spawn_at_relocates_results_to_the_source_worker() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .unwrap();
     let source = runtime.scheduler().block_on(async |cx| cx).unwrap();
     let destination = source
         .control()
@@ -239,7 +264,11 @@ fn spawn_at_relocates_results_to_the_source_worker() {
 // to the worker that receives the result.
 #[test]
 fn spawn_anywhere_returns_context_bound_to_the_source_worker() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .unwrap();
     runtime
         .scheduler()
         .block_on(async |cx| {
@@ -261,7 +290,11 @@ fn spawn_anywhere_returns_context_bound_to_the_source_worker() {
 // selects the result destination, not the submitting worker.
 #[test]
 fn spawn_anywhere_relocates_results_to_the_worker_that_receives_the_join() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .unwrap();
     let source = runtime.scheduler().block_on(async |cx| cx).unwrap();
     let destination = runtime.scheduler().block_on(async |cx| cx).unwrap();
     assert_ne!(source.thread(), destination.thread());
@@ -291,7 +324,11 @@ fn spawn_anywhere_relocates_results_to_the_worker_that_receives_the_join() {
 // receiving Arty worker.
 #[test]
 fn spawn_anywhere_results_joined_outside_arty_are_not_relocated() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
     let source = runtime.scheduler().block_on(async |cx| cx.thread().clone()).unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let result = scheduler
@@ -321,7 +358,11 @@ fn a_foreign_owner_cannot_rebind_a_registered_thread_id() {
         }
     }
 
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
     let (source, mut scheduler) = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { (cx.thread().clone(), cx.scheduler().clone()) })
@@ -372,6 +413,7 @@ struct RelocationObservation {
 #[cfg(test)]
 fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) -> RelocationObservation {
     let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .blocking_pool(policy)
         .build()
@@ -508,7 +550,11 @@ fn relocating_context_uses_same_pool_when_shared() {
 
 #[test]
 fn relocated_context_initializes_io_on_the_destination_worker() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .unwrap();
     let initialized = Arc::new(Mutex::new(Vec::new()));
     let destination = runtime
         .scheduler()
@@ -550,8 +596,16 @@ fn relocated_context_initializes_io_on_the_destination_worker() {
 
 #[test]
 fn foreign_owner_relocation_preserves_runtime_binding() {
-    let source_runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-    let destination_runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let source_runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    let destination_runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
     let mut cx = source_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx })
@@ -582,7 +636,11 @@ fn repeated_spawn_after_relocation_uses_destination() {
     // Exercise the cached route repeatedly without turning this regression test into a load test.
     const SPAWN_COUNT: usize = 100;
 
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .unwrap();
     let workers: Vec<_> = (0..2)
         .map(|_| runtime.scheduler().spawn_anywhere((), |cx, ()| async move { cx }))
         .map(|handle| handle.join().unwrap())
@@ -602,8 +660,16 @@ fn repeated_spawn_after_relocation_uses_destination() {
 
 #[test]
 fn foreign_owner_relocation_preserves_bare_scheduler_binding() {
-    let source_runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-    let destination_runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let source_runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    let destination_runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
     let cx = source_runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx })

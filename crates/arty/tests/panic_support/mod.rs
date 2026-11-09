@@ -7,6 +7,7 @@ use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
 
 pub(crate) fn runtime() -> Runtime {
     Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .panic(PanicPolicy::ignore())

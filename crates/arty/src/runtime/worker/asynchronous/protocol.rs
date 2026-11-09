@@ -123,6 +123,7 @@ mod tests {
     #[test]
     fn queued_factory_into_inner_returns_the_factory() {
         let runtime = crate::runtime::Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();

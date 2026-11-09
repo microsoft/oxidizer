@@ -11,10 +11,14 @@ use std::error::Error as StdError;
 use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, WorkersPolicy};
 
 #[test]
+#[cfg(any(not(feature = "monitor"), feature = "test-util"))]
 fn monitor_policy_defaults_to_enabled() {
+    let policy = MonitorPolicy::default();
+    #[cfg(feature = "monitor")]
+    let policy = policy.io(seismograph_protocol::io::MonitorIo::new_mocked().0);
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .monitor(MonitorPolicy::default())
+        .monitor(policy)
         .build()
         .unwrap();
 
@@ -23,8 +27,11 @@ fn monitor_policy_defaults_to_enabled() {
 }
 
 #[test]
+#[cfg(any(not(feature = "monitor"), feature = "test-util"))]
 fn explicit_monitor_policies_preserve_runtime_behavior() {
     for policy in [MonitorPolicy::disabled(), MonitorPolicy::enabled()] {
+        #[cfg(feature = "monitor")]
+        let policy = policy.io(seismograph_protocol::io::MonitorIo::new_mocked().0);
         let runtime = Runtime::builder()
             .workers(WorkersPolicy::exactly(1))
             .monitor(policy)
@@ -39,9 +46,14 @@ fn explicit_monitor_policies_preserve_runtime_behavior() {
 #[test]
 fn default_runtime_construction_uses_one_worker() {
     for runtime in [
+        #[cfg(not(feature = "monitor"))]
         Runtime::new().unwrap(),
-        Runtime::builder().build().unwrap(),
-        Runtime::builder().workers(WorkersPolicy::default()).build().unwrap(),
+        Runtime::builder().monitor(MonitorPolicy::disabled()).build().unwrap(),
+        Runtime::builder()
+            .monitor(MonitorPolicy::disabled())
+            .workers(WorkersPolicy::default())
+            .build()
+            .unwrap(),
     ] {
         runtime
             .scheduler()
@@ -57,7 +69,12 @@ fn default_runtime_construction_uses_one_worker() {
 #[test]
 fn explicit_panic_policies_preserve_runtime_construction() {
     for policy in [PanicPolicy::shutdown(), PanicPolicy::ignore()] {
-        let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).panic(policy).build().unwrap();
+        let runtime = Runtime::builder()
+            .monitor(MonitorPolicy::disabled())
+            .workers(WorkersPolicy::exactly(1))
+            .panic(policy)
+            .build()
+            .unwrap();
 
         assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
         runtime.stop().unwrap();
@@ -95,6 +112,7 @@ fn zero_shared_blocking_limits_are_rejected_when_the_runtime_is_built() {
 #[test]
 fn zero_shared_blocking_limit_can_be_replaced_before_building() {
     let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
         .blocking_pool(BlockingPoolPolicy::shared().max(0))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .build()

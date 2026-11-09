@@ -60,7 +60,7 @@
 //! #     }
 //! # }
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! #[arty::main]
+//! #[arty::main(monitor = disabled)]
 //! async fn main(cx: Context) {
 //!     let io = cx.io().context::<ExampleIo>(&());
 //!     io.submit("request");

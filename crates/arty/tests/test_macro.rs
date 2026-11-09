@@ -130,7 +130,7 @@ async fn worker_count_is_exact_even_when_processors_are_shared(cx: Context) {
     assert_eq!(workers.len(), 3);
 }
 
-#[arty::main]
+#[arty::main(monitor = disabled)]
 #[::core::prelude::v1::test]
 async fn default_main_runtime_has_exactly_one_worker(cx: Context) {
     let tasks: Vec<_> = cx

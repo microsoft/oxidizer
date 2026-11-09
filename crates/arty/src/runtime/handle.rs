@@ -45,7 +45,9 @@ use crate::task::RuntimeScheduler;
 /// ```
 /// use arty::runtime::Runtime;
 ///
-/// let runtime = Runtime::new()?;
+/// let runtime = Runtime::builder()
+///     .monitor(arty::runtime::MonitorPolicy::disabled())
+///     .build()?;
 /// let task = runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 });
 /// assert_eq!(futures::executor::block_on(task)?, 42);
 /// runtime.stop()?;
@@ -78,7 +80,7 @@ impl Runtime {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use arty::runtime::Runtime;
     ///
     /// let runtime = Runtime::new()?;
@@ -120,7 +122,9 @@ impl Runtime {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let scheduler = runtime.scheduler();
     /// let first = scheduler.spawn_anywhere((), |_, ()| async { 20 });
     /// let second = scheduler.spawn_anywhere((), |_, ()| async { 22 });
@@ -179,7 +183,9 @@ impl Runtime {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
     ///     cx.control().request_stop();
     ///     cx.scheduler()
@@ -346,6 +352,7 @@ mod tests {
     #[test]
     fn ignored_task_worker_stop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .panic(crate::runtime::PanicPolicy::ignore())
             .build()
@@ -399,6 +406,7 @@ mod tests {
     #[test]
     fn ignored_task_worker_drop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .panic(crate::runtime::PanicPolicy::ignore())
             .build()
@@ -525,6 +533,7 @@ mod tests {
 
     fn single_worker_runtime() -> Runtime {
         Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .blocking_pool(crate::runtime::BlockingPoolPolicy::shared().max(1))
             .build()

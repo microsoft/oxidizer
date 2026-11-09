@@ -36,7 +36,9 @@ use performables::sync::mutex::Mutex;
 /// ```
 /// use arty::runtime::Runtime;
 ///
-/// let runtime = Runtime::new()?;
+/// let runtime = Runtime::builder()
+///     .monitor(arty::runtime::MonitorPolicy::disabled())
+///     .build()?;
 /// let error = runtime.scheduler().block_on(async |cx| {
 ///     cx.control().request_stop();
 ///     cx.scheduler()
@@ -71,7 +73,7 @@ impl JoinError {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main(panic = ignore)]
+    /// # #[arty::main(panic = ignore, monitor = disabled)]
     /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// let result: Result<(), arty::task::JoinError> =
     ///     cx.scheduler().spawn(async |_| panic!("task failed")).await;
@@ -93,7 +95,9 @@ impl JoinError {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
     ///     cx.control().request_stop();
     ///     cx.scheduler()

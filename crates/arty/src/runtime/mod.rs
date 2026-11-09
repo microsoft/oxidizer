@@ -92,6 +92,7 @@
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let runtime = Runtime::builder()
+//!         .monitor(arty::runtime::MonitorPolicy::disabled())
 //!         .workers(WorkersPolicy::at_most(2))
 //!         .blocking_pool(BlockingPoolPolicy::shared().max(4))
 //!         .build()?;
