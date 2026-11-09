@@ -17,7 +17,6 @@
 
 mod body;
 mod builder;
-mod map;
 pub(crate) mod options;
 pub use body::{Content, HttpBody, StreamingBody};
 pub use builder::HttpBodyBuilder;

@@ -16,7 +16,6 @@ use pin_project::pin_project;
 use thread_aware::ThreadAware;
 use tick::{Clock, Delay};
 
-use super::map;
 use super::options::HttpBodyOptions;
 use crate::constants::DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES;
 use crate::error_labels::{LABEL_BODY_CONSUMED, LABEL_BODY_NOT_BUFFERED, LABEL_BODY_SIZE_LIMIT, LABEL_BODY_UTF8_INVALID};
@@ -188,7 +187,7 @@ pub struct HttpBody {
     #[pin]
     #[thread_aware(skip)]
     pub(super) kind: Kind,
-    options: HttpBodyOptions,
+    pub(super) options: HttpBodyOptions,
     pub(super) clock: Clock,
 }
 
@@ -210,13 +209,6 @@ impl HttpBody {
             options,
             clock,
         }
-    }
-
-    /// The policies this body was created with.
-    ///
-    /// Buffering and transformations keep these policies for later streaming output.
-    pub(crate) const fn options(&self) -> HttpBodyOptions {
-        self.options
     }
 
     /// Creates a streaming body backed by a boxed [`Body`] implementation.
@@ -276,7 +268,24 @@ impl HttpBody {
     /// # }
     /// ```
     pub fn map(self, map_content: impl FnOnce(Content) -> Result<Content>) -> Result<Self> {
-        map::map_body(self, map_content)
+        let options = self.options;
+        let clock = self.clock;
+        let content = match self.kind {
+            Kind::Body(inner, _) => Content::Streaming(inner),
+            Kind::Bytes(Some(bytes)) => Content::Bytes(bytes),
+            Kind::Empty => Content::Bytes(BytesView::default()),
+            Kind::Bytes(None) => {
+                return Err(HttpError::validation_with_label(
+                    "body cannot be mapped because it is already consumed",
+                    LABEL_BODY_CONSUMED,
+                ));
+            }
+        };
+
+        match map_content(content)? {
+            Content::Streaming(inner) => Ok(Self::from_streaming(inner, options, clock, None)),
+            Content::Bytes(bytes) => Ok(Self::from_bytes(bytes, options, clock)),
+        }
     }
 
     /// Converts the body into a memory-efficient view over a byte sequence.

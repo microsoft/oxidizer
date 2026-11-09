@@ -373,7 +373,7 @@ mod tests {
         let body = builder.with_options(strict).stream(futures::stream::empty());
         let transformed = body.map(Ok).unwrap();
 
-        assert_eq!(transformed.options(), strict);
+        assert_eq!(transformed.options, strict);
     }
 
     #[test]
@@ -401,7 +401,7 @@ mod tests {
         let lenient = HttpBodyOptions::default().buffer_limit(99);
         let transformed = HttpBodyBuilder::new_fake().with_options(lenient).text("hello");
 
-        assert_eq!(transformed.options(), lenient);
+        assert_eq!(transformed.options, lenient);
     }
 
     #[test]
@@ -413,7 +413,7 @@ mod tests {
             .with_options(overrides)
             .stream(stream::pending());
 
-        assert_eq!(wrapped.options(), overrides);
+        assert_eq!(wrapped.options, overrides);
     }
 
     use crate::testing::{create_stream_body, create_stream_body_from_chunks};
