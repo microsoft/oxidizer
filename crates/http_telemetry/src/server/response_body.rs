@@ -51,6 +51,7 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
     })
     .flatten();
     response.map(|body| {
+        // TODO: Decide whether a buffered body can complete telemetry here instead of becoming a stream.
         body.map(|content| {
             Ok(Content::Streaming(StreamingBody::new(TelemetryBody {
                 inner: content,

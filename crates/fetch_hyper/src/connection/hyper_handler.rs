@@ -191,13 +191,17 @@ fn handle_poisoning(capture: &CaptureConnection, extensions: &Extensions) {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::task::{Context, Poll};
     use std::time::Duration;
 
     use anyspawn::Spawner;
     use bytes::Bytes;
+    use bytesbuf::mem::GlobalPool;
     use fetch_options::{ConnectionLifetime, PoolIndex, RequestFilter};
     use http::Version;
     use http_extensions::{HttpBodyBuilder, HttpRequestBuilder};
+    use hyper::body::Body;
+    use ohno::Labeled;
 
     use super::*;
     use crate::HyperTransport;
@@ -261,17 +265,36 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn request_body_timeout_configures_the_response_body() {
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
-        let connector = FakeConnector::new_success(http_response_bytes(), clock);
-        let handler = make_handler(connector, ConnectionLifetime::unlimited());
+        let connection_clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_pending_response(Bytes::from_static(b"HTTP/1.1 200 OK\r\n\r\n"), connection_clock.clone());
+        let body_clock = tick::ClockControl::new();
+        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &body_clock.to_clock())
+            .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(1)));
+        let mut options = fetch_options::TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        let handler = build_hyper_handler(
+            HyperTransportBuilder::new(connector, Spawner::new_tokio(None), connection_clock, options),
+            tls(),
+            body_builder,
+            &opentelemetry::global::meter("test"),
+        );
         let mut request = test_request();
-        request
-            .extensions_mut()
-            .insert(BodyTimeout::new(Duration::from_secs(5)));
+        request.extensions_mut().insert(BodyTimeout::new(Duration::from_millis(100)));
 
         let response = handler.execute(request).await.unwrap();
+        let mut body = response.into_body();
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
 
-        assert_eq!(response.into_body().into_text().await.unwrap(), "hello");
+        assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
+        body_clock.advance(Duration::from_millis(99));
+        assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
+        body_clock.advance(Duration::from_millis(1));
+
+        let Poll::Ready(Some(Err(error))) = Pin::new(&mut body).poll_frame(&mut cx) else {
+            panic!("the request body timeout must end the pending response body");
+        };
+        assert_eq!(error.label(), "body_timeout");
     }
 
     #[cfg_attr(miri, ignore)]
