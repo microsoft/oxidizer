@@ -91,17 +91,10 @@ pub struct RequestUris {
 /// [`HttpRequestBuilder::build`][crate::HttpRequestBuilder::build] renders this value once.
 /// Routing changes only the [`BaseUri`].
 /// [`Router::resolve_request_uri`] reuses the rendered value for every attempt.
-#[derive(Clone)]
-pub(crate) struct RenderedPath(pub(crate) http::uri::PathAndQuery);
-
-impl std::fmt::Debug for RenderedPath {
-    // Do not include the path and query contents.
-    // A rendered URI can contain sensitive IDs, tokens, and query parameters.
-    // This behavior matches the redacted Debug implementation for PathAndQuery.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("RenderedPath").finish_non_exhaustive()
-    }
-}
+// A rendered URI can contain sensitive IDs, tokens, and query parameters.
+// This matches the redacted Debug output for PathAndQuery.
+#[derive(Clone, derive_more::Debug)]
+pub(crate) struct RenderedPath(#[debug(skip)] pub(crate) http::uri::PathAndQuery);
 
 impl RequestUris {
     /// Creates a [`RequestUris`] with the given templated [`Uri`] as the
@@ -324,28 +317,16 @@ impl Router {
 
 type RouterFn = dyn Fn(&RouterContext) -> Option<BaseUri> + Send + Sync + 'static;
 
-#[derive(Default)]
+#[derive(Default, derive_more::Debug)]
 enum Resolver {
     #[default]
     Empty,
     Fixed(BaseUri),
     Custom {
+        #[debug(skip)]
         resolver: Arc<RouterFn>,
         has_alternatives: bool,
     },
-}
-
-impl std::fmt::Debug for Resolver {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Empty => f.write_str("Empty"),
-            Self::Fixed(base_uri) => f.debug_tuple("Fixed").field(base_uri).finish(),
-            Self::Custom { has_alternatives, .. } => f
-                .debug_struct("Custom")
-                .field("has_alternatives", has_alternatives)
-                .finish_non_exhaustive(),
-        }
-    }
 }
 
 fn use_fallback(context: &RouterContext) -> bool {

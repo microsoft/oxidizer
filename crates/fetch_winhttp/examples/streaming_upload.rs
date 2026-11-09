@@ -32,7 +32,6 @@ mod example {
     use http::{HeaderMap, HeaderName, HeaderValue, Version};
     use http_body::Frame;
     use http_body_util::StreamBody;
-    use http_extensions::HttpBodyOptions;
     use tick::Clock;
 
     pub(super) async fn run() -> Result<(), ohno::AppError> {
@@ -46,13 +45,10 @@ mod example {
         let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_tokio());
 
         // A stream carries no length, so neither the caller nor `fetch` declares one.
-        let body = test_client.body_builder.stream(
-            futures::stream::iter([
-                Ok(BytesView::copied_from_slice(b"streamed ", &test_client.body_builder)),
-                Ok(BytesView::copied_from_slice(b"request", &test_client.body_builder)),
-            ]),
-            &HttpBodyOptions::default(),
-        );
+        let body = test_client.body_builder.stream(futures::stream::iter([
+            Ok(BytesView::copied_from_slice(b"streamed ", &test_client.body_builder)),
+            Ok(BytesView::copied_from_slice(b"request", &test_client.body_builder)),
+        ]));
 
         let response = test_client.client.post(server.url("/upload")).body(body).fetch_text_body().await?;
 
@@ -74,7 +70,7 @@ mod example {
                 HeaderValue::from_static("value"),
             )]))),
         ]));
-        let body = test_client.body_builder.body(body, &HttpBodyOptions::default());
+        let body = test_client.body_builder.body(body);
 
         let Err(error) = test_client.client.post(server.url("/trailers")).body(body).fetch().await else {
             ohno::bail!("the transport accepted unsupported request trailers");

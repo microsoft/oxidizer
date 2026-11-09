@@ -16,7 +16,7 @@ use bytesbuf::mem::GlobalPool;
 use futures::TryStreamExt;
 use http::Request;
 use http_body_util::BodyExt;
-use http_extensions::{HttpBodyBuilder, HttpBodyOptions, HttpRequest, HttpResponse, HttpResponseBuilder, RequestHandler};
+use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, RequestHandler};
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server;
@@ -82,7 +82,7 @@ fn map_incoming_to_http_body(incoming: Incoming, body_builder: &HttpBodyBuilder)
         .map_ok(BytesView::from)
         .map_err(|e| http_extensions::HttpError::other(e, recoverable::RecoveryInfo::unknown(), "hyper"));
 
-    body_builder.stream(stream, &HttpBodyOptions::default())
+    body_builder.stream(stream)
 }
 
 async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder: HttpBodyBuilder, port: u16) -> Result<(), ohno::AppError> {

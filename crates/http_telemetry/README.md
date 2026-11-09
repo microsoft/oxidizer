@@ -27,7 +27,7 @@ use http_telemetry::Telemetry;
 use layered::{Execute, Stack};
 use observed::Sink;
 
-let layer = Telemetry::server(sink, body_builder.clone());
+let layer = Telemetry::server(sink);
 let handler = Execute::new(move |_request: HttpRequest| {
     let response = HttpResponse::new(body_builder.empty());
     async move { Ok::<_, HttpError>(response) }
@@ -169,7 +169,7 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbn2IYXeoCYmobaAmfVgVxiE0bR7PT3wT4qM0b7kH_Wq953qRhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb9UryyuyQgxAb1NkWER9_bs8brk09cVM2YXYb6NcdDGlK6nlhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
  [__link0]: https://crates.io/crates/observed/0.30.1
  [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
  [__link2]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry

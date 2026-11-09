@@ -14,13 +14,11 @@ use compressors::format::Format;
 use futures::Stream as _;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures::task::noop_waker;
-use http::header::CONTENT_TYPE;
+use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use http::{HeaderMap, HeaderValue, StatusCode};
 use http_body::{Body, Frame};
 use http_compression::{Compression, OriginalBody};
-use http_extensions::{
-    FakeHandler, HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, HttpResponseBuilder, Result,
-};
+use http_extensions::{FakeHandler, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, HttpResponseBuilder, Result};
 use layered::{Layer, Service};
 use ohno::{ErrorLabel, Labeled as _};
 use seatbelt::RecoveryInfo;
@@ -40,22 +38,25 @@ impl Body for ChannelBody {
 
 async fn streaming_response(format: Format) -> (UnboundedSender<Result<Frame<BytesView>>>, HttpResponse) {
     let builder = HttpBodyBuilder::new_fake();
-    let server = Compression::server(builder.clone())
+    let server = Compression::server()
         .compress_responses(&[format])
         .layer(FakeHandler::from_fn(|request: HttpRequest| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
                 .header(CONTENT_TYPE, HeaderValue::from_static("application/x-ndjson"))
+                .header(CONTENT_LENGTH, HeaderValue::from(123))
                 .body(request.into_body())
                 .build()
         }));
-    let client = Compression::client(builder.clone()).decompress_responses(&[format]).layer(server);
+    let client = Compression::client().decompress_responses(&[format]).layer(server);
     let (sender, receiver) = unbounded();
     let request = http::Request::get("https://example.com/stream")
-        .body(builder.body(ChannelBody(receiver), &HttpBodyOptions::default()))
+        .body(builder.body(ChannelBody(receiver)))
         .unwrap();
     let response = client.execute(request).await.unwrap();
+    assert!(response.headers().get(CONTENT_LENGTH).is_none());
     assert_eq!(response.extensions().get::<OriginalBody>().unwrap().formats(), [format]);
+    assert_eq!(response.extensions().get::<OriginalBody>().unwrap().content_length(), None);
     (sender, response)
 }
 

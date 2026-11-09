@@ -13,16 +13,19 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::task::Poll;
 use std::time::Duration;
 
+use bytesbuf::mem::GlobalPool;
 use common::{
     ABANDONED, COMPLETE, Capture, Captured, DURATION, ERROR, Echoing, Step, data, duration, poll_frame, scripted, server, sized_scripted,
 };
 use future_assert::FutureTestExt;
+use futures::stream;
 use http::header::{CONTENT_LENGTH, HeaderName, HeaderValue, TRANSFER_ENCODING};
 use http::{Method, StatusCode, Version};
 use http_body::Body;
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest};
 use layered::{Layer, Service};
 use observed::{Severity, Value};
+use ohno::Labeled;
 use tick::ClockControl;
 
 /// Sends `request` through a server layer to [`Echoing`] with `status`. Returns the response body
@@ -41,18 +44,47 @@ fn get(body: HttpBody) -> HttpRequest {
 
 #[test]
 fn size_hint_survives_wrapping() {
-    let (body, _capture) = respond(StatusCode::OK, get(HttpBodyBuilder::new_fake().text("chunk")));
+    let length = |source| {
+        let (body, _capture) = respond(StatusCode::OK, get(source));
+        body.content_length()
+    };
 
-    assert_eq!(body.content_length(), Some(5));
+    assert_eq!(
+        [
+            length(HttpBodyBuilder::new_fake().text("chunk")),
+            length(sized_scripted([data("chunk")]))
+        ],
+        [Some(5); 2]
+    );
+}
+
+#[test]
+fn buffered_data_survives_wrapping() {
+    let (mut body, capture) = respond(StatusCode::OK, get(HttpBodyBuilder::new_fake().text("chunk")));
+
+    let Poll::Ready(Some(Ok(frame))) = poll_frame(&mut body) else {
+        panic!("the first poll must return the buffered frame");
+    };
+
+    assert_eq!(
+        (frame.into_data().unwrap().to_vec(), capture.names()),
+        (b"chunk".to_vec(), vec![COMPLETE])
+    );
 }
 
 #[test]
 fn end_of_stream_survives_wrapping() {
-    let (mut body, _capture) = respond(StatusCode::OK, get(HttpBodyBuilder::new_fake().text("chunk")));
-    let before = body.is_end_stream();
-    let _ = poll_frame(&mut body);
+    let ends = |source| {
+        let (mut body, _capture) = respond(StatusCode::OK, get(source));
+        let before = body.is_end_stream();
+        let _ = poll_frame(&mut body);
+        (before, body.is_end_stream())
+    };
 
-    assert_eq!((before, body.is_end_stream()), (false, true));
+    assert_eq!(
+        [ends(HttpBodyBuilder::new_fake().text("chunk")), ends(scripted([data("chunk")]))],
+        [(false, true); 2]
+    );
 }
 
 #[test]
@@ -251,6 +283,28 @@ fn body_error_reports_error_event_with_status() {
                 enrichments: vec![],
             }
         )
+    );
+}
+
+#[test]
+fn body_timeout_reports_error_instead_of_abandonment() {
+    let timeout = Duration::from_millis(100);
+    let clock = ClockControl::new();
+    let body = HttpBodyBuilder::new(GlobalPool::new(), &clock.to_clock())
+        .with_options(http_extensions::HttpBodyOptions::new().timeout(timeout))
+        .stream(stream::pending());
+    let (mut body, capture) = respond(StatusCode::OK, get(body));
+
+    assert!(poll_frame(&mut body).is_pending());
+    clock.advance(timeout);
+    let Poll::Ready(Some(Err(error))) = poll_frame(&mut body) else {
+        panic!("the body must return its timeout error");
+    };
+    let event = capture.single();
+
+    assert_eq!(
+        (error.label().as_str(), event.name, event.log("error.type").cloned()),
+        ("body_timeout", ERROR, Some(Value::from("body_timeout")))
     );
 }
 

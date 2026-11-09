@@ -83,7 +83,7 @@ impl HttpClient {
                         .map(BytesView::from)
                         .map_err(|error| fetch::HttpError::unavailable(format!("failed to read the Azure request body: {error}")))
                 });
-                builder.stream(stream, &fetch::options::HttpBodyOptions::default())
+                builder.stream(stream)
             }
         }
     }
