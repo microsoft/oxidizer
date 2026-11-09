@@ -17,7 +17,7 @@ use layered::{Layer, Service};
 use mime::Mime;
 use smallvec::SmallVec;
 
-use crate::error::{CompressibleTypeError, invalid, not_acceptable, too_many_content_codings, unsupported};
+use crate::error::{CompressibleTypeError, invalid, too_many_content_codings, unsupported};
 use crate::{CONTENT_DIGEST_HEADER, REPR_DIGEST_HEADER, body, negotiate};
 
 /// A short list of formats: a stacked `Content-Encoding` is rare.
@@ -781,7 +781,7 @@ impl Server {
             return if negotiate::content_encoding_acceptable(&negotiation.accept_encoding, response.headers()) {
                 Ok(response)
             } else {
-                Err(not_acceptable())
+                not_acceptable(response)
             };
         }
 
@@ -791,7 +791,7 @@ impl Server {
                 if negotiate::identity_acceptable(&negotiation.accept_encoding) {
                     return Ok(response);
                 }
-                return Err(not_acceptable());
+                return not_acceptable(response);
             }
             negotiate::Selection::Identity => return Ok(response),
         };
@@ -867,6 +867,21 @@ impl Server {
                 .as_ref()
                 .is_none_or(|allowed| allowed.iter().any(|allowed| matches_type(allowed, &actual)))
     }
+}
+
+fn not_acceptable(response: HttpResponse) -> Result<HttpResponse> {
+    let (mut parts, body) = response.into_parts();
+    parts.status = StatusCode::NOT_ACCEPTABLE;
+    parts.headers.remove(CONTENT_ENCODING);
+    parts.headers.remove(CONTENT_LENGTH);
+    parts.headers.remove(CONTENT_RANGE);
+    parts.headers.remove(CONTENT_TYPE);
+    parts.headers.remove(ETAG);
+    parts.headers.remove(CONTENT_DIGEST_HEADER);
+    parts.headers.remove(REPR_DIGEST_HEADER);
+
+    let body = body.map(|_| Ok(Content::Bytes(Default::default())))?;
+    Ok(HttpResponse::from_parts(parts, body))
 }
 
 /// Settings shared by both roles.

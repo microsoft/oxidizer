@@ -110,7 +110,6 @@ Failures carry one of four labels:
 |-----|-------------|
 |`compression_invalid`|The body was malformed for its declared compression format|
 |`compression_limit_exceeded`|Decompression would have exceeded the configured limits|
-|`compression_not_acceptable`|No response representation satisfies `Accept-Encoding`; status code 406|
 |`compression_unsupported`|An unavailable format was seen under [`UnsupportedCompression::Fail`][__link19]|
 
 A `Content-Encoding` that cannot be parsed is not an error: the body is left
@@ -122,7 +121,7 @@ exactly as it arrived.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb5q2Xb7Eh3rgb2NnB6z38pnAb5WeA_3MoJo4bFKU28sPxByhhZIKCa2NvbXByZXNzb3JzZTAuNS4wgnBodHRwX2NvbXByZXNzaW9uZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbx1to9e5EbUsbNdU0IsHP1oobVIy1-ock6fYbrwmuuY7ObV9hZIKCa2NvbXByZXNzb3JzZTAuNS4wgnBodHRwX2NvbXByZXNzaW9uZTAuNS4w
  [__link0]: https://crates.io/crates/compressors/0.5.0
  [__link1]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Compression
  [__link10]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::on_unsupported

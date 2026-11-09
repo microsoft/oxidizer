@@ -918,15 +918,20 @@ async fn an_uncompressed_response_still_says_it_varies() {
 }
 
 #[tokio::test]
-async fn no_acceptable_representation_returns_an_error() {
+async fn a_body_is_not_returned_when_no_representation_is_acceptable() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct CorrelationId(&'static str);
+
     for accept_encoding in ["gzip;q=0, identity;q=0", "*;q=0"] {
         let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
+                .header("access-control-allow-origin", HeaderValue::from_static("*"))
                 .header(CONTENT_TYPE, HeaderValue::from_static("text/plain"))
                 .header(ETAG, HeaderValue::from_static("\"original\""))
                 .header("content-digest", HeaderValue::from_static("sha-256=:Y29udGVudA==:"))
                 .header("repr-digest", HeaderValue::from_static("sha-256=:cmVwcg==:"))
+                .extension(CorrelationId("request-42"))
                 .text(payload())
                 .build()
         }));
@@ -935,11 +940,18 @@ async fn no_acceptable_representation_returns_an_error() {
             .headers_mut()
             .insert(ACCEPT_ENCODING, HeaderValue::from_static(accept_encoding));
 
-        let error = handler.execute(input).await.unwrap_err();
+        let response = handler.execute(input).await.unwrap();
 
-        assert_eq!(error.label(), "compression_not_acceptable", "{accept_encoding}");
-        assert_eq!(error.status_code(), Some(StatusCode::NOT_ACCEPTABLE), "{accept_encoding}");
-        assert!(error.to_string().contains("no acceptable content encoding"), "{accept_encoding}");
+        assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE, "{accept_encoding}");
+        assert_eq!(response.headers().get(VARY).unwrap(), "accept-encoding");
+        assert_eq!(response.headers().get("access-control-allow-origin").unwrap(), "*");
+        assert_eq!(response.extensions().get::<CorrelationId>(), Some(&CorrelationId("request-42")));
+        assert!(response.headers().get(CONTENT_ENCODING).is_none(), "{accept_encoding}");
+        assert!(response.headers().get(CONTENT_TYPE).is_none(), "{accept_encoding}");
+        assert!(response.headers().get(ETAG).is_none(), "{accept_encoding}");
+        assert!(response.headers().get("content-digest").is_none(), "{accept_encoding}");
+        assert!(response.headers().get("repr-digest").is_none(), "{accept_encoding}");
+        assert!(response.into_body().into_bytes().await.unwrap().is_empty(), "{accept_encoding}");
     }
 }
 
@@ -984,7 +996,7 @@ async fn empty_content_encoding_members_do_not_make_an_acceptable_response_fail(
 }
 
 #[tokio::test]
-async fn an_unacceptable_pre_encoded_response_returns_an_error() {
+async fn an_unacceptable_pre_encoded_response_is_replaced_with_406() {
     let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
         HttpResponseBuilder::new_fake()
             .status(StatusCode::OK)
@@ -997,10 +1009,10 @@ async fn an_unacceptable_pre_encoded_response_returns_an_error() {
         .headers_mut()
         .insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, identity;q=0"));
 
-    let error = handler.execute(input).await.unwrap_err();
+    let response = handler.execute(input).await.unwrap();
 
-    assert_eq!(error.label(), "compression_not_acceptable");
-    assert_eq!(error.status_code(), Some(StatusCode::NOT_ACCEPTABLE));
+    assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
+    assert!(response.into_body().into_bytes().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -1023,7 +1035,7 @@ async fn an_error_response_is_not_hidden_by_negotiation_failure() {
 }
 
 #[tokio::test]
-async fn rejected_identity_is_not_used_for_a_non_compressible_response() {
+async fn rejected_identity_returns_406_for_a_non_compressible_response() {
     let handler = server().compress_responses(&[Format::Gzip]).layer(responds_with(|| {
         HttpResponseBuilder::new_fake()
             .status(StatusCode::OK)
@@ -1036,10 +1048,10 @@ async fn rejected_identity_is_not_used_for_a_non_compressible_response() {
         .headers_mut()
         .insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, identity;q=0"));
 
-    let error = handler.execute(input).await.unwrap_err();
+    let response = handler.execute(input).await.unwrap();
 
-    assert_eq!(error.label(), "compression_not_acceptable");
-    assert_eq!(error.status_code(), Some(StatusCode::NOT_ACCEPTABLE));
+    assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
+    assert!(response.into_body().into_bytes().await.unwrap().is_empty());
 }
 
 #[tokio::test]

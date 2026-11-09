@@ -3,7 +3,6 @@
 
 //! Error labels and translation for HTTP body compression and decompression.
 
-use http::StatusCode;
 use http_extensions::HttpError;
 use ohno::ErrorLabel;
 use seatbelt::RecoveryInfo;
@@ -42,9 +41,6 @@ pub(crate) const LABEL_COMPRESSION_UNSUPPORTED: ErrorLabel = ErrorLabel::from_st
 /// Decompressing the body would have exceeded the configured limits.
 pub(crate) const LABEL_COMPRESSION_LIMIT_EXCEEDED: ErrorLabel = ErrorLabel::from_static("compression_limit_exceeded");
 
-/// No available response representation satisfies the request.
-pub(crate) const LABEL_COMPRESSION_NOT_ACCEPTABLE: ErrorLabel = ErrorLabel::from_static("compression_not_acceptable");
-
 /// Builds a `compression_unsupported` failure for `token`.
 pub(crate) fn unsupported(token: &str) -> HttpError {
     HttpError::other(
@@ -57,16 +53,6 @@ pub(crate) fn unsupported(token: &str) -> HttpError {
 /// Builds a `compression_invalid` failure from `cause`.
 pub(crate) fn invalid(cause: impl std::error::Error + Send + Sync + 'static) -> HttpError {
     HttpError::other(cause, RecoveryInfo::never(), LABEL_COMPRESSION_INVALID)
-}
-
-/// Builds a `compression_not_acceptable` failure.
-pub(crate) fn not_acceptable() -> HttpError {
-    HttpError::other(
-        "no acceptable content encoding is available for the response",
-        RecoveryInfo::never(),
-        LABEL_COMPRESSION_NOT_ACCEPTABLE,
-    )
-    .with_status_code(StatusCode::NOT_ACCEPTABLE)
 }
 
 /// Builds a `compression_limit_exceeded` failure for an excessive coding stack.

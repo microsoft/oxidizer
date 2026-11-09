@@ -111,7 +111,6 @@
 //! |-------|---------------|
 //! | `compression_invalid` | The body was malformed for its declared compression format |
 //! | `compression_limit_exceeded` | Decompression would have exceeded the configured limits |
-//! | `compression_not_acceptable` | No response representation satisfies `Accept-Encoding`; status code 406 |
 //! | `compression_unsupported` | An unavailable format was seen under [`UnsupportedCompression::Fail`] |
 //!
 //! A `Content-Encoding` that cannot be parsed is not an error: the body is left
