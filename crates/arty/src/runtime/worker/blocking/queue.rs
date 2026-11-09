@@ -32,6 +32,7 @@ mod tests {
 
     #[test]
     fn blocking_slots_finish_and_retire_without_retaining_a_running_task() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-slots", 1));
         let queue = Arc::new(Queue::default());
         let index = queue.add_worker();
@@ -63,6 +64,7 @@ mod tests {
 
     #[test]
     fn blocking_collection_handles_missing_metadata_limits_and_canceled_requests() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-limits", 1));
         let queue = Arc::new(Queue::default());
         queue.add_worker();

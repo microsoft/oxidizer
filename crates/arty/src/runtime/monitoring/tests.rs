@@ -23,15 +23,13 @@ use thread_aware::Unaware;
 
 use crate::runtime::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, Runtime, WorkersPolicy};
 
-static RECORDING: Mutex<()> = Mutex::new(());
-
 struct RecorderGuard {
     _lock: MutexGuard<'static, ()>,
 }
 
 impl RecorderGuard {
     fn new() -> Self {
-        let lock = RECORDING.lock().unwrap();
+        let lock = super::TEST_LOCK.lock().unwrap();
         seismograph::recorder(Configuration::default());
         Self { _lock: lock }
     }

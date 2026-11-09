@@ -803,6 +803,7 @@ mod tests {
             }
         }
 
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("cycle-observation", 1));
         let mut options = MonitorOptions::default();
         options.set_runtime(Some(runtime.handle()));

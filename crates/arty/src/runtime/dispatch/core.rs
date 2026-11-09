@@ -560,6 +560,7 @@ mod tests {
     fn dispatcher_stop_updates_its_registered_runtime() {
         use seismograph_runtime::snapshot::{CaptureOptions, RuntimeState};
 
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("dispatcher-stop", 1));
         let (worker_tx, _worker_rx) = channel::unbounded();
         let threads = test_threads(1);

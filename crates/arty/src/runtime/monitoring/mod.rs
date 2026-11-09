@@ -10,6 +10,10 @@ mod task;
 #[cfg(all(test, not(miri)))]
 mod tests;
 
+// Hold for the full lifetime of tests that use the process registry or recorder.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub(crate) use asynchronous::WorkerDiagnostics;
 pub(crate) use runtime::RuntimeDiagnostics;
 pub(crate) use task::{TaskInfo, add_task, add_task_with_metadata, current_task, enter_current};

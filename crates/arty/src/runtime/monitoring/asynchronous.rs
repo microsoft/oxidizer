@@ -142,6 +142,7 @@ mod tests {
 
         use crate::runtime::monitoring::task::{current_events, current_task};
 
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("worker-bridge", 1));
         let thread = thread_aware::ThreadBuilder::default().build(std::thread::current().id());
         let dispatcher = DispatcherClient::for_test(&thread);
