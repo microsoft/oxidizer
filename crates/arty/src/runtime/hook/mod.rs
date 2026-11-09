@@ -38,6 +38,7 @@ mod on_start;
 mod registry;
 
 pub use on_panic::OnPanic;
+pub(crate) use on_spawn::TaskPolls;
 pub use on_spawn::{OnSpawn, TaskPoll};
 pub use on_start::OnStart;
 pub(crate) use registry::{BlockingPanicHook, HookRegistration, Hooks, PanicAction};

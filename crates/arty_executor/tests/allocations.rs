@@ -15,8 +15,7 @@ use std::task::Poll;
 
 use alloc_tracker::{Allocator, Session};
 use arty_executor::{
-    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskPoll, TaskPollHooks, TaskSet,
-    discard_task_panic_payload,
+    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskPoll, TaskSet, discard_task_panic_payload,
 };
 
 #[global_allocator]
@@ -105,21 +104,38 @@ impl TaskPoll for OneBytePollHook {
 }
 
 #[test]
-fn one_poll_hook_uses_one_allocation() {
+fn concrete_poll_wrapper_uses_no_allocation() {
+    let mut executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let completed = Rc::new(Cell::new(0));
+    for value in 0..WARM_UP_OPERATIONS {
+        tasks.add_with_poll(
+            async {},
+            TaskOptions::default(),
+            Some(OneBytePollHook(value as u8)),
+            CountCompletion(Rc::clone(&completed)),
+        );
+        let _ = executor.execute_cycle();
+    }
+    completed.set(0);
+
     let session = Session::new().no_stdout().no_file();
-    let operation = session.operation("one_poll_hook");
+    let operation = session.operation("concrete_poll_wrapper");
     {
         let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
         for value in 0..MEASURED_OPERATIONS {
-            let mut hooks = TaskPollHooks::default();
-            hooks.push(Box::new(OneBytePollHook(value as u8)));
-            black_box(TaskOptions::default().with_poll_hooks(hooks));
+            tasks.add_with_poll(
+                async {},
+                TaskOptions::default(),
+                Some(OneBytePollHook(value as u8)),
+                CountCompletion(Rc::clone(&completed)),
+            );
+            let _ = black_box(executor.execute_cycle());
         }
     }
 
-    let (allocations, _) = allocation_totals(&session, "one_poll_hook");
-    assert_eq!(
-        allocations, MEASURED_OPERATIONS as u64,
-        "one poll hook must allocate only its boxed trait object"
-    );
+    let (allocations, bytes) = allocation_totals(&session, "concrete_poll_wrapper");
+    assert_eq!(allocations, 0, "a concrete optional poll wrapper must not allocate");
+    assert_eq!(bytes, 0, "a concrete optional poll wrapper must not allocate bytes");
+    assert_eq!(completed.get(), MEASURED_OPERATIONS);
 }

@@ -77,6 +77,7 @@ thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true }
 
 [dev-dependencies]
+alloc_tracker = { workspace = true }
 arty_executor = { path = "../arty_executor" }
 arty_io_host = { path = "../arty_io_host" }
 arty_macros = { path = "../arty_macros" }

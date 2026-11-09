@@ -91,7 +91,7 @@ impl LocalWorker {
         });
     }
 
-    pub(crate) fn on_spawn() -> Option<arty_executor::TaskPollHooks> {
+    pub(crate) fn on_spawn() -> Option<OnSpawn> {
         Self::with_scheduler_mut(|current| current.and_then(|current| current.spawn_hooks()))
     }
 
@@ -208,21 +208,21 @@ impl SchedulerContext {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        let Some(poll_hooks) = self.spawn_hooks() else {
+        let Some(spawn) = self.spawn_hooks() else {
             return JoinHandle::try_from_shutdown(self.results.shutdown())
                 .expect("a spawn hook rejects registration only after runtime shutdown starts");
         };
         let (handle, result_tx) = self.results.handle();
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
         self.tasks
-            .add(inner, TaskOptions::new(placement).with_poll_hooks(poll_hooks), result_tx);
+            .add_with_poll(inner, TaskOptions::new(placement), spawn.into_handlers(), result_tx);
         handle
     }
 
-    fn spawn_hooks(&self) -> Option<arty_executor::TaskPollHooks> {
+    fn spawn_hooks(&self) -> Option<OnSpawn> {
         let mut event = OnSpawn::new(self.thread.clone());
         self.hooks.borrow_mut().execute_spawn(&mut event);
-        matches!(self.results.shutdown().state(), ShutdownState::Running).then(|| event.into_handlers())
+        matches!(self.results.shutdown().state(), ShutdownState::Running).then_some(event)
     }
 
     fn execute_panic_hooks(&self) -> PanicAction {

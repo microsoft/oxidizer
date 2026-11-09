@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::cell::RefCell;
 use std::task::Poll;
 
 use observed::Sink;
@@ -34,51 +33,9 @@ pub trait TaskPoll: 'static {
     fn poll(&mut self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()>;
 }
 
-/// Stores the handlers that wrap one task's polls.
-///
-/// The first handler uses only its boxed trait object allocation. Additional
-/// handlers use a separate growable collection.
-#[doc(hidden)]
-#[derive(Default, derive_more::Debug)]
-pub struct TaskPollHooks {
-    #[debug(ignore)]
-    first: Option<Box<dyn TaskPoll>>,
-    #[debug(ignore)]
-    additional: Vec<Box<dyn TaskPoll>>,
-}
-
-impl TaskPollHooks {
-    /// Creates an empty handler collection.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            first: None,
-            additional: Vec::new(),
-        }
-    }
-
-    /// Appends one poll handler.
-    pub fn push(&mut self, hook: Box<dyn TaskPoll>) {
-        if self.first.is_none() {
-            self.first = Some(hook);
-        } else {
-            self.additional.push(hook);
-        }
-    }
-
-    fn poll_task(&mut self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
-        fn poll_next(hooks: &mut [Box<dyn TaskPoll>], task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
-            let Some((hook, remaining)) = hooks.split_first_mut() else {
-                return task();
-            };
-            hook.poll(&mut || poll_next(remaining, task))
-        }
-
-        let Self { first, additional } = self;
-        match first {
-            Some(first) => first.poll(&mut || poll_next(additional, task)),
-            None => task(),
-        }
+impl TaskPoll for () {
+    fn poll(&mut self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
+        task()
     }
 }
 
@@ -88,12 +45,10 @@ impl TaskPollHooks {
 /// and lifecycle events. The placement value classifies how the caller selected
 /// the executor. It does not select a worker. The default has no observed context
 /// and uses [`TaskPlacement::Any`].
-#[derive(Default, derive_more::Debug)]
+#[derive(Default, Debug)]
 pub struct TaskOptions {
     context: Option<Transfer>,
     placement: TaskPlacement,
-    #[debug(ignore)]
-    poll_hooks: RefCell<TaskPollHooks>,
 }
 
 pub(crate) struct TaskCreatedReporter {
@@ -117,11 +72,7 @@ impl TaskOptions {
     /// Creates options with the specified placement classification.
     #[must_use]
     pub const fn new(placement: TaskPlacement) -> Self {
-        Self {
-            context: None,
-            placement,
-            poll_hooks: RefCell::new(TaskPollHooks::new()),
-        }
+        Self { context: None, placement }
     }
 
     /// Creates options that apply the observed `context` for the task lifecycle.
@@ -130,22 +81,7 @@ impl TaskOptions {
         Self {
             context: Some(context),
             placement,
-            poll_hooks: RefCell::new(TaskPollHooks::default()),
         }
-    }
-
-    /// Adds handlers that wrap each poll of this task.
-    ///
-    /// The first handler is the outermost handler. Each handler must call the
-    /// next task exactly once and return its result.
-    #[must_use]
-    pub fn with_poll_hooks(mut self, hooks: TaskPollHooks) -> Self {
-        self.poll_hooks = RefCell::new(hooks);
-        self
-    }
-
-    pub(crate) fn poll_task(&self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
-        self.poll_hooks.borrow_mut().poll_task(task)
     }
 
     pub(crate) fn with_context<T>(&self, f: impl FnOnce() -> T) -> T {
