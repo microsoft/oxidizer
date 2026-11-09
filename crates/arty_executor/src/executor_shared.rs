@@ -20,9 +20,7 @@ use plurality::{Arc as PoolArc, MultiPool};
 #[cfg(feature = "inspection")]
 use crate::discard_task_panic_payload;
 use crate::wake::RemoteWake;
-use crate::{
-    PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskOptions, TaskPoll, TypeErasedTask, WakeShared, WakeSignal, allocate_task,
-};
+use crate::{PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskOptions, TypeErasedTask, WakeShared, WakeSignal, allocate_task};
 
 /// Cloneable handle to state used by reentrant task submissions.
 #[derive(Clone, Debug)]
@@ -63,7 +61,6 @@ impl ExecutorShared {
             &self.inner.task_storage,
             future,
             options,
-            None::<()>,
             self.inner.sink.clone(),
             completion,
             inspector,
@@ -148,12 +145,11 @@ impl ExecutorShared {
         self.shutdown().is_triggered() && self.inner.task_count.get() == 0
     }
 
-    pub(crate) fn add_task<F, R, T, P>(&self, future: F, options: TaskOptions, poll: Option<P>, completion: T)
+    pub(crate) fn add_task<F, R, T>(&self, future: F, options: TaskOptions, completion: T)
     where
         F: IntoFuture<Output = R> + 'static,
         R: 'static,
         T: TaskCompletion<R>,
-        P: TaskPoll,
     {
         if self.shutdown().is_triggered() {
             completion.cancelled(self.shutdown().cause());
@@ -168,7 +164,6 @@ impl ExecutorShared {
             &self.inner.task_storage,
             future,
             options,
-            poll,
             self.inner.sink.clone(),
             completion,
         ));

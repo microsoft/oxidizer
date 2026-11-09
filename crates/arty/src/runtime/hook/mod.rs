@@ -33,13 +33,10 @@
 //! [`ThreadAware`]: crate::core::ThreadAware
 
 mod on_panic;
-mod on_spawn;
 mod on_start;
 mod registry;
 
 pub use on_panic::OnPanic;
-pub(crate) use on_spawn::TaskPolls;
-pub use on_spawn::{OnSpawn, TaskPoll};
 pub use on_start::OnStart;
 pub(crate) use registry::{BlockingPanicHook, HookRegistration, Hooks, PanicAction};
 
@@ -49,5 +46,4 @@ pub(crate) use registry::{BlockingPanicHook, HookRegistration, Hooks, PanicActio
 pub trait Hook: registry::private::Sealed + 'static {}
 
 impl Hook for OnStart {}
-impl Hook for OnSpawn {}
 impl Hook for OnPanic {}

@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::task::Poll;
-
 use observed::Sink;
 use observed::context::Transfer;
 
@@ -25,27 +23,13 @@ pub enum TaskPlacement {
     SpecificThread,
 }
 
-/// Wraps one top-level executor task poll.
-pub trait TaskPoll: 'static {
-    /// Wraps one top-level task poll.
-    ///
-    /// Implementations must call `task` exactly once and return its result.
-    fn poll(&mut self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()>;
-}
-
-impl TaskPoll for () {
-    fn poll(&mut self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
-        task()
-    }
-}
-
 /// Lifecycle metadata for a task registered with [`TaskSet`](crate::TaskSet).
 ///
 /// The executor applies the captured observed context during polling, cleanup,
 /// and lifecycle events. The placement value classifies how the caller selected
 /// the executor. It does not select a worker. The default has no observed context
 /// and uses [`TaskPlacement::Any`].
-#[derive(Default, Debug)]
+#[derive(Debug, Default)]
 pub struct TaskOptions {
     context: Option<Transfer>,
     placement: TaskPlacement,

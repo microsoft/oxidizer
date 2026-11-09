@@ -9,13 +9,11 @@
 
 use std::alloc::System;
 use std::cell::Cell;
-use std::hint::black_box;
 use std::rc::Rc;
-use std::task::Poll;
 
 use alloc_tracker::{Allocator, Session};
 use arty_executor::{
-    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskPoll, TaskSet, discard_task_panic_payload,
+    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskSet, discard_task_panic_payload,
 };
 
 #[global_allocator]
@@ -91,51 +89,4 @@ fn spawn_and_complete_one_reuses_all_storage() {
     assert!(!executor.has_tasks());
     executor.shutdown().trigger(arty_executor::ShutdownCause::default());
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)));
-}
-
-#[derive(Debug)]
-struct OneBytePollHook(u8);
-
-impl TaskPoll for OneBytePollHook {
-    fn poll(&mut self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
-        black_box(self.0);
-        task()
-    }
-}
-
-#[test]
-fn concrete_poll_wrapper_uses_no_allocation() {
-    let mut executor = Executor::builder().build();
-    let tasks = executor.tasks();
-    let completed = Rc::new(Cell::new(0));
-    for value in 0..WARM_UP_OPERATIONS {
-        tasks.add_with_poll(
-            async {},
-            TaskOptions::default(),
-            Some(OneBytePollHook(value as u8)),
-            CountCompletion(Rc::clone(&completed)),
-        );
-        let _ = executor.execute_cycle();
-    }
-    completed.set(0);
-
-    let session = Session::new().no_stdout().no_file();
-    let operation = session.operation("concrete_poll_wrapper");
-    {
-        let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
-        for value in 0..MEASURED_OPERATIONS {
-            tasks.add_with_poll(
-                async {},
-                TaskOptions::default(),
-                Some(OneBytePollHook(value as u8)),
-                CountCompletion(Rc::clone(&completed)),
-            );
-            let _ = black_box(executor.execute_cycle());
-        }
-    }
-
-    let (allocations, bytes) = allocation_totals(&session, "concrete_poll_wrapper");
-    assert_eq!(allocations, 0, "a concrete optional poll wrapper must not allocate");
-    assert_eq!(bytes, 0, "a concrete optional poll wrapper must not allocate bytes");
-    assert_eq!(completed.get(), MEASURED_OPERATIONS);
 }

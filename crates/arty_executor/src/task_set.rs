@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{ExecutorShared, TaskCompletion, TaskOptions, TaskPoll};
+use crate::{ExecutorShared, TaskCompletion, TaskOptions};
 
 /// A handle that registers tasks with an executor.
 ///
@@ -45,19 +45,7 @@ impl TaskSet {
         R: 'static,
         T: TaskCompletion<R>,
     {
-        self.add_with_poll(future, options, None::<()>, completion);
-    }
-
-    /// Registers a future with a runtime-owned poll wrapper.
-    #[doc(hidden)]
-    pub fn add_with_poll<F, R, T, P>(&self, future: F, options: TaskOptions, poll: Option<P>, completion: T)
-    where
-        F: IntoFuture<Output = R> + 'static,
-        R: 'static,
-        T: TaskCompletion<R>,
-        P: TaskPoll,
-    {
-        self.shared.add_task(future, options, poll, completion);
+        self.shared.add_task(future, options, completion);
     }
 
     /// Returns whether this task set's executor is running a cycle on this thread.

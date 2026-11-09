@@ -8,8 +8,7 @@ use thread_aware::Thread;
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{HookRegistration, Hooks, OnPanic, OnSpawn, OnStart, PanicAction};
-use crate::runtime::shutdown::ShutdownState;
+use crate::runtime::hook::{HookRegistration, Hooks, OnPanic, OnStart, PanicAction};
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
@@ -89,10 +88,6 @@ impl LocalWorker {
             let mut event = OnStart::new(current.thread.clone());
             current.hooks.borrow_mut().execute_start(&mut event);
         });
-    }
-
-    pub(crate) fn on_spawn() -> Option<OnSpawn> {
-        Self::with_scheduler_mut(|current| current.and_then(|current| current.spawn_hooks()))
     }
 
     pub(crate) fn on_panic() -> bool {
@@ -208,21 +203,10 @@ impl SchedulerContext {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        let Some(spawn) = self.spawn_hooks() else {
-            return JoinHandle::try_from_shutdown(self.results.shutdown())
-                .expect("a spawn hook rejects registration only after runtime shutdown starts");
-        };
         let (handle, result_tx) = self.results.handle();
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        self.tasks
-            .add_with_poll(inner, TaskOptions::new(placement), spawn.into_handlers(), result_tx);
+        self.tasks.add(inner, TaskOptions::new(placement), result_tx);
         handle
-    }
-
-    fn spawn_hooks(&self) -> Option<OnSpawn> {
-        let mut event = OnSpawn::new(self.thread.clone());
-        self.hooks.borrow_mut().execute_spawn(&mut event);
-        matches!(self.results.shutdown().state(), ShutdownState::Running).then_some(event)
     }
 
     fn execute_panic_hooks(&self) -> PanicAction {

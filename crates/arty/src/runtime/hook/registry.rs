@@ -8,9 +8,8 @@ use performables::sync::channel;
 use thread_aware::{Thread, ThreadAware};
 
 use super::on_panic::PanicHook;
-use super::on_spawn::SpawnHook;
 use super::on_start::StartHook;
-use super::{Hook, OnPanic, OnSpawn, OnStart};
+use super::{Hook, OnPanic, OnStart};
 use crate::runtime::worker::asynchronous::Command;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,7 +88,6 @@ impl<E: 'static> ThreadAware for TypedHook<E> {
 #[derive(Clone, Copy, Debug)]
 enum HookType {
     Start,
-    Spawn,
     Panic,
 }
 
@@ -119,7 +117,6 @@ fn execute_callback<H>(event: &mut H, callback: &mut CallbackData<H>) {
 #[derive(Clone, derive_more::Debug)]
 pub(crate) enum HookRegistration {
     Start(StartHook),
-    Spawn(SpawnHook),
     Panic(PanicHook),
 }
 
@@ -141,12 +138,6 @@ impl HookRegistration {
                     .expect("OnStart hook type is selected by its TypeId");
                 Self::Start(StartHook::new(hook.data, hook.callback))
             }
-            HookType::Spawn => {
-                let hook = *hook
-                    .downcast::<HookWithData<OnSpawn, D>>()
-                    .expect("OnSpawn hook type is selected by its TypeId");
-                Self::Spawn(SpawnHook::new(hook.data, hook.callback))
-            }
             HookType::Panic => {
                 let hook = *hook
                     .downcast::<HookWithData<OnPanic, D>>()
@@ -159,7 +150,6 @@ impl HookRegistration {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         match self {
             Self::Start(hook) => hook.relocate(source, destination),
-            Self::Spawn(hook) => hook.relocate(source, destination),
             Self::Panic(hook) => hook.relocate(source, destination),
         }
     }
@@ -168,7 +158,6 @@ impl HookRegistration {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Hooks {
     start: Vec<StartHook>,
-    spawn: Vec<SpawnHook>,
     panic: Vec<PanicHook>,
 }
 
@@ -193,19 +182,12 @@ impl Hooks {
     fn push(&mut self, hook: HookRegistration) {
         match hook {
             HookRegistration::Start(hook) => self.start.push(hook),
-            HookRegistration::Spawn(hook) => self.spawn.push(hook),
             HookRegistration::Panic(hook) => self.panic.push(hook),
         }
     }
 
     pub(crate) fn execute_start(&mut self, event: &mut OnStart) {
         for hook in &mut self.start {
-            hook.execute(event);
-        }
-    }
-
-    pub(crate) fn execute_spawn(&mut self, event: &mut OnSpawn) {
-        for hook in &mut self.spawn {
             hook.execute(event);
         }
     }
@@ -220,9 +202,6 @@ impl Hooks {
 impl ThreadAware for Hooks {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         for hook in &mut self.start {
-            hook.relocate(source, destination);
-        }
-        for hook in &mut self.spawn {
             hook.relocate(source, destination);
         }
         for hook in &mut self.panic {
@@ -284,8 +263,6 @@ impl BlockingPanicHook {
 fn hook_type<H: Hook>() -> HookType {
     if TypeId::of::<H>() == TypeId::of::<OnStart>() {
         HookType::Start
-    } else if TypeId::of::<H>() == TypeId::of::<OnSpawn>() {
-        HookType::Spawn
     } else {
         debug_assert_eq!(TypeId::of::<H>(), TypeId::of::<OnPanic>());
         HookType::Panic
@@ -296,6 +273,5 @@ pub(super) mod private {
     pub trait Sealed {}
 
     impl Sealed for super::OnStart {}
-    impl Sealed for super::OnSpawn {}
     impl Sealed for super::OnPanic {}
 }
