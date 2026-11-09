@@ -118,6 +118,41 @@ impl ThreadAware for ReturnedProbe {
 }
 
 #[test]
+fn spawn_anywhere_keeps_round_robin_selection_and_local_children() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let source = cx.thread().id();
+            let tasks = (0..4).map(|_| {
+                cx.scheduler().spawn_anywhere(cx.clone(), |request| async move {
+                    let worker = thread::current().id();
+                    let child = request
+                        .scheduler()
+                        .spawn(async |_| {
+                            let local = std::rc::Rc::new(thread::current().id());
+                            testing_aids::YieldFuture::default().await;
+                            *local
+                        })
+                        .await
+                        .unwrap();
+                    (worker, child)
+                })
+            });
+            let results = join_all(tasks).await.into_iter().map(Result::unwrap).collect::<Vec<_>>();
+            assert_ne!(results[0].0, source);
+            assert_eq!(results[1].0, source);
+            assert_eq!(results[2], results[0]);
+            assert_eq!(results[3], results[1]);
+            for (worker, child) in results {
+                assert_eq!(worker, child);
+            }
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn spawn_anywhere_relocates_results_on_the_source_worker() {
     for (runtime, workers) in [
         (Runtime::new().unwrap(), 1),

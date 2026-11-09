@@ -7,10 +7,12 @@
 
 mod support;
 
+use std::future::poll_fn;
 use std::marker::PhantomPinned;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
+use std::task::Poll;
 use std::thread;
 
 use arty::core::{Thread, ThreadAware};
@@ -30,6 +32,33 @@ use thread_aware::Unaware;
 #[test]
 fn assert_send_sync() {
     static_assertions::assert_impl_all!(Scheduler: Send, Sync);
+}
+
+#[test]
+fn spawned_future_preserves_mutable_self_borrows_across_polls() {
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let task = scheduler.spawn(|_| async {
+        let mut polls = 0;
+        // Keep a mutable borrow of the outer future's local across suspension.
+        poll_fn(|cx| {
+            polls += 1;
+            if polls == 1 {
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })
+        .await;
+        polls
+    });
+
+    assert_eq!(task.join().unwrap(), 2);
+    runtime.stop().unwrap();
 }
 
 #[cfg(feature = "macros")]
@@ -74,6 +103,115 @@ async fn spawn_some_tasks(cx: Context) {
         )
         .await
         .unwrap();
+}
+
+#[test]
+fn local_factory_runs_once_and_preserves_future_borrows() {
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let factory_calls = Arc::clone(&calls);
+            let owner = cx.thread().id();
+            let child = cx.scheduler().spawn(move |child| {
+                assert_eq!(factory_calls.fetch_add(1, Ordering::Relaxed), 0);
+                assert_eq!(child.thread().id(), owner);
+                async move {
+                    let value = Rc::new(42);
+                    let mut polls = 0;
+                    poll_fn(|cx| {
+                        polls += 1;
+                        if polls == 1 {
+                            cx.waker().wake_by_ref();
+                            Poll::Pending
+                        } else {
+                            Poll::Ready(())
+                        }
+                    })
+                    .await;
+                    (*value, polls, thread::current().id())
+                }
+            });
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+            assert_eq!(child.await.unwrap(), (42, 2, owner));
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn relocating_factories_remain_deferred_and_preserve_future_borrows() {
+    struct Probe {
+        relocations: Arc<AtomicUsize>,
+        factories: Arc<AtomicUsize>,
+        owner: thread::ThreadId,
+    }
+
+    impl ThreadAware for Probe {
+        fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+            assert_eq!(source.unwrap().id(), self.owner);
+            assert_eq!(destination.id(), self.owner);
+            assert_eq!(thread::current().id(), self.owner);
+            assert_eq!(self.relocations.fetch_add(1, Ordering::Relaxed), 0);
+        }
+    }
+
+    let create = |probe: Probe| {
+        assert_eq!(probe.relocations.load(Ordering::Relaxed), 1);
+        assert_eq!(probe.factories.fetch_add(1, Ordering::Relaxed), 0);
+        let owner = Rc::new(thread::current().id());
+        async move {
+            let mut polls = 0;
+            poll_fn(|cx| {
+                polls += 1;
+                if polls == 1 {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            })
+            .await;
+            drop(probe);
+            (polls, *owner)
+        }
+    };
+
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            for specific in [false, true] {
+                let relocations = Arc::new(AtomicUsize::new(0));
+                let factories = Arc::new(AtomicUsize::new(0));
+                let owner = cx.thread().id();
+                let probe = Probe {
+                    relocations: Arc::clone(&relocations),
+                    factories: Arc::clone(&factories),
+                    owner,
+                };
+                let child = if specific {
+                    cx.scheduler().spawn_at(cx.thread(), probe, create)
+                } else {
+                    cx.scheduler().spawn_anywhere(probe, create)
+                };
+                assert_eq!(relocations.load(Ordering::Relaxed), 0);
+                assert_eq!(factories.load(Ordering::Relaxed), 0);
+                assert_eq!(child.await.unwrap(), (2, owner));
+                assert_eq!(relocations.load(Ordering::Relaxed), 1);
+                assert_eq!(factories.load(Ordering::Relaxed), 1);
+            }
+        })
+        .unwrap();
+    runtime.stop().unwrap();
 }
 
 #[test]

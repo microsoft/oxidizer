@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.4] - 2026-11-06
+
+- Keep mockall-dependent lifetime helpers in a private module gated on `mockall`.
+  Accepted macro invocations and generated code do not change.
+
 ## [0.2.3] - 2026-11-02
 
 - The package compiles mockall-specific helpers and fields only when `mockall` is enabled. Macro

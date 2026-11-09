@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.14.0] - 2026-11-06
+
+- Update published local dependency requirements. No direct source change.
+- Keep the `multitude` macro companions at the same version.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `bytesbuf`, `multitude_macros`, `seismograph`, `seismograph_io`.
+- Update the local `bytesbuf` requirement from `0.13.0` to `0.14.0`.
+- Update the local `multitude_macros` requirement from `0.13.0` to `0.14.0`.
+
 ## [0.13.0] - 2026-11-02
 
 - Release arena chunk references through raw pointers. The final deallocation no longer leaves a

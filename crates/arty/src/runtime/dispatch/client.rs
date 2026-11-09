@@ -96,13 +96,13 @@ impl DispatcherClient {
         self.core.spawn(future_factory)
     }
 
-    pub(crate) fn spawn_relocating<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    pub(crate) fn spawn_relocating<FF, F, R>(&self, source: &thread_aware::Thread, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
-        self.core.spawn_relocating(future_factory)
+        self.core.spawn_relocating(source, future_factory)
     }
 
     pub(crate) fn spawn_at_worker_relocating<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>

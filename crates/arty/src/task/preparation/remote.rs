@@ -8,7 +8,7 @@ use plurality::{Box as PoolBox, MultiPool, coerce};
 
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-use crate::task::preparation::{DeferredTask, discard_panicking_drop};
+use crate::task::preparation::{DeferredTaskFactory, discard_panicking_drop};
 
 thread_local! {
     static FUTURE_FACTORIES: MultiPool = MultiPool::new();
@@ -102,7 +102,7 @@ where
     let future_factory = TaskFactory::new(future_factory);
     let future_factory = RemoteFutureFactory::new(move |cx, tasks| {
         let future_factory = future_factory.into_inner();
-        let inner = DeferredTask::new(future_factory, cx);
+        let inner = DeferredTaskFactory::new(future_factory, cx);
         let options = TaskOptions::new(placement);
         tasks.add(inner, options, result_tx);
     });

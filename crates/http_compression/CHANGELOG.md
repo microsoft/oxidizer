@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0] - 2026-11-06
+
+- Update published local dependency requirements. No direct source change.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `bytesbuf`, `compressors`, `http_extensions`, `seismograph`, `seismograph_io`.
+- Update the local `bytesbuf` requirement from `0.13.0` to `0.14.0`.
+- Update the local `compressors` requirement from `0.4.0` to `0.5.0`.
+- Update the local `http_extensions` requirement from `0.14.0` to `0.15.0`.
+- Update the local `seatbelt` requirement from `0.12.0` to `0.12.1`.
+
 ## [0.4.0] - 2026-11-02
 
 - Update compression middleware dependencies to use Bytesbuf, Compressors, HTTP Extensions, and

@@ -4,7 +4,7 @@
 [package]
 name = "observed_destination_stdout"
 description = "stdout destination for Observed pipeline."
-version = "0.1.0"
+version = "0.1.1"
 readme = "README.md"
 keywords = ["observed", "telemetry", "tracing", "logging", "metrics"]
 categories = ["development-tools::debugging"]

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.4] - 2026-11-06
+
+- Align the version with the `fakeable` package group. No independent source
+  or macro expansion change.
+- Update the local `fakeable_impl` requirement from `0.2.3` to `0.2.4`.
+
 ## [0.2.3] - 2026-11-02
 
 - Update the exact implementation dependency for fixes to builds with different features. Accepted

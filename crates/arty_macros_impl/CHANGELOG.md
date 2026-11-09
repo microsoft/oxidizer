@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.1] - 2026-11-06
+
+- Simplify macro documentation and the package description. Accepted invocations and
+  generated entry points do not change.
+
 ## [0.6.0] - 2026-11-02
 
 - Breaking: Generate entry points that use `arty::task::Context` and the Arty 0.6.0 runtime

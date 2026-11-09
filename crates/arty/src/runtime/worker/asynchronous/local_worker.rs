@@ -3,14 +3,15 @@
 
 use std::cell::RefCell;
 
-use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskSet};
+use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskOptions, TaskPlacement, TaskSet};
 use thread_aware::Thread;
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
-use crate::task::handle::JoinHandlePool;
+use crate::task::handle::{JoinHandle, JoinHandlePool};
+use crate::task::preparation::DeferredTaskFactory;
 
 thread_local! {
     static CURRENT: RefCell<Option<LocalWorker>> = const { RefCell::new(None) };
@@ -153,23 +154,154 @@ impl SchedulerContext {
         &self.thread
     }
 
-    pub(crate) fn context(&self) -> &Context {
-        &self.context
-    }
-
     pub(crate) fn tasks(&self) -> &TaskSet {
         &self.tasks
     }
 
-    pub(crate) fn results(&self) -> &JoinHandlePool {
-        &self.results
+    pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF, placement: TaskPlacement) -> JoinHandle<R>
+    where
+        FF: FnOnce(Context) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        let (handle, result_tx) = self.results.handle();
+        let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
+        self.tasks.add(inner, TaskOptions::new(placement), result_tx);
+        handle
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Poll, Wake, Waker};
+
+    use arty_executor::Executor;
+    use nonempty::NonEmpty;
+    use performables::arc::Arc;
+    use performables::sync::channel;
+    use thread_aware::ThreadBuilder;
+    use tick::runtime::InactiveClock;
+
     use super::*;
+    use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
+    use crate::runtime::shutdown::Shutdown;
+    use crate::runtime::worker::asynchronous::Command;
+    use crate::runtime::worker::blocking::{PanicPolicy, Pool, Worker};
+
+    #[derive(Default)]
+    struct CountingWake(AtomicUsize);
+
+    impl Wake for CountingWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &std::sync::Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn relocating_registration_checks_owner_execution_and_shutdown() {
+        let observations = std::thread::spawn(|| {
+            let thread = ThreadBuilder::default().build(std::thread::current().id());
+            let wakes = std::sync::Arc::new(CountingWake::default());
+            let shutdown = Shutdown::default();
+            let (command_tx, command_rx) = channel::unbounded();
+            let core = DispatcherCore::new(
+                NonEmpty::new(WorkerEndpoint {
+                    command_tx,
+                    waker: Waker::from(std::sync::Arc::clone(&wakes)),
+                    thread: thread.clone(),
+                    blocking_worker: Worker::new(Pool::new(None), shutdown.clone(), PanicPolicy::Ignore),
+                }),
+                shutdown.clone(),
+            );
+            let dispatcher = DispatcherClient::new(Arc::clone(&core));
+            let io = crate::io::Io::new(
+                arty_io_host::IoRuntime::new(observed::Sink::noop()),
+                dispatcher.clone(),
+                thread.clone(),
+            );
+            let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+            let context = Context::new(dispatcher, clock, io, thread.clone());
+            let mut executor = Executor::builder().thread(thread.clone()).build();
+            LocalWorker::attach();
+            LocalWorker::register_scheduler(context, executor.tasks(), executor.shutdown());
+
+            let mut join = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 42 }));
+            let registered_locally = command_rx.try_recv().is_err() && executor.has_tasks();
+            let idle_worker_woken = wakes.0.load(Ordering::Relaxed) == 1;
+            _ = executor.execute_cycle();
+            let local_result = matches!(
+                join.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())),
+                Poll::Ready(Ok(42))
+            );
+
+            let nested_core = Arc::clone(&core);
+            let source = thread.clone();
+            let nested_wakes = std::sync::Arc::clone(&wakes);
+            let mut parent = std::pin::pin!(core.spawn_relocating(&thread, move |_| async move {
+                let before = nested_wakes.0.load(Ordering::Relaxed);
+                let child = nested_core.spawn_relocating(&source, |_| async { 7 });
+                let executing_worker_not_woken = nested_wakes.0.load(Ordering::Relaxed) == before;
+                (child.await.unwrap(), executing_worker_not_woken)
+            }));
+            _ = executor.execute_cycle();
+            _ = executor.execute_cycle();
+            _ = executor.execute_cycle();
+            let nested_result = matches!(
+                parent.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())),
+                Poll::Ready(Ok((7, true)))
+            );
+            let nested_registered_locally = command_rx.try_recv().is_err();
+
+            let other_thread = ThreadBuilder::default().build(std::thread::current().id());
+            let (other_tx, other_rx) = channel::unbounded();
+            let other_core = DispatcherCore::new(
+                NonEmpty::new(WorkerEndpoint {
+                    command_tx: other_tx,
+                    waker: Waker::noop().clone(),
+                    thread: other_thread.clone(),
+                    blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),
+                }),
+                Shutdown::default(),
+            );
+            let _remote = other_core.spawn_relocating(&other_thread, |_| async { 9 });
+            let other_owner_queued = matches!(other_rx.try_recv(), Ok(Command::EnqueueTask { .. }));
+            let other_owner_not_registered = !executor.has_tasks();
+
+            shutdown.begin(ShutdownCause::default());
+            let before = wakes.0.load(Ordering::Relaxed);
+            let mut rejected = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 11 }));
+            let rejected_after_shutdown = matches!(
+                rejected.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())),
+                Poll::Ready(Err(error)) if error.is_shutdown()
+            );
+            let rejection_not_queued = command_rx.try_recv().is_err();
+            let rejection_not_woken = wakes.0.load(Ordering::Relaxed) == before;
+            LocalWorker::clear_scheduler();
+            [
+                ("same-owner registration stays local", registered_locally),
+                ("idle worker is woken", idle_worker_woken),
+                ("local result completes", local_result),
+                ("nested result completes without waking the executing worker", nested_result),
+                ("nested registration stays local", nested_registered_locally),
+                ("other owner receives a queued command", other_owner_queued),
+                ("other owner's task is not registered locally", other_owner_not_registered),
+                ("shutdown rejects registration", rejected_after_shutdown),
+                ("shutdown rejection sends no command", rejection_not_queued),
+                ("shutdown rejection does not wake the worker", rejection_not_woken),
+            ]
+        })
+        .join()
+        .unwrap();
+        for (description, observed) in observations {
+            assert!(observed, "{description}");
+        }
+    }
 
     thread_local! {
         static EXTERNAL_OWNER: ExternalOwner = const { ExternalOwner };

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0] - 2026-11-06
+
+- Breaking: Publish native allocation observations independently of recorder sessions and
+  accepted event samples. Publish once per lease or requested observation round.
+- Breaking: Emit allocator source schema 4. Failed allocations no longer produce allocation
+  events for a null address.
+- Simplify the thread-local recording fast path.
+- Update the local `seismograph` requirement from `0.4.0` to `0.5.0`.
+- Update the local `seismograph_rallocator` requirement from `0.4.0` to `0.5.0`.
+
 ## [0.3.1] - 2026-11-02
 
 - Update optional dependencies for Seismograph measurements. Allocation behavior and public APIs do

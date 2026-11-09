@@ -31,6 +31,7 @@ Please see each crate's change log below:
 - [`http_headers`](./crates/http_headers/CHANGELOG.md)
 - [`http_headers_simd`](./crates/http_headers_simd/CHANGELOG.md)
 - [`http_path_template`](./crates/http_path_template/CHANGELOG.md)
+- [`http_telemetry`](./crates/http_telemetry/CHANGELOG.md)
 - [`internity`](./crates/internity/CHANGELOG.md)
 - [`layered`](./crates/layered/CHANGELOG.md)
 - [`metabench`](./crates/metabench/CHANGELOG.md)

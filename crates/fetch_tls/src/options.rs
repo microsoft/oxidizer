@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! [`TlsOptions`] and its type-state builder [`TlsOptionsBuilder`].
+//! [`TlsOptions`] and the [`TlsOptionsBuilder`] type-state builder.
 
 use http::Version;
 
@@ -14,14 +14,13 @@ use crate::{TlsBackend, TlsBackendBuilder};
     clippy::allow_attributes,
     clippy::large_enum_variant,
     dead_code,
-    reason = "configuration object; variants are consumed by downstream HTTP client crates that materialize TLS backends from TlsOptions"
+    reason = "downstream HTTP client crates consume these configuration variants to build TLS backends from TlsOptions"
 )]
 pub(crate) enum TlsOptionsKind {
-    /// Backend is selected automatically based on how the default backend
-    /// is configured via [`TlsBackendBuilder`]; see its documentation for details.
+    /// [`TlsBackendBuilder`] selects its configured default backend.
     Auto,
 
-    /// Pre-configured TLS backend, used as-is without any modifications.
+    /// A pre-configured TLS backend that is used without changes.
     PreConfigured(TlsBackend),
 
     /// rustls backend.
@@ -35,32 +34,24 @@ pub(crate) enum TlsOptionsKind {
 
 /// TLS configuration for an HTTP client.
 ///
-/// `TlsOptions` describes the TLS behavior an application wants without
-/// committing to a particular implementation. There are a few ways to
-/// construct one:
+/// `TlsOptions` describes TLS requirements. It can select a backend or let the
+/// client library select one. You can construct it in these ways:
 ///
-/// - With [`TlsOptions::builder`], a backend-agnostic builder that exposes
-///   only the configuration options common to every backend. The actual
-///   backend is chosen by the consuming library's [`TlsBackendBuilder`].
-///   This is the recommended path when an application does not care which
-///   backend ends up being used.
-/// - With one of the backend-specific constructors (for example, a
-///   `new_rustls` / `new_native_tls` helper available when the matching
-///   Cargo feature is enabled) for sensible defaults.
-/// - With a backend-specific builder (a `builder_rustls` /
-///   `builder_native_tls` helper, also feature-gated) when you need to
-///   customize backend-specific knobs such as the rustls certificate
-///   verifier or client-cert resolver. The builder type is
-///   [`TlsOptionsBuilder`].
-/// - By wrapping a pre-built `rustls::ClientConfig` or
-///   `native_tls::TlsConnector` via `From`/`Into`.
-/// - With [`TlsOptions::default`], which leaves the backend choice to the
-///   consuming library and uses default values for every shared option.
+/// - [`TlsOptions::builder`] sets values that apply to every backend.
+///   [`TlsBackendBuilder`] selects the backend.
+/// - `new_rustls` and `new_native_tls` create backend-specific defaults when
+///   the matching Cargo feature is enabled.
+/// - `builder_rustls` and `builder_native_tls` set backend-specific values when
+///   the matching Cargo feature is enabled.
+/// - `From` and `Into` wrap a pre-built `rustls::ClientConfig` or
+///   `native_tls::TlsConnector` when the matching Cargo feature is enabled.
+/// - [`TlsOptions::default`] uses shared defaults and lets the client library
+///   select the backend.
 ///
 /// # Examples
 ///
-/// Backend-agnostic options that customize only the shared knobs. The
-/// consuming library's [`TlsBackendBuilder`] picks the backend:
+/// These options set an HTTP version and let [`TlsBackendBuilder`] select the
+/// backend:
 ///
 /// ```rust
 /// use fetch_tls::TlsOptions;
@@ -71,9 +62,8 @@ pub(crate) enum TlsOptionsKind {
 ///     .build();
 /// ```
 ///
-/// Minimal rustls-backed options using defaults. The consuming library is
-/// expected to have configured the rustls crypto provider on its
-/// [`TlsBackendBuilder`] before materializing this into a backend:
+/// These rustls options use defaults. The client library must configure the
+/// rustls crypto provider on [`TlsBackendBuilder`] before it builds the backend:
 ///
 /// ```rust,no_run
 /// # #[cfg(feature = "rustls")] {
@@ -83,8 +73,7 @@ pub(crate) enum TlsOptionsKind {
 /// # }
 /// ```
 ///
-/// Minimal native-tls-backed options using defaults; no environment-
-/// supplied defaults are required to materialize the backend:
+/// These native TLS options use defaults. They do not need environment values:
 ///
 /// ```rust,no_run
 /// # #[cfg(feature = "native-tls")] {
@@ -110,7 +99,7 @@ impl SharedOptions {
     #[allow(
         clippy::allow_attributes,
         dead_code,
-        reason = "used by feature-gated backend builders; can be unused in builds without rustls/native-tls"
+        reason = "feature-gated backend builders use this method. Builds without backend features do not use it"
     )]
     pub(crate) fn resolved_supported_http_versions<'a>(&'a self, defaults: &'a TlsBackendBuilder) -> &'a [Version] {
         self.supported_http_versions
@@ -119,9 +108,7 @@ impl SharedOptions {
     }
 }
 
-/// Constructs [`TlsOptions`] whose backend is chosen when the consuming
-/// library materializes them via its [`TlsBackendBuilder`]. See
-/// [`TlsBackendBuilder`] for how to configure the default backend.
+/// Creates [`TlsOptions`] that lets [`TlsBackendBuilder`] select the backend.
 impl Default for TlsOptions {
     fn default() -> Self {
         Self {
@@ -133,9 +120,8 @@ impl Default for TlsOptions {
 
 /// Marker for [`TlsOptionsBuilder`] returned by [`TlsOptions::builder`].
 ///
-/// Carries no backend-specific state: the consuming library's
-/// [`TlsBackendBuilder`] decides which backend to use when the resulting
-/// [`TlsOptions`] is materialized.
+/// This type contains no backend-specific values. [`TlsBackendBuilder`] selects
+/// the backend when it builds the resulting [`TlsOptions`].
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct AutoBackend;
@@ -143,12 +129,9 @@ pub struct AutoBackend;
 impl TlsOptions {
     /// Creates a backend-agnostic builder for [`TlsOptions`].
     ///
-    /// The builder exposes only options that apply to every backend (such
-    /// as supported HTTP versions and the client identity for `mTLS`).
-    /// The actual backend is selected by the consuming library's
-    /// [`TlsBackendBuilder`] when the options are materialized, so callers
-    /// don't need to pick `builder_rustls` / `builder_native_tls`
-    /// explicitly.
+    /// The builder contains only values that apply to every backend, such as
+    /// HTTP versions and the `mTLS` client identity. [`TlsBackendBuilder`]
+    /// selects the backend.
     pub fn builder() -> TlsOptionsBuilder<AutoBackend> {
         TlsOptionsBuilder {
             backend: AutoBackend,
@@ -158,11 +141,10 @@ impl TlsOptions {
 }
 
 impl TlsOptionsBuilder<AutoBackend> {
-    /// Builds the final [`TlsOptions`] without pinning a backend.
+    /// Builds [`TlsOptions`] without selecting a backend.
     ///
-    /// The consuming library's [`TlsBackendBuilder`] picks the backend
-    /// when [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend)
-    /// is called.
+    /// [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend)
+    /// selects the backend.
     pub fn build(self) -> TlsOptions {
         TlsOptions {
             inner: TlsOptionsKind::Auto,
@@ -171,18 +153,17 @@ impl TlsOptionsBuilder<AutoBackend> {
     }
 }
 
-/// Type-state builder for [`TlsOptions`], parameterized by backend.
+/// A type-state builder for [`TlsOptions`].
 ///
-/// The type parameter `B` carries the backend-specific state (rustls or
-/// native-tls). Obtain a builder from one of the feature-gated
-/// `TlsOptions::builder_*` constructors and finish with `.build()`.
+/// The `B` type contains backend-specific values. Get a builder from a
+/// `TlsOptions::builder_*` method and finish with `.build()`.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct TlsOptionsBuilder<B> {
     #[allow(
         clippy::allow_attributes,
         dead_code,
-        reason = "Read by feature-gated backend impls (rustls/native-tls); unused when neither feature is enabled."
+        reason = "feature-gated rustls and native-tls implementations read this field. It is unused when both features are disabled"
     )]
     pub(crate) backend: B,
     pub(crate) shared: SharedOptions,
@@ -199,7 +180,7 @@ impl<B> TlsOptionsBuilder<B> {
     pub fn supported_http_versions(mut self, versions: &[Version]) -> Self {
         assert!(
             !versions.is_empty(),
-            "supported_http_versions cannot be empty; configure at least one HTTP version (for example HTTP/1.1 or HTTP/2)"
+            "supported_http_versions cannot be empty. Configure at least one HTTP version, such as HTTP/1.1 or HTTP/2"
         );
         self.shared.supported_http_versions = Some(versions.to_vec());
         self
@@ -207,9 +188,10 @@ impl<B> TlsOptionsBuilder<B> {
 
     /// Sets the client identity for mutual TLS (`mTLS`) authentication.
     ///
-    /// The same identity works for either backend; backend-specific
-    /// conversion happens when the options are materialized into a backend.
-    /// The native-tls backend requires the private key to be `PKCS#8`.
+    /// The same identity works with either backend. Each backend converts it
+    /// when [`TlsBackendBuilder`] builds the backend.
+    /// The native-tls backend requires a `PKCS#8` private key. It does not
+    /// support client identities on Apple platforms other than macOS.
     pub fn client_identity(mut self, identity: ClientIdentity) -> Self {
         self.shared.client_identity = Some(identity);
         self

@@ -77,11 +77,12 @@ impl TaskOptions {
         f()
     }
 
-    pub(crate) fn created_reporter(&self, sink: Sink) -> Option<TaskCreatedReporter> {
+    #[inline]
+    pub(crate) fn created_reporter(&self, sink: &Sink) -> Option<TaskCreatedReporter> {
         (!sink.is_noop()).then(|| TaskCreatedReporter {
             context: self.context.clone(),
             placement: self.placement,
-            sink,
+            sink: sink.clone(),
         })
     }
 

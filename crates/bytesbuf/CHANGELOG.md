@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0] - 2026-11-06
+
+- Add conversion from `GlobalPool` to `OpaqueMemory` for memory-provider builders.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `seismograph`, `seismograph_io`.
+- Update the local `performables` requirement from `0.3.1` to `0.4.0`.
+- Update the local `seismograph_io` requirement from `0.4.0` to `0.5.0`.
+
 ## [0.13.0] - 2026-11-02
 
 - Update dependencies to use the Seismograph 0.4.0 packages. This release does not change the buffer
