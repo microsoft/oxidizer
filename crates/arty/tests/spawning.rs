@@ -161,7 +161,7 @@ fn relocating_factories_remain_deferred_and_preserve_future_borrows() {
         }
     }
 
-    fn create(probe: Probe) -> impl Future<Output = (usize, thread::ThreadId)> {
+    let create = |probe: Probe| {
         assert_eq!(probe.relocations.load(Ordering::Relaxed), 1);
         assert_eq!(probe.factories.fetch_add(1, Ordering::Relaxed), 0);
         let owner = Rc::new(thread::current().id());
@@ -177,9 +177,10 @@ fn relocating_factories_remain_deferred_and_preserve_future_borrows() {
                 }
             })
             .await;
+            drop(probe);
             (polls, *owner)
         }
-    }
+    };
 
     let runtime = Runtime::builder()
         .workers(arty::runtime::WorkersPolicy::exactly(1))
