@@ -4,6 +4,7 @@
 //! Maps existing [`HttpBody`] content while preserving its policies.
 //!
 //! See [`HttpBody::map`] for more information.
+//! Call it before polling begins. Mapping does not preserve an in-progress timeout.
 //!
 //! If you want to create a new body, use [`HttpBodyBuilder`][crate::HttpBodyBuilder].
 
@@ -16,26 +17,20 @@ use crate::{HttpError, Result};
 pub(crate) fn map_body(body: HttpBody, map_content: impl FnOnce(Content) -> Result<Content>) -> Result<HttpBody> {
     let options = body.options();
     let clock = body.clock;
-    let (content, mapped_timeout, current_delay) = match body.kind {
-        Kind::Body(inner, active_timeout, current_delay) => (Content::Streaming(inner), active_timeout.or(options.timeout), current_delay),
-        Kind::Bytes(Some(bytes)) => (Content::Bytes(bytes), options.timeout, None),
-        Kind::Empty => (Content::Bytes(BytesView::default()), options.timeout, None),
+    let content = match body.kind {
+        Kind::Body(inner, _) => Content::Streaming(inner),
+        Kind::Bytes(Some(bytes)) => Content::Bytes(bytes),
+        Kind::Empty => Content::Bytes(BytesView::default()),
         Kind::Bytes(None) => {
             return Err(HttpError::validation_with_label(
-                "body cannot be transformed because it is already consumed",
+                "body cannot be mapped because it is already consumed",
                 LABEL_BODY_CONSUMED,
             ));
         }
     };
 
     match map_content(content)? {
-        Content::Streaming(inner) => Ok(HttpBody::from_streaming_with_timeout(
-            inner,
-            options,
-            clock,
-            mapped_timeout,
-            current_delay,
-        )),
+        Content::Streaming(inner) => Ok(HttpBody::from_streaming(inner, options, clock, None)),
         Content::Bytes(bytes) => Ok(HttpBody::from_bytes(bytes, options, clock)),
     }
 }

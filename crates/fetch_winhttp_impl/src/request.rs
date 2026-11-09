@@ -267,7 +267,11 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
         };
 
         let reader = WinHttpBodyReader::new(guard, bindings, self.memory, declared_body_length(&headers));
-        let body = self.body_builder.body(WinHttpResponseBody::new(reader), &self.body_options);
+        let body = self
+            .body_builder
+            .clone()
+            .with_options(self.body_options)
+            .body(WinHttpResponseBody::new(reader));
         let mut response = HttpResponseBuilder::new(self.body_builder)
             .status(status)
             .version(version)
@@ -618,7 +622,6 @@ mod tests {
     use http::header::HeaderValue;
     use http::{HeaderMap, Method, Version};
     use http_body::{Frame, SizeHint};
-    use http_extensions::HttpBodyOptions;
     use http_extensions::timeout::BodyTimeout;
     use ohno::Labeled as _;
     use plurality::Pool;
@@ -1246,19 +1249,16 @@ mod tests {
         ];
         let segmented = BytesView::from_views([first, second]);
         let completed_writes = Arc::new(AtomicUsize::new(0));
-        let body = body_builder.body(
-            ScriptedBody::new(
-                [
-                    (0, Ok(Frame::data(BytesView::new()))),
-                    (0, Ok(Frame::data(segmented))),
-                    (2, Ok(Frame::data(third))),
-                ],
-                Arc::clone(&completed_writes),
-                3,
-                Some(6),
-            ),
-            &HttpBodyOptions::default(),
-        );
+        let body = body_builder.body(ScriptedBody::new(
+            [
+                (0, Ok(Frame::data(BytesView::new()))),
+                (0, Ok(Frame::data(segmented))),
+                (2, Ok(Frame::data(third))),
+            ],
+            Arc::clone(&completed_writes),
+            3,
+            Some(6),
+        ));
         let request = http::Request::builder()
             .method(Method::POST)
             .uri("https://example.com/")
@@ -1301,10 +1301,12 @@ mod tests {
         let data = BytesView::copied_from_slice(b"abcd", &memory);
         let address = data.first_slice().as_ptr().addr();
         let completed_writes = Arc::new(AtomicUsize::new(0));
-        let body = body_builder.body(
-            ScriptedBody::new([(0, Ok(Frame::data(data)))], Arc::clone(&completed_writes), 2, Some(4)),
-            &HttpBodyOptions::default(),
-        );
+        let body = body_builder.body(ScriptedBody::new(
+            [(0, Ok(Frame::data(data)))],
+            Arc::clone(&completed_writes),
+            2,
+            Some(4),
+        ));
         let request = http::Request::builder()
             .method(Method::POST)
             .uri("https://example.com/")
@@ -1348,15 +1350,12 @@ mod tests {
             let memory = OpaqueMemory::new(GlobalPool::new());
             let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
             let completed_writes = Arc::new(AtomicUsize::new(0));
-            let body = body_builder.body(
-                ScriptedBody::new(
-                    [(0, Ok(Frame::data(BytesView::copied_from_slice(b"x", &memory))))],
-                    Arc::clone(&completed_writes),
-                    1,
-                    None,
-                ),
-                &HttpBodyOptions::default(),
-            );
+            let body = body_builder.body(ScriptedBody::new(
+                [(0, Ok(Frame::data(BytesView::copied_from_slice(b"x", &memory))))],
+                Arc::clone(&completed_writes),
+                1,
+                None,
+            ));
             let request = http::Request::builder()
                 .method(Method::POST)
                 .uri("https://example.com/")
@@ -1395,10 +1394,7 @@ mod tests {
         let clock = Clock::new_frozen();
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
         let completed_writes = Arc::new(AtomicUsize::new(0));
-        let body = body_builder.body(
-            ScriptedBody::new([], Arc::clone(&completed_writes), 0, None),
-            &HttpBodyOptions::default(),
-        );
+        let body = body_builder.body(ScriptedBody::new([], Arc::clone(&completed_writes), 0, None));
         let mut request = http::Request::builder()
             .method(Method::POST)
             .uri("https://example.com/")
@@ -1490,10 +1486,7 @@ mod tests {
         let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &Clock::new_frozen());
         let completed_writes = Arc::new(AtomicUsize::new(0));
         let length = u64::from(u32::MAX) + 1;
-        let body = body_builder.body(
-            ScriptedBody::new([], Arc::clone(&completed_writes), 0, Some(length)),
-            &HttpBodyOptions::default(),
-        );
+        let body = body_builder.body(ScriptedBody::new([], Arc::clone(&completed_writes), 0, Some(length)));
         let request = http::Request::builder()
             .method(Method::POST)
             .uri("https://example.com/")
@@ -1522,15 +1515,12 @@ mod tests {
     fn request_body_errors_and_trailers_stop_before_response_reception() {
         let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &Clock::new_frozen());
         let completed_writes = Arc::new(AtomicUsize::new(0));
-        let body = body_builder.body(
-            ScriptedBody::new(
-                [(0, Err(HttpError::validation("request body stream failed")))],
-                Arc::clone(&completed_writes),
-                0,
-                None,
-            ),
-            &HttpBodyOptions::default(),
-        );
+        let body = body_builder.body(ScriptedBody::new(
+            [(0, Err(HttpError::validation("request body stream failed")))],
+            Arc::clone(&completed_writes),
+            0,
+            None,
+        ));
         let request = http::Request::builder()
             .method(Method::POST)
             .uri("https://example.com/")
@@ -1550,10 +1540,12 @@ mod tests {
         assert_lifecycle_closed(&record);
 
         let completed_writes = Arc::new(AtomicUsize::new(0));
-        let body = body_builder.body(
-            ScriptedBody::new([(0, Ok(Frame::trailers(HeaderMap::new())))], Arc::clone(&completed_writes), 0, None),
-            &HttpBodyOptions::default(),
-        );
+        let body = body_builder.body(ScriptedBody::new(
+            [(0, Ok(Frame::trailers(HeaderMap::new())))],
+            Arc::clone(&completed_writes),
+            0,
+            None,
+        ));
         let request = http::Request::builder()
             .method(Method::POST)
             .uri("https://example.com/")
@@ -1578,10 +1570,7 @@ mod tests {
         for failure in [LifecycleFailure::EndWriteSync, LifecycleFailure::EndWriteCallback] {
             let body_builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &Clock::new_frozen());
             let completed_writes = Arc::new(AtomicUsize::new(0));
-            let body = body_builder.body(
-                ScriptedBody::new([], Arc::clone(&completed_writes), 0, None),
-                &HttpBodyOptions::default(),
-            );
+            let body = body_builder.body(ScriptedBody::new([], Arc::clone(&completed_writes), 0, None));
             let request = http::Request::builder()
                 .method(Method::POST)
                 .uri("https://example.com/")
@@ -1609,15 +1598,12 @@ mod tests {
             let memory = OpaqueMemory::new(GlobalPool::new());
             let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
             let completed_writes = Arc::new(AtomicUsize::new(0));
-            let body = body_builder.body(
-                ScriptedBody::new(
-                    [(0, Ok(Frame::data(BytesView::copied_from_slice(b"data", &memory))))],
-                    Arc::clone(&completed_writes),
-                    0,
-                    Some(4),
-                ),
-                &HttpBodyOptions::default(),
-            );
+            let body = body_builder.body(ScriptedBody::new(
+                [(0, Ok(Frame::data(BytesView::copied_from_slice(b"data", &memory))))],
+                Arc::clone(&completed_writes),
+                0,
+                Some(4),
+            ));
             let request = http::Request::builder()
                 .method(Method::POST)
                 .uri("https://example.com/")
@@ -1640,15 +1626,12 @@ mod tests {
         let memory = OpaqueMemory::new(GlobalPool::new());
         let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
         let completed_writes = Arc::new(AtomicUsize::new(0));
-        let body = body_builder.body(
-            ScriptedBody::new(
-                [(0, Ok(Frame::data(BytesView::copied_from_slice(b"data", &memory))))],
-                Arc::clone(&completed_writes),
-                0,
-                Some(4),
-            ),
-            &HttpBodyOptions::default(),
-        );
+        let body = body_builder.body(ScriptedBody::new(
+            [(0, Ok(Frame::data(BytesView::copied_from_slice(b"data", &memory))))],
+            Arc::clone(&completed_writes),
+            0,
+            Some(4),
+        ));
         let request = http::Request::builder()
             .method(Method::POST)
             .uri("https://example.com/")
@@ -1673,15 +1656,12 @@ mod tests {
         let memory = OpaqueMemory::new(GlobalPool::new());
         let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
         let completed_writes = Arc::new(AtomicUsize::new(0));
-        let body = body_builder.body(
-            ScriptedBody::new(
-                [(0, Ok(Frame::data(BytesView::copied_from_slice(b"outstanding", &memory))))],
-                Arc::clone(&completed_writes),
-                0,
-                Some(11),
-            ),
-            &HttpBodyOptions::default(),
-        );
+        let body = body_builder.body(ScriptedBody::new(
+            [(0, Ok(Frame::data(BytesView::copied_from_slice(b"outstanding", &memory))))],
+            Arc::clone(&completed_writes),
+            0,
+            Some(11),
+        ));
         let mut request = http::Request::builder()
             .method(Method::POST)
             .uri("https://example.com/")
@@ -1825,15 +1805,12 @@ mod tests {
         let memory = OpaqueMemory::new(GlobalPool::new());
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
         let completed_writes = Arc::new(AtomicUsize::new(0));
-        let body = body_builder.body(
-            ScriptedBody::new(
-                [(0, Ok(Frame::data(BytesView::copied_from_slice(b"pending upload", &memory))))],
-                Arc::clone(&completed_writes),
-                0,
-                Some(14),
-            ),
-            &HttpBodyOptions::default(),
-        );
+        let body = body_builder.body(ScriptedBody::new(
+            [(0, Ok(Frame::data(BytesView::copied_from_slice(b"pending upload", &memory))))],
+            Arc::clone(&completed_writes),
+            0,
+            Some(14),
+        ));
         let mut request = http::Request::builder()
             .method(Method::POST)
             .uri("https://example.com/")

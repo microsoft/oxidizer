@@ -18,9 +18,7 @@ use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use http::{HeaderMap, HeaderValue, StatusCode};
 use http_body::{Body, Frame};
 use http_compression::{Compression, OriginalBody};
-use http_extensions::{
-    FakeHandler, HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, HttpResponseBuilder, Result,
-};
+use http_extensions::{FakeHandler, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, HttpResponseBuilder, Result};
 use layered::{Layer, Service};
 use ohno::{ErrorLabel, Labeled as _};
 use seatbelt::RecoveryInfo;
@@ -53,7 +51,7 @@ async fn streaming_response(format: Format) -> (UnboundedSender<Result<Frame<Byt
     let client = Compression::client().decompress_responses(&[format]).layer(server);
     let (sender, receiver) = unbounded();
     let request = http::Request::get("https://example.com/stream")
-        .body(builder.body(ChannelBody(receiver), &HttpBodyOptions::default()))
+        .body(builder.body(ChannelBody(receiver)))
         .unwrap();
     let response = client.execute(request).await.unwrap();
     assert!(response.headers().get(CONTENT_LENGTH).is_none());

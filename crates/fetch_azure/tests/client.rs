@@ -209,10 +209,7 @@ async fn execute_request_maps_seekable_stream_read_error() {
 #[tokio::test]
 async fn execute_request_maps_response_body_read_error() {
     let handler = FakeHandler::from_fn(|_request| {
-        let body = fetch::HttpBodyBuilder::new_fake().stream(
-            futures::stream::iter([Err(fetch::HttpError::unavailable("boom"))]),
-            &fetch::options::HttpBodyOptions::default(),
-        );
+        let body = fetch::HttpBodyBuilder::new_fake().stream(futures::stream::iter([Err(fetch::HttpError::unavailable("boom"))]));
         HttpResponseBuilder::new_fake().status(200u16).body(body).build()
     });
     let client = HttpClient::new(FetchClient::new_fake(handler));

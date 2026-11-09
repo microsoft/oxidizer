@@ -40,10 +40,7 @@ fn maps_buffered_and_streaming_content() {
     assert_eq!(block_on(buffered.into_text()).unwrap(), "buffered output");
 
     let selected_streaming = Cell::new(false);
-    let source = builder.stream(
-        stream::iter([Ok(BytesView::copied_from_slice(b"streaming", &builder))]),
-        &HttpBodyOptions::new(),
-    );
+    let source = builder.stream(stream::iter([Ok(BytesView::copied_from_slice(b"streaming", &builder))]));
     let streaming = source
         .map(|content| {
             let Content::Streaming(inner) = content else {
@@ -102,11 +99,14 @@ fn preserves_the_buffer_limit_for_streaming_output() {
 }
 
 #[test]
-fn preserves_an_active_timeout_and_its_clock() {
+fn starts_a_new_timeout_and_preserves_the_clock() {
     let control = ClockControl::new();
     let timeout = Duration::from_millis(100);
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
-    let mut source = builder.stream(stream::pending(), &HttpBodyOptions::new().timeout(timeout));
+    let mut source = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(timeout))
+        .stream(stream::pending());
     let waker = futures::task::noop_waker();
     let mut cx = Context::from_waker(&waker);
 
@@ -123,9 +123,11 @@ fn preserves_an_active_timeout_and_its_clock() {
         .unwrap();
     assert!(Pin::new(&mut transformed).poll_frame(&mut cx).is_pending());
     control.advance(Duration::from_millis(25));
+    assert!(Pin::new(&mut transformed).poll_frame(&mut cx).is_pending());
+    control.advance(Duration::from_millis(75));
 
     let Poll::Ready(Some(Err(error))) = Pin::new(&mut transformed).poll_frame(&mut cx) else {
-        panic!("the original timeout must fire");
+        panic!("the mapped body must start a new timeout");
     };
     assert_eq!(error.label(), "body_timeout");
 }

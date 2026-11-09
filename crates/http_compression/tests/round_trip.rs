@@ -571,7 +571,7 @@ async fn response_compression_defaults_to_fast_and_honours_the_configured_level(
                     let body = if buffered {
                         builder().bytes(bytes)
                     } else {
-                        builder().stream(futures::stream::iter([Ok(bytes)]), &HttpBodyOptions::new())
+                        builder().stream(futures::stream::iter([Ok(bytes)]))
                     };
                     HttpResponseBuilder::new_fake().status(StatusCode::OK).body(body).build()
                 }));
@@ -690,7 +690,7 @@ async fn decompression_limits_use_the_same_error_label_in_both_roles() {
                 let body = if buffered {
                     builder().bytes(response_body.clone())
                 } else {
-                    builder().stream(futures::stream::iter([Ok(response_body.clone())]), &HttpBodyOptions::new())
+                    builder().stream(futures::stream::iter([Ok(response_body.clone())]))
                 };
                 HttpResponseBuilder::new_fake()
                     .status(StatusCode::OK)
@@ -1132,13 +1132,10 @@ async fn trailers_survive_every_format() {
             }));
 
         let mut input = http::Request::post(URL)
-            .body(builder().body(
-                TrailingBody {
-                    data: Some(compressed),
-                    trailers: Some(trailers),
-                },
-                &http_extensions::HttpBodyOptions::default(),
-            ))
+            .body(builder().body(TrailingBody {
+                data: Some(compressed),
+                trailers: Some(trailers),
+            }))
             .unwrap();
         input.headers_mut().insert(CONTENT_ENCODING, HeaderValue::from_str(token).unwrap());
 

@@ -6,7 +6,6 @@ use std::io::Read;
 use std::pin::Pin;
 use std::task::Poll::Ready;
 use std::task::{Context, Poll};
-use std::time::Duration;
 
 use bytesbuf::BytesView;
 use futures::future::Either;
@@ -222,30 +221,21 @@ impl HttpBody {
 
     /// Creates a streaming body backed by a boxed [`Body`] implementation.
     pub(super) fn from_streaming(body: StreamingBody, options: HttpBodyOptions, clock: Clock, current_delay: Option<Delay>) -> Self {
-        Self::from_streaming_with_timeout(body, options, clock, options.timeout, current_delay)
-    }
-
-    pub(super) fn from_streaming_with_timeout(
-        body: StreamingBody,
-        options: HttpBodyOptions,
-        clock: Clock,
-        active_timeout: Option<Duration>,
-        current_delay: Option<Delay>,
-    ) -> Self {
         Self {
-            kind: Kind::Body(body, active_timeout, current_delay),
+            kind: Kind::Body(body, current_delay),
             options,
             clock,
         }
     }
 
-    pub(super) fn enforces_timeout_policy(&self) -> bool {
-        self.options.timeout.is_some() && matches!(self.kind, Kind::Body(..))
-    }
-
     /// Maps body content while preserving its policies.
     ///
     /// Match both [`Content`] variants to handle buffered bytes and streaming frames.
+    /// Call this method before polling the body.
+    ///
+    /// The mapped body keeps the configured timeout, buffer limit, and clock.
+    /// It does not keep an idle timeout that already started.
+    /// The timeout starts when the mapped body is first polled.
     ///
     /// # Errors
     ///
@@ -671,14 +661,14 @@ impl Body for HttpBody {
                 .take()
                 .map_or_else(|| Ready(None), |bytes| Ready((!bytes.is_empty()).then(|| Ok(Frame::data(bytes))))),
             BodyInnerProj::Empty => Ready(None),
-            BodyInnerProj::Body(body, active_timeout, current_delay) => {
+            BodyInnerProj::Body(body, current_delay) => {
                 let result = Pin::new(body).poll_frame(cx);
                 if result.is_ready() {
                     *current_delay = None;
                     return result;
                 }
 
-                let Some(duration) = *active_timeout else {
+                let Some(duration) = this.options.timeout else {
                     return Poll::Pending;
                 };
                 let clock = this.clock;
@@ -720,7 +710,7 @@ pub(super) enum Kind {
     #[debug("Empty")]
     Empty,
     #[debug("Body")]
-    Body(StreamingBody, Option<Duration>, Option<Delay>),
+    Body(StreamingBody, Option<Delay>),
 }
 
 fn collect_with_limit(
@@ -865,7 +855,7 @@ mod tests {
 
     #[test]
     fn custom_body_is_not_cloneable() {
-        let body = HttpBodyBuilder::new_fake().body(http_body_util::Empty::new(), &HttpBodyOptions::default());
+        let body = HttpBodyBuilder::new_fake().body(http_body_util::Empty::new());
 
         assert!(body.try_clone().is_none());
 
@@ -892,10 +882,9 @@ mod tests {
     #[test]
     fn body_error_propagation() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = builder.body(
-            StreamBody::new(futures::stream::once(async { Err(HttpError::validation("test error")) })),
-            &HttpBodyOptions::default(),
-        );
+        let body = builder.body(StreamBody::new(futures::stream::once(async {
+            Err(HttpError::validation("test error"))
+        })));
 
         let error = block_on(body.into_buffered()).unwrap_err();
         assert_eq!(error.message(), "test error");
@@ -984,7 +973,7 @@ mod tests {
     #[test]
     fn try_clone_custom_body_fails() {
         let builder = HttpBodyBuilder::new_fake();
-        let custom_body = builder.body(http_body_util::Empty::new(), &HttpBodyOptions::default());
+        let custom_body = builder.body(http_body_util::Empty::new());
 
         assert!(custom_body.try_clone().is_none());
     }
@@ -1012,7 +1001,7 @@ mod tests {
     #[test]
     fn into_bytes_custom_body_fails() {
         let builder = HttpBodyBuilder::new_fake();
-        let custom_body = builder.body(http_body_util::Empty::new(), &HttpBodyOptions::default());
+        let custom_body = builder.body(http_body_util::Empty::new());
 
         BytesView::try_from(custom_body).unwrap_err();
     }
@@ -1082,7 +1071,7 @@ mod tests {
 
         let builder = HttpBodyBuilder::new_fake();
         let stream = futures::stream::iter(Vec::<Result<BytesView>>::new());
-        let body = builder.stream(stream, &HttpBodyOptions::default());
+        let body = builder.stream(stream);
         let debug_str = format!("{body:?}");
         assert!(debug_str.contains("Body"), "{debug_str}");
     }
@@ -1150,7 +1139,7 @@ mod tests {
     fn is_end_stream_custom_body_empty() {
         let builder = HttpBodyBuilder::new_fake();
         let custom = http_body_util::Empty::new();
-        let body = builder.body(custom, &HttpBodyOptions::default());
+        let body = builder.body(custom);
 
         assert!(body.is_end_stream());
     }
@@ -1160,7 +1149,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
         let data = Bytes::from_static(b"test data");
         let custom = http_body_util::Full::new(data.into());
-        let body = builder.body(custom, &HttpBodyOptions::default());
+        let body = builder.body(custom);
 
         assert!(!body.is_end_stream());
     }

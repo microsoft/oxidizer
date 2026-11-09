@@ -88,7 +88,7 @@ where
 
                 handle_poisoning(&captured, &parts.extensions);
 
-                HttpResponse::from_parts(parts, self.body_builder.body(body, &body_options))
+                HttpResponse::from_parts(parts, self.body_builder.clone().with_options(body_options).body(body))
             })
     }
 }

@@ -63,7 +63,6 @@ mod windows {
     use futures::executor::{LocalPool, block_on};
     use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, TRANSFER_ENCODING};
     use http::{HeaderName, HeaderValue, Version};
-    use http_extensions::HttpBodyOptions;
     use tick::Clock;
 
     /// Payload size for the "low" leg of every parameterized body scenario.
@@ -382,17 +381,13 @@ mod windows {
         let payload = vec![b's'; len];
         assert_request_shape(false, len, |shape_url| {
             let frame = BytesView::copied_from_slice(&payload, &test_client.body_builder);
-            let body = test_client
-                .body_builder
-                .stream(futures::stream::iter([Ok(frame)]), &HttpBodyOptions::default());
+            let body = test_client.body_builder.stream(futures::stream::iter([Ok(frame)]));
             drop(block_on(test_client.client.post(shape_url).body(body).fetch_text_body()).unwrap());
         });
 
         measure(group, allocs, time, name, |_| async {
             let frame = BytesView::copied_from_slice(&payload, &test_client.body_builder);
-            let body = test_client
-                .body_builder
-                .stream(futures::stream::iter([Ok(frame)]), &HttpBodyOptions::default());
+            let body = test_client.body_builder.stream(futures::stream::iter([Ok(frame)]));
 
             let request = test_client.client.post(url.as_str()).body(body);
             black_box(request.fetch_text_body().await.unwrap());

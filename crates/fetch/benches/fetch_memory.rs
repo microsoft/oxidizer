@@ -53,7 +53,7 @@ fn memory(c: &mut Criterion) {
         });
         operation(&mut group, &session, "stream_read", size, || {
             let frames = [Ok(frame.clone()), Ok(frame.clone())];
-            let body = black_box(&builder).stream(futures::stream::iter(frames), &HttpBodyOptions::default());
+            let body = black_box(&builder).stream(futures::stream::iter(frames));
             block_on(body.into_buffered()).unwrap()
         });
     }

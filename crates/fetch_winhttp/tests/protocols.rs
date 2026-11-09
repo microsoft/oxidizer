@@ -17,7 +17,6 @@ use bytesbuf::BytesView;
 use fetch_winhttp::WinHttpTlsConfig;
 use fetch_winhttp_impl::testing::{Http3Server, ResponsePlan, TestServer, client, collect_frames};
 use http::{HeaderMap, HeaderValue, Version};
-use http_extensions::HttpBodyOptions;
 use tick::Clock;
 
 #[cfg_attr(miri, ignore)]
@@ -29,9 +28,7 @@ fn unknown_length_upload_is_streamed_before_the_response() {
         Ok(BytesView::copied_from_slice(b"streamed ", &test_client.body_builder)),
         Ok(BytesView::copied_from_slice(b"request", &test_client.body_builder)),
     ];
-    let body = test_client
-        .body_builder
-        .stream(futures::stream::iter(chunks), &HttpBodyOptions::default());
+    let body = test_client.body_builder.stream(futures::stream::iter(chunks));
 
     let response = futures::executor::block_on(test_client.client.post(server.url("/stream")).body(body).fetch_text_body()).unwrap();
 
@@ -112,13 +109,10 @@ fn http2_streams_unknown_length_uploads_and_preserves_response_trailers() {
         WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
         Clock::new_frozen(),
     );
-    let body = test_client.body_builder.stream(
-        futures::stream::iter([
-            Ok(BytesView::copied_from_slice(b"streamed ", &test_client.body_builder)),
-            Ok(BytesView::copied_from_slice(b"request", &test_client.body_builder)),
-        ]),
-        &HttpBodyOptions::default(),
-    );
+    let body = test_client.body_builder.stream(futures::stream::iter([
+        Ok(BytesView::copied_from_slice(b"streamed ", &test_client.body_builder)),
+        Ok(BytesView::copied_from_slice(b"request", &test_client.body_builder)),
+    ]));
 
     let response = futures::executor::block_on(test_client.client.post(server.url("/stream")).body(body).fetch()).unwrap();
     let (response_body, trailers) = futures::executor::block_on(collect_frames(response.into_body()));
@@ -145,13 +139,10 @@ fn http3_streams_an_unknown_length_request_and_reports_the_protocol() {
         WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
         Clock::new_frozen(),
     );
-    let body = test_client.body_builder.stream(
-        futures::stream::iter([
-            Ok(BytesView::copied_from_slice(b"streamed ", &test_client.body_builder)),
-            Ok(BytesView::copied_from_slice(b"request", &test_client.body_builder)),
-        ]),
-        &HttpBodyOptions::default(),
-    );
+    let body = test_client.body_builder.stream(futures::stream::iter([
+        Ok(BytesView::copied_from_slice(b"streamed ", &test_client.body_builder)),
+        Ok(BytesView::copied_from_slice(b"request", &test_client.body_builder)),
+    ]));
 
     let response = futures::executor::block_on(test_client.client.post(server.url("/stream")).body(body).fetch()).unwrap();
 

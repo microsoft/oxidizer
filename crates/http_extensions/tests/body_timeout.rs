@@ -99,11 +99,7 @@ fn transform_rejects_a_consumed_buffered_body() {
 #[test]
 fn transform_propagates_callback_errors() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen());
-    for body in [
-        builder.empty(),
-        builder.text("source"),
-        builder.body(PendingBody, &HttpBodyOptions::new()),
-    ] {
+    for body in [builder.empty(), builder.text("source"), builder.body(PendingBody)] {
         let expected: HttpError = std::io::Error::other("map failed").into();
         let expected_label = expected.label().to_string();
         let expected_message = expected.message().to_string();
@@ -117,7 +113,7 @@ fn transform_propagates_callback_errors() {
 #[test]
 fn transform_accepts_an_empty_streaming_body() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen());
-    let body = builder.body(http_body_util::Empty::new(), &HttpBodyOptions::new());
+    let body = builder.body(http_body_util::Empty::new());
     assert!(body.is_end_stream());
     let called = Cell::new(false);
     let transformed = body
@@ -137,11 +133,14 @@ fn transform_accepts_an_empty_streaming_body() {
 }
 
 #[test]
-fn body_transform_keeps_the_running_timer() {
+fn mapping_starts_a_new_idle_period() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let timeout = Duration::from_millis(100);
-    let mut source = builder.body(PendingBody, &HttpBodyOptions::new().timeout(timeout));
+    let mut source = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(timeout))
+        .body(PendingBody);
     let waker = futures::task::noop_waker();
     let mut cx = Context::from_waker(&waker);
 
@@ -150,9 +149,11 @@ fn body_transform_keeps_the_running_timer() {
     let mut body = source.map(Ok).unwrap();
     assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
     control.advance(Duration::from_millis(25));
+    assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
+    control.advance(Duration::from_millis(75));
 
     let Poll::Ready(Some(Err(error))) = Pin::new(&mut body).poll_frame(&mut cx) else {
-        panic!("transform must keep the original deadline");
+        panic!("the mapped body must start a new idle period");
     };
     assert_eq!(error.label(), "body_timeout");
 }
@@ -162,10 +163,10 @@ fn body_transform_times_out_after_the_source_finishes() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let timeout = Duration::from_millis(100);
-    let source = builder.body(
-        Full::new(BytesView::copied_from_slice(b"source", &builder)),
-        &HttpBodyOptions::new().timeout(timeout),
-    );
+    let source = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(timeout))
+        .body(Full::new(BytesView::copied_from_slice(b"source", &builder)));
     let mut body = map_stream(source, |body| {
         StreamBody::new(stream::once(async move {
             let _collected = body.collect().await?;
@@ -190,13 +191,17 @@ fn body_transform_preserves_the_buffer_limit() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen()).with_options(HttpBodyOptions::new().buffer_limit(99));
     let options = HttpBodyOptions::new().buffer_limit(3);
     let body = builder
-        .body(Full::new(BytesView::copied_from_slice(b"abc", &builder)), &options)
+        .clone()
+        .with_options(options)
+        .body(Full::new(BytesView::copied_from_slice(b"abc", &builder)))
         .map(Ok)
         .unwrap();
     assert_eq!(block_on(body.into_bytes()).unwrap(), b"abc");
 
     let body = builder
-        .body(Full::new(BytesView::copied_from_slice(b"abcd", &builder)), &options)
+        .clone()
+        .with_options(options)
+        .body(Full::new(BytesView::copied_from_slice(b"abcd", &builder)))
         .map(Ok)
         .unwrap();
     let error = block_on(body.into_bytes()).unwrap_err();
@@ -230,10 +235,7 @@ fn policies_survive_buffering_cloning_and_buffered_transformations() {
     let timeout = Duration::from_millis(100);
     let builder =
         HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock()).with_options(HttpBodyOptions::new().timeout(timeout).buffer_limit(3));
-    let source = builder.stream(
-        stream::iter([Ok(BytesView::copied_from_slice(b"abc", &builder))]),
-        &HttpBodyOptions::new(),
-    );
+    let source = builder.stream(stream::iter([Ok(BytesView::copied_from_slice(b"abc", &builder))]));
     let buffered = block_on(source.into_buffered()).unwrap();
     let buffered = buffered.map(Ok).unwrap();
     let clone = buffered.try_clone().unwrap();
@@ -317,10 +319,10 @@ fn transform_can_complete_streaming_content_and_release_its_source() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let dropped = Arc::new(AtomicBool::new(false));
-    let mut source = builder.body(
-        DropObservedBody(Arc::clone(&dropped)),
-        &HttpBodyOptions::new().timeout(Duration::from_millis(100)).buffer_limit(1),
-    );
+    let mut source = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(100)).buffer_limit(1))
+        .body(DropObservedBody(Arc::clone(&dropped)));
     let waker = futures::task::noop_waker();
     let mut cx = Context::from_waker(&waker);
     assert!(Pin::new(&mut source).poll_frame(&mut cx).is_pending());
@@ -373,7 +375,10 @@ fn stream_body_returns_data_before_timeout() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let chunks = vec![Ok(BytesView::copied_from_slice(b"streamed data", &builder))];
-    let body = builder.stream(stream::iter(chunks), &HttpBodyOptions::new().timeout(Duration::from_secs(30)));
+    let body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)))
+        .stream(stream::iter(chunks));
 
     assert_eq!(block_on(body.into_bytes()).unwrap(), b"streamed data");
 }
@@ -382,7 +387,10 @@ fn stream_body_returns_data_before_timeout() {
 fn stream_body_times_out_when_pending() {
     let clock = ClockControl::new().auto_advance_timers(true).to_clock();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
-    let body = builder.stream(stream::pending(), &HttpBodyOptions::new().timeout(Duration::from_millis(100)));
+    let body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(100)))
+        .stream(stream::pending());
 
     let error = block_on(body.into_bytes()).unwrap_err();
     assert!(error.to_string().contains("body data was not fully received"));
@@ -393,7 +401,10 @@ fn stream_body_times_out_when_pending() {
 fn body_timeout_chains_with_buffer_limit() {
     let clock = ClockControl::new().auto_advance_timers(true).to_clock();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(HttpBodyOptions::new().buffer_limit(1024));
-    let body = builder.body(PendingBody, &HttpBodyOptions::new().timeout(Duration::from_secs(30)));
+    let body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)))
+        .body(PendingBody);
 
     let error = block_on(body.into_bytes()).unwrap_err();
     assert!(error.to_string().contains("body data was not fully received"));
@@ -403,7 +414,7 @@ fn body_timeout_chains_with_buffer_limit() {
 fn size_hint_delegates_to_inner() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen());
     let chunks = vec![Ok(BytesView::copied_from_slice(b"hello", &builder))];
-    let body = builder.stream(stream::iter(chunks), &HttpBodyOptions::new());
+    let body = builder.stream(stream::iter(chunks));
 
     assert_eq!(body.size_hint().lower(), 0);
 }
@@ -411,10 +422,10 @@ fn size_hint_delegates_to_inner() {
 #[test]
 fn size_hint_delegates_through_body_timeout() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen());
-    let body = builder.body(
-        Full::new(BytesView::copied_from_slice(b"hello", &builder)),
-        &HttpBodyOptions::new().timeout(Duration::from_secs(30)),
-    );
+    let body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)))
+        .body(Full::new(BytesView::copied_from_slice(b"hello", &builder)));
 
     assert_eq!(body.size_hint().lower(), 5);
     assert_eq!(body.size_hint().upper(), Some(5));
@@ -423,10 +434,10 @@ fn size_hint_delegates_through_body_timeout() {
 #[test]
 fn is_end_stream_true_when_inner_is_empty() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen());
-    let body = builder.body(
-        http_body_util::Empty::new(),
-        &HttpBodyOptions::new().timeout(Duration::from_secs(1)),
-    );
+    let body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(1)))
+        .body(http_body_util::Empty::new());
 
     assert!(body.is_end_stream());
 }
@@ -434,10 +445,10 @@ fn is_end_stream_true_when_inner_is_empty() {
 #[test]
 fn is_end_stream_false_when_inner_has_data() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen());
-    let body = builder.body(
-        Full::new(BytesView::copied_from_slice(b"data", &builder)),
-        &HttpBodyOptions::new().timeout(Duration::from_secs(1)),
-    );
+    let body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(1)))
+        .body(Full::new(BytesView::copied_from_slice(b"data", &builder)));
 
     assert!(!body.is_end_stream());
 }
@@ -445,10 +456,10 @@ fn is_end_stream_false_when_inner_has_data() {
 #[test]
 fn poll_frame_returns_data_through_body_timeout() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen());
-    let body = builder.body(
-        Full::new(BytesView::copied_from_slice(b"payload", &builder)),
-        &HttpBodyOptions::new().timeout(Duration::from_secs(30)),
-    );
+    let body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)))
+        .body(Full::new(BytesView::copied_from_slice(b"payload", &builder)));
 
     assert_eq!(block_on(body.into_bytes()).unwrap(), b"payload");
 }
@@ -457,7 +468,10 @@ fn poll_frame_returns_data_through_body_timeout() {
 fn poll_frame_times_out_when_pending_with_short_timeout() {
     let clock = ClockControl::new().auto_advance_timers(true).to_clock();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
-    let body = builder.body(PendingBody, &HttpBodyOptions::new().timeout(Duration::from_millis(1)));
+    let body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(1)))
+        .body(PendingBody);
 
     let error = block_on(body.into_bytes()).unwrap_err();
     assert!(error.to_string().contains("body data was not fully received"));
@@ -467,10 +481,10 @@ fn poll_frame_times_out_when_pending_with_short_timeout() {
 fn poll_frame_returns_data_even_when_clock_advanced_past_timeout() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
-    let body = builder.body(
-        Full::new(BytesView::copied_from_slice(b"ready data", &builder)),
-        &HttpBodyOptions::new().timeout(Duration::from_millis(1)),
-    );
+    let body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(1)))
+        .body(Full::new(BytesView::copied_from_slice(b"ready data", &builder)));
 
     control.advance(Duration::from_mins(1));
 
@@ -481,10 +495,10 @@ fn poll_frame_returns_data_even_when_clock_advanced_past_timeout() {
 fn poll_frame_times_out_via_delay_when_inner_body_advances_clock() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
-    let body = builder.body(
-        ClockAdvancingBody { control, poll_count: 0 },
-        &HttpBodyOptions::new().timeout(Duration::from_millis(100)),
-    );
+    let body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(100)))
+        .body(ClockAdvancingBody { control, poll_count: 0 });
 
     let error = block_on(body.into_bytes()).unwrap_err();
     assert!(error.to_string().contains("body data was not fully received"));
@@ -496,7 +510,10 @@ fn poll_frame_returns_error_after_timeout() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let timeout = Duration::from_millis(50);
     let dropped = Arc::new(AtomicBool::new(false));
-    let mut body = builder.body(DropObservedBody(Arc::clone(&dropped)), &HttpBodyOptions::new().timeout(timeout));
+    let mut body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(timeout))
+        .body(DropObservedBody(Arc::clone(&dropped)));
     let waker = futures::task::noop_waker();
     let mut cx = Context::from_waker(&waker);
 
@@ -518,10 +535,10 @@ fn transformed_body_times_out_after_the_source_finishes() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let timeout = Duration::from_millis(100);
-    let source = builder.body(
-        Full::new(BytesView::copied_from_slice(b"source", &builder)),
-        &HttpBodyOptions::new().timeout(timeout),
-    );
+    let source = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(timeout))
+        .body(Full::new(BytesView::copied_from_slice(b"source", &builder)));
     let mut body = map_stream(source, |body| {
         StreamBody::new(stream::once(async move {
             let _collected = body.collect().await?;
@@ -548,7 +565,7 @@ fn source_frames_do_not_reset_the_mapped_output_timeout() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
     let (sender, receiver) = mpsc::unbounded();
-    let source = builder.stream(receiver, &options);
+    let source = builder.clone().with_options(options).stream(receiver);
     let mut body = Box::pin(
         source
             .map(|content| {
@@ -582,13 +599,16 @@ fn source_frames_do_not_reset_the_mapped_output_timeout() {
 }
 
 #[test]
-fn rewrapping_uses_the_builder_timeout_and_clock_when_the_source_has_none() {
+fn body_options_then_mapping_use_the_body_clock() {
     let control = ClockControl::new();
     let timeout = Duration::from_millis(100);
-    let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock()).with_options(HttpBodyOptions::new().timeout(timeout));
-    let source_builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen());
-    let source = source_builder.body(PendingBody, &HttpBodyOptions::new());
-    let mut body = builder.rewrap(source, |body| body);
+    let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
+    let mut body = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(timeout))
+        .body(PendingBody)
+        .map(|_| Ok(Content::Streaming(StreamingBody::new(PendingBody))))
+        .unwrap();
     let waker = futures::task::noop_waker();
     let mut cx = Context::from_waker(&waker);
 
@@ -596,62 +616,30 @@ fn rewrapping_uses_the_builder_timeout_and_clock_when_the_source_has_none() {
     control.advance(timeout);
 
     let Poll::Ready(Some(Err(error))) = Pin::new(&mut body).poll_frame(&mut cx) else {
-        panic!("the builder timeout must apply to the wrapped body");
+        panic!("the body timeout must apply to the mapped body");
     };
     assert_eq!(error.label(), "body_timeout");
 }
 
 #[test]
-fn rewrapping_does_not_add_a_second_timeout_to_the_output() {
-    let control = ClockControl::new();
-    let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
-    let timeout = Duration::from_millis(100);
-    let (sender, receiver) = mpsc::unbounded();
-    let source = builder.stream(receiver, &HttpBodyOptions::new().timeout(timeout));
-    let mut body = builder.rewrap(source, |body| {
-        StreamBody::new(stream::once(async move { body.into_bytes().await.map(Frame::data) }))
-    });
-    let waker = futures::task::noop_waker();
-    let mut cx = Context::from_waker(&waker);
-
-    assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
-    control.advance(Duration::from_millis(75));
-    sender.unbounded_send(Ok(BytesView::copied_from_slice(b"first", &builder))).unwrap();
-    assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
-
-    control.advance(Duration::from_millis(75));
-    sender
-        .unbounded_send(Ok(BytesView::copied_from_slice(b"second", &builder)))
-        .unwrap();
-    assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
-    drop(sender);
-
-    let Poll::Ready(Some(Ok(frame))) = Pin::new(&mut body).poll_frame(&mut cx) else {
-        panic!("source progress must keep the wrapped body alive");
-    };
-    assert_eq!(frame.into_data().unwrap(), b"firstsecond");
-}
-
-#[test]
-fn mapping_a_rewrapped_body_keeps_its_timeout_and_clock() {
+fn body_options_then_mapping_override_builder_defaults() {
     let source_control = ClockControl::new();
-    let source_builder = HttpBodyBuilder::new(GlobalPool::new(), &source_control.to_clock());
-    let wrapper_control = ClockControl::new();
-    let wrapper_builder = HttpBodyBuilder::new(GlobalPool::new(), &wrapper_control.to_clock());
+    let source_builder = HttpBodyBuilder::new(GlobalPool::new(), &source_control.to_clock())
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)));
     let timeout = Duration::from_millis(100);
-    let source = source_builder.body(PendingBody, &HttpBodyOptions::new().timeout(timeout));
-    let rewrapped = wrapper_builder.rewrap(source, |body| body);
-    let mut body = rewrapped.map(|_| Ok(Content::Streaming(StreamingBody::new(PendingBody)))).unwrap();
+    let source = source_builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(timeout))
+        .body(PendingBody);
     let waker = futures::task::noop_waker();
     let mut cx = Context::from_waker(&waker);
 
-    assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
-    wrapper_control.advance(Duration::from_secs(1));
+    let mut body = source.map(|_| Ok(Content::Streaming(StreamingBody::new(PendingBody)))).unwrap();
     assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
     source_control.advance(timeout);
 
     let Poll::Ready(Some(Err(error))) = Pin::new(&mut body).poll_frame(&mut cx) else {
-        panic!("mapping must enforce the rewrapped body's timeout");
+        panic!("the body timeout must override the builder default");
     };
     assert_eq!(error.label(), "body_timeout");
 }
@@ -661,7 +649,10 @@ fn buffering_a_transformed_body_enforces_its_timeout() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let timeout = Duration::from_millis(100);
-    let source = builder.stream(stream::pending(), &HttpBodyOptions::new().timeout(timeout));
+    let source = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(timeout))
+        .stream(stream::pending());
     let body = map_stream(
         source,
         |_| StreamBody::new(stream::pending::<Result<Frame<BytesView>, HttpError>>()),
@@ -680,27 +671,28 @@ fn buffering_a_transformed_body_enforces_its_timeout() {
 }
 
 #[test]
-fn transforming_keeps_the_running_timer_and_source_clock() {
+fn mapping_preserves_the_source_clock_across_multiple_maps() {
     let source_control = ClockControl::new();
     let source_builder = HttpBodyBuilder::new(GlobalPool::new(), &source_control.to_clock());
     let wrapper_control = ClockControl::new();
     let timeout = Duration::from_millis(100);
-    let mut source = source_builder.body(PendingBody, &HttpBodyOptions::new().timeout(timeout));
+    let source = source_builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(timeout))
+        .body(PendingBody);
     let waker = futures::task::noop_waker();
     let mut cx = Context::from_waker(&waker);
 
-    assert!(Pin::new(&mut source).poll_frame(&mut cx).is_pending());
-    source_control.advance(Duration::from_millis(75));
     let mut body = source.map(Ok).unwrap();
     body = body.map(Ok).unwrap();
 
     assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
     wrapper_control.advance(Duration::from_secs(2));
     assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
-    source_control.advance(Duration::from_millis(25));
+    source_control.advance(timeout);
 
     let Poll::Ready(Some(Err(error))) = Pin::new(&mut body).poll_frame(&mut cx) else {
-        panic!("transforming must keep the original deadline and clock");
+        panic!("mapping must keep the source clock");
     };
     assert_eq!(error.label(), "body_timeout");
 }
@@ -710,7 +702,10 @@ fn transformed_output_resets_the_timer_without_a_source_timeout() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let timeout = Duration::from_millis(100);
-    let source = builder.stream(stream::pending(), &HttpBodyOptions::new().timeout(timeout));
+    let source = builder
+        .clone()
+        .with_options(HttpBodyOptions::new().timeout(timeout))
+        .stream(stream::pending());
     let (sender, mut receiver) = mpsc::unbounded();
     let mut body = map_stream(source, |mut source| {
         StreamBody::new(stream::poll_fn(move |cx| {

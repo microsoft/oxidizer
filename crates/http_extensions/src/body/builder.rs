@@ -90,12 +90,12 @@ impl HttpBodyBuilder {
         }
     }
 
-    /// Sets default [`HttpBodyOptions`] for all bodies created by this builder.
+    /// Overrides selected default [`HttpBodyOptions`] for bodies created by this builder.
     ///
-    /// Options for [`body`](Self::body) or [`stream`](Self::stream) override these defaults.
+    /// Clone the builder and call this method again to override selected defaults.
     #[must_use]
     pub fn with_options(mut self, options: HttpBodyOptions) -> Self {
-        self.options = options;
+        self.options = options.merge(&self.options);
         self
     }
 
@@ -105,7 +105,7 @@ impl HttpBodyBuilder {
     /// [`HttpBody`] system. Useful for third-party libraries or your own custom body
     /// implementations.
     ///
-    /// If the merged options contain a timeout, `HttpBody` applies it while polling.
+    /// If the builder options contain a timeout, `HttpBody` applies it while polling.
     /// The timeout limits the wait for the next frame.
     ///
     /// # Examples
@@ -113,7 +113,7 @@ impl HttpBodyBuilder {
     /// ```
     /// # fn main() {
     /// # #[cfg(feature = "test-util")] {
-    /// # use http_extensions::{HttpBodyOptions, HttpBodyBuilder, HttpError, HttpBody};
+    /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpBody};
     /// # use http_body::Body;
     /// # use std::pin::Pin;
     /// # use std::task::{Context, Poll};
@@ -138,54 +138,15 @@ impl HttpBodyBuilder {
     /// # let builder = HttpBodyBuilder::new_fake();
     /// // Create HttpBody from your custom body
     /// let custom_body = CustomBody(vec![1, 2, 3, 4]);
-    /// let body = builder.body(custom_body, &HttpBodyOptions::default());
+    /// let body = builder.body(custom_body);
     /// # }
     /// # }
     /// ```
-    pub fn body<B>(&self, body: B, options: &HttpBodyOptions) -> HttpBody
+    pub fn body<B>(&self, body: B) -> HttpBody
     where
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        let merged = options.merge(&self.options);
-        HttpBody::from_streaming(StreamingBody::new(body), merged, self.clock.clone(), None)
-    }
-
-    /// Wraps an existing [`HttpBody`] while preserving its policies.
-    ///
-    /// Missing policies fall back to this builder's defaults. An existing timeout
-    /// stays attached to the source body, so the wrapper does not add a second timer.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() {
-    /// # #[cfg(feature = "test-util")] {
-    /// use http_body_util::BodyExt;
-    /// use http_extensions::HttpBodyBuilder;
-    ///
-    /// let builder = HttpBodyBuilder::new_fake();
-    /// let body = builder.text("hello");
-    /// let wrapped = builder.rewrap(body, |body| body.map_frame(|frame| frame));
-    ///
-    /// assert_eq!(wrapped.content_length(), Some(5));
-    /// # }
-    /// # }
-    /// ```
-    pub fn rewrap<B>(&self, body: HttpBody, wrap: impl FnOnce(HttpBody) -> B) -> HttpBody
-    where
-        B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
-    {
-        let own = body.options();
-        let options = own.merge(&self.options);
-        let source_enforces_timeout = body.enforces_timeout_policy();
-        let clock = if own.timeout.is_some() {
-            body.clock.clone()
-        } else {
-            self.clock.clone()
-        };
-        let active_timeout = if source_enforces_timeout { None } else { options.timeout };
-
-        HttpBody::from_streaming_with_timeout(StreamingBody::new(wrap(body)), options, clock, active_timeout, None)
+        HttpBody::from_streaming(StreamingBody::new(body), self.options, self.clock.clone(), None)
     }
 
     /// Creates a body from a stream of byte chunks.
@@ -193,7 +154,7 @@ impl HttpBodyBuilder {
     /// Accepts a [`Stream`][futures::Stream] of [`BytesView`] chunks and creates a streaming
     /// body from them.
     ///
-    /// If the merged options contain a timeout, `HttpBody` applies it while polling.
+    /// If the builder options contain a timeout, `HttpBody` applies it while polling.
     /// The timeout limits the wait for the next frame.
     ///
     /// # Examples
@@ -201,28 +162,28 @@ impl HttpBodyBuilder {
     /// ```
     /// # fn main() {
     /// # #[cfg(feature = "test-util")] {
-    /// # use http_extensions::{HttpBodyOptions, HttpBodyBuilder, HttpError};
+    /// # use http_extensions::{HttpBodyBuilder, HttpError};
     /// # use bytesbuf::BytesView;
     /// # let builder = HttpBodyBuilder::new_fake();
     /// let chunks = vec![
     ///     Ok(BytesView::copied_from_slice(b"hello ", &builder)),
     ///     Ok(BytesView::copied_from_slice(b"world", &builder)),
     /// ];
-    /// let body = builder.stream(futures::stream::iter(chunks), &HttpBodyOptions::default());
+    /// let body = builder.stream(futures::stream::iter(chunks));
     ///
     /// assert_eq!(body.content_length(), None); // unknown length for streams
     ///
     /// # }
     /// # }
     /// ```
-    pub fn stream<S>(&self, stream: S, options: &HttpBodyOptions) -> HttpBody
+    pub fn stream<S>(&self, stream: S) -> HttpBody
     where
         S: Stream<Item = Result<BytesView>> + Send + 'static,
     {
         use http_body_util::StreamBody;
 
         let framed = stream.map_ok(Frame::data);
-        self.body(StreamBody::new(framed), options)
+        self.body(StreamBody::new(framed))
     }
 
     /// Creates a body from text.
@@ -409,7 +370,7 @@ mod tests {
         let strict = HttpBodyOptions::default().buffer_limit(7).timeout(Duration::from_secs(3));
 
         // A streaming body carries its own policies through transformation.
-        let body = builder.stream(futures::stream::empty(), &strict);
+        let body = builder.clone().with_options(strict).stream(futures::stream::empty());
         let transformed = body.map(Ok).unwrap();
 
         assert_eq!(transformed.options(), strict);
@@ -421,7 +382,7 @@ mod tests {
         let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &control.to_clock())
             .with_options(HttpBodyOptions::default().timeout(Duration::from_secs(1)));
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
-        let source = builder.stream(stream::pending(), &options);
+        let source = builder.clone().with_options(options).stream(stream::pending());
         let mut body = pin!(source.map(Ok).unwrap());
         let waker = futures::task::noop_waker();
         let mut cx = Context::from_waker(&waker);
@@ -436,26 +397,23 @@ mod tests {
     }
 
     #[test]
-    fn rewrapping_applies_builder_defaults_to_a_buffered_body() {
+    fn body_options_update_a_buffered_body() {
         let lenient = HttpBodyOptions::default().buffer_limit(99);
-        let builder = HttpBodyBuilder::new_fake().with_options(lenient);
-
-        let original = HttpBodyBuilder::new_fake().text("hello");
-        let transformed = builder.rewrap(original, |body| body);
+        let transformed = HttpBodyBuilder::new_fake().with_options(lenient).text("hello");
 
         assert_eq!(transformed.options(), lenient);
     }
 
     #[test]
-    fn rewrapping_prefers_existing_policies_to_builder_defaults() {
+    fn body_options_override_builder_defaults() {
         let defaults = HttpBodyOptions::default().buffer_limit(99).timeout(Duration::from_secs(30));
-        let existing = HttpBodyOptions::default().buffer_limit(7).timeout(Duration::from_secs(3));
-        let builder = HttpBodyBuilder::new_fake().with_options(defaults);
-        let source = HttpBodyBuilder::new_fake().stream(stream::pending(), &existing);
+        let overrides = HttpBodyOptions::default().buffer_limit(7).timeout(Duration::from_secs(3));
+        let wrapped = HttpBodyBuilder::new_fake()
+            .with_options(defaults)
+            .with_options(overrides)
+            .stream(stream::pending());
 
-        let wrapped = builder.rewrap(source, |body| body);
-
-        assert_eq!(wrapped.options(), existing);
+        assert_eq!(wrapped.options(), overrides);
     }
 
     use crate::testing::{create_stream_body, create_stream_body_from_chunks};
@@ -615,7 +573,7 @@ mod tests {
             .map(|c| Ok(BytesView::copied_from_slice(c, &builder)))
             .collect();
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let body = builder.stream(stream::iter(chunks), &options);
+        let body = builder.clone().with_options(options).stream(stream::iter(chunks));
         assert_eq!(body.content_length(), None);
         let text = block_on(body.into_text()).unwrap();
         assert_eq!(text, "hello world");
@@ -625,10 +583,10 @@ mod tests {
     fn body_with_max_duration_timeout_still_returns_data() {
         let builder = HttpBodyBuilder::new_fake();
         let options = HttpBodyOptions::default().timeout(Duration::MAX);
-        let body = builder.body(
-            http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)),
-            &options,
-        );
+        let body = builder
+            .clone()
+            .with_options(options)
+            .body(http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)));
         let bytes = block_on(body.into_bytes()).unwrap();
         assert_eq!(bytes, b"hello");
     }
@@ -709,7 +667,10 @@ mod tests {
 
         // Per-call options override the builder-level default.
         let per_call = HttpBodyOptions::default().timeout(Duration::from_secs(5));
-        let body = builder.stream(stream::iter(Vec::<Result<BytesView>>::new()), &per_call);
+        let body = builder
+            .clone()
+            .with_options(per_call)
+            .stream(stream::iter(Vec::<Result<BytesView>>::new()));
         // The body uses the timeout from per_call.
         assert_eq!(body.content_length(), None);
     }
