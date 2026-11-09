@@ -74,6 +74,54 @@ fn server_address_and_port_come_from_uri_authority_else_host_header() {
 }
 
 #[test]
+fn host_header_preserves_address_spelling_and_checked_port() {
+    let rows = [
+        ("MiXeD.%65xample", Some("MiXeD.%65xample"), None),
+        ("example.com:00080", Some("example.com"), Some(80)),
+        ("192.0.2.1:0", Some("192.0.2.1"), Some(0)),
+        ("[2001:DB8::1]:443", Some("[2001:DB8::1]"), Some(443)),
+        ("[::ffff:192.0.2.1]", Some("[::ffff:192.0.2.1]"), None),
+        ("[Vf.a:b!]:65535", Some("[Vf.a:b!]"), Some(65535)),
+        ("example.com:", Some("example.com"), None),
+        ("example.com:65536", Some("example.com"), None),
+        ("[::1]:", Some("[::1]"), None),
+        ("[::1]:999999999999999999999", Some("[::1]"), None),
+        ("", None, None),
+        (":80", None, None),
+        ("bad%2", None, None),
+        ("bad%GG", None, None),
+        ("user@example.com", None, None),
+        ("example.com:abc", None, None),
+        ("example.com:80:90", None, None),
+        ("example.com: 80", None, None),
+        ("[::1", None, None),
+        ("[not-an-ip]", None, None),
+        ("[v.a]", None, None),
+        ("[v1.]", None, None),
+        ("[v1.%20]", None, None),
+        ("[::1]extra", None, None),
+        ("[::1]:abc", None, None),
+    ];
+    for (host, address, port) in rows {
+        let address = address.map(Value::from);
+        let port = port.map(Value::I64);
+        assert_eq!(
+            server_fields(get("/", Some(host))),
+            [(address.clone(), address), (port.clone(), port)],
+            "{host}"
+        );
+    }
+    assert_eq!(server_fields(get("/", None)), [(None, None), (None, None)]);
+    assert_eq!(
+        server_fields(get("https://example.com/", Some("[not-an-ip]"))),
+        [
+            (Some(Value::from("example.com")), Some(Value::from("example.com"))),
+            (Some(Value::I64(443)), Some(Value::I64(443))),
+        ]
+    );
+}
+
+#[test]
 fn excluded_request_reaches_handler_unchanged_and_emits_no_event() {
     let capture = Capture::new(|_| true);
     let service = server(common::sink_with(&capture))

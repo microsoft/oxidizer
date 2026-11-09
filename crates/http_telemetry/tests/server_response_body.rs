@@ -182,6 +182,74 @@ fn drop_completes_ended_body_and_abandons_unfinished_body() {
 }
 
 #[test]
+fn content_length_requires_agreement_and_falls_back_to_exact_size() {
+    let rows: &[(&[&str], bool)] = &[
+        (&["5"], true),
+        (&[" \t05\t , 5 ", "005"], true),
+        (&["5", "5"], true),
+        (&["5", "6"], false),
+        (&["5, 6"], false),
+        (&["5", "bad"], false),
+        (&["5,"], false),
+        (&[",5"], false),
+        (&["5,,5"], false),
+        (&[""], false),
+        (&[" \t"], false),
+        (&["+5"], false),
+        (&["-5"], false),
+        (&["5 0"], false),
+        (&["18446744073709551616"], false),
+        (&[], false),
+    ];
+    for &(values, valid) in rows {
+        for exact_size in [false, true] {
+            let steps = [data("hello"), Step::Pending, Step::Pending];
+            let source = if exact_size { sized_scripted(steps) } else { scripted(steps) };
+            let mut request = get(source);
+            for value in values {
+                request.headers_mut().append(CONTENT_LENGTH, HeaderValue::from_str(value).unwrap());
+            }
+            let (mut body, capture) = respond(StatusCode::OK, request);
+            assert!(matches!(poll_frame(&mut body), Poll::Ready(Some(Ok(frame))) if frame.is_data()));
+            assert!(poll_frame(&mut body).is_pending());
+            assert!(capture.names().is_empty());
+            drop(body);
+            assert_eq!(
+                capture.names(),
+                vec![if valid || exact_size { COMPLETE } else { ABANDONED }],
+                "{values:?}, exact size: {exact_size}"
+            );
+        }
+    }
+}
+
+#[test]
+fn content_length_completion_obeys_protocol_and_transfer_encoding() {
+    for (version, transfer_encoding, expected) in [
+        (Version::HTTP_10, false, COMPLETE),
+        (Version::HTTP_11, false, COMPLETE),
+        (Version::HTTP_2, false, ABANDONED),
+        (Version::HTTP_3, false, ABANDONED),
+        (Version::HTTP_11, true, ABANDONED),
+    ] {
+        let mut request = common::request(Method::GET, version).map(|_| sized_scripted([data("hello"), Step::Pending, Step::Trailers]));
+        request.headers_mut().insert(CONTENT_LENGTH, HeaderValue::from_static("5, 05"));
+        if transfer_encoding {
+            request.headers_mut().insert(TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+        }
+        let (mut body, capture) = respond(StatusCode::OK, request);
+        let _ = poll_frame(&mut body);
+        let _ = poll_frame(&mut body);
+        drop(body);
+        assert_eq!(
+            capture.names(),
+            vec![expected],
+            "{version:?}, transfer encoding: {transfer_encoding}"
+        );
+    }
+}
+
+#[test]
 fn body_dropped_before_end_reports_abandoned_with_status() {
     let (sink, capture) = common::capture_sink();
     let service = server(sink).layer(Echoing(StatusCode::SERVICE_UNAVAILABLE));
