@@ -246,12 +246,11 @@ mod tests {
     use nonempty::NonEmpty;
     use performables::arc::Arc;
     use performables::sync::channel;
-    use thread_aware::ThreadBuilder;
+    use thread_aware::{ThreadAware, ThreadBuilder};
     use tick::runtime::InactiveClock;
 
     use super::*;
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
-    use crate::runtime::hook::Hooks;
     use crate::runtime::shutdown::Shutdown;
     use crate::runtime::worker::asynchronous::Command;
     use crate::runtime::worker::blocking::{Pool, TestPanicResponse, Worker};

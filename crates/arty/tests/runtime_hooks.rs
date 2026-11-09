@@ -354,7 +354,7 @@ impl ThreadAware for LateSpawnProbe {
 }
 
 #[test]
-fn control_registration_takes_priority_over_later_task_submissions() {
+fn control_registration_precedes_later_task_submissions() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     let (control, scheduler) = runtime
         .scheduler()

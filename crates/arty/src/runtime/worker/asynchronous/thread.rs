@@ -61,7 +61,6 @@ impl SpawnedWorker {
 
 pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
     let (command_tx, command_rx) = channel::unbounded();
-    let (priority_command_tx, priority_command_rx) = channel::unbounded();
     let (endpoint_tx, endpoint_rx) = channel::unbounded();
     let (activation_tx, activation_rx) = channel::oneshot();
     let (ready_tx, ready_rx) = channel::unbounded();
@@ -69,8 +68,7 @@ pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
     let stack_size = options.stack_size;
     let thread_entry = ThreadEntry {
         options,
-        priority_command_tx: priority_command_tx.clone(),
-        priority_command_rx,
+        command_tx: command_tx.clone(),
         command_rx,
         activation_rx,
         ready_tx,
@@ -84,7 +82,6 @@ pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
     SpawnedWorker {
         endpoint: WorkerEndpoint {
             command_tx,
-            priority_command_tx,
             waker: endpoint.waker,
             thread: endpoint.thread,
             blocking_worker: endpoint.blocking_worker,
@@ -110,8 +107,7 @@ struct Endpoint {
 #[derive(Debug)]
 struct ThreadEntry {
     options: StartOptions,
-    priority_command_tx: channel::Sender<asynchronous::Command>,
-    priority_command_rx: channel::Receiver<asynchronous::Command>,
+    command_tx: channel::Sender<asynchronous::Command>,
     command_rx: channel::Receiver<asynchronous::Command>,
     activation_rx: OneshotReceiver<Activation>,
     ready_tx: Sender<()>,
@@ -122,8 +118,7 @@ impl ThreadEntry {
     fn run(self) {
         let Self {
             options,
-            priority_command_tx,
-            priority_command_rx,
+            command_tx,
             command_rx,
             activation_rx,
             ready_tx,
@@ -153,7 +148,7 @@ impl ThreadEntry {
         let worker_waker = asynchronous::Signal::waker(&signal);
         let mut worker_hooks = hooks;
         worker_hooks.relocate(None, &current);
-        let blocking_panic_hook = crate::runtime::hook::BlockingPanicHook::new(priority_command_tx, worker_waker.clone());
+        let blocking_panic_hook = crate::runtime::hook::BlockingPanicHook::new(command_tx, worker_waker.clone());
         let blocking_worker = blocking::Worker::new(blocking_pools.pool_for_worker(), shutdown, blocking_panic_hook);
 
         endpoint_tx
@@ -173,7 +168,6 @@ impl ThreadEntry {
 
         let mut worker = asynchronous::Worker::new(
             command_rx,
-            priority_command_rx,
             dispatcher.clone(),
             current,
             io,

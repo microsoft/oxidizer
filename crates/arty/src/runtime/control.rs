@@ -58,9 +58,9 @@ impl RuntimeControl {
 
     /// Registers a runtime hook without callback data.
     ///
-    /// This method queues one priority registration command for each live
-    /// worker. A worker applies the hook before later normal task and I/O
-    /// commands. Use [`on_with`](Self::on_with) when the callback needs
+    /// This method queues one registration command for each live worker. A
+    /// worker applies the hook when it reaches that command in its normal
+    /// command queue. Use [`on_with`](Self::on_with) when the callback needs
     /// worker-local data. If runtime shutdown has started, Arty ignores the
     /// registration.
     pub fn on<H: Hook>(&self, callback: fn(&mut H)) {
@@ -71,9 +71,9 @@ impl RuntimeControl {
     ///
     /// Arty clones the hook data for each worker and relocates it before the
     /// callback can run. Arty sends late hook registration through each
-    /// worker's priority command channel. A worker applies it before later
-    /// normal queued task and I/O commands. If runtime shutdown has started,
-    /// Arty ignores the registration.
+    /// worker's normal command queue. A worker applies the hook when it
+    /// processes that command. If runtime shutdown has started, Arty ignores
+    /// the registration.
     ///
     /// A late [`OnStart`](crate::runtime::hook::OnStart) registration is stored
     /// but does not run because the workers have already started.

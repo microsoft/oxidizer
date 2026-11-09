@@ -26,7 +26,6 @@ use crate::task::preparation::prepare_remote;
 #[derive(Clone, Debug)]
 pub(crate) struct WorkerEndpoint {
     pub(crate) command_tx: channel::Sender<Command>,
-    pub(crate) priority_command_tx: channel::Sender<Command>,
     pub(crate) waker: Waker,
     pub(crate) thread: Thread,
     pub(crate) blocking_worker: Arc<Worker>,
@@ -35,11 +34,8 @@ pub(crate) struct WorkerEndpoint {
 impl WorkerEndpoint {
     #[cfg(test)]
     pub(crate) fn for_test(command_tx: channel::Sender<Command>, waker: Waker, thread: Thread, blocking_worker: Arc<Worker>) -> Self {
-        let (priority_command_tx, priority_command_rx) = channel::unbounded();
-        std::mem::forget(priority_command_rx);
         Self {
             command_tx,
-            priority_command_tx,
             waker,
             thread,
             blocking_worker,
@@ -230,7 +226,7 @@ impl DispatcherCore {
 
         let source = LocalWorker::current_thread().filter(|thread| self.owns(thread));
         for endpoint in &self.worker_endpoints {
-            _ = endpoint.priority_command_tx.send(Command::RegisterHook {
+            _ = endpoint.command_tx.send(Command::RegisterHook {
                 hook: hook.clone(),
                 source: source.clone(),
             });
