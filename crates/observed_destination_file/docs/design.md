@@ -53,15 +53,16 @@ flowchart TD
 
 `file_logs(path)` returns a builder for `FileLogDestination`.
 `rolling_file_logs(path)` returns a builder for `RollingFileLogDestination` and
-requires the `rolling_file` feature. Calling `.build()` creates a
-`FileLogDestination` or `RollingFileLogDestination` struct in memory.
+requires the `rolling_file` feature. Calling `FileLogDestinationBuilder::build`
+or `RollingFileLogDestinationBuilder::build` completes building a destination.
 Creating and building a *destination* does
 not open the file or start the worker thread.
 
 For single-file output, [`FileWriterOpener::open_file`](../src/file_writer.rs)
 registration opens `path` for writing. It creates the file if it is missing.
 By default, it preserves existing contents and moves the write position to the
-end. With `overwrite(true)`, it truncates the file to zero bytes.
+end. With `FileLogDestinationBuilder::overwrite(true)`, it truncates the file to
+zero bytes.
 An error from this opener returns as `FileLogInitError` before the background
 writer thread starts.
 
@@ -104,7 +105,8 @@ Three `performables` channels connect `BackgroundLogProcessor` to `Worker`.
 ## Record acceptance and loss reporting
 
 [`SeverityFilter::emit`](../../observed_destination_core/src/filter.rs) compares
-`data.severity_number().unwrap_or(Severity::Fatal)` with the configured minimum.
+the result of `SdkLogRecord::severity_number` with the configured minimum.
+If the record has no severity, the comparison uses `Severity::Fatal`.
 The filter applies the minimum log level, which defaults to `Info`.
 The record keeps its original severity field.
 The filter discards records whose comparison value is less than the minimum.
@@ -126,27 +128,21 @@ also retains more data in memory.
 `BackgroundLogProcessor` calls `log_tx.try_send(payload)` to add the copy to
 the record queue.
 If the queue is full or its receiver is closed, `BackgroundLogProcessor`
-discards the new record and increases the lost-record counter. Existing queued
-records remain available for `Worker` to process through `log_rx`.
+discards the new record and increases the lost-record counter. While the receiver
+remains open, existing queued records remain available for `Worker` to process
+through `log_rx`.
 
-After a successful send, `wake_worker()` calls `wake_tx.try_send(())` on a
-separate wake-up channel. `()` is an empty value used as a wake-up notification.
+After a successful send, `BackgroundWriterInner::wake_worker` calls
+`wake_tx.try_send(())` on the separate wake-up channel.
+It sends `()`, an empty value used as a wake-up notification.
 The notification tells `Worker` to examine the record and control queues.
 An idle `Worker` waits on `wake_rx`. Receiving this notification ends that wait.
-
-The lost-record counter counts failed enqueue attempts. A failed enqueue does
-not add a record to the record queue.
-It does not include records lost through file errors.
-`Worker` examines the lost-record counter at a one-minute interval and during
-shutdown. It resets the count and writes a warning when the count is greater
-than zero. The warning uses the same output writer as the records, so file
-errors can also prevent the warning from appearing.
 
 ## `Worker` scheduling
 
 [`Worker::run`](../src/worker.rs) owns the processing loop and final output.
-Its `serve` loop handles control messages, writes a limited batch of records,
-and examines the flush and loss-report deadlines. After each batch of log records,
+The `Worker::serve` loop handles control messages, writes a limited batch of
+records, and examines the flush and loss-report deadlines. After each batch of log records,
 the worker checks for control messages, even when more records are waiting.
 
 The separate control channel lets provider requests enter even when the record
@@ -193,8 +189,8 @@ The rolling destination limits the byte-buffer capacity to
 `min(buffer_size, max_file_size)`.
 
 Bytes pass to the file writer when the buffer lacks space or a large write
-bypasses it. Automatic flushes, `force_flush`, and shutdown handle bytes that
-remain buffered. `Worker` uses the same buffer for all these operations.
+bypasses it. Automatic flushes, `BackgroundLogProcessor::force_flush`, and shutdown
+handle bytes that remain buffered. `Worker` uses the same buffer for all these operations.
 
 ## File writers and rotation
 
@@ -205,8 +201,8 @@ thread. This common interface lets both destinations use the same
 handling.
 
 For a single file, `FileWriterOpener` creates a `std::fs::File` and positions it
-at the end of existing contents. `overwrite(true)` truncates the file during
-registration. For rotating files, the opener creates a
+at the end of existing contents. `FileLogDestinationBuilder::overwrite(true)`
+truncates the file during registration. For rotating files, the opener creates a
 `file_rotate::FileRotate`. That writer uses archive names with timestamps,
 age or count retention, and optional gzip compression. Retention limits which
 archives the writer keeps.
@@ -250,8 +246,8 @@ Queued records stay in the record queue for later processing. Incoming records c
 still enter that queue, subject to `queue_capacity`. Incoming control messages
 also remain queued until the flush finishes.
 
-After each scheduled flush attempt or explicit `force_flush`, the worker
-restarts the timer for automatic flushing.
+After each scheduled flush attempt or explicit `BackgroundLogProcessor::force_flush`,
+the worker restarts the timer for automatic flushing.
 Writing bytes because the buffer lacks space does not restart the automatic
 flush timer. An automatic flush skips an empty buffer.
 After a scheduled failure, `Worker` advances the deadline
@@ -287,8 +283,8 @@ still finish that flush after `BackgroundLogProcessor::force_flush` returns.
 
 The log call returns without waiting for file output, so it cannot return output
 errors to the application. `Worker` saves the first write or automatic flush
-error for the next `force_flush` or shutdown (sync operations where the error
-can be communicated to the caller).
+error for the next `BackgroundLogProcessor::force_flush` or shutdown (sync
+operations where the error can be communicated to the caller).
 `BackgroundLogProcessor` reports these errors to the caller only through an
 explicit flush or shutdown result.
 
@@ -299,9 +295,9 @@ It returns the first saved or newly observed error in the operation result.
 If the acknowledgment arrives before the timeout, `BackgroundLogProcessor`
 reports the error as `InternalFailure`.
 
-If a `force_flush` caller times out, `Worker` can still process the flush and
-clear the saved error. The acknowledgment then fails, and `Worker` discards its
-result. The write error can thus remain unreported, and later flush or shutdown
+If a `BackgroundLogProcessor::force_flush` caller times out, `Worker` can still
+process the flush and clear the saved error. The acknowledgment then fails, and
+`Worker` discards its result. The write error can thus remain unreported, and later flush or shutdown
 calls do not report it again.
 
 A write can fail after part of its input is already in the file.
@@ -311,8 +307,9 @@ The file can contain incomplete records, and unwritten output can be lost.
 After a write error, `Worker` continues to process later records and attempts
 to write them to the file.
 
-A failure in the underlying writer's `flush` can occur after all buffered bytes
-were written. That failure also becomes a reported error.
+A failure in `std::fs::File::flush` or `file_rotate::FileRotate::flush` can occur
+after all buffered bytes were written. That failure follows the same first-error and acknowledgment-timeout
+rules described in this section.
 The buffer is already empty, so a later flush does not send those bytes again.
 
 ## Shutdown
@@ -340,6 +337,7 @@ The timeout does not cancel file operations.
 
 `BackgroundLogProcessor` keeps its shutdown flag set after success, timeout, or
 failure.
-It treats later shutdown and `force_flush` calls as successful requests without
-doing work. The first call's result records whether shutdown completed, failed,
+It treats later calls to `BackgroundLogProcessor::shutdown_with_timeout` and
+`BackgroundLogProcessor::force_flush` as successful requests without doing work.
+The first call's result records whether shutdown completed, failed,
 or timed out.
