@@ -5,6 +5,7 @@
 
 use std::num::NonZeroU64;
 
+use bytesbuf::BytesView;
 use compressors::format::Format;
 use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources};
 use futures::FutureExt as _;
@@ -880,7 +881,7 @@ fn not_acceptable(response: HttpResponse) -> Result<HttpResponse> {
     parts.headers.remove(CONTENT_DIGEST_HEADER);
     parts.headers.remove(REPR_DIGEST_HEADER);
 
-    let body = body.map(|_| Ok(Content::Bytes(Default::default())))?;
+    let body = body.map(|_| Ok(Content::Bytes(BytesView::default())))?;
     Ok(HttpResponse::from_parts(parts, body))
 }
 

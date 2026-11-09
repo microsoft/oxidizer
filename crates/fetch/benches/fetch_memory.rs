@@ -16,7 +16,6 @@ use criterion::{BenchmarkGroup, BenchmarkId, Criterion, criterion_group, criteri
 use fetch::{HttpBodyBuilder, HttpClient};
 use futures::executor::block_on;
 use http::StatusCode;
-use http_extensions::HttpBodyOptions;
 use tick::Clock;
 
 #[global_allocator]

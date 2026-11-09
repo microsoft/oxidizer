@@ -44,9 +44,32 @@ fn get(body: HttpBody) -> HttpRequest {
 
 #[test]
 fn size_hint_survives_wrapping() {
-    let (body, _capture) = respond(StatusCode::OK, get(HttpBodyBuilder::new_fake().text("chunk")));
+    let length = |source| {
+        let (body, _capture) = respond(StatusCode::OK, get(source));
+        body.content_length()
+    };
 
-    assert_eq!(body.content_length(), Some(5));
+    assert_eq!(
+        [
+            length(HttpBodyBuilder::new_fake().text("chunk")),
+            length(sized_scripted([data("chunk")]))
+        ],
+        [Some(5); 2]
+    );
+}
+
+#[test]
+fn buffered_data_survives_wrapping() {
+    let (mut body, capture) = respond(StatusCode::OK, get(HttpBodyBuilder::new_fake().text("chunk")));
+
+    let Poll::Ready(Some(Ok(frame))) = poll_frame(&mut body) else {
+        panic!("the first poll must return the buffered frame");
+    };
+
+    assert_eq!(
+        (frame.into_data().unwrap().to_vec(), capture.names()),
+        (b"chunk".to_vec(), vec![COMPLETE])
+    );
 }
 
 #[test]

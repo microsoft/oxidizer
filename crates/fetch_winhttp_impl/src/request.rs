@@ -266,14 +266,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
         };
 
         let reader = WinHttpBodyReader::new(guard, bindings, self.memory, declared_body_length(&headers));
-        let body = match self.body_options {
-            Some(options) => self
-                .body_builder
-                .clone()
-                .with_options(options)
-                .body(WinHttpResponseBody::new(reader)),
-            None => self.body_builder.body(WinHttpResponseBody::new(reader)),
-        };
+        let body = response_body(self.body_builder, self.body_options, reader);
         let mut response = HttpResponseBuilder::new(self.body_builder)
             .status(status)
             .version(version)
@@ -286,6 +279,14 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             .build()
             .map_err(invalid_response)
             .map_err(|error| RequestFailure::after_context_installation(error, cold_connect_state, connect_duration))
+    }
+}
+
+fn response_body(builder: &HttpBodyBuilder, options: Option<HttpBodyOptions>, reader: WinHttpBodyReader) -> HttpBody {
+    let body = WinHttpResponseBody::new(reader);
+    match options {
+        Some(options) => builder.clone().with_options(options).body(body),
+        None => builder.body(body),
     }
 }
 

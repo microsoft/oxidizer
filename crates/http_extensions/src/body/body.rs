@@ -682,6 +682,10 @@ impl Body for HttpBody {
 }
 
 #[derive(derive_more::Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "BytesView stores spans inline; boxing it would allocate every buffered body"
+)]
 #[pin_project(project = BodyInnerProj)]
 pub(super) enum Kind {
     #[debug("Bytes")]

@@ -64,7 +64,7 @@ where
     }
 
     fn size_hint(&self) -> SizeHint {
-        self.inner.as_ref().map(Body::size_hint).unwrap_or_else(|| SizeHint::with_exact(0))
+        self.inner.as_ref().map_or_else(|| SizeHint::with_exact(0), Body::size_hint)
     }
 
     fn is_end_stream(&self) -> bool {
