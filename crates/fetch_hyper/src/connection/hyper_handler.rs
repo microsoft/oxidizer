@@ -260,6 +260,22 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
+    async fn request_body_timeout_configures_the_response_body() {
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_success(http_response_bytes(), clock);
+        let handler = make_handler(connector, ConnectionLifetime::unlimited());
+        let mut request = test_request();
+        request
+            .extensions_mut()
+            .insert(BodyTimeout::new(Duration::from_secs(5)));
+
+        let response = handler.execute(request).await.unwrap();
+
+        assert_eq!(response.into_body().into_text().await.unwrap(), "hello");
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
     async fn http2_only_configures_hyper_correctly() {
         // Builder with HTTP/2-only flips `http2_only(true)` on hyper's builder.
         // Using FakeStream over HTTP/1.1-style data will fail, but we want to

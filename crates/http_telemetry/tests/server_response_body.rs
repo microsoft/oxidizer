@@ -48,11 +48,17 @@ fn size_hint_survives_wrapping() {
 
 #[test]
 fn end_of_stream_survives_wrapping() {
-    let (mut body, _capture) = respond(StatusCode::OK, get(HttpBodyBuilder::new_fake().text("chunk")));
-    let before = body.is_end_stream();
-    let _ = poll_frame(&mut body);
+    let ends = |source| {
+        let (mut body, _capture) = respond(StatusCode::OK, get(source));
+        let before = body.is_end_stream();
+        let _ = poll_frame(&mut body);
+        (before, body.is_end_stream())
+    };
 
-    assert_eq!((before, body.is_end_stream()), (false, true));
+    assert_eq!(
+        [ends(HttpBodyBuilder::new_fake().text("chunk")), ends(scripted([data("chunk")]))],
+        [(false, true); 2]
+    );
 }
 
 #[test]

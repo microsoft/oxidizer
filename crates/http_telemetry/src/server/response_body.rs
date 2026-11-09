@@ -52,12 +52,8 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
     .flatten();
     response.map(|body| {
         body.map(|content| {
-            let inner = match content {
-                Content::Bytes(bytes) => InnerBody::Buffered(Some(bytes)),
-                Content::Streaming(inner) => InnerBody::Streaming(inner),
-            };
             Ok(Content::Streaming(StreamingBody::new(TelemetryBody {
-                inner,
+                inner: content,
                 guard,
                 status_code,
                 content_length,
@@ -68,39 +64,8 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
     })
 }
 
-enum InnerBody {
-    Buffered(Option<BytesView>),
-    Streaming(StreamingBody),
-}
-
-impl Body for InnerBody {
-    type Data = BytesView;
-    type Error = HttpError;
-
-    fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        match self.get_mut() {
-            Self::Buffered(bytes) => Poll::Ready(bytes.take().map(Frame::data).map(Ok)),
-            Self::Streaming(body) => Pin::new(body).poll_frame(cx),
-        }
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        match self {
-            Self::Buffered(bytes) => SizeHint::with_exact(bytes.as_ref().map_or(0, |bytes| bytes.len() as u64)),
-            Self::Streaming(body) => body.size_hint(),
-        }
-    }
-
-    fn is_end_stream(&self) -> bool {
-        match self {
-            Self::Buffered(bytes) => bytes.as_ref().is_none_or(BytesView::is_empty),
-            Self::Streaming(body) => body.is_end_stream(),
-        }
-    }
-}
-
 struct TelemetryBody {
-    inner: InnerBody,
+    inner: Content,
     guard: TelemetryDropGuard,
     status_code: StatusCode,
     content_length: Option<u64>,
@@ -114,8 +79,14 @@ impl Body for TelemetryBody {
     fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<BytesView>, HttpError>>> {
         let this = &mut *self;
         let polled = catch_unwind(AssertUnwindSafe(|| {
-            let poll = Pin::new(&mut this.inner).poll_frame(cx);
-            let ended = matches!(&poll, Poll::Ready(Some(Ok(frame))) if frame.is_data()) && this.inner.is_end_stream();
+            let poll = match &mut this.inner {
+                Content::Bytes(bytes) => {
+                    let bytes = std::mem::take(bytes);
+                    Poll::Ready((!bytes.is_empty()).then(|| Ok(Frame::data(bytes))))
+                }
+                Content::Streaming(body) => Pin::new(body).poll_frame(cx),
+            };
+            let ended = matches!(&poll, Poll::Ready(Some(Ok(frame))) if frame.is_data()) && this.is_end_stream();
             (poll, ended)
         }));
         let (poll, ended) = match polled {
@@ -142,11 +113,17 @@ impl Body for TelemetryBody {
     }
 
     fn size_hint(&self) -> SizeHint {
-        self.inner.size_hint()
+        match &self.inner {
+            Content::Bytes(bytes) => SizeHint::with_exact(bytes.len() as u64),
+            Content::Streaming(body) => body.size_hint(),
+        }
     }
 
     fn is_end_stream(&self) -> bool {
-        self.inner.is_end_stream()
+        match &self.inner {
+            Content::Bytes(bytes) => bytes.is_empty(),
+            Content::Streaming(body) => body.is_end_stream(),
+        }
     }
 }
 
@@ -155,7 +132,7 @@ impl Drop for TelemetryBody {
         if std::thread::panicking() {
             return;
         }
-        if self.inner.is_end_stream() || self.content_length == Some(self.bytes_read) {
+        if self.is_end_stream() || self.content_length == Some(self.bytes_read) {
             self.guard.emit(RequestEnd::Complete(self.status_code));
         } else {
             self.guard.emit(RequestEnd::Abandoned(Some(self.status_code)));
