@@ -1,16 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! WinHTTP-based HTTP transport for the [`fetch`] HTTP client.
+//! WinHTTP transport for the [`fetch`] HTTP client.
 //!
-//! This Windows-only crate adds a WinHTTP transport constructor to
-//! [`HttpClient`]. Callers supply the clock, memory provider, and telemetry sink
-//! required by the transport through [`WinHttpDeps`].
-//! The provider uses `bytesbuf::mem::OpaqueMemory`, so callers can select their own allocator.
+//! This Windows-only crate adds a WinHTTP constructor to [`HttpClient`].
+//! [`WinHttpDeps`] supplies the clock, memory provider, and telemetry sink.
+//! The memory provider uses `bytesbuf::mem::OpaqueMemory`, so callers can select
+//! an allocator.
 //!
-//! WinHTTP-specific TLS configuration is available through
-//! [`WinHttpTlsConfig`]. Independently built clients do
-//! not share connections.
+//! [`WinHttpTlsConfig`] provides WinHTTP-specific TLS configuration.
+//! Independently built clients do not share connections.
 //!
 //! ## Platform requirements
 //!
@@ -19,36 +18,31 @@
 //!
 //! ## Behavior and limitations
 //!
-//! WinHTTP owns connection management and much of the HTTP protocol, so some
-//! generic `fetch` configuration cannot be represented and some behavior is
-//! fixed by the operating system.
+//! WinHTTP manages connections and much of the HTTP protocol. Some generic
+//! `fetch` configuration does not apply, and Windows fixes some behavior.
 //!
 //! - Generic TLS configuration, finite connection limits, and bounded
-//!   connection lifetimes are accepted and ignored rather than rejected, so a
-//!   client that sets them still builds.
+//!   connection lifetimes are accepted but ignored. A client that sets them
+//!   still builds.
 //! - Requests always connect directly to the origin. Proxies are not supported,
 //!   Windows proxy configuration is not consulted, and there is no setting that
 //!   changes this.
-//! - Redirects are not followed, no cookie store is kept, and authentication
-//!   challenges are not answered. Those responses are returned to the caller to
-//!   act on, and none of this can be re-enabled.
-//! - Request framing is derived from the body, so a caller-supplied
-//!   `Transfer-Encoding` is rejected before anything is sent. Code that
-//!   forwards an inbound request's headers verbatim is the common case that
-//!   trips on this.
-//! - Gzip and deflate responses are decoded transparently, with the headers
-//!   describing the encoded form removed and no opt-out. Brotli and zstd are
-//!   not decoded and arrive still encoded.
-//! - A request body that yields trailers fails the request, and does so after
-//!   the headers and preceding body data have already been sent. The request
-//!   body is sent in full before response reception begins.
+//! - Redirects are not followed. The transport does not keep cookies or answer
+//!   authentication challenges. It returns these responses to the caller.
+//! - The body determines request framing. A caller-supplied
+//!   `Transfer-Encoding` is rejected before the transport sends data.
+//! - Gzip and deflate responses are decoded automatically. The transport
+//!   removes headers that describe the encoded form. Brotli and zstd responses
+//!   remain encoded.
+//! - Request trailers fail the request after the transport sends the headers
+//!   and earlier body data. The transport sends the full request body before it
+//!   receives the response.
 //!
-//! Failures carry a stable error label and retry guidance. The label is
-//! contractual; the retry guidance attached to any particular failure is not,
-//! and may change as the transport's classification is refined.
+//! Failures include a stable error label and retry guidance. The label is part
+//! of the contract. The retry guidance can change.
 //!
-//! The full contract - error classification, timeout semantics, and the
-//! fidelity of every generic option - is documented in
+//! The full contract covers error classification, timeout behavior, and each
+//! generic configuration value. It is documented in
 //! [`docs/design.md`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md).
 //!
 //! Requests are serviced through the operating system's
@@ -61,17 +55,15 @@
 //! [`WinHttpTlsConfig`]: https://docs.rs/fetch_winhttp/latest/fetch_winhttp/struct.WinHttpTlsConfig.html
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
-// The attribute this feature enables appears only in the placeholder modules'
-// tests, so the feature is declared only where a use of it survives
-// configuration; an unused feature declaration is itself an error.
+// Only the coverage-anchor tests use this feature. Declare it only when those
+// tests compile because an unused feature declaration is an error.
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/favicon.ico")]
 
-// The transport is implemented in `fetch_winhttp_impl`, so this library carries
-// no code of its own on any target. The two placeholder modules below keep one
-// trivially exercised item in the build per platform, which is what stops the
-// coverage tooling from reading the resulting empty measurement as a failed one.
+// `fetch_winhttp_impl` contains the transport. These coverage-anchor modules
+// keep one tested item in each platform build. This prevents an empty coverage
+// result from appearing as a failed measurement.
 #[cfg(not(windows))]
 mod linux;
 #[cfg(windows)]
