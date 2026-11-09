@@ -633,6 +633,30 @@ fn rewrapping_does_not_add_a_second_timeout_to_the_output() {
 }
 
 #[test]
+fn mapping_a_rewrapped_body_keeps_its_timeout_and_clock() {
+    let source_control = ClockControl::new();
+    let source_builder = HttpBodyBuilder::new(GlobalPool::new(), &source_control.to_clock());
+    let wrapper_control = ClockControl::new();
+    let wrapper_builder = HttpBodyBuilder::new(GlobalPool::new(), &wrapper_control.to_clock());
+    let timeout = Duration::from_millis(100);
+    let source = source_builder.body(PendingBody, &HttpBodyOptions::new().timeout(timeout));
+    let rewrapped = wrapper_builder.rewrap(source, |body| body);
+    let mut body = rewrapped.map(|_| Ok(Content::Streaming(StreamingBody::new(PendingBody)))).unwrap();
+    let waker = futures::task::noop_waker();
+    let mut cx = Context::from_waker(&waker);
+
+    assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
+    wrapper_control.advance(Duration::from_secs(1));
+    assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
+    source_control.advance(timeout);
+
+    let Poll::Ready(Some(Err(error))) = Pin::new(&mut body).poll_frame(&mut cx) else {
+        panic!("mapping must enforce the rewrapped body's timeout");
+    };
+    assert_eq!(error.label(), "body_timeout");
+}
+
+#[test]
 fn buffering_a_transformed_body_enforces_its_timeout() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());

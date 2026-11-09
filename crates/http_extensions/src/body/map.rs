@@ -17,7 +17,7 @@ pub(crate) fn map_body(body: HttpBody, map_content: impl FnOnce(Content) -> Resu
     let options = body.options();
     let clock = body.clock;
     let (content, mapped_timeout, current_delay) = match body.kind {
-        Kind::Body(inner, active_timeout, current_delay) => (Content::Streaming(inner), active_timeout, current_delay),
+        Kind::Body(inner, active_timeout, current_delay) => (Content::Streaming(inner), active_timeout.or(options.timeout), current_delay),
         Kind::Bytes(Some(bytes)) => (Content::Bytes(bytes), options.timeout, None),
         Kind::Empty => (Content::Bytes(BytesView::default()), options.timeout, None),
         Kind::Bytes(None) => {
