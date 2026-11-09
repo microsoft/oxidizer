@@ -103,7 +103,15 @@ impl JoinableThreadPool {
                                 (worker, poll)
                             })
                         });
-                        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job.body));
+                        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            #[cfg(feature = "monitor")]
+                            let _current = observation
+                                .as_ref()
+                                .and_then(|(_, poll)| poll.as_ref())
+                                .and(job.info.as_ref())
+                                .map(|info| crate::runtime::monitoring::enter_current(info.id()));
+                            (job.body)();
+                        }));
                         #[cfg(feature = "monitor")]
                         if let Some((worker, Some(poll))) = observation {
                             worker.task_poll_finished(poll);

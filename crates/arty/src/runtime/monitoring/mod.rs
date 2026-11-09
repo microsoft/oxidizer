@@ -9,4 +9,4 @@ mod task;
 
 pub(crate) use asynchronous::WorkerDiagnostics;
 pub(crate) use runtime::RuntimeDiagnostics;
-pub(crate) use task::{TaskInfo, add_task};
+pub(crate) use task::{TaskInfo, add_task, add_task_with_metadata, current_task, enter_current};

@@ -135,7 +135,11 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        futures::executor::block_on(self.dispatcher.spawn(factory)).map_err(Error::new)
+        #[cfg(feature = "monitor")]
+        let task = self.dispatcher.spawn_with_size(factory, size_of::<F>());
+        #[cfg(not(feature = "monitor"))]
+        let task = self.dispatcher.spawn(factory);
+        futures::executor::block_on(task).map_err(Error::new)
     }
 
     /// Lets the runtime choose a worker for an async task and relocates its data.

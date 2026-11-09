@@ -115,6 +115,17 @@ pub(crate) fn capture(runtime: &Arc<RuntimeControl>, options: CaptureOptions) ->
     )
 }
 
+#[cfg(feature = "test-util")]
+pub(crate) fn capture_with_timeout(runtime: &Arc<RuntimeControl>, options: CaptureOptions) -> Runtime {
+    capture_with(
+        runtime,
+        options,
+        &SimpleClock::new_frozen(),
+        |_| {},
+        |_, _| Err(mpsc::RecvTimeoutError::Timeout),
+    )
+}
+
 fn capture_with(
     runtime: &Arc<RuntimeControl>,
     options: CaptureOptions,

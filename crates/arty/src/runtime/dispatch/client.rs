@@ -106,6 +106,16 @@ impl DispatcherClient {
         self.core.spawn(future_factory)
     }
 
+    #[cfg(feature = "monitor")]
+    pub(crate) fn spawn_with_size<FF, F, R>(&self, future_factory: FF, body_size: usize) -> JoinHandle<R>
+    where
+        FF: FnOnce(Context) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.core.spawn_with_size(future_factory, body_size)
+    }
+
     pub(crate) fn spawn_relocating<FF, F, R>(&self, source: &thread_aware::Thread, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,

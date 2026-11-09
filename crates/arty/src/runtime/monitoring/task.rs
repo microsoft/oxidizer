@@ -31,6 +31,24 @@ pub(super) fn set_current(task: Option<TaskId>) {
     CURRENT.with(|slot| slot.set(task));
 }
 
+pub(crate) fn current_task() -> Option<TaskId> {
+    CURRENT.with(Cell::get)
+}
+
+#[derive(Debug)]
+#[must_use]
+pub(crate) struct CurrentTask(Option<TaskId>);
+
+impl Drop for CurrentTask {
+    fn drop(&mut self) {
+        set_current(self.0);
+    }
+}
+
+pub(crate) fn enter_current(task: TaskId) -> CurrentTask {
+    CurrentTask(CURRENT.with(|slot| slot.replace(Some(task))))
+}
+
 #[expect(
     clippy::large_enum_variant,
     reason = "descriptions are transient stack values; boxing snapshots would allocate during native inspection"
@@ -63,7 +81,7 @@ impl TaskMetadata {
             describe_type: descriptor::<T>,
             body_size: size_of::<T>(),
             events,
-            parent: CURRENT.with(Cell::get),
+            parent: current_task(),
             spawned_at: None,
         }
     }
@@ -165,9 +183,8 @@ struct AsyncTaskInfo {
 }
 
 impl AsyncTaskInfo {
-    fn new<T: 'static>(events: EventContext) -> Self {
-        let parent = CURRENT.with(Cell::get);
-        let spawn = events.spawned_with(descriptor::<T>, parent, size_of::<T>());
+    fn new<T: 'static>(events: EventContext, parent: Option<TaskId>, body_size: usize) -> Self {
+        let spawn = events.spawned_with(descriptor::<T>, parent, body_size);
         Self {
             events,
             parent,
@@ -180,11 +197,11 @@ impl AsyncTaskInfo {
         *self.identity.get_or_init(seismograph_runtime::allocate_task_id)
     }
 
-    fn describe<T: 'static>(&self, state: TaskActivityState) -> Task {
+    fn describe<T: 'static>(&self, state: TaskActivityState, body_size: usize) -> Task {
         let mut task = Task::new(self.id(), descriptor::<T>(), state);
         task.parent = self.parent;
         task.spawned_at = self.spawned_at;
-        task.future_size_bytes = Some(u64::try_from(size_of::<T>()).expect("a task body fits the platform address space"));
+        task.future_size_bytes = Some(u64::try_from(body_size).expect("a task body fits the platform address space"));
         task
     }
 }
@@ -225,19 +242,37 @@ where
     R: 'static,
     T: TaskCompletion<R>,
 {
+    // The function item stores no bytes. Only erased scoped futures carry a size.
+    add_task_with_metadata::<Body, _, _, _, _>(tasks, future, options, completion, current_task(), size_of::<Body>);
+}
+
+pub(crate) fn add_task_with_metadata<Body, F, R, T, S>(
+    tasks: &TaskSet,
+    future: F,
+    options: TaskOptions,
+    completion: T,
+    parent: Option<TaskId>,
+    body_size: S,
+) where
+    Body: 'static,
+    F: IntoFuture<Output = R> + 'static,
+    R: 'static,
+    T: TaskCompletion<R>,
+    S: Fn() -> usize + 'static,
+{
     let Some(events) = current_events() else {
         tasks.add(future, options, completion);
         return;
     };
     let completion = Completion {
         target: completion,
-        info: AsyncTaskInfo::new::<Body>(events),
+        info: AsyncTaskInfo::new::<Body>(events, parent, body_size()),
     };
-    tasks.add_with_completion_inspection(future.into_future(), options, completion, |_, completion, state| {
+    tasks.add_with_completion_inspection(future.into_future(), options, completion, move |_, completion, state| {
         let info = &completion.info;
         Some(seismograph::recorder::without_recording(|| match state {
-            TaskState::Ready => Description::Snapshot(info.describe::<Body>(TaskActivityState::Ready)),
-            TaskState::Waiting => Description::Snapshot(info.describe::<Body>(TaskActivityState::Waiting)),
+            TaskState::Ready => Description::Snapshot(info.describe::<Body>(TaskActivityState::Ready, body_size())),
+            TaskState::Waiting => Description::Snapshot(info.describe::<Body>(TaskActivityState::Waiting, body_size())),
             TaskState::Running => Description::Poll(info.id()),
         }))
     });
@@ -245,7 +280,30 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{AsyncTaskInfo, TaskInfo};
+    use super::{AsyncTaskInfo, TaskInfo, current_task, enter_current};
+
+    #[test]
+    fn current_task_scope_restores_its_parent_after_return_and_panic() {
+        let parent = seismograph_runtime::allocate_task_id();
+        let child = seismograph_runtime::allocate_task_id();
+        assert_eq!(current_task(), None);
+        {
+            let _parent = enter_current(parent);
+            {
+                let _child = enter_current(child);
+                assert_eq!(current_task(), Some(child));
+            }
+            assert_eq!(current_task(), Some(parent));
+            let result = std::panic::catch_unwind(|| {
+                let _child = enter_current(child);
+                assert_eq!(current_task(), Some(child));
+                panic!("scope restores the parent during unwinding");
+            });
+            assert!(result.is_err());
+            assert_eq!(current_task(), Some(parent));
+        }
+        assert_eq!(current_task(), None);
+    }
 
     #[test]
     fn async_metadata_is_smaller_and_stays_owner_local() {

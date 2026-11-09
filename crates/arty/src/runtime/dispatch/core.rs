@@ -20,7 +20,7 @@ use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-use crate::task::preparation::prepare_remote;
+use crate::task::preparation::prepare_remote_with_size;
 
 #[derive(Clone, Debug)]
 pub(crate) struct WorkerEndpoint {
@@ -172,6 +172,16 @@ impl DispatcherCore {
         self.enqueue(self.next_worker_index(), TaskPlacement::Any, future_factory)
     }
 
+    #[cfg(feature = "monitor")]
+    pub(crate) fn spawn_with_size<FF, F, R>(&self, future_factory: FF, body_size: usize) -> JoinHandle<R>
+    where
+        FF: FnOnce(Context) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.enqueue_with_size(self.next_worker_index(), TaskPlacement::Any, future_factory, move || body_size)
+    }
+
     pub(crate) fn spawn_relocating<FF, F, R>(&self, source: &Thread, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
@@ -298,6 +308,22 @@ impl DispatcherCore {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
+        self.enqueue_with_size(worker_index, placement, future_factory, size_of::<F>)
+    }
+
+    fn enqueue_with_size<FF, F, R, S>(
+        &self,
+        worker_index: WorkerIndex,
+        placement: TaskPlacement,
+        future_factory: FF,
+        body_size: S,
+    ) -> JoinHandle<R>
+    where
+        FF: FnOnce(Context) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+        S: Fn() -> usize + Send + 'static,
+    {
         if let Some(join_handle) = JoinHandle::try_from_shutdown(self.shutdown()) {
             drop(future_factory);
             return join_handle;
@@ -306,7 +332,7 @@ impl DispatcherCore {
             .worker_endpoints
             .get(usize::from(worker_index))
             .expect("worker index must identify a registered runtime worker");
-        let (future_factory, join_handle) = prepare_remote(&self.remote_results, future_factory, placement);
+        let (future_factory, join_handle) = prepare_remote_with_size(&self.remote_results, future_factory, placement, body_size);
 
         // A worker can close its channel before this send if shutdown already
         // reached that worker. The join handle detects the disconnection.
