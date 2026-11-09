@@ -53,13 +53,14 @@ default. Use [`level`][__link12] to change it. If a streaming
 body pauses, the compressor flushes buffered output. The consumer can then
 decompress each sent part before the body ends.
 
-For an eligible successful response with a complete, nonempty body, the
-server layer can return an empty `406 Not Acceptable` response. It does this
-if no content coding is acceptable and the caller rejects `identity`. It
-also does this for an existing unacceptable `Content-Encoding`. `HEAD`,
-successful `CONNECT`, statuses that cannot carry a body, known-empty bodies,
-partial responses, and responses with `Content-Range` bypass this
-negotiation.
+For an eligible successful response with a complete body that is not known
+to be empty, the server layer can return an empty `406 Not Acceptable`
+response. It does this if the caller rejects `identity` and the layer cannot
+apply an acceptable coding. A content-type exclusion can prevent that
+coding. The layer also returns `406 Not Acceptable` for an existing
+unacceptable `Content-Encoding`. `HEAD`, successful `CONNECT`, statuses that
+cannot carry a body, known-empty bodies, partial responses, and responses
+with `Content-Range` bypass this negotiation.
 
 ```rust
 use std::num::NonZeroU64;
@@ -108,13 +109,15 @@ removes `Transfer-Encoding`. Decompression and streaming compression remove
 `Content-Length` because the final size is unknown.
 
 A small buffered compression error fails the handler call. Other data errors
-fail the body read. A failure has one of these labels:
+fail the body read. Errors created by this crate use one of these labels:
 
 |Label|What happened|
 |-----|-------------|
 |`compression_invalid`|The body was malformed for its declared compression format|
 |`compression_limit_exceeded`|The body exceeds a decompression or content-coding limit|
 |`compression_unsupported`|A recognized but disabled format was seen under [`UnsupportedCompression::Fail`][__link18]|
+
+A source body error keeps its original label.
 
 An unknown or invalid `Content-Encoding` is not an error under either
 unsupported-format policy. The crate leaves the body and its headers
@@ -126,7 +129,7 @@ unchanged.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbYCgTtkVNYhkb0Td1GxsPAgYb4JnOBqlGKREb3MZ5-guTSOZhZIKCa2NvbXByZXNzb3JzZTAuNS4wgnBodHRwX2NvbXByZXNzaW9uZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbjIF91VUuDpAbNLyEfqDaEpQbkNTJTajiwz4b6v07tnkCpXthZIKCa2NvbXByZXNzb3JzZTAuNS4wgnBodHRwX2NvbXByZXNzaW9uZTAuNS4w
  [__link0]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Compression
  [__link1]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Client
  [__link10]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::compressible_types

@@ -51,13 +51,14 @@
 //! body pauses, the compressor flushes buffered output. The consumer can then
 //! decompress each sent part before the body ends.
 //!
-//! For an eligible successful response with a complete, nonempty body, the
-//! server layer can return an empty `406 Not Acceptable` response. It does this
-//! if no content coding is acceptable and the caller rejects `identity`. It
-//! also does this for an existing unacceptable `Content-Encoding`. `HEAD`,
-//! successful `CONNECT`, statuses that cannot carry a body, known-empty bodies,
-//! partial responses, and responses with `Content-Range` bypass this
-//! negotiation.
+//! For an eligible successful response with a complete body that is not known
+//! to be empty, the server layer can return an empty `406 Not Acceptable`
+//! response. It does this if the caller rejects `identity` and the layer cannot
+//! apply an acceptable coding. A content-type exclusion can prevent that
+//! coding. The layer also returns `406 Not Acceptable` for an existing
+//! unacceptable `Content-Encoding`. `HEAD`, successful `CONNECT`, statuses that
+//! cannot carry a body, known-empty bodies, partial responses, and responses
+//! with `Content-Range` bypass this negotiation.
 //!
 //! ```
 //! # #[cfg(feature = "gzip")] {
@@ -109,13 +110,15 @@
 //! `Content-Length` because the final size is unknown.
 //!
 //! A small buffered compression error fails the handler call. Other data errors
-//! fail the body read. A failure has one of these labels:
+//! fail the body read. Errors created by this crate use one of these labels:
 //!
 //! | Label | What happened |
 //! |-------|---------------|
 //! | `compression_invalid` | The body was malformed for its declared compression format |
 //! | `compression_limit_exceeded` | The body exceeds a decompression or content-coding limit |
 //! | `compression_unsupported` | A recognized but disabled format was seen under [`UnsupportedCompression::Fail`] |
+//!
+//! A source body error keeps its original label.
 //!
 //! An unknown or invalid `Content-Encoding` is not an error under either
 //! unsupported-format policy. The crate leaves the body and its headers

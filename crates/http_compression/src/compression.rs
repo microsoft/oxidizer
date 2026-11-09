@@ -303,10 +303,10 @@ impl CompressionLayer<Client> {
 
     /// Sets whether `Accept-Encoding` is added to outgoing requests.
     ///
-    /// This setting has an effect only after
-    /// [`decompress_responses`][Self::decompress_responses] has named
-    /// a format. Disable it if an upstream proxy or caller-supplied header
-    /// controls negotiation, but responses still need decompression.
+    /// This setting has an effect only if
+    /// [`decompress_responses`][Self::decompress_responses] names a format.
+    /// Disable it if an upstream proxy or caller-supplied header controls
+    /// negotiation, but responses still need decompression.
     #[must_use]
     pub fn advertise(mut self, enabled: bool) -> Self {
         self.role.advertise = enabled;
@@ -320,8 +320,8 @@ impl CompressionLayer<Server> {
     /// Decompresses request bodies compressed with any of `formats`.
     ///
     /// A request with a known body length of zero stays unchanged, including its
-    /// `Content-Encoding`. A decoder cannot produce a compressed member from an
-    /// empty body.
+    /// `Content-Encoding`. An empty body cannot contain a compressed member for
+    /// the decoder to process.
     ///
     /// Each decompression stage rejects output beyond 64 MiB or 1,024 compressed
     /// streams by default. Use [`limits`][Self::limits] to change these bounds.
@@ -339,10 +339,12 @@ impl CompressionLayer<Server> {
     /// quality values and `*`. `formats` lists server preference order and
     /// resolves equal quality values. Invalid members do not remove valid ones.
     ///
-    /// For an eligible successful response with a complete, nonempty body, the
-    /// layer can return an empty `406 Not Acceptable` response. It does this if
-    /// no content coding is acceptable and the caller rejects `identity`. It
-    /// also does this if an existing `Content-Encoding` is not acceptable.
+    /// For an eligible successful response with a complete body that is not
+    /// known to be empty, the layer can return an empty `406 Not Acceptable`
+    /// response. It does this if the caller rejects `identity` and the layer
+    /// cannot apply an acceptable coding. A content-type exclusion can prevent
+    /// that coding. The layer also returns `406 Not Acceptable` if an existing
+    /// `Content-Encoding` is not acceptable.
     ///
     /// `HEAD`, successful `CONNECT`, statuses that cannot carry a body,
     /// known-empty bodies, partial responses, and responses with `Content-Range`
