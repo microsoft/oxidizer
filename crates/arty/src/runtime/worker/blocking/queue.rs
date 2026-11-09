@@ -17,6 +17,7 @@ pub(super) type Job = Box<dyn FnOnce() + Send + 'static>;
 
 pub(super) struct QueuedJob {
     pub(super) body: Job,
+    pub(super) shutdown: Option<crate::runtime::shutdown::Shutdown>,
     #[cfg(feature = "monitor")]
     pub(super) info: Option<Arc<TaskInfo>>,
 }

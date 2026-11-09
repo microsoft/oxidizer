@@ -334,6 +334,143 @@ fn stopped_runtime_does_not_record_new_blocking_tasks() {
 }
 
 #[test]
+fn recording_enabled_during_blocking_execution_reports_real_outcomes() {
+    let _recording = RecorderGuard::new();
+    for (panics, stops) in [(false, false), (true, false), (false, true)] {
+        seismograph::recorder(Configuration::default());
+        let (io, _) = MonitorIo::new_mocked();
+        let runtime = runtime("late-blocking-recording", &io);
+        let id = runtime.diagnostics().unwrap().id();
+        let control = support::runtime_control(&runtime);
+        let (started, ready) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let running = runtime.scheduler().spawn_blocking(move || {
+            started.send(()).unwrap();
+            released.recv_timeout(TEST_TIMEOUT).unwrap();
+            assert!(!panics, "recorded blocking panic");
+        });
+        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        let queued = stops.then(|| runtime.scheduler().spawn_blocking(|| panic!("canceled function must not run")));
+        seismograph::recorder(Configuration {
+            runtime_tasks: Policy::all(false),
+            ..Configuration::default()
+        });
+        if stops {
+            control.request_stop();
+        }
+        release.send(()).unwrap();
+        let outcome = running.join();
+        if panics {
+            assert!(outcome.unwrap_err().is_panic());
+        } else {
+            outcome.unwrap();
+        }
+        if let Some(queued) = queued {
+            assert!(queued.join().unwrap_err().is_shutdown());
+        }
+        runtime.stop().unwrap();
+        let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+        let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
+        let tasks = snapshot
+            .events
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.kind,
+                    EventKind::TaskSpawned
+                        | EventKind::TaskPollStarted
+                        | EventKind::TaskPollFinished
+                        | EventKind::TaskCompleted
+                        | EventKind::TaskPanicked
+                        | EventKind::TaskCanceled
+                ) && event.runtime().is_some_and(|payload| payload.runtime_id == id)
+            })
+            .collect::<Vec<_>>();
+        let outcomes = tasks.iter().map(|event| event.kind).collect::<Vec<_>>();
+        let expected = if panics {
+            vec![EventKind::TaskPanicked]
+        } else if stops {
+            vec![EventKind::TaskCompleted, EventKind::TaskCanceled]
+        } else {
+            vec![EventKind::TaskCompleted]
+        };
+        assert_eq!(outcomes, expected);
+        let identities = tasks.iter().map(|event| event.runtime().unwrap().subject_id).collect::<Vec<_>>();
+        assert!(identities.iter().all(|id| *id != 0));
+        if stops {
+            assert_ne!(identities[0], identities[1]);
+        }
+    }
+}
+
+#[test]
+fn recording_enabled_during_an_async_poll_reports_real_outcomes() {
+    let _recording = RecorderGuard::new();
+    for (panics, stops) in [(false, false), (true, false), (false, true)] {
+        seismograph::recorder(Configuration::default());
+        let (io, _) = MonitorIo::new_mocked();
+        let runtime = runtime("late-async-recording", &io);
+        let id = runtime.diagnostics().unwrap().id();
+        let control = support::runtime_control(&runtime);
+        let (started, ready) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let running = runtime.scheduler().spawn_anywhere(
+            Unaware((started, released, panics, stops)),
+            |_, Unaware((started, released, panics, stops))| async move {
+                started.send(()).unwrap();
+                released.recv_timeout(TEST_TIMEOUT).unwrap();
+                if stops {
+                    pending::<()>().await;
+                }
+                assert!(!panics, "recorded async panic");
+            },
+        );
+        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        seismograph::recorder(Configuration {
+            runtime_tasks: Policy::all(false),
+            ..Configuration::default()
+        });
+        if stops {
+            control.request_stop();
+        }
+        release.send(()).unwrap();
+        let outcome = running.join();
+        let expected = if panics {
+            assert!(outcome.unwrap_err().is_panic());
+            EventKind::TaskPanicked
+        } else if stops {
+            assert!(outcome.unwrap_err().is_shutdown());
+            EventKind::TaskCanceled
+        } else {
+            outcome.unwrap();
+            EventKind::TaskCompleted
+        };
+        runtime.stop().unwrap();
+        let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+        let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
+        let tasks = snapshot
+            .events
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.kind,
+                    EventKind::TaskSpawned
+                        | EventKind::TaskPollStarted
+                        | EventKind::TaskPollFinished
+                        | EventKind::TaskCompleted
+                        | EventKind::TaskPanicked
+                        | EventKind::TaskCanceled
+                ) && event.runtime().is_some_and(|payload| payload.runtime_id == id)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(tasks.iter().map(|event| event.kind).collect::<Vec<_>>(), [expected]);
+        assert_ne!(tasks[0].runtime().unwrap().subject_id, 0);
+    }
+}
+
+#[test]
 fn recording_reports_real_async_and_blocking_outcomes() {
     let _recording = RecorderGuard::new();
     seismograph::recorder(Configuration {
@@ -847,7 +984,11 @@ fn shutdown_records_cancellation_for_a_queued_blocking_function() {
                         && payload.subject_id == id.get()
                         && matches!(
                             event.kind,
-                            EventKind::TaskCompleted | EventKind::TaskPanicked | EventKind::TaskCanceled
+                            EventKind::TaskCompleted
+                                | EventKind::TaskPanicked
+                                | EventKind::TaskCanceled
+                                | EventKind::TaskPollStarted
+                                | EventKind::TaskPollFinished
                         )
                 })
                 .map(|_| event.kind)

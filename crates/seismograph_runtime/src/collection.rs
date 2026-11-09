@@ -188,7 +188,16 @@ fn capture_with(
             worker.snapshot(batch.collection)
         })
         .collect();
-    tasks.sort_unstable_by_key(|task| task.id);
+    // A shared-queue task can start between two workers' responses. Keep its
+    // executing observation rather than also reporting its earlier queue entry.
+    tasks.sort_unstable_by_key(|task| {
+        (
+            task.id,
+            task.activity
+                .is_none_or(|activity| activity.state != crate::snapshot::TaskActivityState::Running),
+        )
+    });
+    tasks.dedup_by_key(|task| task.id);
     let state = RuntimeState::from_wire_value(runtime.state.load(Ordering::Acquire)).expect("runtime state stores enum values");
     Runtime {
         id: runtime.id,

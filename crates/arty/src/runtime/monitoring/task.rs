@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use arty_executor::{ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskSet, TaskState};
-use seismograph::recorder::event::EventTimestamp;
+use seismograph::recorder::event::{EventClass, EventTimestamp};
 use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
 use seismograph_runtime::snapshot::{Task, TaskActivityState};
 use seismograph_runtime::task::EventContext;
@@ -154,21 +154,28 @@ impl TaskInfo {
     }
 
     pub(crate) fn completed(&self) {
-        if let Some(identity) = self.identity.get() {
-            self.execution_events.get().unwrap_or(&self.metadata.events).completed(identity.id);
+        if let Some(id) = self.terminal_id() {
+            self.execution_events.get().unwrap_or(&self.metadata.events).completed(id);
         }
     }
 
     pub(crate) fn panicked(&self) {
-        if let Some(identity) = self.identity.get() {
-            self.execution_events.get().unwrap_or(&self.metadata.events).panicked(identity.id);
+        if let Some(id) = self.terminal_id() {
+            self.execution_events.get().unwrap_or(&self.metadata.events).panicked(id);
         }
     }
 
     pub(crate) fn canceled(&self) {
-        if let Some(identity) = self.identity.get() {
-            self.execution_events.get().unwrap_or(&self.metadata.events).canceled(identity.id);
+        if let Some(id) = self.terminal_id() {
+            self.execution_events.get().unwrap_or(&self.metadata.events).canceled(id);
         }
+    }
+
+    fn terminal_id(&self) -> Option<TaskId> {
+        self.identity
+            .get()
+            .map(|identity| identity.id)
+            .or_else(|| seismograph::recorder::is_enabled(EventClass::RuntimeTask).then(|| self.id()))
     }
 }
 
@@ -204,6 +211,13 @@ impl AsyncTaskInfo {
         task.future_size_bytes = Some(u64::try_from(body_size).expect("a task body fits the platform address space"));
         task
     }
+
+    fn terminal_id(&self) -> Option<TaskId> {
+        self.identity
+            .get()
+            .copied()
+            .or_else(|| seismograph::recorder::is_enabled(EventClass::RuntimeTask).then(|| self.id()))
+    }
 }
 
 #[derive(Debug)]
@@ -214,22 +228,22 @@ struct Completion<T> {
 
 impl<R: 'static, T: TaskCompletion<R>> TaskCompletion<R> for Completion<T> {
     fn completed(self, result: R) {
-        if let Some(id) = self.info.identity.get() {
-            self.info.events.completed(*id);
+        if let Some(id) = self.info.terminal_id() {
+            self.info.events.completed(id);
         }
         self.target.completed(result);
     }
 
     fn panicked(self, panic: TaskPanicPayload, cause: Option<ShutdownCause>) {
-        if let Some(id) = self.info.identity.get() {
-            self.info.events.panicked(*id);
+        if let Some(id) = self.info.terminal_id() {
+            self.info.events.panicked(id);
         }
         self.target.panicked(panic, cause);
     }
 
     fn cancelled(self, cause: ShutdownCause) {
-        if let Some(id) = self.info.identity.get() {
-            self.info.events.canceled(*id);
+        if let Some(id) = self.info.terminal_id() {
+            self.info.events.canceled(id);
         }
         self.target.cancelled(cause);
     }

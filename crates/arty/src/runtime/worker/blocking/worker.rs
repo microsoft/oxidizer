@@ -57,6 +57,7 @@ impl JoinableThreadPool {
     {
         self.enqueue(QueuedJob {
             body: Box::new(job),
+            shutdown: None,
             #[cfg(feature = "monitor")]
             info: None,
         })
@@ -95,8 +96,12 @@ impl JoinableThreadPool {
                     ) {
                         active_count.fetch_add(1, Ordering::SeqCst);
                         queued_count.fetch_sub(1, Ordering::SeqCst);
+                        let canceled = job
+                            .shutdown
+                            .as_ref()
+                            .is_some_and(|shutdown| matches!(shutdown.state(), ShutdownState::Started));
                         #[cfg(feature = "monitor")]
-                        let observation = diagnostics.as_ref().and_then(|worker| {
+                        let observation = diagnostics.as_ref().filter(|_| !canceled).and_then(|worker| {
                             job.info.as_ref().map(|info| {
                                 info.started_on(worker.task_events());
                                 let poll = worker.is_observed().then(|| worker.task_poll_started(info.id()));
@@ -110,7 +115,11 @@ impl JoinableThreadPool {
                                 .and_then(|(_, poll)| poll.as_ref())
                                 .and(job.info.as_ref())
                                 .map(|info| crate::runtime::monitoring::enter_current(info.id()));
-                            (job.body)();
+                            if canceled {
+                                drop(job.body);
+                            } else {
+                                (job.body)();
+                            }
                         }));
                         #[cfg(feature = "monitor")]
                         if let Some((worker, Some(poll))) = observation {
@@ -217,16 +226,9 @@ impl Worker {
             return join_handle;
         }
         let join_handle = join_handle.blocking_pool(Arc::clone(&self.pool.identity));
-        let task = move || {
-            if matches!(runtime_shutdown.state(), ShutdownState::Started) {
-                drop(task);
-            } else {
-                task();
-            }
-        };
-
         let job = QueuedJob {
             body: Box::new(task),
+            shutdown: Some(runtime_shutdown),
             #[cfg(feature = "monitor")]
             info,
         };
@@ -299,6 +301,7 @@ impl Pool {
     {
         self.enqueue(QueuedJob {
             body: Box::new(f),
+            shutdown: None,
             #[cfg(feature = "monitor")]
             info: None,
         })

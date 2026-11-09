@@ -74,6 +74,63 @@ fn all_native_constructor_states_survive_process_snapshot_encoding() {
 }
 
 #[test]
+fn captures_keep_one_running_row_when_a_task_also_appears_in_a_queue() {
+    let _lock = RECORDING.lock().unwrap();
+    for running_first in [false, true] {
+        let runtime = register_runtime(RuntimeMetadata::new("shared-queue-transition", 2));
+        let first = runtime.register_worker(WorkerMetadata::new(WorkerRole::Blocking));
+        let second = runtime.register_worker(WorkerMetadata::new(WorkerRole::Blocking));
+        let task = allocate_task_id();
+        let other_task = allocate_task_id();
+        let descriptor = allocate_type_descriptor_id();
+        let (running, ready) = if running_first { (&first, &second) } else { (&second, &first) };
+        running
+            .handle()
+            .register_task_provider(move |request| {
+                request.respond(
+                    vec![Task::new(task, descriptor, TaskActivityState::Running)],
+                    TaskCollection::Complete,
+                );
+            })
+            .unwrap();
+        ready
+            .handle()
+            .register_task_provider(move |request| {
+                request.respond(
+                    vec![
+                        Task::new(task, descriptor, TaskActivityState::Ready),
+                        Task::new(other_task, descriptor, TaskActivityState::Ready),
+                    ],
+                    TaskCollection::Truncated,
+                );
+            })
+            .unwrap();
+
+        let captured = runtime.handle().capture(CaptureOptions::default()).unwrap();
+
+        assert_eq!(captured.tasks.len(), 2);
+        assert_eq!(
+            (
+                captured.tasks[0].id,
+                captured.tasks[0].last_worker_id,
+                captured.tasks[0].activity.unwrap().state
+            ),
+            (task, Some(running.id()), TaskActivityState::Running)
+        );
+        assert_eq!(captured.tasks[1].id, other_task);
+        assert_eq!(
+            captured
+                .workers
+                .iter()
+                .find(|worker| worker.id == ready.id())
+                .unwrap()
+                .task_collection,
+            TaskCollection::Truncated
+        );
+    }
+}
+
+#[test]
 fn worker_metadata_transitions_and_runtime_retirement_remain_visible() {
     use seismograph_runtime::snapshot::{RuntimeState, WorkerState};
     let _lock = RECORDING.lock().unwrap();
