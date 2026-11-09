@@ -221,7 +221,7 @@ impl<R: 'static, T: TaskCompletion<R>> TaskCompletion<R> for Completion<T> {
 pub(crate) fn add_task<Body, F, R, T>(tasks: &TaskSet, future: F, options: TaskOptions, completion: T)
 where
     Body: 'static,
-    F: Future<Output = R> + 'static,
+    F: IntoFuture<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
 {
@@ -233,7 +233,7 @@ where
         target: completion,
         info: AsyncTaskInfo::new::<Body>(events),
     };
-    tasks.add_with_completion_inspection(future, options, completion, |_, completion, state| {
+    tasks.add_with_completion_inspection(future.into_future(), options, completion, |_, completion, state| {
         let info = &completion.info;
         Some(seismograph::recorder::without_recording(|| match state {
             TaskState::Ready => Description::Snapshot(info.describe::<Body>(TaskActivityState::Ready)),

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.21.0] - 2026-11-06
+
+- Use the Tokio runtime active at each spawn call for the default task spawner.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `bytesbuf`, `http_extensions`, `seatbelt_http`, `seismograph`, `seismograph_io`.
+- Update the local `anyspawn` requirement from `0.10.0` to `0.11.0`.
+- Update the local `bytesbuf` requirement from `0.13.0` to `0.14.0`.
+- Update the local `compressors` requirement from `0.4.0` to `0.5.0`.
+- Update the local `fetch_hyper` requirement from `0.11.0` to `0.12.0`.
+- Update the local `http_compression` requirement from `0.4.0` to `0.5.0`.
+- Update the local `http_extensions` requirement from `0.14.0` to `0.15.0`.
+- Update the local `performables` requirement from `0.3.1` to `0.4.0`.
+- Update the local `seatbelt` requirement from `0.12.0` to `0.12.1`.
+- Update the local `seatbelt_http` requirement from `0.12.0` to `0.13.0`.
+- Update the local `tick` requirement from `0.9.0` to `0.9.1`.
+
 ## [0.20.0] - 2026-11-02
 
 - Breaking: Replace `CustomDeps::global_pool` and `TokioDeps::global_pool` with

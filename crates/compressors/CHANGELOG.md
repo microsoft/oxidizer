@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0] - 2026-11-06
+
+- Update published local dependency requirements. No direct source change.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `bytesbuf`, `seismograph`, `seismograph_io`.
+- Update the local `bytesbuf` requirement from `0.13.0` to `0.14.0`.
+- Update the local `performables` requirement from `0.3.1` to `0.4.0`.
+
 ## [0.4.0] - 2026-11-02
 
 - Clarify the documentation for compression formats, streaming, flushing, and decompression limits.

@@ -186,6 +186,9 @@ fn retained_waker_is_noop_after_shutdown() {
     drop(executor);
 
     std::thread::spawn(move || {
+        let cloned = retained.clone();
+        cloned.wake_by_ref();
+        drop(cloned);
         retained.wake_by_ref();
         retained.wake();
     })

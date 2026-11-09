@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.18.0] - 2026-11-06
+
+- Accept `impl Into<OpaqueMemory>` in serialization builders. Callers can pass `GlobalPool`
+  directly without an explicit conversion.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `anyspawn`, `bytesbuf`, `seismograph`, `seismograph_io`.
+- Update the local `anyspawn` requirement from `0.10.0` to `0.11.0`.
+- Update the local `bytesbuf` requirement from `0.13.0` to `0.14.0`.
+- Update the local `cachet_memory` requirement from `0.9.1` to `0.9.2`.
+- Update the local `seismograph` requirement from `0.4.0` to `0.5.0`.
+- Update the local `tick` requirement from `0.9.0` to `0.9.1`.
+- Update the local `uniflight` requirement from `0.8.1` to `0.9.0`.
+
 ## [0.17.0] - 2026-11-02
 
 - Breaking: Pass `bytesbuf::mem::OpaqueMemory` to `CacheBuilder::serialize` and

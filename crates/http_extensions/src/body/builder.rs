@@ -7,13 +7,12 @@ use bytesbuf::mem::{HasMemory, Memory, MemoryShared, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
 use http_body::{Body, Frame};
-use http_body_util::BodyExt;
 use thread_aware::ThreadAware;
 use tick::Clock;
 
-use super::HttpBody;
 use super::options::HttpBodyOptions;
 use super::timeout_body::TimeoutBody;
+use super::{HttpBody, StreamingBody};
 #[cfg(any(feature = "json", test))]
 use crate::json::JsonError;
 use crate::{HttpError, Result};
@@ -92,12 +91,12 @@ impl HttpBodyBuilder {
         }
     }
 
-    /// Sets default [`HttpBodyOptions`] for all bodies created by this builder.
+    /// Overrides selected default [`HttpBodyOptions`] for bodies created by this builder.
     ///
-    /// Options for [`body`](Self::body) or [`stream`](Self::stream) override these defaults.
+    /// Clone the builder and call this method again to override selected defaults.
     #[must_use]
     pub fn with_options(mut self, options: HttpBodyOptions) -> Self {
-        self.options = options;
+        self.options = options.merge(&self.options);
         self
     }
 
@@ -107,15 +106,15 @@ impl HttpBodyBuilder {
     /// [`HttpBody`] system. Useful for third-party libraries or your own custom body
     /// implementations.
     ///
-    /// If `options` contains a timeout, the builder wraps the body with an idle timeout.
-    /// The timeout limits the time between frames.
+    /// If the builder options contain a timeout, `HttpBody` applies it while polling.
+    /// The timeout limits the wait for the next frame.
     ///
     /// # Examples
     ///
     /// ```
     /// # fn main() {
     /// # #[cfg(feature = "test-util")] {
-    /// # use http_extensions::{HttpBodyOptions, HttpBodyBuilder, HttpError, HttpBody};
+    /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpBody};
     /// # use http_body::Body;
     /// # use std::pin::Pin;
     /// # use std::task::{Context, Poll};
@@ -140,64 +139,19 @@ impl HttpBodyBuilder {
     /// # let builder = HttpBodyBuilder::new_fake();
     /// // Create HttpBody from your custom body
     /// let custom_body = CustomBody(vec![1, 2, 3, 4]);
-    /// let body = builder.body(custom_body, &HttpBodyOptions::default());
+    /// let body = builder.body(custom_body);
     /// # }
     /// # }
     /// ```
-    pub fn body<B>(&self, body: B, options: &HttpBodyOptions) -> HttpBody
+    pub fn body<B>(&self, body: B) -> HttpBody
     where
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        let merged = options.merge(&self.options);
-        let body = body.map_err(Into::into);
-
-        match merged.timeout {
-            Some(timeout) => HttpBody::from_streaming(Box::pin(TimeoutBody::new(body, timeout, &self.clock)), merged),
-            None => HttpBody::from_streaming(Box::pin(body), merged),
-        }
-    }
-
-    /// Applies `wrap` to the frames and keeps the existing body policies.
-    ///
-    /// Use this method to decode, count, or trace a body in flight.
-    /// [`body`](Self::body) builds a body from the start and can add a second idle timeout.
-    /// This method copies the existing options to the result.
-    /// A later [`into_buffered`](HttpBody::into_buffered) still applies the original buffer limit.
-    /// If the body has no policy, this method uses the builder defaults.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() {
-    /// # #[cfg(feature = "test-util")] {
-    /// # use http_extensions::{HttpBody, HttpBodyBuilder};
-    /// # use http_body_util::BodyExt;
-    /// # let builder = HttpBodyBuilder::new_fake();
-    /// let body = builder.text("hello");
-    ///
-    /// // Count the frames without disturbing the body's own policies.
-    /// let counted = builder.rewrap(body, |body| body.map_frame(|frame| frame));
-    /// # }
-    /// # }
-    /// ```
-    pub fn rewrap<B>(&self, body: HttpBody, wrap: impl FnOnce(HttpBody) -> B) -> HttpBody
-    where
-        B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
-    {
-        let own = body.options();
-        let options = own.merge(&self.options);
-        let wrapped = wrap(body).map_err(Into::into);
-
-        match (own.timeout, options.timeout) {
-            // The body carried no timeout of its own, so this builder's is not
-            // yet enforced anywhere: install it rather than record a policy
-            // nothing applies.
-            (None, Some(timeout)) => HttpBody::from_streaming(Box::pin(TimeoutBody::new(wrapped, timeout, &self.clock)), options),
-            // The wrapped body already applies this timeout.
-            // Another timeout measures the transformed frames.
-            // A transformation that combines many input frames can then time out.
-            _ => HttpBody::from_streaming(Box::pin(wrapped), options),
-        }
+        let body = match self.options.timeout {
+            Some(timeout) => StreamingBody::new(TimeoutBody::new(body, timeout, &self.clock)),
+            None => StreamingBody::new(body),
+        };
+        HttpBody::from_streaming(body, self.options)
     }
 
     /// Creates a body from a stream of byte chunks.
@@ -205,36 +159,36 @@ impl HttpBodyBuilder {
     /// Accepts a [`Stream`][futures::Stream] of [`BytesView`] chunks and creates a streaming
     /// body from them.
     ///
-    /// If `options` contains a timeout, the builder wraps the stream with an idle timeout.
-    /// The timeout limits the time between frames.
+    /// If the builder options contain a timeout, `HttpBody` applies it while polling.
+    /// The timeout limits the wait for the next frame.
     ///
     /// # Examples
     ///
     /// ```
     /// # fn main() {
     /// # #[cfg(feature = "test-util")] {
-    /// # use http_extensions::{HttpBodyOptions, HttpBodyBuilder, HttpError};
+    /// # use http_extensions::{HttpBodyBuilder, HttpError};
     /// # use bytesbuf::BytesView;
     /// # let builder = HttpBodyBuilder::new_fake();
     /// let chunks = vec![
     ///     Ok(BytesView::copied_from_slice(b"hello ", &builder)),
     ///     Ok(BytesView::copied_from_slice(b"world", &builder)),
     /// ];
-    /// let body = builder.stream(futures::stream::iter(chunks), &HttpBodyOptions::default());
+    /// let body = builder.stream(futures::stream::iter(chunks));
     ///
     /// assert_eq!(body.content_length(), None); // unknown length for streams
     ///
     /// # }
     /// # }
     /// ```
-    pub fn stream<S>(&self, stream: S, options: &HttpBodyOptions) -> HttpBody
+    pub fn stream<S>(&self, stream: S) -> HttpBody
     where
         S: Stream<Item = Result<BytesView>> + Send + 'static,
     {
         use http_body_util::StreamBody;
 
         let framed = stream.map_ok(Frame::data);
-        self.body(StreamBody::new(framed), options)
+        self.body(StreamBody::new(framed))
     }
 
     /// Creates a body from text.
@@ -316,18 +270,16 @@ impl HttpBodyBuilder {
     /// # }
     /// # }
     /// ```
-    #[expect(clippy::unused_self, reason = "body might receive more data from builder later")]
     pub fn bytes(&self, b: impl Into<BytesView>) -> HttpBody {
-        HttpBody::from_bytes(b.into())
+        HttpBody::from_bytes(b.into(), self.options)
     }
 
     /// Creates an empty body (zero bytes).
     ///
     /// Use this for HTTP methods that do not need a body, such as GET and HEAD.
     /// You can also use it for responses that contain only status codes or headers.
-    #[expect(clippy::unused_self, reason = "body might receive more data from builder later")]
     pub fn empty(&self) -> HttpBody {
-        HttpBody::empty()
+        HttpBody::from_empty(self.options)
     }
 
     #[cfg(any(feature = "json", test))]
@@ -407,7 +359,6 @@ mod tests {
     use bytes::Bytes;
     use bytesbuf::mem::CallbackMemory;
     use bytesbuf::mem::testing::TransparentMemory;
-    use futures::channel::mpsc;
     use futures::executor::block_on;
     use futures::stream;
     use ohno::Labeled as _;
@@ -419,26 +370,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rewrapping_keeps_the_policies_the_body_already_had() {
+    fn transforming_keeps_the_policies_the_body_already_had() {
         let builder = HttpBodyBuilder::new_fake();
         let strict = HttpBodyOptions::default().buffer_limit(7).timeout(Duration::from_secs(3));
 
-        // A streaming body carries its own policies, and they must survive being
-        // wrapped rather than be replaced by the builder's defaults.
-        let body = builder.stream(futures::stream::empty(), &strict);
-        let rewrapped = builder.rewrap(body, |body| body);
+        // A streaming body carries its own policies through transformation.
+        let body = builder.with_options(strict).stream(futures::stream::empty());
+        let transformed = body.map(Ok).unwrap();
 
-        assert_eq!(rewrapped.options(), strict);
+        assert_eq!(transformed.options, strict);
     }
 
     #[test]
-    fn rewrapping_preserves_the_source_idle_timeout() {
+    fn transforming_preserves_the_source_idle_timeout() {
         let control = ClockControl::new();
         let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &control.to_clock())
             .with_options(HttpBodyOptions::default().timeout(Duration::from_secs(1)));
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
-        let source = builder.stream(stream::pending(), &options);
-        let mut body = pin!(builder.rewrap(source, |body| body));
+        let source = builder.with_options(options).stream(stream::pending());
+        let mut body = pin!(source.map(Ok).unwrap());
         let waker = futures::task::noop_waker();
         let mut cx = Context::from_waker(&waker);
 
@@ -446,82 +396,29 @@ mod tests {
         control.advance(Duration::from_millis(101));
 
         let Poll::Ready(Some(Err(error))) = body.as_mut().poll_frame(&mut cx) else {
-            panic!("the source idle timeout must still fire after rewrapping");
+            panic!("the source idle timeout must still fire after transformation");
         };
         assert_eq!(error.label(), "body_timeout");
     }
 
     #[test]
-    fn rewrapping_does_not_time_transformed_frames_while_the_source_makes_progress() {
-        let control = ClockControl::new();
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &control.to_clock());
-        let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
-        let (sender, receiver) = mpsc::unbounded();
-        let source = builder.stream(receiver, &options);
-        let mut body = pin!(builder.rewrap(source, |body| {
-            http_body_util::StreamBody::new(stream::once(async move { body.into_bytes().await.map(Frame::data) }))
-        }));
-        let waker = futures::task::noop_waker();
-        let mut cx = Context::from_waker(&waker);
-
-        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
-        control.advance(Duration::from_millis(75));
-        sender.unbounded_send(Ok(BytesView::copied_from_slice(b"first", &builder))).unwrap();
-        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
-
-        // Output is buffered for longer than the timeout, but source frames keep arriving.
-        control.advance(Duration::from_millis(75));
-        sender
-            .unbounded_send(Ok(BytesView::copied_from_slice(b"second", &builder)))
-            .unwrap();
-        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
-        drop(sender);
-
-        let Poll::Ready(Some(Ok(frame))) = body.as_mut().poll_frame(&mut cx) else {
-            panic!("the transformed frame must not acquire a second idle timeout");
-        };
-        assert_eq!(frame.into_data().unwrap(), b"firstsecond");
-    }
-
-    #[test]
-    fn rewrapping_falls_back_to_the_builder_for_a_buffered_body() {
+    fn body_options_update_a_buffered_body() {
         let lenient = HttpBodyOptions::default().buffer_limit(99);
-        let builder = HttpBodyBuilder::new_fake().with_options(lenient);
+        let transformed = HttpBodyBuilder::new_fake().with_options(lenient).text("hello");
 
-        // A buffered body has no policies of its own, so the builder supplies them.
-        let rewrapped = builder.rewrap(builder.text("hello"), |body| body);
-
-        assert_eq!(rewrapped.options(), lenient);
+        assert_eq!(transformed.options, lenient);
     }
 
     #[test]
-    fn rewrapping_installs_the_builder_timeout_when_the_body_has_none() {
-        #[derive(Debug)]
-        struct PendingBody;
+    fn body_options_override_builder_defaults() {
+        let defaults = HttpBodyOptions::default().buffer_limit(99).timeout(Duration::from_secs(30));
+        let overrides = HttpBodyOptions::default().buffer_limit(7).timeout(Duration::from_secs(3));
+        let wrapped = HttpBodyBuilder::new_fake()
+            .with_options(defaults)
+            .with_options(overrides)
+            .stream(stream::pending());
 
-        impl Body for PendingBody {
-            type Data = BytesView;
-            type Error = HttpError;
-
-            fn poll_frame(
-                self: std::pin::Pin<&mut Self>,
-                _: &mut std::task::Context<'_>,
-            ) -> std::task::Poll<Option<Result<Frame<Self::Data>>>> {
-                std::task::Poll::Pending
-            }
-        }
-
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock).with_options(options);
-        let mut body = Box::pin(builder.rewrap(builder.text("source"), |_| PendingBody));
-        let waker = futures::task::noop_waker();
-        let mut cx = std::task::Context::from_waker(&waker);
-
-        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
-
-        let result = body.as_mut().poll_frame(&mut cx);
-        assert!(matches!(result, std::task::Poll::Ready(Some(Err(_)))));
+        assert_eq!(wrapped.options, overrides);
     }
 
     use crate::testing::{create_stream_body, create_stream_body_from_chunks};
@@ -681,7 +578,7 @@ mod tests {
             .map(|c| Ok(BytesView::copied_from_slice(c, &builder)))
             .collect();
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let body = builder.stream(stream::iter(chunks), &options);
+        let body = builder.with_options(options).stream(stream::iter(chunks));
         assert_eq!(body.content_length(), None);
         let text = block_on(body.into_text()).unwrap();
         assert_eq!(text, "hello world");
@@ -691,10 +588,10 @@ mod tests {
     fn body_with_max_duration_timeout_still_returns_data() {
         let builder = HttpBodyBuilder::new_fake();
         let options = HttpBodyOptions::default().timeout(Duration::MAX);
-        let body = builder.body(
-            http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)),
-            &options,
-        );
+        let body = builder
+            .clone()
+            .with_options(options)
+            .body(http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)));
         let bytes = block_on(body.into_bytes()).unwrap();
         assert_eq!(bytes, b"hello");
     }
@@ -775,7 +672,7 @@ mod tests {
 
         // Per-call options override the builder-level default.
         let per_call = HttpBodyOptions::default().timeout(Duration::from_secs(5));
-        let body = builder.stream(stream::iter(Vec::<Result<BytesView>>::new()), &per_call);
+        let body = builder.with_options(per_call).stream(stream::iter(Vec::<Result<BytesView>>::new()));
         // The body uses the timeout from per_call.
         assert_eq!(body.content_length(), None);
     }

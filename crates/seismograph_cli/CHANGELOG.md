@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0] - 2026-11-06
+
+- Breaking: Show bounded native task state instead of source-derived task lifetimes and
+  creation stacks. Creation provenance comes only from retained creation events.
+- Show missing task ages and worker collection status explicitly, including unavailable,
+  busy, timed-out, failed, and truncated results.
+- Show poll measurements only for their recorded observation window.
+- Read allocator source schemas 3 and 4 and runtime source schema 8.
+- Update the binary lockfile to match the new diagnostic sources and their dependencies.
+- Update the local `performables` requirement from `0.3.1` to `0.4.0`.
+- Update the local `seismograph` requirement from `0.4.0` to `0.5.0`.
+- Update the local `seismograph_rallocator` requirement from `0.4.0` to `0.5.0`.
+- Update the local `seismograph_runtime` requirement from `0.4.0` to `0.5.0`.
+
 ## [0.4.0] - 2026-11-02
 
 - Breaking: Use Unix sockets or Windows named pipes instead of the former TCP/token protocol.

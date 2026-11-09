@@ -51,73 +51,11 @@
 //! The `?` returns a [`JoinError`](crate::task::JoinError) if the child task fails.
 //! Await child tasks before returning. Shutdown cancels pending async tasks.
 //!
-//! # Execution model
+//! [`Scheduler::spawn`](crate::task::Scheduler::spawn) starts a child task on the
+//! scheduler's current thread. The scheduler's thread can differ from the thread
+//! that calls `spawn`. See [`task`] to learn how to schedule tasks.
 //!
-//! Each worker is one operating-system thread with a cooperative executor.
-//! The worker thread polls the tasks assigned to it. When one task awaits an
-//! operation that is not ready, the worker can poll another assigned task.
-//! After a task starts, it stays on that worker thread for its entire life.
-//!
-//! Choose the initial worker for a new task:
-//!
-//! - [`Scheduler::spawn`](crate::task::Scheduler::spawn) uses the worker bound
-//!   to the scheduler. A cloned scheduler keeps the same binding, even when
-//!   another thread calls it.
-//! - [`Scheduler::spawn_anywhere`](crate::task::Scheduler::spawn_anywhere) lets
-//!   the runtime select a worker. This initial placement is similar to Tokio
-//!   task placement.
-//! - [`Scheduler::spawn_at`](crate::task::Scheduler::spawn_at) uses a worker
-//!   that you select from the same runtime.
-//!
-//! Unlike a Tokio task, an Arty task does not move between workers after it
-//! starts.
-//!
-//! A task factory creates the task future on its destination worker. A payload
-//! is a separate value passed to that factory. If the factory starts, Arty
-//! relocates a [`ThreadAware`](core::ThreadAware) payload before the factory
-//! uses it. Rejected tasks and tasks cancelled before their factory starts can
-//! drop the payload without relocation.
-//!
-//! Cloned values can refer to the same resource while keeping separate state
-//! on each worker. `ThreadAware` updates that state, but it does not share
-//! ownership of a resource or store local state for you.
-//!
-//! This example compares fixed placement with runtime-selected placement:
-//!
-//! ```
-//! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! # #[arty::main]
-//! # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
-//! let parent_worker = cx.thread().id();
-//! let child_worker = cx
-//!     .scheduler()
-//!     .spawn(async |child| child.thread().id())
-//!     .await?;
-//! assert_eq!(child_worker, parent_worker);
-//!
-//! // `cx.clone()` is the payload. The closure is the task factory.
-//! cx.scheduler()
-//!     .spawn_anywhere(cx.clone(), |moved| async move {
-//!         assert_eq!(moved.thread().id(), std::thread::current().id());
-//!     })
-//!     .await?;
-//! # Ok(())
-//! # }
-//! # #[cfg(not(all(feature = "macros", feature = "rt")))] fn main() {}
-//! ```
-//!
-//! `spawn_anywhere` can select the original worker. The relocated context
-//! always reports the worker that runs the new task.
-//!
-//! Each runtime owns its workers and services. Arty does not use a single
-//! runtime shared by the whole process. Each worker tracks its own state.
-//!
-//! Arty runs tasks, provides clocks, and runs blocking functions on separate threads.
-//! It can also run I/O drivers, which handle input and output.
-//! I/O libraries connect to Arty through `arty_io_core`.
-//! Related I/O crates ship alongside Arty.
-//!
-//! # API overview
+//! # Additional documentation
 //!
 //! - [`runtime`] explains how to create, configure, and stop a runtime.
 //! - [`task`] explains how to start tasks, choose their workers, and receive results.

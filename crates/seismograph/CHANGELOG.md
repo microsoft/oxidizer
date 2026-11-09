@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0] - 2026-11-06
+
+- Breaking: Rename `RecordingPolicy` to `Policy` and `CaptureSource` to `CaptureFn`.
+  `EventBufferCapacity::new` now panics for invalid values instead of returning `None`.
+  Use `TryFrom<usize>` for fallible construction.
+- Breaking: Remove recording-session APIs, the public `system` module, wire event aliases,
+  and snapshot-arena helpers.
+- Check event category, sampling, suppression, and configuration changes in one recorder
+  path. Keep snapshot allocations outside allocator recording without a custom arena.
+- Simplify recorder and monitor documentation.
+
 ## [0.4.0] - 2026-11-02
 
 - Breaking: Use local Unix sockets or Windows named pipes instead of TCP ports and authentication

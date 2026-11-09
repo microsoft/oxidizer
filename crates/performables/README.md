@@ -47,10 +47,10 @@ See [`arc`][__link4] and [`sync`][__link5] for the available types and their ful
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/performables">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbjoywrf8x380bBFqvc_ICHowbdAdclot_xZUbyJH0yhPbYTxhZIKCbHBlcmZvcm1hYmxlc2UwLjMuMYJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjM
- [__link0]: https://docs.rs/performables/0.3.1/performables/?search=arc::Arc
- [__link1]: https://docs.rs/performables/0.3.1/performables/?search=arc::PerThread
- [__link2]: https://docs.rs/performables/0.3.1/performables/?search=arc::PerNuma
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbjoywrf8x380bBFqvc_ICHowbdAdclot_xZUbyJH0yhPbYTxhZIKCbHBlcmZvcm1hYmxlc2UwLjQuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMC4xLjM
+ [__link0]: https://docs.rs/performables/0.4.0/performables/?search=arc::Arc
+ [__link1]: https://docs.rs/performables/0.4.0/performables/?search=arc::PerThread
+ [__link2]: https://docs.rs/performables/0.4.0/performables/?search=arc::PerNuma
  [__link3]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
- [__link4]: https://docs.rs/performables/0.3.1/performables/arc/index.html
- [__link5]: https://docs.rs/performables/0.3.1/performables/sync/index.html
+ [__link4]: https://docs.rs/performables/0.4.0/performables/arc/index.html
+ [__link5]: https://docs.rs/performables/0.4.0/performables/sync/index.html

@@ -15,7 +15,7 @@ use performables::sync::channel;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
-use crate::runtime::worker::asynchronous::{Command, QueuedFactory, QueuedIoAccess};
+use crate::runtime::worker::asynchronous::{Command, LocalWorker, QueuedFactory, QueuedIoAccess};
 use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
 use crate::task::Context;
@@ -172,13 +172,36 @@ impl DispatcherCore {
         self.enqueue(self.next_worker_index(), TaskPlacement::Any, future_factory)
     }
 
-    pub(crate) fn spawn_relocating<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    pub(crate) fn spawn_relocating<FF, F, R>(&self, source: &Thread, future_factory: FF) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
         let worker_index = self.next_worker_index();
+        let endpoint = &self.worker_endpoints[usize::from(worker_index)];
+        let future_factory = if &endpoint.thread == source {
+            if let Some(join_handle) = JoinHandle::try_from_shutdown(self.shutdown()) {
+                return join_handle;
+            }
+            // Only inspect local state when round-robin already chose the bound
+            // worker. A retained scheduler can still be used from another thread.
+            match LocalWorker::with_scheduler(|current| {
+                let Some(current) = current.filter(|current| current.thread() == &endpoint.thread) else {
+                    return Err(future_factory);
+                };
+                let handle = current.spawn(future_factory, TaskPlacement::Any);
+                if !current.tasks().is_executing() {
+                    endpoint.waker.wake_by_ref();
+                }
+                Ok(handle)
+            }) {
+                Ok(handle) => return handle.relocate_result_from(endpoint.thread.clone()),
+                Err(future_factory) => future_factory,
+            }
+        } else {
+            future_factory
+        };
         self.spawn_relocating_on_worker(worker_index, TaskPlacement::Any, future_factory)
     }
 

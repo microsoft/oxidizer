@@ -178,9 +178,8 @@ impl RuntimeBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
-    /// Time advances automatically when a timer starts or code
-    /// reads the controlled clock. If the order of overlapping timers matters,
-    /// advance time manually. See the [`time`](crate::time) module.
+    /// You can advance controlled time yourself or enable automatic advancement.
+    /// See the [`time`](crate::time) module.
     #[must_use]
     pub fn clock(mut self, clock: impl Into<InactiveClock>) -> Self {
         self.clock = clock.into();

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty_executor::{TaskOptions, TaskPlacement};
+use arty_executor::TaskPlacement;
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
@@ -10,7 +10,6 @@ use crate::runtime::worker::asynchronous;
 use crate::runtime::worker::blocking::Worker;
 use crate::task::Context;
 use crate::task::handle::JoinHandle;
-use crate::task::preparation::DeferredTask;
 
 /// Submits async tasks and blocking functions for one worker.
 ///
@@ -32,7 +31,6 @@ use crate::task::preparation::DeferredTask;
 ///
 /// Once shutdown starts, awaiting a new task returns
 /// [`JoinError`](crate::task::JoinError) immediately.
-/// Arty does not call the task factory.
 /// Await required results before shutdown.
 /// Dropping a [`JoinHandle`] does not cancel its task.
 ///
@@ -163,14 +161,7 @@ impl Scheduler {
             if current.thread() != &self.binding.thread {
                 return Err(future_factory);
             }
-            let context = current.context().clone();
-            let (handle, result_tx) = current.results().handle();
-            let inner = DeferredTask::new(future_factory, context);
-            let options = TaskOptions::new(TaskPlacement::SameThread);
-            #[cfg(feature = "monitor")]
-            crate::runtime::monitoring::add_task::<F, _, _, _>(current.tasks(), inner, options, result_tx);
-            #[cfg(not(feature = "monitor"))]
-            current.tasks().add(inner, options, result_tx);
+            let handle = current.spawn(future_factory, TaskPlacement::SameThread);
             if !current.tasks().is_executing() {
                 self.dispatcher.wake_worker(self.binding.worker_index);
             }
@@ -187,9 +178,7 @@ impl Scheduler {
     /// them. The data and result must implement [`ThreadAware`] and `'static`.
     /// The future must be `'static` and does not need to implement `Send`.
     /// If you await the result on an Arty async worker, Arty relocates it to that
-    /// worker before returning it. This is normally the worker that submitted the task.
-    /// Awaiting the result on a different worker changes where Arty relocates it.
-    /// Awaiting outside an Arty async worker does not relocate the result.
+    /// worker. Awaiting outside an Arty async worker does not relocate the result.
     ///
     /// # Examples
     ///
@@ -229,7 +218,7 @@ impl Scheduler {
         R: ThreadAware + 'static,
     {
         let source = self.binding.thread.clone();
-        self.dispatcher.spawn_relocating(move |cx| {
+        self.dispatcher.spawn_relocating(&self.binding.thread, move |cx| {
             let mut data = data;
             data.relocate(Some(&source), cx.thread());
             f(data)
@@ -246,11 +235,9 @@ impl Scheduler {
     /// The data and result must implement [`ThreadAware`] and `'static`.
     /// The future must be `'static` and does not need to implement `Send`.
     /// If you await the result on an Arty async worker, Arty relocates it from
-    /// `destination` to that worker before returning it.
-    /// This is normally this scheduler's worker.
+    /// `destination` to that worker.
     /// Awaiting outside an Arty async worker does not relocate the result.
-    /// During shutdown, or if the destination is invalid, Arty rejects the task
-    /// without relocating `data` or calling `f`.
+    /// During shutdown, or if the destination is invalid, Arty rejects the task.
     ///
     /// # Examples
     ///
@@ -314,10 +301,8 @@ impl Scheduler {
         let source = self.binding.thread.clone();
         self.dispatcher.spawn_at_worker_relocating(worker_index, move |cx| {
             let mut data = data;
-            async move {
-                data.relocate(Some(&source), cx.thread());
-                f(data).await
-            }
+            data.relocate(Some(&source), cx.thread());
+            f(data)
         })
     }
 

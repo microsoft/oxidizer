@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0] - 2026-11-06
+
+- Accept `impl Into<OpaqueMemory>` in `WinHttpDeps::builder`. This also updates the builder
+  re-exported by `fetch_winhttp`.
+- Breaking: Public APIs expose types from packages with incompatible releases:
+  `anyspawn`, `bytesbuf`, `bytesbuf_io`, `compressors`, `fetch`, `fetch_hyper`,
+  `http_compression`, `http_extensions`, `performables`, `seatbelt_http`, `seismograph`,
+  `seismograph_io`.
+- Update the local `bytesbuf` requirement from `0.13.0` to `0.14.0`.
+- Update the local `bytesbuf_io` requirement from `0.13.0` to `0.14.0`.
+- Update the local `fetch` requirement from `0.20.0` to `0.21.0`.
+- Update the local `http_extensions` requirement from `0.14.0` to `0.15.0`.
+- Update the local `observed` requirement from `0.30.0` to `0.30.1`.
+- Update the local `tick` requirement from `0.9.0` to `0.9.1`.
+
 ## [0.5.0] - 2026-11-02
 
 - Breaking: Pass `OpaqueMemory` instead of `GlobalPool` to `WinHttpDeps::builder`.

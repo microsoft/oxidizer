@@ -162,16 +162,16 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "anyspawn"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "arty",
  "criterion",
  "ctor",
  "futures",
  "many_cpus",
- "opentelemetry",
- "performables",
- "smol",
+ "observed",
+ "observed_testing",
+ "ohno",
  "static_assertions",
  "testing_aids",
  "thread_aware",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "anyspawn_azure"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyspawn",
  "async-trait",
@@ -236,7 +236,7 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "arty"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "alloc_tracker",
  "arty_executor",
@@ -273,7 +273,7 @@ dependencies = [
 
 [[package]]
 name = "arty_executor"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "alloc_tracker",
  "criterion",
@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "arty_io_host"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "arty_io_core",
  "data_privacy",
@@ -319,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "arty_macros"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "arty_macros_impl",
  "mutants",
@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "arty_macros_impl"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "darling",
  "insta",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "arty_tokio"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arty",
  "derive_more",
@@ -401,61 +401,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-channel"
-version = "2.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
-dependencies = [
- "concurrent-queue",
- "event-listener-strategy",
- "futures-core",
- "pin-project-lite",
-]
-
-[[package]]
-name = "async-executor"
-version = "1.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f426a31126c735126297bc5ea7a521263c9faff4f63ca415267ee625651c4f37"
-dependencies = [
- "async-task",
- "concurrent-queue",
- "fastrand",
- "futures-lite",
- "pin-project-lite",
- "slab",
-]
-
-[[package]]
-name = "async-fs"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8034a681df4aed8b8edbd7fbe472401ecf009251c8b40556b304567052e294c5"
-dependencies = [
- "async-lock",
- "blocking",
- "futures-lite",
-]
-
-[[package]]
-name = "async-io"
-version = "2.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "456b8a8feb6f42d237746d4b3e9a178494627745c3c56c6ea55d92ba50d026fc"
-dependencies = [
- "autocfg",
- "cfg-if",
- "concurrent-queue",
- "futures-io",
- "futures-lite",
- "parking",
- "polling",
- "rustix",
- "slab",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "async-lock"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -467,57 +412,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-net"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b948000fad4873c1c9339d60f2623323a0cfd3816e5181033c6a5cb68b2accf7"
-dependencies = [
- "async-io",
- "blocking",
- "futures-lite",
-]
-
-[[package]]
 name = "async-once-cell"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4288f83726785267c6f2ef073a3d83dc3f9b81464e9f99898240cced85fce35a"
-
-[[package]]
-name = "async-process"
-version = "2.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc50921ec0055cdd8a16de48773bfeec5c972598674347252c0399676be7da75"
-dependencies = [
- "async-channel",
- "async-io",
- "async-lock",
- "async-signal",
- "async-task",
- "blocking",
- "cfg-if",
- "event-listener",
- "futures-lite",
- "rustix",
-]
-
-[[package]]
-name = "async-signal"
-version = "0.2.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52b5aaafa020cf5053a01f2a60e8ff5dccf550f0f77ec54a4e47285ac2bab485"
-dependencies = [
- "async-io",
- "async-lock",
- "atomic-waker",
- "cfg-if",
- "futures-core",
- "futures-io",
- "rustix",
- "signal-hook-registry",
- "slab",
- "windows-sys 0.61.2",
-]
 
 [[package]]
 name = "async-stream"
@@ -540,12 +438,6 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
-
-[[package]]
-name = "async-task"
-version = "4.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
 name = "async-trait"
@@ -785,19 +677,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "blocking"
-version = "1.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a70e4329df6cb94385eed412ec92375c3cdd8a6e502493d1229b6414e4036dfa"
-dependencies = [
- "async-channel",
- "async-task",
- "futures-io",
- "futures-lite",
- "piper",
-]
-
-[[package]]
 name = "bolero"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -980,7 +859,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "bytesbuf"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "alloc_tracker",
  "benchmarking",
@@ -1004,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "bytesbuf_io"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bytesbuf",
  "future_assert",
@@ -1019,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1053,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -1311,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "compressors"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bolero",
  "brotli",
@@ -1332,15 +1211,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "zstd-safe",
-]
-
-[[package]]
-name = "concurrent-queue"
-version = "2.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
-dependencies = [
- "crossbeam-utils",
 ]
 
 [[package]]
@@ -1890,7 +1760,7 @@ dependencies = [
 
 [[package]]
 name = "fakeable"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "fakeable_impl",
  "mockall",
@@ -1899,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "fakeable_impl"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "insta",
  "proc-macro2",
@@ -1937,7 +1807,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fetch"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1992,7 +1862,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_azure"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyspawn",
  "anyspawn_azure",
@@ -2012,7 +1882,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_hyper"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyspawn",
  "bytes",
@@ -2078,7 +1948,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_winhttp"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "all_the_time",
  "alloc_tracker",
@@ -2101,7 +1971,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_winhttp_impl"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bytes",
  "bytesbuf",
@@ -2322,19 +2192,6 @@ name = "futures-io"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53c0fa8157de1303bfffdaa1cc2a673bfffb60102f76b0ef4441659124373fed"
-
-[[package]]
-name = "futures-lite"
-version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f78e10609fe0e0b3f4157ffab1876319b5b0db102a2c60dc4626306dc46b44ad"
-dependencies = [
- "fastrand",
- "futures-core",
- "futures-io",
- "parking",
- "pin-project-lite",
-]
 
 [[package]]
 name = "futures-macro"
@@ -2682,13 +2539,14 @@ dependencies = [
 
 [[package]]
 name = "http_compression"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bytesbuf",
  "compressors",
  "futures",
  "http",
  "http-body",
+ "http-body-util",
  "http_extensions",
  "layered",
  "mime",
@@ -2701,7 +2559,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "alloc_tracker",
  "argh",
@@ -2709,6 +2567,7 @@ dependencies = [
  "bytes",
  "bytesbuf",
  "criterion",
+ "derive_more",
  "futures",
  "gungraun",
  "http",
@@ -2778,6 +2637,32 @@ dependencies = [
  "criterion",
  "gungraun",
  "mutants",
+]
+
+[[package]]
+name = "http_telemetry"
+version = "0.1.0"
+dependencies = [
+ "bytesbuf",
+ "criterion",
+ "data_privacy",
+ "future_assert",
+ "futures",
+ "http",
+ "http-body",
+ "http-body-util",
+ "http_extensions",
+ "http_headers",
+ "hyper",
+ "hyper-util",
+ "layered",
+ "metabench",
+ "observed",
+ "observed_testing",
+ "ohno",
+ "templated_uri",
+ "tick",
+ "tokio",
 ]
 
 [[package]]
@@ -3660,7 +3545,7 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "multitude"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.2.21",
@@ -3688,7 +3573,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "multitude_macros_impl",
  "mutants",
@@ -3697,7 +3582,7 @@ dependencies = [
 
 [[package]]
 name = "multitude_macros_impl"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "prettyplease 0.3.0",
  "proc-macro2",
@@ -3871,7 +3756,7 @@ dependencies = [
 
 [[package]]
 name = "observed"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "criterion",
  "data_privacy",
@@ -3894,7 +3779,7 @@ dependencies = [
 
 [[package]]
 name = "observed_destination_core"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "jiff",
  "log",
@@ -3907,7 +3792,7 @@ dependencies = [
 
 [[package]]
 name = "observed_destination_stdout"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bon",
  "derive_more",
@@ -3922,7 +3807,7 @@ dependencies = [
 
 [[package]]
 name = "observed_macros"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "mutants",
  "observed_macros_impl",
@@ -3930,7 +3815,7 @@ dependencies = [
 
 [[package]]
 name = "observed_macros_impl"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "criterion",
  "insta",
@@ -3956,7 +3841,7 @@ dependencies = [
 
 [[package]]
 name = "observed_utils"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "arrayvec",
  "const-hex",
@@ -4265,7 +4150,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "performables"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "alloc_tracker",
  "criterion",
@@ -4351,17 +4236,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
-name = "piper"
-version = "0.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c835479a4443ded371d6c535cbfd8d31ad92c5d23ae9770a61bc155e4992a3c1"
-dependencies = [
- "atomic-waker",
- "fastrand",
- "futures-io",
-]
-
-[[package]]
 name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4387,20 +4261,6 @@ dependencies = [
  "slab",
  "slotmap",
  "static_assertions",
-]
-
-[[package]]
-name = "polling"
-version = "3.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d0e4f59085d47d8241c88ead0f274e8a0cb551f3625263c05eb8dd897c34218"
-dependencies = [
- "cfg-if",
- "concurrent-queue",
- "hermit-abi",
- "pin-project-lite",
- "rustix",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4763,7 +4623,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rallocator"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "criterion",
  "libc",
@@ -5328,7 +5188,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seatbelt"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "alloc_tracker",
  "benchmarking",
@@ -5364,7 +5224,7 @@ dependencies = [
 
 [[package]]
 name = "seatbelt_http"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "futures",
  "http",
@@ -5402,7 +5262,7 @@ dependencies = [
 
 [[package]]
 name = "seismograph"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "libc",
  "mutants",
@@ -5412,7 +5272,7 @@ dependencies = [
 
 [[package]]
 name = "seismograph_cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "clap",
@@ -5429,7 +5289,7 @@ dependencies = [
 
 [[package]]
 name = "seismograph_io"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "seismograph",
 ]
@@ -5447,14 +5307,14 @@ dependencies = [
 
 [[package]]
 name = "seismograph_rallocator"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "seismograph",
 ]
 
 [[package]]
 name = "seismograph_runtime"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "mutants",
  "seismograph",
@@ -5683,23 +5543,6 @@ name = "smallvec"
 version = "1.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
-
-[[package]]
-name = "smol"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a33bd3e260892199c3ccfc487c88b2da2265080acb316cd920da72fdfd7c599f"
-dependencies = [
- "async-channel",
- "async-executor",
- "async-fs",
- "async-io",
- "async-lock",
- "async-net",
- "async-process",
- "blocking",
- "futures-lite",
-]
 
 [[package]]
 name = "socket2"
@@ -6034,7 +5877,7 @@ dependencies = [
 
 [[package]]
 name = "tick"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "alloc_tracker",
  "chrono",
@@ -6567,7 +6410,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "uniflight"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "ahash",
  "async-once-cell",
