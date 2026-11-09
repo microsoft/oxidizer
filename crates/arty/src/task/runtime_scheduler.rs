@@ -191,10 +191,10 @@ impl RuntimeScheduler {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.dispatcher.spawn(async move |cx| {
+        self.dispatcher.spawn(move |cx| {
             let mut data = data;
             data.relocate(None, cx.thread());
-            future_factory(cx, data).await
+            future_factory(cx, data)
         })
     }
 

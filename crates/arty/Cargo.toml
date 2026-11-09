@@ -21,6 +21,8 @@ allowed_external_types = [
     "arty_io_core::io_context::IoContext",
     "arty_macros::main",
     "arty_macros::test",
+    "seismograph_protocol::io::MonitorIo",
+    "seismograph_runtime::RuntimeHandle",
     "thread_aware_core::thread::NumaNode",
     "thread_aware_core::thread::Owner",
     "thread_aware_core::thread::Thread",
@@ -36,7 +38,14 @@ all-features = true
 [features]
 default = ["rt", "macros", "monitor"]
 macros = ["rt", "dep:arty_macros"]
-monitor = ["dep:seismograph", "seismograph/monitor", "performables?/seismograph"]
+monitor = [
+    "dep:seismograph",
+    "dep:seismograph_protocol",
+    "dep:seismograph_runtime",
+    "arty_executor?/inspection",
+    "seismograph/monitor",
+    "performables?/seismograph",
+]
 rt = [
     "dep:arty_executor",
     "dep:arty_io_host",
@@ -53,7 +62,7 @@ rt = [
     "dep:plurality",
     "dep:thread_aware",
 ]
-test-util = ["tick/test-util", "many_cpus?/test-util"]
+test-util = ["tick/test-util", "many_cpus?/test-util", "seismograph_protocol?/test-util"]
 
 [dependencies]
 arty_executor = { workspace = true, optional = true }
@@ -72,12 +81,15 @@ performables = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 plurality = { workspace = true, features = ["std"], optional = true }
 seismograph = { workspace = true, optional = true }
+seismograph_protocol = { workspace = true, optional = true }
+seismograph_runtime = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true }
 
 [dev-dependencies]
-arty_executor = { path = "../arty_executor" }
+alloc_tracker = { workspace = true }
+arty_executor = { path = "../arty_executor", features = ["inspection"] }
 arty_io_host = { path = "../arty_io_host" }
 arty_macros = { path = "../arty_macros" }
 bolero = { workspace = true, features = ["std"] }
@@ -99,6 +111,8 @@ pin-project = { workspace = true }
 plurality = { path = "../plurality", features = ["std"] }
 scopeguard = { workspace = true }
 seismograph = { path = "../seismograph", features = ["monitor"] }
+seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
+seismograph_runtime = { path = "../seismograph_runtime" }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", features = ["std", "derive", "test-utils"] }
@@ -120,6 +134,16 @@ required-features = ["rt"]
 
 [[bench]]
 name = "arty_contention"
+harness = false
+required-features = ["rt"]
+
+[[bench]]
+name = "arty_inspection"
+harness = false
+required-features = ["rt"]
+
+[[bench]]
+name = "arty_spawn_allocations"
 harness = false
 required-features = ["rt"]
 

@@ -167,6 +167,9 @@ impl Scheduler {
             let (handle, result_tx) = current.results().handle();
             let inner = DeferredTask::new(future_factory, context);
             let options = TaskOptions::new(TaskPlacement::SameThread);
+            #[cfg(feature = "monitor")]
+            crate::runtime::monitoring::add_task::<F, _, _, _>(current.tasks(), inner, options, result_tx);
+            #[cfg(not(feature = "monitor"))]
             current.tasks().add(inner, options, result_tx);
             if !current.tasks().is_executing() {
                 self.dispatcher.wake_worker(self.binding.worker_index);
@@ -226,10 +229,10 @@ impl Scheduler {
         R: ThreadAware + 'static,
     {
         let source = self.binding.thread.clone();
-        self.dispatcher.spawn_relocating(async move |cx| {
+        self.dispatcher.spawn_relocating(move |cx| {
             let mut data = data;
             data.relocate(Some(&source), cx.thread());
-            f(data).await
+            f(data)
         })
     }
 

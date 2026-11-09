@@ -92,6 +92,8 @@ pub(crate) struct Worker {
     cycle_clock: SimpleClock,
     signal: Arc<Signal>,
     monitor_options: MonitorOptions,
+    #[cfg(feature = "monitor")]
+    diagnostics: Option<crate::runtime::monitoring::WorkerDiagnostics>,
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -123,6 +125,10 @@ impl Worker {
         let tasks = executor.tasks();
         let executor_shutdown = executor.shutdown();
 
+        #[cfg(feature = "monitor")]
+        let diagnostics = monitor_options
+            .runtime()
+            .map(|runtime| crate::runtime::monitoring::WorkerDiagnostics::new(runtime, &dispatcher, &thread));
         let context = Context::new(dispatcher, clock, io, thread);
         LocalWorker::register_scheduler(context.clone(), tasks.clone(), executor_shutdown);
 
@@ -136,6 +142,8 @@ impl Worker {
             cycle_clock,
             signal,
             monitor_options,
+            #[cfg(feature = "monitor")]
+            diagnostics,
             _single_threaded: PhantomData,
         }
     }
@@ -144,9 +152,7 @@ impl Worker {
     /// The configuration-facing `RuntimeBuilder` delegates construction to bootstrap.
     /// After this method returns, the thread will end.
     pub(crate) fn run(&mut self) {
-        // Keep the worker-owned policy available at the boundary where monitoring
-        // will be attached in a later stage.
-        let _monitor_policy = self.monitor_options.policy();
+        let _monitoring_enabled = self.monitor_options.policy().is_enabled();
         self.execute_phase();
     }
 
@@ -163,6 +169,13 @@ impl Worker {
             CycleAction::Poll | CycleAction::WaitForSignal(_) => Duration::ZERO,
         };
 
+        #[cfg(feature = "monitor")]
+        if !matches!(action, CycleAction::Poll)
+            && let Some(diagnostics) = &self.diagnostics
+        {
+            diagnostics.parked();
+        }
+
         if RuntimeDriverHost::execute_cycle_current(max_wait).is_err() {
             return self.finish_shutdown();
         }
@@ -172,6 +185,13 @@ impl Worker {
                 Some(deadline) => self.signal.wait(self.wait_until(deadline)),
                 None => self.signal.wait_for_notification(),
             }
+        }
+
+        #[cfg(feature = "monitor")]
+        if !matches!(action, CycleAction::Poll)
+            && let Some(diagnostics) = &self.diagnostics
+        {
+            diagnostics.unparked();
         }
 
         ControlFlow::Continue(())
@@ -189,6 +209,12 @@ impl Worker {
             .as_mut()
             .expect("executor removal publishes shutdown, which is handled above");
 
+        #[cfg(feature = "monitor")]
+        let cycle_outcome = match &self.diagnostics {
+            Some(diagnostics) if diagnostics.is_observed() => executor.execute_cycle_observed(diagnostics),
+            _ => executor.execute_cycle(),
+        };
+        #[cfg(not(feature = "monitor"))]
         let cycle_outcome = executor.execute_cycle();
 
         if let CycleOutcome::Shutdown(cause) = cycle_outcome {
@@ -256,6 +282,12 @@ impl Worker {
                     Command::AccessIo { access } => {
                         access.into_inner()(context);
                     }
+                    #[cfg(feature = "monitor")]
+                    Command::Inspect { request } => {
+                        if let (Some(diagnostics), Some(executor)) = (&self.diagnostics, &mut self.executor) {
+                            diagnostics.collect(executor, request);
+                        }
+                    }
                     Command::Shutdown => {
                         self.begin_shutdown();
 
@@ -298,6 +330,8 @@ impl Worker {
         // Safe executor shutdown synchronously cancels and releases all remaining task storage.
         executor.shutdown().trigger(cause);
         drop(executor);
+        #[cfg(feature = "monitor")]
+        drop(self.diagnostics.take());
         let driver_host = RuntimeDriverHost::uninstall();
         drop(driver_host);
     }

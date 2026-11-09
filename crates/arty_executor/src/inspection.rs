@@ -70,14 +70,14 @@ pub trait PollObserver: std::fmt::Debug {
 }
 
 /// Builds a temporary description while the native future is borrowed on its owner.
-pub(crate) trait Inspector<F>: 'static {
+pub(crate) trait Inspector<F, T>: 'static {
     #[cfg(feature = "inspection")]
-    fn inspect(&self, future: &F, state: TaskState, visitor: &mut dyn FnMut(&dyn Any));
+    fn inspect(&self, future: &F, completion: &T, state: TaskState, visitor: &mut dyn FnMut(&dyn Any));
 }
 
-impl<F> Inspector<F> for () {
+impl<F, T> Inspector<F, T> for () {
     #[cfg(feature = "inspection")]
-    fn inspect(&self, _future: &F, _state: TaskState, _visitor: &mut dyn FnMut(&dyn Any)) {}
+    fn inspect(&self, _future: &F, _completion: &T, _state: TaskState, _visitor: &mut dyn FnMut(&dyn Any)) {}
 }
 
 #[cfg(feature = "inspection")]
@@ -98,13 +98,13 @@ impl<I, D> InspectWith<I, D> {
 }
 
 #[cfg(feature = "inspection")]
-impl<F, I, D> Inspector<F> for InspectWith<I, D>
+impl<F, T, I, D> Inspector<F, T> for InspectWith<I, D>
 where
-    I: Fn(&F, TaskState) -> Option<D> + 'static,
+    I: Fn(&F, &T, TaskState) -> Option<D> + 'static,
     D: 'static,
 {
-    fn inspect(&self, future: &F, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
-        if let Some(description) = (self.inspect)(future, state) {
+    fn inspect(&self, future: &F, completion: &T, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
+        if let Some(description) = (self.inspect)(future, completion, state) {
             visitor(&description);
         }
     }

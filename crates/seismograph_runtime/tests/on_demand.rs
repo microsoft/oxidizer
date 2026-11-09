@@ -377,6 +377,8 @@ fn event_and_capture_values_preserve_copy_and_unwind_contracts() {
     fn copied<T: Copy>() {}
     value::<seismograph_runtime::task::EventContext>();
     copied::<seismograph_runtime::task::EventContext>();
+    value::<seismograph_runtime::task::TaskSpawn>();
+    copied::<seismograph_runtime::task::TaskSpawn>();
     value::<CaptureOptions>();
     value::<TaskCollection>();
     value::<CountersScope>();
@@ -676,6 +678,14 @@ fn recording_retains_task_creation_and_real_outcomes_without_a_task_registry() {
 fn disabled_task_event_context_does_not_initialize_event_buffers() {
     let _lock = RECORDING.lock().unwrap();
     seismograph::recorder(Configuration::default());
+    // Disabling recording preserves earlier tests' buffers. Release them before
+    // checking that this disabled path creates none.
+    drop(
+        seismograph::snapshot(SnapshotOptions {
+            event_buffers: EventBufferDisposition::Stop,
+        })
+        .unwrap(),
+    );
     let runtime = register_runtime(RuntimeMetadata::new("disabled-task-events", 1));
     let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
     let context = worker.handle().task_events();
@@ -690,4 +700,78 @@ fn disabled_task_event_context_does_not_initialize_event_buffers() {
     let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
 
     assert_eq!((created, snapshot.events.events.len(), snapshot.events.threads.len()), (None, 0, 0));
+}
+
+#[test]
+fn lazy_spawn_metadata_matches_the_recorded_event() {
+    let _lock = RECORDING.lock().unwrap();
+    seismograph::recorder(Configuration::default());
+    let runtime = register_runtime(RuntimeMetadata::new("lazy-spawn-metadata", 1));
+    let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+    let context = worker.handle().task_events();
+    let descriptor = allocate_type_descriptor_id();
+    let parent = allocate_task_id();
+    let calls = std::cell::Cell::new(0);
+    seismograph::recorder(Configuration {
+        runtime_tasks: Policy::all(false),
+        ..Configuration::default()
+    });
+
+    let spawned = context
+        .spawned_with(
+            || {
+                calls.set(calls.get() + 1);
+                descriptor
+            },
+            Some(parent),
+            64,
+        )
+        .unwrap();
+    let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+    let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
+    seismograph::recorder(Configuration::default());
+    let event = snapshot
+        .events
+        .events
+        .iter()
+        .find(|event| {
+            event.kind == EventKind::TaskSpawned
+                && event
+                    .runtime()
+                    .is_some_and(|payload| payload.runtime_id == runtime.id() && payload.subject_id == spawned.id.get())
+        })
+        .unwrap();
+    let payload = event.runtime().unwrap();
+
+    assert_eq!(
+        (
+            calls.get(),
+            spawned.descriptor,
+            spawned.timestamp,
+            payload.related_id,
+            payload.value_0,
+            payload.value_1
+        ),
+        (1, descriptor, event.timestamp, parent.get(), descriptor.get(), 65)
+    );
+}
+
+#[test]
+fn disabled_and_suppressed_spawns_do_not_build_type_metadata() {
+    let _lock = RECORDING.lock().unwrap();
+    seismograph::recorder(Configuration::default());
+    let runtime = register_runtime(RuntimeMetadata::new("lazy-disabled-spawn", 1));
+    let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+    let context = worker.handle().task_events();
+    let descriptor = || panic!("disabled or suppressed recording must not build task type metadata");
+
+    let disabled = context.spawned_with(descriptor, None, 0);
+    seismograph::recorder(Configuration {
+        runtime_tasks: Policy::all(false),
+        ..Configuration::default()
+    });
+    let suppressed = without_recording(|| context.spawned_with(descriptor, None, 0));
+    seismograph::recorder(Configuration::default());
+
+    assert_eq!((disabled, suppressed), (None, None));
 }

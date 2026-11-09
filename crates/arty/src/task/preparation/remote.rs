@@ -104,6 +104,9 @@ where
         let future_factory = future_factory.into_inner();
         let inner = DeferredTask::new(future_factory, cx);
         let options = TaskOptions::new(placement);
+        #[cfg(feature = "monitor")]
+        crate::runtime::monitoring::add_task::<F, _, _, _>(tasks, inner, options, result_tx);
+        #[cfg(not(feature = "monitor"))]
         tasks.add(inner, options, result_tx);
     });
     (future_factory, handle)

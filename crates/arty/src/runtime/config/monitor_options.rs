@@ -7,6 +7,8 @@ use crate::runtime::config::MonitorPolicy;
 #[derive(Clone, Debug)]
 pub(crate) struct MonitorOptions {
     policy: MonitorPolicy,
+    #[cfg(feature = "monitor")]
+    runtime: Option<seismograph_runtime::RuntimeHandle>,
 }
 
 impl MonitorOptions {
@@ -19,6 +21,16 @@ impl MonitorOptions {
     pub(crate) const fn policy(&self) -> &MonitorPolicy {
         &self.policy
     }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn set_runtime(&mut self, runtime: Option<seismograph_runtime::RuntimeHandle>) {
+        self.runtime = runtime;
+    }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn runtime(&self) -> Option<&seismograph_runtime::RuntimeHandle> {
+        self.runtime.as_ref()
+    }
 }
 
 impl Default for MonitorOptions {
@@ -29,7 +41,11 @@ impl Default for MonitorOptions {
 
 impl From<MonitorPolicy> for MonitorOptions {
     fn from(policy: MonitorPolicy) -> Self {
-        Self { policy }
+        Self {
+            policy,
+            #[cfg(feature = "monitor")]
+            runtime: None,
+        }
     }
 }
 

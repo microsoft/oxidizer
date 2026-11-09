@@ -40,7 +40,7 @@ where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
-    I: Inspector<F>,
+    I: Inspector<F, T>,
 {
     /// `None` after the task completes or the executor abandons it during shutdown.
     ///
@@ -80,7 +80,7 @@ where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
-    I: Inspector<F>,
+    I: Inspector<F, T>,
 {
 }
 
@@ -90,7 +90,7 @@ where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
-    I: Inspector<F>,
+    I: Inspector<F, T>,
 {
 }
 
@@ -110,7 +110,7 @@ where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
-    I: Inspector<F>,
+    I: Inspector<F, T>,
 {
     fn new_inspected(future: F, result_target: T, options: TaskOptions, sink: Sink, inspector: I) -> Self {
         Self {
@@ -146,7 +146,7 @@ where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
-    I: Inspector<F>,
+    I: Inspector<F, T>,
 {
     TaskHandle::new(pool.alloc_arc_pin(Task::new_inspected(future, completion, options, sink, inspector)))
 }
@@ -193,7 +193,7 @@ where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
-    I: Inspector<F>,
+    I: Inspector<F, T>,
 {
     #[cfg(feature = "inspection")]
     fn inspect(&self, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
@@ -202,8 +202,9 @@ where
         let payload = unsafe { &*self.payload.get() };
         if let Some(payload) = payload
             && let Some(future) = &payload.future.inner
+            && let Some(completion) = &payload.result_target
         {
-            payload.inspector.inspect(future, state, visitor);
+            payload.inspector.inspect(future, completion, state, visitor);
         }
     }
 
@@ -268,7 +269,7 @@ where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
-    I: Inspector<F>,
+    I: Inspector<F, T>,
 {
     fn pinned_wake_signal(self: Pin<&Self>) -> Pin<&WakeSignal> {
         let signal = self.get_ref().wake_signal.get().expect("task must be initialized before poll()");
@@ -413,7 +414,7 @@ where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
-    I: Inspector<F>,
+    I: Inspector<F, T>,
 {
     /// The future that will be polled by the executor to progress the task.
     future: FutureStorage<F>,

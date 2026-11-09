@@ -47,7 +47,7 @@ impl ExecutorShared {
         F: Future<Output = R> + 'static,
         R: 'static,
         T: TaskCompletion<R>,
-        I: crate::inspection::Inspector<F>,
+        I: crate::inspection::Inspector<F, T>,
     {
         if self.shutdown().is_triggered() {
             if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(inspector))) {

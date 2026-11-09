@@ -64,8 +64,9 @@ impl RuntimeBuilder {
     ///
     /// The default is [`MonitorPolicy::enabled`]. The `monitor` Cargo feature
     /// enables the Seismograph dependencies that monitoring needs.
-    /// This choice does not start a monitor, add task measurements, or change
-    /// which tasks run.
+    /// Building an enabled runtime starts a local connection for the Seismograph CLI.
+    /// Task collection runs on request. This does not enable event recording or
+    /// change which tasks run. See the [monitoring guide](crate::runtime#monitoring).
     ///
     /// # Examples
     ///
@@ -193,6 +194,7 @@ impl RuntimeBuilder {
     /// # Errors
     ///
     /// Returns [`Error`] if the worker count or blocking-pool limit is zero.
+    /// With monitoring enabled, also returns an error if the local monitor cannot start.
     ///
     /// # Panics
     ///

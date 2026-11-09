@@ -1,0 +1,258 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+use std::any::TypeId;
+use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use arty_executor::{ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskSet, TaskState};
+use seismograph::recorder::event::EventTimestamp;
+use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
+use seismograph_runtime::snapshot::{Task, TaskActivityState};
+use seismograph_runtime::task::EventContext;
+
+thread_local! {
+    static EVENTS: Cell<Option<EventContext>> = const { Cell::new(None) };
+    static CURRENT: Cell<Option<TaskId>> = const { Cell::new(None) };
+    // This cache contains types, not live tasks. It is touched only during observation.
+    static TYPES: RefCell<HashMap<TypeId, TypeDescriptorId>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn current_events() -> Option<EventContext> {
+    EVENTS.with(Cell::get)
+}
+
+pub(super) fn set_events(events: Option<EventContext>) {
+    EVENTS.with(|slot| slot.set(events));
+}
+
+pub(super) fn set_current(task: Option<TaskId>) {
+    CURRENT.with(|slot| slot.set(task));
+}
+
+#[expect(
+    clippy::large_enum_variant,
+    reason = "descriptions are transient stack values; boxing snapshots would allocate during native inspection"
+)]
+pub(super) enum Description {
+    Snapshot(Task),
+    Poll(TaskId),
+}
+
+fn descriptor<T: 'static>() -> TypeDescriptorId {
+    TYPES.with_borrow_mut(|types| {
+        *types
+            .entry(TypeId::of::<T>())
+            .or_insert_with(seismograph_runtime::allocate_type_descriptor_id)
+    })
+}
+
+#[derive(Debug)]
+struct TaskMetadata {
+    describe_type: fn() -> TypeDescriptorId,
+    body_size: usize,
+    events: EventContext,
+    parent: Option<TaskId>,
+    spawned_at: Option<EventTimestamp>,
+}
+
+impl TaskMetadata {
+    fn new<T: 'static>(events: EventContext) -> Self {
+        Self {
+            describe_type: descriptor::<T>,
+            body_size: size_of::<T>(),
+            events,
+            parent: CURRENT.with(Cell::get),
+            spawned_at: None,
+        }
+    }
+
+    fn record_spawn(&mut self) -> Option<TaskIdentity> {
+        self.events
+            .spawned_with(self.describe_type, self.parent, self.body_size)
+            .map(|spawn| {
+                self.spawned_at = Some(spawn.timestamp);
+                TaskIdentity {
+                    id: spawn.id,
+                    descriptor: spawn.descriptor,
+                }
+            })
+    }
+
+    fn identity(&self) -> TaskIdentity {
+        TaskIdentity {
+            id: seismograph_runtime::allocate_task_id(),
+            descriptor: (self.describe_type)(),
+        }
+    }
+
+    fn describe(&self, identity: &TaskIdentity, state: TaskActivityState) -> Task {
+        let mut task = Task::new(identity.id, identity.descriptor, state);
+        task.parent = self.parent;
+        task.spawned_at = self.spawned_at;
+        task.future_size_bytes = Some(u64::try_from(self.body_size).expect("a task body fits the platform address space"));
+        task
+    }
+}
+
+#[derive(Debug)]
+struct TaskIdentity {
+    id: TaskId,
+    descriptor: TypeDescriptorId,
+}
+
+#[derive(Debug)]
+pub(crate) struct TaskInfo {
+    metadata: TaskMetadata,
+    identity: OnceLock<TaskIdentity>,
+    execution_events: OnceLock<EventContext>,
+}
+
+impl TaskInfo {
+    pub(crate) fn new<T: 'static>(events: EventContext) -> Self {
+        let mut metadata = TaskMetadata::new::<T>(events);
+        let identity = metadata.record_spawn().map_or_else(OnceLock::new, OnceLock::from);
+        Self {
+            metadata,
+            identity,
+            execution_events: OnceLock::new(),
+        }
+    }
+
+    pub(crate) fn id(&self) -> TaskId {
+        self.identity.get_or_init(|| self.metadata.identity()).id
+    }
+
+    pub(crate) fn describe(&self, state: TaskActivityState) -> Task {
+        self.metadata
+            .describe(self.identity.get_or_init(|| self.metadata.identity()), state)
+    }
+
+    pub(crate) fn started_on(&self, events: EventContext) {
+        self.execution_events
+            .set(events)
+            .expect("a blocking function starts on exactly one worker");
+    }
+
+    pub(crate) fn completed(&self) {
+        if let Some(identity) = self.identity.get() {
+            self.execution_events.get().unwrap_or(&self.metadata.events).completed(identity.id);
+        }
+    }
+
+    pub(crate) fn panicked(&self) {
+        if let Some(identity) = self.identity.get() {
+            self.execution_events.get().unwrap_or(&self.metadata.events).panicked(identity.id);
+        }
+    }
+
+    pub(crate) fn canceled(&self) {
+        if let Some(identity) = self.identity.get() {
+            self.execution_events.get().unwrap_or(&self.metadata.events).canceled(identity.id);
+        }
+    }
+}
+
+// Async metadata stays in the executor's owner-only payload. Blocking metadata
+// above remains synchronized because queue inspection and execution can overlap.
+#[derive(Debug)]
+struct AsyncTaskInfo {
+    events: EventContext,
+    parent: Option<TaskId>,
+    spawned_at: Option<EventTimestamp>,
+    identity: OnceCell<TaskId>,
+}
+
+impl AsyncTaskInfo {
+    fn new<T: 'static>(events: EventContext) -> Self {
+        let parent = CURRENT.with(Cell::get);
+        let spawn = events.spawned_with(descriptor::<T>, parent, size_of::<T>());
+        Self {
+            events,
+            parent,
+            spawned_at: spawn.map(|spawn| spawn.timestamp),
+            identity: spawn.map_or_else(OnceCell::new, |spawn| OnceCell::from(spawn.id)),
+        }
+    }
+
+    fn id(&self) -> TaskId {
+        *self.identity.get_or_init(seismograph_runtime::allocate_task_id)
+    }
+
+    fn describe<T: 'static>(&self, state: TaskActivityState) -> Task {
+        let mut task = Task::new(self.id(), descriptor::<T>(), state);
+        task.parent = self.parent;
+        task.spawned_at = self.spawned_at;
+        task.future_size_bytes = Some(u64::try_from(size_of::<T>()).expect("a task body fits the platform address space"));
+        task
+    }
+}
+
+#[derive(Debug)]
+struct Completion<T> {
+    target: T,
+    info: AsyncTaskInfo,
+}
+
+impl<R: 'static, T: TaskCompletion<R>> TaskCompletion<R> for Completion<T> {
+    fn completed(self, result: R) {
+        if let Some(id) = self.info.identity.get() {
+            self.info.events.completed(*id);
+        }
+        self.target.completed(result);
+    }
+
+    fn panicked(self, panic: TaskPanicPayload, cause: Option<ShutdownCause>) {
+        if let Some(id) = self.info.identity.get() {
+            self.info.events.panicked(*id);
+        }
+        self.target.panicked(panic, cause);
+    }
+
+    fn cancelled(self, cause: ShutdownCause) {
+        if let Some(id) = self.info.identity.get() {
+            self.info.events.canceled(*id);
+        }
+        self.target.cancelled(cause);
+    }
+}
+
+pub(crate) fn add_task<Body, F, R, T>(tasks: &TaskSet, future: F, options: TaskOptions, completion: T)
+where
+    Body: 'static,
+    F: Future<Output = R> + 'static,
+    R: 'static,
+    T: TaskCompletion<R>,
+{
+    let Some(events) = current_events() else {
+        tasks.add(future, options, completion);
+        return;
+    };
+    let completion = Completion {
+        target: completion,
+        info: AsyncTaskInfo::new::<Body>(events),
+    };
+    tasks.add_with_completion_inspection(future, options, completion, |_, completion, state| {
+        let info = &completion.info;
+        Some(seismograph::recorder::without_recording(|| match state {
+            TaskState::Ready => Description::Snapshot(info.describe::<Body>(TaskActivityState::Ready)),
+            TaskState::Waiting => Description::Snapshot(info.describe::<Body>(TaskActivityState::Waiting)),
+            TaskState::Running => Description::Poll(info.id()),
+        }))
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AsyncTaskInfo, TaskInfo};
+
+    #[test]
+    fn async_metadata_is_smaller_and_stays_owner_local() {
+        static_assertions::assert_not_impl_any!(AsyncTaskInfo: Sync);
+        static_assertions::assert_impl_all!(TaskInfo: Send, Sync);
+        assert!(size_of::<AsyncTaskInfo>() < size_of::<TaskInfo>());
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(size_of::<AsyncTaskInfo>(), 56);
+    }
+}

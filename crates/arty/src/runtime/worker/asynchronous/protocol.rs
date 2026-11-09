@@ -63,6 +63,10 @@ pub(crate) enum Command {
     /// Executes synchronous I/O context access on this worker.
     AccessIo { access: QueuedIoAccess },
 
+    /// Copies task descriptions from native executor storage between cycles.
+    #[cfg(feature = "monitor")]
+    Inspect { request: seismograph_runtime::task::TaskRequest },
+
     /// Starts shutdown on this worker.
     ///
     /// The worker stops accepting new tasks. It discards tasks enqueued after
@@ -78,6 +82,8 @@ impl fmt::Debug for Command {
         match self {
             Self::EnqueueTask { .. } => write!(f, "EnqueueTask"),
             Self::AccessIo { .. } => write!(f, "AccessIo"),
+            #[cfg(feature = "monitor")]
+            Self::Inspect { .. } => write!(f, "Inspect"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
     }

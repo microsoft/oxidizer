@@ -132,9 +132,11 @@
 //!
 //! - `rt`: Enables the runtime, task, and I/O APIs.
 //! - `macros`: Enables [`main`] and [`test`]. It also enables `rt`.
-//! - `monitor`: Enables the Seismograph monitor dependency. It forwards
-//!   monitoring support for `performables` when `performables` is enabled. It does
-//!   not start monitoring or emit new telemetry.
+//! - `monitor`: Connects runtime workers and tasks to Seismograph. An enabled
+//!   [`MonitorPolicy`](crate::runtime::MonitorPolicy) starts a local connection for
+//!   the Seismograph CLI. Task collection runs on request. Event recording stays
+//!   off until an application or the CLI enables it. This feature also forwards
+//!   monitoring support for `performables` when `performables` is enabled.
 //! - `test-util`: Enables testing utilities, including
 //!   [`ClockControl`](crate::time::ClockControl).
 //!   Enable it in dev-dependencies, not production dependencies.
@@ -165,7 +167,8 @@ use arty_io_core as _;
 ///   causes runtime construction to fail.
 /// - `workers = all` starts one async worker per available processor.
 /// - `monitor = enabled` or `monitor = disabled` selects whether the runtime
-///   is prepared for monitoring. The default is `enabled`.
+///   starts a local Seismograph monitor when the `monitor` feature is present.
+///   The default is `enabled`.
 /// - `panic = shutdown` or `panic = ignore` selects whether the runtime stops
 ///   after Arty catches a task panic. The default is `shutdown`.
 ///
@@ -268,7 +271,6 @@ pub use arty_macros::main;
 /// `monitor`, and `panic` options also apply.
 /// By default, a test uses one worker, disables monitoring, and stops its
 /// runtime after Arty catches a task panic.
-/// Ordinary tests therefore keep monitoring disabled if Arty adds automatic monitoring later.
 /// To test monitoring, use `monitor = enabled`.
 ///
 /// # Simulated time

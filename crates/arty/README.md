@@ -121,11 +121,13 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 
 * `rt`: Enables the runtime, task, and I/O APIs.
 * `macros`: Enables [`main`][__link15] and [`test`][__link16]. It also enables `rt`.
-* `monitor`: Enables the Seismograph monitor dependency. It forwards
-  monitoring support for `performables` when `performables` is enabled. It does
-  not start monitoring or emit new telemetry.
+* `monitor`: Connects runtime workers and tasks to Seismograph. An enabled
+  [`MonitorPolicy`][__link17] starts a local connection for
+  the Seismograph CLI. Task collection runs on request. Event recording stays
+  off until an application or the CLI enables it. This feature also forwards
+  monitoring support for `performables` when `performables` is enabled.
 * `test-util`: Enables testing utilities, including
-  [`ClockControl`][__link17].
+  [`ClockControl`][__link18].
   Enable it in dev-dependencies, not production dependencies.
 
 
@@ -134,7 +136,7 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbVOOkiwtK_84bGyYJldq1SSMbSs5R1-8kbtkbwouPZ79D401hZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbzAp7t6NKScAb3WDVIfzt6sUbEShFs-Ipr28b7AssFBf93fFhZIKCZGFydHllMC42LjCCa2FydHlfbWFjcm9zZTAuNi4w
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/0.6.0/arty/?search=core::ThreadAware
  [__link10]: https://docs.rs/arty/0.6.0/arty/time/index.html
@@ -144,7 +146,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link14]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
  [__link15]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
  [__link16]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=test
- [__link17]: https://docs.rs/arty/0.6.0/arty/?search=time::ClockControl
+ [__link17]: https://docs.rs/arty/0.6.0/arty/?search=runtime::MonitorPolicy
+ [__link18]: https://docs.rs/arty/0.6.0/arty/?search=time::ClockControl
  [__link2]: https://docs.rs/arty_macros/0.6.0/arty_macros/?search=main
  [__link3]: https://docs.rs/arty/0.6.0/arty/?search=task::JoinError
  [__link4]: https://docs.rs/arty/0.6.0/arty/?search=task::Scheduler::spawn

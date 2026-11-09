@@ -68,6 +68,8 @@ pub(crate) struct DispatcherCore {
     next_async_worker_index: AtomicUsize,
 
     remote_results: JoinHandlePool,
+    #[cfg(feature = "monitor")]
+    diagnostics: std::sync::OnceLock<seismograph_runtime::RuntimeHandle>,
 }
 
 impl DispatcherCore {
@@ -101,12 +103,45 @@ impl DispatcherCore {
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
             remote_results: JoinHandlePool::new(shutdown),
+            #[cfg(feature = "monitor")]
+            diagnostics: std::sync::OnceLock::new(),
         })
+    }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn set_diagnostics(&self, runtime: Option<seismograph_runtime::RuntimeHandle>) {
+        if let Some(runtime) = runtime {
+            self.diagnostics
+                .set(runtime)
+                .expect("bootstrap sets runtime diagnostics exactly once");
+        }
+    }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn register_task_provider(&self, thread: ThreadId, handle: &seismograph_runtime::worker::WorkerHandle) {
+        let index = self
+            .worker_index(thread)
+            .expect("worker diagnostics use a registered runtime thread");
+        let endpoint = &self.worker_endpoints[usize::from(index)];
+        let commands = endpoint.command_tx.clone();
+        let waker = endpoint.waker.clone();
+        handle
+            .register_task_provider(move |request| {
+                if commands.send(Command::Inspect { request }).is_ok() {
+                    waker.wake_by_ref();
+                }
+                // A failed send drops the request and reports collection failure.
+            })
+            .expect("bootstrap registers providers before their workers can stop");
     }
 
     #[cfg_attr(test, mutants::skip)] // Tests hang if mutation removes the shutdown signal or worker notifications.
     pub(crate) fn stop_inner(&self, cause: ShutdownCause) -> ShutdownCause {
         self.shutdown().begin(cause);
+        #[cfg(feature = "monitor")]
+        if let Some(runtime) = self.diagnostics.get() {
+            runtime.stopping();
+        }
         let cause = self.shutdown().cause().unwrap_or_default();
         // Shutdown stores the cause independently. This atomic only elects the
         // broadcaster. Observing `true` does not mean notification is complete.

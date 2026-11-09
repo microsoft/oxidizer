@@ -26,6 +26,56 @@ impl TaskSet {
         D: 'static,
         I: Fn(&F, crate::TaskState) -> Option<D> + 'static,
     {
+        self.add_with_completion_inspection(future, options, completion, move |future, _, state| inspect(future, state));
+    }
+
+    /// Adds a task whose inspector borrows its future and completion target.
+    ///
+    /// Store shared diagnostic metadata in the completion target to avoid a
+    /// separate allocation. The inspector borrows it only during explicit
+    /// inspection or observed polls on the executor thread. Ordinary cycles
+    /// do not call the inspector. Terminal delivery consumes the same target
+    /// through [`TaskCompletion`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "inspection")] {
+    /// use arty_executor::{Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload};
+    ///
+    /// #[derive(Debug)]
+    /// struct Completion {
+    ///     id: u64,
+    /// }
+    /// impl TaskCompletion<()> for Completion {
+    ///     fn completed(self, _: ()) {}
+    ///     fn panicked(self, panic: TaskPanicPayload, _: Option<ShutdownCause>) {
+    ///         arty_executor::discard_task_panic_payload(panic);
+    ///     }
+    ///     fn cancelled(self, _: ShutdownCause) {}
+    /// }
+    ///
+    /// let mut executor = Executor::builder().build();
+    /// executor.tasks().add_with_completion_inspection(
+    ///     std::future::pending::<()>(),
+    ///     TaskOptions::default(),
+    ///     Completion { id: 7 },
+    ///     |_, completion, _| Some(completion.id),
+    /// );
+    /// let mut ids = Vec::new();
+    /// executor.inspect(1, |id: &u64| ids.push(*id)).unwrap();
+    /// assert_eq!(ids, [7]);
+    /// # }
+    /// ```
+    #[cfg(feature = "inspection")]
+    pub fn add_with_completion_inspection<F, R, T, D, I>(&self, future: F, options: TaskOptions, completion: T, inspect: I)
+    where
+        F: Future<Output = R> + 'static,
+        R: 'static,
+        T: TaskCompletion<R>,
+        D: 'static,
+        I: Fn(&F, &T, crate::TaskState) -> Option<D> + 'static,
+    {
         self.shared
             .add_inspected_task(future, options, completion, crate::inspection::InspectWith::new(inspect));
     }

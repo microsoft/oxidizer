@@ -56,6 +56,8 @@ pub struct Runtime {
     scheduler: RuntimeScheduler,
     worker_joiner: WorkerJoiner,
     shutdown_on_drop: bool,
+    #[cfg(feature = "monitor")]
+    diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>,
 }
 
 impl Runtime {
@@ -134,6 +136,19 @@ impl Runtime {
         &self.scheduler
     }
 
+    /// Returns the runtime's diagnostic handle for collection tests.
+    ///
+    /// Returns `None` when monitoring is disabled. Capture from a diagnostic
+    /// thread, not from an Arty worker that must answer the collection request.
+    /// This does not change the process-wide recorder.
+    #[cfg(all(feature = "monitor", any(test, feature = "test-util")))]
+    #[must_use]
+    pub fn diagnostics(&self) -> Option<seismograph_runtime::RuntimeHandle> {
+        self.diagnostics
+            .as_ref()
+            .map(crate::runtime::monitoring::RuntimeDiagnostics::handle)
+    }
+
     /// Takes ownership of this runtime, requests shutdown, and waits for its workers to stop.
     ///
     /// Cancels pending async tasks and prevents queued blocking functions from
@@ -149,6 +164,8 @@ impl Runtime {
     /// Returns an error if a worker panicked or an I/O driver failed during
     /// startup or normal operation. It does not return I/O driver shutdown
     /// failures. It waits for all workers to stop before it reports a failure.
+    /// With monitoring enabled, also reports a stored monitor failure unless a
+    /// worker or runtime failure takes precedence.
     /// To receive a task failure, await its [`JoinHandle`](crate::task::JoinHandle).
     ///
     /// # Panics
@@ -186,12 +203,32 @@ impl Runtime {
         self.wait()
     }
 
-    fn wait(&self) -> Result<(), Error> {
+    #[cfg_attr(
+        not(feature = "monitor"),
+        expect(
+            clippy::needless_pass_by_ref_mut,
+            reason = "monitoring consumes the diagnostic registration after workers stop"
+        )
+    )]
+    fn wait(&mut self) -> Result<(), Error> {
         let wait_error = self.worker_joiner.join().err();
+        #[cfg(feature = "monitor")]
+        let monitor_error = self.diagnostics.take().and_then(|diagnostics| diagnostics.finish().err());
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
             return Err(Error::shutdown_failure(error));
         }
+        #[cfg(feature = "monitor")]
+        if let Some(error) = monitor_error
+            && wait_error.is_none()
+        {
+            return Err(error);
+        }
         wait_error.map_or(Ok(()), Err)
+    }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn set_diagnostics(&mut self, diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>) {
+        self.diagnostics = diagnostics;
     }
 
     pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient, worker_joiner: WorkerJoiner) -> Self {
@@ -199,6 +236,8 @@ impl Runtime {
             scheduler: RuntimeScheduler::new(dispatcher),
             worker_joiner,
             shutdown_on_drop: true,
+            #[cfg(feature = "monitor")]
+            diagnostics: None,
         }
     }
 }
