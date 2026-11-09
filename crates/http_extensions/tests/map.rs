@@ -77,6 +77,7 @@ fn propagates_callback_and_consumed_body_errors() {
 
     assert!(!called.get());
     assert_eq!(error.label(), "body_consumed");
+    assert_eq!(error.message(), "body cannot be mapped because it is already consumed");
 }
 
 #[test]

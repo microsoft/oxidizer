@@ -30,14 +30,19 @@ pub enum Content {
     /// Buffered bytes. An empty body supplies an empty view.
     #[debug("Bytes")]
     Bytes(BytesView),
-    /// A streaming body without the surrounding `HttpBody` policies.
+    /// Streaming content with any source timeout already applied.
+    ///
+    /// The outer [`HttpBody`] keeps the buffer limit. A mapper that buffers this
+    /// stream must apply its own limit to that intermediate buffer.
     Streaming(StreamingBody),
 }
 
 /// Streaming content used by [`HttpBody::map`].
 ///
-/// A streaming value supplied to the mapper already applies the source body's policies.
-/// A wrapper must poll this value to retain those policies.
+/// A streaming value supplied to the mapper already applies the source body's timeout.
+/// A wrapper must poll this value to retain that timeout.
+/// The outer [`HttpBody`] keeps the buffer limit. This type does not limit memory
+/// that a mapper uses to collect or combine source frames.
 #[derive(ThreadAware, derive_more::Debug)]
 #[must_use]
 pub struct StreamingBody {

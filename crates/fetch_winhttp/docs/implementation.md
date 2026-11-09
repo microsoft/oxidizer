@@ -1075,7 +1075,10 @@ that erased future free of borrows:
 
 ```rust,ignore
 let body = WinHttpResponseBody::new(WinHttpBodyReader::new(/* .. */));
-let body = builder.body(body, &body_options);
+let body = match body_options {
+    Some(options) => builder.clone().with_options(options).body(body),
+    None => builder.body(body),
+};
 ```
 
 Erasing that future needs one allocation per frame, so the adapter rents it from
@@ -1089,11 +1092,12 @@ that issued the request and may be polled and dropped on another.
 The resulting `HttpBody` is pull-based:
 WinHTTP reads are issued lazily as the consumer polls, so backpressure is natural and
 there is no unbounded buffering. The request's body idle timeout
-(`http_extensions::BodyTimeout`) is copied into `body_options`.
-`HttpBodyBuilder::body` merges it with the client's response-body defaults and applies
+(`http_extensions::BodyTimeout`) is copied into the optional `body_options`.
+When an override exists, a cloned builder merges it with the client's response-body
+defaults through `HttpBodyBuilder::with_options`. `HttpBodyBuilder::body` then applies
 the Rust-side idle-timeout wrapper (§10.4). Native WinHTTP receive timers remain
-unlimited. That Rust-side timeout is also what bounds a read that asked to fill
-its buffer against a peer which then stops sending.
+unlimited. That Rust-side timeout also bounds a read that asked to fill its buffer
+against a peer which then stops sending.
 
 The `READ_COMPLETE` buffer WinHTTP fills is a slice reserved inside a pooled
 `BytesBuf`; it stays pinned until the callback fires (§4), then the filled prefix

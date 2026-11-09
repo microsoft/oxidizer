@@ -95,7 +95,8 @@ fn transform_rejects_a_consumed_buffered_body() {
         .unwrap_err();
 
     assert!(!called.get());
-    assert!(error.to_string().contains("already consumed"));
+    assert_eq!(error.label(), "body_consumed");
+    assert_eq!(error.message(), "body cannot be mapped because it is already consumed");
 }
 
 #[test]
@@ -553,6 +554,70 @@ fn source_frames_reset_the_timeout_inside_the_mapper() {
 
     let Poll::Ready(Some(Err(error))) = body.as_mut().poll_frame(&mut cx) else {
         panic!("the source timeout must start again after source progress");
+    };
+    assert_eq!(error.label(), "body_timeout");
+}
+
+#[test]
+fn source_progress_allows_a_coalescing_mapper_to_finish() {
+    let control = ClockControl::new();
+    let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
+    let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
+    let (sender, receiver) = mpsc::unbounded();
+    let source = builder.clone().with_options(options).stream(receiver);
+    let mut body = Box::pin(
+        source
+            .map(|content| {
+                Ok(match content {
+                    Content::Streaming(body) => Content::Streaming(StreamingBody::new(StreamBody::new(stream::once(async move {
+                        body.collect()
+                            .await
+                            .map(|collected| Frame::data(BytesView::from(collected.to_bytes())))
+                    })))),
+                    Content::Bytes(bytes) => Content::Bytes(bytes),
+                })
+            })
+            .unwrap(),
+    );
+    let waker = futures::task::noop_waker();
+    let mut cx = Context::from_waker(&waker);
+
+    assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+    control.advance(Duration::from_millis(75));
+    sender.unbounded_send(Ok(BytesView::copied_from_slice(b"first", &builder))).unwrap();
+    assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+    control.advance(Duration::from_millis(75));
+    sender
+        .unbounded_send(Ok(BytesView::copied_from_slice(b"second", &builder)))
+        .unwrap();
+    drop(sender);
+
+    let Poll::Ready(Some(Ok(frame))) = body.as_mut().poll_frame(&mut cx) else {
+        panic!("source progress must let the coalescing mapper finish");
+    };
+    assert_eq!(frame.into_data().unwrap(), b"firstsecond");
+    assert!(matches!(body.as_mut().poll_frame(&mut cx), Poll::Ready(None)));
+}
+
+#[test]
+fn timeout_only_override_keeps_the_buffer_limit() {
+    let control = ClockControl::new();
+    let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock())
+        .with_options(HttpBodyOptions::new().buffer_limit(3))
+        .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(100)));
+
+    let oversized = builder.stream(stream::iter([Ok(BytesView::copied_from_slice(b"four", &builder))]));
+    let error = block_on(oversized.into_buffered()).unwrap_err();
+    assert_eq!(error.label(), "body_size_limit");
+    assert_eq!(error.message(), "body size exceeds the limit of 3 bytes");
+
+    let mut pending = builder.stream(stream::pending());
+    let waker = futures::task::noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    assert!(Pin::new(&mut pending).poll_frame(&mut cx).is_pending());
+    control.advance(Duration::from_millis(100));
+    let Poll::Ready(Some(Err(error))) = Pin::new(&mut pending).poll_frame(&mut cx) else {
+        panic!("the timeout-only override must apply its timeout");
     };
     assert_eq!(error.label(), "body_timeout");
 }

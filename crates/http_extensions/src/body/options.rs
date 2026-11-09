@@ -7,9 +7,8 @@ use thread_aware::ThreadAware;
 
 /// Options for body behavior.
 ///
-/// Pass this value to [`HttpBodyBuilder::body`][super::HttpBodyBuilder::body]
-/// or [`HttpBodyBuilder::stream`][super::HttpBodyBuilder::stream].
-/// The builder applies body policies such as an idle timeout.
+/// Pass this value to [`HttpBodyBuilder::with_options`][super::HttpBodyBuilder::with_options].
+/// Bodies created by that builder use the merged policies.
 ///
 /// Use [`Default::default()`] when no special behavior is needed.
 ///

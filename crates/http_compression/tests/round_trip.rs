@@ -18,7 +18,7 @@ use http::{HeaderValue, StatusCode};
 use http_compression::{Client, Compression, CompressionLayer, OriginalBody, Server, UnsupportedCompression};
 use http_extensions::{FakeHandler, HttpBodyBuilder, HttpBodyOptions, HttpRequest, HttpResponse, HttpResponseBuilder, Result};
 use layered::{Layer, Service};
-use ohno::Labeled as _;
+use ohno::{ErrorExt as _, Labeled as _};
 
 const URL: &str = "https://example.com/resource";
 
@@ -809,7 +809,7 @@ async fn buffered_decompression_preserves_the_body_buffer_limit() {
         } else {
             let error = result.unwrap_err();
             assert_eq!(error.label(), "body_size_limit");
-            assert!(error.to_string().contains(&format!("body size exceeds the limit of {limit} bytes")));
+            assert_eq!(error.message(), format!("body size exceeds the limit of {limit} bytes"));
         }
     }
 }
