@@ -159,7 +159,7 @@ async fn main() {
         .expect("the example builds valid responses");
         async move { Ok::<_, HttpError>(response) }
     });
-    let telemetry = Telemetry::server(sink, body_builder.clone()).excluded_paths([BasePath::from_static("/health/")]);
+    let telemetry = Telemetry::server(sink).excluded_paths([BasePath::from_static("/health/")]);
     let service = Arc::new((telemetry, handler).into_service());
 
     // hyper serves each connection, and takes HTTP/1.1 and HTTP/2 on the same port.

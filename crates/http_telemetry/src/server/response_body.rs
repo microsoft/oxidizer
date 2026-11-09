@@ -12,12 +12,12 @@ use http::header::TRANSFER_ENCODING;
 use http::{Method, StatusCode, Version};
 use http_body::{Body, Frame, SizeHint};
 use http_extensions::body::{Content, StreamingBody};
-use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse};
+use http_extensions::{HttpError, HttpResponse};
 use http_headers::headers::{ContentLength, ContentLengthOwned};
 
 use super::drop_guard::{RequestEnd, TelemetryDropGuard};
 
-pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpResponse, _body_builder: &HttpBodyBuilder) -> HttpResponse {
+pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpResponse) -> HttpResponse {
     let status_code = response.status();
     // A server sends no content for a body at its end, nor for these responses (RFC 9110, sections
     // 9.3.2, 9.3.6, 15.2, 15.3.5 and 15.4.5), and can drop their body without a poll. So their
@@ -53,8 +53,8 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
     response.map(|body| {
         body.map(|content| {
             let inner = match content {
-                Content::Bytes(bytes) => StreamingBody::new(BufferedBody(Some(bytes))),
-                Content::Streaming(inner) => inner,
+                Content::Bytes(bytes) => InnerBody::Buffered(Some(bytes)),
+                Content::Streaming(inner) => InnerBody::Streaming(inner),
             };
             Ok(Content::Streaming(StreamingBody::new(TelemetryBody {
                 inner,
@@ -68,27 +68,39 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
     })
 }
 
-struct BufferedBody(Option<BytesView>);
+enum InnerBody {
+    Buffered(Option<BytesView>),
+    Streaming(StreamingBody),
+}
 
-impl Body for BufferedBody {
+impl Body for InnerBody {
     type Data = BytesView;
     type Error = HttpError;
 
-    fn poll_frame(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        Poll::Ready(self.0.take().map(Frame::data).map(Ok))
+    fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        match self.get_mut() {
+            Self::Buffered(bytes) => Poll::Ready(bytes.take().map(Frame::data).map(Ok)),
+            Self::Streaming(body) => Pin::new(body).poll_frame(cx),
+        }
     }
 
     fn size_hint(&self) -> SizeHint {
-        SizeHint::with_exact(self.0.as_ref().map_or(0, |bytes| bytes.len() as u64))
+        match self {
+            Self::Buffered(bytes) => SizeHint::with_exact(bytes.as_ref().map_or(0, |bytes| bytes.len() as u64)),
+            Self::Streaming(body) => body.size_hint(),
+        }
     }
 
     fn is_end_stream(&self) -> bool {
-        self.0.as_ref().is_none_or(BytesView::is_empty)
+        match self {
+            Self::Buffered(bytes) => bytes.as_ref().is_none_or(BytesView::is_empty),
+            Self::Streaming(body) => body.is_end_stream(),
+        }
     }
 }
 
 struct TelemetryBody {
-    inner: StreamingBody,
+    inner: InnerBody,
     guard: TelemetryDropGuard,
     status_code: StatusCode,
     content_length: Option<u64>,

@@ -38,7 +38,7 @@ pub(crate) const DURATION: &str = "http.server.request.duration";
 /// A server layer over `sink` with a frozen clock. If a test does not set its own clock, each
 /// duration is `0`.
 pub(crate) fn server(sink: Sink) -> TelemetryLayer {
-    Telemetry::server(sink, HttpBodyBuilder::new_fake()).clock(SimpleClock::new_frozen())
+    Telemetry::server(sink).clock(SimpleClock::new_frozen())
 }
 
 /// The value that one field records in a metric, and the description of that metric.
