@@ -91,7 +91,7 @@ impl LocalWorker {
         });
     }
 
-    pub(crate) fn on_spawn() -> Option<Vec<Box<dyn arty_executor::TaskPoll>>> {
+    pub(crate) fn on_spawn() -> Option<arty_executor::TaskPollHooks> {
         Self::with_scheduler_mut(|current| current.and_then(|current| current.spawn_hooks()))
     }
 
@@ -219,7 +219,7 @@ impl SchedulerContext {
         handle
     }
 
-    fn spawn_hooks(&self) -> Option<Vec<Box<dyn arty_executor::TaskPoll>>> {
+    fn spawn_hooks(&self) -> Option<arty_executor::TaskPollHooks> {
         let mut event = OnSpawn::new(self.thread.clone());
         self.hooks.borrow_mut().execute_spawn(&mut event);
         matches!(self.results.shutdown().state(), ShutdownState::Running).then(|| event.into_handlers())

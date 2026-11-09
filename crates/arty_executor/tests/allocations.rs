@@ -9,11 +9,14 @@
 
 use std::alloc::System;
 use std::cell::Cell;
+use std::hint::black_box;
 use std::rc::Rc;
+use std::task::Poll;
 
 use alloc_tracker::{Allocator, Session};
 use arty_executor::{
-    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskSet, discard_task_panic_payload,
+    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskPoll, TaskPollHooks, TaskSet,
+    discard_task_panic_payload,
 };
 
 #[global_allocator]
@@ -89,4 +92,34 @@ fn spawn_and_complete_one_reuses_all_storage() {
     assert!(!executor.has_tasks());
     executor.shutdown().trigger(arty_executor::ShutdownCause::default());
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)));
+}
+
+#[derive(Debug)]
+struct OneBytePollHook(u8);
+
+impl TaskPoll for OneBytePollHook {
+    fn poll(&mut self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
+        black_box(self.0);
+        task()
+    }
+}
+
+#[test]
+fn one_poll_hook_uses_one_allocation() {
+    let session = Session::new().no_stdout().no_file();
+    let operation = session.operation("one_poll_hook");
+    {
+        let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
+        for value in 0..MEASURED_OPERATIONS {
+            let mut hooks = TaskPollHooks::default();
+            hooks.push(Box::new(OneBytePollHook(value as u8)));
+            black_box(TaskOptions::default().with_poll_hooks(hooks));
+        }
+    }
+
+    let (allocations, _) = allocation_totals(&session, "one_poll_hook");
+    assert_eq!(
+        allocations, MEASURED_OPERATIONS as u64,
+        "one poll hook must allocate only its boxed trait object"
+    );
 }

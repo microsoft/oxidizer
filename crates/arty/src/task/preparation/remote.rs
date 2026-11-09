@@ -51,7 +51,7 @@ impl<F> Drop for TaskFactory<F> {
 /// registration. The executor can then store the future inline in its task
 /// storage pool. Returning the future requires a `Pin<Box<dyn Future>>` and a
 /// heap allocation for every remote spawn.
-type ErasedRemoteFutureFactory = dyn Fn(Context, &TaskSet, Vec<Box<dyn arty_executor::TaskPoll>>) + Send;
+type ErasedRemoteFutureFactory = dyn Fn(Context, &TaskSet, arty_executor::TaskPollHooks) + Send;
 
 pub(crate) struct RemoteFutureFactory {
     inner: PoolBox<ErasedRemoteFutureFactory>,
@@ -66,7 +66,7 @@ impl RemoteFutureFactory {
         Self::new_with_poll_hooks(move |cx, tasks, _poll_hooks| factory(cx, tasks))
     }
 
-    fn new_with_poll_hooks(factory: impl FnOnce(Context, &TaskSet, Vec<Box<dyn arty_executor::TaskPoll>>) + Send + 'static) -> Self {
+    fn new_with_poll_hooks(factory: impl FnOnce(Context, &TaskSet, arty_executor::TaskPollHooks) + Send + 'static) -> Self {
         let factory = Cell::new(Some(factory));
         // A pooled box cannot move an erased FnOnce out of its slot. Take the concrete
         // closure through Cell instead, without requiring its captures to be Unpin.
@@ -79,7 +79,7 @@ impl RemoteFutureFactory {
                 let factory = factory.take().expect("the pooled allocation consumes the factory once");
                 PoolBox::unsize(
                     pool.alloc_box(factory),
-                    coerce!(dyn Fn(Context, &TaskSet, Vec<Box<dyn arty_executor::TaskPoll>>) + Send),
+                    coerce!(dyn Fn(Context, &TaskSet, arty_executor::TaskPollHooks) + Send),
                 )
             })
             .unwrap_or_else(|_| {
@@ -87,7 +87,7 @@ impl RemoteFutureFactory {
                 let factory = factory.take().expect("the fallback allocation consumes the factory once");
                 PoolBox::unsize(
                     pool.alloc_box(factory),
-                    coerce!(dyn Fn(Context, &TaskSet, Vec<Box<dyn arty_executor::TaskPoll>>) + Send),
+                    coerce!(dyn Fn(Context, &TaskSet, arty_executor::TaskPollHooks) + Send),
                 )
             });
         Self { inner }

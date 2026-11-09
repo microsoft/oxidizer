@@ -34,6 +34,54 @@ pub trait TaskPoll: 'static {
     fn poll(&mut self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()>;
 }
 
+/// Stores the handlers that wrap one task's polls.
+///
+/// The first handler uses only its boxed trait object allocation. Additional
+/// handlers use a separate growable collection.
+#[doc(hidden)]
+#[derive(Default, derive_more::Debug)]
+pub struct TaskPollHooks {
+    #[debug(ignore)]
+    first: Option<Box<dyn TaskPoll>>,
+    #[debug(ignore)]
+    additional: Vec<Box<dyn TaskPoll>>,
+}
+
+impl TaskPollHooks {
+    /// Creates an empty handler collection.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            first: None,
+            additional: Vec::new(),
+        }
+    }
+
+    /// Appends one poll handler.
+    pub fn push(&mut self, hook: Box<dyn TaskPoll>) {
+        if self.first.is_none() {
+            self.first = Some(hook);
+        } else {
+            self.additional.push(hook);
+        }
+    }
+
+    fn poll_task(&mut self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
+        fn poll_next(hooks: &mut [Box<dyn TaskPoll>], task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
+            let Some((hook, remaining)) = hooks.split_first_mut() else {
+                return task();
+            };
+            hook.poll(&mut || poll_next(remaining, task))
+        }
+
+        let Self { first, additional } = self;
+        match first {
+            Some(first) => first.poll(&mut || poll_next(additional, task)),
+            None => task(),
+        }
+    }
+}
+
 /// Lifecycle metadata for a task registered with [`TaskSet`](crate::TaskSet).
 ///
 /// The executor applies the captured observed context during polling, cleanup,
@@ -45,7 +93,7 @@ pub struct TaskOptions {
     context: Option<Transfer>,
     placement: TaskPlacement,
     #[debug(ignore)]
-    poll_hooks: RefCell<Vec<Box<dyn TaskPoll>>>,
+    poll_hooks: RefCell<TaskPollHooks>,
 }
 
 pub(crate) struct TaskCreatedReporter {
@@ -72,7 +120,7 @@ impl TaskOptions {
         Self {
             context: None,
             placement,
-            poll_hooks: RefCell::new(Vec::new()),
+            poll_hooks: RefCell::new(TaskPollHooks::new()),
         }
     }
 
@@ -82,7 +130,7 @@ impl TaskOptions {
         Self {
             context: Some(context),
             placement,
-            poll_hooks: RefCell::new(Vec::new()),
+            poll_hooks: RefCell::new(TaskPollHooks::default()),
         }
     }
 
@@ -91,20 +139,13 @@ impl TaskOptions {
     /// The first handler is the outermost handler. Each handler must call the
     /// next task exactly once and return its result.
     #[must_use]
-    pub fn with_poll_hooks(mut self, hooks: Vec<Box<dyn TaskPoll>>) -> Self {
+    pub fn with_poll_hooks(mut self, hooks: TaskPollHooks) -> Self {
         self.poll_hooks = RefCell::new(hooks);
         self
     }
 
     pub(crate) fn poll_task(&self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
-        fn poll_next(hooks: &mut [Box<dyn TaskPoll>], task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
-            let Some((hook, remaining)) = hooks.split_first_mut() else {
-                return task();
-            };
-            hook.poll(&mut || poll_next(remaining, task))
-        }
-
-        poll_next(&mut self.poll_hooks.borrow_mut(), task)
+        self.poll_hooks.borrow_mut().poll_task(task)
     }
 
     pub(crate) fn with_context<T>(&self, f: impl FnOnce() -> T) -> T {

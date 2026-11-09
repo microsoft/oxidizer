@@ -33,18 +33,18 @@ pub trait TaskPoll: ThreadAware + 'static {
 pub struct OnSpawn {
     pub(super) thread: Thread,
     #[debug(ignore)]
-    pub(super) handlers: Vec<Box<dyn arty_executor::TaskPoll>>,
+    pub(super) handlers: arty_executor::TaskPollHooks,
 }
 
 impl OnSpawn {
     pub(crate) fn new(thread: Thread) -> Self {
         Self {
             thread,
-            handlers: Vec::new(),
+            handlers: arty_executor::TaskPollHooks::default(),
         }
     }
 
-    pub(crate) fn into_handlers(self) -> Vec<Box<dyn arty_executor::TaskPoll>> {
+    pub(crate) fn into_handlers(self) -> arty_executor::TaskPollHooks {
         self.handlers
     }
 
@@ -57,7 +57,9 @@ impl OnSpawn {
     /// Adds a poll handler to the task.
     ///
     /// The first registered handler is the outermost handler. Arty relocates
-    /// `handler` to the selected worker before the task can run.
+    /// `handler` to the selected worker before the task can run. The first
+    /// handler allocates only its boxed trait object. It does not allocate a
+    /// separate collection buffer.
     pub fn register<H: TaskPoll>(&mut self, mut handler: H) {
         handler.relocate(Some(&self.thread), &self.thread);
         self.handlers.push(Box::new(TaskPollAdapter(handler)));
