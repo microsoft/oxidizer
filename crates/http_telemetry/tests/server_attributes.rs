@@ -96,6 +96,7 @@ fn host_header_preserves_address_spelling_and_checked_port() {
         ("example.com: 80", None, None),
         ("[::1", None, None),
         ("[not-an-ip]", None, None),
+        ("[v1]", None, None),
         ("[v.a]", None, None),
         ("[v1.]", None, None),
         ("[v1.%20]", None, None),
