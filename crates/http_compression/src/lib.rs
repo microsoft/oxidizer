@@ -21,7 +21,7 @@
 
 //! [`compressors`] transforms a stream of bytes. This crate applies that to
 //! HTTP messages: reading `Content-Encoding`, negotiating `Accept-Encoding`,
-//! and compressing buffered bodies directly or transforming streaming bodies as they are read.
+//! and compressing small buffered bodies directly or transforming larger and streaming bodies as they are read.
 //! Decompression always returns a streaming body, including for buffered input.
 //! The policies and trailer fields the body already carried travel through,
 //! except stale `Content-Digest` and `Repr-Digest` values removed after a
@@ -101,7 +101,7 @@
 //!
 //! # Errors
 //!
-//! Buffered compression sets `Content-Length` to the final byte count and removes `Transfer-Encoding`.
+//! Small buffered compression sets `Content-Length` to the final byte count and removes `Transfer-Encoding`.
 //! Decompression and streaming compression remove `Content-Length` because the final size is not known yet.
 //! Buffered compression errors fail the handler call. Other data errors fail the body read.
 //! Failures carry one of four labels:

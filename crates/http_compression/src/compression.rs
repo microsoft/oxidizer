@@ -38,6 +38,12 @@ const DEFAULT_MAX_DECOMPRESSED_BODY_LEN: u64 = 67_108_864;
 /// Maximum compressed streams decoded by each decompression stage unless the caller overrides it.
 const DEFAULT_MAX_DECOMPRESSED_STREAMS: u64 = 1024;
 
+/// Largest input compressed synchronously before the handler returns.
+///
+/// This matches the compressor's default 64 KiB output chunk. Larger input uses
+/// the bounded streaming adapter so one handler poll cannot drain an unbounded body.
+const MAX_DIRECT_COMPRESSION_INPUT_LEN: usize = 64 * 1024;
+
 const fn default_decompressor_limits() -> DecompressorLimits {
     DecompressorLimits::new()
         .max_output_len(
@@ -806,7 +812,7 @@ impl Server {
         Ok(HttpRequest::from_parts(parts, body))
     }
 
-    /// Compresses buffered data directly and wraps streaming data.
+    /// Compresses small buffered data directly and streams larger data.
     fn compress(&self, config: &Config, headers: &mut HeaderMap, body: HttpBody, format: Format) -> Result<HttpBody> {
         let Some(token) = format.content_encoding() else {
             return Ok(body);
@@ -828,11 +834,17 @@ impl Server {
                 Content::Streaming(inner) => Content::Streaming(StreamingBody::new(body::CompressionBody::new(
                     body::CompressionChain::new(inner).compress(compressor),
                 ))),
-                Content::Bytes(bytes) => {
+                Content::Bytes(bytes) if bytes.len() <= MAX_DIRECT_COMPRESSION_INPUT_LEN => {
                     let bytes = compressors::compress(bytes, compressor).map_err(body::to_http_error)?;
                     headers.remove(TRANSFER_ENCODING);
                     headers.insert(CONTENT_LENGTH, HeaderValue::from(bytes.len()));
                     Content::Bytes(bytes)
+                }
+                Content::Bytes(bytes) => {
+                    let inner = StreamingBody::new(http_body_util::Full::new(bytes));
+                    Content::Streaming(StreamingBody::new(body::CompressionBody::new(
+                        body::CompressionChain::new(inner).compress(compressor),
+                    )))
                 }
             })
         })

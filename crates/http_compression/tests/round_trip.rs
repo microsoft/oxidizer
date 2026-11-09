@@ -114,6 +114,23 @@ async fn buffered_compression_returns_a_buffered_body() {
 }
 
 #[tokio::test]
+async fn large_buffered_compression_uses_a_streaming_body() {
+    let expected = vec![b'x'; 64 * 1024 + 1];
+    let body = BytesView::copied_from_slice(&expected, &builder());
+    let handler = server().compress_responses(&[Format::Gzip]).layer(echo());
+    let mut input = request(body, None);
+    input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
+
+    let response = handler.execute(input).await.unwrap();
+
+    assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
+    assert!(response.headers().get(CONTENT_LENGTH).is_none());
+    assert!(response.body().try_clone().is_none());
+    let wire = response.into_body().into_bytes().await.unwrap();
+    assert_eq!(compressors::gzip::decompress(wire, Resources::global()).unwrap().to_vec(), expected);
+}
+
+#[tokio::test]
 async fn compression_adds_buffered_length_and_decompression_remains_streamed() {
     let expected = payload();
     for decompress in [false, true] {
@@ -128,7 +145,9 @@ async fn compression_adds_buffered_length_and_decompression_remains_streamed() {
                 .bytes(response_bytes.clone())
                 .build()?;
             response.headers_mut().remove(CONTENT_LENGTH);
-            response.headers_mut().insert(TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+            response
+                .headers_mut()
+                .insert(TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
             if decompress {
                 response.headers_mut().insert(CONTENT_ENCODING, HeaderValue::from_static("gzip"));
             }
@@ -137,9 +156,19 @@ async fn compression_adds_buffered_length_and_decompression_remains_streamed() {
         let mut input = request(BytesView::default(), None);
         input.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
         let response = if decompress {
-            client().decompress_responses(&[Format::Gzip]).layer(inner).execute(input).await.unwrap()
+            client()
+                .decompress_responses(&[Format::Gzip])
+                .layer(inner)
+                .execute(input)
+                .await
+                .unwrap()
         } else {
-            server().compress_responses(&[Format::Gzip]).layer(inner).execute(input).await.unwrap()
+            server()
+                .compress_responses(&[Format::Gzip])
+                .layer(inner)
+                .execute(input)
+                .await
+                .unwrap()
         };
 
         if decompress {
