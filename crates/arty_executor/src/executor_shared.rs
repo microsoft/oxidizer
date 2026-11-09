@@ -8,19 +8,18 @@ use std::mem;
 use std::ops::ControlFlow;
 #[cfg(feature = "inspection")]
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::pin::Pin;
 use std::rc::Rc;
 use std::task::Waker;
 use std::thread::ThreadId;
 
 use observed::Sink;
 use performables::sync::channel;
-use plurality::{Arc as PoolArc, MultiPool};
+use plurality::MultiPool;
 
 #[cfg(feature = "inspection")]
 use crate::discard_task_panic_payload;
 use crate::wake::RemoteWake;
-use crate::{PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskOptions, TypeErasedTask, WakeShared, WakeSignal, allocate_task};
+use crate::{PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskOptions, WakeShared, WakeSignal, allocate_task};
 
 /// Cloneable handle to state used by reentrant task submissions.
 #[derive(Clone, Debug)]
@@ -170,9 +169,7 @@ impl ExecutorShared {
     }
 
     #[inline]
-    fn register_task<T: TypeErasedTask + 'static>(&self, task: Pin<PoolArc<T>>) {
-        // Keep the concrete type at this boundary so task setup can use direct calls.
-        let task_handle = TaskHandle::new(task);
+    fn register_task(&self, task_handle: TaskHandle) {
         let wake_signal = WakeSignal::new(self.inner.wake.clone(), task_handle.as_ptr());
 
         // SAFETY: The new pinned task has one live owner and no aliases have been exposed.
