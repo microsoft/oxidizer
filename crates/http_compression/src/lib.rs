@@ -78,7 +78,8 @@
 //! ```
 //!
 //! A decompressed message stores [`OriginalBody`] in its extensions. This value
-//! records the original compression formats and `Content-Length`.
+//! records the original compression formats. It also records the first
+//! `Content-Length` field value if it can parse that value as a `u64`.
 //!
 //! # Formats
 //!

@@ -684,8 +684,8 @@ async fn a_no_content_response_is_never_given_a_body() {
 
         let response = handler.execute(input).await.unwrap();
 
-        // These statuses cannot contain a body. The middleware must ignore bytes
-        // from an invalid inner handler.
+        // These statuses cannot contain a body. The middleware must leave bytes
+        // from an invalid inner handler unchanged.
         assert!(response.headers().get(CONTENT_ENCODING).is_none(), "status {status}");
         assert_eq!(
             response.into_body().into_text().await.unwrap(),

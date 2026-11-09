@@ -7,8 +7,9 @@
 //! frames and trailers. The adapter stores trailers while it transforms data.
 //!
 //! [`CompressionChain`] represents all transformation stages as one concrete
-//! type. After the data ends, [`CompressionStream::into_inner`] returns the
-//! stored trailers. The chain does not share or erase types.
+//! type. After the data ends, [`CompressionStream::into_inner`] returns each
+//! source stream. The chain unwraps these streams until it reaches the adapter
+//! that stores the trailers. The chain does not share or erase types.
 //!
 //! The compression engine is a type parameter, so one chain supports both
 //! compression and decompression.

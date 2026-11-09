@@ -86,11 +86,11 @@ impl OriginalBody {
         &self.formats
     }
 
-    /// The original `Content-Length`, if the message contained one.
+    /// The first `Content-Length` field value, if it can be parsed as a `u64`.
     ///
     /// This measures the compressed body, not its decompressed size.
-    /// It is `None` for a chunked message. The decompressed length is unknown
-    /// until the complete body is read.
+    /// It is `None` if this value is absent, unreadable, or not a `u64`. The
+    /// decompressed length is unknown until the complete body is read.
     #[must_use]
     pub const fn content_length(&self) -> Option<u64> {
         self.content_length

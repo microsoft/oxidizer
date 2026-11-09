@@ -73,7 +73,8 @@ let server = Compression::server(body_builder)
 ```
 
 A decompressed message stores [`OriginalBody`][__link13] in its extensions. This value
-records the original compression formats and `Content-Length`.
+records the original compression formats. It also records the first
+`Content-Length` field value if it can parse that value as a `u64`.
 
 ## Formats
 
@@ -114,7 +115,7 @@ its headers unchanged.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbDo5gpCFtyFIbhEI9WnqGcdcbXb8GFPvf5Wsb6qYGF5ZhdKhhZIKCa2NvbXByZXNzb3JzZTAuNS4wgnBodHRwX2NvbXByZXNzaW9uZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbLVrZEWoTp_Eb6hKGbuVuzDYbsSJt8yCzNhcb0GlMc5b8nHdhZIKCa2NvbXByZXNzb3JzZTAuNS4wgnBodHRwX2NvbXByZXNzaW9uZTAuNS4w
  [__link0]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Compression
  [__link1]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Client
  [__link10]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::compressible_types
