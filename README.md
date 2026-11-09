@@ -49,6 +49,7 @@ These are the primary crates built out of this repo:
 - [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
 - [`http_headers`](./crates/http_headers/README.md) - Fast, ergonomic typed HTTP headers with borrowed views.
 - [`http_path_template`](./crates/http_path_template/README.md) - Parser for the google.api.http path-template grammar.
+- [`http_telemetry`](./crates/http_telemetry/README.md) - Automatic telemetry collection for incoming HTTP requests.
 - [`internity`](./crates/internity/README.md) - Blazingly fast string interning with compact handles, compact storage, and concurrent fill support.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`metabench`](./crates/metabench/README.md) - Run Criterion, Gungraun, Linux perf, Intel VTune, and allocation benchmarks together and combine their reports.
