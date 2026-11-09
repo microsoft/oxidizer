@@ -18,6 +18,7 @@
 mod body;
 mod builder;
 pub(crate) mod options;
+mod timeout_body;
 pub use body::{Content, HttpBody, StreamingBody};
 pub use builder::HttpBodyBuilder;
 pub use options::HttpBodyOptions;

@@ -43,8 +43,9 @@ impl HttpBodyOptions {
     /// The timeout limits how long the consumer will wait between frames while
     /// polling the body. The timer resets every time the body yields a frame, so
     /// only idle periods (no progress) count toward the timeout.
-    /// After [`HttpBody::map`][super::HttpBody::map], the timer starts on the
-    /// first poll. Only the mapped output frames reset it.
+    /// After [`HttpBody::map`][super::HttpBody::map], source frames reset the
+    /// timer for a streaming source. Buffered bodies do not activate a timeout,
+    /// including when mapping converts them to streaming content.
     #[must_use]
     pub const fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);

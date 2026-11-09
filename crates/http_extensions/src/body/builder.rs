@@ -11,6 +11,7 @@ use thread_aware::ThreadAware;
 use tick::Clock;
 
 use super::options::HttpBodyOptions;
+use super::timeout_body::TimeoutBody;
 use super::{HttpBody, StreamingBody};
 #[cfg(any(feature = "json", test))]
 use crate::json::JsonError;
@@ -146,7 +147,11 @@ impl HttpBodyBuilder {
     where
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        HttpBody::from_streaming(StreamingBody::new(body), self.options, self.clock.clone(), None)
+        let body = match self.options.timeout {
+            Some(timeout) => StreamingBody::new(TimeoutBody::new(body, timeout, &self.clock)),
+            None => StreamingBody::new(body),
+        };
+        HttpBody::from_streaming(body, self.options)
     }
 
     /// Creates a body from a stream of byte chunks.
@@ -266,7 +271,7 @@ impl HttpBodyBuilder {
     /// # }
     /// ```
     pub fn bytes(&self, b: impl Into<BytesView>) -> HttpBody {
-        HttpBody::from_bytes(b.into(), self.options, self.clock.clone())
+        HttpBody::from_bytes(b.into(), self.options)
     }
 
     /// Creates an empty body (zero bytes).
@@ -274,7 +279,7 @@ impl HttpBodyBuilder {
     /// Use this for HTTP methods that do not need a body, such as GET and HEAD.
     /// You can also use it for responses that contain only status codes or headers.
     pub fn empty(&self) -> HttpBody {
-        HttpBody::from_empty(self.options, self.clock.clone())
+        HttpBody::from_empty(self.options)
     }
 
     #[cfg(any(feature = "json", test))]

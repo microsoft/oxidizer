@@ -13,16 +13,19 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::task::Poll;
 use std::time::Duration;
 
+use bytesbuf::mem::GlobalPool;
 use common::{
     ABANDONED, COMPLETE, Capture, Captured, DURATION, ERROR, Echoing, Step, data, duration, poll_frame, scripted, server, sized_scripted,
 };
 use future_assert::FutureTestExt;
+use futures::stream;
 use http::header::{CONTENT_LENGTH, HeaderName, HeaderValue, TRANSFER_ENCODING};
 use http::{Method, StatusCode, Version};
 use http_body::Body;
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest};
 use layered::{Layer, Service};
 use observed::{Severity, Value};
+use ohno::Labeled;
 use tick::ClockControl;
 
 /// Sends `request` through a server layer to [`Echoing`] with `status`. Returns the response body
@@ -257,6 +260,28 @@ fn body_error_reports_error_event_with_status() {
                 enrichments: vec![],
             }
         )
+    );
+}
+
+#[test]
+fn body_timeout_reports_error_instead_of_abandonment() {
+    let timeout = Duration::from_millis(100);
+    let clock = ClockControl::new();
+    let body = HttpBodyBuilder::new(GlobalPool::new(), &clock.to_clock())
+        .with_options(http_extensions::HttpBodyOptions::new().timeout(timeout))
+        .stream(stream::pending());
+    let (mut body, capture) = respond(StatusCode::OK, get(body));
+
+    assert!(poll_frame(&mut body).is_pending());
+    clock.advance(timeout);
+    let Poll::Ready(Some(Err(error))) = poll_frame(&mut body) else {
+        panic!("the body must return its timeout error");
+    };
+    let event = capture.single();
+
+    assert_eq!(
+        (error.label().as_str(), event.name, event.log("error.type").cloned()),
+        ("body_timeout", ERROR, Some(Value::from("body_timeout")))
     );
 }
 

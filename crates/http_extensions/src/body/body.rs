@@ -14,7 +14,6 @@ use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
 use pin_project::pin_project;
 use thread_aware::ThreadAware;
-use tick::{Clock, Delay};
 
 use super::options::HttpBodyOptions;
 use crate::constants::DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES;
@@ -37,7 +36,8 @@ pub enum Content {
 
 /// Streaming content used by [`HttpBody::map`].
 ///
-/// The transformation preserves the body's policies around this content.
+/// A streaming value supplied to the mapper already applies the source body's policies.
+/// A wrapper must poll this value to retain those policies.
 #[derive(ThreadAware, derive_more::Debug)]
 #[must_use]
 pub struct StreamingBody {
@@ -135,7 +135,7 @@ impl Body for StreamingBody {
 ///
 /// An idle timeout limits the wait for the next frame while the body is polled.
 /// Set it with [`HttpBodyOptions::timeout`].
-/// [`HttpBody::map`] keeps the timeout and applies it to the mapped output frames.
+/// [`HttpBody::map`] keeps the timeout on the source frames supplied to the mapper.
 ///
 /// The following example writes a downloaded file to disk:
 ///
@@ -188,46 +188,42 @@ pub struct HttpBody {
     #[thread_aware(skip)]
     pub(super) kind: Kind,
     pub(super) options: HttpBodyOptions,
-    pub(super) clock: Clock,
 }
 
 // HttpBody implementations.
 
 impl HttpBody {
-    pub(crate) fn from_empty(options: HttpBodyOptions, clock: Clock) -> Self {
+    pub(crate) fn from_empty(options: HttpBodyOptions) -> Self {
         Self {
             kind: Kind::Empty,
             options,
-            clock,
         }
     }
 
     /// Creates a body backed by an in-memory byte sequence.
-    pub(crate) fn from_bytes(bytes: BytesView, options: HttpBodyOptions, clock: Clock) -> Self {
+    pub(crate) fn from_bytes(bytes: BytesView, options: HttpBodyOptions) -> Self {
         Self {
             kind: Kind::Bytes(Some(bytes)),
             options,
-            clock,
         }
     }
 
     /// Creates a streaming body backed by a boxed [`Body`] implementation.
-    pub(super) fn from_streaming(body: StreamingBody, options: HttpBodyOptions, clock: Clock, current_delay: Option<Delay>) -> Self {
+    pub(super) fn from_streaming(body: StreamingBody, options: HttpBodyOptions) -> Self {
         Self {
-            kind: Kind::Body(body, current_delay),
+            kind: Kind::Body(body),
             options,
-            clock,
         }
     }
 
     /// Maps body content while preserving its policies.
     ///
     /// Match both [`Content`] variants to handle buffered bytes and streaming frames.
-    /// Call this method before polling the body.
     ///
-    /// The mapped body keeps the configured timeout, buffer limit, and clock.
-    /// It does not keep an idle timeout that already started.
-    /// The timeout starts when the mapped body is first polled.
+    /// The mapped body keeps the configured timeout and buffer limit.
+    /// A streaming source keeps its active timeout state inside the [`StreamingBody`]
+    /// supplied to `map_content`. Source frames reset that timeout.
+    /// A buffered source does not activate a timeout if it becomes streaming content.
     ///
     /// # Errors
     ///
@@ -269,9 +265,8 @@ impl HttpBody {
     /// ```
     pub fn map(self, map_content: impl FnOnce(Content) -> Result<Content>) -> Result<Self> {
         let options = self.options;
-        let clock = self.clock;
         let content = match self.kind {
-            Kind::Body(inner, _) => Content::Streaming(inner),
+            Kind::Body(inner) => Content::Streaming(inner),
             Kind::Bytes(Some(bytes)) => Content::Bytes(bytes),
             Kind::Empty => Content::Bytes(BytesView::default()),
             Kind::Bytes(None) => {
@@ -283,8 +278,8 @@ impl HttpBody {
         };
 
         match map_content(content)? {
-            Content::Streaming(inner) => Ok(Self::from_streaming(inner, options, clock, None)),
-            Content::Bytes(bytes) => Ok(Self::from_bytes(bytes, options, clock)),
+            Content::Streaming(inner) => Ok(Self::from_streaming(inner, options)),
+            Content::Bytes(bytes) => Ok(Self::from_bytes(bytes, options)),
         }
     }
 
@@ -417,13 +412,9 @@ impl HttpBody {
                 "body cannot be buffered because it is already consumed",
                 LABEL_BODY_CONSUMED,
             )))),
-            Kind::Body(..) => {
-                let clock = self.clock.clone();
-                Either::Right(
-                    collect_with_limit(self.into_data_stream(), options.buffer_limit)
-                        .map_ok(move |bytes| Self::from_bytes(bytes, options, clock)),
-                )
-            }
+            Kind::Body(..) => Either::Right(
+                collect_with_limit(self.into_data_stream(), options.buffer_limit).map_ok(move |bytes| Self::from_bytes(bytes, options)),
+            ),
         }
     }
 
@@ -560,7 +551,7 @@ impl HttpBody {
         match &self.kind {
             Kind::Bytes(Some(bytes)) => Some(bytes.len() as u64),
             Kind::Bytes(None) | Kind::Empty => Some(0),
-            Kind::Body(b, ..) => b.size_hint().exact(),
+            Kind::Body(b) => b.size_hint().exact(),
         }
     }
 
@@ -600,8 +591,8 @@ impl HttpBody {
     #[must_use]
     pub fn try_clone(&self) -> Option<Self> {
         match &self.kind {
-            Kind::Bytes(Some(bytes)) => Some(Self::from_bytes(bytes.clone(), self.options, self.clock.clone())),
-            Kind::Empty => Some(Self::from_empty(self.options, self.clock.clone())),
+            Kind::Bytes(Some(bytes)) => Some(Self::from_bytes(bytes.clone(), self.options)),
+            Kind::Empty => Some(Self::from_empty(self.options)),
             Kind::Body(..) | Kind::Bytes(None) => None,
         }
     }
@@ -669,27 +660,7 @@ impl Body for HttpBody {
                 .take()
                 .map_or_else(|| Ready(None), |bytes| Ready((!bytes.is_empty()).then(|| Ok(Frame::data(bytes))))),
             BodyInnerProj::Empty => Ready(None),
-            BodyInnerProj::Body(body, current_delay) => {
-                let result = Pin::new(body).poll_frame(cx);
-                if result.is_ready() {
-                    *current_delay = None;
-                    return result;
-                }
-
-                let Some(duration) = this.options.timeout else {
-                    return Poll::Pending;
-                };
-                let clock = this.clock;
-                let delay = current_delay.get_or_insert_with(|| Delay::new(clock, duration));
-
-                if Pin::new(delay).poll(cx).is_ready() {
-                    let error = HttpError::timeout_for_body(duration);
-                    this.kind.set(Kind::Empty);
-                    return Ready(Some(Err(error)));
-                }
-
-                Poll::Pending
-            }
+            BodyInnerProj::Body(body) => Pin::new(body).poll_frame(cx),
         }
     }
 
@@ -697,7 +668,7 @@ impl Body for HttpBody {
         match &self.kind {
             Kind::Bytes(Some(bytes)) => SizeHint::with_exact(bytes.len() as u64),
             Kind::Bytes(None) | Kind::Empty => SizeHint::with_exact(0),
-            Kind::Body(b, ..) => b.size_hint(),
+            Kind::Body(b) => b.size_hint(),
         }
     }
 
@@ -705,7 +676,7 @@ impl Body for HttpBody {
         match &self.kind {
             Kind::Bytes(Some(x)) => x.is_empty(),
             Kind::Bytes(None) | Kind::Empty => true,
-            Kind::Body(b, ..) => b.is_end_stream(),
+            Kind::Body(b) => b.is_end_stream(),
         }
     }
 }
@@ -718,7 +689,7 @@ pub(super) enum Kind {
     #[debug("Empty")]
     Empty,
     #[debug("Body")]
-    Body(StreamingBody, Option<Delay>),
+    Body(StreamingBody),
 }
 
 fn collect_with_limit(

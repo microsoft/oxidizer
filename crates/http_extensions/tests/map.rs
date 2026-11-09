@@ -99,7 +99,7 @@ fn preserves_the_buffer_limit_for_streaming_output() {
 }
 
 #[test]
-fn starts_a_new_timeout_and_preserves_the_clock() {
+fn preserves_the_active_timeout_and_clock() {
     let control = ClockControl::new();
     let timeout = Duration::from_millis(100);
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
@@ -122,11 +122,9 @@ fn starts_a_new_timeout_and_preserves_the_clock() {
         .unwrap();
     assert!(Pin::new(&mut transformed).poll_frame(&mut cx).is_pending());
     control.advance(Duration::from_millis(25));
-    assert!(Pin::new(&mut transformed).poll_frame(&mut cx).is_pending());
-    control.advance(Duration::from_millis(75));
 
     let Poll::Ready(Some(Err(error))) = Pin::new(&mut transformed).poll_frame(&mut cx) else {
-        panic!("the mapped body must start a new timeout");
+        panic!("the mapped body must keep the active source timeout");
     };
     assert_eq!(error.label(), "body_timeout");
 }
