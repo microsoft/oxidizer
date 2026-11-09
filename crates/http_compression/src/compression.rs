@@ -11,7 +11,7 @@ use futures::FutureExt as _;
 use futures::future::{Either, ready};
 use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, RANGE, TRANSFER_ENCODING, VARY};
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
-use http_extensions::transform::{Content, StreamingBody};
+use http_extensions::body::{Content, StreamingBody};
 use http_extensions::{HttpBody, HttpRequest, HttpResponse, RequestHandler, Result};
 use layered::{Layer, Service};
 use mime::Mime;
@@ -823,13 +823,11 @@ impl Server {
         headers.remove(REPR_DIGEST_HEADER);
         weaken_etag(headers);
 
-        body.transform(|content| {
+        body.map(|content| {
             Ok(match content {
-                Content::Streaming(inner) => {
-                    Content::Streaming(StreamingBody::new(body::CompressionBody::new(
-                        body::CompressionChain::new(inner).compress(compressor),
-                    )))
-                }
+                Content::Streaming(inner) => Content::Streaming(StreamingBody::new(body::CompressionBody::new(
+                    body::CompressionChain::new(inner).compress(compressor),
+                ))),
                 Content::Bytes(bytes) => {
                     let bytes = compressors::compress(bytes, compressor).map_err(body::to_http_error)?;
                     headers.remove(TRANSFER_ENCODING);
@@ -921,7 +919,7 @@ impl Config {
             })
             .collect::<Result<SmallVec<[_; 2]>>>()?;
 
-        let decompressed = body.transform(|content| {
+        let decompressed = body.map(|content| {
             let inner = match content {
                 Content::Streaming(inner) => inner,
                 Content::Bytes(bytes) => StreamingBody::new(http_body_util::Full::new(bytes)),
@@ -1003,7 +1001,11 @@ mod tests {
     fn raw_deflate_has_no_http_content_encoding() {
         let layer = Compression::server();
         let mut headers = HeaderMap::new();
-        let body = http_extensions::HttpResponseBuilder::new_fake().text("unchanged").build().unwrap().into_body();
+        let body = http_extensions::HttpResponseBuilder::new_fake()
+            .text("unchanged")
+            .build()
+            .unwrap()
+            .into_body();
 
         let body = layer.role.compress(&layer.config, &mut headers, body, Format::Deflate).unwrap();
 

@@ -18,7 +18,7 @@ use futures::executor::block_on;
 use futures::{FutureExt, Stream, stream};
 use http_body::{Body, Frame};
 use http_body_util::{BodyExt, Full, StreamBody};
-use http_extensions::transform::{Content, StreamingBody};
+use http_extensions::body::{Content, StreamingBody};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError};
 use ohno::Labeled;
 use tick::ClockControl;
@@ -55,14 +55,18 @@ fn transform_buffered_and_empty_bodies() {
         (builder.slice(b"bytes"), b"bytes"),
     ] {
         let calls = Cell::new(0);
-        let transformed = body.transform(|content| Ok(match content {
-            Content::Bytes(bytes) => {
-                calls.set(calls.get() + 1);
-                assert_eq!(bytes, expected);
-                Content::Bytes(BytesView::from_views([bytes, BytesView::copied_from_slice(b"!", &builder)]))
-            }
-            Content::Streaming(_) => panic!("buffered fixtures must use the bytes path"),
-        })).unwrap();
+        let transformed = body
+            .map(|content| {
+                Ok(match content {
+                    Content::Bytes(bytes) => {
+                        calls.set(calls.get() + 1);
+                        assert_eq!(bytes, expected);
+                        Content::Bytes(BytesView::from_views([bytes, BytesView::copied_from_slice(b"!", &builder)]))
+                    }
+                    Content::Streaming(_) => panic!("buffered fixtures must use the bytes path"),
+                })
+            })
+            .unwrap();
 
         assert_eq!(calls.get(), 1);
         assert!(transformed.try_clone().is_some());
@@ -81,10 +85,12 @@ fn transform_rejects_a_consumed_buffered_body() {
     let called = Cell::new(false);
     assert!(body.is_end_stream());
     assert!(body.frame().now_or_never().unwrap().is_none());
-    let error = body.transform(|content| {
-        called.set(true);
-        Ok(content)
-    }).unwrap_err();
+    let error = body
+        .map(|content| {
+            called.set(true);
+            Ok(content)
+        })
+        .unwrap_err();
 
     assert!(!called.get());
     assert!(error.to_string().contains("already consumed"));
@@ -93,13 +99,17 @@ fn transform_rejects_a_consumed_buffered_body() {
 #[test]
 fn transform_propagates_callback_errors() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen());
-    for body in [builder.empty(), builder.text("source"), builder.body(PendingBody, &HttpBodyOptions::new())] {
-        let expected: HttpError = std::io::Error::other("transform failed").into();
+    for body in [
+        builder.empty(),
+        builder.text("source"),
+        builder.body(PendingBody, &HttpBodyOptions::new()),
+    ] {
+        let expected: HttpError = std::io::Error::other("map failed").into();
         let expected_label = expected.label().to_string();
-        let error = body.transform(|_| Err(expected)).unwrap_err();
+        let error = body.map(|_| Err(expected)).unwrap_err();
 
         assert_eq!(error.label().to_string(), expected_label);
-        assert!(error.to_string().contains("transform failed"));
+        assert!(error.to_string().contains("map failed"));
     }
 }
 
@@ -109,13 +119,17 @@ fn transform_accepts_an_empty_streaming_body() {
     let body = builder.body(http_body_util::Empty::new(), &HttpBodyOptions::new());
     assert!(body.is_end_stream());
     let called = Cell::new(false);
-    let transformed = body.transform(|content| Ok(match content {
-        Content::Streaming(inner) => {
-            called.set(true);
-            Content::Streaming(inner)
-        }
-        Content::Bytes(_) => panic!("a streaming fixture must stay on the streaming path"),
-    })).unwrap();
+    let transformed = body
+        .map(|content| {
+            Ok(match content {
+                Content::Streaming(inner) => {
+                    called.set(true);
+                    Content::Streaming(inner)
+                }
+                Content::Bytes(_) => panic!("a streaming fixture must stay on the streaming path"),
+            })
+        })
+        .unwrap();
 
     assert!(called.get());
     assert!(block_on(transformed.into_bytes()).unwrap().is_empty());
@@ -132,7 +146,7 @@ fn body_transform_keeps_the_running_timer() {
 
     assert!(Pin::new(&mut source).poll_frame(&mut cx).is_pending());
     control.advance(Duration::from_millis(75));
-    let mut body = source.transform(Ok).unwrap();
+    let mut body = source.map(Ok).unwrap();
     assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
     control.advance(Duration::from_millis(25));
 
@@ -151,7 +165,7 @@ fn body_transform_times_out_after_the_source_finishes() {
         Full::new(BytesView::copied_from_slice(b"source", &builder)),
         &HttpBodyOptions::new().timeout(timeout),
     );
-    let mut body = transform_stream(source, |body| {
+    let mut body = map_stream(source, |body| {
         StreamBody::new(stream::once(async move {
             let _collected = body.collect().await?;
             futures::future::pending::<Result<Frame<BytesView>, HttpError>>().await
@@ -176,13 +190,13 @@ fn body_transform_preserves_the_buffer_limit() {
     let options = HttpBodyOptions::new().buffer_limit(3);
     let body = builder
         .body(Full::new(BytesView::copied_from_slice(b"abc", &builder)), &options)
-        .transform(Ok)
+        .map(Ok)
         .unwrap();
     assert_eq!(block_on(body.into_bytes()).unwrap(), b"abc");
 
     let body = builder
         .body(Full::new(BytesView::copied_from_slice(b"abcd", &builder)), &options)
-        .transform(Ok)
+        .map(Ok)
         .unwrap();
     let error = block_on(body.into_bytes()).unwrap_err();
     assert!(error.to_string().contains("body size exceeds the limit of 3 bytes"));
@@ -194,10 +208,10 @@ fn transform_does_not_apply_builder_defaults() {
     let timeout = Duration::from_millis(100);
     let builder =
         HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock()).with_options(HttpBodyOptions::new().timeout(timeout).buffer_limit(1));
-    let body = builder.text("source").transform(Ok).unwrap();
+    let body = builder.text("source").map(Ok).unwrap();
     assert_eq!(block_on(body.into_text()).unwrap(), "source");
 
-    let mut body = builder.text("source").transform(Ok).unwrap();
+    let mut body = builder.text("source").map(Ok).unwrap();
     let waker = futures::task::noop_waker();
     let mut cx = Context::from_waker(&waker);
     control.advance(Duration::from_secs(2));
@@ -212,21 +226,23 @@ fn transform_does_not_apply_builder_defaults() {
 fn policies_survive_buffering_cloning_and_buffered_transformations() {
     let control = ClockControl::new();
     let timeout = Duration::from_millis(100);
-    let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock())
-        .with_options(HttpBodyOptions::new().timeout(timeout).buffer_limit(3));
+    let builder =
+        HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock()).with_options(HttpBodyOptions::new().timeout(timeout).buffer_limit(3));
     let source = builder.stream(
         stream::iter([Ok(BytesView::copied_from_slice(b"abc", &builder))]),
         &HttpBodyOptions::new(),
     );
     let buffered = block_on(source.into_buffered()).unwrap();
-    let buffered = buffered.transform(Ok).unwrap();
+    let buffered = buffered.map(Ok).unwrap();
     let clone = buffered.try_clone().unwrap();
-    let mut stalled = clone.transform(|content| {
-        Ok(match content {
-            Content::Bytes(_) => Content::Streaming(StreamingBody::new(PendingBody)),
-            Content::Streaming(inner) => Content::Streaming(inner),
+    let mut stalled = clone
+        .map(|content| {
+            Ok(match content {
+                Content::Bytes(_) => Content::Streaming(StreamingBody::new(PendingBody)),
+                Content::Streaming(inner) => Content::Streaming(inner),
+            })
         })
-    }).unwrap();
+        .unwrap();
     let waker = futures::task::noop_waker();
     let mut cx = Context::from_waker(&waker);
 
@@ -237,14 +253,14 @@ fn policies_survive_buffering_cloning_and_buffered_transformations() {
     };
     assert_eq!(error.label(), "body_timeout");
 
-    let expanded = buffered.transform(|content| {
-        Ok(match content {
-            Content::Bytes(_) => Content::Streaming(StreamingBody::new(Full::new(
-                BytesView::copied_from_slice(b"abcd", &builder),
-            ))),
-            Content::Streaming(inner) => Content::Streaming(inner),
+    let expanded = buffered
+        .map(|content| {
+            Ok(match content {
+                Content::Bytes(_) => Content::Streaming(StreamingBody::new(Full::new(BytesView::copied_from_slice(b"abcd", &builder)))),
+                Content::Streaming(inner) => Content::Streaming(inner),
+            })
         })
-    }).unwrap();
+        .unwrap();
     let error = block_on(expanded.into_buffered()).unwrap_err();
     assert!(error.to_string().contains("body size exceeds the limit of 3 bytes"));
 }
@@ -253,15 +269,17 @@ fn policies_survive_buffering_cloning_and_buffered_transformations() {
 fn buffered_builder_policies_apply_after_conversion_to_streaming() {
     let control = ClockControl::new();
     let timeout = Duration::from_millis(100);
-    let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock())
-        .with_options(HttpBodyOptions::new().timeout(timeout).buffer_limit(3));
+    let builder =
+        HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock()).with_options(HttpBodyOptions::new().timeout(timeout).buffer_limit(3));
     let source = builder.text("abc");
-    let mut stalled = source.transform(|content| {
-        Ok(match content {
-            Content::Bytes(_) => Content::Streaming(StreamingBody::new(PendingBody)),
-            Content::Streaming(inner) => Content::Streaming(inner),
+    let mut stalled = source
+        .map(|content| {
+            Ok(match content {
+                Content::Bytes(_) => Content::Streaming(StreamingBody::new(PendingBody)),
+                Content::Streaming(inner) => Content::Streaming(inner),
+            })
         })
-    }).unwrap();
+        .unwrap();
     let waker = futures::task::noop_waker();
     let mut cx = Context::from_waker(&waker);
 
@@ -276,10 +294,15 @@ fn buffered_builder_policies_apply_after_conversion_to_streaming() {
 #[test]
 fn transform_can_turn_buffered_bytes_into_streaming_content() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen());
-    let body = builder.text("source").transform(|content| Ok(match content {
-        Content::Bytes(bytes) => Content::Streaming(StreamingBody::new(Full::new(bytes))),
-        Content::Streaming(inner) => Content::Streaming(inner),
-    })).unwrap();
+    let body = builder
+        .text("source")
+        .map(|content| {
+            Ok(match content {
+                Content::Bytes(bytes) => Content::Streaming(StreamingBody::new(Full::new(bytes))),
+                Content::Streaming(inner) => Content::Streaming(inner),
+            })
+        })
+        .unwrap();
 
     assert!(body.try_clone().is_none());
     assert_eq!(body.content_length(), Some(6));
@@ -299,10 +322,14 @@ fn transform_can_complete_streaming_content_and_release_its_source() {
     let mut cx = Context::from_waker(&waker);
     assert!(Pin::new(&mut source).poll_frame(&mut cx).is_pending());
 
-    let body = source.transform(|content| Ok(match content {
-        Content::Streaming(_) => Content::Bytes(BytesView::copied_from_slice(b"result", &builder)),
-        Content::Bytes(bytes) => Content::Bytes(bytes),
-    })).unwrap();
+    let body = source
+        .map(|content| {
+            Ok(match content {
+                Content::Streaming(_) => Content::Bytes(BytesView::copied_from_slice(b"result", &builder)),
+                Content::Bytes(bytes) => Content::Bytes(bytes),
+            })
+        })
+        .unwrap();
 
     assert!(dropped.load(Ordering::Relaxed));
     assert!(body.try_clone().is_some());
@@ -489,7 +516,7 @@ fn transformed_body_times_out_after_the_source_finishes() {
         Full::new(BytesView::copied_from_slice(b"source", &builder)),
         &HttpBodyOptions::new().timeout(timeout),
     );
-    let mut body = transform_stream(source, |body| {
+    let mut body = map_stream(source, |body| {
         StreamBody::new(stream::once(async move {
             let _collected = body.collect().await?;
             futures::future::pending::<Result<Frame<BytesView>, HttpError>>().await
@@ -515,7 +542,7 @@ fn buffering_a_transformed_body_enforces_its_timeout() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let timeout = Duration::from_millis(100);
     let source = builder.stream(stream::pending(), &HttpBodyOptions::new().timeout(timeout));
-    let body = transform_stream(
+    let body = map_stream(
         source,
         |_| StreamBody::new(stream::pending::<Result<Frame<BytesView>, HttpError>>()),
     );
@@ -544,8 +571,8 @@ fn transforming_keeps_the_running_timer_and_source_clock() {
 
     assert!(Pin::new(&mut source).poll_frame(&mut cx).is_pending());
     source_control.advance(Duration::from_millis(75));
-    let mut body = source.transform(Ok).unwrap();
-    body = body.transform(Ok).unwrap();
+    let mut body = source.map(Ok).unwrap();
+    body = body.map(Ok).unwrap();
 
     assert!(Pin::new(&mut body).poll_frame(&mut cx).is_pending());
     wrapper_control.advance(Duration::from_secs(2));
@@ -565,7 +592,7 @@ fn transformed_output_resets_the_timer_without_a_source_timeout() {
     let timeout = Duration::from_millis(100);
     let source = builder.stream(stream::pending(), &HttpBodyOptions::new().timeout(timeout));
     let (sender, mut receiver) = mpsc::unbounded();
-    let mut body = transform_stream(source, |mut source| {
+    let mut body = map_stream(source, |mut source| {
         StreamBody::new(stream::poll_fn(move |cx| {
             let output = Pin::new(&mut receiver).poll_next(cx);
             if output.is_ready() {
@@ -591,14 +618,17 @@ fn transformed_output_resets_the_timer_without_a_source_timeout() {
 }
 
 #[expect(clippy::panic, reason = "this integration-test helper requires a streaming fixture")]
-fn transform_stream<B>(body: HttpBody, transform_content: impl FnOnce(StreamingBody) -> B) -> HttpBody
+fn map_stream<B>(body: HttpBody, map_content: impl FnOnce(StreamingBody) -> B) -> HttpBody
 where
     B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
 {
-    body.transform(|content| Ok(match content {
-        Content::Streaming(inner) => Content::Streaming(StreamingBody::new(transform_content(inner))),
-        Content::Bytes(_) => panic!("the fixture must be a streaming body"),
-    })).unwrap()
+    body.map(|content| {
+        Ok(match content {
+            Content::Streaming(inner) => Content::Streaming(StreamingBody::new(map_content(inner))),
+            Content::Bytes(_) => panic!("the fixture must be a streaming body"),
+        })
+    })
+    .unwrap()
 }
 
 struct PinnedBody {

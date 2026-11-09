@@ -25,7 +25,7 @@ use compressors::core::{Compress, Compression, Decompress};
 use futures::Stream;
 use http::HeaderMap;
 use http_body::{Body, Frame, SizeHint};
-use http_extensions::transform::StreamingBody;
+use http_extensions::body::StreamingBody;
 use http_extensions::{HttpError, Result};
 use seatbelt::{Recovery as _, RecoveryInfo};
 

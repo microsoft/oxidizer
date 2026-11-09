@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Transforms existing [`HttpBody`] content while preserving its policies.
+//! Maps existing [`HttpBody`] content while preserving its policies.
 //!
-//! See [`HttpBody::transform`] for more information.
+//! See [`HttpBody::map`] for more information.
 //!
 //! If you want to create a new body, use [`HttpBodyBuilder`][crate::HttpBodyBuilder].
 
@@ -19,7 +19,7 @@ use super::{HttpBody, Kind};
 use crate::error_labels::LABEL_BODY_CONSUMED;
 use crate::{HttpError, Result};
 
-pub(crate) fn transform_body(body: HttpBody, transform_content: impl FnOnce(Content) -> Result<Content>) -> Result<HttpBody> {
+pub(crate) fn map_body(body: HttpBody, map_content: impl FnOnce(Content) -> Result<Content>) -> Result<HttpBody> {
     let options = body.options();
     let clock = body.clock;
     let (content, current_delay) = match body.kind {
@@ -34,15 +34,15 @@ pub(crate) fn transform_body(body: HttpBody, transform_content: impl FnOnce(Cont
         }
     };
 
-    match transform_content(content)? {
+    match map_content(content)? {
         Content::Streaming(inner) => Ok(HttpBody::from_streaming(inner, options, clock, current_delay)),
         Content::Bytes(bytes) => Ok(HttpBody::from_bytes(bytes, options, clock)),
     }
 }
 
-/// Raw content passed to and returned from [`HttpBody::transform`].
+/// Raw content passed to and returned from [`HttpBody::map`].
 ///
-/// Match both variants to transform buffered bytes and streaming frames.
+/// Match both variants to map buffered bytes and streaming frames.
 #[must_use]
 #[expect(clippy::large_enum_variant, reason = "keeps buffered bytes inline without an extra allocation")]
 #[derive(derive_more::Debug)]
@@ -54,7 +54,7 @@ pub enum Content {
     Streaming(StreamingBody),
 }
 
-/// Streaming content used by [`HttpBody::transform`].
+/// Streaming content used by [`HttpBody::map`].
 ///
 /// The transformation preserves the body's policies around this content.
 #[derive(ThreadAware, derive_more::Debug)]

@@ -35,11 +35,11 @@ use crate::error_labels::{LABEL_BODY_CONSUMED, LABEL_BODY_NOT_BUFFERED, LABEL_BO
 use crate::{HttpError, Result};
 
 mod builder;
+mod map;
 pub(crate) mod options;
-pub mod transform;
 pub use builder::HttpBodyBuilder;
+pub use map::{Content, StreamingBody};
 pub use options::HttpBodyOptions;
-use transform::StreamingBody;
 
 /// An HTTP body that can contain several data types.
 ///
@@ -101,7 +101,7 @@ use transform::StreamingBody;
 ///
 /// An idle timeout limits the wait for the next frame while the body is polled.
 /// Set it with [`HttpBodyOptions::timeout`].
-/// [`HttpBody::transform`] keeps the timeout and applies it to the transformed output frames.
+/// [`HttpBody::map`] keeps the timeout and applies it to the mapped output frames.
 ///
 /// The following example writes a downloaded file to disk:
 ///
@@ -193,25 +193,25 @@ impl HttpBody {
         }
     }
 
-    /// Transforms body content while preserving its policies.
+    /// Maps body content while preserving its policies.
     ///
-    /// Match both [`Content`][transform::Content] variants to handle buffered bytes and streaming frames.
+    /// Match both [`Content`] variants to handle buffered bytes and streaming frames.
     ///
     /// # Errors
     ///
-    /// Returns the error from `transform_content` without changing it.
-    /// If a buffered body was already consumed, returns an error without calling `transform_content`.
+    /// Returns the error from `map_content` without changing it.
+    /// If a buffered body was already consumed, returns an error without calling `map_content`.
     ///
     /// # Examples
     ///
     /// ```
     /// # fn main() -> Result<(), http_extensions::HttpError> {
     /// # #[cfg(feature = "test-util")] {
+    /// # use http_extensions::body::{Content, StreamingBody};
     /// # use http_extensions::HttpBodyBuilder;
-    /// # use http_extensions::transform::{Content, StreamingBody};
     /// # use http_body_util::BodyExt;
     /// let body = HttpBodyBuilder::new_fake().text("hello");
-    /// let transformed = body.transform(|content| {
+    /// let mapped = body.map(|content| {
     ///     Ok(match content {
     ///         Content::Bytes(bytes) => Content::Bytes(bytes),
     ///         Content::Streaming(inner) => {
@@ -227,19 +227,16 @@ impl HttpBody {
     /// A match must also handle the bytes path:
     ///
     /// ```compile_fail,E0004
+    /// # use http_extensions::body::Content;
     /// # use http_extensions::{HttpBody, Result};
-    /// # use http_extensions::transform::Content;
     /// # fn example(body: HttpBody) -> Result<HttpBody> {
-    /// body.transform(|content| Ok(match content {
+    /// body.map(|content| Ok(match content {
     ///     Content::Streaming(inner) => Content::Streaming(inner),
     /// }))
     /// # }
     /// ```
-    pub fn transform(
-        self,
-        transform_content: impl FnOnce(transform::Content) -> Result<transform::Content>,
-    ) -> Result<Self> {
-        transform::transform_body(self, transform_content)
+    pub fn map(self, map_content: impl FnOnce(Content) -> Result<Content>) -> Result<Self> {
+        map::map_body(self, map_content)
     }
 
     /// Converts the body into a memory-efficient view over a byte sequence.

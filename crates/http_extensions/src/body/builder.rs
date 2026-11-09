@@ -365,8 +365,8 @@ mod tests {
     use thread_aware::unaware;
     use tick::ClockControl;
 
+    use super::super::Content;
     use super::*;
-    use crate::transform::Content;
 
     #[test]
     fn transforming_keeps_the_policies_the_body_already_had() {
@@ -375,7 +375,7 @@ mod tests {
 
         // A streaming body carries its own policies through transformation.
         let body = builder.stream(futures::stream::empty(), &strict);
-        let transformed = body.transform(Ok).unwrap();
+        let transformed = body.map(Ok).unwrap();
 
         assert_eq!(transformed.options(), strict);
     }
@@ -387,7 +387,7 @@ mod tests {
             .with_options(HttpBodyOptions::default().timeout(Duration::from_secs(1)));
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
         let source = builder.stream(stream::pending(), &options);
-        let mut body = pin!(source.transform(Ok).unwrap());
+        let mut body = pin!(source.map(Ok).unwrap());
         let waker = futures::task::noop_waker();
         let mut cx = Context::from_waker(&waker);
 
@@ -407,16 +407,20 @@ mod tests {
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
         let (sender, receiver) = mpsc::unbounded();
         let source = builder.stream(receiver, &options);
-        let mut body = pin!(source.transform(|content| Ok(match content {
-            Content::Streaming(body) => {
-                Content::Streaming(StreamingBody::new(http_body_util::StreamBody::new(stream::once(async move {
-                    body.collect()
-                        .await
-                        .map(|collected| Frame::data(BytesView::from(collected.to_bytes())))
-                }))))
-            }
-            Content::Bytes(bytes) => Content::Bytes(bytes),
-        })).unwrap());
+        let mut body = pin!(
+            source
+                .map(|content| Ok(match content {
+                    Content::Streaming(body) => {
+                        Content::Streaming(StreamingBody::new(http_body_util::StreamBody::new(stream::once(async move {
+                            body.collect()
+                                .await
+                                .map(|collected| Frame::data(BytesView::from(collected.to_bytes())))
+                        }))))
+                    }
+                    Content::Bytes(bytes) => Content::Bytes(bytes),
+                }))
+                .unwrap()
+        );
         let waker = futures::task::noop_waker();
         let mut cx = Context::from_waker(&waker);
 
@@ -441,7 +445,7 @@ mod tests {
         let lenient = HttpBodyOptions::default().buffer_limit(99);
         let builder = HttpBodyBuilder::new_fake().with_options(lenient);
 
-        let original = builder.text("hello").transform(Ok).unwrap();
+        let original = builder.text("hello").map(Ok).unwrap();
         let transformed = builder.body(original, &HttpBodyOptions::new());
 
         assert_eq!(transformed.options(), lenient);
@@ -468,7 +472,7 @@ mod tests {
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
         let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock).with_options(options);
         let source = HttpBodyBuilder::new_fake().body(PendingBody, &HttpBodyOptions::new());
-        let transformed = source.transform(Ok).unwrap();
+        let transformed = source.map(Ok).unwrap();
         let mut body = Box::pin(builder.body(transformed, &HttpBodyOptions::new()));
         let waker = futures::task::noop_waker();
         let mut cx = std::task::Context::from_waker(&waker);
