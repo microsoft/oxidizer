@@ -9,7 +9,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use arty_executor::discard_task_panic_payload;
 use thread_aware::Thread;
 
-use crate::runtime::hook::{PanicAction, WorkerHook};
+use crate::runtime::hook::{HookRegistration, PanicAction};
 use crate::task::Context;
 use crate::task::preparation::RemoteFutureFactory;
 
@@ -66,11 +66,7 @@ pub(crate) enum Command {
     AccessIo { access: QueuedIoAccess },
 
     /// Replaces one worker-local runtime hook.
-    RegisterHook {
-        hook: WorkerHook,
-        source: Option<Thread>,
-        ready: std::sync::mpsc::Sender<()>,
-    },
+    RegisterHook { hook: HookRegistration, source: Option<Thread> },
 
     /// Runs the panic hook for a blocking function and returns its decision.
     BlockingPanic { ready: std::sync::mpsc::Sender<PanicAction> },

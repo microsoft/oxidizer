@@ -14,7 +14,7 @@ use performables::arc::Arc;
 use performables::sync::channel;
 use thread_aware::{Thread, ThreadAware};
 
-use crate::runtime::hook::HookFactory;
+use crate::runtime::hook::HookRegistration;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{Command, LocalWorker, QueuedFactory, QueuedIoAccess};
 use crate::runtime::worker::blocking::Worker;
@@ -223,38 +223,19 @@ impl DispatcherCore {
         send_result.map_err(|_error| self.runtime_shutting_down_error())
     }
 
-    pub(crate) fn register_hook(&self, factory: HookFactory) -> Result<(), Error> {
+    pub(crate) fn register_hook(&self, hook: HookRegistration) {
         if matches!(self.shutdown().state(), ShutdownState::Started) {
-            return Err(self.runtime_shutting_down_error());
+            return;
         }
 
         let source = LocalWorker::current_thread().filter(|thread| self.owns(thread));
-        let mut acknowledgements = Vec::with_capacity(self.worker_endpoints.len());
         for endpoint in &self.worker_endpoints {
-            let mut hook = Some(factory.make());
-            if source.as_ref().is_some_and(|source| source == &endpoint.thread) {
-                let installed = LocalWorker::install_hook(hook.take().expect("the local hook is installed at most once"), source.as_ref());
-                debug_assert!(installed, "a live runtime worker retains its hook registry");
-                continue;
-            }
-
-            let (ready, acknowledged) = std::sync::mpsc::channel();
-            endpoint
-                .priority_command_tx
-                .send(Command::RegisterHook {
-                    hook: hook.expect("a remote hook has not been installed locally"),
-                    source: source.clone(),
-                    ready,
-                })
-                .map_err(|_error| self.runtime_shutting_down_error())?;
+            _ = endpoint.priority_command_tx.send(Command::RegisterHook {
+                hook: hook.clone(),
+                source: source.clone(),
+            });
             endpoint.waker.wake_by_ref();
-            acknowledgements.push(acknowledged);
         }
-
-        for acknowledged in acknowledgements {
-            acknowledged.recv().map_err(|_error| self.runtime_shutting_down_error())?;
-        }
-        Ok(())
     }
 
     fn runtime_shutting_down_error(&self) -> Error {

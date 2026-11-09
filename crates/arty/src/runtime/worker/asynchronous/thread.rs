@@ -17,7 +17,7 @@ use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::{DispatcherClient, WorkerEndpoint};
 use crate::runtime::error::Error;
-use crate::runtime::hook::{WorkerHookSeed, WorkerHooks};
+use crate::runtime::hook::Hooks;
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::worker::{asynchronous, blocking};
 
@@ -33,7 +33,7 @@ pub(crate) struct StartOptions {
     pub(crate) shutdown: Shutdown,
     pub(crate) io_runtime: IoRuntime,
     pub(crate) monitor_options: MonitorOptions,
-    pub(crate) hooks: WorkerHookSeed,
+    pub(crate) hooks: Hooks,
 }
 
 /// A spawned worker waiting for runtime activation.
@@ -151,7 +151,8 @@ impl ThreadEntry {
 
         let signal = Arc::new(asynchronous::Signal::default());
         let worker_waker = asynchronous::Signal::waker(&signal);
-        let worker_hooks = WorkerHooks::new(hooks, current.clone(), shutdown.clone());
+        let mut worker_hooks = hooks;
+        worker_hooks.relocate(None, &current);
         let blocking_panic_hook = crate::runtime::hook::BlockingPanicHook::new(priority_command_tx, worker_waker.clone());
         let blocking_worker = blocking::Worker::new(blocking_pools.pool_for_worker(), shutdown, blocking_panic_hook);
 

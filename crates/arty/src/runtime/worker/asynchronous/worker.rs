@@ -18,7 +18,7 @@ use tick::runtime::{ClockDriver, InactiveClock};
 use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::WorkerHooks;
+use crate::runtime::hook::Hooks;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{Command, LocalWorker, Signal};
 #[cfg(test)]
@@ -111,7 +111,7 @@ impl Worker {
         clock: InactiveClock,
         signal: Arc<Signal>,
         monitor_options: MonitorOptions,
-        hooks: WorkerHooks,
+        hooks: Hooks,
     ) -> Self {
         let worker_waker = Signal::waker(&signal);
         let shutdown = dispatcher.shutdown().clone();
@@ -261,8 +261,8 @@ impl Worker {
                     Command::AccessIo { access } => {
                         access.into_inner()(context);
                     }
-                    Command::RegisterHook { hook, source, ready } => {
-                        unreachable!("hook registration uses the priority command channel: {hook:?} {source:?} {ready:?}");
+                    Command::RegisterHook { hook, source } => {
+                        unreachable!("hook registration uses the priority command channel: {hook:?} {source:?}");
                     }
                     Command::BlockingPanic { .. } => {
                         unreachable!("blocking panic notification uses the priority command channel");
@@ -291,10 +291,9 @@ impl Worker {
         };
         loop {
             match command_rx.try_recv() {
-                Ok(Command::RegisterHook { hook, source, ready }) => {
+                Ok(Command::RegisterHook { hook, source }) => {
                     let installed = LocalWorker::install_hook(hook, source.as_ref());
                     debug_assert!(installed, "a running worker retains its hook registry");
-                    _ = ready.send(());
                 }
                 Ok(Command::BlockingPanic { ready }) => {
                     _ = ready.send(LocalWorker::blocking_panic());
@@ -381,7 +380,7 @@ mod tests {
     use super::*;
     use crate::runtime::config::MonitorPolicy;
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
-    use crate::runtime::hook::HookFactories;
+    use crate::runtime::hook::Hooks;
     use crate::runtime::worker::asynchronous::{QueuedFactory, QueuedIoAccess};
     use crate::task::preparation::RemoteFutureFactory;
 
@@ -502,7 +501,8 @@ mod tests {
 
         let (priority_tx, priority_rx) = channel::unbounded();
         std::mem::forget(priority_tx);
-        let hooks = WorkerHooks::new(HookFactories::default().seed(), thread.clone(), shutdown);
+        let mut hooks = Hooks::default();
+        hooks.relocate(None, &thread);
         Worker::new(
             command_rx,
             priority_rx,

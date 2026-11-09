@@ -8,7 +8,8 @@ use thread_aware::Thread;
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{PanicAction, WorkerHook, WorkerHooks};
+use crate::runtime::hook::{HookRegistration, Hooks, OnPanic, OnSpawn, OnStart, PanicAction};
+use crate::runtime::shutdown::ShutdownState;
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
@@ -41,7 +42,7 @@ impl LocalWorker {
         });
     }
 
-    pub(super) fn register_scheduler(context: Context, tasks: TaskSet, executor_shutdown: ExecutorShutdown, hooks: WorkerHooks) {
+    pub(super) fn register_scheduler(context: Context, tasks: TaskSet, executor_shutdown: ExecutorShutdown, hooks: Hooks) {
         let results = JoinHandlePool::new(context.dispatcher().shutdown().clone());
         let scheduler = SchedulerContext {
             thread: context.thread().clone(),
@@ -84,16 +85,14 @@ impl LocalWorker {
 
     pub(crate) fn on_start() {
         Self::with_scheduler_mut(|current| {
-            current
-                .expect("task worker startup registers hooks before invoking OnStart")
-                .hooks
-                .borrow_mut()
-                .on_start();
+            let current = current.expect("task worker startup registers hooks before invoking OnStart");
+            let mut event = OnStart::new(current.thread.clone());
+            current.hooks.borrow_mut().execute_start(&mut event);
         });
     }
 
     pub(crate) fn on_spawn() -> Option<Vec<Box<dyn arty_executor::TaskPoll>>> {
-        Self::with_scheduler_mut(|current| current.and_then(|current| current.hooks.borrow_mut().on_spawn()))
+        Self::with_scheduler_mut(|current| current.and_then(|current| current.spawn_hooks()))
     }
 
     pub(crate) fn on_panic() -> bool {
@@ -101,21 +100,21 @@ impl LocalWorker {
             let Some(current) = current else {
                 return false;
             };
-            current.hooks.borrow_mut().on_panic();
+            current.execute_panic_hooks();
             true
         })
     }
 
     pub(crate) fn blocking_panic() -> PanicAction {
-        Self::with_scheduler_mut(|current| current.map_or(PanicAction::Shutdown, |current| current.hooks.borrow_mut().on_panic()))
+        Self::with_scheduler_mut(|current| current.map_or(PanicAction::Shutdown, |current| current.execute_panic_hooks()))
     }
 
-    pub(crate) fn install_hook(hook: WorkerHook, source: Option<&Thread>) -> bool {
+    pub(crate) fn install_hook(hook: HookRegistration, source: Option<&Thread>) -> bool {
         Self::with_scheduler_mut(|current| {
             let Some(current) = current else {
                 return false;
             };
-            current.hooks.borrow_mut().install(hook, source);
+            current.hooks.borrow_mut().install(hook, source, &current.thread);
             true
         })
     }
@@ -191,7 +190,7 @@ pub(crate) struct SchedulerContext {
     tasks: TaskSet,
     executor_shutdown: ExecutorShutdown,
     results: JoinHandlePool,
-    hooks: RefCell<WorkerHooks>,
+    hooks: RefCell<Hooks>,
 }
 
 impl SchedulerContext {
@@ -209,7 +208,7 @@ impl SchedulerContext {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        let Some(poll_hooks) = self.hooks.borrow_mut().on_spawn() else {
+        let Some(poll_hooks) = self.spawn_hooks() else {
             return JoinHandle::try_from_shutdown(self.results.shutdown())
                 .expect("a spawn hook rejects registration only after runtime shutdown starts");
         };
@@ -218,6 +217,22 @@ impl SchedulerContext {
         self.tasks
             .add(inner, TaskOptions::new(placement).with_poll_hooks(poll_hooks), result_tx);
         handle
+    }
+
+    fn spawn_hooks(&self) -> Option<Vec<Box<dyn arty_executor::TaskPoll>>> {
+        let mut event = OnSpawn::new(self.thread.clone());
+        self.hooks.borrow_mut().execute_spawn(&mut event);
+        matches!(self.results.shutdown().state(), ShutdownState::Running).then(|| event.into_handlers())
+    }
+
+    fn execute_panic_hooks(&self) -> PanicAction {
+        let mut event = OnPanic::new();
+        self.hooks.borrow_mut().execute_panic(&mut event);
+        let action = event.action();
+        if action == PanicAction::Shutdown {
+            self.results.shutdown().begin(ShutdownCause::panic());
+        }
+        action
     }
 }
 
@@ -236,7 +251,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
-    use crate::runtime::hook::HookFactories;
+    use crate::runtime::hook::Hooks;
     use crate::runtime::shutdown::Shutdown;
     use crate::runtime::worker::asynchronous::Command;
     use crate::runtime::worker::blocking::{Pool, TestPanicResponse, Worker};
@@ -280,7 +295,8 @@ mod tests {
             let context = Context::new(dispatcher, clock, io, thread.clone());
             let mut executor = Executor::builder().thread(thread.clone()).build();
             LocalWorker::attach();
-            let hooks = WorkerHooks::new(HookFactories::default().seed(), thread.clone(), shutdown.clone());
+            let mut hooks = Hooks::default();
+            hooks.relocate(None, &thread);
             LocalWorker::register_scheduler(context, executor.tasks(), executor.shutdown(), hooks);
 
             let mut join = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 42 }));

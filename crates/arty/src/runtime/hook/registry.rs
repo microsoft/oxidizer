@@ -1,144 +1,131 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
+use std::any::{Any, TypeId};
 use std::task::Waker;
 
-use arty_executor::ShutdownCause;
 use performables::sync::channel;
 use thread_aware::{Thread, ThreadAware};
 
+use super::on_panic::PanicHook;
+use super::on_spawn::SpawnHook;
+use super::on_start::StartHook;
 use super::{Hook, OnPanic, OnSpawn, OnStart};
-use crate::runtime::Shutdown;
-use crate::runtime::shutdown::ShutdownState;
 use crate::runtime::worker::asynchronous::Command;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
 pub(crate) enum PanicAction {
-    Ignore = 0,
-    Shutdown = 1,
+    Ignore,
+    Shutdown,
 }
 
-impl PanicAction {
-    fn from_u8(value: u8) -> Self {
-        match value {
-            0 => Self::Ignore,
-            _ => Self::Shutdown,
-        }
-    }
-}
-
-trait Callback: Send {
+trait Callback<E>: Send {
+    fn clone_box(&self) -> Box<dyn Callback<E>>;
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread);
-    fn invoke(&mut self, thread: &Thread) -> HookOutcome;
+    fn execute(&mut self, event: &mut E);
 }
 
-struct TypedCallback<H, D> {
+struct CallbackWithData<E, D> {
     data: D,
-    callback: fn(&mut H, &mut D),
+    callback: fn(&mut E, &mut D),
 }
 
-struct CallbackOnly<H> {
-    callback: fn(&mut H),
-}
-
-impl<H> Callback for CallbackOnly<H>
+impl<E, D> Callback<E> for CallbackWithData<E, D>
 where
-    H: Hook,
+    E: 'static,
+    D: ThreadAware + Clone + 'static,
 {
-    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
-
-    fn invoke(&mut self, thread: &Thread) -> HookOutcome {
-        fn invoke<H>(event: &mut H, callback: &mut fn(&mut H)) {
-            callback(event);
-        }
-
-        let mut callback = self.callback;
-        let mut handlers = Vec::new();
-        let action = <H as private::Sealed>::invoke(invoke::<H>, &mut callback, thread, &mut handlers);
-        outcome::<H>(action, handlers)
+    fn clone_box(&self) -> Box<dyn Callback<E>> {
+        Box::new(Self {
+            data: self.data.clone(),
+            callback: self.callback,
+        })
     }
-}
 
-impl<H, D> Callback for TypedCallback<H, D>
-where
-    H: Hook,
-    D: ThreadAware + 'static,
-{
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.data.relocate(source, destination);
     }
 
-    fn invoke(&mut self, thread: &Thread) -> HookOutcome {
-        let mut handlers = Vec::new();
-        let action = <H as private::Sealed>::invoke(self.callback, &mut self.data, thread, &mut handlers);
-        outcome::<H>(action, handlers)
+    fn execute(&mut self, event: &mut E) {
+        (self.callback)(event, &mut self.data);
     }
 }
 
-trait CallbackFactory: Send + Sync {
-    fn make(&self) -> Box<dyn Callback>;
+#[derive(derive_more::Debug)]
+pub(crate) struct TypedHook<E> {
+    #[debug(ignore)]
+    callback: Box<dyn Callback<E>>,
 }
 
-struct TypedCallbackFactory<H, D> {
-    data: Mutex<D>,
-    callback: fn(&mut H, &mut D),
-    marker: PhantomData<fn(H)>,
-}
+impl<E: 'static> TypedHook<E> {
+    pub(crate) fn new<D>(data: D, callback: fn(&mut E, &mut D)) -> Self
+    where
+        D: ThreadAware + Clone + 'static,
+    {
+        Self {
+            callback: Box::new(CallbackWithData { data, callback }),
+        }
+    }
 
-struct CallbackOnlyFactory<H> {
-    callback: fn(&mut H),
-}
-
-impl<H> CallbackFactory for CallbackOnlyFactory<H>
-where
-    H: Hook,
-{
-    fn make(&self) -> Box<dyn Callback> {
-        Box::new(CallbackOnly::<H> { callback: self.callback })
+    pub(crate) fn execute(&mut self, event: &mut E) {
+        self.callback.execute(event);
     }
 }
 
-impl<H, D> CallbackFactory for TypedCallbackFactory<H, D>
-where
-    H: Hook,
-    D: ThreadAware + Clone + 'static,
-{
-    fn make(&self) -> Box<dyn Callback> {
-        Box::new(TypedCallback::<H, D> {
-            data: self
-                .data
-                .lock()
-                .expect("hook data is only locked while Arty clones it during registration")
-                .clone(),
-            callback: self.callback,
-        })
+impl<E: 'static> Clone for TypedHook<E> {
+    fn clone(&self) -> Self {
+        Self {
+            callback: self.callback.clone_box(),
+        }
+    }
+}
+
+impl<E: 'static> ThreadAware for TypedHook<E> {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        self.callback.relocate(source, destination);
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-enum HookKind {
+enum HookType {
     Start,
     Spawn,
     Panic,
 }
 
-#[derive(derive_more::Debug)]
-pub(crate) struct HookFactory {
-    kind: HookKind,
-    #[debug(ignore)]
-    callback: Box<dyn CallbackFactory>,
+struct HookWithData<H, D> {
+    data: D,
+    callback: fn(&mut H, &mut D),
 }
 
-impl HookFactory {
-    pub(crate) fn without_data<H: Hook>(callback: fn(&mut H)) -> Self {
-        Self {
-            kind: hook_kind::<H>(),
-            callback: Box::new(CallbackOnlyFactory::<H> { callback }),
-        }
+struct CallbackData<H>(fn(&mut H));
+
+impl<H> Copy for CallbackData<H> {}
+
+impl<H> Clone for CallbackData<H> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<H> ThreadAware for CallbackData<H> {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+fn execute_callback<H>(event: &mut H, callback: &mut CallbackData<H>) {
+    (callback.0)(event);
+}
+
+#[derive(Clone, derive_more::Debug)]
+pub(crate) enum HookRegistration {
+    Start(StartHook),
+    Spawn(SpawnHook),
+    Panic(PanicHook),
+}
+
+impl HookRegistration {
+    pub(crate) fn callback<H: Hook>(callback: fn(&mut H)) -> Self {
+        Self::new(CallbackData(callback), execute_callback::<H>)
     }
 
     pub(crate) fn new<H, D>(data: D, callback: fn(&mut H, &mut D)) -> Self
@@ -146,91 +133,102 @@ impl HookFactory {
         H: Hook,
         D: ThreadAware + Clone + 'static,
     {
-        Self {
-            kind: hook_kind::<H>(),
-            callback: Box::new(TypedCallbackFactory::<H, D> {
-                data: Mutex::new(data),
-                callback,
-                marker: PhantomData,
-            }),
+        let hook: Box<dyn Any + Send> = Box::new(HookWithData { data, callback });
+        match hook_type::<H>() {
+            HookType::Start => {
+                let hook = *hook
+                    .downcast::<HookWithData<OnStart, D>>()
+                    .expect("OnStart hook type is selected by its TypeId");
+                Self::Start(StartHook::new(hook.data, hook.callback))
+            }
+            HookType::Spawn => {
+                let hook = *hook
+                    .downcast::<HookWithData<OnSpawn, D>>()
+                    .expect("OnSpawn hook type is selected by its TypeId");
+                Self::Spawn(SpawnHook::new(hook.data, hook.callback))
+            }
+            HookType::Panic => {
+                let hook = *hook
+                    .downcast::<HookWithData<OnPanic, D>>()
+                    .expect("OnPanic hook type is selected by its TypeId");
+                Self::Panic(PanicHook::new(hook.data, hook.callback))
+            }
         }
     }
 
-    pub(crate) fn make(&self) -> WorkerHook {
-        WorkerHook {
-            kind: self.kind,
-            callback: self.callback.make(),
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        match self {
+            Self::Start(hook) => hook.relocate(source, destination),
+            Self::Spawn(hook) => hook.relocate(source, destination),
+            Self::Panic(hook) => hook.relocate(source, destination),
         }
     }
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct HookFactories {
-    start: Option<HookFactory>,
-    spawn: Option<HookFactory>,
-    panic: Option<HookFactory>,
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Hooks {
+    start: Vec<StartHook>,
+    spawn: Vec<SpawnHook>,
+    panic: Vec<PanicHook>,
 }
 
-impl HookFactories {
-    pub(crate) fn set_without_data<H: Hook>(&mut self, callback: fn(&mut H)) {
-        self.set_factory(HookFactory::without_data(callback));
+impl Hooks {
+    pub(crate) fn set_callback<H: Hook>(&mut self, callback: fn(&mut H)) {
+        self.push(HookRegistration::callback(callback));
     }
 
-    pub(crate) fn set<H, D>(&mut self, data: D, callback: fn(&mut H, &mut D))
+    pub(crate) fn add<H, D>(&mut self, data: D, callback: fn(&mut H, &mut D))
     where
         H: Hook,
         D: ThreadAware + Clone + 'static,
     {
-        self.set_factory(HookFactory::new(data, callback));
+        self.push(HookRegistration::new(data, callback));
     }
 
-    fn set_factory(&mut self, factory: HookFactory) {
-        match factory.kind {
-            HookKind::Start => self.start = Some(factory),
-            HookKind::Spawn => self.spawn = Some(factory),
-            HookKind::Panic => self.panic = Some(factory),
+    pub(crate) fn install(&mut self, mut hook: HookRegistration, source: Option<&Thread>, destination: &Thread) {
+        hook.relocate(source, destination);
+        self.push(hook);
+    }
+
+    fn push(&mut self, hook: HookRegistration) {
+        match hook {
+            HookRegistration::Start(hook) => self.start.push(hook),
+            HookRegistration::Spawn(hook) => self.spawn.push(hook),
+            HookRegistration::Panic(hook) => self.panic.push(hook),
         }
     }
 
-    pub(crate) fn seed(&self) -> WorkerHookSeed {
-        WorkerHookSeed {
-            start: self.start.as_ref().map(HookFactory::make),
-            spawn: self.spawn.as_ref().map(HookFactory::make),
-            panic: self.panic.as_ref().map(HookFactory::make),
+    pub(crate) fn execute_start(&mut self, event: &mut OnStart) {
+        for hook in &mut self.start {
+            hook.execute(event);
+        }
+    }
+
+    pub(crate) fn execute_spawn(&mut self, event: &mut OnSpawn) {
+        for hook in &mut self.spawn {
+            hook.execute(event);
+        }
+    }
+
+    pub(crate) fn execute_panic(&mut self, event: &mut OnPanic) {
+        for hook in &mut self.panic {
+            hook.execute(event);
         }
     }
 }
 
-fn hook_kind<H: Hook>() -> HookKind {
-    match <H as private::Sealed>::KIND {
-        private::START => HookKind::Start,
-        private::SPAWN => HookKind::Spawn,
-        private::PANIC => HookKind::Panic,
-        _ => unreachable!("sealed hook kinds are defined by Arty"),
+impl ThreadAware for Hooks {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        for hook in &mut self.start {
+            hook.relocate(source, destination);
+        }
+        for hook in &mut self.spawn {
+            hook.relocate(source, destination);
+        }
+        for hook in &mut self.panic {
+            hook.relocate(source, destination);
+        }
     }
-}
-
-fn outcome<H: Hook>(action: u8, handlers: Vec<Box<dyn arty_executor::TaskPoll>>) -> HookOutcome {
-    match <H as private::Sealed>::KIND {
-        private::START => HookOutcome::None,
-        private::SPAWN => HookOutcome::Spawn(handlers),
-        private::PANIC => HookOutcome::Panic(PanicAction::from_u8(action)),
-        _ => unreachable!("sealed hook kinds are defined by Arty"),
-    }
-}
-
-#[derive(derive_more::Debug)]
-pub(crate) struct WorkerHook {
-    kind: HookKind,
-    #[debug(ignore)]
-    callback: Box<dyn Callback>,
-}
-
-#[derive(Debug)]
-pub(crate) struct WorkerHookSeed {
-    start: Option<WorkerHook>,
-    spawn: Option<WorkerHook>,
-    panic: Option<WorkerHook>,
 }
 
 #[derive(Clone, Debug)]
@@ -283,163 +281,21 @@ impl BlockingPanicHook {
     }
 }
 
-#[derive(derive_more::Debug)]
-pub(crate) struct WorkerHooks {
-    #[debug(ignore)]
-    start: Option<Box<dyn Callback>>,
-    #[debug(ignore)]
-    spawn: Option<Box<dyn Callback>>,
-    #[debug(ignore)]
-    panic: Option<Box<dyn Callback>>,
-    shutdown: Shutdown,
-    thread: Thread,
-}
-
-impl WorkerHooks {
-    pub(crate) fn new(seed: WorkerHookSeed, thread: Thread, shutdown: Shutdown) -> Self {
-        let mut hooks = Self {
-            start: None,
-            spawn: None,
-            panic: None,
-            shutdown,
-            thread,
-        };
-        if let Some(hook) = seed.start {
-            hooks.install(hook, None);
-        }
-        if let Some(hook) = seed.spawn {
-            hooks.install(hook, None);
-        }
-        if let Some(hook) = seed.panic {
-            hooks.install(hook, None);
-        }
-        hooks
-    }
-
-    pub(crate) fn install(&mut self, mut hook: WorkerHook, source: Option<&Thread>) {
-        hook.callback.relocate(source, &self.thread);
-        match hook.kind {
-            HookKind::Start => self.start = Some(hook.callback),
-            HookKind::Spawn => self.spawn = Some(hook.callback),
-            HookKind::Panic => self.panic = Some(hook.callback),
-        }
-    }
-
-    pub(crate) fn on_start(&mut self) {
-        if let Some(callback) = self.start.as_mut() {
-            _ = callback.invoke(&self.thread);
-        }
-    }
-
-    pub(crate) fn on_spawn(&mut self) -> Option<Vec<Box<dyn arty_executor::TaskPoll>>> {
-        let handlers = if let Some(callback) = self.spawn.as_mut() {
-            match callback.invoke(&self.thread) {
-                HookOutcome::Spawn(handlers) => handlers,
-                HookOutcome::None | HookOutcome::Panic(_) => {
-                    unreachable!("OnSpawn callbacks return poll handlers")
-                }
-            }
-        } else {
-            Vec::new()
-        };
-        if matches!(self.shutdown.state(), ShutdownState::Running) {
-            Some(handlers)
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn on_panic(&mut self) -> PanicAction {
-        let action = self
-            .panic
-            .as_mut()
-            .map_or(PanicAction::Shutdown, |callback| match callback.invoke(&self.thread) {
-                HookOutcome::Panic(action) => action,
-                HookOutcome::None | HookOutcome::Spawn(_) => {
-                    unreachable!("OnPanic callbacks return a panic action")
-                }
-            });
-        if action == PanicAction::Shutdown {
-            self.shutdown.begin(ShutdownCause::panic());
-        }
-        action
+fn hook_type<H: Hook>() -> HookType {
+    if TypeId::of::<H>() == TypeId::of::<OnStart>() {
+        HookType::Start
+    } else if TypeId::of::<H>() == TypeId::of::<OnSpawn>() {
+        HookType::Spawn
+    } else {
+        debug_assert_eq!(TypeId::of::<H>(), TypeId::of::<OnPanic>());
+        HookType::Panic
     }
 }
 
 pub(super) mod private {
-    use super::*;
+    pub trait Sealed {}
 
-    pub(super) const START: u8 = 0;
-    pub(super) const SPAWN: u8 = 1;
-    pub(super) const PANIC: u8 = 2;
-
-    pub trait Sealed: Sized {
-        const KIND: u8;
-
-        fn invoke<D>(
-            callback: fn(&mut Self, &mut D),
-            data: &mut D,
-            thread: &Thread,
-            handlers: &mut Vec<Box<dyn arty_executor::TaskPoll>>,
-        ) -> u8;
-    }
-
-    impl Sealed for OnStart {
-        const KIND: u8 = START;
-
-        fn invoke<D>(
-            callback: fn(&mut Self, &mut D),
-            data: &mut D,
-            _thread: &Thread,
-            _handlers: &mut Vec<Box<dyn arty_executor::TaskPoll>>,
-        ) -> u8 {
-            callback(&mut Self { thread: _thread.clone() }, data);
-            PanicAction::Ignore as u8
-        }
-    }
-
-    impl Sealed for OnSpawn {
-        const KIND: u8 = SPAWN;
-
-        fn invoke<D>(
-            callback: fn(&mut Self, &mut D),
-            data: &mut D,
-            thread: &Thread,
-            handlers: &mut Vec<Box<dyn arty_executor::TaskPoll>>,
-        ) -> u8 {
-            let mut event = Self {
-                thread: thread.clone(),
-                handlers: Vec::new(),
-            };
-            callback(&mut event, data);
-            handlers.append(&mut event.handlers);
-            PanicAction::Ignore as u8
-        }
-    }
-
-    impl Sealed for OnPanic {
-        const KIND: u8 = PANIC;
-
-        fn invoke<D>(
-            callback: fn(&mut Self, &mut D),
-            data: &mut D,
-            _thread: &Thread,
-            _handlers: &mut Vec<Box<dyn arty_executor::TaskPoll>>,
-        ) -> u8 {
-            let action = Arc::new(AtomicU8::new(PanicAction::Shutdown as u8));
-            callback(
-                &mut Self {
-                    action: Arc::clone(&action),
-                },
-                data,
-            );
-            action.load(Ordering::Acquire)
-        }
-    }
-}
-
-enum HookOutcome {
-    None,
-    Spawn(Vec<Box<dyn arty_executor::TaskPoll>>),
-    Panic(PanicAction),
+    impl Sealed for super::OnStart {}
+    impl Sealed for super::OnSpawn {}
+    impl Sealed for super::OnPanic {}
 }

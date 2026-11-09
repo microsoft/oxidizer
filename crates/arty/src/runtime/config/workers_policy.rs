@@ -2,12 +2,13 @@
 // Licensed under the MIT License.
 
 use std::num::{NonZero, NonZeroUsize};
+use std::sync::Mutex;
 
 use many_cpus::ProcessorSet;
 
 use crate::runtime::config::{BlockingPoolPolicy, MonitorOptions};
 use crate::runtime::error::Error;
-use crate::runtime::hook::HookFactories;
+use crate::runtime::hook::Hooks;
 
 /// Selects how many async workers run and which processors they use.
 ///
@@ -180,7 +181,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) stack_size: NonZeroUsize,
     pub(crate) blocking_pool_policy: BlockingPoolPolicy,
     pub(crate) monitor_options: MonitorOptions,
-    pub(crate) hooks: HookFactories,
+    pub(crate) hooks: Mutex<Hooks>,
 }
 
 impl Default for RuntimeConfig {
@@ -192,7 +193,7 @@ impl Default for RuntimeConfig {
             stack_size: NonZeroUsize::new(2 * 1024 * 1024).expect("the default stack size is nonzero"),
             blocking_pool_policy: BlockingPoolPolicy::default(),
             monitor_options: MonitorOptions::default(),
-            hooks: HookFactories::default(),
+            hooks: Mutex::new(Hooks::default()),
         }
     }
 }

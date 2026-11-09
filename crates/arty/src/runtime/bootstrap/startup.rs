@@ -35,6 +35,10 @@ fn build_with_processors(
         .get()
         .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
     let monitor_options = processor_config.monitor_options;
+    let hooks = processor_config
+        .hooks
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools()?;
@@ -50,7 +54,7 @@ fn build_with_processors(
             shutdown: shutdown.clone(),
             io_runtime: io_runtime.clone(),
             monitor_options: monitor_options.for_worker(),
-            hooks: processor_config.hooks.seed(),
+            hooks: hooks.clone(),
         }));
     }
 

@@ -16,7 +16,8 @@ use crate::runtime::hook::Hook;
 ///
 /// Obtain a builder from [`Runtime::builder`]. Change its configuration, then
 /// call [`build`](Self::build) to start the workers.
-/// Each method replaces any earlier value for the same configuration.
+/// Policy methods replace any earlier value for the same configuration.
+/// Hook methods append callbacks in registration order.
 /// Configuring a builder does not start threads.
 ///
 /// See the [runtime defaults](crate::runtime#defaults) for the initial
@@ -41,7 +42,7 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
-    /// Registers or replaces a runtime hook without callback data.
+    /// Registers a runtime hook without callback data.
     ///
     /// Use [`on_with`](Self::on_with) when the callback needs worker-local
     /// data.
@@ -56,15 +57,19 @@ impl RuntimeBuilder {
     /// ```
     #[must_use]
     pub fn on<H: Hook>(mut self, callback: fn(&mut H)) -> Self {
-        self.processor_config.hooks.set_without_data(callback);
+        self.processor_config
+            .hooks
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_callback(callback);
         self
     }
 
-    /// Registers or replaces a runtime hook with worker-local callback data.
+    /// Registers a runtime hook with worker-local callback data.
     ///
     /// Arty clones the hook data for each worker and relocates it before a
-    /// callback can run. Registering another hook of the same type replaces the
-    /// earlier registration.
+    /// callback can run. Registering another hook of the same type appends it
+    /// after earlier callbacks.
     ///
     /// # Examples
     ///
@@ -80,7 +85,11 @@ impl RuntimeBuilder {
         H: Hook,
         D: thread_aware::ThreadAware + Clone + 'static,
     {
-        self.processor_config.hooks.set(data, callback);
+        self.processor_config
+            .hooks
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .add(data, callback);
         self
     }
 

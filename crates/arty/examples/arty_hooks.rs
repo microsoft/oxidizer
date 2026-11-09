@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .block_on(async |cx| (cx.control().clone(), cx.scheduler().clone()))?;
 
     // A contained async or blocking panic now leaves the runtime available.
-    control.on::<OnPanic>(|event| event.ignore())?;
+    control.on::<OnPanic>(|event| event.ignore());
 
     let answer = futures::executor::block_on(scheduler.spawn(async |_| 42))?;
     assert_eq!(answer, 42);

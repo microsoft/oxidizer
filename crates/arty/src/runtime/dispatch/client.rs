@@ -12,7 +12,7 @@ use performables::arc::Arc;
 use thread_aware::ThreadAware;
 
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
-use crate::runtime::hook::HookFactory;
+use crate::runtime::hook::HookRegistration;
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
@@ -119,8 +119,8 @@ impl DispatcherClient {
         self.core.access_io(worker_index, access)
     }
 
-    pub(crate) fn register_hook(&self, factory: HookFactory) -> Result<(), Error> {
-        self.core.register_hook(factory)
+    pub(crate) fn register_hook(&self, hook: HookRegistration) {
+        self.core.register_hook(hook);
     }
 
     #[cfg_attr(test, mutants::skip)] // Will cause tests to hang due to runtime never stopping.

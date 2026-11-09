@@ -5,6 +5,8 @@ use std::task::Poll;
 
 use thread_aware::{Thread, ThreadAware};
 
+use super::registry::TypedHook;
+
 /// Wraps each top-level poll of an async task.
 ///
 /// The handler runs on one async worker. Arty relocates it to that worker
@@ -35,6 +37,17 @@ pub struct OnSpawn {
 }
 
 impl OnSpawn {
+    pub(crate) fn new(thread: Thread) -> Self {
+        Self {
+            thread,
+            handlers: Vec::new(),
+        }
+    }
+
+    pub(crate) fn into_handlers(self) -> Vec<Box<dyn arty_executor::TaskPoll>> {
+        self.handlers
+    }
+
     /// Returns the coordinate of the worker that will own the task.
     #[must_use]
     pub fn thread(&self) -> &Thread {
@@ -56,5 +69,26 @@ struct TaskPollAdapter<H>(H);
 impl<H: TaskPoll> arty_executor::TaskPoll for TaskPollAdapter<H> {
     fn poll(&mut self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
         self.0.poll(task)
+    }
+}
+
+#[derive(Clone, derive_more::Debug)]
+pub(crate) struct SpawnHook(TypedHook<OnSpawn>);
+
+impl SpawnHook {
+    pub(crate) fn new<D>(data: D, callback: fn(&mut OnSpawn, &mut D)) -> Self
+    where
+        D: thread_aware::ThreadAware + Clone + 'static,
+    {
+        Self(TypedHook::new(data, callback))
+    }
+    pub(crate) fn execute(&mut self, event: &mut OnSpawn) {
+        self.0.execute(event);
+    }
+}
+
+impl ThreadAware for SpawnHook {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        self.0.relocate(source, destination);
     }
 }

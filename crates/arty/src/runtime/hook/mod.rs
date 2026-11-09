@@ -9,10 +9,9 @@
 //! Function pointers prevent hidden closure captures from bypassing
 //! [`ThreadAware`] relocation.
 //!
-//! Register hooks before startup with [`RuntimeBuilder::on`]. Register or
-//! replace hooks after startup with [`RuntimeControl::on`]. Each worker stores
-//! one callback for each event type. A later registration of the same event
-//! type replaces the earlier callback on that worker.
+//! Register hooks before startup with [`RuntimeBuilder::on`]. Add hooks after
+//! startup with [`RuntimeControl::on`]. Each worker stores one typed collection
+//! for each event. Arty invokes callbacks in registration order.
 //! Hook callbacks must not panic.
 //!
 //! ```
@@ -41,7 +40,7 @@ mod registry;
 pub use on_panic::OnPanic;
 pub use on_spawn::{OnSpawn, TaskPoll};
 pub use on_start::OnStart;
-pub(crate) use registry::{BlockingPanicHook, HookFactories, HookFactory, PanicAction, WorkerHook, WorkerHookSeed, WorkerHooks};
+pub(crate) use registry::{BlockingPanicHook, HookRegistration, Hooks, PanicAction};
 
 /// Marks an event that can be registered as a runtime hook.
 ///

@@ -107,13 +107,16 @@ fn spawn_hook_wraps_the_complete_task_poll_in_registration_order() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .on_with::<OnSpawn, _>(log.clone(), |event, log| {
-            log.push("spawn");
+            log.push("outer spawn");
             event.register(PollRecorder {
                 before: "outer before",
                 after: "outer after",
                 destination: None,
                 log: log.clone(),
             });
+        })
+        .on_with::<OnSpawn, _>(log.clone(), |event, log| {
+            log.push("inner spawn");
             event.register(PollRecorder {
                 before: "inner before",
                 after: "inner after",
@@ -134,7 +137,15 @@ fn spawn_hook_wraps_the_complete_task_poll_in_registration_order() {
 
     assert_eq!(
         log.take(),
-        ["spawn", "outer before", "inner before", "task", "inner after", "outer after",]
+        [
+            "outer spawn",
+            "inner spawn",
+            "outer before",
+            "inner before",
+            "task",
+            "inner after",
+            "outer after",
+        ]
     );
     runtime.stop().unwrap();
 }
@@ -343,7 +354,7 @@ impl ThreadAware for LateSpawnProbe {
 }
 
 #[test]
-fn control_registration_is_effective_on_every_worker_before_return() {
+fn control_registration_takes_priority_over_later_task_submissions() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     let (control, scheduler) = runtime
         .scheduler()
@@ -352,18 +363,16 @@ fn control_registration_is_effective_on_every_worker_before_return() {
     let calls = Arc::new(AtomicUsize::new(0));
     let destinations = Arc::new(Mutex::new(Vec::new()));
 
-    control
-        .on_with::<OnSpawn, _>(
-            LateSpawnProbe {
-                calls: Arc::clone(&calls),
-                destinations: Arc::clone(&destinations),
-            },
-            |event, probe| {
-                assert_eq!(event.thread().id(), thread::current().id());
-                probe.calls.fetch_add(1, Ordering::SeqCst);
-            },
-        )
-        .unwrap();
+    control.on_with::<OnSpawn, _>(
+        LateSpawnProbe {
+            calls: Arc::clone(&calls),
+            destinations: Arc::clone(&destinations),
+        },
+        |event, probe| {
+            assert_eq!(event.thread().id(), thread::current().id());
+            probe.calls.fetch_add(1, Ordering::SeqCst);
+        },
+    );
 
     let tasks: Vec<_> = control
         .workers()
@@ -424,11 +433,15 @@ fn panic_hook_covers_async_and_blocking_user_panics() {
 }
 
 #[test]
-fn control_can_replace_the_panic_response_after_startup() {
+fn control_appends_panic_hooks_in_registration_order() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
 
-    control.on::<OnPanic>(|event| event.ignore()).unwrap();
+    let order = SharedLog(Arc::new(Mutex::new(Vec::new())));
+    control.on_with::<OnPanic, _>(order.clone(), |event, order| {
+        order.push("ignore");
+        event.ignore();
+    });
     assert!(
         runtime
             .scheduler()
@@ -439,7 +452,12 @@ fn control_can_replace_the_panic_response_after_startup() {
     );
     assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap(), 42);
 
-    control.on::<OnPanic>(|event| event.shutdown()).unwrap();
+    assert_eq!(order.take(), ["ignore"]);
+
+    control.on_with::<OnPanic, _>(order.clone(), |event, order| {
+        order.push("shutdown");
+        event.shutdown();
+    });
     assert!(
         runtime
             .scheduler()
@@ -448,6 +466,7 @@ fn control_can_replace_the_panic_response_after_startup() {
             .unwrap_err()
             .is_panic()
     );
+    assert_eq!(order.take(), ["ignore", "shutdown"]);
     assert!(runtime.stop().is_err());
 }
 
@@ -457,11 +476,24 @@ fn late_start_registration_does_not_replay_worker_start() {
     let control = support::runtime_control(&runtime);
     let calls = Arc::new(AtomicUsize::new(0));
 
-    control
-        .on_with::<OnStart, _>(PanicCount(Arc::clone(&calls)), |_, count| {
-            count.0.fetch_add(1, Ordering::SeqCst);
-        })
-        .unwrap();
+    control.on_with::<OnStart, _>(PanicCount(Arc::clone(&calls)), |_, count| {
+        count.0.fetch_add(1, Ordering::SeqCst);
+    });
+
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn control_ignores_registration_after_shutdown_starts() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let control = support::runtime_control(&runtime);
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    control.request_stop();
+    control.on_with::<OnSpawn, _>(PanicCount(Arc::clone(&calls)), |_, count| {
+        count.0.fetch_add(1, Ordering::SeqCst);
+    });
 
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     runtime.stop().unwrap();
