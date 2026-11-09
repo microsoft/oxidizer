@@ -3,14 +3,15 @@
 
 use std::cell::RefCell;
 
-use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskSet};
+use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskOptions, TaskPlacement, TaskSet};
 use thread_aware::Thread;
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
-use crate::task::handle::JoinHandlePool;
+use crate::task::handle::{JoinHandle, JoinHandlePool};
+use crate::task::preparation::DeferredTaskFactory;
 
 thread_local! {
     static CURRENT: RefCell<Option<LocalWorker>> = const { RefCell::new(None) };
@@ -153,16 +154,20 @@ impl SchedulerContext {
         &self.thread
     }
 
-    pub(crate) fn context(&self) -> &Context {
-        &self.context
-    }
-
     pub(crate) fn tasks(&self) -> &TaskSet {
         &self.tasks
     }
 
-    pub(crate) fn results(&self) -> &JoinHandlePool {
-        &self.results
+    pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF, placement: TaskPlacement) -> JoinHandle<R>
+    where
+        FF: FnOnce(Context) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        let (handle, result_tx) = self.results.handle();
+        let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
+        self.tasks.add(inner, TaskOptions::new(placement), result_tx);
+        handle
     }
 }
 
