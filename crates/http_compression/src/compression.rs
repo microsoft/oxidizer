@@ -65,8 +65,8 @@ pub enum UnsupportedCompression {
 
     /// Fail with the `compression_unsupported` error label.
     ///
-    /// Use this policy when the caller requires a decompressed body. It prevents
-    /// the caller from parsing compressed bytes as payload.
+    /// This policy fails for a recognized compression format that is not
+    /// enabled. Unknown or invalid content codings still pass through unchanged.
     Fail,
 }
 
@@ -164,10 +164,11 @@ enum Role {
 /// Select the role with [`Compression::client`] or [`Compression::server`].
 /// Each transformation is off until you configure it.
 ///
-/// The layer compresses small buffered bodies before it passes the message to
-/// the inner handler. A compression error for such a body fails the handler
-/// call. Larger buffered bodies, streaming bodies, and decompression run when
-/// the body is read. Their data errors fail that body read.
+/// After the inner handler returns, the layer compresses small buffered
+/// response bodies before it returns the response to the caller. A compression
+/// error for such a body fails the handler call. Larger buffered bodies,
+/// streaming bodies, and decompression run when the body is read. Their data
+/// errors fail that body read.
 ///
 /// Apply its layer with [`Layer::layer`].
 #[derive(Debug)]
@@ -339,9 +340,9 @@ impl CompressionLayer<Server> {
     /// resolves equal quality values. Invalid members do not remove valid ones.
     ///
     /// For an eligible successful response with a complete, nonempty body, the
-    /// layer returns an empty `406 Not Acceptable` response if no content coding
-    /// is acceptable and the caller rejects `identity`. It does the same if an
-    /// existing `Content-Encoding` is not acceptable.
+    /// layer can return an empty `406 Not Acceptable` response. It does this if
+    /// no content coding is acceptable and the caller rejects `identity`. It
+    /// also does this if an existing `Content-Encoding` is not acceptable.
     ///
     /// `HEAD`, successful `CONNECT`, statuses that cannot carry a body,
     /// known-empty bodies, partial responses, and responses with `Content-Range`
@@ -962,8 +963,11 @@ impl Config {
 
     /// Resolves `Content-Encoding` to the formats to strip, in header order.
     ///
-    /// Returns `None` if the header is unreadable, invalid, or names a disabled
-    /// format. The caller then leaves the body and its headers unchanged.
+    /// Returns `None` if the header is unreadable or invalid. A disabled format
+    /// returns `None` under [`UnsupportedCompression::PassThrough`] and returns
+    /// `compression_unsupported` under [`UnsupportedCompression::Fail`]. When
+    /// this method returns `None`, the caller leaves the body and headers
+    /// unchanged.
     ///
     /// Decompression applies every coding or none. Partial decompression can
     /// require a rewritten `Content-Encoding`.

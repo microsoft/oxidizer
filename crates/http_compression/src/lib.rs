@@ -52,11 +52,12 @@
 //! decompress each sent part before the body ends.
 //!
 //! For an eligible successful response with a complete, nonempty body, the
-//! server layer returns an empty `406 Not Acceptable` response if no content
-//! coding is acceptable and the caller rejects `identity`. This also applies to
-//! an existing unacceptable `Content-Encoding`. `HEAD`, successful `CONNECT`,
-//! statuses that cannot carry a body, known-empty bodies, partial responses,
-//! and responses with `Content-Range` bypass this negotiation.
+//! server layer can return an empty `406 Not Acceptable` response. It does this
+//! if no content coding is acceptable and the caller rejects `identity`. It
+//! also does this for an existing unacceptable `Content-Encoding`. `HEAD`,
+//! successful `CONNECT`, statuses that cannot carry a body, known-empty bodies,
+//! partial responses, and responses with `Content-Range` bypass this
+//! negotiation.
 //!
 //! ```
 //! # #[cfg(feature = "gzip")] {
@@ -98,8 +99,8 @@
 //! [`limits`][CompressionLayer::limits] to change them. To remove them, use
 //! [`unbounded_output_len`][compressors::DecompressorLimits::unbounded_output_len] and
 //! [`unbounded_streams`][compressors::DecompressorLimits::unbounded_streams] methods.
-//! A decompressed message can contain at most 16 enabled compression coding
-//! layers. This limit is fixed.
+//! An encoded request or response can declare at most 16 enabled compression
+//! coding layers. This limit is fixed.
 //!
 //! # Errors
 //!
@@ -114,10 +115,11 @@
 //! |-------|---------------|
 //! | `compression_invalid` | The body was malformed for its declared compression format |
 //! | `compression_limit_exceeded` | The body exceeds a decompression or content-coding limit |
-//! | `compression_unsupported` | An unavailable format was seen under [`UnsupportedCompression::Fail`] |
+//! | `compression_unsupported` | A recognized but disabled format was seen under [`UnsupportedCompression::Fail`] |
 //!
-//! An invalid `Content-Encoding` is not an error. The crate leaves the body and
-//! its headers unchanged.
+//! An unknown or invalid `Content-Encoding` is not an error under either
+//! unsupported-format policy. The crate leaves the body and its headers
+//! unchanged.
 
 mod body;
 mod compression;
