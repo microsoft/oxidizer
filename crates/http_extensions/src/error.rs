@@ -121,9 +121,10 @@ pub struct HttpError {
     metadata: Option<Box<ErrorMetadata>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default, derive_more::Debug)]
 struct ErrorMetadata {
     // SyncHolder makes HttpError Sync when HttpRequest is not Sync.
+    #[debug(skip)]
     request: Option<SyncHolder<Box<HttpRequest>>>,
     status_code: Option<StatusCode>,
 }
