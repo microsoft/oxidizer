@@ -3,6 +3,8 @@
 
 //! Idle timeout behavior for streaming and transformed HTTP bodies.
 
+#![allow(clippy::unwrap_used, reason = "test code")]
+
 use std::cell::Cell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -102,7 +104,7 @@ fn transform_propagates_callback_errors() {
     for body in [builder.empty(), builder.text("source"), builder.body(PendingBody)] {
         let expected: HttpError = std::io::Error::other("map failed").into();
         let expected_label = expected.label().to_string();
-        let expected_message = expected.message().to_string();
+        let expected_message = expected.message().clone();
         let error = body.map(|_| Err(expected)).unwrap_err();
 
         assert_eq!(error.label().to_string(), expected_label);
@@ -137,10 +139,7 @@ fn mapping_starts_a_new_idle_period() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let timeout = Duration::from_millis(100);
-    let mut source = builder
-        .clone()
-        .with_options(HttpBodyOptions::new().timeout(timeout))
-        .body(PendingBody);
+    let mut source = builder.with_options(HttpBodyOptions::new().timeout(timeout)).body(PendingBody);
     let waker = futures::task::noop_waker();
     let mut cx = Context::from_waker(&waker);
 
@@ -376,7 +375,6 @@ fn stream_body_returns_data_before_timeout() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let chunks = vec![Ok(BytesView::copied_from_slice(b"streamed data", &builder))];
     let body = builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)))
         .stream(stream::iter(chunks));
 
@@ -388,7 +386,6 @@ fn stream_body_times_out_when_pending() {
     let clock = ClockControl::new().auto_advance_timers(true).to_clock();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
     let body = builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(100)))
         .stream(stream::pending());
 
@@ -402,7 +399,6 @@ fn body_timeout_chains_with_buffer_limit() {
     let clock = ClockControl::new().auto_advance_timers(true).to_clock();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(HttpBodyOptions::new().buffer_limit(1024));
     let body = builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)))
         .body(PendingBody);
 
@@ -435,7 +431,6 @@ fn size_hint_delegates_through_body_timeout() {
 fn is_end_stream_true_when_inner_is_empty() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &tick::Clock::new_frozen());
     let body = builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(1)))
         .body(http_body_util::Empty::new());
 
@@ -469,7 +464,6 @@ fn poll_frame_times_out_when_pending_with_short_timeout() {
     let clock = ClockControl::new().auto_advance_timers(true).to_clock();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
     let body = builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(1)))
         .body(PendingBody);
 
@@ -496,7 +490,6 @@ fn poll_frame_times_out_via_delay_when_inner_body_advances_clock() {
     let control = ClockControl::new();
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let body = builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(Duration::from_millis(100)))
         .body(ClockAdvancingBody { control, poll_count: 0 });
 
@@ -511,7 +504,6 @@ fn poll_frame_returns_error_after_timeout() {
     let timeout = Duration::from_millis(50);
     let dropped = Arc::new(AtomicBool::new(false));
     let mut body = builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(timeout))
         .body(DropObservedBody(Arc::clone(&dropped)));
     let waker = futures::task::noop_waker();
@@ -604,7 +596,6 @@ fn body_options_then_mapping_use_the_body_clock() {
     let timeout = Duration::from_millis(100);
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let mut body = builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(timeout))
         .body(PendingBody)
         .map(|_| Ok(Content::Streaming(StreamingBody::new(PendingBody))))
@@ -628,7 +619,6 @@ fn body_options_then_mapping_override_builder_defaults() {
         .with_options(HttpBodyOptions::new().timeout(Duration::from_secs(30)));
     let timeout = Duration::from_millis(100);
     let source = source_builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(timeout))
         .body(PendingBody);
     let waker = futures::task::noop_waker();
@@ -650,7 +640,6 @@ fn buffering_a_transformed_body_enforces_its_timeout() {
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let timeout = Duration::from_millis(100);
     let source = builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(timeout))
         .stream(stream::pending());
     let body = map_stream(
@@ -677,7 +666,6 @@ fn mapping_preserves_the_source_clock_across_multiple_maps() {
     let wrapper_control = ClockControl::new();
     let timeout = Duration::from_millis(100);
     let source = source_builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(timeout))
         .body(PendingBody);
     let waker = futures::task::noop_waker();

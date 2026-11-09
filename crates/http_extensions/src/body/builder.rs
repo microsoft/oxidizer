@@ -370,7 +370,7 @@ mod tests {
         let strict = HttpBodyOptions::default().buffer_limit(7).timeout(Duration::from_secs(3));
 
         // A streaming body carries its own policies through transformation.
-        let body = builder.clone().with_options(strict).stream(futures::stream::empty());
+        let body = builder.with_options(strict).stream(futures::stream::empty());
         let transformed = body.map(Ok).unwrap();
 
         assert_eq!(transformed.options(), strict);
@@ -382,7 +382,7 @@ mod tests {
         let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &control.to_clock())
             .with_options(HttpBodyOptions::default().timeout(Duration::from_secs(1)));
         let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
-        let source = builder.clone().with_options(options).stream(stream::pending());
+        let source = builder.with_options(options).stream(stream::pending());
         let mut body = pin!(source.map(Ok).unwrap());
         let waker = futures::task::noop_waker();
         let mut cx = Context::from_waker(&waker);
@@ -573,7 +573,7 @@ mod tests {
             .map(|c| Ok(BytesView::copied_from_slice(c, &builder)))
             .collect();
         let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let body = builder.clone().with_options(options).stream(stream::iter(chunks));
+        let body = builder.with_options(options).stream(stream::iter(chunks));
         assert_eq!(body.content_length(), None);
         let text = block_on(body.into_text()).unwrap();
         assert_eq!(text, "hello world");
@@ -667,10 +667,7 @@ mod tests {
 
         // Per-call options override the builder-level default.
         let per_call = HttpBodyOptions::default().timeout(Duration::from_secs(5));
-        let body = builder
-            .clone()
-            .with_options(per_call)
-            .stream(stream::iter(Vec::<Result<BytesView>>::new()));
+        let body = builder.with_options(per_call).stream(stream::iter(Vec::<Result<BytesView>>::new()));
         // The body uses the timeout from per_call.
         assert_eq!(body.content_length(), None);
     }

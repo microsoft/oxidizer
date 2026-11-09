@@ -114,7 +114,7 @@ pub(crate) struct RequestDriver<'body, 'contexts> {
     settings: RequestSettings,
     body: &'body mut HttpBody,
     body_framing: RequestBodyFraming,
-    body_options: HttpBodyOptions,
+    body_options: Option<HttpBodyOptions>,
 }
 
 impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
@@ -150,8 +150,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
         let body_options = request
             .extensions()
             .get::<BodyTimeout>()
-            .map(|timeout| HttpBodyOptions::default().timeout(timeout.duration()))
-            .unwrap_or_default();
+            .map(|timeout| HttpBodyOptions::new().timeout(timeout.duration()));
         let body = request.body_mut();
 
         Ok(Self {
@@ -267,11 +266,14 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
         };
 
         let reader = WinHttpBodyReader::new(guard, bindings, self.memory, declared_body_length(&headers));
-        let body = self
-            .body_builder
-            .clone()
-            .with_options(self.body_options)
-            .body(WinHttpResponseBody::new(reader));
+        let body = match self.body_options {
+            Some(options) => self
+                .body_builder
+                .clone()
+                .with_options(options)
+                .body(WinHttpResponseBody::new(reader)),
+            None => self.body_builder.body(WinHttpResponseBody::new(reader)),
+        };
         let mut response = HttpResponseBuilder::new(self.body_builder)
             .status(status)
             .version(version)

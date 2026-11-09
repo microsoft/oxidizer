@@ -403,12 +403,11 @@ impl HttpBody {
     pub fn into_buffered(self) -> impl Future<Output = Result<Self>> + Send {
         let options = self.options;
         match self.kind {
-            Kind::Bytes(Some(_)) => Either::Left(ready(Ok(self))),
+            Kind::Bytes(Some(_)) | Kind::Empty => Either::Left(ready(Ok(self))),
             Kind::Bytes(None) => Either::Left(ready(Err(HttpError::validation_with_label(
                 "body cannot be buffered because it is already consumed",
                 LABEL_BODY_CONSUMED,
             )))),
-            Kind::Empty => Either::Left(ready(Ok(self))),
             Kind::Body(..) => {
                 let clock = self.clock.clone();
                 Either::Right(

@@ -70,11 +70,7 @@ where
     fn execute(&self, mut input: HttpRequest) -> impl Future<Output = Result<HttpResponse>> + Send {
         let captured = capture_connection::<HttpBody>(&mut input);
 
-        let body_options = input
-            .extensions()
-            .get::<BodyTimeout>()
-            .map(|v| HttpBodyOptions::default().timeout(v.duration()))
-            .unwrap_or_default();
+        let body_timeout = input.extensions().get::<BodyTimeout>().map(BodyTimeout::duration);
 
         self.client
             .request(input)
@@ -88,7 +84,16 @@ where
 
                 handle_poisoning(&captured, &parts.extensions);
 
-                HttpResponse::from_parts(parts, self.body_builder.clone().with_options(body_options).body(body))
+                let body = match body_timeout {
+                    Some(timeout) => self
+                        .body_builder
+                        .clone()
+                        .with_options(HttpBodyOptions::new().timeout(timeout))
+                        .body(body),
+                    None => self.body_builder.body(body),
+                };
+
+                HttpResponse::from_parts(parts, body)
             })
     }
 }

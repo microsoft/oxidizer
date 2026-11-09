@@ -118,7 +118,11 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 pub struct HttpError {
     label: ErrorLabel,
     recovery: RecoveryInfo,
-    // The box keeps HttpError small.
+    metadata: Option<Box<ErrorMetadata>>,
+}
+
+#[derive(Debug, Default)]
+struct ErrorMetadata {
     // SyncHolder makes HttpError Sync when HttpRequest is not Sync.
     request: Option<SyncHolder<Box<HttpRequest>>>,
     status_code: Option<StatusCode>,
@@ -137,7 +141,7 @@ impl HttpError {
     /// The `label` accepts anything that implements `Into<ErrorLabel>`.
     /// See [`ErrorLabel`] docs for cardinality requirements.
     pub fn other(error: impl Into<Box<dyn std::error::Error + Send + Sync>>, recovery: RecoveryInfo, label: impl Into<ErrorLabel>) -> Self {
-        Self::caused_by(label, recovery, None, None, error)
+        Self::caused_by(label, recovery, None, error)
     }
 
     /// Wraps an error that implements [`Recovery`] in an [`HttpError`].
@@ -250,21 +254,21 @@ impl HttpError {
     /// Use the attached request for a later retry.
     #[must_use]
     pub fn with_request(mut self, request: HttpRequest) -> Self {
-        self.request = Some(SyncHolder::new(Box::new(request)));
+        self.metadata.get_or_insert_with(Default::default).request = Some(SyncHolder::new(Box::new(request)));
         self
     }
 
     /// Attaches an HTTP status code to this error.
     #[must_use]
     pub fn with_status_code(mut self, status_code: StatusCode) -> Self {
-        self.status_code = Some(status_code);
+        self.metadata.get_or_insert_with(Default::default).status_code = Some(status_code);
         self
     }
 
     /// Returns the attached HTTP status code, if any.
     #[must_use]
-    pub const fn status_code(&self) -> Option<StatusCode> {
-        self.status_code
+    pub fn status_code(&self) -> Option<StatusCode> {
+        self.metadata.as_ref().and_then(|metadata| metadata.status_code)
     }
 
     /// Extracts the HTTP request from this error, if any.
@@ -274,7 +278,10 @@ impl HttpError {
     /// method.
     #[must_use]
     pub fn take_request(&mut self) -> Option<HttpRequest> {
-        self.request.take().map(|holder| *holder.into_inner())
+        self.metadata
+            .as_mut()
+            .and_then(|metadata| metadata.request.take())
+            .map(|holder| *holder.into_inner())
     }
 
     /// Resolves the error label for pre-defined set of errors.

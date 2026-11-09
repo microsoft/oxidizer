@@ -104,7 +104,6 @@ fn starts_a_new_timeout_and_preserves_the_clock() {
     let timeout = Duration::from_millis(100);
     let builder = HttpBodyBuilder::new(GlobalPool::new(), &control.to_clock());
     let mut source = builder
-        .clone()
         .with_options(HttpBodyOptions::new().timeout(timeout))
         .stream(stream::pending());
     let waker = futures::task::noop_waker();
