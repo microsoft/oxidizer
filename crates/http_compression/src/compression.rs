@@ -169,9 +169,10 @@ enum Role {
 /// received, and a server cannot advertise `Accept-Encoding` on a request that
 /// is arriving rather than leaving.
 ///
-/// The layer compresses buffered bodies before it passes the message onward.
-/// Buffered compression errors fail the handler call.
-/// Decompression and streaming compression run as the body is polled, so their data errors fail the body read.
+/// The layer compresses small buffered bodies before it passes the message onward.
+/// Errors from small buffered compression fail the handler call.
+/// Larger buffered bodies, streaming bodies, and decompression run as the body is polled.
+/// Their data errors fail the body read.
 ///
 /// Apply its layer with [`Layer::layer`].
 #[derive(Debug)]

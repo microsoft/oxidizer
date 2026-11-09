@@ -103,7 +103,8 @@
 //!
 //! Small buffered compression sets `Content-Length` to the final byte count and removes `Transfer-Encoding`.
 //! Decompression and streaming compression remove `Content-Length` because the final size is not known yet.
-//! Buffered compression errors fail the handler call. Other data errors fail the body read.
+//! Small buffered compression errors fail the handler call.
+//! Larger buffered compression and other data errors fail the body read.
 //! Failures carry one of four labels:
 //!
 //! | Label | What happened |

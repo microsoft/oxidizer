@@ -365,7 +365,8 @@ fn streaming_body_converts_source_errors() {
     let mut body = StreamingBody::new(source);
     let error = body.frame().now_or_never().unwrap().unwrap().unwrap_err();
 
-    assert!(error.to_string().contains("stream failed"));
+    assert_eq!(error.message(), "stream failed");
+    assert_eq!(error.label(), "io");
     assert!(body.frame().now_or_never().unwrap().is_none());
 }
 
