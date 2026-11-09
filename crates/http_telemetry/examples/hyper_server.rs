@@ -42,7 +42,7 @@ use futures::{StreamExt, stream};
 use http::header::{CONTENT_TYPE, HOST};
 use http::{Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Empty};
-use http_extensions::{HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest};
+use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest};
 use http_telemetry::Telemetry;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -117,10 +117,6 @@ async fn read(response: hyper::Result<Response<Incoming>>, hang_up: bool) -> Str
 }
 
 #[tokio::main]
-#[expect(
-    clippy::too_many_lines,
-    reason = "the example runs its scenario from top to bottom in one function"
-)]
 async fn main() {
     let (sender, mut request_ends) = mpsc::unbounded();
     // The sink calls its processors in order, so each event is printed before its signal.
@@ -149,15 +145,14 @@ async fn main() {
         let response = match (request.method(), route) {
             (&Method::GET, Some("")) => json.body(bodies.text(r#"{"title":"Dune"}"#)),
             // One chunk, and then the body waits until the client hangs up.
-            (&Method::GET, Some("chapters")) => json.body(bodies.stream(
-                stream::iter([chunk(r#"{"chapter":1}"#)]).chain(stream::pending()),
-                &HttpBodyOptions::new(),
-            )),
+            (&Method::GET, Some("chapters")) => {
+                json.body(bodies.stream(stream::iter([chunk(r#"{"chapter":1}"#)]).chain(stream::pending())))
+            }
             // One chunk, and then the body fails.
-            (&Method::GET, Some("pages")) => json.body(bodies.stream(
-                stream::iter([chunk(r#"{"page":1}"#), Err(HttpError::validation("the page is missing"))]),
-                &HttpBodyOptions::new(),
-            )),
+            (&Method::GET, Some("pages")) => json.body(bodies.stream(stream::iter([
+                chunk(r#"{"page":1}"#),
+                Err(HttpError::validation("the page is missing")),
+            ]))),
             (&Method::GET, None) if request.uri().path() == HEALTH_PATH => Response::builder().body(bodies.empty()),
             _ => Response::builder().status(StatusCode::NOT_FOUND).body(bodies.empty()),
         }
@@ -182,7 +177,7 @@ async fn main() {
                         let body = body
                             .map_frame(|frame| frame.map_data(BytesView::from))
                             .map_err(|error| HttpError::from(io::Error::other(error)));
-                        body_builder.body(body, &HttpBodyOptions::new())
+                        body_builder.body(body)
                     });
                     let service = Arc::clone(&service);
                     async move { service.execute(request).await }
