@@ -200,7 +200,8 @@ fn body_transform_preserves_the_buffer_limit() {
         .map(Ok)
         .unwrap();
     let error = block_on(body.into_bytes()).unwrap_err();
-    assert!(error.to_string().contains("body size exceeds the limit of 3 bytes"));
+    assert_eq!(error.label(), "body_size_limit");
+    assert_eq!(error.message(), "body size exceeds the limit of 3 bytes");
 }
 
 #[test]
@@ -263,7 +264,8 @@ fn policies_survive_buffering_cloning_and_buffered_transformations() {
         })
         .unwrap();
     let error = block_on(expanded.into_buffered()).unwrap_err();
-    assert!(error.to_string().contains("body size exceeds the limit of 3 bytes"));
+    assert_eq!(error.label(), "body_size_limit");
+    assert_eq!(error.message(), "body size exceeds the limit of 3 bytes");
 }
 
 #[test]
