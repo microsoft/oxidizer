@@ -11,39 +11,6 @@ use std::error::Error as StdError;
 use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, WorkersPolicy};
 
 #[test]
-#[cfg(any(not(feature = "monitor"), feature = "test-util"))]
-fn monitor_policy_defaults_to_enabled() {
-    let policy = MonitorPolicy::default();
-    #[cfg(feature = "monitor")]
-    let policy = policy.io(seismograph_protocol::io::MonitorIo::new_mocked().0);
-    let runtime = Runtime::builder()
-        .workers(WorkersPolicy::exactly(1))
-        .monitor(policy)
-        .build()
-        .unwrap();
-
-    assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
-    runtime.stop().unwrap();
-}
-
-#[test]
-#[cfg(any(not(feature = "monitor"), feature = "test-util"))]
-fn explicit_monitor_policies_preserve_runtime_behavior() {
-    for policy in [MonitorPolicy::disabled(), MonitorPolicy::enabled()] {
-        #[cfg(feature = "monitor")]
-        let policy = policy.io(seismograph_protocol::io::MonitorIo::new_mocked().0);
-        let runtime = Runtime::builder()
-            .workers(WorkersPolicy::exactly(1))
-            .monitor(policy)
-            .build()
-            .unwrap();
-
-        assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
-        runtime.stop().unwrap();
-    }
-}
-
-#[test]
 fn default_runtime_construction_uses_one_worker() {
     for runtime in [
         #[cfg(not(feature = "monitor"))]

@@ -761,6 +761,98 @@ mod tests {
         assert!(!worker.monitor_options.policy().is_enabled());
     }
 
+    #[cfg(all(feature = "monitor", feature = "test-util", not(miri)))]
+    #[test]
+    fn monitoring_cycles_only_park_when_waiting_and_leave_idle_polls_unobserved() {
+        use seismograph_runtime::RuntimeHandle;
+        use seismograph_runtime::snapshot::{CaptureOptions, WorkerState};
+
+        #[derive(Clone)]
+        struct ProbeContext(RuntimeHandle, Arc<std::sync::Mutex<Vec<WorkerState>>>);
+
+        impl ThreadAware for ProbeContext {
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+        }
+
+        impl IoContext for ProbeContext {
+            type ContextOptions = Self;
+            type Driver = Self;
+
+            fn context(options: Self) -> Self {
+                options
+            }
+
+            fn driver(&mut self, _options: DriverOptions) -> Result<Self, DriverError> {
+                Ok(self.clone())
+            }
+        }
+
+        impl Driver for ProbeContext {
+            fn waker(&self) -> Waker {
+                Waker::noop().clone()
+            }
+
+            fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+                let snapshot = self.0.capture_with_timeout(CaptureOptions::default()).unwrap();
+                self.1.lock().unwrap().push(snapshot.workers[0].state);
+                Ok(())
+            }
+
+            fn shutdown(self) -> Result<(), DriverError> {
+                Ok(())
+            }
+        }
+
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("cycle-observation", 1));
+        let mut options = MonitorOptions::default();
+        options.set_runtime(Some(runtime.handle()));
+        let (command_tx, command_rx) = channel::unbounded();
+        let mut worker = test_worker_with_monitor_options(
+            command_tx.clone(),
+            command_rx,
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::new(Signal::default()),
+            options,
+        );
+        let polled = std::rc::Rc::new(std::cell::Cell::new(false));
+        let completed = std::rc::Rc::clone(&polled);
+        crate::runtime::monitoring::add_task::<(), _, _, _>(
+            &worker.tasks,
+            async move {
+                assert_eq!(crate::runtime::monitoring::current_task(), None);
+                completed.set(true);
+            },
+            TaskOptions::default(),
+            DiscardCompletion,
+        );
+        seismograph::recorder::without_recording(|| {
+            worker.prepare_cycle();
+        });
+        assert!(polled.get());
+
+        let states = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let _io = worker
+            .context
+            .as_ref()
+            .unwrap()
+            .io()
+            .context::<ProbeContext>(&ProbeContext(runtime.handle(), Arc::clone(&states)));
+        assert!(worker.execute_step().is_continue());
+        assert_eq!(
+            runtime.handle().capture_with_timeout(CaptureOptions::default()).unwrap().workers[0].state,
+            WorkerState::Running
+        );
+        for _ in 0..COMMANDS_PER_CYCLE {
+            command_tx.send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+        }
+        assert!(worker.execute_step().is_continue());
+
+        assert_eq!(*states.lock().unwrap(), vec![WorkerState::Parked, WorkerState::Running]);
+        command_tx.send(Command::Shutdown).unwrap();
+        worker.run();
+    }
+
     #[cfg(not(miri))]
     #[test]
     fn worker_without_primary_waits_for_timer_or_notification() {

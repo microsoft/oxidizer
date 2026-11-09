@@ -45,16 +45,11 @@ impl WorkerDiagnostics {
             return;
         }
         let mut tasks = Vec::new();
-        let status = match executor.inspect(request.limit(), |description: &Description| {
+        let status = collection_status(executor.inspect(request.limit(), |description: &Description| {
             if let Description::Snapshot(task) = description {
                 tasks.push(task.clone());
             }
-        }) {
-            Ok(InspectionStatus::Complete) => TaskCollection::Complete,
-            Ok(InspectionStatus::Truncated) => TaskCollection::Truncated,
-            Err(InspectionError::Busy) => TaskCollection::Busy,
-            Err(InspectionError::InvalidLimit | InspectionError::Panicked) => TaskCollection::Failed,
-        };
+        }));
         let status = if self.failed.replace(false) {
             TaskCollection::Failed
         } else {
@@ -98,5 +93,121 @@ impl Drop for WorkerDiagnostics {
     fn drop(&mut self) {
         set_current(None);
         set_events(None);
+    }
+}
+
+fn collection_status(result: Result<InspectionStatus, InspectionError>) -> TaskCollection {
+    match result {
+        Ok(InspectionStatus::Complete) => TaskCollection::Complete,
+        Ok(InspectionStatus::Truncated) => TaskCollection::Truncated,
+        Err(InspectionError::Busy) => TaskCollection::Busy,
+        Err(InspectionError::InvalidLimit | InspectionError::Panicked) => TaskCollection::Failed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(all(feature = "test-util", not(miri)))]
+    use std::sync::mpsc;
+
+    use super::*;
+
+    #[test]
+    fn inspection_outcomes_preserve_completeness_and_failure() {
+        assert_eq!(
+            [
+                Ok(InspectionStatus::Complete),
+                Ok(InspectionStatus::Truncated),
+                Err(InspectionError::Busy),
+                Err(InspectionError::InvalidLimit),
+                Err(InspectionError::Panicked),
+            ]
+            .map(collection_status),
+            [
+                TaskCollection::Complete,
+                TaskCollection::Truncated,
+                TaskCollection::Busy,
+                TaskCollection::Failed,
+                TaskCollection::Failed,
+            ]
+        );
+    }
+
+    #[cfg(all(feature = "test-util", not(miri)))]
+    #[test]
+    fn worker_bridge_preserves_demand_failures_and_thread_local_lifecycle() {
+        use seismograph_runtime::RuntimeMetadata;
+        use seismograph_runtime::snapshot::{CaptureOptions, WorkerState};
+        use testing_aids::TEST_TIMEOUT;
+
+        use crate::runtime::monitoring::task::{current_events, current_task};
+
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("worker-bridge", 1));
+        let thread = thread_aware::ThreadBuilder::default().build(std::thread::current().id());
+        let dispatcher = DispatcherClient::for_test(&thread);
+        let diagnostics = WorkerDiagnostics::new(&runtime.handle(), &dispatcher, &thread);
+        let (sender, receiver) = mpsc::channel();
+        diagnostics
+            .handle
+            .register_task_provider(move |request| sender.send(request).unwrap())
+            .unwrap();
+        let mut executor = Executor::builder().build();
+        let capture = |executor: &mut Executor| {
+            std::thread::scope(|scope| {
+                let handle = runtime.handle();
+                let captured = scope.spawn(move || {
+                    handle
+                        .capture(CaptureOptions {
+                            timeout: TEST_TIMEOUT.min(std::time::Duration::from_secs(5)),
+                            ..CaptureOptions::default()
+                        })
+                        .unwrap()
+                });
+                let request = receiver.recv_timeout(TEST_TIMEOUT).unwrap();
+                assert!(diagnostics.is_observed());
+                diagnostics.collect(executor, request);
+                captured.join().unwrap()
+            })
+        };
+
+        assert!(current_events().is_some());
+        assert!(!seismograph::recorder::without_recording(|| diagnostics.is_observed()));
+        let completion = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
+        let (_handle, sender) = completion.handle();
+        crate::runtime::monitoring::add_task::<(), _, _, _>(
+            &executor.tasks(),
+            std::future::pending::<()>(),
+            arty_executor::TaskOptions::default(),
+            sender,
+        );
+        assert_eq!(
+            capture(&mut executor).tasks[0].activity.unwrap().state,
+            seismograph_runtime::snapshot::TaskActivityState::Ready
+        );
+        diagnostics.parked();
+        assert_eq!(capture(&mut executor).workers[0].state, WorkerState::Parked);
+        diagnostics.unparked();
+        assert_eq!(capture(&mut executor).workers[0].state, WorkerState::Running);
+
+        diagnostics.inspection_failed(InspectionError::Panicked);
+        assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Failed);
+        assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Complete);
+        diagnostics.poll_started(&());
+        diagnostics.poll_finished(false);
+        assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Failed);
+
+        let task = seismograph_runtime::allocate_task_id();
+        diagnostics.poll_started(&Description::Poll(task));
+        assert_eq!(current_task(), Some(task));
+        diagnostics.poll_finished(false);
+        assert_eq!(current_task(), None);
+        diagnostics.poll_started(&Description::Poll(task));
+        drop(diagnostics);
+        assert_eq!(current_task(), None);
+        assert!(current_events().is_none());
+        assert_eq!(
+            runtime.handle().capture(CaptureOptions::default()).unwrap().workers[0].state,
+            WorkerState::Stopped
+        );
     }
 }

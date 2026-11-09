@@ -22,6 +22,85 @@ pub(super) struct QueuedJob {
     pub(super) info: Option<Arc<TaskInfo>>,
 }
 
+#[cfg(all(test, feature = "monitor", feature = "test-util"))]
+mod tests {
+    use seismograph_runtime::RuntimeMetadata;
+    use seismograph_runtime::snapshot::{CaptureOptions, TaskActivityState, TaskCollection, WorkerState};
+    use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+
+    use super::*;
+
+    #[test]
+    fn blocking_slots_finish_and_retire_without_retaining_a_running_task() {
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-slots", 1));
+        let queue = Arc::new(Queue::default());
+        let index = queue.add_worker();
+        queue.enable_monitoring(&runtime.handle());
+        queue.enable_monitoring(&runtime.handle());
+        let info = Arc::new(TaskInfo::new::<()>(*queue.events.get().unwrap()));
+        assert!(queue.push(QueuedJob {
+            body: Box::new(|| {}),
+            shutdown: None,
+            info: Some(Arc::clone(&info)),
+        }));
+        let mut worker = None;
+        let job = queue.pop(index, &mut worker).unwrap();
+        let active = runtime.handle().capture(CaptureOptions::default()).unwrap();
+
+        queue.finish(index);
+        let finished = runtime.handle().capture(CaptureOptions::default()).unwrap();
+        queue.retire(index);
+        let retired = runtime.handle().capture(CaptureOptions::default()).unwrap();
+        drop(job);
+
+        assert_eq!(active.tasks.len(), 1);
+        assert_eq!(active.tasks[0].id, info.id());
+        assert_eq!(active.tasks[0].activity.unwrap().state, TaskActivityState::Running);
+        assert!(finished.tasks.is_empty());
+        assert!(retired.tasks.is_empty());
+        assert_eq!(retired.workers[0].state, WorkerState::Stopped);
+    }
+
+    #[test]
+    fn blocking_collection_handles_missing_metadata_limits_and_canceled_requests() {
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-limits", 1));
+        let queue = Arc::new(Queue::default());
+        queue.add_worker();
+        queue.enable_monitoring(&runtime.handle());
+        for info in [None, Some(Arc::new(TaskInfo::new::<()>(*queue.events.get().unwrap())))] {
+            assert!(queue.push(QueuedJob {
+                body: Box::new(|| {}),
+                shutdown: None,
+                info,
+            }));
+        }
+        let truncated = runtime
+            .handle()
+            .capture(CaptureOptions {
+                limit_per_worker: 1,
+                ..CaptureOptions::default()
+            })
+            .unwrap();
+        let complete = runtime.handle().capture(CaptureOptions::default()).unwrap();
+
+        let source = seismograph_runtime::register_runtime(RuntimeMetadata::new("canceled-blocking-request", 1));
+        let worker = source.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        worker
+            .handle()
+            .register_task_provider(move |request| sender.send(request).unwrap())
+            .unwrap();
+        source.handle().capture_with_timeout(CaptureOptions::default()).unwrap();
+        queue.collect(0, receiver.try_recv().unwrap());
+
+        assert!(truncated.tasks.is_empty());
+        assert_eq!(truncated.workers[0].task_collection, TaskCollection::Truncated);
+        assert_eq!(complete.tasks.len(), 1);
+        assert_eq!(complete.tasks[0].activity.unwrap().state, TaskActivityState::Ready);
+        assert_eq!(complete.workers[0].task_collection, TaskCollection::Complete);
+    }
+}
+
 #[derive(Default)]
 struct WorkerSlot {
     #[cfg(feature = "monitor")]

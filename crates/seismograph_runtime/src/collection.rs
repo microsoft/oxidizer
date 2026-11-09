@@ -326,6 +326,31 @@ mod tests {
         )
     }
 
+    #[cfg(feature = "test-util")]
+    #[test]
+    fn forced_timeout_marks_an_unanswered_worker_without_waiting() {
+        let runtime = register_runtime(RuntimeMetadata::new("forced-timeout", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let (sender, receiver) = mpsc::channel();
+        worker
+            .handle()
+            .register_task_provider(move |request| sender.send(request).unwrap())
+            .unwrap();
+
+        let captured = runtime
+            .handle()
+            .capture_with_timeout(CaptureOptions {
+                measure_for: Duration::from_secs(1),
+                ..CaptureOptions::default()
+            })
+            .unwrap();
+        let request = receiver.try_recv().unwrap();
+
+        assert_eq!(captured.workers[0].task_collection, TaskCollection::TimedOut);
+        assert!(request.is_canceled());
+        assert!(!worker.handle().is_observed());
+    }
+
     #[test]
     fn a_poll_from_a_finished_window_cannot_enter_the_next_window() {
         let runtime = register_runtime(RuntimeMetadata::new("measurement-window", 1));

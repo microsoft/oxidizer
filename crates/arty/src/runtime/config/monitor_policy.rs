@@ -27,20 +27,13 @@
 pub struct MonitorPolicy {
     enabled: bool,
     name: Option<String>,
-    #[cfg(feature = "monitor")]
-    io: Option<seismograph_protocol::io::MonitorIo>,
 }
 
 impl MonitorPolicy {
     /// Creates a policy with monitoring enabled in the runtime configuration.
     #[must_use]
     pub const fn enabled() -> Self {
-        Self {
-            enabled: true,
-            name: None,
-            #[cfg(feature = "monitor")]
-            io: None,
-        }
+        Self { enabled: true, name: None }
     }
 
     /// Creates a policy with monitoring disabled in the runtime configuration.
@@ -49,8 +42,6 @@ impl MonitorPolicy {
         Self {
             enabled: false,
             name: None,
-            #[cfg(feature = "monitor")]
-            io: None,
         }
     }
 
@@ -63,16 +54,6 @@ impl MonitorPolicy {
         self
     }
 
-    /// Selects isolated monitor I/O for tests.
-    ///
-    /// This does not change the process-wide recorder or runtime source.
-    #[cfg(all(feature = "monitor", any(test, feature = "test-util")))]
-    #[must_use]
-    pub fn io(mut self, io: seismograph_protocol::io::MonitorIo) -> Self {
-        self.io = Some(io);
-        self
-    }
-
     pub(crate) const fn is_enabled(&self) -> bool {
         self.enabled
     }
@@ -80,15 +61,6 @@ impl MonitorPolicy {
     #[cfg(feature = "monitor")]
     pub(crate) fn runtime_name(&self) -> &str {
         self.name.as_deref().unwrap_or("arty")
-    }
-
-    #[cfg(feature = "monitor")]
-    pub(crate) fn monitor_io(&self) -> Option<seismograph_protocol::io::MonitorIo> {
-        #[cfg(all(miri, any(test, feature = "test-util")))]
-        if self.io.is_none() {
-            return Some(seismograph_protocol::io::MonitorIo::new_mocked().0);
-        }
-        self.io.clone()
     }
 }
 

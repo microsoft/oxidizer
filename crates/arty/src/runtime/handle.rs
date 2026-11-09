@@ -145,9 +145,9 @@ impl Runtime {
     /// Returns `None` when monitoring is disabled. Capture from a diagnostic
     /// thread, not from an Arty worker that must answer the collection request.
     /// This does not change the process-wide recorder.
-    #[cfg(all(feature = "monitor", any(test, feature = "test-util")))]
+    #[cfg(all(feature = "monitor", test, not(miri)))]
     #[must_use]
-    pub fn diagnostics(&self) -> Option<seismograph_runtime::RuntimeHandle> {
+    pub(crate) fn diagnostics(&self) -> Option<seismograph_runtime::RuntimeHandle> {
         self.diagnostics
             .as_ref()
             .map(crate::runtime::monitoring::RuntimeDiagnostics::handle)

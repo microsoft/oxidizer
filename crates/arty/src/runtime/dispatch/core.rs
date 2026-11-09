@@ -555,6 +555,27 @@ mod tests {
         assert_eq!(drain_rx(&worker2_rx).len(), 0);
     }
 
+    #[cfg(feature = "monitor")]
+    #[test]
+    fn dispatcher_stop_updates_its_registered_runtime() {
+        use seismograph_runtime::snapshot::{CaptureOptions, RuntimeState};
+
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("dispatcher-stop", 1));
+        let (worker_tx, _worker_rx) = channel::unbounded();
+        let threads = test_threads(1);
+        let core = DispatcherCore::new(NonEmpty::new(endpoint(worker_tx, &threads[0])), Shutdown::default());
+        let client = DispatcherClient::new(core);
+        client.set_diagnostics(None);
+        client.set_diagnostics(Some(runtime.handle()));
+
+        client.stop(ShutdownCause::default());
+
+        assert_eq!(
+            runtime.handle().capture(CaptureOptions::default()).unwrap().state,
+            RuntimeState::Stopping
+        );
+    }
+
     #[test]
     fn spawn_after_command_channel_closed_returns_disconnected_join_handle() {
         // After a worker closes its command channel during shutdown, later

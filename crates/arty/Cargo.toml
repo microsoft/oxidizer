@@ -21,8 +21,6 @@ allowed_external_types = [
     "arty_io_core::io_context::IoContext",
     "arty_macros::main",
     "arty_macros::test",
-    "seismograph_protocol::io::MonitorIo",
-    "seismograph_runtime::RuntimeHandle",
     "thread_aware_core::thread::NumaNode",
     "thread_aware_core::thread::Owner",
     "thread_aware_core::thread::Thread",
@@ -40,7 +38,6 @@ default = ["rt", "macros", "monitor"]
 macros = ["rt", "dep:arty_macros"]
 monitor = [
     "dep:seismograph",
-    "dep:seismograph_protocol",
     "dep:seismograph_runtime",
     "arty_executor?/inspection",
     "seismograph/monitor",
@@ -62,7 +59,7 @@ rt = [
     "dep:plurality",
     "dep:thread_aware",
 ]
-test-util = ["tick/test-util", "many_cpus?/test-util", "seismograph_protocol?/test-util", "seismograph_runtime?/test-util"]
+test-util = ["tick/test-util", "many_cpus?/test-util"]
 
 [dependencies]
 arty_executor = { workspace = true, optional = true }
@@ -81,7 +78,6 @@ performables = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 plurality = { workspace = true, features = ["std"], optional = true }
 seismograph = { workspace = true, optional = true }
-seismograph_protocol = { workspace = true, optional = true }
 seismograph_runtime = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }

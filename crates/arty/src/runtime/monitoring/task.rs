@@ -327,4 +327,27 @@ mod tests {
         #[cfg(target_pointer_width = "64")]
         assert_eq!(size_of::<AsyncTaskInfo>(), 56);
     }
+
+    #[test]
+    fn absent_worker_events_preserve_plain_task_execution() {
+        super::set_events(None);
+        let mut executor = arty_executor::Executor::builder().build();
+        let ran = std::rc::Rc::new(std::cell::Cell::new(false));
+        let completed = std::rc::Rc::clone(&ran);
+        let future = async move { completed.set(true) };
+        let completion = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
+        let (_handle, sender) = completion.handle();
+
+        super::add_task_with_metadata::<(), _, _, _, _>(
+            &executor.tasks(),
+            future,
+            arty_executor::TaskOptions::default(),
+            sender,
+            None,
+            || 0,
+        );
+        let _ = executor.execute_cycle();
+
+        assert!(ran.get());
+    }
 }

@@ -3,12 +3,7 @@
 
 //! Arty supplies native task state independently of event recording.
 
-// Collection uses real worker-response deadlines. Native and careful tests cover
-// this integration; the executor retains direct storage coverage under Miri.
-#![cfg(all(feature = "rt", feature = "monitor", feature = "test-util", not(miri)))]
 #![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
-
-mod support;
 
 use std::future::{pending, poll_fn};
 use std::pin::Pin;
@@ -16,22 +11,17 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, mpsc};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use arty::runtime::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, Runtime, WorkersPolicy};
-use seismograph::recorder::event::{EventClass, EventKind};
+use seismograph::recorder::event::EventKind;
 use seismograph::recorder::{Configuration, Policy};
 use seismograph::snapshot::SnapshotOptions;
-use seismograph_protocol::discovery::Directory;
-use seismograph_protocol::io::{IoOperation, MonitorIo};
-use seismograph_protocol::message::{RecordingConfiguration, RecordingPolicy, Request, Response};
-use seismograph_protocol::transport::Connection;
-use seismograph_protocol::{read_response, write_request};
 use seismograph_runtime::snapshot::{
     CaptureOptions, Runtime as RuntimeSnapshot, RuntimeState, TaskActivityState, TaskCollection, TaskMetricsScope,
 };
 use seismograph_runtime::worker::WorkerRole;
-use support::JoinHandleExt as _;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
+
+use crate::runtime::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, Runtime, WorkersPolicy};
 
 static RECORDING: Mutex<()> = Mutex::new(());
 
@@ -53,11 +43,11 @@ impl Drop for RecorderGuard {
     }
 }
 
-fn runtime(name: &str, io: &MonitorIo) -> Runtime {
+fn runtime(name: &str) -> Runtime {
     Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .monitor(MonitorPolicy::enabled().name(name).io(io.clone()))
+        .monitor(MonitorPolicy::enabled().name(name))
         .panic(PanicPolicy::ignore())
         .build()
         .unwrap()
@@ -86,23 +76,42 @@ fn capture(runtime: &Runtime) -> RuntimeSnapshot {
         .unwrap()
 }
 
-fn names(io: &MonitorIo) -> Vec<String> {
-    let directory = Directory::current(io).unwrap();
-    let mut names = directory
-        .descriptors()
-        .unwrap()
-        .map(|descriptor| descriptor.unwrap().name)
-        .collect::<Vec<_>>();
-    names.sort();
-    names
+#[test]
+fn monitor_policy_defaults_to_enabled() {
+    let _recording = RecorderGuard::new();
+    let runtime = Runtime::new().unwrap();
+    let diagnostics = runtime.diagnostics().unwrap();
+    let workers = runtime
+        .scheduler()
+        .block_on(async |cx| cx.control().workers().into_iter().count())
+        .unwrap();
+    let active = diagnostics.capture(CaptureOptions::default()).unwrap().state;
+    runtime.stop().unwrap();
+    let stopped = runtimes().into_iter().find(|runtime| runtime.id == diagnostics.id()).unwrap().state;
+
+    assert_eq!((workers, active, stopped), (1, RuntimeState::Running, RuntimeState::Stopped));
 }
 
 #[test]
-fn disabled_monitoring_registers_no_runtime_or_endpoint() {
+fn explicit_monitor_policies_preserve_runtime_behavior() {
     let _recording = RecorderGuard::new();
-    let (io, _) = MonitorIo::new_mocked();
+    for policy in [MonitorPolicy::disabled(), MonitorPolicy::enabled()] {
+        let runtime = Runtime::builder()
+            .workers(WorkersPolicy::exactly(1))
+            .monitor(policy)
+            .build()
+            .unwrap();
+
+        assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
+        runtime.stop().unwrap();
+    }
+}
+
+#[test]
+fn disabled_monitoring_registers_no_runtime() {
+    let _recording = RecorderGuard::new();
     let runtime = Runtime::builder()
-        .monitor(MonitorPolicy::disabled().name("disabled-monitor").io(io.clone()))
+        .monitor(MonitorPolicy::disabled().name("disabled-monitor"))
         .build()
         .unwrap();
 
@@ -110,14 +119,13 @@ fn disabled_monitoring_registers_no_runtime_or_endpoint() {
     let registered = runtimes().iter().any(|runtime| runtime.name == "disabled-monitor");
     runtime.stop().unwrap();
 
-    assert_eq!((value, registered, names(&io)), (42, false, Vec::new()));
+    assert_eq!((value, registered), (42, false));
 }
 
 #[test]
 fn local_and_remote_tasks_are_collected_without_recording() {
     let _recording = RecorderGuard::new();
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("native-tasks", &io);
+    let runtime = runtime("native-tasks");
     let (started, ready) = mpsc::channel();
     let parent = runtime
         .scheduler()
@@ -169,8 +177,7 @@ fn local_and_remote_tasks_are_collected_without_recording() {
 #[test]
 fn task_identity_survives_repeated_collection_and_recording_changes() {
     let _recording = RecorderGuard::new();
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("stable-identities", &io);
+    let runtime = runtime("stable-identities");
     let (started, ready) = mpsc::channel();
     let task = runtime.scheduler().spawn_anywhere(Unaware(started), |_, Unaware(started)| {
         let mut started = Some(started);
@@ -218,8 +225,7 @@ fn task_identity_survives_repeated_collection_and_recording_changes() {
 #[test]
 fn queued_and_running_blocking_tasks_come_from_native_pool_storage() {
     let _recording = RecorderGuard::new();
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("blocking-tasks", &io);
+    let runtime = runtime("blocking-tasks");
     let (started, ready) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let first = runtime.scheduler().spawn_blocking(move || {
@@ -263,8 +269,7 @@ fn draining_queued_blocking_tasks_does_not_report_worker_resumes() {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("blocking-queue-resumes", &io);
+    let runtime = runtime("blocking-queue-resumes");
     let (started, ready) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let first = runtime.scheduler().spawn_blocking(move || {
@@ -322,8 +327,7 @@ fn draining_queued_blocking_tasks_does_not_report_worker_resumes() {
 #[test]
 fn stopped_runtime_does_not_record_new_blocking_tasks() {
     let _recording = RecorderGuard::new();
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("stopped-blocking-submission", &io);
+    let runtime = runtime("stopped-blocking-submission");
     let id = runtime.diagnostics().unwrap().id();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     runtime.stop().unwrap();
@@ -349,10 +353,9 @@ fn recording_enabled_during_blocking_execution_reports_real_outcomes() {
     let _recording = RecorderGuard::new();
     for (panics, stops) in [(false, false), (true, false), (false, true)] {
         seismograph::recorder(Configuration::default());
-        let (io, _) = MonitorIo::new_mocked();
-        let runtime = runtime("late-blocking-recording", &io);
+        let runtime = runtime("late-blocking-recording");
         let id = runtime.diagnostics().unwrap().id();
-        let control = support::runtime_control(&runtime);
+        let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
         let (started, ready) = mpsc::channel();
         let (release, released) = mpsc::channel();
         let running = runtime.scheduler().spawn_blocking(move || {
@@ -420,10 +423,9 @@ fn recording_enabled_during_an_async_poll_reports_real_outcomes() {
     let _recording = RecorderGuard::new();
     for (panics, stops) in [(false, false), (true, false), (false, true)] {
         seismograph::recorder(Configuration::default());
-        let (io, _) = MonitorIo::new_mocked();
-        let runtime = runtime("late-async-recording", &io);
+        let runtime = runtime("late-async-recording");
         let id = runtime.diagnostics().unwrap().id();
-        let control = support::runtime_control(&runtime);
+        let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
         let (started, ready) = mpsc::channel();
         let (release, released) = mpsc::channel();
         let running = runtime.scheduler().spawn_anywhere(
@@ -488,8 +490,7 @@ fn recording_reports_real_async_and_blocking_outcomes() {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("recorded-outcomes", &io);
+    let runtime = runtime("recorded-outcomes");
     let id = runtime.diagnostics().unwrap().id();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let completed = scheduler.spawn(async |_| 42);
@@ -565,8 +566,7 @@ fn native_tasks_reuse_their_recorded_spawn_timestamp_and_identity() {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("coherent-spawn-metadata", &io);
+    let runtime = runtime("coherent-spawn-metadata");
     let (started, ready) = mpsc::channel();
     let asynchronous = runtime
         .scheduler()
@@ -647,8 +647,7 @@ fn async_task_sizes_precede_wrapping_and_erasure() {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("original-body-sizes", &io);
+    let runtime = runtime("original-body-sizes");
     let (scheduler, destination) = runtime
         .scheduler()
         .block_on(async |cx| (cx.scheduler().clone(), cx.thread().clone()))
@@ -717,10 +716,9 @@ fn queued_remote_children_retain_their_recorded_parent() {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let (io, _) = MonitorIo::new_mocked();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
-        .monitor(MonitorPolicy::enabled().name("remote-parent-links").io(io))
+        .monitor(MonitorPolicy::enabled().name("remote-parent-links"))
         .build()
         .unwrap();
     let (started, ready) = mpsc::channel();
@@ -778,8 +776,7 @@ fn blocking_children_retain_their_recorded_parent() {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("blocking-parent-links", &io);
+    let runtime = runtime("blocking-parent-links");
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let (started, ready) = mpsc::channel();
     let (release, released) = mpsc::channel();
@@ -826,8 +823,7 @@ fn blocking_children_retain_their_recorded_parent() {
 #[test]
 fn collection_reports_the_native_task_limit_instead_of_claiming_completeness() {
     let _recording = RecorderGuard::new();
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("bounded-tasks", &io);
+    let runtime = runtime("bounded-tasks");
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     for _ in 0..260 {
         drop(scheduler.spawn(async |_| pending::<()>().await));
@@ -849,8 +845,7 @@ fn collection_reports_the_native_task_limit_instead_of_claiming_completeness() {
 #[test]
 fn a_blocked_async_worker_times_out_and_can_answer_a_later_request() {
     let _recording = RecorderGuard::new();
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("blocked-worker", &io);
+    let runtime = runtime("blocked-worker");
     let (started, ready) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let task = runtime
@@ -888,65 +883,19 @@ fn a_blocked_async_worker_times_out_and_can_answer_a_later_request() {
 }
 
 #[test]
-fn stopping_one_runtime_retires_only_its_endpoint_and_workers() {
+fn stopping_one_runtime_retires_only_its_workers() {
     let _recording = RecorderGuard::new();
-    let (io, _) = MonitorIo::new_mocked();
-    let first = runtime("endpoint-one", &io);
-    let second = runtime("endpoint-two", &io);
-    assert_eq!(names(&io), ["endpoint-one", "endpoint-two"]);
+    let first = runtime("runtime-one");
+    let second = runtime("runtime-two");
 
     first.stop().unwrap();
-    let first = runtimes().into_iter().find(|runtime| runtime.name == "endpoint-one").unwrap();
+    let first = runtimes().into_iter().find(|runtime| runtime.name == "runtime-one").unwrap();
     let second_snapshot = capture(&second);
-    let remaining = names(&io);
     second.stop().unwrap();
 
     assert_eq!(
-        (first.state, first.tasks.is_empty(), second_snapshot.state, remaining, names(&io)),
-        (
-            RuntimeState::Stopped,
-            true,
-            RuntimeState::Running,
-            vec!["endpoint-two".to_owned()],
-            Vec::new()
-        )
-    );
-}
-
-#[test]
-fn monitor_startup_failure_is_returned_without_publishing_an_endpoint() {
-    let _recording = RecorderGuard::new();
-    let (io, control) = MonitorIo::new_mocked();
-    control.fail_next(IoOperation::Bind, std::io::ErrorKind::PermissionDenied.into());
-
-    let result = Runtime::builder()
-        .monitor(MonitorPolicy::enabled().name("failed-monitor").io(io.clone()))
-        .build();
-
-    drop(result.unwrap_err());
-    assert_eq!(names(&io), Vec::<String>::new());
-}
-
-#[test]
-fn stopping_reports_a_monitor_failure_after_removing_the_endpoint() {
-    let _recording = RecorderGuard::new();
-    let (io, control) = MonitorIo::new_mocked();
-    control.fail_next(
-        IoOperation::Accept,
-        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected monitor accept failure"),
-    );
-    let runtime = runtime("failed-listener", &io);
-    let descriptor = Directory::current(&io).unwrap().descriptors().unwrap().next().unwrap().unwrap();
-    let mut connection = Connection::connect(&io, &descriptor, TEST_TIMEOUT).unwrap();
-    connection.set_read_timeout(Some(TEST_TIMEOUT)).unwrap();
-    write_request(&mut connection, 1, &Request::Hello).unwrap();
-    assert!(matches!(read_response(&mut connection).unwrap(), (1, Response::Hello { .. })));
-
-    let error = runtime.stop().unwrap_err();
-
-    assert_eq!(
-        (error.to_string().contains("injected monitor accept failure"), names(&io)),
-        (true, Vec::new())
+        (first.state, first.tasks.is_empty(), second_snapshot.state),
+        (RuntimeState::Stopped, true, RuntimeState::Running)
     );
 }
 
@@ -957,9 +906,8 @@ fn shutdown_records_cancellation_for_a_queued_blocking_function() {
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("canceled-blocking", &io);
-    let control = support::runtime_control(&runtime);
+    let runtime = runtime("canceled-blocking");
+    let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
     let (started, ready) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let running = runtime.scheduler().spawn_blocking(move || {
@@ -1010,77 +958,6 @@ fn shutdown_records_cancellation_for_a_queued_blocking_function() {
 }
 
 #[test]
-fn the_monitor_connection_captures_runtime_diagnostics_and_preserves_recording_configuration() {
-    let _recording = RecorderGuard::new();
-    seismograph::recorder(Configuration {
-        general_events: Policy::all(false),
-        ..Configuration::default()
-    });
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("connected-monitor", &io);
-    let id = runtime.diagnostics().unwrap().id();
-    let descriptor = Directory::current(&io).unwrap().descriptors().unwrap().next().unwrap().unwrap();
-    let mut connection = Connection::connect(&io, &descriptor, TEST_TIMEOUT).unwrap();
-    connection.set_read_timeout(Some(TEST_TIMEOUT)).unwrap();
-
-    write_request(&mut connection, 1, &Request::Hello).unwrap();
-    let hello = read_response(&mut connection).unwrap();
-    write_request(
-        &mut connection,
-        2,
-        &Request::CaptureSnapshot(seismograph_protocol::message::SnapshotOptions::default()),
-    )
-    .unwrap();
-    let (request, Response::Snapshot(bytes)) = read_response(&mut connection).unwrap() else {
-        panic!("the monitor must return the requested snapshot");
-    };
-    let snapshot = seismograph::snapshot::decode(&bytes).unwrap();
-    let source = snapshot
-        .sources
-        .iter()
-        .find(|source| source.id == seismograph_runtime::snapshot::source::ID)
-        .unwrap();
-    let snapshot = seismograph_runtime::snapshot::decode(&source.data).unwrap();
-    let captured = snapshot
-        .runtimes
-        .iter()
-        .find(|runtime| runtime.name == "connected-monitor")
-        .unwrap();
-    runtime.stop().unwrap();
-
-    assert_eq!(
-        (
-            hello,
-            request,
-            (captured.id, captured.state),
-            seismograph::recorder::is_enabled(EventClass::General),
-            seismograph::recorder::is_enabled(EventClass::RuntimeTask),
-            names(&io),
-        ),
-        (
-            (
-                1,
-                Response::Hello {
-                    instance_id: descriptor.instance_id,
-                    recording: RecordingConfiguration {
-                        general_events: RecordingPolicy {
-                            enabled: true,
-                            ..RecordingPolicy::default()
-                        },
-                        ..RecordingConfiguration::default()
-                    },
-                },
-            ),
-            2,
-            (id, RuntimeState::Running),
-            true,
-            false,
-            Vec::new(),
-        )
-    );
-}
-
-#[test]
 fn task_sizes_describe_user_futures_before_runtime_wrapping() {
     struct Body {
         started: Option<mpsc::Sender<()>>,
@@ -1099,8 +976,7 @@ fn task_sizes_describe_user_futures_before_runtime_wrapping() {
     }
 
     let _recording = RecorderGuard::new();
-    let (io, _) = MonitorIo::new_mocked();
-    let runtime = runtime("user-bodies", &io);
+    let runtime = runtime("user-bodies");
     let (started, ready) = mpsc::channel();
     drop(
         runtime
@@ -1141,11 +1017,10 @@ fn growing_pool(name: &str, policy: BlockingPoolPolicy, expected_blocking_worker
         runtime_tasks: Policy::all(false),
         ..Configuration::default()
     });
-    let (io, _) = MonitorIo::new_mocked();
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
         .blocking_pool(policy.max(2))
-        .monitor(MonitorPolicy::enabled().name(name).io(io))
+        .monitor(MonitorPolicy::enabled().name(name))
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();

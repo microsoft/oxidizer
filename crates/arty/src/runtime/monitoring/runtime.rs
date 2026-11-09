@@ -18,10 +18,9 @@ impl RuntimeDiagnostics {
             return Ok(None);
         }
         let workers = u32::try_from(workers).map_err(Error::new)?;
-        let mut builder = Monitor::builder().name(policy.runtime_name());
-        if let Some(io) = policy.monitor_io() {
-            builder = builder.io(io);
-        }
+        let builder = Monitor::builder().name(policy.runtime_name());
+        #[cfg(test)]
+        let builder = builder.io(seismograph_protocol::io::MonitorIo::new_mocked().0);
         let monitor = builder.start().map_err(Error::new)?;
         let registration = seismograph_runtime::register_runtime(RuntimeMetadata::new(policy.runtime_name(), workers));
         Ok(Some(Self { monitor, registration }))
