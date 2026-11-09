@@ -261,7 +261,10 @@ mod tests {
                     .unwrap()
                     .downcast_ref::<arty_executor::ShutdownError>()
                     .unwrap();
-                assert!(std::ptr::eq(shutdown.inner(), cause.inner()));
+                assert!(std::ptr::eq(
+                    shutdown.inner().downcast_ref::<std::io::Error>().unwrap(),
+                    cause.inner().downcast_ref::<std::io::Error>().unwrap(),
+                ));
             } else {
                 assert!(error.source().unwrap().downcast_ref::<performables::Error>().unwrap().is_closed());
             }

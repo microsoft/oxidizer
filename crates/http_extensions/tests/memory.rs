@@ -23,10 +23,10 @@ fn body_builder_accepts_a_global_pool() {
 }
 
 #[cfg(feature = "json")]
-#[tokio::test]
-async fn lazy_json_can_be_read_repeatedly() {
+#[test]
+fn lazy_json_can_be_read_repeatedly() {
     let builder = HttpBodyBuilder::new(OpaqueMemory::new(TransparentMemory::new()), &Clock::new_frozen());
-    let mut json = builder.text(r#""payload""#).into_json_ref::<String>().await.unwrap();
+    let mut json = futures::executor::block_on(builder.text(r#""payload""#).into_json_ref::<String>()).unwrap();
     assert_eq!(json.read().unwrap(), "payload");
     assert_eq!(json.read().unwrap(), "payload");
 }

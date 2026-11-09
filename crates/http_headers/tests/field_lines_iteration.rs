@@ -79,3 +79,17 @@ fn http_line_iteration_preserves_repetition_and_sensitivity() {
     assert_eq!(values, lines.iter().collect::<Vec<_>>());
     assert_eq!(lines.iter().map(FieldValueRef::is_sensitive).collect::<Vec<_>>(), [true, false]);
 }
+
+#[cfg(feature = "http")]
+#[test]
+fn exactly_one_rejects_multiple_http_field_lines() {
+    let mut map = http::HeaderMap::new();
+    map.append(http::header::SET_COOKIE, http::HeaderValue::from_static("a=1"));
+    map.append(http::header::SET_COOKIE, http::HeaderValue::from_static("b=2"));
+    let lines = FieldLines::from_http(&FieldName::SetCookie, map.get_all(http::header::SET_COOKIE)).unwrap();
+
+    let error = lines.exactly_one().unwrap_err();
+
+    assert_eq!(error.header(), &FieldName::SetCookie);
+    assert_eq!(error.kind(), http_headers::DecodeErrorKind::UnexpectedMultipleValues);
+}

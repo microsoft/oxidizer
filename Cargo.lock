@@ -5255,6 +5255,7 @@ version = "0.5.0"
 dependencies = [
  "libc",
  "seismograph_protocol",
+ "tempfile",
  "windows-sys 0.61.2",
 ]
 
