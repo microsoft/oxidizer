@@ -113,8 +113,10 @@ impl HttpClientBuilder {
     /// [`HttpBodyOptions`] sets the buffer limit for
     /// [`HttpBody::into_buffered`](crate::HttpBody::into_buffered) and the idle timeout between
     /// body frames.
-    /// Bundled transports use these options through their configured [`HttpBodyBuilder`].
-    /// A custom transport receives the configured builder in [`CustomContext::body_builder`].
+    /// Bundled transports use these options through their configured
+    /// [`HttpBodyBuilder`](http_extensions::HttpBodyBuilder).
+    /// A custom transport receives the configured builder in
+    /// [`CustomContext::body_builder`](crate::custom::CustomContext::body_builder).
     /// A response body built independently keeps its own options.
     ///
     /// By default, [`HttpBodyOptions::default()`] is used.

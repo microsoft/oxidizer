@@ -91,7 +91,7 @@
 //!
 //! - It uses [`http::Request`] and [`http::Response`] as base types.
 //! - It reuses [`http::Method`], [`http::StatusCode`], and [`http::HeaderMap`].
-//! - It implements standard traits such as [`http_body::Body`].
+//! - It implements standard traits such as [`http_body::Body`](::http_body::Body).
 //! - It works with other Rust HTTP libraries.
 //!
 //! # Examples
