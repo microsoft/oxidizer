@@ -242,12 +242,14 @@ mod raw_match;
 mod raw_resolver;
 mod resolve_error;
 mod resolver;
+mod route_table;
 mod rt_node;
 mod walk;
 
 pub use configuration_error::ConfigurationError;
 pub use resolve_error::ResolveError;
 pub use resolver::Resolver;
+pub use route_table::{RouteHit, RouteTable};
 
 /// Runtime support for generated resolvers.
 #[doc(hidden)]

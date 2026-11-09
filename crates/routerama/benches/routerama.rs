@@ -28,9 +28,9 @@ use criterion::{BenchmarkId, Criterion};
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
 use http_path_template::{Grammar, PathTemplate};
 use routerama::__rt::{RawResolver, Route};
-use routerama::HttpMethod;
 #[cfg(feature = "query")]
 use routerama::query::{FromQuery, ToQuery};
+use routerama::{HttpMethod, RouteTable};
 #[cfg(feature = "query")]
 use serde::{Deserialize, Serialize};
 
@@ -717,6 +717,10 @@ fn dynamic_capture_threshold_lookup(scenario: &(RawResolver, String)) {
     black_box(scenario.0.resolve("GET", black_box(&scenario.1)));
 }
 
+fn route_table_match_lookup(scenario: &(RawResolver, String)) {
+    black_box(scenario.0.match_route("GET", black_box(&scenario.1)));
+}
+
 fn build_dynamic_misses() -> RawResolver {
     RawResolver::new([route("Deep", "/a/b/c/d/e/f/g/h"), route_with_method("Submit", "POST", "/submit")])
 }
@@ -1229,6 +1233,27 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         bencher.iter(|| dynamic_deep_table_deep_lookup(&deep));
     });
     scratch.finish();
+
+    let mut route_table = criterion.benchmark_group("routerama/route_table_dynamic");
+    route_table.bench_function("resolve_4_captures", |bencher| {
+        bencher.iter(|| dynamic_capture_threshold_lookup(&capture_count_4));
+    });
+    route_table.bench_function("match_route_4_captures", |bencher| {
+        bencher.iter(|| route_table_match_lookup(&capture_count_4));
+    });
+    route_table.bench_function("resolve_5_captures", |bencher| {
+        bencher.iter(|| dynamic_capture_threshold_lookup(&capture_count_5));
+    });
+    route_table.bench_function("match_route_5_captures", |bencher| {
+        bencher.iter(|| route_table_match_lookup(&capture_count_5));
+    });
+    route_table.bench_function("match_route_16_segments", |bencher| {
+        bencher.iter(|| route_table_match_lookup(&depth_16));
+    });
+    route_table.bench_function("match_route_17_segments", |bencher| {
+        bencher.iter(|| route_table_match_lookup(&depth_17));
+    });
+    route_table.finish();
 
     let mixed = build_mixed_scenario();
     let mut dispatch = criterion.benchmark_group("routerama_mixed/dispatch");
@@ -1773,6 +1798,72 @@ fn routerama_dynamic_deep_scratch_deep_lookup(scenario: RawResolver) -> RawResol
     scenario
 }
 
+#[metabench::benchmark(
+    ROUTERAMA_ROUTE_TABLE_DYNAMIC_RESOLVE_4_CAPTURES,
+    "routerama/route_table_dynamic",
+    "resolve_4_captures"
+)]
+#[bench::run(build_capture_threshold(4))]
+fn routerama_route_table_dynamic_resolve_4_captures(scenario: (RawResolver, String)) -> (RawResolver, String) {
+    dynamic_capture_threshold_lookup(&scenario);
+    scenario
+}
+
+#[metabench::benchmark(
+    ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_4_CAPTURES,
+    "routerama/route_table_dynamic",
+    "match_route_4_captures"
+)]
+#[bench::run(build_capture_threshold(4))]
+fn routerama_route_table_dynamic_match_route_4_captures(scenario: (RawResolver, String)) -> (RawResolver, String) {
+    route_table_match_lookup(&scenario);
+    scenario
+}
+
+#[metabench::benchmark(
+    ROUTERAMA_ROUTE_TABLE_DYNAMIC_RESOLVE_5_CAPTURES,
+    "routerama/route_table_dynamic",
+    "resolve_5_captures"
+)]
+#[bench::run(build_capture_threshold(5))]
+fn routerama_route_table_dynamic_resolve_5_captures(scenario: (RawResolver, String)) -> (RawResolver, String) {
+    dynamic_capture_threshold_lookup(&scenario);
+    scenario
+}
+
+#[metabench::benchmark(
+    ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_5_CAPTURES,
+    "routerama/route_table_dynamic",
+    "match_route_5_captures"
+)]
+#[bench::run(build_capture_threshold(5))]
+fn routerama_route_table_dynamic_match_route_5_captures(scenario: (RawResolver, String)) -> (RawResolver, String) {
+    route_table_match_lookup(&scenario);
+    scenario
+}
+
+#[metabench::benchmark(
+    ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_16_SEGMENTS,
+    "routerama/route_table_dynamic",
+    "match_route_16_segments"
+)]
+#[bench::run(build_dynamic_depth(16))]
+fn routerama_route_table_dynamic_match_route_16_segments(scenario: (RawResolver, String)) -> (RawResolver, String) {
+    route_table_match_lookup(&scenario);
+    scenario
+}
+
+#[metabench::benchmark(
+    ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_17_SEGMENTS,
+    "routerama/route_table_dynamic",
+    "match_route_17_segments"
+)]
+#[bench::run(build_dynamic_depth(17))]
+fn routerama_route_table_dynamic_match_route_17_segments(scenario: (RawResolver, String)) -> (RawResolver, String) {
+    route_table_match_lookup(&scenario);
+    scenario
+}
+
 #[metabench::benchmark(ROUTERAMA_MIXED_DISPATCH_STATIC_HIT, "routerama_mixed/dispatch", "static_hit")]
 #[bench::run(build_mixed_scenario())]
 fn routerama_mixed_dispatch_static_hit(router: MixedScenarioResolver) -> MixedScenarioResolver {
@@ -2032,6 +2123,12 @@ metabench::main!(
                 ROUTERAMA_DYNAMIC_SEGMENT_DEPTH_DEEP_17,
                 ROUTERAMA_DYNAMIC_DEEP_SCRATCH_SHALLOW_LOOKUP,
                 ROUTERAMA_DYNAMIC_DEEP_SCRATCH_DEEP_LOOKUP,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_RESOLVE_4_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_4_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_RESOLVE_5_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_5_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_16_SEGMENTS,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_17_SEGMENTS,
             ],
             gungraun_config = callgrind_branch_cache_config(),
         },
@@ -2146,6 +2243,12 @@ metabench::main!(
                 ROUTERAMA_DYNAMIC_SEGMENT_DEPTH_DEEP_17,
                 ROUTERAMA_DYNAMIC_DEEP_SCRATCH_SHALLOW_LOOKUP,
                 ROUTERAMA_DYNAMIC_DEEP_SCRATCH_DEEP_LOOKUP,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_RESOLVE_4_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_4_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_RESOLVE_5_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_5_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_16_SEGMENTS,
+                ROUTERAMA_ROUTE_TABLE_DYNAMIC_MATCH_ROUTE_17_SEGMENTS,
             ],
             gungraun_config = callgrind_branch_cache_config(),
         },

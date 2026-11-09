@@ -14,7 +14,7 @@
 use bolero::TypeGenerator;
 use http_path_template::{Grammar, PathTemplate};
 use routerama::__rt::{RawResolver, Route, RouteMatch};
-use routerama::{HttpMethod, ResolveError};
+use routerama::{HttpMethod, ResolveError, RouteTable};
 
 #[routerama::resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -229,6 +229,39 @@ fn dynamic_matches_static_on_structured_paths() {
         .with_type::<StructuredRequest>()
         .for_each(|req: &StructuredRequest| {
             assert_backends_agree(&resolver, req.method.as_str(), &req.path());
+        });
+}
+
+// Route-table differential.
+
+#[test]
+fn raw_match_route_agrees_with_resolve() {
+    let resolver = dynamic_resolver();
+    bolero::check!()
+        .with_type::<StructuredRequest>()
+        .for_each(|req: &StructuredRequest| {
+            let (method, path) = (req.method.as_str(), req.path());
+            let from_resolve = resolver.resolve(method, &path).map(|matched| {
+                let template = match matched.name() {
+                    "ListBooks" | "CreateBook" => "/books",
+                    "GetFeatured" => "/books/featured",
+                    "GetBook" => "/books/{book}",
+                    "GetReview" => "/books/{book}/reviews/{review}",
+                    "Archive" => "/books/{book}:archive",
+                    "Files" => "/files/**",
+                    "Search" => "/search",
+                    name => unreachable!("`dynamic_resolver` has no route named `{name}`"),
+                };
+                (template, matched.captures().collect::<Vec<_>>())
+            });
+            let from_match_route = resolver.match_route(method, &path).map(|hit| {
+                let names = resolver.parameters(hit.route()).unwrap().iter().map(AsRef::as_ref);
+                (
+                    resolver.template(hit.route()).unwrap(),
+                    names.zip(hit.captures().iter().copied()).collect::<Vec<_>>(),
+                )
+            });
+            assert_eq!(from_resolve, from_match_route, "route table disagreement on `{method} {path}`");
         });
 }
 
