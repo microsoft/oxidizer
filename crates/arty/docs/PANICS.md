@@ -1,4 +1,4 @@
-# Panic policy
+# Panic hooks
 
 With `panic = "unwind"`, Rust cleans up the stack after a panic.
 Arty can then catch panics from three user operations:
@@ -9,7 +9,19 @@ Arty can then catch panics from three user operations:
 
 Arty reports these panics through `JoinError` when possible. By default, the
 first panic that Arty catches from these operations shuts down the runtime.
-`PanicPolicy::ignore()` keeps the runtime running.
+Register `OnPanic` and call `OnPanic::ignore` in its callback to keep the
+runtime running:
+
+```rust
+use arty::runtime::Runtime;
+use arty::runtime::hook::OnPanic;
+
+let runtime = Runtime::builder()
+    .on::<OnPanic>(|event| event.ignore())
+    .build()?;
+# runtime.stop()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 A waker tells a worker that a task is ready to run again.
 Do not rely on Arty to recover from panics in cleanup or notification code.

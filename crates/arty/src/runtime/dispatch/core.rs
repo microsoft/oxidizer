@@ -14,6 +14,7 @@ use performables::arc::Arc;
 use performables::sync::channel;
 use thread_aware::{Thread, ThreadAware};
 
+use crate::runtime::hook::HookFactory;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{Command, LocalWorker, QueuedFactory, QueuedIoAccess};
 use crate::runtime::worker::blocking::Worker;
@@ -25,9 +26,25 @@ use crate::task::preparation::prepare_remote;
 #[derive(Clone, Debug)]
 pub(crate) struct WorkerEndpoint {
     pub(crate) command_tx: channel::Sender<Command>,
+    pub(crate) priority_command_tx: channel::Sender<Command>,
     pub(crate) waker: Waker,
     pub(crate) thread: Thread,
     pub(crate) blocking_worker: Arc<Worker>,
+}
+
+impl WorkerEndpoint {
+    #[cfg(test)]
+    pub(crate) fn for_test(command_tx: channel::Sender<Command>, waker: Waker, thread: Thread, blocking_worker: Arc<Worker>) -> Self {
+        let (priority_command_tx, priority_command_rx) = channel::unbounded();
+        std::mem::forget(priority_command_rx);
+        Self {
+            command_tx,
+            priority_command_tx,
+            waker,
+            thread,
+            blocking_worker,
+        }
+    }
 }
 
 /// Index resolved against a dispatcher's registered workers, not a hardware processor ID.
@@ -206,6 +223,40 @@ impl DispatcherCore {
         send_result.map_err(|_error| self.runtime_shutting_down_error())
     }
 
+    pub(crate) fn register_hook(&self, factory: HookFactory) -> Result<(), Error> {
+        if matches!(self.shutdown().state(), ShutdownState::Started) {
+            return Err(self.runtime_shutting_down_error());
+        }
+
+        let source = LocalWorker::current_thread().filter(|thread| self.owns(thread));
+        let mut acknowledgements = Vec::with_capacity(self.worker_endpoints.len());
+        for endpoint in &self.worker_endpoints {
+            let mut hook = Some(factory.make());
+            if source.as_ref().is_some_and(|source| source == &endpoint.thread) {
+                let installed = LocalWorker::install_hook(hook.take().expect("the local hook is installed at most once"), source.as_ref());
+                debug_assert!(installed, "a live runtime worker retains its hook registry");
+                continue;
+            }
+
+            let (ready, acknowledged) = std::sync::mpsc::channel();
+            endpoint
+                .priority_command_tx
+                .send(Command::RegisterHook {
+                    hook: hook.expect("a remote hook has not been installed locally"),
+                    source: source.clone(),
+                    ready,
+                })
+                .map_err(|_error| self.runtime_shutting_down_error())?;
+            endpoint.waker.wake_by_ref();
+            acknowledgements.push(acknowledged);
+        }
+
+        for acknowledged in acknowledgements {
+            acknowledged.recv().map_err(|_error| self.runtime_shutting_down_error())?;
+        }
+        Ok(())
+    }
+
     fn runtime_shutting_down_error(&self) -> Error {
         Error::from_shutdown(self.shutdown()).unwrap_or_else(Error::runtime_shutting_down)
     }
@@ -298,16 +349,16 @@ mod tests {
 
     use super::*;
     use crate::runtime::dispatch::{DispatcherClient, test_threads};
-    use crate::runtime::worker::blocking::{PanicPolicy, Pool};
+    use crate::runtime::worker::blocking::{Pool, TestPanicResponse};
 
     #[cfg_attr(test, mutants::skip)]
     fn endpoint(tx: channel::Sender<Command>, thread: &Thread) -> WorkerEndpoint {
-        WorkerEndpoint {
-            command_tx: tx,
-            waker: Waker::noop().clone(),
-            thread: thread.clone(),
-            blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),
-        }
+        WorkerEndpoint::for_test(
+            tx,
+            Waker::noop().clone(),
+            thread.clone(),
+            Worker::new(Pool::new(None), Shutdown::default(), TestPanicResponse::Ignore),
+        )
     }
 
     #[test]

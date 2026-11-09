@@ -18,6 +18,7 @@ use tick::runtime::{ClockDriver, InactiveClock};
 use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::DispatcherClient;
+use crate::runtime::hook::WorkerHooks;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{Command, LocalWorker, Signal};
 #[cfg(test)]
@@ -71,6 +72,7 @@ pub(crate) struct Worker {
     // Only top-level worker logic uses this field.
     // Shutdown drops the receiver. Later submissions then fail and discard their tasks.
     command_rx: Option<channel::Receiver<Command>>,
+    priority_command_rx: Option<channel::Receiver<Command>>,
 
     // Dropped when shutdown starts so no more tasks can be enqueued and worker-local
     // services can release resources needed by shutdown.
@@ -102,13 +104,14 @@ impl Worker {
     )]
     pub(crate) fn new(
         command_rx: channel::Receiver<Command>,
+        priority_command_rx: channel::Receiver<Command>,
         dispatcher: DispatcherClient,
         thread: Thread,
         io: Io,
         clock: InactiveClock,
         signal: Arc<Signal>,
         monitor_options: MonitorOptions,
-        panic_policy: crate::runtime::PanicPolicy,
+        hooks: WorkerHooks,
     ) -> Self {
         let worker_waker = Signal::waker(&signal);
         let shutdown = dispatcher.shutdown().clone();
@@ -118,16 +121,17 @@ impl Worker {
         let executor = Executor::builder()
             .owner_waker(worker_waker)
             .thread(thread.clone())
-            .panic_policy(panic_policy.into_executor_policy())
+            .panic_policy(arty_executor::PanicPolicy::Ignore)
             .build();
         let tasks = executor.tasks();
         let executor_shutdown = executor.shutdown();
 
         let context = Context::new(dispatcher, clock, io, thread);
-        LocalWorker::register_scheduler(context.clone(), tasks.clone(), executor_shutdown);
+        LocalWorker::register_scheduler(context.clone(), tasks.clone(), executor_shutdown, hooks);
 
         Self {
             command_rx: Some(command_rx),
+            priority_command_rx: Some(priority_command_rx),
             context: Some(context),
             shutdown,
             executor: Some(executor),
@@ -178,6 +182,7 @@ impl Worker {
     }
 
     fn prepare_cycle(&mut self) -> CycleAction {
+        self.process_priority_commands();
         let batch_exhausted = self.process_commands();
 
         if matches!(self.shutdown.state(), ShutdownState::Started) {
@@ -256,6 +261,12 @@ impl Worker {
                     Command::AccessIo { access } => {
                         access.into_inner()(context);
                     }
+                    Command::RegisterHook { hook, source, ready } => {
+                        unreachable!("hook registration uses the priority command channel: {hook:?} {source:?} {ready:?}");
+                    }
+                    Command::BlockingPanic { .. } => {
+                        unreachable!("blocking panic notification uses the priority command channel");
+                    }
                     Command::Shutdown => {
                         self.begin_shutdown();
 
@@ -272,6 +283,29 @@ impl Worker {
         }
         // An exhausted batch can leave commands queued. Read the queue again before parking.
         true
+    }
+
+    fn process_priority_commands(&mut self) {
+        let Some(command_rx) = self.priority_command_rx.as_ref() else {
+            return;
+        };
+        loop {
+            match command_rx.try_recv() {
+                Ok(Command::RegisterHook { hook, source, ready }) => {
+                    let installed = LocalWorker::install_hook(hook, source.as_ref());
+                    debug_assert!(installed, "a running worker retains its hook registry");
+                    _ = ready.send(());
+                }
+                Ok(Command::BlockingPanic { ready }) => {
+                    _ = ready.send(LocalWorker::blocking_panic());
+                }
+                Ok(command) => unreachable!("ordinary worker command sent through priority channel: {command:?}"),
+                Err(error) => {
+                    assert!(error.is_empty(), "priority command channel disconnected before worker shutdown");
+                    return;
+                }
+            }
+        }
     }
 
     #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
@@ -294,6 +328,7 @@ impl Worker {
 
         // The command channel is now closed. No more commands can arrive.
         self.command_rx = None;
+        self.priority_command_rx = None;
 
         // Safe executor shutdown synchronously cancels and releases all remaining task storage.
         executor.shutdown().trigger(cause);
@@ -346,13 +381,14 @@ mod tests {
     use super::*;
     use crate::runtime::config::MonitorPolicy;
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
+    use crate::runtime::hook::HookFactories;
     use crate::runtime::worker::asynchronous::{QueuedFactory, QueuedIoAccess};
     use crate::task::preparation::RemoteFutureFactory;
 
     fn test_blocking_worker() -> (Arc<blocking::Worker>, Shutdown) {
         let shutdown = Shutdown::default();
         (
-            blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore),
+            blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::TestPanicResponse::Ignore),
             shutdown,
         )
     }
@@ -454,13 +490,8 @@ mod tests {
     ) -> Worker {
         let (blocking_worker, shutdown) = blocking;
         let thread = ThreadBuilder::default().build(thread::current().id());
-        let endpoint = WorkerEndpoint {
-            command_tx,
-            waker: Signal::waker(&signal),
-            thread: thread.clone(),
-            blocking_worker: Arc::clone(&blocking_worker),
-        };
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown));
+        let endpoint = WorkerEndpoint::for_test(command_tx, Signal::waker(&signal), thread.clone(), Arc::clone(&blocking_worker));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone()));
         let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
         if !LocalWorker::is_current() {
@@ -469,15 +500,19 @@ mod tests {
         let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, Signal::waker(&signal));
         signal.set_driver_waker(driver_waker);
 
+        let (priority_tx, priority_rx) = channel::unbounded();
+        std::mem::forget(priority_tx);
+        let hooks = WorkerHooks::new(HookFactories::default().seed(), thread.clone(), shutdown);
         Worker::new(
             command_rx,
+            priority_rx,
             dispatcher,
             thread,
             io,
             clock,
             signal,
             monitor_options,
-            crate::runtime::PanicPolicy::default(),
+            hooks,
         )
     }
 

@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::cell::RefCell;
+use std::task::Poll;
+
 use observed::Sink;
 use observed::context::Transfer;
 
@@ -23,16 +26,26 @@ pub enum TaskPlacement {
     SpecificThread,
 }
 
+/// Wraps one top-level executor task poll.
+pub trait TaskPoll: 'static {
+    /// Wraps one top-level task poll.
+    ///
+    /// Implementations must call `task` exactly once and return its result.
+    fn poll(&mut self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()>;
+}
+
 /// Lifecycle metadata for a task registered with [`TaskSet`](crate::TaskSet).
 ///
 /// The executor applies the captured observed context during polling, cleanup,
 /// and lifecycle events. The placement value classifies how the caller selected
 /// the executor. It does not select a worker. The default has no observed context
 /// and uses [`TaskPlacement::Any`].
-#[derive(Debug, Default)]
+#[derive(Default, derive_more::Debug)]
 pub struct TaskOptions {
     context: Option<Transfer>,
     placement: TaskPlacement,
+    #[debug(ignore)]
+    poll_hooks: RefCell<Vec<Box<dyn TaskPoll>>>,
 }
 
 pub(crate) struct TaskCreatedReporter {
@@ -56,7 +69,11 @@ impl TaskOptions {
     /// Creates options with the specified placement classification.
     #[must_use]
     pub const fn new(placement: TaskPlacement) -> Self {
-        Self { context: None, placement }
+        Self {
+            context: None,
+            placement,
+            poll_hooks: RefCell::new(Vec::new()),
+        }
     }
 
     /// Creates options that apply the observed `context` for the task lifecycle.
@@ -65,7 +82,29 @@ impl TaskOptions {
         Self {
             context: Some(context),
             placement,
+            poll_hooks: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Adds handlers that wrap each poll of this task.
+    ///
+    /// The first handler is the outermost handler. Each handler must call the
+    /// next task exactly once and return its result.
+    #[must_use]
+    pub fn with_poll_hooks(mut self, hooks: Vec<Box<dyn TaskPoll>>) -> Self {
+        self.poll_hooks = RefCell::new(hooks);
+        self
+    }
+
+    pub(crate) fn poll_task(&self, task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
+        fn poll_next(hooks: &mut [Box<dyn TaskPoll>], task: &mut dyn FnMut() -> Poll<()>) -> Poll<()> {
+            let Some((hook, remaining)) = hooks.split_first_mut() else {
+                return task();
+            };
+            hook.poll(&mut || poll_next(remaining, task))
+        }
+
+        poll_next(&mut self.poll_hooks.borrow_mut(), task)
     }
 
     pub(crate) fn with_context<T>(&self, f: impl FnOnce() -> T) -> T {

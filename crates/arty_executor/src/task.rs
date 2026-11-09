@@ -298,31 +298,64 @@ where
 
         // SAFETY: Our future and the task that owns it are always pinned by design, the
         // `Pin` annotation just gets lost in the type layering. We add it back here.
-        let future_as_mut_pinned = unsafe { Pin::new_unchecked(&mut payload.future) };
+        let mut future_as_mut_pinned = unsafe { Pin::new_unchecked(&mut payload.future) };
 
         let wake_signal = self.pinned_wake_signal();
 
-        let poll_result = {
+        enum PollAttempt<R> {
+            NotPolled,
+            Polled(task::Poll<R>),
+            Panicked(TaskPanicPayload),
+        }
+
+        let mut attempt = PollAttempt::NotPolled;
+        let wrapped_result = {
             // SAFETY: The borrowed polling waker cannot escape this block. Clones retain the
             // pinned pooled task allocation. Owner retirement empties its payload before a remote
             // clone can release the final reference.
             let waker = unsafe { wake_signal.waker_ref() };
 
             let mut cx = task::Context::from_waker(&waker);
-
-            match catch_unwind(AssertUnwindSafe(|| future_as_mut_pinned.poll(&mut cx))) {
-                Ok(x) => x,
-                Err(panic) => return self.finish_panicked(maybe_payload, wake_signal, panic, shared),
-            }
+            self.options.poll_task(&mut || {
+                if !matches!(attempt, PollAttempt::NotPolled) {
+                    panic!("a task poll hook must call the task exactly once");
+                }
+                let result = match catch_unwind(AssertUnwindSafe(|| future_as_mut_pinned.as_mut().poll(&mut cx))) {
+                    Ok(result) => {
+                        let ready = matches!(&result, task::Poll::Ready(_));
+                        attempt = PollAttempt::Polled(result);
+                        if ready { task::Poll::Ready(()) } else { task::Poll::Pending }
+                    }
+                    Err(panic) => {
+                        attempt = PollAttempt::Panicked(panic);
+                        task::Poll::Ready(())
+                    }
+                };
+                result
+            })
         };
 
-        match poll_result {
-            task::Poll::Ready(result) => {
-                wake_signal.retire();
-                self.finish_terminal(maybe_payload, TerminalOutcome::Succeeded(result));
-                task::Poll::Ready(())
+        match attempt {
+            PollAttempt::NotPolled => panic!("a task poll hook must call the task exactly once"),
+            PollAttempt::Panicked(panic) => {
+                assert!(wrapped_result.is_ready(), "a task poll hook must return the task poll result");
+                self.finish_panicked(maybe_payload, wake_signal, panic, shared)
             }
-            task::Poll::Pending => task::Poll::Pending,
+            PollAttempt::Polled(poll_result) => {
+                assert_eq!(
+                    wrapped_result.is_ready(),
+                    poll_result.is_ready(),
+                    "a task poll hook must return the task poll result"
+                );
+                match poll_result {
+                    task::Poll::Ready(result) => {
+                        wake_signal.retire();
+                        self.finish_terminal(maybe_payload, TerminalOutcome::Succeeded(result));
+                        task::Poll::Ready(())
+                    }
+                    task::Poll::Pending => task::Poll::Pending,
+                }
+            }
         }
     }
 

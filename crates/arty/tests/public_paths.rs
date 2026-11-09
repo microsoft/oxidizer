@@ -10,9 +10,8 @@ use std::fmt::Debug;
 use std::io;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
-use arty::runtime::{
-    BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, RuntimeBuilder, RuntimeControl, Workers, WorkersPolicy,
-};
+use arty::runtime::hook::{Hook, OnPanic, OnSpawn, OnStart};
+use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, Runtime, RuntimeBuilder, RuntimeControl, Workers, WorkersPolicy};
 use arty::task::{Context, JoinError, JoinHandle, RuntimeScheduler, Scheduler};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware::ThreadAware;
@@ -35,8 +34,12 @@ assert_not_impl_any!(RuntimeScheduler: Clone, ThreadAware);
 assert_impl_all!(BlockingPoolPolicy: Clone, Debug);
 assert_impl_all!(MonitorPolicy: Clone, Debug, Default);
 assert_not_impl_any!(MonitorPolicy: Copy);
-assert_impl_all!(PanicPolicy: Clone, Debug, Default);
-assert_not_impl_any!(PanicPolicy: Copy);
+assert_impl_all!(OnStart: Debug, Hook);
+assert_impl_all!(OnSpawn: Debug, Hook);
+assert_impl_all!(OnPanic: Debug, Hook);
+assert_not_impl_any!(OnStart: Copy);
+assert_not_impl_any!(OnSpawn: Copy);
+assert_not_impl_any!(OnPanic: Copy);
 assert_impl_all!(WorkersPolicy: Clone, Copy, Debug, Default);
 assert_impl_all!(Error: StdError, Send, Sync);
 assert_not_impl_any!(Error: From<io::Error>, From<Box<dyn StdError + Send + Sync>>);
@@ -45,14 +48,17 @@ const _: fn(usize) -> WorkersPolicy = WorkersPolicy::exactly;
 const _: fn(usize) -> WorkersPolicy = WorkersPolicy::at_most;
 const _: fn() -> MonitorPolicy = MonitorPolicy::enabled;
 const _: fn() -> MonitorPolicy = MonitorPolicy::disabled;
-const _: fn() -> PanicPolicy = PanicPolicy::shutdown;
-const _: fn() -> PanicPolicy = PanicPolicy::ignore;
-const _: fn(RuntimeBuilder, PanicPolicy) -> RuntimeBuilder = RuntimeBuilder::panic;
+const _: fn(&OnPanic) = OnPanic::shutdown;
+const _: fn(&OnPanic) = OnPanic::ignore;
+const _: fn(RuntimeBuilder, fn(&mut OnPanic)) -> RuntimeBuilder = RuntimeBuilder::on::<OnPanic>;
+const _: fn(RuntimeBuilder, (), fn(&mut OnPanic, &mut ())) -> RuntimeBuilder = RuntimeBuilder::on_with::<OnPanic, ()>;
 
 const _: fn(&Runtime) -> &RuntimeScheduler = Runtime::scheduler;
 const _: fn(Runtime) -> Result<(), Error> = Runtime::stop;
 const _: fn(&Context) -> &RuntimeControl = Context::control;
 const _: fn(&RuntimeControl) = RuntimeControl::request_stop;
 const _: fn(&RuntimeControl) -> &Workers = RuntimeControl::workers;
+const _: fn(&RuntimeControl, fn(&mut OnPanic)) -> Result<(), Error> = RuntimeControl::on::<OnPanic>;
+const _: fn(&RuntimeControl, (), fn(&mut OnPanic, &mut ())) -> Result<(), Error> = RuntimeControl::on_with::<OnPanic, ()>;
 fn assert_join_output<F: Future<Output = Result<u32, JoinError>>>() {}
 const _: fn() = assert_join_output::<JoinHandle<u32>>;

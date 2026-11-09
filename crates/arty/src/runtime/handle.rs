@@ -241,7 +241,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
-    use crate::runtime::worker::blocking::{PanicPolicy, Pool, Worker};
+    use crate::runtime::worker::blocking::{Pool, TestPanicResponse, Worker};
     use crate::task::JoinError;
 
     thread_local! {
@@ -259,12 +259,16 @@ mod tests {
     #[test]
     fn explicit_stop_reports_a_worker_panic_after_joining() {
         let worker = thread::spawn(|| panic!("worker shutdown failure"));
-        let endpoint = WorkerEndpoint {
-            command_tx: channel::unbounded().0,
-            waker: Waker::noop().clone(),
-            thread: ThreadBuilder::default().build(worker.thread().id()),
-            blocking_worker: Worker::new(Pool::new(None), crate::runtime::shutdown::Shutdown::default(), PanicPolicy::Ignore),
-        };
+        let endpoint = WorkerEndpoint::for_test(
+            channel::unbounded().0,
+            Waker::noop().clone(),
+            ThreadBuilder::default().build(worker.thread().id()),
+            Worker::new(
+                Pool::new(None),
+                crate::runtime::shutdown::Shutdown::default(),
+                TestPanicResponse::Ignore,
+            ),
+        );
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
@@ -276,12 +280,16 @@ mod tests {
     #[test]
     fn authoritative_shutdown_failure_precedes_later_worker_panic() {
         let worker = thread::spawn(|| panic!("worker teardown failure"));
-        let endpoint = WorkerEndpoint {
-            command_tx: channel::unbounded().0,
-            waker: Waker::noop().clone(),
-            thread: ThreadBuilder::default().build(worker.thread().id()),
-            blocking_worker: Worker::new(Pool::new(None), crate::runtime::shutdown::Shutdown::default(), PanicPolicy::Ignore),
-        };
+        let endpoint = WorkerEndpoint::for_test(
+            channel::unbounded().0,
+            Waker::noop().clone(),
+            ThreadBuilder::default().build(worker.thread().id()),
+            Worker::new(
+                Pool::new(None),
+                crate::runtime::shutdown::Shutdown::default(),
+                TestPanicResponse::Ignore,
+            ),
+        );
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
@@ -308,7 +316,7 @@ mod tests {
     fn ignored_task_worker_stop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
-            .panic(crate::runtime::PanicPolicy::ignore())
+            .on::<crate::runtime::hook::OnPanic>(|event| event.ignore())
             .build()
             .unwrap();
         let joiner = runtime.worker_joiner.clone_for_test();
@@ -361,7 +369,7 @@ mod tests {
     fn ignored_task_worker_drop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
-            .panic(crate::runtime::PanicPolicy::ignore())
+            .on::<crate::runtime::hook::OnPanic>(|event| event.ignore())
             .build()
             .unwrap();
         let joiner = runtime.worker_joiner.clone_for_test();

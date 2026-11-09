@@ -7,9 +7,10 @@ use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
 use crate::runtime::bootstrap;
-use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, RuntimeConfig, WorkersPolicy};
+use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, RuntimeConfig, WorkersPolicy};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
+use crate::runtime::hook::Hook;
 
 /// Configures workers and clocks before starting a runtime.
 ///
@@ -40,23 +41,46 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
-    /// Sets how the runtime responds to a panic that it catches in a user task.
+    /// Registers or replaces a runtime hook without callback data.
     ///
-    /// The default is [`PanicPolicy::shutdown`]. Use
-    /// [`PanicPolicy::ignore`] to keep the runtime available after a panic.
-    /// With either policy, awaiting the task's [`JoinHandle`](crate::task::JoinHandle) returns an error.
-    /// This also applies to blocking functions.
+    /// Use [`on_with`](Self::on_with) when the callback needs worker-local
+    /// data.
     ///
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{PanicPolicy, Runtime};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::hook::OnPanic;
     ///
-    /// let builder = Runtime::builder().panic(PanicPolicy::ignore());
+    /// let builder = Runtime::builder().on::<OnPanic>(|event| event.ignore());
     /// ```
     #[must_use]
-    pub const fn panic(mut self, policy: PanicPolicy) -> Self {
-        self.processor_config.panic_policy = policy;
+    pub fn on<H: Hook>(mut self, callback: fn(&mut H)) -> Self {
+        self.processor_config.hooks.set_without_data(callback);
+        self
+    }
+
+    /// Registers or replaces a runtime hook with worker-local callback data.
+    ///
+    /// Arty clones the hook data for each worker and relocates it before a
+    /// callback can run. Registering another hook of the same type replaces the
+    /// earlier registration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::hook::OnPanic;
+    ///
+    /// let builder = Runtime::builder().on_with::<OnPanic, _>((), |event, _| event.ignore());
+    /// ```
+    #[must_use]
+    pub fn on_with<H, D>(mut self, data: D, callback: fn(&mut H, &mut D)) -> Self
+    where
+        H: Hook,
+        D: thread_aware::ThreadAware + Clone + 'static,
+    {
+        self.processor_config.hooks.set(data, callback);
         self
     }
 
@@ -253,10 +277,6 @@ mod tests {
         assert_eq!(builder.processor_config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
         assert_eq!(builder.processor_config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
         assert!(builder.processor_config.monitor_options.policy().is_enabled());
-        assert!(matches!(
-            builder.processor_config.panic_policy.into_executor_policy(),
-            arty_executor::PanicPolicy::Shutdown
-        ));
     }
 
     #[test]
@@ -310,16 +330,6 @@ mod tests {
         let builder = Runtime::builder().monitor(MonitorPolicy::disabled());
 
         assert!(!builder.processor_config.monitor_options.policy().is_enabled());
-    }
-
-    #[test]
-    fn panic_replaces_the_default() {
-        let builder = Runtime::builder().panic(PanicPolicy::ignore());
-
-        assert!(matches!(
-            builder.processor_config.panic_policy.into_executor_policy(),
-            arty_executor::PanicPolicy::Ignore
-        ));
     }
 
     #[test]

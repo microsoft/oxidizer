@@ -7,7 +7,9 @@ use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::discard_task_panic_payload;
+use thread_aware::Thread;
 
+use crate::runtime::hook::{PanicAction, WorkerHook};
 use crate::task::Context;
 use crate::task::preparation::RemoteFutureFactory;
 
@@ -63,6 +65,16 @@ pub(crate) enum Command {
     /// Executes synchronous I/O context access on this worker.
     AccessIo { access: QueuedIoAccess },
 
+    /// Replaces one worker-local runtime hook.
+    RegisterHook {
+        hook: WorkerHook,
+        source: Option<Thread>,
+        ready: std::sync::mpsc::Sender<()>,
+    },
+
+    /// Runs the panic hook for a blocking function and returns its decision.
+    BlockingPanic { ready: std::sync::mpsc::Sender<PanicAction> },
+
     /// Starts shutdown on this worker.
     ///
     /// The worker stops accepting new tasks. It discards tasks enqueued after
@@ -78,6 +90,8 @@ impl fmt::Debug for Command {
         match self {
             Self::EnqueueTask { .. } => write!(f, "EnqueueTask"),
             Self::AccessIo { .. } => write!(f, "AccessIo"),
+            Self::RegisterHook { .. } => write!(f, "RegisterHook"),
+            Self::BlockingPanic { .. } => write!(f, "BlockingPanic"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
     }

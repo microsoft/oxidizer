@@ -12,8 +12,9 @@ use performables::arc::Arc;
 use performables::sync::channel;
 use performables::sync::mutex::Mutex;
 
+use crate::runtime::hook::BlockingPanicHook;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
-use crate::runtime::worker::blocking::{LocalWorker, PanicPolicy, PoolIdentity};
+use crate::runtime::worker::blocking::{LocalWorker, PoolIdentity};
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::prepare_blocking;
 
@@ -143,15 +144,15 @@ impl fmt::Debug for JoinableThreadPool {
 pub(crate) struct Worker {
     pool: Pool,
     remote_results: JoinHandlePool,
-    panic_policy: PanicPolicy,
+    panic_hook: BlockingPanicHook,
 }
 
 impl Worker {
-    pub(crate) fn new(pool: Pool, runtime_shutdown: Shutdown, panic_policy: PanicPolicy) -> Arc<Self> {
+    pub(crate) fn new(pool: Pool, runtime_shutdown: Shutdown, panic_hook: impl Into<BlockingPanicHook>) -> Arc<Self> {
         Arc::new(Self {
             pool,
             remote_results: JoinHandlePool::new(runtime_shutdown),
-            panic_policy,
+            panic_hook: panic_hook.into(),
         })
     }
 
@@ -162,7 +163,7 @@ impl Worker {
         R: Send + 'static,
     {
         let runtime_shutdown = self.remote_results.shutdown().clone();
-        let (task, join_handle) = prepare_blocking(&self.remote_results, body, self.panic_policy.clone());
+        let (task, join_handle) = prepare_blocking(&self.remote_results, body, self.panic_hook.clone());
         if matches!(runtime_shutdown.state(), ShutdownState::Started) {
             drop(task);
             return join_handle;
@@ -317,8 +318,9 @@ mod tests {
     use performables::sync::mutex::Mutex;
     use testing_aids::{TEST_TIMEOUT, execute_or_abandon};
 
-    use super::{Job, JoinableThreadPool, LocalWorker, PanicPolicy, Pool, Worker, attach_thread};
+    use super::{Job, JoinableThreadPool, LocalWorker, Pool, Worker, attach_thread};
     use crate::runtime::shutdown::Shutdown;
+    use crate::runtime::worker::blocking::TestPanicResponse;
 
     fn limit(value: usize) -> NonZeroUsize {
         NonZeroUsize::new(value).unwrap()
@@ -433,7 +435,7 @@ mod tests {
     #[test]
     fn closed_pool_rejects_worker_submission_after_admission() {
         let pool = Pool::new(NonZeroUsize::new(1));
-        let worker = Worker::new(pool.clone(), Shutdown::default(), PanicPolicy::Ignore);
+        let worker = Worker::new(pool.clone(), Shutdown::default(), TestPanicResponse::Ignore);
         pool.join();
 
         let invoked = Arc::new(AtomicBool::new(false));
@@ -611,7 +613,7 @@ mod tests {
         let thread_join_handle = thread::spawn({
             let events = Arc::clone(&events);
             move || {
-                let worker = Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore);
+                let worker = Worker::new(Pool::new(None), Shutdown::default(), TestPanicResponse::Ignore);
 
                 drop(worker.spawn_blocking({
                     let events = Arc::clone(&events);
@@ -665,7 +667,7 @@ mod tests {
         let dropped = Arc::new(AtomicBool::new(false));
         let work_done = Arc::new(AtomicBool::new(false));
 
-        let worker = Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore);
+        let worker = Worker::new(Pool::new(None), Shutdown::default(), TestPanicResponse::Ignore);
 
         worker.remote_results.shutdown().begin(ShutdownCause::default());
 
@@ -686,7 +688,7 @@ mod tests {
     #[test]
     fn runtime_shutdown_cancels_queued_work_before_worker_shutdown() {
         let runtime_shutdown = Shutdown::default();
-        let worker = Worker::new(Pool::new(Some(limit(1))), runtime_shutdown.clone(), PanicPolicy::Ignore);
+        let worker = Worker::new(Pool::new(Some(limit(1))), runtime_shutdown.clone(), TestPanicResponse::Ignore);
         let (started_tx, started_rx) = channel();
         let (release_tx, release_rx) = Event::<()>::boxed();
 
@@ -715,7 +717,7 @@ mod tests {
     fn runtime_shutdown_rejects_new_work_before_worker_shutdown() {
         let runtime_shutdown = Shutdown::default();
         runtime_shutdown.begin(ShutdownCause::default());
-        let worker = Worker::new(Pool::new(Some(limit(1))), runtime_shutdown, PanicPolicy::Ignore);
+        let worker = Worker::new(Pool::new(Some(limit(1))), runtime_shutdown, TestPanicResponse::Ignore);
         let invoked = Arc::new(AtomicBool::new(false));
 
         let rejected = worker.spawn_blocking({
@@ -731,7 +733,7 @@ mod tests {
 
     #[test]
     fn worker_shutdown_rejects_same_pool_join_without_deadlock_guard() {
-        let worker = Worker::new(Pool::new(Some(limit(1))), Shutdown::default(), PanicPolicy::Ignore);
+        let worker = Worker::new(Pool::new(Some(limit(1))), Shutdown::default(), TestPanicResponse::Ignore);
         attach_thread(Arc::clone(&worker.pool.identity));
         worker.remote_results.shutdown().begin(ShutdownCause::default());
 

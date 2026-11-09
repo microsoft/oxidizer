@@ -43,19 +43,20 @@
 //! - The clock follows real time.
 //! - [`MonitorPolicy::default`] enables monitoring in the runtime configuration.
 //!   This choice does not start a monitor or add task measurements.
-//! - [`PanicPolicy::default`] stops the runtime after Arty catches a panic
-//!   while it creates or polls a task, or runs a blocking function.
+//! - Without an [`OnPanic`](hook::OnPanic) hook, the runtime stops after Arty
+//!   catches a panic while it creates or polls a task, or runs a blocking
+//!   function.
 //!
 //! The [`test`](crate::test) attribute disables monitoring by default.
 //! See [`main`](crate::main) and [`test`](crate::test) for their other defaults.
 //!
-//! ## Policy types
+//! ## Configuration types
 //!
 //! - [`WorkersPolicy`] selects how many async workers run and which processors they use.
 //! - [`BlockingPoolPolicy`] selects a shared or per-worker blocking pool and
 //!   sets its thread limit.
-//! - [`PanicPolicy`] selects whether the runtime stops after Arty catches a panic.
 //! - [`MonitorPolicy`] selects the monitoring configuration.
+//! - [`hook`] provides worker-start, task-spawn, task-poll, and panic hooks.
 //!
 //! [`RuntimeBuilder::stack_size`] sets the async worker stack size.
 //! [`RuntimeBuilder::clock`] selects the runtime clock. See each linked API for
@@ -130,6 +131,7 @@ mod control;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
+pub mod hook;
 mod shutdown;
 pub(crate) mod worker;
 mod workers;
@@ -137,14 +139,14 @@ mod workers;
 #[doc(inline)]
 pub use builder::RuntimeBuilder;
 #[doc(inline)]
-pub use config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, WorkersPolicy};
+pub use config::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 #[doc(inline)]
 pub use control::RuntimeControl;
 #[doc(inline)]
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
-pub(crate) use shutdown::{Shutdown, ShutdownStart, ShutdownState};
+pub(crate) use shutdown::{Shutdown, ShutdownState};
 #[doc(inline)]
 pub use workers::Workers;
 

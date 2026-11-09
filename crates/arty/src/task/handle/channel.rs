@@ -60,6 +60,10 @@ impl<R: Send + 'static> Sender<R> {
         let tx = self.tx.take().expect("an Arty result sender publishes at most one result");
         discard_unwind(|| tx.send(result));
     }
+
+    pub(crate) fn panicked_after_hook(self, panic: TaskPanicPayload) {
+        self.publish(Err(JoinError::panicked(panic)));
+    }
 }
 
 impl<R: Send + 'static> TaskCompletion<R> for Sender<R> {
@@ -68,7 +72,13 @@ impl<R: Send + 'static> TaskCompletion<R> for Sender<R> {
     }
 
     fn panicked(self, panic: TaskPanicPayload, cause: Option<ShutdownCause>) {
-        if let Some(cause) = cause {
+        if !crate::runtime::worker::asynchronous::LocalWorker::on_panic() {
+            if let Some(cause) = cause {
+                self.shutdown.begin(cause);
+            } else {
+                self.shutdown.begin(ShutdownCause::panic());
+            }
+        } else if let Some(cause) = cause {
             self.shutdown.begin(cause);
         }
         self.publish(Err(JoinError::panicked(panic)));

@@ -11,7 +11,8 @@ use std::pin::Pin;
 use std::sync::{Arc, Barrier, mpsc};
 use std::task::{Context as PollContext, Wake, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, RuntimeControl, WorkersPolicy};
+use arty::runtime::hook::OnPanic;
+use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeBuilder, RuntimeControl, WorkersPolicy};
 use arty::task::Context;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
@@ -19,13 +20,22 @@ use thread_aware::Unaware;
 use crate::support;
 use crate::support::JoinHandleExt as _;
 
-fn runtime_builder(workers: usize, policy: PanicPolicy) -> RuntimeBuilder {
-    Runtime::builder()
+#[derive(Clone, Copy)]
+enum PanicResponse {
+    Shutdown,
+    Ignore,
+}
+
+fn runtime_builder(workers: usize, response: PanicResponse) -> RuntimeBuilder {
+    let builder = Runtime::builder()
         .workers(WorkersPolicy::exactly(workers))
         // Two threads keep blocking-panic scenarios bounded without serializing
         // the callback whose completion or cancellation the test observes.
-        .blocking_pool(BlockingPoolPolicy::shared().max(2))
-        .panic(policy)
+        .blocking_pool(BlockingPoolPolicy::shared().max(2));
+    match response {
+        PanicResponse::Shutdown => builder.on::<OnPanic>(|event| event.shutdown()),
+        PanicResponse::Ignore => builder.on::<OnPanic>(|event| event.ignore()),
+    }
 }
 
 fn shutdown_cause(error: &arty::runtime::Error) -> &arty_executor::ShutdownError {
@@ -74,7 +84,7 @@ async fn relocated_value(Unaware(value): Unaware<u32>) -> u32 {
 
 #[test]
 fn default_async_panic_preserves_the_panic_join_and_starts_shutdown() {
-    let runtime = runtime_builder(1, PanicPolicy::default()).build().unwrap();
+    let runtime = runtime_builder(1, PanicResponse::Shutdown).build().unwrap();
     let task = runtime.scheduler().spawn_anywhere((), panic_async);
 
     let panic = task.join().unwrap_err();
@@ -98,7 +108,7 @@ fn default_async_panic_preserves_the_panic_join_and_starts_shutdown() {
 
 #[test]
 fn default_factory_panic_cancels_pending_work() {
-    let runtime = runtime_builder(1, PanicPolicy::shutdown()).build().unwrap();
+    let runtime = runtime_builder(1, PanicResponse::Shutdown).build().unwrap();
     let pending = runtime.scheduler().spawn_anywhere((), pending_forever);
     let panicking = runtime.scheduler().spawn_anywhere((), panic_factory);
 
@@ -143,7 +153,7 @@ fn assert_panic_cause_precedes_join_notification(observe_panic: bool, blocking: 
         }
     }
 
-    let runtime = runtime_builder(1, PanicPolicy::shutdown()).build().unwrap();
+    let runtime = runtime_builder(1, PanicResponse::Shutdown).build().unwrap();
     let control = support::runtime_control(&runtime);
     let (started_tx, started_rx) = mpsc::channel();
     let pending = runtime
@@ -189,8 +199,8 @@ fn assert_panic_cause_precedes_join_notification(observe_panic: bool, blocking: 
 
 #[test]
 fn blocking_panics_follow_the_configured_policy() {
-    for (policy, starts_shutdown) in [(PanicPolicy::default(), true), (PanicPolicy::ignore(), false)] {
-        let runtime = runtime_builder(1, policy).build().unwrap();
+    for (response, starts_shutdown) in [(PanicResponse::Shutdown, true), (PanicResponse::Ignore, false)] {
+        let runtime = runtime_builder(1, response).build().unwrap();
         let (release, released) = events_once::Event::<()>::boxed();
         let pending = runtime
             .scheduler()
@@ -236,7 +246,7 @@ fn blocking_panics_follow_the_configured_policy() {
 
 #[test]
 fn ignore_policy_keeps_running_after_each_governed_panic_boundary() {
-    let runtime = runtime_builder(1, PanicPolicy::ignore()).build().unwrap();
+    let runtime = runtime_builder(1, PanicResponse::Ignore).build().unwrap();
     let scheduler = runtime.scheduler();
 
     assert!(scheduler.spawn_anywhere((), panic_factory).join().unwrap_err().is_panic());
@@ -253,7 +263,7 @@ fn ignore_policy_keeps_running_after_each_governed_panic_boundary() {
 
 #[test]
 fn ignore_policy_remains_operational_across_workers_and_cloned_schedulers() {
-    let runtime = runtime_builder(2, PanicPolicy::ignore()).build().unwrap();
+    let runtime = runtime_builder(2, PanicResponse::Ignore).build().unwrap();
     let destination = support::runtime_control(&runtime).workers().into_iter().nth(1).unwrap().clone();
     let scheduler = runtime
         .scheduler()
@@ -277,7 +287,7 @@ fn ignore_policy_remains_operational_across_workers_and_cloned_schedulers() {
 
 #[test]
 fn concurrent_panics_start_one_coordinated_shutdown() {
-    let runtime = runtime_builder(2, PanicPolicy::shutdown()).build().unwrap();
+    let runtime = runtime_builder(2, PanicResponse::Shutdown).build().unwrap();
     let control = support::runtime_control(&runtime);
     let scheduler = runtime
         .scheduler()
@@ -307,7 +317,7 @@ fn concurrent_panics_start_one_coordinated_shutdown() {
 
 #[test]
 fn panic_during_started_shutdown_keeps_the_first_shutdown_cause() {
-    let runtime = runtime_builder(1, PanicPolicy::shutdown()).build().unwrap();
+    let runtime = runtime_builder(1, PanicResponse::Shutdown).build().unwrap();
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let task = runtime.scheduler().spawn_blocking(move || {
@@ -327,7 +337,7 @@ fn panic_during_started_shutdown_keeps_the_first_shutdown_cause() {
 
 #[test]
 fn a_dropped_join_does_not_suppress_default_shutdown() {
-    let runtime = runtime_builder(1, PanicPolicy::shutdown()).build().unwrap();
+    let runtime = runtime_builder(1, PanicResponse::Shutdown).build().unwrap();
     let (panicking_tx, panicking_rx) = mpsc::channel();
     drop(runtime.scheduler().spawn_anywhere(Unaware(panicking_tx), detached_panic));
     panicking_rx.recv().unwrap();
@@ -343,7 +353,7 @@ fn a_dropped_join_does_not_suppress_default_shutdown() {
 
 #[test]
 fn detached_async_panic_cascades_its_shutdown_cause_to_every_worker() {
-    let runtime = runtime_builder(2, PanicPolicy::shutdown()).build().unwrap();
+    let runtime = runtime_builder(2, PanicResponse::Shutdown).build().unwrap();
     let control = support::runtime_control(&runtime);
     let scheduler = runtime
         .scheduler()
@@ -384,7 +394,7 @@ fn detached_async_panic_cascades_its_shutdown_cause_to_every_worker() {
 
 #[test]
 fn detached_blocking_panic_cascades_its_shutdown_cause_to_every_worker() {
-    let runtime = runtime_builder(2, PanicPolicy::shutdown()).build().unwrap();
+    let runtime = runtime_builder(2, PanicResponse::Shutdown).build().unwrap();
     let control = support::runtime_control(&runtime);
     let scheduler = runtime
         .scheduler()
@@ -429,7 +439,7 @@ fn detached_blocking_panic_cascades_its_shutdown_cause_to_every_worker() {
 
 #[test]
 fn detached_blocking_panic_keeps_work_running_under_ignore_policy() {
-    let runtime = runtime_builder(2, PanicPolicy::ignore())
+    let runtime = runtime_builder(2, PanicResponse::Ignore)
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .build()
         .unwrap();

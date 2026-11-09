@@ -5,16 +5,30 @@
 //!
 //! `worker` accepts and runs blocking callbacks. `pools` owns the blocking
 //! thread pools. `local_worker` stores thread-local worker state.
-//! `panic_policy` applies the configured panic policy.
 
 mod local_worker;
-mod panic_policy;
 mod pools;
 mod worker;
 
 pub(crate) use local_worker::LocalWorker;
-pub(crate) use panic_policy::PanicPolicy;
 pub(crate) use pools::Pools;
 pub(crate) use worker::{Pool, Worker};
 
 pub(crate) type PoolIdentity = performables::arc::Arc<()>;
+
+#[cfg(test)]
+#[derive(Clone, Debug)]
+pub(crate) enum TestPanicResponse {
+    Ignore,
+    Shutdown(std::task::Waker),
+}
+
+#[cfg(test)]
+impl From<TestPanicResponse> for crate::runtime::hook::BlockingPanicHook {
+    fn from(value: TestPanicResponse) -> Self {
+        match value {
+            TestPanicResponse::Ignore => Self::for_test(crate::runtime::hook::PanicAction::Ignore),
+            TestPanicResponse::Shutdown(waker) => Self::for_test_with_waker(crate::runtime::hook::PanicAction::Shutdown, waker),
+        }
+    }
+}

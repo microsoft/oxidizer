@@ -3,6 +3,8 @@
 
 use crate::runtime::Workers;
 use crate::runtime::dispatch::DispatcherClient;
+use crate::runtime::error::Error;
+use crate::runtime::hook::{Hook, HookFactory};
 
 /// Requests runtime shutdown from any thread.
 ///
@@ -53,6 +55,53 @@ impl RuntimeControl {
     #[must_use]
     pub fn workers(&self) -> &Workers {
         self.dispatcher.workers()
+    }
+
+    /// Registers or replaces a runtime hook without callback data.
+    ///
+    /// This method returns after every live worker installs the hook. Use
+    /// [`on_with`](Self::on_with) when the callback needs worker-local data.
+    pub fn on<H: Hook>(&self, callback: fn(&mut H)) -> Result<(), Error> {
+        self.dispatcher.register_hook(HookFactory::without_data(callback))
+    }
+
+    /// Registers or replaces a runtime hook on every live async worker.
+    ///
+    /// Arty clones the hook data for each worker and relocates it before the
+    /// callback can run. This method returns after every live worker installs
+    /// the hook. Arty sends late hook registration through each worker's
+    /// priority command channel. A worker applies it before normal queued task
+    /// and I/O commands. Tasks that a worker registers after this method
+    /// returns use the new hook.
+    ///
+    /// A late [`OnStart`](crate::runtime::hook::OnStart) registration is stored
+    /// but does not run because the workers have already started.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if runtime shutdown starts before every worker
+    /// installs the hook.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::hook::OnPanic;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// let control = runtime
+    ///     .scheduler()
+    ///     .block_on(async |cx| cx.control().clone())?;
+    /// control.on_with::<OnPanic, _>((), |event, _| event.ignore())?;
+    /// runtime.stop()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn on_with<H, D>(&self, data: D, callback: fn(&mut H, &mut D)) -> Result<(), Error>
+    where
+        H: Hook,
+        D: thread_aware::ThreadAware + Clone + 'static,
+    {
+        self.dispatcher.register_hook(HookFactory::new(data, callback))
     }
 
     /// Requests shutdown without blocking the calling thread.

@@ -8,8 +8,8 @@
   task factories, and blocking callbacks.
 - A contained task or callback panic becomes `JoinError` without replacing
   the original panic.
-- Let the executor apply the configured `PanicPolicy` to async task factories
-  and polls. Forward its `ShutdownCause` without another panic-policy decision.
+- Apply the configured `OnPanic` hook to async task factories and polls.
+  Forward its `ShutdownCause` without another panic decision.
 - For blocking callbacks, apply the policy at the blocking execution boundary.
   Publish the cause before delivering the panic result. Wake the associated
   async worker only when publication starts shutdown.
