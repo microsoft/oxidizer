@@ -29,7 +29,7 @@ pub(crate) fn create_dispatch_handler(
     let mut create = |index: usize| {
         let handler = transport.create_transport_handler(options.clone(), meter.clone(), PoolIndex::new(index));
 
-        decompression::wrap(handler, decompression.as_ref())
+        decompression::wrap(handler, decompression.as_ref(), body_builder)
     };
 
     let mode = match options.transport.connection_pool.multiple_pools.clone() {
@@ -56,12 +56,31 @@ mod decompression {
     use bytesbuf::mem::HasMemory as _;
     use compressors::Resources;
     use http_compression::{Client, Compression, CompressionLayer};
-    use layered::Layer as _;
+    use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
+    use layered::{Layer as _, Service};
 
     use super::{ClientOptions, HttpBodyBuilder};
     use crate::handlers::TransportHandler;
 
     pub(super) type Layer = CompressionLayer<Client>;
+
+    #[derive(Debug)]
+    struct ResponseBodyPolicies<T> {
+        inner: T,
+        body_builder: HttpBodyBuilder,
+    }
+
+    impl<T: RequestHandler> Service<HttpRequest> for ResponseBodyPolicies<T> {
+        type Out = Result<HttpResponse>;
+
+        async fn execute(&self, input: HttpRequest) -> Self::Out {
+            let response = self.inner.execute(input).await?;
+            let (parts, body) = response.into_parts();
+            let body = self.body_builder.rewrap(body, |body| body);
+
+            Ok(HttpResponse::from_parts(parts, body))
+        }
+    }
 
     /// Builds the layer, or `None` when the client asked for no decompression.
     pub(super) fn layer(options: &ClientOptions, body_builder: &HttpBodyBuilder) -> Option<Layer> {
@@ -78,9 +97,12 @@ mod decompression {
         Some(layer)
     }
 
-    pub(super) fn wrap(handler: TransportHandler, layer: Option<&Layer>) -> TransportHandler {
+    pub(super) fn wrap(handler: TransportHandler, layer: Option<&Layer>, body_builder: &HttpBodyBuilder) -> TransportHandler {
         match layer {
-            Some(layer) => TransportHandler::new(layer.layer(handler)),
+            Some(layer) => TransportHandler::new(layer.layer(ResponseBodyPolicies {
+                inner: handler,
+                body_builder: body_builder.clone(),
+            })),
             None => handler,
         }
     }
@@ -107,7 +129,7 @@ mod decompression {
     }
 
     #[cfg_attr(test, mutants::skip)] // Trivial identity adapter, inactive in the all-features mutation suite.
-    pub(super) const fn wrap(handler: TransportHandler, _: Option<&Layer>) -> TransportHandler {
+    pub(super) const fn wrap(handler: TransportHandler, _: Option<&Layer>, _: &HttpBodyBuilder) -> TransportHandler {
         handler
     }
 }

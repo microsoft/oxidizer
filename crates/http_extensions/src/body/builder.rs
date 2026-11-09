@@ -150,6 +150,44 @@ impl HttpBodyBuilder {
         HttpBody::from_streaming(StreamingBody::new(body), merged, self.clock.clone(), None)
     }
 
+    /// Wraps an existing [`HttpBody`] while preserving its policies.
+    ///
+    /// Missing policies fall back to this builder's defaults. An existing timeout
+    /// stays attached to the source body, so the wrapper does not add a second timer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// use http_body_util::BodyExt;
+    /// use http_extensions::HttpBodyBuilder;
+    ///
+    /// let builder = HttpBodyBuilder::new_fake();
+    /// let body = builder.text("hello");
+    /// let wrapped = builder.rewrap(body, |body| body.map_frame(|frame| frame));
+    ///
+    /// assert_eq!(wrapped.content_length(), Some(5));
+    /// # }
+    /// # }
+    /// ```
+    pub fn rewrap<B>(&self, body: HttpBody, wrap: impl FnOnce(HttpBody) -> B) -> HttpBody
+    where
+        B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
+    {
+        let own = body.options();
+        let options = own.merge(&self.options);
+        let source_enforces_timeout = body.enforces_timeout_policy();
+        let clock = if own.timeout.is_some() {
+            body.clock.clone()
+        } else {
+            self.clock.clone()
+        };
+        let active_timeout = if source_enforces_timeout { None } else { options.timeout };
+
+        HttpBody::from_streaming_with_timeout(StreamingBody::new(wrap(body)), options, clock, active_timeout, None)
+    }
+
     /// Creates a body from a stream of byte chunks.
     ///
     /// Accepts a [`Stream`][futures::Stream] of [`BytesView`] chunks and creates a streaming
@@ -355,17 +393,14 @@ mod tests {
     use bytes::Bytes;
     use bytesbuf::mem::CallbackMemory;
     use bytesbuf::mem::testing::TransparentMemory;
-    use futures::channel::mpsc;
     use futures::executor::block_on;
     use futures::stream;
-    use http_body_util::BodyExt;
     use ohno::Labeled as _;
     use serde::Serialize;
     use static_assertions::assert_impl_all;
     use thread_aware::unaware;
     use tick::ClockControl;
 
-    use super::super::Content;
     use super::*;
 
     #[test]
@@ -401,86 +436,26 @@ mod tests {
     }
 
     #[test]
-    fn transforming_times_output_frames_while_the_source_makes_progress() {
-        let control = ClockControl::new();
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &control.to_clock());
-        let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
-        let (sender, receiver) = mpsc::unbounded();
-        let source = builder.stream(receiver, &options);
-        let mut body = pin!(
-            source
-                .map(|content| Ok(match content {
-                    Content::Streaming(body) => {
-                        Content::Streaming(StreamingBody::new(http_body_util::StreamBody::new(stream::once(async move {
-                            body.collect()
-                                .await
-                                .map(|collected| Frame::data(BytesView::from(collected.to_bytes())))
-                        }))))
-                    }
-                    Content::Bytes(bytes) => Content::Bytes(bytes),
-                }))
-                .unwrap()
-        );
-        let waker = futures::task::noop_waker();
-        let mut cx = Context::from_waker(&waker);
-
-        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
-        control.advance(Duration::from_millis(75));
-        sender.unbounded_send(Ok(BytesView::copied_from_slice(b"first", &builder))).unwrap();
-        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
-
-        // Output is buffered for longer than the timeout, but source frames keep arriving.
-        control.advance(Duration::from_millis(75));
-        sender
-            .unbounded_send(Ok(BytesView::copied_from_slice(b"second", &builder)))
-            .unwrap();
-        let Poll::Ready(Some(Err(error))) = body.as_mut().poll_frame(&mut cx) else {
-            panic!("source progress must not reset the timeout for transformed frames");
-        };
-        assert_eq!(error.label(), "body_timeout");
-    }
-
-    #[test]
-    fn body_applies_builder_defaults_to_a_returned_buffered_body() {
+    fn rewrapping_applies_builder_defaults_to_a_buffered_body() {
         let lenient = HttpBodyOptions::default().buffer_limit(99);
         let builder = HttpBodyBuilder::new_fake().with_options(lenient);
 
-        let original = builder.text("hello").map(Ok).unwrap();
-        let transformed = builder.body(original, &HttpBodyOptions::new());
+        let original = HttpBodyBuilder::new_fake().text("hello");
+        let transformed = builder.rewrap(original, |body| body);
 
         assert_eq!(transformed.options(), lenient);
     }
 
     #[test]
-    fn body_applies_builder_timeout_to_a_transformed_body_without_one() {
-        #[derive(Debug)]
-        struct PendingBody;
+    fn rewrapping_prefers_existing_policies_to_builder_defaults() {
+        let defaults = HttpBodyOptions::default().buffer_limit(99).timeout(Duration::from_secs(30));
+        let existing = HttpBodyOptions::default().buffer_limit(7).timeout(Duration::from_secs(3));
+        let builder = HttpBodyBuilder::new_fake().with_options(defaults);
+        let source = HttpBodyBuilder::new_fake().stream(stream::pending(), &existing);
 
-        impl Body for PendingBody {
-            type Data = BytesView;
-            type Error = HttpError;
+        let wrapped = builder.rewrap(source, |body| body);
 
-            fn poll_frame(
-                self: std::pin::Pin<&mut Self>,
-                _: &mut std::task::Context<'_>,
-            ) -> std::task::Poll<Option<Result<Frame<Self::Data>>>> {
-                std::task::Poll::Pending
-            }
-        }
-
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock).with_options(options);
-        let source = HttpBodyBuilder::new_fake().body(PendingBody, &HttpBodyOptions::new());
-        let transformed = source.map(Ok).unwrap();
-        let mut body = Box::pin(builder.body(transformed, &HttpBodyOptions::new()));
-        let waker = futures::task::noop_waker();
-        let mut cx = std::task::Context::from_waker(&waker);
-
-        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
-
-        let result = body.as_mut().poll_frame(&mut cx);
-        assert!(matches!(result, std::task::Poll::Ready(Some(Err(_)))));
+        assert_eq!(wrapped.options(), existing);
     }
 
     use crate::testing::{create_stream_body, create_stream_body_from_chunks};

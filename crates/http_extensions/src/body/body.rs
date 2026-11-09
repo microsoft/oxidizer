@@ -6,6 +6,7 @@ use std::io::Read;
 use std::pin::Pin;
 use std::task::Poll::Ready;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use bytesbuf::BytesView;
 use futures::future::Either;
@@ -221,11 +222,25 @@ impl HttpBody {
 
     /// Creates a streaming body backed by a boxed [`Body`] implementation.
     pub(super) fn from_streaming(body: StreamingBody, options: HttpBodyOptions, clock: Clock, current_delay: Option<Delay>) -> Self {
+        Self::from_streaming_with_timeout(body, options, clock, options.timeout, current_delay)
+    }
+
+    pub(super) fn from_streaming_with_timeout(
+        body: StreamingBody,
+        options: HttpBodyOptions,
+        clock: Clock,
+        active_timeout: Option<Duration>,
+        current_delay: Option<Delay>,
+    ) -> Self {
         Self {
-            kind: Kind::Body(body, current_delay),
+            kind: Kind::Body(body, active_timeout, current_delay),
             options,
             clock,
         }
+    }
+
+    pub(super) fn enforces_timeout_policy(&self) -> bool {
+        self.options.timeout.is_some() && matches!(self.kind, Kind::Body(..))
     }
 
     /// Maps body content while preserving its policies.
@@ -656,14 +671,14 @@ impl Body for HttpBody {
                 .take()
                 .map_or_else(|| Ready(None), |bytes| Ready((!bytes.is_empty()).then(|| Ok(Frame::data(bytes))))),
             BodyInnerProj::Empty => Ready(None),
-            BodyInnerProj::Body(body, current_delay) => {
+            BodyInnerProj::Body(body, active_timeout, current_delay) => {
                 let result = Pin::new(body).poll_frame(cx);
                 if result.is_ready() {
                     *current_delay = None;
                     return result;
                 }
 
-                let Some(duration) = this.options.timeout else {
+                let Some(duration) = *active_timeout else {
                     return Poll::Pending;
                 };
                 let clock = this.clock;
@@ -705,7 +720,7 @@ pub(super) enum Kind {
     #[debug("Empty")]
     Empty,
     #[debug("Body")]
-    Body(StreamingBody, Option<Delay>),
+    Body(StreamingBody, Option<Duration>, Option<Delay>),
 }
 
 fn collect_with_limit(

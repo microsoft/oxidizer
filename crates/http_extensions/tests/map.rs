@@ -18,7 +18,7 @@ use http_body::Body;
 use http_body_util::{BodyExt, Full};
 use http_extensions::body::{Content, StreamingBody};
 use http_extensions::{HttpBodyBuilder, HttpBodyOptions, HttpError};
-use ohno::Labeled;
+use ohno::{ErrorExt, Labeled};
 use tick::ClockControl;
 
 #[test]
@@ -65,7 +65,8 @@ fn propagates_callback_and_consumed_body_errors() {
         .text("source")
         .map(|_| Err(HttpError::validation("map failed")))
         .unwrap_err();
-    assert!(error.to_string().contains("map failed"));
+    assert_eq!(error.message(), "map failed");
+    assert_eq!(error.label(), "validation");
 
     let mut consumed = builder.text("source");
     consumed.frame().now_or_never().unwrap().unwrap().unwrap();
