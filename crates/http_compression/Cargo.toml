@@ -3,7 +3,7 @@
 
 [package]
 name = "http_compression"
-description = "HTTP request and response body compression and decompression."
+description = "Compression and decompression for HTTP message bodies."
 version = "0.5.0"
 readme = "README.md"
 keywords = ["http", "compression", "decompression", "gzip", "middleware"]

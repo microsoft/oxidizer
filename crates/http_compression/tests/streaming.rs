@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Incremental HTTP compression, including pauses, trailers and source failures.
+//! Tests streaming compression with pauses, trailers, and source failures.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 #![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
@@ -67,8 +67,8 @@ fn receive_burst(mut body: Pin<&mut HttpBody>, expected: &[u8]) {
     let waker = noop_waker();
     let mut cx = Context::from_waker(&waker);
     let mut received = Vec::new();
-    // Bound polling rather than waiting for EOF or a wall-clock timeout. Cooperative
-    // compression engine yields may return Pending before the source itself pauses.
+    // Use a poll limit instead of EOF or a wall-clock timeout. A cooperative
+    // compression engine can return `Pending` before the source pauses.
     for _ in 0..1024 {
         match body.as_mut().poll_frame(&mut cx) {
             Poll::Ready(Some(frame)) => received.extend(frame.unwrap().into_data().unwrap().to_vec()),

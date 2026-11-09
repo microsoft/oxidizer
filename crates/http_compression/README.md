@@ -23,42 +23,35 @@ use http_extensions::HttpBodyBuilder;
 let layer = Compression::client(body_builder).decompress_responses(&[Format::Gzip]);
 ```
 
-[`compressors`][__link0] transforms a stream of bytes. This crate applies that to
-HTTP messages: reading `Content-Encoding`, negotiating `Accept-Encoding`,
-and replacing a body with one that compresses or decompresses as it is read.
-The policies and trailer fields the body already carried travel through,
-except stale `Content-Digest` and `Repr-Digest` values removed after a
-transformation.
+[`Compression`][__link0] transforms HTTP bodies as they are read. It uses
+`Content-Encoding` to decompress bodies and `Accept-Encoding` to select
+response compression. It preserves body policies and trailers. It removes
+stale `Content-Digest` and `Repr-Digest` values after a transformation.
 
-Everything runs through one handler, [`Compression`][__link1], because a client and
-a server want different parts of the same job. The role is chosen up front
-and decides which toggles exist:
+Select a client or server role when you create the layer:
 
 |Role|Configured with|Transforms|
 |----|---------------|----------|
-|[`Client`][__link2]|[`decompress_responses`][__link3]|the response coming back|
-|[`Server`][__link4]|[`decompress_requests`][__link5]|the request coming in|
-|[`Server`][__link6]|[`compress_responses`][__link7]|the response going out|
+|[`Client`][__link1]|[`decompress_responses`][__link2]|the response coming back|
+|[`Server`][__link3]|[`decompress_requests`][__link4]|the request coming in|
+|[`Server`][__link5]|[`compress_responses`][__link6]|the response going out|
 
-Each is off until it is configured. Because the toggles are scoped to the
-role, a misconfiguration is a compile error rather than a subtle one: a
-client cannot ask to compress a response it has just received, and a server
-cannot advertise `Accept-Encoding` on a request that is arriving rather than
-leaving. [`limits`][__link8],
-[`resources`][__link9] and
-[`on_unsupported`][__link10] mean the same thing
-either way, so they are available on both.
+Each transformation is off until you configure it. The role limits which
+transformations are available. Both roles support
+[`limits`][__link7],
+[`resources`][__link8], and
+[`on_unsupported`][__link9].
 
-Clients leave request bodies unchanged, and servers leave response decompression
-to their callers. Servers skip server-sent events, native gRPC and common
-already-compressed media types. A
-[`content-type allowlist`][__link11] can restrict
+Clients do not change request bodies. Servers do not decompress response
+bodies. Servers skip server-sent events, native gRPC, and common compressed
+media types. A
+[`content-type allowlist`][__link10] can restrict
 response compression further.
 
-Response compression defaults to [`Level::FAST`][__link12],
-adjustable with [`level`][__link13]. When a streaming body pauses,
-buffered compression output is flushed so the consumer can decompress the bytes
-already sent without waiting for the body to end.
+Response compression uses [`Level::FAST`][__link11] by
+default. Use [`level`][__link12] to change it. If a streaming
+body pauses, the compressor flushes buffered output. The consumer can then
+decompress each sent part before the body ends.
 
 ```rust
 use std::num::NonZeroU64;
@@ -79,42 +72,41 @@ let server = Compression::server(body_builder)
     .compress_responses(&[Format::Gzip]);
 ```
 
-Decompressed messages carry [`OriginalBody`][__link14] in their extensions. It records the
-original compression formats and `Content-Length` after those headers have been
-removed from the decompressed request or response.
+A decompressed message stores [`OriginalBody`][__link13] in its extensions. This value
+records the original compression formats and `Content-Length`.
 
-## Which formats
+## Formats
 
-Nothing happens until one of the three transformations is given formats, and
-only formats compiled in by the `gzip`, `deflate`, `brotli` and `zstd`
-features can be named.
+A transformation needs at least one format. The `gzip`, `deflate`, `brotli`,
+and `zstd` features enable their matching formats.
 
-HTTP `deflate` is zlib-wrapped DEFLATE, so the `deflate` feature enables
-[`Format::Zlib`][__link15]. Raw RFC 1951 DEFLATE has no
-HTTP content-coding token and is ignored when supplied.
+HTTP `deflate` uses zlib-wrapped DEFLATE. The `deflate` feature therefore
+enables [`Format::Zlib`][__link14]. Raw RFC 1951 DEFLATE
+has no HTTP content-coding token, so the crate ignores it.
 
 ## Bounds
 
-Decompressed request and response bodies are capped at 64 MiB and 1,024 compressed streams per
-decompression stage by default, including when they are streamed rather than buffered. Use
-[`limits`][__link16] to change either bound for an application’s budget. Removing
-them requires the explicit
-[`unbounded_output_len`][__link17] and
-[`unbounded_streams`][__link18] methods.
+Each decompression stage limits output to 64 MiB and 1,024 compressed
+streams by default. These limits also apply to streaming bodies. Use
+[`limits`][__link15] to change them. To remove them, use
+[`unbounded_output_len`][__link16] and
+[`unbounded_streams`][__link17] methods.
+A decompressed message can contain at most 16 enabled compression coding
+layers. This limit is fixed.
 
 ## Errors
 
-Every transformation is lazy, so a malformed or oversized body fails when it
-is read rather than when its headers arrive. Failures carry one of three labels:
+Transformations are lazy. A malformed or oversized body fails when it is
+read, not when its headers arrive. A failure has one of these labels:
 
 |Label|What happened|
 |-----|-------------|
 |`compression_invalid`|The body was malformed for its declared compression format|
-|`compression_limit_exceeded`|Decompression would have exceeded the configured limits|
-|`compression_unsupported`|An unavailable format was seen under [`UnsupportedCompression::Fail`][__link19]|
+|`compression_limit_exceeded`|The body exceeds a decompression or content-coding limit|
+|`compression_unsupported`|An unavailable format was seen under [`UnsupportedCompression::Fail`][__link18]|
 
-A `Content-Encoding` that cannot be parsed is not an error: the body is left
-exactly as it arrived.
+An invalid `Content-Encoding` is not an error. The crate leaves the body and
+its headers unchanged.
 
 
 <hr/>
@@ -122,24 +114,23 @@ exactly as it arrived.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbRTuyOUnubrsbZ7dRIlt5B_kbOluzi0YM-7QbBhIflEyby5JhZIKCa2NvbXByZXNzb3JzZTAuNS4wgnBodHRwX2NvbXByZXNzaW9uZTAuNS4w
- [__link0]: https://crates.io/crates/compressors/0.5.0
- [__link1]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Compression
- [__link10]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::on_unsupported
- [__link11]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::compressible_types
- [__link12]: https://docs.rs/compressors/0.5.0/compressors/?search=Level::FAST
- [__link13]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::level
- [__link14]: https://docs.rs/http_compression/0.5.0/http_compression/?search=OriginalBody
- [__link15]: https://docs.rs/compressors/0.5.0/compressors/?search=format::Format
- [__link16]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::limits
- [__link17]: https://docs.rs/compressors/0.5.0/compressors/?search=DecompressorLimits::unbounded_output_len
- [__link18]: https://docs.rs/compressors/0.5.0/compressors/?search=DecompressorLimits::unbounded_streams
- [__link19]: https://docs.rs/http_compression/0.5.0/http_compression/?search=UnsupportedCompression::Fail
- [__link2]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Client
- [__link3]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::decompress_responses
- [__link4]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Server
- [__link5]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::decompress_requests
- [__link6]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Server
- [__link7]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::compress_responses
- [__link8]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::limits
- [__link9]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::resources
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbDo5gpCFtyFIbhEI9WnqGcdcbXb8GFPvf5Wsb6qYGF5ZhdKhhZIKCa2NvbXByZXNzb3JzZTAuNS4wgnBodHRwX2NvbXByZXNzaW9uZTAuNS4w
+ [__link0]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Compression
+ [__link1]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Client
+ [__link10]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::compressible_types
+ [__link11]: https://docs.rs/compressors/0.5.0/compressors/?search=Level::FAST
+ [__link12]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::level
+ [__link13]: https://docs.rs/http_compression/0.5.0/http_compression/?search=OriginalBody
+ [__link14]: https://docs.rs/compressors/0.5.0/compressors/?search=format::Format
+ [__link15]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::limits
+ [__link16]: https://docs.rs/compressors/0.5.0/compressors/?search=DecompressorLimits::unbounded_output_len
+ [__link17]: https://docs.rs/compressors/0.5.0/compressors/?search=DecompressorLimits::unbounded_streams
+ [__link18]: https://docs.rs/http_compression/0.5.0/http_compression/?search=UnsupportedCompression::Fail
+ [__link2]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::decompress_responses
+ [__link3]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Server
+ [__link4]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::decompress_requests
+ [__link5]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Server
+ [__link6]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::compress_responses
+ [__link7]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::limits
+ [__link8]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::resources
+ [__link9]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::on_unsupported
