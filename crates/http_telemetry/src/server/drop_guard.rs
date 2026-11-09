@@ -3,13 +3,12 @@
 
 //! The drop guard that emits the event of one request.
 
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 
 use http::uri::Authority;
 use http::{HeaderValue, Method, StatusCode, Version};
 use http_extensions::HttpError;
-use http_headers::SingleValueField;
-use http_headers::headers::{Host, HostView};
 use observed::context::Transfer;
 use observed::{Sink, Text, emit};
 use ohno::{ErrorLabel, Labeled};
@@ -102,13 +101,7 @@ impl TelemetryDropGuard {
         };
         let (server_address, server_port) = match &self.uri_authority {
             Some(UriAuthority::Uri(authority, default_port)) => (Some(authority.host()), authority.port_u16().or(*default_port)),
-            Some(UriAuthority::Host(value)) => {
-                let host = <Host as SingleValueField>::decode_view(value.into()).ok();
-                (
-                    host.as_ref().map(HostView::host),
-                    host.and_then(|host| host.network_port().ok().flatten()),
-                )
-            }
+            Some(UriAuthority::Host(value)) => decode_host(value).map_or((None, None), |(host, port)| (Some(host), port)),
             None => (None, None),
         };
         // `emit!` builds an event only for a sink that is interested in it, so the method and the host are copied
@@ -185,6 +178,68 @@ impl TelemetryDropGuard {
         }
         self.add_active_request(-1);
     }
+}
+
+/// Reads the strict Host grammar without normalizing the address (RFC 9110, section 7.2).
+fn decode_host(value: &HeaderValue) -> Option<(&str, Option<u16>)> {
+    let value = value.to_str().ok()?;
+    let (host, port) = if let Some(literal) = value.strip_prefix('[') {
+        let (literal, suffix) = literal.split_once(']')?;
+        if !valid_ip_literal(literal) {
+            return None;
+        }
+        let host = &value[..literal.len() + 2];
+        let port = if suffix.is_empty() { None } else { Some(suffix.strip_prefix(':')?) };
+        (host, port)
+    } else {
+        let (host, port) = value.split_once(':').map_or((value, None), |(host, port)| (host, Some(port)));
+        if (host.is_empty() && port.is_some()) || !valid_registered_name(host.as_bytes()) {
+            return None;
+        }
+        (host, port)
+    };
+    if let Some(port) = port
+        && !port.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    // An empty or overflowing decimal port leaves the address usable.
+    Some((host, port.and_then(|port| port.parse().ok())))
+}
+
+fn valid_registered_name(mut bytes: &[u8]) -> bool {
+    while let Some((&byte, rest)) = bytes.split_first() {
+        if host_name_byte(byte) {
+            bytes = rest;
+        } else if byte == b'%' && rest.first().is_some_and(u8::is_ascii_hexdigit) && rest.get(1).is_some_and(u8::is_ascii_hexdigit) {
+            bytes = &rest[2..];
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+fn valid_ip_literal(literal: &str) -> bool {
+    let Some(versioned) = literal.strip_prefix('v').or_else(|| literal.strip_prefix('V')) else {
+        return literal.parse::<Ipv6Addr>().is_ok();
+    };
+    let Some((version, address)) = versioned.split_once('.') else {
+        return false;
+    };
+    !version.is_empty()
+        && version.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && !address.is_empty()
+        && address.bytes().all(|byte| host_name_byte(byte) || byte == b':')
+}
+
+/// Unreserved and sub-delimiter bytes (RFC 3986, sections 2.2 and 2.3).
+const fn host_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'-' | b'.' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'='
+        )
 }
 
 /// The label of one error of a source chain: the label of an [`HttpError`], the kind of an I/O

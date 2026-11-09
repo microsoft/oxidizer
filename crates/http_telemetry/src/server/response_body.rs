@@ -8,12 +8,11 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use bytesbuf::BytesView;
-use http::header::TRANSFER_ENCODING;
-use http::{Method, StatusCode, Version};
+use http::header::{CONTENT_LENGTH, TRANSFER_ENCODING};
+use http::{HeaderMap, Method, StatusCode, Version};
 use http_body::{Body, Frame, SizeHint};
 use http_extensions::body::{Content, StreamingBody};
 use http_extensions::{HttpError, HttpResponse};
-use http_headers::headers::{ContentLength, ContentLengthOwned};
 
 use super::drop_guard::{RequestEnd, TelemetryDropGuard};
 
@@ -42,13 +41,7 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
     // the content (RFC 9112, sections 6.3 and 7.1, RFC 9113, section 8.1, and RFC 9114, section 4.1).
     let content_length = (matches!(guard.version, Version::HTTP_10 | Version::HTTP_11)
         && !response.headers().contains_key(TRANSFER_ENCODING))
-    .then(|| {
-        ContentLength::view(response.headers())
-            .ok()
-            .flatten()
-            .map(ContentLengthOwned::get)
-            .or_else(|| response.body().size_hint().exact())
-    })
+    .then(|| decode_content_length(response.headers()).or_else(|| response.body().size_hint().exact()))
     .flatten();
     response.map(|body| {
         // TODO: Decide whether a buffered body can complete telemetry here instead of becoming a stream.
@@ -63,6 +56,25 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
         })
         .expect("the response body was confirmed above to not be at its end")
     })
+}
+
+/// All repeated and comma-separated lengths must agree (RFC 9110, section 8.6).
+fn decode_content_length(headers: &HeaderMap) -> Option<u64> {
+    let mut length = None;
+    for value in headers.get_all(CONTENT_LENGTH) {
+        for item in value.to_str().ok()?.split(',') {
+            let item = item.trim_matches([' ', '\t']);
+            if item.is_empty() || !item.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            let number = item.parse().ok()?;
+            if length.is_some_and(|previous| previous != number) {
+                return None;
+            }
+            length = Some(number);
+        }
+    }
+    length
 }
 
 struct TelemetryBody {

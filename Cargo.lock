@@ -2649,7 +2649,6 @@ dependencies = [
  "http-body",
  "http-body-util",
  "http_extensions",
- "http_headers",
  "hyper",
  "hyper-util",
  "layered",
