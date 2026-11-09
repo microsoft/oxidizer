@@ -135,6 +135,10 @@ required-features = ["macros"]
 name = "arty_io"
 required-features = ["macros"]
 
+[[example]]
+name = "arty_hooks"
+required-features = ["rt"]
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
