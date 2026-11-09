@@ -52,8 +52,8 @@ reported in the destination output.
   returning to control messages, so `force_flush`, `shutdown`, and resource
   updates stay responsive under sustained logging.
 * Both destinations buffer formatted bytes on the worker thread to coalesce
-  small writes. Use the builder’s
-  `buffer_size` option to change it, or zero to disable buffering. Pending
+  small writes. Use the `buffer_size` builder option to change it,
+  or zero to disable buffering. Pending
   bytes reach the file when the buffer fills, at `flush_interval`,
   on `force_flush`, or on shutdown. The worker wakes to flush even
   when logging stops; continued logging does not postpone the deadline.
@@ -62,7 +62,7 @@ reported in the destination output.
   to the operating system but does not guarantee durable storage.
 * [`LogProcessor::force_flush`][__link4]
   sends a control message to the worker and waits for an acknowledgement.
-  The wait is bounded by the builder’s `flush_ack_timeout` option.
+  The wait is bounded by the `flush_ack_timeout` builder option.
   A timeout, stopped worker, or write/flush failure is returned
   as an `InternalFailure`.
 * Write errors and automatic flush errors cannot be returned to the
@@ -95,7 +95,7 @@ for ownership, failure policy, and testing boundaries.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_file">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbAnSzg003HPQbWJVBMV-GajkbRwY41Jr0jr4b6XC3j3by_HRhZIKCeBlvYnNlcnZlZF9kZXN0aW5hdGlvbl9maWxlZTAuMS4wgnFvcGVudGVsZW1ldHJ5X3Nka2YwLjMzLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbLd-vGAD7Bjsbp3UObcynKKUb958NGCe-9U8bLXdh6Q6MxRxhZIKCeBlvYnNlcnZlZF9kZXN0aW5hdGlvbl9maWxlZTAuMS4wgnFvcGVudGVsZW1ldHJ5X3Nka2YwLjMzLjE
  [__link0]: https://docs.rs/observed_destination_file/0.1.0/observed_destination_file/?search=file_logs
  [__link1]: https://docs.rs/performables/
  [__link2]: https://docs.rs/observed_destination_file/0.1.0/observed_destination_file/?search=file_logs

@@ -47,8 +47,8 @@
 //!   returning to control messages, so `force_flush`, `shutdown`, and resource
 //!   updates stay responsive under sustained logging.
 //! * Both destinations buffer formatted bytes on the worker thread to coalesce
-//!   small writes. Use the builder's
-//!   `buffer_size` option to change it, or zero to disable buffering. Pending
+//!   small writes. Use the `buffer_size` builder option to change it,
+//!   or zero to disable buffering. Pending
 //!   bytes reach the file when the buffer fills, at `flush_interval`,
 //!   on `force_flush`, or on shutdown. The worker wakes to flush even
 //!   when logging stops; continued logging does not postpone the deadline.
@@ -57,7 +57,7 @@
 //!   to the operating system but does not guarantee durable storage.
 //! * [`LogProcessor::force_flush`](opentelemetry_sdk::logs::LogProcessor::force_flush)
 //!   sends a control message to the worker and waits for an acknowledgement.
-//!   The wait is bounded by the builder's `flush_ack_timeout` option.
+//!   The wait is bounded by the `flush_ack_timeout` builder option.
 //!   A timeout, stopped worker, or write/flush failure is returned
 //!   as an `InternalFailure`.
 //! * Write errors and automatic flush errors cannot be returned to the
