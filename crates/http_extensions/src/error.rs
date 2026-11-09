@@ -31,6 +31,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 /// - Classifies errors as temporary or permanent.
 /// - Converts errors from the `http` crate.
 /// - Stores an [`ErrorLabel`] for metrics and logging.
+/// - Can store an HTTP status code.
 ///
 /// # Examples
 ///
@@ -117,9 +118,15 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 pub struct HttpError {
     label: ErrorLabel,
     recovery: RecoveryInfo,
-    // The box keeps HttpError small.
+    metadata: Option<Box<ErrorMetadata>>,
+}
+
+#[derive(Default, derive_more::Debug)]
+struct ErrorMetadata {
     // SyncHolder makes HttpError Sync when HttpRequest is not Sync.
+    #[debug(skip)]
     request: Option<SyncHolder<Box<HttpRequest>>>,
+    status_code: Option<StatusCode>,
 }
 
 impl ThreadAware for HttpError {
@@ -162,6 +169,7 @@ impl HttpError {
             recovery,
             LABEL_RESPONSE_UNSUCCESSFUL,
         )
+        .with_status_code(code)
     }
 
     /// Creates a validation error.
@@ -247,8 +255,21 @@ impl HttpError {
     /// Use the attached request for a later retry.
     #[must_use]
     pub fn with_request(mut self, request: HttpRequest) -> Self {
-        self.request = Some(SyncHolder::new(Box::new(request)));
+        self.metadata.get_or_insert_with(Default::default).request = Some(SyncHolder::new(Box::new(request)));
         self
+    }
+
+    /// Attaches an HTTP status code to this error.
+    #[must_use]
+    pub fn with_status_code(mut self, status_code: StatusCode) -> Self {
+        self.metadata.get_or_insert_with(Default::default).status_code = Some(status_code);
+        self
+    }
+
+    /// Returns the attached HTTP status code, if any.
+    #[must_use]
+    pub fn status_code(&self) -> Option<StatusCode> {
+        self.metadata.as_ref().and_then(|metadata| metadata.status_code)
     }
 
     /// Extracts the HTTP request from this error, if any.
@@ -258,7 +279,10 @@ impl HttpError {
     /// method.
     #[must_use]
     pub fn take_request(&mut self) -> Option<HttpRequest> {
-        self.request.take().map(|holder| *holder.into_inner())
+        self.metadata
+            .as_mut()
+            .and_then(|metadata| metadata.request.take())
+            .map(|holder| *holder.into_inner())
     }
 
     /// Resolves the error label for pre-defined set of errors.
@@ -335,6 +359,7 @@ mod tests {
         assert_eq!(error.message(), "my-validation");
         assert_eq!(error.label(), "validation");
         assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.status_code(), None);
     }
 
     #[test]
@@ -344,6 +369,14 @@ mod tests {
         assert_eq!(error.message(), "the response was not successful, status code: 404");
         assert_eq!(error.label(), "response_unsuccessful");
         assert_eq!(error.recovery(), RecoveryInfo::unknown());
+        assert_eq!(error.status_code(), Some(StatusCode::NOT_FOUND));
+    }
+
+    #[test]
+    fn status_code_can_be_attached() {
+        let error = HttpError::validation("bad request").with_status_code(StatusCode::BAD_REQUEST);
+
+        assert_eq!(error.status_code(), Some(StatusCode::BAD_REQUEST));
     }
 
     #[test]

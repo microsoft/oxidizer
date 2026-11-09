@@ -18,13 +18,13 @@ Compresses and decompresses HTTP message bodies.
 ```rust
 use compressors::format::Format;
 use http_compression::Compression;
-use http_extensions::HttpBodyBuilder;
-
-let layer = Compression::client(body_builder).decompress_responses(&[Format::Gzip]);
+let layer = Compression::client().decompress_responses(&[Format::Gzip]);
 ```
 
-[`Compression`][__link0] transforms HTTP bodies as they are read. It uses
-`Content-Encoding` to decompress bodies and `Accept-Encoding` to select
+[`Compression`][__link0] transforms HTTP bodies. It compresses small buffered bodies
+directly. It transforms larger or streaming bodies as they are read.
+Decompression always returns a streaming body, including for buffered input.
+The layer uses `Content-Encoding` for decompression and `Accept-Encoding` for
 response compression. It preserves body policies and trailers. It removes
 stale `Content-Digest` and `Repr-Digest` values after a transformation.
 
@@ -53,21 +53,26 @@ default. Use [`level`][__link12] to change it. If a streaming
 body pauses, the compressor flushes buffered output. The consumer can then
 decompress each sent part before the body ends.
 
+For an eligible successful response with a complete, nonempty body, the
+server layer returns an empty `406 Not Acceptable` response if no content
+coding is acceptable and the caller rejects `identity`. This also applies to
+an existing unacceptable `Content-Encoding`. `HEAD`, successful `CONNECT`,
+statuses that cannot carry a body, known-empty bodies, partial responses,
+and responses with `Content-Range` bypass this negotiation.
+
 ```rust
 use std::num::NonZeroU64;
 
 use compressors::DecompressorLimits;
 use compressors::format::Format;
 use http_compression::Compression;
-use http_extensions::HttpBodyBuilder;
-
-let client = Compression::client(body_builder.clone())
+let client = Compression::client()
     .decompress_responses(&[Format::Gzip])
     .limits(
         DecompressorLimits::new().max_output_len(NonZeroU64::new(16 * 1024 * 1024).unwrap()),
     );
 
-let server = Compression::server(body_builder)
+let server = Compression::server()
     .decompress_requests(&[Format::Gzip])
     .compress_responses(&[Format::Gzip]);
 ```
@@ -97,8 +102,12 @@ layers. This limit is fixed.
 
 ## Errors
 
-Transformations are lazy. A malformed or oversized body fails when it is
-read, not when its headers arrive. A failure has one of these labels:
+Small buffered compression sets `Content-Length` to the final byte count and
+removes `Transfer-Encoding`. Decompression and streaming compression remove
+`Content-Length` because the final size is unknown.
+
+A small buffered compression error fails the handler call. Other data errors
+fail the body read. A failure has one of these labels:
 
 |Label|What happened|
 |-----|-------------|
@@ -115,7 +124,7 @@ its headers unchanged.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_compression">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbLVrZEWoTp_Eb6hKGbuVuzDYbsSJt8yCzNhcb0GlMc5b8nHdhZIKCa2NvbXByZXNzb3JzZTAuNS4wgnBodHRwX2NvbXByZXNzaW9uZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb14FVQFx8pWsbzpAOgGGVYrQbu4Yo4PeF-tEbKhi675hS5fxhZIKCa2NvbXByZXNzb3JzZTAuNS4wgnBodHRwX2NvbXByZXNzaW9uZTAuNS4w
  [__link0]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Compression
  [__link1]: https://docs.rs/http_compression/0.5.0/http_compression/?search=Client
  [__link10]: https://docs.rs/http_compression/0.5.0/http_compression/?search=CompressionLayer::compressible_types

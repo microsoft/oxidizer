@@ -170,7 +170,7 @@ A pooled provider can reuse memory after the body data is consumed.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb9zpOVazdOWUbz0LoasLuC_EbSXsHWxyT2r0bHcdheDLoihxhZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xNC4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbnVchMiUtu-UbiATCmjs6GxQbexXb3pAL3wkbyTgMMqkyA_thZIWCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZmMC4xNC4wgmRodHRwZTEuNS4wg2lodHRwLWJvZHllMS4xLjBpaHR0cF9ib2R5gm9odHRwX2V4dGVuc2lvbnNmMC4xNS4w
  [__link0]: https://crates.io/crates/http/1.5.0
  [__link1]: https://docs.rs/http_extensions/0.15.0/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.15.0/http_extensions/?search=StatusExt

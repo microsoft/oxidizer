@@ -19,7 +19,6 @@ use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, COOKIE, LOCATION, SET_COOKI
 use http::{HeaderMap, HeaderValue, Method, StatusCode, Version};
 use http_body::Frame;
 use http_body_util::StreamBody;
-use http_extensions::HttpBodyOptions;
 use tick::Clock;
 
 #[cfg_attr(miri, ignore)]
@@ -200,7 +199,7 @@ fn request_trailers_fail_explicitly() {
             HeaderValue::from_static("value"),
         )]))),
     ]));
-    let request_body = test_client.body_builder.body(request_body, &HttpBodyOptions::default());
+    let request_body = test_client.body_builder.body(request_body);
 
     let error = futures::executor::block_on(
         test_client

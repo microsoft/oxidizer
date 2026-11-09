@@ -7,12 +7,8 @@
 //! # #[cfg(feature = "gzip")] {
 //! use compressors::format::Format;
 //! use http_compression::Compression;
-//! use http_extensions::HttpBodyBuilder;
-//!
-//! # fn configure(body_builder: HttpBodyBuilder) {
-//! let layer = Compression::client(body_builder).decompress_responses(&[Format::Gzip]);
+//! let layer = Compression::client().decompress_responses(&[Format::Gzip]);
 //! # let _ = layer;
-//! # }
 //! # }
 //! ```
 
@@ -23,8 +19,10 @@
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/http_compression/favicon.ico"
 )]
 
-//! [`Compression`] transforms HTTP bodies as they are read. It uses
-//! `Content-Encoding` to decompress bodies and `Accept-Encoding` to select
+//! [`Compression`] transforms HTTP bodies. It compresses small buffered bodies
+//! directly. It transforms larger or streaming bodies as they are read.
+//! Decompression always returns a streaming body, including for buffered input.
+//! The layer uses `Content-Encoding` for decompression and `Accept-Encoding` for
 //! response compression. It preserves body policies and trailers. It removes
 //! stale `Content-Digest` and `Repr-Digest` values after a transformation.
 //!
@@ -53,6 +51,13 @@
 //! body pauses, the compressor flushes buffered output. The consumer can then
 //! decompress each sent part before the body ends.
 //!
+//! For an eligible successful response with a complete, nonempty body, the
+//! server layer returns an empty `406 Not Acceptable` response if no content
+//! coding is acceptable and the caller rejects `identity`. This also applies to
+//! an existing unacceptable `Content-Encoding`. `HEAD`, successful `CONNECT`,
+//! statuses that cannot carry a body, known-empty bodies, partial responses,
+//! and responses with `Content-Range` bypass this negotiation.
+//!
 //! ```
 //! # #[cfg(feature = "gzip")] {
 //! use std::num::NonZeroU64;
@@ -60,20 +65,16 @@
 //! use compressors::DecompressorLimits;
 //! use compressors::format::Format;
 //! use http_compression::Compression;
-//! use http_extensions::HttpBodyBuilder;
-//!
-//! # fn configure(body_builder: HttpBodyBuilder) {
-//! let client = Compression::client(body_builder.clone())
+//! let client = Compression::client()
 //!     .decompress_responses(&[Format::Gzip])
 //!     .limits(
 //!         DecompressorLimits::new().max_output_len(NonZeroU64::new(16 * 1024 * 1024).unwrap()),
 //!     );
 //!
-//! let server = Compression::server(body_builder)
+//! let server = Compression::server()
 //!     .decompress_requests(&[Format::Gzip])
 //!     .compress_responses(&[Format::Gzip]);
 //! # let _ = (client, server);
-//! # }
 //! # }
 //! ```
 //!
@@ -102,8 +103,12 @@
 //!
 //! # Errors
 //!
-//! Transformations are lazy. A malformed or oversized body fails when it is
-//! read, not when its headers arrive. A failure has one of these labels:
+//! Small buffered compression sets `Content-Length` to the final byte count and
+//! removes `Transfer-Encoding`. Decompression and streaming compression remove
+//! `Content-Length` because the final size is unknown.
+//!
+//! A small buffered compression error fails the handler call. Other data errors
+//! fail the body read. A failure has one of these labels:
 //!
 //! | Label | What happened |
 //! |-------|---------------|

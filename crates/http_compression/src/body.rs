@@ -9,7 +9,9 @@
 //! [`CompressionChain`] represents all transformation stages as one concrete
 //! type. After the data ends, [`CompressionStream::into_inner`] returns each
 //! source stream. The chain unwraps these streams until it reaches the adapter
-//! that stores the trailers. The chain does not share or erase types.
+//! that stores the trailers. Each stage keeps its compression engine's concrete
+//! type. The source uses [`StreamingBody`], which erases the body's concrete
+//! type.
 //!
 //! The compression engine is a type parameter, so one chain supports both
 //! compression and decompression.
@@ -23,7 +25,8 @@ use compressors::core::{Compress, Compression, Decompress};
 use futures::Stream;
 use http::HeaderMap;
 use http_body::{Body, Frame, SizeHint};
-use http_extensions::{HttpBody, HttpError, Result};
+use http_extensions::body::StreamingBody;
+use http_extensions::{HttpError, Result};
 use seatbelt::{Recovery as _, RecoveryInfo};
 
 use crate::error::{LABEL_COMPRESSION_INVALID, LABEL_COMPRESSION_LIMIT_EXCEEDED};
@@ -38,10 +41,7 @@ use crate::{CONTENT_DIGEST_HEADER, REPR_DIGEST_HEADER};
 #[derive(Debug)]
 pub(crate) enum CompressionChain<C> {
     /// The source body and any trailers read from it.
-    Source {
-        body: Pin<Box<HttpBody>>,
-        trailers: Option<HeaderMap>,
-    },
+    Source { body: StreamingBody, trailers: Option<HeaderMap> },
 
     /// One transformation stage around the previous stream.
     Layer(Box<CompressionStream<Self, C>>),
@@ -49,11 +49,8 @@ pub(crate) enum CompressionChain<C> {
 
 impl<C> CompressionChain<C> {
     /// Starts a chain that reads data frames from `body`.
-    pub(crate) fn new(body: HttpBody) -> Self {
-        Self::Source {
-            body: Box::pin(body),
-            trailers: None,
-        }
+    pub(crate) fn new(body: StreamingBody) -> Self {
+        Self::Source { body, trailers: None }
     }
 
     /// Returns the trailers read from the body.
@@ -90,7 +87,7 @@ impl<C: Compression> Stream for CompressionChain<C> {
                 .map(|item| item.map(|chunk| chunk.map_err(to_http_error))),
 
             Self::Source { body, trailers } => loop {
-                let Some(frame) = ready!(body.as_mut().poll_frame(cx)) else {
+                let Some(frame) = ready!(Pin::new(&mut *body).poll_frame(cx)) else {
                     return Poll::Ready(None);
                 };
 
@@ -172,7 +169,7 @@ impl<C: Compression> Body for CompressionBody<C> {
 }
 
 /// Converts an engine failure to an [`HttpError`].
-fn to_http_error(err: compressors::Error) -> HttpError {
+pub(crate) fn to_http_error(err: compressors::Error) -> HttpError {
     if err.is_source() {
         // Preserve an `HttpError` from the source layer.
         if let Some(original) = err.into_source().and_then(|source| source.downcast::<HttpError>().ok()) {

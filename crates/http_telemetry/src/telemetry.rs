@@ -11,7 +11,7 @@ use std::sync::Arc;
 use futures::FutureExt;
 use futures::future::Either;
 use http::header::HOST;
-use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, RequestHandler, Result};
+use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
 use layered::{Layer, Service};
 use observed::{Event, Sink};
 use templated_uri::BasePath;
@@ -35,10 +35,9 @@ pub struct Telemetry<T> {
 impl Telemetry<()> {
     /// Creates a [`Layer::layer`] whose middleware produces telemetry about incoming HTTP requests.
     #[must_use]
-    pub fn server(sink: Sink, body_builder: HttpBodyBuilder) -> TelemetryLayer {
+    pub fn server(sink: Sink) -> TelemetryLayer {
         TelemetryLayer {
             sink,
-            body_builder,
             clock: SimpleClock::new_system(),
             excluded_paths: ExcludedPaths::default(),
         }
@@ -100,7 +99,7 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
         };
         Either::Right(async move {
             match AssertUnwindSafe(response).catch_unwind().await {
-                Ok(Ok(response)) => Ok(emit_when_body_ends(guard, response, &layer.body_builder)),
+                Ok(Ok(response)) => Ok(emit_when_body_ends(guard, response)),
                 Ok(Err(error)) => {
                     guard.emit(RequestEnd::Error(&error, None));
                     Err(error)
@@ -126,7 +125,6 @@ impl<T> fmt::Debug for Telemetry<T> {
 #[derive(Clone)]
 pub struct TelemetryLayer {
     pub(crate) sink: Sink,
-    pub(crate) body_builder: HttpBodyBuilder,
     pub(crate) clock: SimpleClock,
     pub(crate) excluded_paths: ExcludedPaths,
 }
@@ -146,14 +144,12 @@ impl TelemetryLayer {
     /// # Examples
     ///
     /// ```
-    /// use http_extensions::HttpBodyBuilder;
     /// use http_telemetry::Telemetry;
     /// use observed::Sink;
     /// use templated_uri::BasePath;
     ///
-    /// # fn build(sink: Sink, body_builder: HttpBodyBuilder) {
-    /// let layer =
-    ///     Telemetry::server(sink, body_builder).excluded_paths([BasePath::from_static("/health/")]);
+    /// # fn build(sink: Sink) {
+    /// let layer = Telemetry::server(sink).excluded_paths([BasePath::from_static("/health/")]);
     /// # let _ = layer;
     /// # }
     /// ```
