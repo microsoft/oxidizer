@@ -54,9 +54,9 @@ fn can_suspend(cycle_outcome: &CycleOutcome, batch_exhausted: bool) -> bool {
 /// 1. Startup: Bootstrap creates the thread and worker from the
 ///    [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) configuration. Bootstrap
 ///    and the worker coordinate initialization until the worker is ready.
-/// 2. Running: The worker processes system commands, registers queued tasks,
-///    polls tasks, advances timers, and waits for commands. It drains system
-///    commands before processing a bounded batch of task submissions.
+/// 2. Running: The worker processes a bounded system-command batch, then a
+///    bounded task-submission batch. It polls tasks, advances timers, and waits
+///    for commands after both batches.
 /// 3. Shutting down: The worker rejects queued and new submissions, stops
 ///    blocking work, cancels async tasks, and runs final timer callbacks.
 /// 4. Dead: The worker completed shutdown and its thread terminated.
