@@ -273,7 +273,7 @@ impl Worker {
         // this batch, prepare_cycle stops before polling the registered tasks.
         let mut processed = 0_usize;
         for SpawnCommand { future_factory } in commands.spawn_commands().take(COMMANDS_PER_CYCLE) {
-            future_factory.into_inner().register(context.clone(), &self.tasks);
+            let _registered = future_factory.into_inner().register(context.clone(), &self.tasks);
             processed = processed.saturating_add(1);
         }
         processed == COMMANDS_PER_CYCLE
@@ -902,7 +902,7 @@ mod tests {
         let (commands, command_rx) = command_channel();
         let signal = Arc::new(Signal::default());
         let worker = test_worker_with_monitor_options(
-            (commands.clone(), command_rx),
+            (commands, command_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             signal,
@@ -1015,7 +1015,7 @@ mod tests {
         let (commands, command_rx) = command_channel();
         let signal = Arc::new(Signal::default());
         let mut worker = test_worker(
-            (commands.clone(), command_rx),
+            (commands, command_rx),
             test_blocking_worker(),
             control.clone().into(),
             Arc::clone(&signal),
@@ -1103,7 +1103,7 @@ mod tests {
         let (commands, command_rx) = command_channel();
         let signal = Arc::new(Signal::default());
         let mut worker = test_worker(
-            (commands.clone(), command_rx),
+            (commands, command_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::clone(&signal),
@@ -1387,7 +1387,7 @@ mod tests {
     fn same_worker_stop_skips_a_later_initialized_task() {
         let (commands, command_rx) = command_channel();
         let mut worker = test_worker(
-            (commands.clone(), command_rx),
+            (commands, command_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
@@ -1411,7 +1411,7 @@ mod tests {
     fn repeated_shutdown_cleanup_is_idempotent() {
         let (commands, command_rx) = command_channel();
         let mut worker = test_worker(
-            (commands.clone(), command_rx),
+            (commands, command_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
