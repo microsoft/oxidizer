@@ -100,17 +100,16 @@ pub(crate) struct CommandReceiver {
 }
 
 impl CommandReceiver {
-    pub(crate) fn system_commands(&self) -> impl Iterator<Item = SystemCommand> + use<> {
+    pub(crate) fn system_commands(&self) -> impl Iterator<Item = SystemCommand> + '_ {
         commands(&self.system)
     }
 
-    pub(crate) fn spawn_commands(&self) -> impl Iterator<Item = SpawnCommand> + use<> {
+    pub(crate) fn spawn_commands(&self) -> impl Iterator<Item = SpawnCommand> + '_ {
         commands(&self.spawn)
     }
 }
 
-fn commands<T>(receiver: &channel::Receiver<T>) -> impl Iterator<Item = T> + use<T> {
-    let receiver = receiver.clone();
+fn commands<T>(receiver: &channel::Receiver<T>) -> impl Iterator<Item = T> + '_ {
     std::iter::from_fn(move || receiver.try_recv().ok())
 }
 
