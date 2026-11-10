@@ -110,6 +110,33 @@ fn remote_notifications_preserve_first_wake_order_and_task_ownership() {
 }
 
 #[test]
+fn completed_task_discards_its_queued_remote_notification() {
+    let mut executor = Executor::builder().build();
+    let polls = Rc::new(Cell::new(0));
+    let mut handle = executor.tasks().add_test(
+        poll_fn({
+            let polls = Rc::clone(&polls);
+            move |cx| {
+                polls.set(polls.get() + 1);
+                let waker = cx.waker().clone();
+                std::thread::spawn(move || waker.wake()).join().unwrap();
+                Poll::Ready(42)
+            }
+        }),
+        TaskOptions::default(),
+    );
+
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Continue));
+    assert!(matches!(
+        Pin::new(&mut handle).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(TaskOutcome::Completed(42))
+    ));
+    assert!(!executor.has_tasks());
+    assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
+    assert_eq!(polls.get(), 1);
+}
+
+#[test]
 fn remote_consuming_wake_keeps_payload_on_owner_when_notification_panics() {
     struct PanicWake;
 
