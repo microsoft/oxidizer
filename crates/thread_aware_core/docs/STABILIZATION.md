@@ -4,7 +4,7 @@ These notes define the stable boundary shared by the `thread_aware` crates.
 
 ## Status
 
-`thread_aware_core` is the authoritative crate for the shared types. The `thread_aware` crate depends on it and re-exports its public types. It also provides derive support, wrappers, and runtime construction. The `performables` crate provides strategy-partitioned shared state.
+`thread_aware_core` is the authoritative crate for the core types. The `thread_aware` crate depends on it and re-exports its public types. It also provides derive support, wrappers, and runtime construction. The `performables` crate provides strategy-partitioned shared state.
 
 ## Stable boundary
 

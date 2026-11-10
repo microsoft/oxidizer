@@ -26,7 +26,7 @@ needs both types.
 
 ## The `thread_aware` family
 
-Use this crate for the stable types that public APIs expose. It has no derive macros, closure
+Use this crate for the core types that public APIs expose. It has no derive macros, closure
 adapters, policy wrappers, or runtime integration.
 
 The [`thread_aware`][__link4] crate provides those utilities. It includes a
@@ -34,7 +34,7 @@ The [`thread_aware`][__link4] crate provides those utilities. It includes a
 runtime coordinate construction. Its [authoring guide][__link6] explains how to make a type
 thread-aware. The `performables` crate provides strategy-partitioned shared state.
 
-Depend on this crate directly if you only need the stable types. It has no normal
+Depend on this crate directly if you only need the core types. It has no normal
 dependencies. Without the default `std` feature, [`Thread`][__link7] keeps [`Owner`][__link8] and [`NumaNode`][__link9]
 but has no thread id.
 
@@ -126,7 +126,7 @@ Without `std`, the crate needs `alloc` and pointer-width atomics.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbEP0jQBXNs50bw28gqpWzvBobDwGo9vljrREbW_IG0q6g70phZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4z
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbrnOdj5SUkXAb8NyCbnmNwPwbGIl3BbkoElwbABFoXGU-0wxhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4z
  [__link0]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=Thread
  [__link10]: https://docs.rs/thread_aware_core/0.1.3/thread_aware_core/?search=ThreadAware

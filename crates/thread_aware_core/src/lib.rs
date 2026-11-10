@@ -26,7 +26,7 @@
 //!
 //! # The `thread_aware` family
 //!
-//! Use this crate for the stable types that public APIs expose. It has no derive macros, closure
+//! Use this crate for the core types that public APIs expose. It has no derive macros, closure
 //! adapters, policy wrappers, or runtime integration.
 //!
 //! The [`thread_aware`] crate provides those utilities. It includes a
@@ -39,7 +39,7 @@
 //! [arc]: https://docs.rs/performables/latest/performables/arc/struct.Arc.html
 //! [authoring guide]: https://docs.rs/thread_aware/latest/thread_aware/documentation/index.html
 //!
-//! Depend on this crate directly if you only need the stable types. It has no normal
+//! Depend on this crate directly if you only need the core types. It has no normal
 //! dependencies. Without the default `std` feature, [`Thread`] keeps [`Owner`] and [`NumaNode`]
 //! but has no thread id.
 //!

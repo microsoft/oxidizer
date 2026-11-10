@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`thread_aware_core` provides stable types for values that adapt when a runtime moves them between threads. Other crates can use these types in public APIs.
+`thread_aware_core` provides core types for values that adapt when a runtime moves them between threads. Other crates can use these types in public APIs.
 
 The stable public boundary contains:
 
@@ -19,11 +19,11 @@ The doc-hidden `__private` module is publicly reachable for runtime integration.
 
 ## Why this crate is separate
 
-Independent libraries must use the same `ThreadAware` trait to interoperate. If each library defines its own trait, a runtime cannot relocate a value that contains types from both libraries through one contract.
+Rust treats traits from different crates as different types, even when their methods match. Independent libraries can use one relocation contract only if they depend on the same `ThreadAware` definition.
 
-An incompatible release can split the ecosystem because public APIs must resolve to the same `thread_aware_core` version. The crate therefore has a small API, no normal dependencies, and a deliberate minimum supported Rust version (MSRV) policy.
+Public APIs name the types from this crate. An incompatible release would require a coordinated migration before old and new libraries could interoperate again. A small API, no normal dependencies, and a deliberate minimum supported Rust version (MSRV) policy reduce that migration risk.
 
-The separate crate also lets `thread_aware` change its utility API without changing the stable contract.
+The separate `thread_aware` crate owns convenience APIs. It can change those APIs without changing the core contract.
 
 ## Scope
 
@@ -49,11 +49,11 @@ The runtime first moves or schedules the value. The destination thread then call
 
 The `destination` coordinate describes the thread that runs the callback. A coordinator must not call the method for another thread. This order lets an implementation release or create local state through the destination thread's allocator and NUMA locality.
 
-### The stable API contains only shared contracts
+### Shared contracts define the stable API
 
 Add an item only if independent crates must agree on it. Helpers that make implementation easier belong in `thread_aware`.
 
-### Use the standard thread id
+### Standard thread identifiers
 
 `Thread` uses `std::thread::ThreadId`. A separate id type requires conversion and another permanent contract.
 
@@ -61,11 +61,11 @@ This choice means that `__private::v1::new_thread` and `Thread::id` need the `st
 
 A `no_std` build needs `alloc` and pointer-width atomics. The atomics provide unique `Owner` identities.
 
-### Do not add normal dependencies
+### No normal dependencies
 
 The manifest has one test-only development dependency. Using this crate adds no other production package.
 
-### Document obligations that the crate cannot enforce
+### Documented runtime obligations
 
 The crate cannot make runtimes use the same NUMA numbering. It also cannot prevent a `relocate` implementation from blocking. These are documented requirements because enforcement requires runtime state and coordination.
 
@@ -73,7 +73,7 @@ The crate cannot make runtimes use the same NUMA numbering. It also cannot preve
 
 Hardware can add locality levels that `Thread` does not model. A future version can add a private coordinate without changing existing construction functions.
 
-### Keep ids opaque
+### Opaque identifiers
 
 `NumaNode` does not expose its integer or implement `From<integer>`. Runtime code uses a typed, versioned constructor. `Owner` accepts no caller-provided identity.
 
@@ -81,13 +81,13 @@ Multiple integer conversions can change how unsuffixed literals resolve. Replaci
 
 A typed constructor avoids this problem. A future wider or fallible form can use a new function name. The private stored width can change without changing the public contract.
 
-### Keep `Thread` fields private
+### Private `Thread` fields
 
 Accessors read each coordinate. A new private field does not change existing readers. Derived `Clone`, `Debug`, `PartialEq`, `Eq`, and `Hash` include the new field.
 
 A field can still remove an auto trait such as `Send`, `Sync`, or unwind safety. Static assertions make such a change fail the build.
 
-### Give each new coordinate a default value
+### Default values for new coordinates
 
 A new coordinate needs a value that means unknown or not pinned. Existing constructors keep their signatures and use this default. A new constructor lets callers provide the coordinate.
 
@@ -95,21 +95,21 @@ The default value must not collide with a value from an existing constructor. Th
 
 Existing construction paths must use the same default. Values created through those paths then keep their previous equality behavior.
 
-Add a coordinate in these steps:
+Adding a coordinate follows these steps:
 
 1. Add the private field and accessor.
 2. Add the reserved default to the coordinate type.
 3. Add a constructor that accepts the new coordinate.
 
-### Keep trait additions dyn-compatible
+### Dyn-compatible trait additions
 
-`dyn ThreadAware` is part of the stable API. A new method needs a default implementation. It also must avoid generic parameters, `impl Trait`, and `Self` by value, unless it uses `where Self: Sized`.
+`dyn ThreadAware` is part of the stable API. A new method needs a default implementation. It also must avoid generic parameters, `impl Trait`, and `Self` outside the receiver, unless it uses `where Self: Sized`.
 
 A static assertion makes a loss of dyn compatibility fail the build.
 
-## Breaking changes
+## Prohibited compatibility changes
 
-These changes are breaking:
+The compatibility contract prohibits these changes:
 
 - Remove a coordinate.
 - Change an existing constructor signature.
@@ -117,7 +117,7 @@ These changes are breaking:
 - Change the meaning of an existing id.
 - Add a method that breaks dyn compatibility.
 
-The additive design does not permit these changes.
+These changes require a separate incompatible contract instead of an additive update.
 
 ## Related documents
 
