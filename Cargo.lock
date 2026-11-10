@@ -3788,6 +3788,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "observed_destination_memory"
+version = "0.1.0"
+
+[[package]]
 name = "observed_destination_stdout"
 version = "0.1.1"
 dependencies = [
