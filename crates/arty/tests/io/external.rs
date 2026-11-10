@@ -166,7 +166,6 @@ fn external_io_access_precedes_an_earlier_queued_spawn() {
     let wakes_before_access = notification_observer.driver_wakes.load(Ordering::SeqCst);
     let external = thread::spawn({
         let io = cx.io().clone();
-        let external_scenario = external_scenario.clone();
         move || io.try_context::<TestContext<SystemBeforeSpawn>>(&external_scenario).unwrap()
     });
     wait_until(|| notification_observer.driver_wakes.load(Ordering::SeqCst) > wakes_before_access);
