@@ -70,18 +70,9 @@ fn can_suspend(cycle_outcome: &CycleOutcome, batch_exhausted: bool) -> bool {
 /// This type is single-threaded. It only exists on its designated worker thread.
 #[derive(Debug)]
 pub(crate) struct Worker {
-    // Only top-level worker logic uses this field.
-    // Shutdown drops the receiver. Later submissions then fail and discard their tasks.
-    commands: Option<CommandReceiver>,
-
-    // Dropped when shutdown starts so no more tasks can be enqueued and worker-local
-    // services can release resources needed by shutdown.
-    context: Option<Context>,
+    state: WorkerState,
 
     shutdown: Shutdown,
-
-    // Becomes None during shutdown when the executor is dropped to cancel and release its tasks.
-    executor: Option<Executor>,
 
     // Connected to the `executor`. Submissions after shutdown resolve to an executor-shutdown
     // JoinError rather than registering a task.
@@ -95,6 +86,16 @@ pub(crate) struct Worker {
     signal: Arc<Signal>,
     monitor_options: MonitorOptions,
     _single_threaded: PhantomData<*const ()>,
+}
+
+#[derive(Debug)]
+enum WorkerState {
+    Ready {
+        commands: CommandReceiver,
+        context: Context,
+        executor: Executor,
+    },
+    Shutdown,
 }
 
 impl Worker {
@@ -129,10 +130,12 @@ impl Worker {
         LocalWorker::register_scheduler(context.clone(), tasks.clone(), executor_shutdown);
 
         Self {
-            commands: Some(commands),
-            context: Some(context),
+            state: WorkerState::Ready {
+                commands,
+                context,
+                executor,
+            },
             shutdown,
-            executor: Some(executor),
             tasks,
             clock_driver,
             cycle_clock,
@@ -180,9 +183,7 @@ impl Worker {
     }
 
     fn prepare_cycle(&mut self) -> CycleAction {
-        self.process_system_commands();
-
-        if matches!(self.shutdown.state(), ShutdownState::Started) {
+        if self.process_system_commands() || matches!(self.shutdown.state(), ShutdownState::Started) {
             return CycleAction::Shutdown;
         }
 
@@ -192,10 +193,9 @@ impl Worker {
             return CycleAction::Shutdown;
         }
 
-        let executor = self
-            .executor
-            .as_mut()
-            .expect("executor removal publishes shutdown, which is handled above");
+        let WorkerState::Ready { executor, .. } = &mut self.state else {
+            return CycleAction::Shutdown;
+        };
 
         let cycle_outcome = executor.execute_cycle();
 
@@ -240,45 +240,34 @@ impl Worker {
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
-    fn process_system_commands(&mut self) {
-        let Some(context) = self.context.as_ref() else {
-            debug_assert!(self.commands.is_none());
-
-            // We are shutting down and have dropped worker-local services.
-            // Both command channels are closed, so no more commands can be received.
-            return;
+    fn process_system_commands(&self) -> bool {
+        let WorkerState::Ready { commands, context, .. } = &self.state else {
+            return true;
         };
-
-        let commands = self.commands.as_ref().expect("context and command channels are dropped together");
 
         for _ in commands.system_snapshot() {
             if matches!(self.shutdown.state(), ShutdownState::Started) {
-                self.begin_shutdown();
-                return;
+                return true;
             }
             let Some(command) = commands.try_recv_system() else {
-                return;
+                return false;
             };
             match command {
                 SystemCommand::AccessIo { access } => {
                     access.into_inner()(context);
                 }
                 SystemCommand::Shutdown => {
-                    self.begin_shutdown();
-
-                    // Shutdown closes both command channels. No more commands can arrive.
-                    return;
+                    return true;
                 }
             }
         }
+        false
     }
 
-    fn process_spawn_commands(&mut self) -> bool {
-        let Some(context) = self.context.as_ref() else {
-            debug_assert!(self.commands.is_none());
+    fn process_spawn_commands(&self) -> bool {
+        let WorkerState::Ready { commands, context, .. } = &self.state else {
             return false;
         };
-        let commands = self.commands.as_ref().expect("context and command channels are dropped together");
 
         // Registration does not invoke user factories. If shutdown starts during
         // this batch, prepare_cycle stops before polling the registered tasks.
@@ -293,24 +282,23 @@ impl Worker {
 
     #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
     fn begin_shutdown(&mut self) {
-        let Some(executor) = self.executor.take() else {
+        let WorkerState::Ready {
+            commands,
+            context,
+            executor,
+        } = std::mem::replace(&mut self.state, WorkerState::Shutdown)
+        else {
             return;
         };
 
-        let cause = self
-            .context
-            .as_ref()
-            .expect("a running worker retains its context until shutdown")
-            .dispatcher()
-            .stop(self.shutdown.cause().unwrap_or_default());
+        let cause = context.dispatcher().stop(self.shutdown.cause().unwrap_or_default());
 
         LocalWorker::clear_scheduler();
-        // Drop worker-local services first. Their futures and waiters can hold
-        // resources that block executor shutdown.
-        self.context = None;
-
         // Both command channels are now closed. No more commands can arrive.
-        self.commands = None;
+        drop(commands);
+        // Drop worker-local services before the executor. Their futures and
+        // waiters can hold resources that block executor shutdown.
+        drop(context);
 
         // Safe executor shutdown synchronously cancels and releases all remaining task storage.
         executor.shutdown().trigger(cause);
@@ -323,7 +311,7 @@ impl Worker {
 impl Drop for Worker {
     #[cfg_attr(test, mutants::skip)] // Worker-owned services must retire before the thread can finish shutdown.
     fn drop(&mut self) {
-        if self.executor.is_some() {
+        if matches!(self.state, WorkerState::Ready { .. }) {
             self.begin_shutdown();
         }
     }
@@ -389,6 +377,31 @@ mod tests {
         {
             self.add(future, TaskOptions::default(), DiscardCompletion);
         }
+    }
+
+    fn worker_context(worker: &Worker) -> &Context {
+        let WorkerState::Ready { context, .. } = &worker.state else {
+            panic!("test requires a running worker");
+        };
+        context
+    }
+
+    fn worker_executor(worker: &Worker) -> &Executor {
+        let WorkerState::Ready { executor, .. } = &worker.state else {
+            panic!("test requires a running worker");
+        };
+        executor
+    }
+
+    fn worker_executor_mut(worker: &mut Worker) -> &mut Executor {
+        let WorkerState::Ready { executor, .. } = &mut worker.state else {
+            panic!("test requires a running worker");
+        };
+        executor
+    }
+
+    fn worker_is_shutdown(worker: &Worker) -> bool {
+        matches!(worker.state, WorkerState::Shutdown)
     }
 
     #[derive(Debug)]
@@ -552,7 +565,7 @@ mod tests {
                 task_ready.await.unwrap();
                 task_observer.store(true, Ordering::Relaxed);
             });
-            let clock = worker.context.as_ref().unwrap().clock().clone();
+            let clock = worker_context(&worker).clock().clone();
             worker.tasks.add_test(async move {
                 clock.delay(Duration::from_secs(1)).await;
                 timer_observer.store(true, Ordering::Relaxed);
@@ -635,7 +648,7 @@ mod tests {
         }
 
         fn step(&mut self) {
-            if self.worker.executor.is_none() {
+            if worker_is_shutdown(&self.worker) {
                 return;
             }
             Signal::waker(&self.signal).wake_by_ref();
@@ -675,7 +688,7 @@ mod tests {
             self.ready_timer();
             self.queue_shutdown();
 
-            let mut stopped = self.worker.executor.is_none();
+            let mut stopped = worker_is_shutdown(&self.worker);
             for _ in 0..Self::MAX_CLEANUP_STEPS {
                 if stopped {
                     break;
@@ -849,7 +862,7 @@ mod tests {
                 })))
                 .unwrap();
         }
-        let join = worker.context.as_ref().unwrap().dispatcher().spawn(|_| async {});
+        let join = worker_context(&worker).dispatcher().spawn(|_| async {});
         commands.send_system(SystemCommand::Shutdown).unwrap();
 
         assert!(worker.execute_step().is_break());
@@ -914,7 +927,7 @@ mod tests {
                 InactiveClock::new_isolated(),
                 Arc::clone(&signal),
             );
-            let clock = worker.context.as_ref().unwrap().clock().clone();
+            let clock = worker_context(&worker).clock().clone();
             let mut delay = Box::pin(clock.delay(Duration::from_mins(1)));
             assert!(delay.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())).is_pending());
             signal.wait(Duration::ZERO);
@@ -962,7 +975,7 @@ mod tests {
                 InactiveClock::new_isolated(),
                 signal,
             );
-            let clock = worker.context.as_ref().unwrap().clock().clone();
+            let clock = worker_context(&worker).clock().clone();
             worker_ready.send((commands, worker_waker, clock)).unwrap();
             worker.run();
         });
@@ -1008,10 +1021,10 @@ mod tests {
             control.clone().into(),
             Arc::clone(&signal),
         );
-        let clock = worker.context.as_ref().unwrap().clock().clone();
+        let clock = worker_context(&worker).clock().clone();
         let invoked = Arc::new(AtomicBool::new(false));
         let callback_waker = Waker::from(std::sync::Arc::new(SpawnOnWake {
-            scheduler: worker.context.as_ref().unwrap().scheduler().clone(),
+            scheduler: worker_context(&worker).scheduler().clone(),
             invoked: Arc::clone(&invoked),
         }));
         let mut delay = Box::pin(clock.delay(Duration::from_secs(1)));
@@ -1064,13 +1077,13 @@ mod tests {
             progress.await.unwrap();
             task_observer.store(true, Ordering::Relaxed);
         });
-        let clock = worker.context.as_ref().unwrap().clock().clone();
+        let clock = worker_context(&worker).clock().clone();
         worker.tasks.add_test(async move {
             clock.delay(Duration::from_secs(1)).await;
             timer_observer.store(true, Ordering::Relaxed);
             shutdown.send_system(SystemCommand::Shutdown).unwrap();
         });
-        _ = worker.executor.as_mut().unwrap().execute_cycle();
+        _ = worker_executor_mut(&mut worker).execute_cycle();
         assert!(!task_done.load(Ordering::Relaxed));
         assert!(!timer_done.load(Ordering::Relaxed));
 
@@ -1098,7 +1111,7 @@ mod tests {
         );
         let child_ran = Arc::new(AtomicBool::new(false));
         let child_observer = Arc::clone(&child_ran);
-        let scheduler = worker.context.as_ref().unwrap().scheduler().clone();
+        let scheduler = worker_context(&worker).scheduler().clone();
         worker.tasks.add_test(async move {
             drop(scheduler.spawn(move |_| async move {
                 child_observer.store(true, Ordering::Relaxed);
@@ -1156,12 +1169,7 @@ mod tests {
             Arc::clone(&signal),
         );
         let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let _context = worker
-            .context
-            .as_ref()
-            .unwrap()
-            .io()
-            .context::<WaitRecordingContext>(&Arc::clone(&waits));
+        let _context = worker_context(&worker).io().context::<WaitRecordingContext>(&Arc::clone(&waits));
         for _ in 0..COMMANDS_PER_CYCLE {
             commands.send_spawn(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
         }
@@ -1194,7 +1202,7 @@ mod tests {
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
         );
-        let clock = worker.context.as_ref().unwrap().clock().clone();
+        let clock = worker_context(&worker).clock().clone();
         let mut timer = clock.delay(Duration::from_millis(1));
         let waker = Waker::from(Arc::into_std_arc(Arc::new(PanicWake)));
         assert!(Pin::new(&mut timer).poll(&mut std::task::Context::from_waker(&waker)).is_pending());
@@ -1385,7 +1393,7 @@ mod tests {
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
         );
-        let control = worker.context.as_ref().unwrap().control().clone();
+        let control = worker_context(&worker).control().clone();
         let invoked = Arc::new(AtomicBool::new(false));
         let invoked_by_task = Arc::clone(&invoked);
         worker.tasks.add_test(async move {
@@ -1394,7 +1402,7 @@ mod tests {
         worker.tasks.add_test(async move {
             invoked_by_task.store(true, Ordering::Release);
         });
-        let executor = worker.executor.as_mut().unwrap();
+        let executor = worker_executor_mut(&mut worker);
 
         assert!(matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)));
         assert!(!invoked.load(Ordering::Acquire));
@@ -1501,7 +1509,7 @@ mod tests {
             })))
             .unwrap();
         let invoked = Arc::new(AtomicBool::new(false));
-        let join = worker.context.as_ref().unwrap().dispatcher().spawn({
+        let join = worker_context(&worker).dispatcher().spawn({
             let invoked = Arc::clone(&invoked);
             move |_| {
                 invoked.store(true, Ordering::Relaxed);
@@ -1548,14 +1556,14 @@ mod tests {
         );
         Signal::waker(&signal).wake_by_ref();
         assert!(worker.execute_step().is_continue());
-        worker.executor.as_ref().unwrap().shutdown().trigger(ShutdownCause::default());
+        worker_executor(&worker).shutdown().trigger(ShutdownCause::default());
 
         let outcome = worker.execute_step();
 
         assert!(outcome.is_break());
-        assert!(worker.executor.is_none());
+        assert!(worker_is_shutdown(&worker));
         assert!(blocking_worker.0.is_shutting_down());
-        worker.process_system_commands();
+        assert!(worker.process_system_commands());
         assert!(!worker.process_spawn_commands());
         drop(commands);
     }
