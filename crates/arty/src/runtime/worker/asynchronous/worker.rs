@@ -271,12 +271,12 @@ impl Worker {
 
         // Registration does not invoke user factories. If shutdown starts during
         // this batch, prepare_cycle stops before polling the registered tasks.
-        commands
-            .spawn_commands()
-            .take(COMMANDS_PER_CYCLE)
-            .map(|SpawnCommand { future_factory }| future_factory.into_inner().register(context.clone(), &self.tasks))
-            .count()
-            == COMMANDS_PER_CYCLE
+        let mut processed = 0_usize;
+        for SpawnCommand { future_factory } in commands.spawn_commands().take(COMMANDS_PER_CYCLE) {
+            future_factory.into_inner().register(context.clone(), &self.tasks);
+            processed = processed.saturating_add(1);
+        }
+        processed == COMMANDS_PER_CYCLE
     }
 
     #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
