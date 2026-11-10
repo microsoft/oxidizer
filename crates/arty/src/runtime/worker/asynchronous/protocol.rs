@@ -100,16 +100,48 @@ pub(crate) struct CommandReceiver {
 }
 
 impl CommandReceiver {
-    pub(crate) fn system_snapshot(&self) -> std::ops::Range<usize> {
-        0..self.system.len()
+    pub(crate) fn system_commands(&self) -> CommandIter<SystemCommand> {
+        CommandIter::snapshot(&self.system)
     }
 
-    pub(crate) fn try_recv_system(&self) -> Option<SystemCommand> {
-        self.system.try_recv().ok()
+    pub(crate) fn spawn_commands(&self) -> CommandIter<SpawnCommand> {
+        CommandIter::until_empty(&self.spawn)
+    }
+}
+
+pub(crate) struct CommandIter<T> {
+    receiver: channel::Receiver<T>,
+    remaining: Option<usize>,
+}
+
+impl<T> CommandIter<T> {
+    fn snapshot(receiver: &channel::Receiver<T>) -> Self {
+        Self {
+            receiver: receiver.clone(),
+            remaining: Some(receiver.len()),
+        }
     }
 
-    pub(crate) fn try_recv_spawn(&self) -> Option<SpawnCommand> {
-        self.spawn.try_recv().ok()
+    fn until_empty(receiver: &channel::Receiver<T>) -> Self {
+        Self {
+            receiver: receiver.clone(),
+            remaining: None,
+        }
+    }
+}
+
+impl<T> Iterator for CommandIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if matches!(self.remaining, Some(0)) {
+            return None;
+        }
+        let command = self.receiver.try_recv().ok()?;
+        if let Some(remaining) = &mut self.remaining {
+            *remaining -= 1;
+        }
+        Some(command)
     }
 }
 

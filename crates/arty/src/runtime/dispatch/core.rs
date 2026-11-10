@@ -490,7 +490,7 @@ mod tests {
         dispatcher.stop_inner(ShutdownCause::default());
 
         // Drain the shutdown command.
-        assert!(matches!(command_rx.try_recv_system(), Some(SystemCommand::Shutdown)));
+        assert!(matches!(command_rx.system_commands().next(), Some(SystemCommand::Shutdown)));
 
         // Close the command channel.
         drop(command_rx);
@@ -539,17 +539,13 @@ mod tests {
     #[cfg_attr(test, mutants::skip)]
     fn drain_system(worker_rx: &CommandReceiver) -> Vec<SystemCommand> {
         let mut commands = Vec::new();
-        while let Some(command) = worker_rx.try_recv_system() {
-            commands.push(command);
-        }
+        commands.extend(worker_rx.system_commands());
         commands
     }
 
     fn drain_spawn(worker_rx: &CommandReceiver) -> Vec<SpawnCommand> {
         let mut commands = Vec::new();
-        while let Some(command) = worker_rx.try_recv_spawn() {
-            commands.push(command);
-        }
+        commands.extend(worker_rx.spawn_commands());
         commands
     }
 }

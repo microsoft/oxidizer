@@ -245,13 +245,10 @@ impl Worker {
             return true;
         };
 
-        for _ in commands.system_snapshot() {
+        for command in commands.system_commands() {
             if matches!(self.shutdown.state(), ShutdownState::Started) {
                 return true;
             }
-            let Some(command) = commands.try_recv_system() else {
-                return false;
-            };
             match command {
                 SystemCommand::AccessIo { access } => {
                     access.into_inner()(context);
@@ -271,13 +268,12 @@ impl Worker {
 
         // Registration does not invoke user factories. If shutdown starts during
         // this batch, prepare_cycle stops before polling the registered tasks.
-        for _ in 0..COMMANDS_PER_CYCLE {
-            let Some(SpawnCommand { future_factory }) = commands.try_recv_spawn() else {
-                return false;
-            };
-            let _registered = future_factory.into_inner().register(context.clone(), &self.tasks);
-        }
-        true
+        commands
+            .spawn_commands()
+            .take(COMMANDS_PER_CYCLE)
+            .map(|SpawnCommand { future_factory }| future_factory.into_inner().register(context.clone(), &self.tasks))
+            .count()
+            == COMMANDS_PER_CYCLE
     }
 
     #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.

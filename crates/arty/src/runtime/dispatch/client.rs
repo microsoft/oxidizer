@@ -197,11 +197,14 @@ mod tests {
 
         // Worker 0 receives no task.
         assert!(
-            worker0_rx.try_recv_spawn().is_none(),
+            worker0_rx.spawn_commands().next().is_none(),
             "task must not dispatch to the original worker after relocation"
         );
         // Worker 1 receives the task.
-        assert!(worker1_rx.try_recv_spawn().is_some(), "task must dispatch to the relocated worker");
+        assert!(
+            worker1_rx.spawn_commands().next().is_some(),
+            "task must dispatch to the relocated worker"
+        );
     }
 
     #[test]
