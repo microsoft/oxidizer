@@ -15,7 +15,7 @@ use tick::runtime::InactiveClock;
 
 use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::PanicPolicy;
-use crate::runtime::config::MonitorOptions;
+use crate::runtime::config::{MonitorOptions, RuntimeName};
 use crate::runtime::dispatch::{DispatcherClient, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::shutdown::Shutdown;
@@ -27,8 +27,10 @@ pub(crate) struct StartOptions {
     pub(crate) stack_size: usize,
     pub(crate) inactive_clock: InactiveClock,
     pub(crate) processor: ProcessorSet,
+    pub(crate) runtime_name: RuntimeName,
+    pub(crate) worker_index: usize,
     pub(crate) thread_builder: ThreadBuilder,
-    pub(crate) blocking_pool: blocking::Pool,
+    pub(crate) blocking_pools: blocking::Pools,
     pub(crate) shutdown: Shutdown,
     pub(crate) io_runtime: IoRuntime,
     pub(crate) monitor_options: MonitorOptions,
@@ -58,11 +60,12 @@ impl SpawnedWorker {
     }
 }
 
-pub(crate) fn start(name: &str, options: StartOptions) -> SpawnedWorker {
+pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
     let (command_tx, command_rx) = channel::unbounded();
     let (endpoint_tx, endpoint_rx) = channel::unbounded();
     let (activation_tx, activation_rx) = channel::oneshot();
     let (ready_tx, ready_rx) = channel::unbounded();
+    let thread_name = options.runtime_name.async_worker(options.worker_index);
     let stack_size = options.stack_size;
     let thread_entry = ThreadEntry {
         options,
@@ -71,7 +74,7 @@ pub(crate) fn start(name: &str, options: StartOptions) -> SpawnedWorker {
         ready_tx,
         endpoint_tx,
     };
-    let join_handle = spawn_thread(name, stack_size, move || thread_entry.run());
+    let join_handle = spawn_thread(&thread_name, stack_size, move || thread_entry.run());
     let endpoint = endpoint_rx
         .recv()
         .expect("failed to receive the worker endpoint from the starting worker");
@@ -122,8 +125,10 @@ impl ThreadEntry {
         let StartOptions {
             inactive_clock,
             processor,
+            runtime_name: _,
+            worker_index,
             thread_builder,
-            blocking_pool,
+            blocking_pools,
             shutdown,
             io_runtime,
             monitor_options,
@@ -145,7 +150,7 @@ impl ThreadEntry {
             arty_executor::PanicPolicy::Ignore => blocking::PanicPolicy::Ignore,
             arty_executor::PanicPolicy::Shutdown => blocking::PanicPolicy::Shutdown(worker_waker.clone()),
         };
-        let blocking_worker = blocking::Worker::new(blocking_pool, shutdown, blocking_panic_policy);
+        let blocking_worker = blocking::Worker::new(blocking_pools.pool_for_worker(worker_index), shutdown, blocking_panic_policy);
 
         endpoint_tx
             .send(Endpoint {

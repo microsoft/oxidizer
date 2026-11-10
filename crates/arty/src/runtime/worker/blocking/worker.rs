@@ -5,7 +5,7 @@
 
 use std::num::NonZeroUsize;
 use std::sync::atomic::Ordering;
-use std::{fmt, thread};
+use std::thread;
 
 use arty_executor::discard_task_panic_payload;
 use performables::arc::Arc;
@@ -28,6 +28,14 @@ fn attach_thread(pool: PoolIdentity) {
 }
 
 /// Grow-only blocking pool that retains worker handles for deterministic shutdown.
+#[derive(derive_more::Debug)]
+#[debug(
+    "JoinableThreadPool {{ name: {:?}, queued_count: {}, active_count: {}, max_count: {} }}",
+    name,
+    self.queued_count(),
+    self.active_count(),
+    self.max_count()
+)]
 struct JoinableThreadPool {
     name: RuntimeName,
     async_worker_index: Option<usize>,
@@ -128,17 +136,6 @@ impl JoinableThreadPool {
 impl Drop for JoinableThreadPool {
     fn drop(&mut self) {
         self.shutdown_and_join();
-    }
-}
-
-impl fmt::Debug for JoinableThreadPool {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("JoinableThreadPool")
-            .field("name", &self.name)
-            .field("queued_count", &self.queued_count())
-            .field("active_count", &self.active_count())
-            .field("max_count", &self.max_count())
-            .finish()
     }
 }
 

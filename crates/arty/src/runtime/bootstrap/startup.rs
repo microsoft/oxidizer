@@ -44,20 +44,19 @@ fn build_with_processors(
     let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
-        workers.push(asynchronous::start(
-            &name.async_worker(worker_index),
-            asynchronous::StartOptions {
-                stack_size,
-                inactive_clock: clock.clone(),
-                processor,
-                thread_builder: thread_builder.clone(),
-                blocking_pool: blocking_pools.pool_for_worker(worker_index),
-                shutdown: shutdown.clone(),
-                io_runtime: io_runtime.clone(),
-                monitor_options: monitor_options.for_worker(),
-                panic_policy: panic_policy.clone(),
-            },
-        ));
+        workers.push(asynchronous::start(asynchronous::StartOptions {
+            stack_size,
+            inactive_clock: clock.clone(),
+            processor,
+            runtime_name: name.clone(),
+            worker_index,
+            thread_builder: thread_builder.clone(),
+            blocking_pools: blocking_pools.clone(),
+            shutdown: shutdown.clone(),
+            io_runtime: io_runtime.clone(),
+            monitor_options: monitor_options.for_worker(),
+            panic_policy: panic_policy.clone(),
+        }));
     }
 
     let dispatcher = DispatcherCore::new(
