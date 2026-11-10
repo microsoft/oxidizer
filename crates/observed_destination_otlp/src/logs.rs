@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! OTLP log destination.
 
@@ -28,6 +29,7 @@ pub fn otlp_logs(endpoint: impl Into<String>) -> OtlpLogDestinationBuilder<otlp_
 
 /// A log destination that sends batches over OTLP HTTP/protobuf or gRPC.
 #[derive(bon::Builder, Debug)]
+#[builder(derive(Debug))]
 pub struct OtlpLogDestination {
     /// Collector URL.
     endpoint: String,
@@ -93,6 +95,7 @@ impl<S: otlp_log_destination_builder::IsComplete> IntoLogDestination for OtlpLog
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::io::{Error, ErrorKind};
 

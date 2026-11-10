@@ -6,7 +6,7 @@ name = "observed_destination_otlp"
 description = "OTLP destination for Observed pipeline."
 version = "0.1.0"
 readme = "README.md"
-keywords = ["oxidizer", "observed", "telemetry", "tracing", "logging", "metrics"]
+keywords = ["observed", "telemetry", "tracing", "logging", "metrics"]
 categories = ["development-tools::debugging"]
 
 edition.workspace = true
@@ -17,12 +17,44 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_otlp"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "bon::builder_state::IsUnset",
+    "observed_destination_core::IntoLogDestination",
+    "observed_destination_core::IntoMetricDestination",
+    "observed_destination_core::LogDestination",
+    "observed_destination_core::MetricDestination",
+    "opentelemetry_sdk::metrics::Temporality",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 
 [dependencies]
+bon = { workspace = true }
+observed_destination_core = { workspace = true }
+opentelemetry-otlp = { workspace = true, features = [
+    "logs",
+    "metrics",
+    "http-proto",
+    "reqwest-blocking-client",
+    "grpc-tonic",
+    "internal-logs",
+] }
+opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "internal-logs"] }
+reqwest = { workspace = true, features = ["blocking"] }
 
 [dev-dependencies]
+axum = { workspace = true, features = ["http1", "http2", "tokio"] }
+opentelemetry = { workspace = true, features = ["logs", "metrics"] }
+# Another dependency enabling an async client must not change HTTP destination delivery.
+opentelemetry-otlp = { workspace = true, features = ["reqwest-client"] }
+opentelemetry-proto = { workspace = true, features = ["gen-tonic", "logs", "metrics"] }
+prost = { workspace = true, features = ["std"] }
+rstest = { workspace = true }
+rustls = { workspace = true, features = ["aws-lc-rs", "std"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "time"] }
+tonic = { workspace = true, features = ["codegen", "router"] }
 
 [lints]
 workspace = true

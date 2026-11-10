@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! OTLP metric destination.
 
@@ -28,6 +29,7 @@ pub fn otlp_metrics(endpoint: impl Into<String>) -> OtlpMetricDestinationBuilder
 
 /// A metric destination that periodically exports over OTLP gRPC or HTTP/protobuf.
 #[derive(bon::Builder, Debug)]
+#[builder(derive(Debug))]
 pub struct OtlpMetricDestination {
     /// Collector URL.
     endpoint: String,
@@ -107,6 +109,7 @@ impl<S: otlp_metric_destination_builder::IsComplete> IntoMetricDestination for O
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::io::{Error, ErrorKind};
 

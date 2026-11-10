@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Keeps HTTP delivery compatible with the SDK's dedicated export threads.
 //!
@@ -50,6 +51,7 @@ fn resolve_timeout(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::time::Duration;
 

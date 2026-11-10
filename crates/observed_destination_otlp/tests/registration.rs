@@ -1,8 +1,10 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Public OTLP destinations deliver telemetry to a local collector.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, coverage(off))]
 #![cfg(test)]
 
 use std::net::Ipv4Addr;
@@ -28,7 +30,7 @@ use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::{SdkMeterProvider, Temporality};
 use prost::Message;
 use rstest::rstest;
-use rustls_symcrypt::default_symcrypt_provider;
+use rustls::crypto::aws_lc_rs::default_provider;
 use tokio::net::TcpListener;
 use tokio::runtime::Builder;
 use tokio::task::JoinHandle;
@@ -40,9 +42,7 @@ fn initialize_crypto_provider() {
 
     // Workspace feature unification can enable reqwest's provider-less Rustls backend.
     INIT.call_once(|| {
-        default_symcrypt_provider()
-            .install_default()
-            .expect("crypto provider already installed");
+        default_provider().install_default().unwrap();
     });
 }
 
@@ -65,7 +65,7 @@ fn metric_registration_delivers_measurement(#[case] protocol: OtlpDestinationPro
     let destination = otlp_metrics(endpoint)
         .protocol(protocol)
         .temporality(Temporality::Delta)
-        .export_interval(Duration::from_secs(60))
+        .export_interval(Duration::from_mins(1))
         .export_timeout(Duration::from_secs(5))
         .build();
     // Registration must also be safe when called from an async task.
