@@ -100,33 +100,18 @@ pub(crate) struct CommandReceiver {
 }
 
 impl CommandReceiver {
-    pub(crate) fn system_commands(&self) -> CommandIter<SystemCommand> {
-        CommandIter::new(&self.system)
+    pub(crate) fn system_commands(&self) -> impl Iterator<Item = SystemCommand> + use<> {
+        commands(&self.system)
     }
 
-    pub(crate) fn spawn_commands(&self) -> CommandIter<SpawnCommand> {
-        CommandIter::new(&self.spawn)
-    }
-}
-
-pub(crate) struct CommandIter<T> {
-    receiver: channel::Receiver<T>,
-}
-
-impl<T> CommandIter<T> {
-    fn new(receiver: &channel::Receiver<T>) -> Self {
-        Self {
-            receiver: receiver.clone(),
-        }
+    pub(crate) fn spawn_commands(&self) -> impl Iterator<Item = SpawnCommand> + use<> {
+        commands(&self.spawn)
     }
 }
 
-impl<T> Iterator for CommandIter<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.receiver.try_recv().ok()
-    }
+fn commands<T>(receiver: &channel::Receiver<T>) -> impl Iterator<Item = T> + use<T> {
+    let receiver = receiver.clone();
+    std::iter::from_fn(move || receiver.try_recv().ok())
 }
 
 pub(crate) fn command_channel() -> (CommandSender, CommandReceiver) {
