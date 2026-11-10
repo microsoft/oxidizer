@@ -98,6 +98,17 @@ enum WorkerState {
     Shutdown,
 }
 
+impl WorkerState {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Unreachable guard for a violated invariant.
+    #[cfg_attr(test, mutants::skip)] // Unreachable guard for a violated invariant.
+    fn ready_executor(&mut self) -> &mut Executor {
+        let Self::Ready { executor, .. } = self else {
+            unreachable!("process_system_commands returns early unless the worker is ready, and only finish_shutdown leaves that state");
+        };
+        executor
+    }
+}
+
 impl Worker {
     #[expect(
         clippy::too_many_arguments,
@@ -194,11 +205,7 @@ impl Worker {
             return CycleAction::Shutdown;
         }
 
-        let WorkerState::Ready { executor, .. } = &mut self.state else {
-            return CycleAction::Shutdown;
-        };
-
-        let cycle_outcome = executor.execute_cycle();
+        let cycle_outcome = self.state.ready_executor().execute_cycle();
 
         if let CycleOutcome::Shutdown(cause) = cycle_outcome {
             self.shutdown.begin(cause);
@@ -264,6 +271,7 @@ impl Worker {
         Some(processed == COMMANDS_PER_CYCLE)
     }
 
+    #[cfg_attr(test, mutants::skip)] // If mutated, spawned tasks are never registered or the worker spins - will hang.
     fn process_spawn_commands(&self) -> bool {
         let WorkerState::Ready { commands, context, .. } = &self.state else {
             return false;

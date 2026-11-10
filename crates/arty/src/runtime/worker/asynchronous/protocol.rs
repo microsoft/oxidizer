@@ -88,6 +88,7 @@ impl CommandSender {
         self.system.send(command)
     }
 
+    #[cfg_attr(test, mutants::skip)] // If mutated, queued commands are never delivered and the runtime hangs.
     pub(crate) fn send_spawn(&self, command: SpawnCommand) -> Result<(), performables::Error<SpawnCommand>> {
         self.spawn.send(command)
     }
@@ -100,15 +101,18 @@ pub(crate) struct CommandReceiver {
 }
 
 impl CommandReceiver {
+    #[cfg_attr(test, mutants::skip)] // If mutated, queued commands are never delivered and the runtime hangs.
     pub(crate) fn system_commands(&self) -> impl Iterator<Item = SystemCommand> + '_ {
         commands(&self.system)
     }
 
+    #[cfg_attr(test, mutants::skip)] // If mutated, queued commands are never delivered and the runtime hangs.
     pub(crate) fn spawn_commands(&self) -> impl Iterator<Item = SpawnCommand> + '_ {
         commands(&self.spawn)
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // If mutated, queued commands are never delivered and the runtime hangs.
 fn commands<T>(receiver: &channel::Receiver<T>) -> impl Iterator<Item = T> + '_ {
     std::iter::from_fn(move || receiver.try_recv().ok())
 }
