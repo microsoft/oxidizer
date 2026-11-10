@@ -198,8 +198,8 @@ struct ContainedRuntimePanic {
 }
 
 impl fmt::Display for ContainedRuntimePanic {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "runtime shutdown was caused by a task panic: {}", self.message)
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "runtime shutdown was caused by a task panic: {}", self.message)
     }
 }
 
