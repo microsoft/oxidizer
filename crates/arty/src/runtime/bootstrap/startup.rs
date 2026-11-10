@@ -26,9 +26,7 @@ fn build_with_processors(
     available: &ProcessorSet,
 ) -> Result<Runtime, Error> {
     let name = processor_config.name;
-    if name.contains_null() {
-        return Err(Error::invalid_name());
-    }
+    name.validate()?;
     let processors = processor_config.workers_policy.select(available)?;
 
     let mut workers = Vec::with_capacity(processors.len());

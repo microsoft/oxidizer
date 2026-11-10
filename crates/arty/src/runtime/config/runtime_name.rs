@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use crate::runtime::error::Error;
+
 /// Creates thread names for one runtime.
 #[derive(Clone, Debug)]
 pub(crate) struct RuntimeName(Arc<str>);
@@ -23,8 +25,11 @@ impl RuntimeName {
         )
     }
 
-    pub(crate) fn contains_null(&self) -> bool {
-        self.0.contains('\0')
+    pub(crate) fn validate(&self) -> Result<(), Error> {
+        if self.0.contains('\0') {
+            return Err(Error::invalid_name());
+        }
+        Ok(())
     }
 }
 
@@ -60,8 +65,11 @@ mod tests {
     }
 
     #[test]
-    fn null_detection_checks_the_base_name() {
-        assert!(!RuntimeName::new("requests").contains_null());
-        assert!(RuntimeName::new("invalid\0name").contains_null());
+    fn validation_checks_the_base_name() {
+        RuntimeName::new("requests").validate().unwrap();
+        assert_eq!(
+            RuntimeName::new("invalid\0name").validate().unwrap_err().to_string(),
+            "runtime name must not contain a null character"
+        );
     }
 }
