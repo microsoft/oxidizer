@@ -60,7 +60,8 @@ impl SpawnedWorker {
 }
 
 pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
-    let (command_tx, command_rx) = channel::unbounded();
+    let (system_tx, system_rx) = channel::unbounded();
+    let (spawn_tx, spawn_rx) = channel::unbounded();
     let (endpoint_tx, endpoint_rx) = channel::unbounded();
     let (activation_tx, activation_rx) = channel::oneshot();
     let (ready_tx, ready_rx) = channel::unbounded();
@@ -68,7 +69,8 @@ pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
     let stack_size = options.stack_size;
     let thread_entry = ThreadEntry {
         options,
-        command_rx,
+        system_rx,
+        spawn_rx,
         activation_rx,
         ready_tx,
         endpoint_tx,
@@ -80,7 +82,8 @@ pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
 
     SpawnedWorker {
         endpoint: WorkerEndpoint {
-            command_tx,
+            system_tx,
+            spawn_tx,
             waker: endpoint.waker,
             thread: endpoint.thread,
             blocking_worker: endpoint.blocking_worker,
@@ -106,7 +109,8 @@ struct Endpoint {
 #[derive(Debug)]
 struct ThreadEntry {
     options: StartOptions,
-    command_rx: channel::Receiver<asynchronous::Command>,
+    system_rx: channel::Receiver<asynchronous::SystemCommand>,
+    spawn_rx: channel::Receiver<asynchronous::SpawnCommand>,
     activation_rx: OneshotReceiver<Activation>,
     ready_tx: Sender<()>,
     endpoint_tx: Sender<Endpoint>,
@@ -116,7 +120,8 @@ impl ThreadEntry {
     fn run(self) {
         let Self {
             options,
-            command_rx,
+            system_rx,
+            spawn_rx,
             activation_rx,
             ready_tx,
             endpoint_tx,
@@ -165,7 +170,8 @@ impl ThreadEntry {
         signal.set_driver_waker(driver_waker);
 
         let mut worker = asynchronous::Worker::new(
-            command_rx,
+            system_rx,
+            spawn_rx,
             dispatcher.clone(),
             current,
             io,
@@ -285,12 +291,13 @@ mod tests {
 
     #[test]
     fn failure_publishes_shutdown_cause() {
-        let (command_tx, _command_rx) = channel::unbounded();
+        let (system_tx, _system_rx) = channel::unbounded();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
-            command_tx,
+            system_tx,
+            spawn_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,
@@ -304,12 +311,13 @@ mod tests {
 
     #[test]
     fn success_does_not_publish_shutdown_cause() {
-        let (command_tx, _command_rx) = channel::unbounded();
+        let (system_tx, _system_rx) = channel::unbounded();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
-            command_tx,
+            system_tx,
+            spawn_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,

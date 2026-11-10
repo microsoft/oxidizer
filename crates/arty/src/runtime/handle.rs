@@ -260,7 +260,8 @@ mod tests {
     fn explicit_stop_reports_a_worker_panic_after_joining() {
         let worker = thread::spawn(|| panic!("worker shutdown failure"));
         let endpoint = WorkerEndpoint {
-            command_tx: channel::unbounded().0,
+            system_tx: channel::unbounded().0,
+            spawn_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
             blocking_worker: Worker::new(Pool::new(None), crate::runtime::shutdown::Shutdown::default(), PanicPolicy::Ignore),
@@ -277,7 +278,8 @@ mod tests {
     fn authoritative_shutdown_failure_precedes_later_worker_panic() {
         let worker = thread::spawn(|| panic!("worker teardown failure"));
         let endpoint = WorkerEndpoint {
-            command_tx: channel::unbounded().0,
+            system_tx: channel::unbounded().0,
+            spawn_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
             blocking_worker: Worker::new(Pool::new(None), crate::runtime::shutdown::Shutdown::default(), PanicPolicy::Ignore),

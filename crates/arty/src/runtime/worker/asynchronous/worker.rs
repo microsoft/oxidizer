@@ -19,7 +19,7 @@ use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
-use crate::runtime::worker::asynchronous::{Command, LocalWorker, Signal};
+use crate::runtime::worker::asynchronous::{LocalWorker, Signal, SpawnCommand, SystemCommand};
 #[cfg(test)]
 use crate::runtime::worker::blocking;
 use crate::task::Context;
@@ -53,8 +53,10 @@ fn can_suspend(cycle_outcome: &CycleOutcome, batch_exhausted: bool) -> bool {
 /// 1. Startup: Bootstrap creates the thread and worker from the
 ///    [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) configuration. Bootstrap
 ///    and the worker coordinate initialization until the worker is ready.
-/// 2. Running: The worker processes tasks, advances timers, and waits for
-///    commands.
+/// 2. Running: The worker processes system commands, registers queued tasks,
+///    polls tasks, advances timers, and waits for commands. Command batches are
+///    bounded so tasks and timers can progress. A full system batch defers task
+///    registration until a later cycle.
 /// 3. Shutting down: The worker rejects queued and new submissions, stops
 ///    blocking work, cancels async tasks, and runs final timer callbacks.
 /// 4. Dead: The worker completed shutdown and its thread terminated.
@@ -70,7 +72,8 @@ fn can_suspend(cycle_outcome: &CycleOutcome, batch_exhausted: bool) -> bool {
 pub(crate) struct Worker {
     // Only top-level worker logic uses this field.
     // Shutdown drops the receiver. Later submissions then fail and discard their tasks.
-    command_rx: Option<channel::Receiver<Command>>,
+    system_rx: Option<channel::Receiver<SystemCommand>>,
+    spawn_rx: Option<channel::Receiver<SpawnCommand>>,
 
     // Dropped when shutdown starts so no more tasks can be enqueued and worker-local
     // services can release resources needed by shutdown.
@@ -101,7 +104,8 @@ impl Worker {
         reason = "worker construction wires its independently owned runtime subsystems"
     )]
     pub(crate) fn new(
-        command_rx: channel::Receiver<Command>,
+        system_rx: channel::Receiver<SystemCommand>,
+        spawn_rx: channel::Receiver<SpawnCommand>,
         dispatcher: DispatcherClient,
         thread: Thread,
         io: Io,
@@ -127,7 +131,8 @@ impl Worker {
         LocalWorker::register_scheduler(context.clone(), tasks.clone(), executor_shutdown);
 
         Self {
-            command_rx: Some(command_rx),
+            system_rx: Some(system_rx),
+            spawn_rx: Some(spawn_rx),
             context: Some(context),
             shutdown,
             executor: Some(executor),
@@ -178,7 +183,8 @@ impl Worker {
     }
 
     fn prepare_cycle(&mut self) -> CycleAction {
-        let batch_exhausted = self.process_commands();
+        let system_batch_exhausted = self.process_system_commands();
+        let batch_exhausted = system_batch_exhausted || self.process_spawn_commands();
 
         if matches!(self.shutdown.state(), ShutdownState::Started) {
             return CycleAction::Shutdown;
@@ -232,45 +238,65 @@ impl Worker {
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
-    fn process_commands(&mut self) -> bool {
+    fn process_system_commands(&mut self) -> bool {
         let Some(context) = self.context.as_ref() else {
-            debug_assert!(self.command_rx.is_none());
+            debug_assert!(self.system_rx.is_none());
 
             // We are shutting down and have dropped worker-local services.
-            // The command channel is also closed, so no more commands can be received.
+            // Both command channels are closed, so no more commands can be received.
             return false;
         };
 
-        let command_rx = self.command_rx.as_ref().expect("context and command channel are dropped together");
+        let system_rx = self.system_rx.as_ref().expect("context and command channels are dropped together");
 
         for _ in 0..COMMANDS_PER_CYCLE {
             if matches!(self.shutdown.state(), ShutdownState::Started) {
                 self.begin_shutdown();
                 return false;
             }
-            match command_rx.try_recv() {
+            match system_rx.try_recv() {
                 Ok(command) => match command {
-                    Command::EnqueueTask { future_factory } => {
-                        let _registered = future_factory.into_inner().register(context.clone(), &self.tasks);
-                    }
-                    Command::AccessIo { access } => {
+                    SystemCommand::AccessIo { access } => {
                         access.into_inner()(context);
                     }
-                    Command::Shutdown => {
+                    SystemCommand::Shutdown => {
                         self.begin_shutdown();
 
-                        // Shutdown closes the command channel. No more commands can arrive.
+                        // Shutdown closes both command channels. No more commands can arrive.
                         return false;
                     }
                 },
                 Err(error) => {
                     // Every initialized worker retains its own dispatcher until shutdown.
-                    assert!(error.is_empty(), "async worker command channel disconnected without shutdown");
+                    assert!(error.is_empty(), "async worker system channel disconnected without shutdown");
                     return false;
                 }
             }
         }
         // An exhausted batch can leave commands queued. Read the queue again before parking.
+        true
+    }
+
+    fn process_spawn_commands(&mut self) -> bool {
+        let Some(context) = self.context.as_ref() else {
+            debug_assert!(self.spawn_rx.is_none());
+            return false;
+        };
+        let spawn_rx = self.spawn_rx.as_ref().expect("context and command channels are dropped together");
+
+        // Registration does not invoke user factories. If shutdown starts during
+        // this batch, prepare_cycle stops before polling the registered tasks.
+        for _ in 0..COMMANDS_PER_CYCLE {
+            match spawn_rx.try_recv() {
+                Ok(SpawnCommand { future_factory }) => {
+                    let _registered = future_factory.into_inner().register(context.clone(), &self.tasks);
+                }
+                Err(error) => {
+                    assert!(error.is_empty(), "async worker spawn channel disconnected without shutdown");
+                    return false;
+                }
+            }
+        }
         true
     }
 
@@ -292,8 +318,9 @@ impl Worker {
         // resources that block executor shutdown.
         self.context = None;
 
-        // The command channel is now closed. No more commands can arrive.
-        self.command_rx = None;
+        // Both command channels are now closed. No more commands can arrive.
+        self.system_rx = None;
+        self.spawn_rx = None;
 
         // Safe executor shutdown synchronously cancels and releases all remaining task storage.
         executor.shutdown().trigger(cause);
@@ -391,8 +418,8 @@ mod tests {
         fn cancelled(self, _cause: ShutdownCause) {}
     }
 
-    fn enqueue(factory: RemoteFutureFactory) -> Command {
-        Command::EnqueueTask {
+    fn enqueue(factory: RemoteFutureFactory) -> SpawnCommand {
+        SpawnCommand {
             future_factory: QueuedFactory::new(factory),
         }
     }
@@ -435,27 +462,30 @@ mod tests {
     }
 
     fn test_worker(
-        command_tx: channel::Sender<Command>,
-        command_rx: channel::Receiver<Command>,
+        system: (channel::Sender<SystemCommand>, channel::Receiver<SystemCommand>),
+        spawn: (channel::Sender<SpawnCommand>, channel::Receiver<SpawnCommand>),
         blocking: (Arc<blocking::Worker>, Shutdown),
         clock: InactiveClock,
         signal: Arc<Signal>,
     ) -> Worker {
-        test_worker_with_monitor_options(command_tx, command_rx, blocking, clock, signal, MonitorOptions::default())
+        test_worker_with_monitor_options(system, spawn, blocking, clock, signal, MonitorOptions::default())
     }
 
     fn test_worker_with_monitor_options(
-        command_tx: channel::Sender<Command>,
-        command_rx: channel::Receiver<Command>,
+        system: (channel::Sender<SystemCommand>, channel::Receiver<SystemCommand>),
+        spawn: (channel::Sender<SpawnCommand>, channel::Receiver<SpawnCommand>),
         blocking: (Arc<blocking::Worker>, Shutdown),
         clock: InactiveClock,
         signal: Arc<Signal>,
         monitor_options: MonitorOptions,
     ) -> Worker {
         let (blocking_worker, shutdown) = blocking;
+        let (system_tx, system_rx) = system;
+        let (spawn_tx, spawn_rx) = spawn;
         let thread = ThreadBuilder::default().build(thread::current().id());
         let endpoint = WorkerEndpoint {
-            command_tx,
+            system_tx,
+            spawn_tx,
             waker: Signal::waker(&signal),
             thread: thread.clone(),
             blocking_worker: Arc::clone(&blocking_worker),
@@ -470,7 +500,8 @@ mod tests {
         signal.set_driver_waker(driver_waker);
 
         Worker::new(
-            command_rx,
+            system_rx,
+            spawn_rx,
             dispatcher,
             thread,
             io,
@@ -481,7 +512,7 @@ mod tests {
         )
     }
 
-    fn replenishing_command(sender: channel::Sender<Command>, processed: Arc<AtomicUsize>) -> Command {
+    fn replenishing_command(sender: channel::Sender<SpawnCommand>, processed: Arc<AtomicUsize>) -> SpawnCommand {
         enqueue(RemoteFutureFactory::new(move |_, _| {
             processed.fetch_add(1, Ordering::Relaxed);
             sender.send(replenishing_command(sender.clone(), Arc::clone(&processed))).unwrap();
@@ -490,7 +521,8 @@ mod tests {
 
     #[cfg(not(miri))]
     struct GeneratedWorkerScenario {
-        command_tx: channel::Sender<Command>,
+        system_tx: channel::Sender<SystemCommand>,
+        spawn_tx: channel::Sender<SpawnCommand>,
         ready_task: Option<BoxedSender<()>>,
         control: ClockControl,
         task_done: Arc<AtomicBool>,
@@ -513,7 +545,8 @@ mod tests {
         const MAX_CLEANUP_STEPS: usize = Self::MAX_OPERATIONS + 8;
 
         fn new() -> Self {
-            let (command_tx, command_rx) = channel::unbounded();
+            let (system_tx, system_rx) = channel::unbounded();
+            let (spawn_tx, spawn_rx) = channel::unbounded();
             let (ready_task, task_ready) = Event::boxed();
             let control = ClockControl::new();
             let task_done = Arc::new(AtomicBool::new(false));
@@ -525,8 +558,8 @@ mod tests {
             let timer_observer = Arc::clone(&timer_done);
 
             let worker = test_worker(
-                command_tx.clone(),
-                command_rx,
+                (system_tx.clone(), system_rx),
+                (spawn_tx.clone(), spawn_rx),
                 test_blocking_worker(),
                 control.clone().into(),
                 Arc::clone(&signal),
@@ -541,7 +574,8 @@ mod tests {
                 timer_observer.store(true, Ordering::Relaxed);
             });
             let mut scenario = Self {
-                command_tx,
+                system_tx,
+                spawn_tx,
                 ready_task: Some(ready_task),
                 control,
                 task_done,
@@ -594,7 +628,7 @@ mod tests {
                 let forbidden = Arc::clone(&self.forbidden_factory_invocations);
                 let forbidden_after_queued_shutdown = self.queued_shutdown;
                 if self
-                    .command_tx
+                    .spawn_tx
                     .send(enqueue(RemoteFutureFactory::new(move |_, _| {
                         invocations.fetch_add(1, Ordering::Relaxed);
                         if forbidden_after_queued_shutdown {
@@ -646,7 +680,7 @@ mod tests {
             if !self.queued_shutdown {
                 self.worker.shutdown.begin(ShutdownCause::default());
             }
-            if !self.queued_shutdown && self.command_tx.send(Command::Shutdown).is_ok() {
+            if !self.queued_shutdown && self.system_tx.send(SystemCommand::Shutdown).is_ok() {
                 self.queued_shutdown = true;
             }
         }
@@ -691,6 +725,127 @@ mod tests {
     }
 
     #[test]
+    fn system_commands_precede_earlier_spawn_submissions() {
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
+        let mut worker = test_worker(
+            (system_tx.clone(), system_rx),
+            (spawn_tx.clone(), spawn_rx),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::new(Signal::default()),
+        );
+        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+        for index in 2..4 {
+            let order = Arc::clone(&order);
+            spawn_tx
+                .send(enqueue(RemoteFutureFactory::new(move |_, _| {
+                    order.lock().unwrap().push(index);
+                })))
+                .unwrap();
+        }
+        for index in 0..2 {
+            let order = Arc::clone(&order);
+            system_tx
+                .send(SystemCommand::AccessIo {
+                    access: QueuedIoAccess::new(Box::new(move |_| {
+                        order.lock().unwrap().push(index);
+                    })),
+                })
+                .unwrap();
+        }
+
+        _ = worker.prepare_cycle();
+
+        assert_eq!(*order.lock().unwrap(), vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn full_system_batch_defers_spawning_without_blocking_registered_tasks() {
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
+        let mut worker = test_worker(
+            (system_tx.clone(), system_rx),
+            (spawn_tx.clone(), spawn_rx),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::new(Signal::default()),
+        );
+        let processed = Arc::new(AtomicUsize::new(0));
+        let spawned_after = Arc::new(AtomicUsize::new(0));
+        let task_polled = Arc::new(AtomicBool::new(false));
+        for _ in 0..=COMMANDS_PER_CYCLE {
+            let processed = Arc::clone(&processed);
+            system_tx
+                .send(SystemCommand::AccessIo {
+                    access: QueuedIoAccess::new(Box::new(move |_| {
+                        processed.fetch_add(1, Ordering::Relaxed);
+                    })),
+                })
+                .unwrap();
+        }
+        spawn_tx
+            .send(enqueue(RemoteFutureFactory::new({
+                let processed = Arc::clone(&processed);
+                let spawned_after = Arc::clone(&spawned_after);
+                move |_, _| {
+                    spawned_after.store(processed.load(Ordering::Relaxed), Ordering::Relaxed);
+                }
+            })))
+            .unwrap();
+        worker.tasks.add_test({
+            let task_polled = Arc::clone(&task_polled);
+            async move {
+                task_polled.store(true, Ordering::Relaxed);
+            }
+        });
+
+        assert!(matches!(worker.prepare_cycle(), CycleAction::Poll));
+        assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE);
+        assert_eq!(spawned_after.load(Ordering::Relaxed), 0);
+        assert!(task_polled.load(Ordering::Relaxed));
+
+        _ = worker.prepare_cycle();
+
+        assert_eq!(spawned_after.load(Ordering::Relaxed), COMMANDS_PER_CYCLE + 1);
+    }
+
+    #[test]
+    fn shutdown_command_discards_an_earlier_spawn_backlog() {
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
+        let mut worker = test_worker(
+            (system_tx.clone(), system_rx),
+            (spawn_tx.clone(), spawn_rx),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::new(Signal::default()),
+        );
+        let invocations = Arc::new(AtomicUsize::new(0));
+        for _ in 0..=COMMANDS_PER_CYCLE {
+            let invocations = Arc::clone(&invocations);
+            spawn_tx
+                .send(enqueue(RemoteFutureFactory::new(move |_, _| {
+                    invocations.fetch_add(1, Ordering::Relaxed);
+                })))
+                .unwrap();
+        }
+        let join = worker.context.as_ref().unwrap().dispatcher().spawn(|_| async {});
+        system_tx.send(SystemCommand::Shutdown).unwrap();
+
+        assert!(worker.execute_step().is_break());
+
+        assert_eq!(invocations.load(Ordering::Relaxed), 0);
+        let mut join = std::pin::pin!(join);
+        let std::task::Poll::Ready(Err(error)) = join.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())) else {
+            panic!("discarded submission must report shutdown");
+        };
+        assert!(error.is_shutdown());
+        assert!(system_tx.send(SystemCommand::Shutdown).is_err());
+        assert!(spawn_tx.send(enqueue(RemoteFutureFactory::new(|_, _| {}))).is_err());
+    }
+
+    #[test]
     fn private_suspend_wait_uses_current_time() {
         // The exact wait calculation is private worker-loop policy; public timer wake and
         // completion behavior is covered by integration tests in `tests/time.rs`.
@@ -713,11 +868,12 @@ mod tests {
 
     #[test]
     fn worker_preserves_monitor_options() {
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let signal = Arc::new(Signal::default());
         let worker = test_worker_with_monitor_options(
-            command_tx,
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx, spawn_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             signal,
@@ -733,11 +889,12 @@ mod tests {
         let (worker_ready, worker_setup) = mpsc::channel();
         let (step_done, step_completion) = mpsc::channel();
         let worker_thread = thread::spawn(move || {
-            let (command_tx, command_rx) = channel::unbounded();
+            let (system_tx, system_rx) = channel::unbounded();
+            let (spawn_tx, spawn_rx) = channel::unbounded();
             let signal = Arc::new(Signal::default());
             let mut worker = test_worker(
-                command_tx.clone(),
-                command_rx,
+                (system_tx.clone(), system_rx),
+                (spawn_tx.clone(), spawn_rx),
                 test_blocking_worker(),
                 InactiveClock::new_isolated(),
                 Arc::clone(&signal),
@@ -753,7 +910,7 @@ mod tests {
 
             drop(delay);
             drop(clock);
-            command_tx.send(Command::Shutdown).unwrap();
+            system_tx.send(SystemCommand::Shutdown).unwrap();
             worker.run();
         });
         let worker_waker = worker_setup.recv_timeout(TEST_TIMEOUT).unwrap();
@@ -781,21 +938,22 @@ mod tests {
         let (wait_entered, wait_entry) = mpsc::channel();
         let (worker_ready, worker_setup) = mpsc::channel();
         let worker_thread = thread::spawn(move || {
-            let (command_tx, command_rx) = channel::unbounded();
+            let (system_tx, system_rx) = channel::unbounded();
+            let (spawn_tx, spawn_rx) = channel::unbounded();
             let signal = Arc::new(Signal::with_wait_observer(wait_entered));
             let worker_waker = Signal::waker(&signal);
             let mut worker = test_worker(
-                command_tx.clone(),
-                command_rx,
+                (system_tx.clone(), system_rx),
+                (spawn_tx.clone(), spawn_rx),
                 test_blocking_worker(),
                 InactiveClock::new_isolated(),
                 signal,
             );
             let clock = worker.context.as_ref().unwrap().clock().clone();
-            worker_ready.send((command_tx, worker_waker, clock)).unwrap();
+            worker_ready.send((system_tx, worker_waker, clock)).unwrap();
             worker.run();
         });
-        let (command_tx, worker_waker, clock) = worker_setup.recv_timeout(TEST_TIMEOUT).unwrap();
+        let (system_tx, worker_waker, clock) = worker_setup.recv_timeout(TEST_TIMEOUT).unwrap();
         wait_entry.recv_timeout(TEST_TIMEOUT).unwrap();
         let (timer_fired, timer_completion) = mpsc::channel();
         let timer_waker = Waker::from(std::sync::Arc::new(TimerWake(timer_fired)));
@@ -806,7 +964,7 @@ mod tests {
 
         drop(delay);
         drop(clock);
-        command_tx.send(Command::Shutdown).unwrap();
+        system_tx.send(SystemCommand::Shutdown).unwrap();
         worker_waker.wake_by_ref();
         worker_thread.join().unwrap();
     }
@@ -829,11 +987,12 @@ mod tests {
         }
 
         let control = ClockControl::new();
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let signal = Arc::new(Signal::default());
         let mut worker = test_worker(
-            command_tx,
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx, spawn_rx),
             test_blocking_worker(),
             control.clone().into(),
             Arc::clone(&signal),
@@ -874,7 +1033,8 @@ mod tests {
 
     #[test]
     fn a_never_empty_command_queue_allows_registered_tasks_and_timers_to_progress() {
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let (proceed, progress) = Event::boxed();
         let control = ClockControl::new();
         let task_done = Arc::new(AtomicBool::new(false));
@@ -882,11 +1042,11 @@ mod tests {
         let processed = Arc::new(AtomicUsize::new(0));
         let task_observer = Arc::clone(&task_done);
         let timer_observer = Arc::clone(&timer_done);
-        let shutdown = command_tx.clone();
+        let shutdown = system_tx.clone();
 
         let mut worker = test_worker(
-            command_tx.clone(),
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx.clone(), spawn_rx),
             test_blocking_worker(),
             control.clone().into(),
             Arc::new(Signal::default()),
@@ -899,14 +1059,14 @@ mod tests {
         worker.tasks.add_test(async move {
             clock.delay(Duration::from_secs(1)).await;
             timer_observer.store(true, Ordering::Relaxed);
-            shutdown.send(Command::Shutdown).unwrap();
+            shutdown.send(SystemCommand::Shutdown).unwrap();
         });
         _ = worker.executor.as_mut().unwrap().execute_cycle();
         assert!(!task_done.load(Ordering::Relaxed));
         assert!(!timer_done.load(Ordering::Relaxed));
 
-        command_tx
-            .send(replenishing_command(command_tx.clone(), Arc::clone(&processed)))
+        spawn_tx
+            .send(replenishing_command(spawn_tx.clone(), Arc::clone(&processed)))
             .unwrap();
         proceed.send(());
         control.advance(Duration::from_secs(1));
@@ -919,11 +1079,12 @@ mod tests {
 
     #[test]
     fn same_worker_child_progresses_without_a_redundant_worker_notification() {
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let signal = Arc::new(Signal::default());
         let mut worker = test_worker(
-            command_tx,
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx, spawn_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::clone(&signal),
@@ -948,12 +1109,13 @@ mod tests {
 
     #[test]
     fn a_full_command_batch_skips_waiting_for_the_worker_signal() {
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let signal = Arc::new(Signal::default());
 
         let mut worker = test_worker(
-            command_tx.clone(),
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx.clone(), spawn_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::clone(&signal),
@@ -967,24 +1129,25 @@ mod tests {
         assert!(!signal.is_notified());
 
         for _ in 0..COMMANDS_PER_CYCLE {
-            command_tx.send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+            spawn_tx.send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
         }
         Signal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());
         assert!(worker.execute_step().is_continue());
         assert!(signal.is_notified());
 
-        command_tx.send(Command::Shutdown).unwrap();
+        system_tx.send(SystemCommand::Shutdown).unwrap();
         worker.run();
     }
 
     #[test]
     fn a_full_command_batch_gives_the_primary_driver_no_wait_budget_and_skips_signal_wait() {
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let signal = Arc::new(Signal::default());
         let mut worker = test_worker(
-            command_tx.clone(),
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx.clone(), spawn_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::clone(&signal),
@@ -997,7 +1160,7 @@ mod tests {
             .io()
             .context::<WaitRecordingContext>(&Arc::clone(&waits));
         for _ in 0..COMMANDS_PER_CYCLE {
-            command_tx.send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+            spawn_tx.send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
         }
         Signal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());
@@ -1006,7 +1169,7 @@ mod tests {
         assert_eq!(*waits.lock().unwrap(), vec![Duration::ZERO]);
         assert!(signal.is_notified());
 
-        command_tx.send(Command::Shutdown).unwrap();
+        system_tx.send(SystemCommand::Shutdown).unwrap();
         worker.run();
     }
 
@@ -1021,10 +1184,11 @@ mod tests {
             }
         }
 
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let mut worker = test_worker(
-            command_tx.clone(),
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx.clone(), spawn_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
@@ -1036,7 +1200,7 @@ mod tests {
         // Forgetting a timer is legal and avoids a second panic from the poisoned timer lock.
         std::mem::forget(timer);
         thread::sleep(Duration::from_millis(2));
-        command_tx.send(Command::Shutdown).unwrap();
+        system_tx.send(SystemCommand::Shutdown).unwrap();
 
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));
         assert_eq!(*outcome.unwrap_err().downcast::<&str>().unwrap(), "final timer callback");
@@ -1046,8 +1210,10 @@ mod tests {
     fn smoke_test() {
         async_test(async || {
             // Run worker, execute one remote task which awaits a nested task, then shut down.
-            let (command_tx, command_rx) = channel::unbounded();
-            let worker_command_tx = command_tx.clone();
+            let (system_tx, system_rx) = channel::unbounded();
+            let (spawn_tx, spawn_rx) = channel::unbounded();
+            let worker_system_tx = system_tx.clone();
+            let worker_spawn_tx = spawn_tx.clone();
             let signal = Arc::new(Signal::default());
             let worker_signal = Arc::clone(&signal);
 
@@ -1055,8 +1221,8 @@ mod tests {
                 let blocking_worker = test_blocking_worker();
 
                 let mut worker = test_worker(
-                    worker_command_tx,
-                    command_rx,
+                    (worker_system_tx, system_rx),
+                    (worker_spawn_tx, spawn_rx),
                     (Arc::clone(&blocking_worker.0), blocking_worker.1.clone()),
                     InactiveClock::new_isolated(),
                     worker_signal,
@@ -1072,7 +1238,7 @@ mod tests {
             // Signals that the nested task has completed.
             let (inner_completed_tx, inner_completed_rx) = Event::boxed();
 
-            command_tx
+            spawn_tx
                 .send(enqueue(RemoteFutureFactory::new({
                     move |_: Context, tasks: &TaskSet| {
                         tasks.add_test(async move {
@@ -1091,7 +1257,7 @@ mod tests {
             outer_completed_rx.await.unwrap();
 
             // Shut down after the test body completes.
-            command_tx.send(Command::Shutdown).unwrap();
+            system_tx.send(SystemCommand::Shutdown).unwrap();
             Signal::waker(&signal).wake_by_ref();
 
             // Join the worker so this test reports shutdown errors.
@@ -1106,14 +1272,16 @@ mod tests {
             let (initial_completed_tx, initial_completed_rx) = Event::boxed();
             let (spawned_completed_tx, spawned_completed_rx) = Event::boxed();
 
-            let (command_tx, command_rx) = channel::unbounded();
-            let worker_command_tx = command_tx.clone();
+            let (system_tx, system_rx) = channel::unbounded();
+            let (spawn_tx, spawn_rx) = channel::unbounded();
+            let worker_system_tx = system_tx.clone();
+            let worker_spawn_tx = spawn_tx.clone();
             let signal = Arc::new(Signal::default());
             let worker_signal = Arc::clone(&signal);
             let worker_thread = thread::spawn(move || {
                 let mut worker = test_worker(
-                    worker_command_tx,
-                    command_rx,
+                    (worker_system_tx, system_rx),
+                    (worker_spawn_tx, spawn_rx),
                     test_blocking_worker(),
                     InactiveClock::new_isolated(),
                     worker_signal,
@@ -1123,7 +1291,7 @@ mod tests {
                 worker.run();
             });
 
-            command_tx
+            spawn_tx
                 .send(enqueue(RemoteFutureFactory::new({
                     move |_: Context, tasks: &TaskSet| {
                         tasks.add_test(async move {
@@ -1138,7 +1306,7 @@ mod tests {
             initial_completed_rx.into_value().unwrap();
 
             // Shut down after both tasks complete.
-            command_tx.send(Command::Shutdown).unwrap();
+            system_tx.send(SystemCommand::Shutdown).unwrap();
             Signal::waker(&signal).wake_by_ref();
 
             // Join the worker so this test reports shutdown errors.
@@ -1154,15 +1322,17 @@ mod tests {
         // The worker drops these tasks so their remote join handles report
         // shutdown and release all task resources.
 
-        let (command_tx, command_rx) = channel::unbounded();
-        let worker_command_tx = command_tx.clone();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
+        let worker_system_tx = system_tx.clone();
+        let worker_spawn_tx = spawn_tx.clone();
         let signal = Arc::new(Signal::default());
         let worker_signal = Arc::clone(&signal);
 
         let async_worker_thread = thread::spawn(move || {
             let mut worker = test_worker(
-                worker_command_tx,
-                command_rx,
+                (worker_system_tx, system_rx),
+                (worker_spawn_tx, spawn_rx),
                 test_blocking_worker(),
                 InactiveClock::new_isolated(),
                 worker_signal,
@@ -1170,13 +1340,13 @@ mod tests {
             worker.run();
         });
 
-        command_tx.send(Command::Shutdown).unwrap();
+        system_tx.send(SystemCommand::Shutdown).unwrap();
         Signal::waker(&signal).wake_by_ref();
 
         let (completed_tx, completed_rx) = Event::boxed();
 
         // The channel can already be closed because the worker is shutting down.
-        let _ = command_tx.send(enqueue(RemoteFutureFactory::new({
+        let _ = spawn_tx.send(enqueue(RemoteFutureFactory::new({
             move |_: Context, tasks: &TaskSet| {
                 tasks.add_test(async move {
                     completed_tx.send(14);
@@ -1193,26 +1363,23 @@ mod tests {
 
     #[test]
     fn shutdown_command_cancels_registered_tasks_before_polling() {
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let invoked = Arc::new(AtomicBool::new(false));
         let invoked_by_task = Arc::clone(&invoked);
 
         let mut worker = test_worker(
-            command_tx.clone(),
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx.clone(), spawn_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
         );
 
-        command_tx
-            .send(enqueue(RemoteFutureFactory::new(move |_, tasks| {
-                tasks.add_test(async move {
-                    invoked_by_task.store(true, Ordering::Relaxed);
-                });
-            })))
-            .unwrap();
-        command_tx.send(Command::Shutdown).unwrap();
+        worker.tasks.add_test(async move {
+            invoked_by_task.store(true, Ordering::Relaxed);
+        });
+        system_tx.send(SystemCommand::Shutdown).unwrap();
 
         worker.run();
 
@@ -1221,10 +1388,11 @@ mod tests {
 
     #[test]
     fn same_worker_stop_skips_a_later_initialized_task() {
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let mut worker = test_worker(
-            command_tx,
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx, spawn_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
@@ -1246,10 +1414,11 @@ mod tests {
 
     #[test]
     fn repeated_shutdown_cleanup_is_idempotent() {
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let mut worker = test_worker(
-            command_tx,
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx, spawn_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
@@ -1269,10 +1438,11 @@ mod tests {
             }
         }
 
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let mut worker = test_worker(
-            command_tx.clone(),
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx.clone(), spawn_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
@@ -1280,8 +1450,8 @@ mod tests {
         let invoked = Arc::new(AtomicBool::new(false));
         let (dropped_tx, dropped_rx) = mpsc::channel();
         let drop_signal = DropSignal(dropped_tx);
-        command_tx
-            .send(Command::AccessIo {
+        system_tx
+            .send(SystemCommand::AccessIo {
                 access: QueuedIoAccess::new(Box::new({
                     let invoked = Arc::clone(&invoked);
                     move |_| {
@@ -1301,11 +1471,12 @@ mod tests {
 
     #[test]
     fn shutdown_published_during_final_batch_registration_cancels_before_polling() {
-        let (command_tx, command_rx) = channel::unbounded();
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
         let invoked = Arc::new(AtomicUsize::new(0));
         let mut worker = test_worker(
-            command_tx.clone(),
-            command_rx,
+            (system_tx.clone(), system_rx),
+            (spawn_tx.clone(), spawn_rx),
             test_blocking_worker(),
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
@@ -1315,7 +1486,7 @@ mod tests {
         for index in 0..COMMANDS_PER_CYCLE {
             let invoked = Arc::clone(&invoked);
             let shutdown = shutdown.clone();
-            command_tx
+            spawn_tx
                 .send(enqueue(RemoteFutureFactory::new(move |_, tasks| {
                     if index + 1 == COMMANDS_PER_CYCLE {
                         shutdown.begin(ShutdownCause::default());
@@ -1333,12 +1504,48 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_published_during_registration_skips_later_user_factories() {
+        let (system_tx, system_rx) = channel::unbounded();
+        let (spawn_tx, spawn_rx) = channel::unbounded();
+        let mut worker = test_worker(
+            (system_tx, system_rx),
+            (spawn_tx.clone(), spawn_rx),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::new(Signal::default()),
+        );
+        let shutdown = worker.shutdown.clone();
+        spawn_tx
+            .send(enqueue(RemoteFutureFactory::new(move |_, _| {
+                shutdown.begin(ShutdownCause::default());
+            })))
+            .unwrap();
+        let invoked = Arc::new(AtomicBool::new(false));
+        let join = worker.context.as_ref().unwrap().dispatcher().spawn({
+            let invoked = Arc::clone(&invoked);
+            move |_| {
+                invoked.store(true, Ordering::Relaxed);
+                std::future::ready(())
+            }
+        });
+
+        assert!(worker.execute_step().is_break());
+
+        assert!(!invoked.load(Ordering::Relaxed));
+        let mut join = std::pin::pin!(join);
+        let std::task::Poll::Ready(Err(error)) = join.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())) else {
+            panic!("task registered during shutdown must be cancelled");
+        };
+        assert!(error.is_shutdown());
+    }
+
+    #[test]
     fn dropping_worker_without_run_cleans_up_safely() {
         let (commands, receiver) = channel::unbounded();
         let blocking_worker = test_blocking_worker();
         let worker = test_worker(
-            commands,
-            receiver,
+            channel::unbounded(),
+            (commands, receiver),
             (Arc::clone(&blocking_worker.0), blocking_worker.1.clone()),
             InactiveClock::new_isolated(),
             Arc::new(Signal::default()),
@@ -1355,8 +1562,8 @@ mod tests {
         let blocking_worker = test_blocking_worker();
         let signal = Arc::new(Signal::default());
         let mut worker = test_worker(
-            commands.clone(),
-            receiver,
+            channel::unbounded(),
+            (commands.clone(), receiver),
             (Arc::clone(&blocking_worker.0), blocking_worker.1.clone()),
             InactiveClock::new_isolated(),
             Arc::clone(&signal),
@@ -1370,7 +1577,8 @@ mod tests {
         assert!(outcome.is_break());
         assert!(worker.executor.is_none());
         assert!(blocking_worker.0.is_shutting_down());
-        assert!(!worker.process_commands());
+        assert!(!worker.process_system_commands());
+        assert!(!worker.process_spawn_commands());
         drop(commands);
     }
 }

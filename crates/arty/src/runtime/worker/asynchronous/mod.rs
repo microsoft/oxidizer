@@ -15,7 +15,7 @@ mod thread;
 mod worker;
 
 pub(crate) use local_worker::LocalWorker;
-pub(crate) use protocol::{Command, QueuedFactory, QueuedIoAccess};
+pub(crate) use protocol::{QueuedFactory, QueuedIoAccess, SpawnCommand, SystemCommand};
 pub(crate) use signal::Signal;
 pub(crate) use thread::{StartOptions, start};
 pub(crate) use worker::Worker;

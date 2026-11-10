@@ -52,34 +52,43 @@ pub(crate) type QueuedFactory = QueuedClosure<RemoteFutureFactory>;
 /// Owns a synchronous I/O access closure until the destination worker invokes it.
 pub(crate) type QueuedIoAccess = QueuedClosure<IoAccess>;
 
-pub(crate) enum Command {
-    /// Schedules a new task on this worker.
-    ///
-    /// The factory creates the task future and registers it with the worker task
-    /// set. This lets the executor store the future inline. The task does not
-    /// run if shutdown reaches the worker first.
-    EnqueueTask { future_factory: QueuedFactory },
+/// Registers a task after the worker processes its system commands.
+///
+/// The factory registers the future with the worker task set for inline storage.
+/// Shutdown discards queued submissions without invoking their factories.
+pub(crate) struct SpawnCommand {
+    pub(crate) future_factory: QueuedFactory,
+}
 
+/// System work processed before task submissions in each worker cycle.
+pub(crate) enum SystemCommand {
     /// Executes synchronous I/O context access on this worker.
     AccessIo { access: QueuedIoAccess },
 
     /// Starts shutdown on this worker.
     ///
-    /// The worker stops accepting new tasks. It discards tasks enqueued after
-    /// this command, including tasks from threads that have not observed
-    /// shutdown. Duplicate commands have no effect.
+    /// The worker stops accepting new tasks and discards all queued submissions,
+    /// including submissions queued before this command. Duplicate commands have
+    /// no effect.
     Shutdown,
 }
 
-impl fmt::Debug for Command {
+impl fmt::Debug for SystemCommand {
     #[cfg_attr(coverage_nightly, coverage(off))] // Command names are diagnostic text only.
     #[cfg_attr(test, mutants::skip)] // We have no contract to test here - can return anything.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EnqueueTask { .. } => write!(f, "EnqueueTask"),
             Self::AccessIo { .. } => write!(f, "AccessIo"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
+    }
+}
+
+impl fmt::Debug for SpawnCommand {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Command names are diagnostic text only.
+    #[cfg_attr(test, mutants::skip)] // We have no contract to test here - can return anything.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SpawnCommand")
     }
 }
 
