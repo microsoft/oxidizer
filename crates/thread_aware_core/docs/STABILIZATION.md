@@ -1,50 +1,48 @@
 # Stabilization Notes
 
-These notes describe the stable boundary shared by the `thread_aware` crates.
+These notes define the stable boundary shared by the `thread_aware` crates.
 
 ## Status
 
-`thread_aware_core` is the authoritative vocabulary crate. The `thread_aware`
-crate depends on it and re-exports its public types alongside derive support,
-wrappers, runtime construction, and strategy-partitioned shared state.
+`thread_aware_core` is the authoritative crate for the shared types. The `thread_aware` crate depends on it and re-exports its public types. It also provides derive support, wrappers, and runtime construction. The `performables` crate provides strategy-partitioned shared state.
 
-Adoption of the core contract across the package family is tracked in
-[oxidizer#719](https://github.com/microsoft/oxidizer/issues/719).
+[oxidizer#719](https://github.com/microsoft/oxidizer/issues/719) tracks adoption across the package family.
 
 ## Stable boundary
 
-`thread_aware_core` 1.0 contains the API that downstream crates may expose:
+`thread_aware_core` 1.0 contains these types:
 
 - `ThreadAware`
-- `Thread`, and its component ids `Owner` and `NumaNode`
+- `Thread`
+- `Owner`
+- `NumaNode`
 
-A `Thread` says where a value runs: which runtime owns it (`Owner`), which
-OS thread it is on, and which memory is closest to that thread (`NumaNode`). The
-thread component is `std::thread::ThreadId` rather than an id of our own, so it
-is not re-exported; callers take it from `std`.
+A `Thread` describes the runtime, OS thread, and nearest memory for a value. `Owner` identifies the runtime. `NumaNode` identifies the nearest memory region. The OS thread uses `std::thread::ThreadId`, so callers get that type from `std`.
 
-`thread_aware::ThreadBuilder` is the public runtime integration API. It
-owns one runtime identifier, is cloneable across worker setup, and constructs
-thread coordinates with optional NUMA-node selection. Only that builder uses the
-doc-hidden, versioned `__private::v1` constructors.
+`thread_aware::ThreadBuilder` is the supported public runtime integration API. It owns one runtime identifier and can be cloned during worker setup. It creates thread coordinates with an optional NUMA node.
 
-The crate has no normal dependencies; its only manifest dependency is test-only.
-The `std` feature is enabled by default and adds
-implementations for standard-library types such as `HashMap`, `Path` and
-`PathBuf`, `SocketAddr`, `SocketAddrV4` and `SocketAddrV6`. Turn it off for
-`no_std`, where the crate needs only `alloc` and pointer-width atomics; a
-`Thread` then loses its thread id component and cannot be constructed, leaving `Owner` and
-`NumaNode` readable so that a `no_std` library can still implement
-`ThreadAware`. Implementations for types from external crates are intentionally
-outside the stable boundary.
+The doc-hidden `__private::v1` constructors are publicly reachable for integration code. They are versioned, unsupported implementation details and are not part of the stable boundary.
+
+The crate has no normal dependencies. Its only manifest dependency is for tests.
+
+The `std` feature is on by default. It adds implementations for `HashMap`, `Path`, `PathBuf`, `SocketAddr`, `SocketAddrV4`, and `SocketAddrV6`.
+
+Without `std`, the crate needs `alloc` and pointer-width atomics. A `Thread` has no thread id and cannot be constructed. A library can still read `Owner` and `NumaNode` and implement `ThreadAware`.
+
+Implementations for external crate types are outside the stable boundary.
 
 ## Unstable utilities
 
-The derive macro, closure adapters, policy wrappers, `ThreadBuilder`,
-strategy-partitioned `Arc` and `Storage`, and relocation test helpers remain in
-the pre-1.0 `thread_aware` crate. Stable downstream crates should not expose
-those types in their public APIs.
+These utilities remain in the pre-1.0 `thread_aware` crate:
 
-This split allows the trait contract, thread coordinate types, and built-in
-implementations to remain stable without prematurely stabilizing the larger
-utility surface.
+- The derive macro
+- Closure adapters
+- Policy wrappers
+- `ThreadBuilder`
+- Relocation test helpers
+
+Stable downstream crates must not expose these utility types in public APIs.
+
+Strategy-partitioned `Arc` and `Storage` remain in the separate pre-1.0 `performables` crate.
+
+This split keeps the trait, coordinate types, and built-in implementations stable. The larger utility APIs can continue to change.
