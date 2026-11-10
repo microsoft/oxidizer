@@ -182,10 +182,44 @@ fn shutdown_cause_exposes_the_original_error() {
     let actual = cause.as_error().unwrap();
 
     assert_same_shutdown_source(actual, &expected);
+    assert!(!actual.is_panic());
     let source = actual.source().unwrap().downcast_ref::<TestShutdownError>().unwrap();
     let expected = expected.inner().downcast_ref::<TestShutdownError>().unwrap();
     assert!(std::ptr::eq(source, expected));
     assert_eq!(format!("{cause:?}"), "ShutdownCause { has_error: true }");
+}
+
+#[test]
+fn panic_causes_retain_messages_without_consuming_payloads() {
+    let payloads: [(TaskPanicPayload, &str); 3] = [
+        (Box::new("borrowed panic"), "borrowed panic"),
+        (Box::new(String::from("owned panic")), "owned panic"),
+        (Box::new(42_u32), "non-string panic payload"),
+    ];
+
+    for (payload, message) in payloads {
+        let cause = ShutdownCause::panic(payload.as_ref());
+        let error = cause.as_error().unwrap();
+        let cloned = cause.clone().into_error().unwrap();
+
+        assert!(error.is_panic());
+        assert!(cloned.is_panic());
+        assert_eq!(error.to_string(), format!("runtime shutdown was caused by a task panic: {message}"));
+        assert!(error.inner().source().is_none());
+        assert!(std::ptr::addr_eq(error.inner(), cloned.inner()));
+        if let Some(value) = payload.downcast_ref::<u32>() {
+            assert_eq!(*value, 42);
+        } else if let Some(value) = payload.downcast_ref::<String>() {
+            assert_eq!(value, message);
+        } else {
+            assert_eq!(*payload.downcast::<&str>().unwrap(), message);
+        }
+    }
+
+    let same_message = ShutdownError::new(TestShutdownError("runtime shutdown was caused by a task panic: borrowed panic"));
+    assert!(!same_message.is_panic());
+    assert!(ShutdownCause::panic(&()).as_error().unwrap().is_panic());
+    assert!(ShutdownCause::default().as_error().is_none());
 }
 
 fn enrichment_keys(sink: &Sink) -> Vec<String> {
@@ -581,7 +615,7 @@ fn panic_notification_carries_the_authoritative_shutdown_cause() {
             } else {
                 assert_eq!(
                     cause.as_error().unwrap().inner().to_string(),
-                    "a contained runtime operation panicked"
+                    "runtime shutdown was caused by a task panic: panic notification"
                 );
             }
         } else {

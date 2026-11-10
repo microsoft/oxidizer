@@ -131,6 +131,7 @@ pub(crate) mod dispatch;
 mod error;
 mod handle;
 mod shutdown;
+mod shutdown_cause;
 pub(crate) mod worker;
 mod workers;
 
@@ -145,6 +146,8 @@ pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
 pub(crate) use shutdown::{Shutdown, ShutdownStart, ShutdownState};
+#[doc(inline)]
+pub use shutdown_cause::ShutdownCause;
 #[doc(inline)]
 pub use workers::Workers;
 

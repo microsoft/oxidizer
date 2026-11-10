@@ -1,10 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::any::Any;
 use std::cell::OnceCell;
 use std::error::Error;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::task::Waker;
 
 use ohno::OhnoCore;
@@ -97,6 +99,12 @@ impl std::panic::UnwindSafe for ShutdownError {}
 impl std::panic::RefUnwindSafe for ShutdownError {}
 
 impl ShutdownError {
+    /// Returns whether a contained task panic initiated shutdown.
+    #[must_use]
+    pub fn is_panic(&self) -> bool {
+        self.inner().is::<ContainedRuntimePanic>()
+    }
+
     /// Wraps an error that caused shutdown.
     pub fn new(error: impl Error + Send + Sync + 'static) -> Self {
         Self {
@@ -148,10 +156,21 @@ pub struct ShutdownCause {
 }
 
 impl ShutdownCause {
-    /// Creates a shutdown cause for a contained runtime panic.
+    /// Creates a shutdown cause without consuming the original panic payload.
+    ///
+    /// String payloads supply the diagnostic message. Other payloads use
+    /// `non-string panic payload` because they have no required display format.
     #[must_use]
-    pub fn panic() -> Self {
-        ShutdownError::new(ContainedRuntimePanic::new()).into()
+    pub fn panic(payload: &(dyn Any + Send)) -> Self {
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("non-string panic payload");
+        ShutdownError::new(ContainedRuntimePanic {
+            message: Arc::from(message),
+        })
+        .into()
     }
 
     /// Creates a shutdown cause from an error.
@@ -173,9 +192,18 @@ impl ShutdownCause {
     }
 }
 
-#[ohno::error]
-#[display("a contained runtime operation panicked")]
-struct ContainedRuntimePanic;
+#[derive(Debug)]
+struct ContainedRuntimePanic {
+    message: Arc<str>,
+}
+
+impl fmt::Display for ContainedRuntimePanic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "runtime shutdown was caused by a task panic: {}", self.message)
+    }
+}
+
+impl Error for ContainedRuntimePanic {}
 
 impl From<ShutdownError> for ShutdownCause {
     fn from(error: ShutdownError) -> Self {
@@ -267,11 +295,11 @@ mod tests {
 
     #[test]
     fn panic_cause_preserves_its_diagnostic() {
-        let cause = ShutdownCause::panic();
+        let cause = ShutdownCause::panic(&());
 
         assert_eq!(
             cause.as_error().unwrap().inner().to_string(),
-            "a contained runtime operation panicked"
+            "runtime shutdown was caused by a task panic: non-string panic payload"
         );
     }
 
