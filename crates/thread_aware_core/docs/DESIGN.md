@@ -19,7 +19,7 @@ The doc-hidden `__private` module is publicly reachable for runtime integration.
 
 ## Why this crate is separate
 
-Rust treats traits from different crates as different types, even when their methods match. Independent libraries can use one relocation contract only if they depend on the same `ThreadAware` definition.
+Rust treats the same traits from different versions of the same crate as different types. Independent libraries can use one relocation contract only if they depend on the same `ThreadAware` definition.
 
 Public APIs name the types from this crate. An incompatible release would require a coordinated migration before old and new libraries could interoperate again. A small API, no normal dependencies, and a deliberate minimum supported Rust version (MSRV) policy reduce that migration risk.
 
