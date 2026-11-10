@@ -4997,6 +4997,7 @@ version = "0.3.1"
 dependencies = [
  "criterion",
  "http_path_template",
+ "insta",
  "prettyplease 0.3.0",
  "proc-macro-crate 3.5.0",
  "proc-macro2",

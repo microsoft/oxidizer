@@ -123,3 +123,35 @@ fn resolver_rejects_unknown_naming_arguments() {
 
     assert!(expanded.contains("expected `name = ResolverType`"), "{expanded}");
 }
+
+/// The expansion of `#[resolver]` on `item`, formatted as Rust source.
+fn expand_resolver(item: proc_macro2::TokenStream) -> String {
+    prettyplease::unparse(&syn::parse2(resolver(quote! {}, item)).expect("the expansion is a Rust file"))
+}
+
+#[test]
+fn static_routes_follow_dynamic_routes_in_route_table() {
+    insta::assert_snapshot!(expand_resolver(quote! {
+        enum Route<'p> {
+            #[route(GET, "/shelves/{shelf.id}")]
+            GetShelf { shelf_id: &'p str },
+            Plugin,
+        }
+    }));
+}
+
+#[test]
+fn dynamic_resolver_route_table_is_runtime_table() {
+    insta::assert_snapshot!(expand_resolver(quote! {
+        enum Route {
+            Plugin,
+        }
+    }));
+}
+
+#[test]
+fn resolver_without_routes_has_empty_route_table() {
+    insta::assert_snapshot!(expand_resolver(quote! {
+        enum Route {}
+    }));
+}

@@ -102,4 +102,10 @@ impl Generator {
     pub fn generate(&self) -> TokenStream {
         crate::codegen::generate(&self.routes, &self.route_type, self.public, self.full_api, &self.runtime)
     }
+
+    /// Generates the route table of the routes, which the `#[resolver]` macro
+    /// uses to implement `RouteTable`.
+    pub(crate) fn generate_route_table(&self) -> TokenStream {
+        crate::codegen::generate_route_table(&self.routes, &self.runtime)
+    }
 }

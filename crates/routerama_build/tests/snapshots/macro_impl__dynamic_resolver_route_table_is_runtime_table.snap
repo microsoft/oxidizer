@@ -1,0 +1,208 @@
+---
+source: crates/routerama_build/tests/macro_impl.rs
+expression: "expand_resolver(quote! { enum Route { Plugin, } })"
+---
+enum Route {
+    Plugin,
+}
+///The generated resolver for [`Route`].
+#[derive(Debug)]
+struct RouteResolver {
+    __state: ::routerama::__rt::RawResolver<
+        ::routerama::__rt::DynRoute<
+            fn(
+                &::routerama::__rt::Captures<'_, '_, '_>,
+            ) -> ::core::result::Result<Route, ::routerama::ResolveError<'static>>,
+        >,
+    >,
+}
+#[automatically_derived]
+impl RouteResolver {
+    /// Resolves an HTTP method and path into the corresponding route enum.
+    ///
+    /// # Errors
+    ///
+    /// Returns `routerama::ResolveError` when no route matches or a
+    /// matched route's capture cannot be decoded or converted.
+    #[inline]
+    fn resolve<'p, P>(
+        &self,
+        __method: impl ::core::convert::AsRef<str>,
+        __path: &'p P,
+    ) -> ::core::result::Result<Route, ::routerama::ResolveError<'p>>
+    where
+        P: ::core::convert::AsRef<str> + ?Sized,
+    {
+        ::routerama::Resolver::resolve(self, __method, __path)
+    }
+}
+#[automatically_derived]
+impl ::routerama::Resolver for RouteResolver {
+    type Route<'p> = Route;
+    #[inline]
+    fn resolve<'p, P>(
+        &self,
+        __method: impl ::core::convert::AsRef<str>,
+        __path: &'p P,
+    ) -> ::core::result::Result<Route, ::routerama::ResolveError<'p>>
+    where
+        P: ::core::convert::AsRef<str> + ?Sized,
+    {
+        let __state = &self.__state;
+        let __method = __method.as_ref();
+        let __path = __path.as_ref();
+        fn __convert_dynamic<'p>(__route: Route) -> Route {
+            match __route {
+                Route::Plugin => Route::Plugin,
+            }
+        }
+        fn __dynamic_resolve<'p>(
+            __dyn: &::routerama::__rt::RawResolver<
+                ::routerama::__rt::DynRoute<
+                    fn(
+                        &::routerama::__rt::Captures<'_, '_, '_>,
+                    ) -> ::core::result::Result<
+                        Route,
+                        ::routerama::ResolveError<'static>,
+                    >,
+                >,
+            >,
+            __method: &str,
+            __path: &'p str,
+        ) -> ::core::result::Result<Route, ::routerama::ResolveError<'p>> {
+            match ::routerama::__rt::RawResolver::resolve_scanned_checked(
+                __dyn,
+                __method,
+                __path,
+                |__leaf, __route, __scanned| {
+                    let __caps = ::routerama::__rt::Captures::new(
+                        __leaf,
+                        __scanned,
+                        ::routerama::__rt::DynRoute::capture_order(__route),
+                    );
+                    match (*::routerama::__rt::DynRoute::extractor(__route))(&__caps) {
+                        ::core::result::Result::Ok(__r) => {
+                            ::core::result::Result::Ok(__convert_dynamic(__r))
+                        }
+                        ::core::result::Result::Err(__err) => {
+                            ::core::result::Result::Err(__err)
+                        }
+                    }
+                },
+            ) {
+                ::core::result::Result::Ok(::core::option::Option::Some(__result)) => {
+                    __result
+                }
+                ::core::result::Result::Ok(::core::option::Option::None) => {
+                    ::core::result::Result::Err(
+                        ::routerama::ResolveError::NotFound(__path),
+                    )
+                }
+                ::core::result::Result::Err(_) => {
+                    ::core::result::Result::Err(
+                        ::routerama::ResolveError::InvalidPath(__path),
+                    )
+                }
+            }
+        }
+        __dynamic_resolve(__state, __method, __path)
+    }
+}
+#[automatically_derived]
+impl Route {
+    /**Creates a [`RouteResolverBuilder`] for this route enum.
+
+The builder compiles all run-time route registrations and returns a resolver from its `build` method.*/
+    #[must_use]
+    fn builder() -> RouteResolverBuilder {
+        RouteResolverBuilder {
+            __dyn: ::routerama::__rt::DynBuilder::new(),
+            __seen_plugin: false,
+        }
+    }
+}
+/**Builds a resolver for [`Route`].
+
+Register every dynamic variant with its generated `add_<variant>` method, then call [`build`](Self::build). Static routes are already compiled into the resolver and need no registration.*/
+#[derive(Debug)]
+struct RouteResolverBuilder {
+    __dyn: ::routerama::__rt::DynBuilder<
+        fn(
+            &::routerama::__rt::Captures<'_, '_, '_>,
+        ) -> ::core::result::Result<Route, ::routerama::ResolveError<'static>>,
+    >,
+    __seen_plugin: bool,
+}
+#[automatically_derived]
+impl RouteResolverBuilder {
+    /**Registers a path for the dynamic [`Route::Plugin`] variant.
+
+`method` is matched exactly against the incoming HTTP method. `path` is parsed as a Routerama path template, and its capture names must be exactly the fields of `Route::Plugin`.
+
+Validation errors are accumulated and returned by [`build`](Self::build). Call this method more than once to register aliases for the same variant.*/
+    #[must_use]
+    fn add_plugin(
+        mut self,
+        method: ::routerama::HttpMethod,
+        path: impl ::core::convert::AsRef<str>,
+    ) -> Self {
+        fn __extract(
+            __caps: &::routerama::__rt::Captures<'_, '_, '_>,
+        ) -> ::core::result::Result<Route, ::routerama::ResolveError<'static>> {
+            ::core::result::Result::Ok(Route::Plugin)
+        }
+        let __extractor: fn(
+            &::routerama::__rt::Captures<'_, '_, '_>,
+        ) -> ::core::result::Result<Route, ::routerama::ResolveError<'static>> = __extract;
+        self.__dyn
+            .add(
+                method,
+                ::core::convert::AsRef::<str>::as_ref(&path),
+                &[],
+                "Plugin",
+                __extractor,
+            );
+        self.__seen_plugin = true;
+        self
+    }
+    /**Validates the dynamic registrations and builds a [`RouteResolver`].
+
+# Errors
+
+Returns `routerama::ConfigurationError` containing every invalid or missing dynamic route registration.*/
+    fn build(
+        self,
+    ) -> ::core::result::Result<RouteResolver, ::routerama::ConfigurationError> {
+        let mut __builder = self.__dyn;
+        __builder.require(self.__seen_plugin, "add_plugin", "Plugin");
+        let mut __resolver = ::routerama::__rt::DynBuilder::finish(__builder)?;
+        ::routerama::__rt::RawResolver::force_verb_split(&mut __resolver, false);
+        ::core::result::Result::Ok(RouteResolver {
+            __state: __resolver,
+        })
+    }
+}
+const _: () = {
+    #[automatically_derived]
+    impl ::routerama::RouteTable for RouteResolver {
+        fn route_count(&self) -> usize {
+            ::routerama::RouteTable::route_count(&self.__state)
+        }
+        fn template(&self, __route: usize) -> ::core::option::Option<&str> {
+            ::routerama::RouteTable::template(&self.__state, __route)
+        }
+        fn parameters(
+            &self,
+            __route: usize,
+        ) -> ::core::option::Option<&[::routerama::codegen_helpers::Cow<'static, str>]> {
+            ::routerama::RouteTable::parameters(&self.__state, __route)
+        }
+        fn match_route<'p>(
+            &self,
+            __method: &str,
+            __path: &'p str,
+        ) -> ::core::option::Option<::routerama::RouteHit<'p>> {
+            ::routerama::RouteTable::match_route(&self.__state, __method, __path)
+        }
+    }
+};

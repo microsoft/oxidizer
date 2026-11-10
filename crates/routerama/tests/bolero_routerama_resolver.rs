@@ -265,6 +265,48 @@ fn raw_match_route_agrees_with_resolve() {
         });
 }
 
+/// The static routes use no verb and a dynamic route does, so `resolve` skips the static routes for a path with a
+/// verb.
+#[routerama::resolver]
+enum HybridRoute<'p> {
+    #[route(GET, "/books/featured")]
+    GetFeatured,
+    #[route(GET, "/books/{book}")]
+    GetBook {
+        book: &'p str,
+    },
+    Search,
+    Archive,
+}
+
+#[test]
+fn generated_match_route_agrees_with_resolve() {
+    let resolver = HybridRoute::builder()
+        .add_search(HttpMethod::GET, "/search")
+        .add_archive(HttpMethod::GET, "/books/featured:archive")
+        .build()
+        .unwrap();
+    bolero::check!()
+        .with_type::<StructuredRequest>()
+        .for_each(|req: &StructuredRequest| {
+            let (method, path) = (req.method.as_str(), req.path());
+            let from_resolve = resolver.resolve(method, &path).ok().map(|route| match route {
+                HybridRoute::GetFeatured => ("/books/featured", vec![]),
+                HybridRoute::GetBook { book } => ("/books/{book}", vec![("book", book)]),
+                HybridRoute::Search => ("/search", vec![]),
+                HybridRoute::Archive => ("/books/featured:archive", vec![]),
+            });
+            let from_match_route = resolver.match_route(method, &path).map(|hit| {
+                let names = resolver.parameters(hit.route()).unwrap().iter().map(AsRef::as_ref);
+                (
+                    resolver.template(hit.route()).unwrap(),
+                    names.zip(hit.captures().iter().copied()).collect::<Vec<_>>(),
+                )
+            });
+            assert_eq!(from_resolve, from_match_route, "route table disagreement on `{method} {path}`");
+        });
+}
+
 // Typed static/dynamic coercion differential. Both route sets use owned fields
 // because dynamic variants cannot borrow the request path.
 

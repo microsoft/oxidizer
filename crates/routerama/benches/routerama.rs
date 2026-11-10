@@ -486,6 +486,26 @@ enum AffixFanout<'p> {
     Asset15 { id: &'p str },
 }
 
+#[::routerama::resolver]
+#[derive(Debug)]
+enum FiveCaptureTable<'p> {
+    #[route(GET, "/captures/{value0}/{value1}/{value2}/{value3}/{value4}")]
+    Captures {
+        value0: &'p str,
+        value1: &'p str,
+        value2: &'p str,
+        value3: &'p str,
+        value4: &'p str,
+    },
+}
+
+#[::routerama::resolver]
+#[derive(Debug)]
+enum SeventeenSegmentTable {
+    #[route(GET, "/s01/s02/s03/s04/s05/s06/s07/s08/s09/s10/s11/s12/s13/s14/s15/s16/s17")]
+    Deep,
+}
+
 type StaticScenarioRouter = StaticScenarioResolver;
 type NoVerbScenarioRouter = NoVerbScenarioResolver;
 type WithVerbScenarioRouter = WithVerbScenarioResolver;
@@ -719,6 +739,32 @@ fn dynamic_capture_threshold_lookup(scenario: &(RawResolver, String)) {
 
 fn route_table_match_lookup(scenario: &(RawResolver, String)) {
     black_box(scenario.0.match_route("GET", black_box(&scenario.1)));
+}
+
+fn routerama_static_match_route_lookups(router: &BenchRouteRouter) {
+    for path in LOOKUPS {
+        let hit = router.match_route(request_method(), black_box(path));
+        debug_assert!(hit.is_some(), "routerama_static misses {path}");
+        black_box(hit);
+    }
+}
+
+#[inline]
+fn static_match_route_4_captures(router: &StaticScenarioRouter) {
+    black_box(router.match_route("GET", black_box("/orgs/acme/repos/api/refs/heads/main")));
+}
+
+#[inline]
+fn static_match_route_5_captures(router: &FiveCaptureTableResolver) {
+    black_box(router.match_route("GET", black_box("/captures/segment0/segment1/segment2/segment3/segment4")));
+}
+
+#[inline]
+fn static_match_route_17_segments(router: &SeventeenSegmentTableResolver) {
+    black_box(router.match_route(
+        "GET",
+        black_box("/s01/s02/s03/s04/s05/s06/s07/s08/s09/s10/s11/s12/s13/s14/s15/s16/s17"),
+    ));
 }
 
 fn build_dynamic_misses() -> RawResolver {
@@ -1254,6 +1300,26 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
         bencher.iter(|| route_table_match_lookup(&depth_17));
     });
     route_table.finish();
+
+    let five_captures = FiveCaptureTable::resolver();
+    let seventeen_segments = SeventeenSegmentTable::resolver();
+    let mut static_route_table = criterion.benchmark_group("routerama/route_table_static");
+    static_route_table.bench_function("resolve_lookups", |bencher| {
+        bencher.iter(|| routerama_static_lookups(&routerama_static));
+    });
+    static_route_table.bench_function("match_route_lookups", |bencher| {
+        bencher.iter(|| routerama_static_match_route_lookups(&routerama_static));
+    });
+    static_route_table.bench_function("match_route_4_captures", |bencher| {
+        bencher.iter(|| static_match_route_4_captures(&router));
+    });
+    static_route_table.bench_function("match_route_5_captures", |bencher| {
+        bencher.iter(|| static_match_route_5_captures(&five_captures));
+    });
+    static_route_table.bench_function("match_route_17_segments", |bencher| {
+        bencher.iter(|| static_match_route_17_segments(&seventeen_segments));
+    });
+    static_route_table.finish();
 
     let mixed = build_mixed_scenario();
     let mut dispatch = criterion.benchmark_group("routerama_mixed/dispatch");
@@ -1864,6 +1930,57 @@ fn routerama_route_table_dynamic_match_route_17_segments(scenario: (RawResolver,
     scenario
 }
 
+#[metabench::benchmark(ROUTERAMA_ROUTE_TABLE_STATIC_RESOLVE_LOOKUPS, "routerama/route_table_static", "resolve_lookups")]
+#[bench::run(build_routerama_static())]
+fn routerama_route_table_static_resolve_lookups(router: BenchRouteRouter) -> BenchRouteRouter {
+    routerama_static_lookups(&router);
+    router
+}
+
+#[metabench::benchmark(
+    ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_LOOKUPS,
+    "routerama/route_table_static",
+    "match_route_lookups"
+)]
+#[bench::run(build_routerama_static())]
+fn routerama_route_table_static_match_route_lookups(router: BenchRouteRouter) -> BenchRouteRouter {
+    routerama_static_match_route_lookups(&router);
+    router
+}
+
+#[metabench::benchmark(
+    ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_4_CAPTURES,
+    "routerama/route_table_static",
+    "match_route_4_captures"
+)]
+#[bench::run(build_static_scenario())]
+fn routerama_route_table_static_match_route_4_captures(router: StaticScenarioRouter) -> StaticScenarioRouter {
+    static_match_route_4_captures(&router);
+    router
+}
+
+#[metabench::benchmark(
+    ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_5_CAPTURES,
+    "routerama/route_table_static",
+    "match_route_5_captures"
+)]
+#[bench::run(FiveCaptureTable::resolver())]
+fn routerama_route_table_static_match_route_5_captures(router: FiveCaptureTableResolver) -> FiveCaptureTableResolver {
+    static_match_route_5_captures(&router);
+    router
+}
+
+#[metabench::benchmark(
+    ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_17_SEGMENTS,
+    "routerama/route_table_static",
+    "match_route_17_segments"
+)]
+#[bench::run(SeventeenSegmentTable::resolver())]
+fn routerama_route_table_static_match_route_17_segments(router: SeventeenSegmentTableResolver) -> SeventeenSegmentTableResolver {
+    static_match_route_17_segments(&router);
+    router
+}
+
 #[metabench::benchmark(ROUTERAMA_MIXED_DISPATCH_STATIC_HIT, "routerama_mixed/dispatch", "static_hit")]
 #[bench::run(build_mixed_scenario())]
 fn routerama_mixed_dispatch_static_hit(router: MixedScenarioResolver) -> MixedScenarioResolver {
@@ -2091,6 +2208,11 @@ metabench::main!(
                 ROUTERAMA_STATIC_TABLE_SHAPE_AFFIX_FANOUT_FIRST,
                 ROUTERAMA_STATIC_TABLE_SHAPE_AFFIX_FANOUT_MIDDLE,
                 ROUTERAMA_STATIC_TABLE_SHAPE_AFFIX_FANOUT_LAST,
+                ROUTERAMA_ROUTE_TABLE_STATIC_RESOLVE_LOOKUPS,
+                ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_LOOKUPS,
+                ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_4_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_5_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_17_SEGMENTS,
             ],
             gungraun_config = callgrind_branch_config(),
         },
@@ -2211,6 +2333,11 @@ metabench::main!(
                 ROUTERAMA_STATIC_TABLE_SHAPE_AFFIX_FANOUT_FIRST,
                 ROUTERAMA_STATIC_TABLE_SHAPE_AFFIX_FANOUT_MIDDLE,
                 ROUTERAMA_STATIC_TABLE_SHAPE_AFFIX_FANOUT_LAST,
+                ROUTERAMA_ROUTE_TABLE_STATIC_RESOLVE_LOOKUPS,
+                ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_LOOKUPS,
+                ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_4_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_5_CAPTURES,
+                ROUTERAMA_ROUTE_TABLE_STATIC_MATCH_ROUTE_17_SEGMENTS,
             ],
             gungraun_config = callgrind_branch_config(),
         },

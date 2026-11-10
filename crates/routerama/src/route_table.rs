@@ -19,6 +19,41 @@ use crate::raw_match::INLINE_CAPTURES;
 /// the route that matches, and [`template`](Self::template) and
 /// [`parameters`](Self::parameters) take it. Which route has which number is
 /// not specified.
+///
+/// Every resolver that [`#[resolver]`](macro@crate::resolver) generates
+/// implements this trait.
+///
+/// # Examples
+///
+/// ```
+/// use routerama::{RouteTable, resolver};
+///
+/// #[resolver]
+/// enum BookRoute<'p> {
+///     #[route(GET, "/books")]
+///     ListBooks,
+///     #[route(GET, "/books/{book}")]
+///     GetBook { book: &'p str },
+/// }
+///
+/// let resolver = BookRoute::resolver();
+///
+/// for route in 0..resolver.route_count() {
+///     let template = resolver
+///         .template(route)
+///         .expect("every number below the count has a route");
+///     let parameters = resolver
+///         .parameters(route)
+///         .expect("every number below the count has a route");
+///     println!("{template} {parameters:?}");
+/// }
+///
+/// let hit = resolver
+///     .match_route("GET", "/books/rust")
+///     .expect("a route matches");
+/// assert_eq!(resolver.template(hit.route()), Some("/books/{book}"));
+/// assert_eq!(hit.captures(), ["rust"]);
+/// ```
 pub trait RouteTable {
     /// Returns how many routes the resolver has.
     fn route_count(&self) -> usize;
@@ -66,5 +101,16 @@ impl<'p> RouteHit<'p> {
     #[must_use]
     pub fn captures(&self) -> &[&'p str] {
         &self.captures
+    }
+}
+
+/// Builds the [`RouteHit`] that a generated resolver returns for the route
+/// with the number `route`.
+#[inline]
+#[must_use]
+pub fn route_hit<'p>(route: usize, captures: &[&'p str]) -> RouteHit<'p> {
+    RouteHit {
+        route,
+        captures: SmallVec::from_slice(captures),
     }
 }

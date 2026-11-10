@@ -61,12 +61,12 @@ fn not_found(_path: &str) {}
 ### What gets generated
 
 For an enum named `BookRoute`, Routerama generates a `BookRouteResolver`
-implementing [`Resolver`][__link1]. Static-only enums get an infallible `resolver`
-constructor. Enums containing dynamic routes instead get a
-`BookRouteResolverBuilder` and an `add_<variant>(method, path)` method for
-each dynamic variant. `#[resolver(name = ApiResolver)]` explicitly names
+implementing [`Resolver`][__link1] and [`RouteTable`][__link2]. Static-only enums get an
+infallible `resolver` constructor. Enums containing dynamic routes instead
+get a `BookRouteResolverBuilder` and an `add_<variant>(method, path)` method
+for each dynamic variant. `#[resolver(name = ApiResolver)]` explicitly names
 the resolver `ApiResolver` and its builder `ApiResolverBuilder`.
-[`Resolver::resolve`][__link2] returns `Result<Route, ResolveError>`.
+[`Resolver::resolve`][__link3] returns `Result<Route, ResolveError>`.
 
 Each capturing variant declares one field per `{capture}`; the field type
 controls conversion. Borrowing field types — `&'p str` (no allocation) and
@@ -78,8 +78,8 @@ names that are valid Rust identifiers matching its field names.
 ## Query string processing
 
 You describe a query schema as a named-field struct deriving
-[`FromQuery`][__link3],
-[`ToQuery`][__link4],
+[`FromQuery`][__link4],
+[`ToQuery`][__link5],
 or both. Its fields may be:
 
 * **scalar** — required while decoding, with string forms handled directly
@@ -135,9 +135,9 @@ field map, Serde, dynamic dispatch, or a generated top-level state type.
 The `#[query(...)]` helper attributes rename fields, add decoding aliases,
 provide defaults, flatten nested query types, skip fields, and reject
 unknown parameters. The
-[`FromQuery`][__link5]
+[`FromQuery`][__link6]
 and
-[`ToQuery`][__link6]
+[`ToQuery`][__link7]
 derive pages document the complete attribute contract.
 
 ## Securing route resolution and query processing
@@ -177,11 +177,12 @@ requires `std`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/routerama">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbr5-IsDAswPcbjrjUKkRECAkbANwTnhwOkuUbLetNhGHuvgVhZIGCaXJvdXRlcmFtYWUwLjMuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbAGu7Oy6YGRIbwwqT87U4ouEbTIDgxq_eZDcbepbj-sYdCDRhZIGCaXJvdXRlcmFtYWUwLjMuMQ
  [__link0]: macro@resolver
  [__link1]: https://docs.rs/routerama/0.3.1/routerama/?search=Resolver
- [__link2]: https://docs.rs/routerama/0.3.1/routerama/?search=Resolver::resolve
- [__link3]: https://docs.rs/routerama/latest/routerama/query/derive.FromQuery.html
- [__link4]: https://docs.rs/routerama/latest/routerama/query/derive.ToQuery.html
- [__link5]: https://docs.rs/routerama/latest/routerama/query/derive.FromQuery.html
- [__link6]: https://docs.rs/routerama/latest/routerama/query/derive.ToQuery.html
+ [__link2]: https://docs.rs/routerama/0.3.1/routerama/?search=RouteTable
+ [__link3]: https://docs.rs/routerama/0.3.1/routerama/?search=Resolver::resolve
+ [__link4]: https://docs.rs/routerama/latest/routerama/query/derive.FromQuery.html
+ [__link5]: https://docs.rs/routerama/latest/routerama/query/derive.ToQuery.html
+ [__link6]: https://docs.rs/routerama/latest/routerama/query/derive.FromQuery.html
+ [__link7]: https://docs.rs/routerama/latest/routerama/query/derive.ToQuery.html
