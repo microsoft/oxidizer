@@ -259,8 +259,9 @@ mod tests {
     #[test]
     fn explicit_stop_reports_a_worker_panic_after_joining() {
         let worker = thread::spawn(|| panic!("worker shutdown failure"));
+        let (commands, _command_rx) = crate::runtime::worker::asynchronous::command_channel();
         let endpoint = WorkerEndpoint {
-            commands: crate::runtime::worker::asynchronous::CommandSender::from_channels(channel::unbounded().0, channel::unbounded().0),
+            commands,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
             blocking_worker: Worker::new(Pool::new(None), crate::runtime::shutdown::Shutdown::default(), PanicPolicy::Ignore),
@@ -276,8 +277,9 @@ mod tests {
     #[test]
     fn authoritative_shutdown_failure_precedes_later_worker_panic() {
         let worker = thread::spawn(|| panic!("worker teardown failure"));
+        let (commands, _command_rx) = crate::runtime::worker::asynchronous::command_channel();
         let endpoint = WorkerEndpoint {
-            commands: crate::runtime::worker::asynchronous::CommandSender::from_channels(channel::unbounded().0, channel::unbounded().0),
+            commands,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
             blocking_worker: Worker::new(Pool::new(None), crate::runtime::shutdown::Shutdown::default(), PanicPolicy::Ignore),

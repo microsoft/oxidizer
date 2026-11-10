@@ -84,11 +84,6 @@ pub(crate) struct CommandSender {
 }
 
 impl CommandSender {
-    #[cfg(test)]
-    pub(crate) fn from_channels(system: channel::Sender<SystemCommand>, spawn: channel::Sender<SpawnCommand>) -> Self {
-        Self { system, spawn }
-    }
-
     pub(crate) fn send_system(&self, command: SystemCommand) -> Result<(), performables::Error<SystemCommand>> {
         self.system.send(command)
     }

@@ -285,12 +285,12 @@ mod tests {
 
     #[test]
     fn failure_publishes_shutdown_cause() {
-        let (system_tx, _system_rx) = channel::unbounded();
+        let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
-            commands: asynchronous::CommandSender::from_channels(system_tx, channel::unbounded().0),
+            commands,
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,
@@ -304,12 +304,12 @@ mod tests {
 
     #[test]
     fn success_does_not_publish_shutdown_cause() {
-        let (system_tx, _system_rx) = channel::unbounded();
+        let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
-            commands: asynchronous::CommandSender::from_channels(system_tx, channel::unbounded().0),
+            commands,
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,
