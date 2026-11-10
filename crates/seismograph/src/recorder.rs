@@ -1301,6 +1301,14 @@ pub fn clear_buffers() -> Result<(), crate::Error> {
 }
 
 fn reset_event_buffers(disposition: crate::snapshot::EventBufferDisposition, capture: bool) -> Result<Option<Events>, crate::Error> {
+    reset_event_buffers_with_writer_wait(disposition, capture, wait_expired)
+}
+
+fn reset_event_buffers_with_writer_wait(
+    disposition: crate::snapshot::EventBufferDisposition,
+    capture: bool,
+    writer_wait_expired: impl FnMut(Instant) -> bool,
+) -> Result<Option<Events>, crate::Error> {
     let deadline = wait_deadline();
     let _configuration = ConfigurationLock::acquire_until(deadline)
         .ok_or_else(|| crate::Error::new("seismograph recorder timed out waiting for configuration"))?;
@@ -1319,7 +1327,7 @@ fn reset_event_buffers(disposition: crate::snapshot::EventBufferDisposition, cap
     IO_POLICY.store(disabled_policy(io_policy), Ordering::SeqCst);
     CACHE_POLICY.store(disabled_policy(cache_policy), Ordering::SeqCst);
 
-    if !wait_for_writers_until(deadline) {
+    if !wait_for_writers_until(deadline, writer_wait_expired) {
         restore_recording_policies(
             allocation_policy,
             general_policy,
@@ -1401,18 +1409,18 @@ const fn disabled_policy(policy: u64) -> u64 {
 #[cfg(test)]
 fn wait_for_writers() {
     assert!(
-        wait_for_writers_until(wait_deadline()),
+        wait_for_writers_until(wait_deadline(), wait_expired),
         "event writers did not quiesce within {RECORDER_WAIT_TIMEOUT:?}"
     );
 }
 
-fn wait_for_writers_until(deadline: Instant) -> bool {
+fn wait_for_writers_until(deadline: Instant, mut expired: impl FnMut(Instant) -> bool) -> bool {
     let mut recorder = RECORDERS.load(Ordering::Acquire);
     while !recorder.is_null() {
         // SAFETY: recorders remain registered for process lifetime.
         let current = unsafe { &*recorder };
         while current.writer_active.load(Ordering::SeqCst) {
-            if wait_expired(deadline) {
+            if expired(deadline) {
                 return false;
             }
             std::hint::spin_loop();
@@ -3196,27 +3204,36 @@ mod tests {
             record(EventClass::General, || {
                 Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
             });
+            assert_eq!(try_statistics().unwrap().retained_events, 1);
             // SAFETY: this thread owns the process-lifetime recorder.
             let recorder = unsafe { &*local_recorder() };
             recorder.writer_active.store(true, Ordering::SeqCst);
-            let writer = WriterActiveGuard { recorder };
-            let (sender, receiver) = std::sync::mpsc::channel();
-            std::thread::scope(|scope| {
-                scope.spawn(|| {
-                    let result = if stop {
-                        try_snapshot(crate::snapshot::EventBufferDisposition::Stop).map(|events| events.unwrap().events.len())
-                    } else {
-                        clear_buffers().map(|()| 0)
-                    };
-                    sender.send(result).unwrap();
-                });
-                assert_eq!(
-                    receiver.recv_timeout(Duration::from_millis(20)).unwrap_err(),
-                    std::sync::mpsc::RecvTimeoutError::Timeout
-                );
-                drop(writer);
-                assert_eq!(receiver.recv_timeout(Duration::from_secs(3)).unwrap().unwrap(), usize::from(stop));
-            });
+            let _writer = WriterActiveGuard { recorder };
+            let disposition = if stop {
+                crate::snapshot::EventBufferDisposition::Stop
+            } else {
+                crate::snapshot::EventBufferDisposition::Clear
+            };
+            let mut waits = 0;
+            let captured = reset_event_buffers_with_writer_wait(disposition, stop, |_| {
+                assert!(recorder.writer_active.load(Ordering::Acquire));
+                waits += 1;
+                if waits == 2 {
+                    recorder.writer_active.store(false, Ordering::Release);
+                }
+                false
+            })
+            .unwrap();
+            assert_eq!(waits, 2);
+            assert_eq!(
+                (
+                    recorder.session.load(Ordering::Acquire),
+                    recorder.write_index.load(Ordering::Acquire)
+                ),
+                (0, 0)
+            );
+            assert_eq!(captured.map(|events| events.events.len()), stop.then_some(1));
+            assert_eq!(try_statistics().unwrap().retained_events, 0);
             assert_eq!(generation().is_some(), !stop);
         }
         configure(Configuration::default());
@@ -3485,27 +3502,31 @@ mod tests {
             event_capacity_per_thread: EventBufferCapacity::new(MIN_EVENT_CAPACITY_PER_THREAD),
             ..Default::default()
         });
+        record(EventClass::General, || {
+            Some(Record::object(EventKind::MutexAccess, ObjectId::new(1)))
+        });
         let recorder = local_recorder();
         // SAFETY: local_recorder returns this thread's process-lifetime recorder.
         let recorder = unsafe { &*recorder };
         recorder.writer_active.store(true, Ordering::Release);
-        let (started_sender, started_receiver) = std::sync::mpsc::channel();
-        let (finished_sender, finished_receiver) = std::sync::mpsc::channel();
-        std::thread::scope(|scope| {
-            scope.spawn(|| {
-                started_sender.send(()).unwrap();
-                let captured = destructive_snapshot(crate::snapshot::EventBufferDisposition::Clear);
-                finished_sender.send(captured).unwrap();
-            });
-            started_receiver.recv().unwrap();
-            assert_eq!(
-                finished_receiver.recv_timeout(std::time::Duration::from_millis(20)).unwrap_err(),
-                std::sync::mpsc::RecvTimeoutError::Timeout
-            );
-            recorder.writer_active.store(false, Ordering::Release);
-            let _captured = finished_receiver.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
-        });
+        let _writer = WriterActiveGuard { recorder };
+        let mut waits = 0;
+        let captured = reset_event_buffers_with_writer_wait(crate::snapshot::EventBufferDisposition::Clear, true, |_| {
+            assert!(recorder.writer_active.load(Ordering::Acquire));
+            waits += 1;
+            if waits == 2 {
+                recorder.writer_active.store(false, Ordering::Release);
+            }
+            false
+        })
+        .unwrap();
+        assert_eq!(waits, 2);
+        let captured = captured.unwrap();
         configure(Configuration::default());
+        assert_eq!(
+            captured.events.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            vec![EventKind::MutexAccess]
+        );
     }
 
     #[test]
