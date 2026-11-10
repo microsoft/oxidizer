@@ -30,6 +30,7 @@ allowed_external_types = [
 
 [package.metadata.docs.rs]
 all-features = true
+
 [dependencies]
 
 # 3rd-party
