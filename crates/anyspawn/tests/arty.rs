@@ -12,7 +12,7 @@ use std::thread::{self, ThreadId};
 use std::time::Duration;
 
 use anyspawn::{JoinHandle, Spawner};
-use arty::runtime::{PanicPolicy, Runtime, WorkersPolicy};
+use arty::runtime::{MonitorPolicy, PanicPolicy, Runtime, WorkersPolicy};
 use futures::future::join_all;
 use thread_aware::{Thread, ThreadAware};
 
@@ -30,7 +30,11 @@ impl ThreadAware for RelocationProbe {
 }
 
 fn runtime_and_spawner() -> (Runtime, Spawner) {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let spawner = Spawner::new_arty(scheduler);
     (runtime, spawner)
@@ -82,7 +86,11 @@ fn arty_relocation_round_trip_rebinds_to_destination_worker() {
     if many_cpus::SystemHardware::current().processors().len() < 2 {
         return;
     }
-    let runtime_a = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime_a = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .unwrap();
     let (mut spawner, source, destination) = runtime_a
         .scheduler()
         .block_on(async |cx| {
@@ -96,7 +104,11 @@ fn arty_relocation_round_trip_rebinds_to_destination_worker() {
         .unwrap();
     let original = spawner.clone();
 
-    let runtime_b = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let runtime_b = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
     let foreign = runtime_b.scheduler().block_on(async |cx| cx.thread().clone()).unwrap();
 
     spawner.relocate(Some(&source), &foreign);
@@ -111,7 +123,11 @@ fn arty_relocation_round_trip_rebinds_to_destination_worker() {
 
 #[test]
 fn arty_spawn_anywhere_relocates_payload_before_factory() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let spawner = Spawner::new_arty(scheduler);
 
@@ -137,6 +153,7 @@ fn arty_spawn_blocking_returns_output() {
 #[test]
 fn arty_task_panics_return_join_errors() {
     let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .panic(PanicPolicy::ignore())
         .build()
@@ -208,7 +225,11 @@ fn arty_spawner_debug_names_the_runtime() {
 
 #[test]
 fn arty_builder_preserves_the_worker_association() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
     let (scheduler, expected) = runtime
         .scheduler()
         .block_on(async |cx| (cx.scheduler().clone(), thread::current().id()))

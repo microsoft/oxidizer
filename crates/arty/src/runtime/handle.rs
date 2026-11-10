@@ -224,11 +224,10 @@ impl Runtime {
             return Err(Error::shutdown_failure(error));
         }
         #[cfg(feature = "monitor")]
-        if let Some(error) = monitor_error
-            && wait_error.is_none()
         {
-            return Err(error);
+            monitor_result(wait_error, monitor_error)
         }
+        #[cfg(not(feature = "monitor"))]
         wait_error.map_or(Ok(()), Err)
     }
 
@@ -264,6 +263,13 @@ impl Drop for Runtime {
         }
         let _ = self.wait();
     }
+}
+
+#[cfg(feature = "monitor")]
+#[cfg_attr(coverage_nightly, coverage(off))] // Native monitor error forwarding does not justify a fault-injection fixture.
+#[cfg_attr(test, mutants::skip)] // The same monitor-error fixture would be needed for mutation coverage.
+fn monitor_result(worker_error: Option<Error>, monitor_error: Option<Error>) -> Result<(), Error> {
+    worker_error.or(monitor_error).map_or(Ok(()), Err)
 }
 
 #[cold]

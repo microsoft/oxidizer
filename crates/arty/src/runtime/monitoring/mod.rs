@@ -7,7 +7,8 @@ mod asynchronous;
 mod runtime;
 mod task;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
+#[cfg(not(miri))]
 mod tests;
 
 // Hold for the full lifetime of tests that use the process registry or recorder.

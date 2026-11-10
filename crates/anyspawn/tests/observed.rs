@@ -200,6 +200,7 @@ fn pending_task_does_not_leak_context_on_the_same_thread() {
 #[test]
 fn arty_transfers_context_for_all_spawn_methods() {
     let runtime = arty::runtime::Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(arty::runtime::WorkersPolicy::exactly(1))
         .build()
         .unwrap();
@@ -229,6 +230,7 @@ fn arty_relocates_data_before_the_observed_factory() {
     }
 
     let runtime = arty::runtime::Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(arty::runtime::WorkersPolicy::exactly(1))
         .build()
         .unwrap();

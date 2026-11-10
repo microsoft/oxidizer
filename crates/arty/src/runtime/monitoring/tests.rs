@@ -3,8 +3,6 @@
 
 //! Arty supplies native task state independently of event recording.
 
-#![expect(clippy::unwrap_used, reason = "test failures use unwrap for concise backtraces")]
-
 use std::future::{pending, poll_fn};
 use std::pin::Pin;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, mpsc};
