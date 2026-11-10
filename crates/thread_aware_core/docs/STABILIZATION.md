@@ -43,6 +43,6 @@ These utilities remain in the pre-1.0 `thread_aware` crate:
 
 Stable downstream crates must not expose these utility types in public APIs.
 
-Strategy-partitioned `Arc` and `Storage` remain in the separate pre-1.0 `performables` crate.
+Strategy-partitioned `Arc` remains in the separate pre-1.0 `performables` crate.
 
 This split keeps the trait, coordinate types, and built-in implementations stable. The larger utility APIs can continue to change.

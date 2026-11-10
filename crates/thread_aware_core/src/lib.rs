@@ -27,12 +27,12 @@
 //! # The `thread_aware` family
 //!
 //! Use this crate for the stable types that public APIs expose. It has no derive macros, closure
-//! adapters, policy wrappers, partitioned storage, or runtime integration.
+//! adapters, policy wrappers, or runtime integration.
 //!
 //! The [`thread_aware`] crate provides those utilities. It includes a
 //! [`#[derive(ThreadAware)]`][derive] macro, closure adapters, wrappers for foreign types, and
 //! runtime coordinate construction. Its [authoring guide] explains how to make a type
-//! thread-aware.
+//! thread-aware. The `performables` crate provides strategy-partitioned shared state.
 //!
 //! [`thread_aware`]: https://docs.rs/thread_aware
 //! [derive]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
