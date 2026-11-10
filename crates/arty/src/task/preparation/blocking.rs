@@ -45,7 +45,7 @@ where
             }
             Err(panic) => {
                 if let PanicPolicy::Shutdown(waker) = &self.panic_policy
-                    && result_tx.shutdown().begin(ShutdownCause::panic()) == ShutdownStart::Started
+                    && result_tx.shutdown().begin(ShutdownCause::panic(panic.as_ref())) == ShutdownStart::Started
                 {
                     waker.wake_by_ref();
                 }

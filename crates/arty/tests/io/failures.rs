@@ -78,12 +78,28 @@ fn driver_failure_is_attached_to_tasks_cancelled_by_shutdown() {
 
     assert_eq!(failure.join().unwrap(), "driver construction failed");
     let cancellation = pending.join().unwrap_err();
+    assert!(cancellation.is_shutdown());
+    assert!(!cancellation.is_panic());
+    assert_eq!(cancellation.shutdown_cause(), None);
+    let rejected = worker.spawn(async |_| 42).join().unwrap_err();
+    assert!(rejected.is_shutdown());
+    assert!(!rejected.is_panic());
+    assert_eq!(rejected.shutdown_cause(), None);
     let shutdown = cancellation
         .source()
         .unwrap()
         .downcast_ref::<arty_executor::ShutdownError>()
         .unwrap();
     assert_eq!(shutdown.to_string(), "driver construction failed");
+    assert!(std::ptr::addr_eq(
+        shutdown.inner(),
+        rejected
+            .source()
+            .unwrap()
+            .downcast_ref::<arty_executor::ShutdownError>()
+            .unwrap()
+            .inner()
+    ));
     let mut source = Some(shutdown.inner());
     let mut driver_error_found = false;
     while let Some(error) = source {

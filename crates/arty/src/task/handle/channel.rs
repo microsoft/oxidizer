@@ -146,7 +146,7 @@ mod tests {
     fn cancellation_preserves_the_executor_shutdown_cause() {
         let pool = JoinHandlePool::new(Shutdown::default());
         let (handle, sender) = pool.handle::<u32>();
-        let cause = ShutdownCause::panic();
+        let cause = ShutdownCause::panic(&"task panic");
         let expected = cause.as_error().unwrap().clone();
 
         sender.cancelled(cause);
@@ -162,11 +162,11 @@ mod tests {
         let shutdown = Shutdown::default();
         let pool = JoinHandlePool::new(shutdown.clone());
         let (handle, sender) = pool.handle::<u32>();
-        let cause = ShutdownCause::panic();
+        let cause = ShutdownCause::panic(&"first task panic");
         let expected = cause.as_error().unwrap().clone();
         shutdown.begin(cause);
 
-        sender.cancelled(ShutdownCause::panic());
+        sender.cancelled(ShutdownCause::panic(&"later task panic"));
         let error = handle.join().unwrap_err();
 
         assert!(error.is_shutdown());
@@ -179,7 +179,7 @@ mod tests {
         let shutdown = Shutdown::default();
         let pool = JoinHandlePool::new(shutdown.clone());
         let (handle, sender) = pool.handle::<u32>();
-        let cause = ShutdownCause::panic();
+        let cause = ShutdownCause::panic(&"task panic");
         let expected = cause.as_error().unwrap().clone();
 
         shutdown.begin(cause);
@@ -209,7 +209,7 @@ mod tests {
         let shutdown = Shutdown::default();
         let pool = JoinHandlePool::new(shutdown.clone());
         let (handle, sender) = pool.handle::<u32>();
-        let cause = ShutdownCause::panic();
+        let cause = ShutdownCause::panic(&42_u32);
         let expected = cause.as_error().unwrap().clone();
 
         sender.panicked(Box::new(42_u32), Some(cause));

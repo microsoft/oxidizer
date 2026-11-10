@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context as PollContext, Poll, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, ShutdownCause, WorkersPolicy};
 use arty::task::JoinError;
 #[cfg(feature = "macros")]
 use arty::task::{Context, JoinHandle};
@@ -48,6 +48,8 @@ async fn async_and_blocking_panics_are_join_errors(cx: Context) {
         let error = handle.await.unwrap_err();
         assert!(error.is_panic());
         assert!(!error.is_shutdown());
+        assert_eq!(error.shutdown_cause(), None);
+        assert!(error.source().is_none());
     }
     assert_eq!(scheduler.spawn(async |_| 42).await.unwrap(), 42);
 }
@@ -137,7 +139,11 @@ fn shutdown_rejects_blocking_work_before_worker_teardown() {
         panic!("blocking work must be rejected after shutdown starts");
     }
     runtime.stop().unwrap();
-    assert!(result.unwrap_err().is_shutdown());
+    let error = result.unwrap_err();
+    assert!(error.is_shutdown());
+    assert!(!error.is_panic());
+    assert_eq!(error.shutdown_cause(), Some(ShutdownCause::Requested));
+    assert!(error.source().is_none());
 }
 
 #[test]
@@ -162,7 +168,10 @@ fn shutdown_between_same_worker_tasks_skips_later_factory() {
         .unwrap();
 
     stopper.join().unwrap();
-    assert!(skipped.join().unwrap_err().is_shutdown());
+    let error = skipped.join().unwrap_err();
+    assert!(error.is_shutdown());
+    assert_eq!(error.shutdown_cause(), Some(ShutdownCause::Requested));
+    assert!(error.source().is_none());
     runtime.stop().unwrap();
     assert!(!invoked.load(Ordering::Acquire));
 }
