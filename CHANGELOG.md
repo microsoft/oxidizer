@@ -36,6 +36,7 @@ Please see each crate's change log below:
 - [`layered`](./crates/layered/CHANGELOG.md)
 - [`metabench`](./crates/metabench/CHANGELOG.md)
 - [`multitude`](./crates/multitude/CHANGELOG.md)
+- [`observed_destination_otlp`](./crates/observed_destination_otlp/CHANGELOG.md)
 - [`observed_destination_stdout`](./crates/observed_destination_stdout/CHANGELOG.md)
 - [`observed_macros_impl`](./crates/observed_macros_impl/CHANGELOG.md)
 - [`ohno`](./crates/ohno/CHANGELOG.md)
