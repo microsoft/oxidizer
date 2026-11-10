@@ -9,22 +9,25 @@ use crate::runtime::worker::blocking::Pool;
 #[derive(Debug, Clone)]
 pub(crate) enum Pools {
     Shared(Pool),
-    PerWorker(Option<NonZeroUsize>),
+    PerWorker { name: Box<str>, max_workers: Option<NonZeroUsize> },
 }
 
 impl Pools {
-    pub(crate) const fn per_worker(max_workers: Option<NonZeroUsize>) -> Self {
-        Self::PerWorker(max_workers)
+    pub(crate) fn per_worker(name: &str, max_workers: Option<NonZeroUsize>) -> Self {
+        Self::PerWorker {
+            name: name.into(),
+            max_workers,
+        }
     }
 
-    pub(crate) fn shared(max_workers: Option<NonZeroUsize>) -> Self {
-        Self::Shared(Pool::new(max_workers))
+    pub(crate) fn shared(name: &str, max_workers: Option<NonZeroUsize>) -> Self {
+        Self::Shared(Pool::new(name, max_workers))
     }
 
     pub(crate) fn pool_for_worker(&self) -> Pool {
         match self {
             Self::Shared(pool) => pool.clone(),
-            Self::PerWorker(max_workers) => Pool::new(*max_workers),
+            Self::PerWorker { name, max_workers } => Pool::new(name, *max_workers),
         }
     }
 }
@@ -36,13 +39,13 @@ mod tests {
 
     #[test]
     fn shared_policy_reuses_the_same_blocking_pool() {
-        let pools = Pools::shared(NonZeroUsize::new(1));
+        let pools = Pools::shared("arty-blocking", NonZeroUsize::new(1));
         assert!(pools.pool_for_worker().shares_pool_with(&pools.pool_for_worker()));
     }
 
     #[test]
     fn per_worker_policy_creates_independent_blocking_pools() {
-        let pools = Pools::per_worker(NonZeroUsize::new(1));
+        let pools = Pools::per_worker("arty-blocking", NonZeroUsize::new(1));
         assert!(!pools.pool_for_worker().shares_pool_with(&pools.pool_for_worker()));
     }
 }

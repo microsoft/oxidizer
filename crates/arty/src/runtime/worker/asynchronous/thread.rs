@@ -27,7 +27,6 @@ pub(crate) struct StartOptions {
     pub(crate) stack_size: usize,
     pub(crate) inactive_clock: InactiveClock,
     pub(crate) processor: ProcessorSet,
-    pub(crate) worker_index: usize,
     pub(crate) thread_builder: ThreadBuilder,
     pub(crate) blocking_pools: blocking::Pools,
     pub(crate) shutdown: Shutdown,
@@ -59,12 +58,11 @@ impl SpawnedWorker {
     }
 }
 
-pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
+pub(crate) fn start(name: &str, options: StartOptions) -> SpawnedWorker {
     let (command_tx, command_rx) = channel::unbounded();
     let (endpoint_tx, endpoint_rx) = channel::unbounded();
     let (activation_tx, activation_rx) = channel::oneshot();
     let (ready_tx, ready_rx) = channel::unbounded();
-    let thread_name = format!("oxidizer-rt-{}", options.worker_index);
     let stack_size = options.stack_size;
     let thread_entry = ThreadEntry {
         options,
@@ -73,7 +71,7 @@ pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
         ready_tx,
         endpoint_tx,
     };
-    let join_handle = spawn_thread(&thread_name, stack_size, move || thread_entry.run());
+    let join_handle = spawn_thread(name, stack_size, move || thread_entry.run());
     let endpoint = endpoint_rx
         .recv()
         .expect("failed to receive the worker endpoint from the starting worker");
@@ -288,7 +286,11 @@ mod tests {
         let (command_tx, _command_rx) = channel::unbounded();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
+        let blocking_worker = blocking::Worker::new(
+            blocking::Pool::new("arty-blocking", None),
+            shutdown.clone(),
+            blocking::PanicPolicy::Ignore,
+        );
         let endpoint = WorkerEndpoint {
             command_tx,
             waker: Waker::noop().clone(),
@@ -307,7 +309,11 @@ mod tests {
         let (command_tx, _command_rx) = channel::unbounded();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
+        let blocking_worker = blocking::Worker::new(
+            blocking::Pool::new("arty-blocking", None),
+            shutdown.clone(),
+            blocking::PanicPolicy::Ignore,
+        );
         let endpoint = WorkerEndpoint {
             command_tx,
             waker: Waker::noop().clone(),

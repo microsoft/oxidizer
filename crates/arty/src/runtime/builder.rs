@@ -40,6 +40,34 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
+    /// Sets the runtime name used in worker thread names.
+    ///
+    /// Async threads use `<name>-async-<index>`, with indices starting at zero.
+    /// Blocking threads use `<name>-blocking` in both shared and per-worker pools.
+    /// The default name is `arty`, which gives `arty-async-<index>` and `arty-blocking`.
+    ///
+    /// The builder copies the name. Empty names are accepted.
+    /// [`build`](Self::build) rejects names that contain a null character (`\0`).
+    /// Operating systems can truncate thread names in diagnostic tools.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::builder().name("requests").build()?;
+    /// runtime.scheduler().block_on(async |_| {
+    ///     assert_eq!(std::thread::current().name(), Some("requests-async-0"));
+    /// })?;
+    /// runtime.stop()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn name(mut self, name: impl AsRef<str>) -> Self {
+        self.processor_config.name = name.as_ref().into();
+        self
+    }
+
     /// Sets how the runtime responds to a panic that it catches in a user task.
     ///
     /// The default is [`PanicPolicy::shutdown`]. Use
@@ -190,7 +218,8 @@ impl RuntimeBuilder {
     ///
     /// # Errors
     ///
-    /// Returns [`Error`] if the worker count or blocking-pool limit is zero.
+    /// Returns [`Error`] if the worker count or blocking-pool limit is zero,
+    /// or if the runtime name contains a null character (`\0`).
     ///
     /// # Panics
     ///

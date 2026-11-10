@@ -175,6 +175,7 @@ enum WorkersPolicyKind {
 /// Resource settings validated during runtime construction.
 #[derive(Debug)]
 pub(crate) struct RuntimeConfig {
+    pub(crate) name: Box<str>,
     pub(crate) workers_policy: WorkersPolicy,
     pub(crate) stack_size: NonZeroUsize,
     pub(crate) blocking_pool_policy: BlockingPoolPolicy,
@@ -185,6 +186,7 @@ pub(crate) struct RuntimeConfig {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
+            name: "arty".into(),
             workers_policy: WorkersPolicy::default(),
             // Match Rust's Tier-1 thread-stack baseline instead of platform-native defaults.
             // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.

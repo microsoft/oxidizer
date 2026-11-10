@@ -28,6 +28,7 @@ fn attach_thread(pool: PoolIdentity) {
 
 /// Grow-only blocking pool that retains worker handles for deterministic shutdown.
 struct JoinableThreadPool {
+    name: Box<str>,
     jobs: Option<channel::Sender<Job>>,
     workers: Vec<thread::JoinHandle<()>>,
     identity: PoolIdentity,
@@ -37,9 +38,10 @@ struct JoinableThreadPool {
 }
 
 impl JoinableThreadPool {
-    fn new(thread_count: usize, identity: PoolIdentity) -> Self {
+    fn new(name: &str, thread_count: usize, identity: PoolIdentity) -> Self {
         let (jobs, receiver) = channel::unbounded();
         let mut pool = Self {
+            name: name.into(),
             jobs: Some(jobs),
             workers: Vec::with_capacity(thread_count),
             identity,
@@ -74,7 +76,7 @@ impl JoinableThreadPool {
             let active_count = Arc::clone(&self.active_count);
             let identity = Arc::clone(&self.identity);
             let worker = thread::Builder::new()
-                .name("arty-blocking".to_string())
+                .name(self.name.to_string())
                 .spawn(move || {
                     attach_thread(identity);
                     while let Ok(job) = receiver.recv() {
@@ -128,6 +130,7 @@ impl Drop for JoinableThreadPool {
 impl fmt::Debug for JoinableThreadPool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("JoinableThreadPool")
+            .field("name", &self.name)
             .field("queued_count", &self.queued_count())
             .field("active_count", &self.active_count())
             .field("max_count", &self.max_count())
@@ -220,10 +223,10 @@ impl Pool {
     /// Default per-pool thread limit for blocking tasks.
     const MAX_THREAD_COUNT_DEFAULT: NonZeroUsize = NonZeroUsize::new(64).expect("the default blocking thread limit is nonzero");
 
-    pub(crate) fn new(max_thread_count: Option<NonZeroUsize>) -> Self {
+    pub(crate) fn new(name: &str, max_thread_count: Option<NonZeroUsize>) -> Self {
         // Start with one thread and let the pool grow as needed.
         let identity = Arc::new(());
-        let thread_pool = JoinableThreadPool::new(Self::INITIAL_THREAD_COUNT, Arc::clone(&identity));
+        let thread_pool = JoinableThreadPool::new(name, Self::INITIAL_THREAD_COUNT, Arc::clone(&identity));
 
         Self {
             inner: Arc::new(Mutex::new(Some(thread_pool))),
@@ -325,12 +328,22 @@ mod tests {
     }
 
     fn joinable_pool(thread_count: usize) -> JoinableThreadPool {
-        JoinableThreadPool::new(thread_count, Arc::new(()))
+        JoinableThreadPool::new("arty-blocking", thread_count, Arc::new(()))
+    }
+
+    #[test]
+    fn pool_growth_preserves_thread_names() {
+        let mut pool = JoinableThreadPool::new("requests-blocking", 1, Arc::new(()));
+        pool.set_num_threads(3);
+
+        let names: Vec<_> = pool.workers.iter().map(|worker| worker.thread().name().unwrap()).collect();
+        assert_eq!(names, vec!["requests-blocking"; 3]);
+        pool.join();
     }
 
     #[test]
     fn blocking_pool_grow_increases_thread_count() {
-        let blocking_pool = Pool::new(None);
+        let blocking_pool = Pool::new("arty-blocking", None);
         assert!(blocking_pool.grow());
         assert_eq!(
             blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(),
@@ -341,7 +354,7 @@ mod tests {
 
     #[test]
     fn blocking_pool_grow_to_maximum() {
-        let blocking_pool = Pool::new(Some(limit(5)));
+        let blocking_pool = Pool::new("arty-blocking", Some(limit(5)));
 
         // It says "max" but it is effectively the "current" count because growth is async.
         assert_eq!(blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 1);
@@ -357,7 +370,7 @@ mod tests {
 
     #[test]
     fn overloaded_pool_grows_only_to_configured_thread_limit() {
-        let pool = Pool::new(Some(limit(2)));
+        let pool = Pool::new("arty-blocking", Some(limit(2)));
         let queued_task_count = Pool::MAX_TASKS_PER_THREAD * 2 + 1;
         pool.inner
             .lock_result()
@@ -378,13 +391,16 @@ mod tests {
     fn blocking_pool_reports_configured_max_thread_count() {
         // The configured maximum differs from the initial count and the crate
         // default. The getter must return it without substituting either.
-        assert_eq!(Pool::new(Some(limit(7))).max_thread_count(), 7);
-        assert_eq!(Pool::new(None).max_thread_count(), Pool::MAX_THREAD_COUNT_DEFAULT.get());
+        assert_eq!(Pool::new("arty-blocking", Some(limit(7))).max_thread_count(), 7);
+        assert_eq!(
+            Pool::new("arty-blocking", None).max_thread_count(),
+            Pool::MAX_THREAD_COUNT_DEFAULT.get()
+        );
     }
 
     #[test]
     fn closed_pool_rejects_work_and_cannot_grow() {
-        let pool = Pool::new(Some(limit(2)));
+        let pool = Pool::new("arty-blocking", Some(limit(2)));
         pool.join();
         let invoked = Arc::new(AtomicBool::new(false));
         assert!(!pool.execute({
@@ -418,7 +434,7 @@ mod tests {
 
     #[test]
     fn spawn_on_worker() {
-        let blocking_pool = Pool::new(None);
+        let blocking_pool = Pool::new("arty-blocking", None);
         let (sender, receiver) = channel();
         blocking_pool.execute(move || {
             sender.send("joined").unwrap();
@@ -432,7 +448,7 @@ mod tests {
 
     #[test]
     fn closed_pool_rejects_worker_submission_after_admission() {
-        let pool = Pool::new(NonZeroUsize::new(1));
+        let pool = Pool::new("arty-blocking", NonZeroUsize::new(1));
         let worker = Worker::new(pool.clone(), Shutdown::default(), PanicPolicy::Ignore);
         pool.join();
 
@@ -451,7 +467,7 @@ mod tests {
     fn joinable_pool_attaches_blocking_worker_identity() {
         let current = Arc::new(());
         let other = Arc::new(());
-        let pool = JoinableThreadPool::new(1, Arc::clone(&current));
+        let pool = JoinableThreadPool::new("arty-blocking", 1, Arc::clone(&current));
         let (observed, received) = channel();
 
         assert!(pool.execute(move || {
@@ -494,6 +510,7 @@ mod tests {
         drop(disconnected);
         let (_, receiver) = performables::sync::channel::unbounded();
         let mut pool = JoinableThreadPool {
+            name: "arty-blocking".into(),
             jobs: Some(jobs),
             workers: Vec::new(),
             identity: Arc::new(()),
@@ -523,6 +540,7 @@ mod tests {
         let worker = thread::spawn(|| panic!("worker failure"));
         let (_, receiver) = performables::sync::channel::unbounded();
         let mut pool = JoinableThreadPool {
+            name: "arty-blocking".into(),
             jobs: None,
             workers: vec![worker],
             identity: Arc::new(()),
@@ -539,6 +557,7 @@ mod tests {
         let pool = joinable_pool(1);
 
         let debug = format!("{pool:?}");
+        assert!(debug.contains("name: \"arty-blocking\""));
         assert!(debug.contains("queued_count: 0"));
         assert!(debug.contains("active_count: 0"));
         assert!(debug.contains("max_count: 1"));
@@ -548,7 +567,7 @@ mod tests {
     #[test]
     fn overload_worker() {
         execute_or_abandon(move || {
-            let blocking_pool = Pool::new(None);
+            let blocking_pool = Pool::new("arty-blocking", None);
             let (worker_thread_started_tx, worker_thread_started_rx) = channel();
             let (worker_thread_finished_tx, worker_thread_finished_rx) = Event::<()>::boxed();
 
@@ -611,7 +630,7 @@ mod tests {
         let thread_join_handle = thread::spawn({
             let events = Arc::clone(&events);
             move || {
-                let worker = Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore);
+                let worker = Worker::new(Pool::new("arty-blocking", None), Shutdown::default(), PanicPolicy::Ignore);
 
                 drop(worker.spawn_blocking({
                     let events = Arc::clone(&events);
@@ -665,7 +684,7 @@ mod tests {
         let dropped = Arc::new(AtomicBool::new(false));
         let work_done = Arc::new(AtomicBool::new(false));
 
-        let worker = Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore);
+        let worker = Worker::new(Pool::new("arty-blocking", None), Shutdown::default(), PanicPolicy::Ignore);
 
         worker.remote_results.shutdown().begin(ShutdownCause::default());
 
@@ -686,7 +705,11 @@ mod tests {
     #[test]
     fn runtime_shutdown_cancels_queued_work_before_worker_shutdown() {
         let runtime_shutdown = Shutdown::default();
-        let worker = Worker::new(Pool::new(Some(limit(1))), runtime_shutdown.clone(), PanicPolicy::Ignore);
+        let worker = Worker::new(
+            Pool::new("arty-blocking", Some(limit(1))),
+            runtime_shutdown.clone(),
+            PanicPolicy::Ignore,
+        );
         let (started_tx, started_rx) = channel();
         let (release_tx, release_rx) = Event::<()>::boxed();
 
@@ -715,7 +738,7 @@ mod tests {
     fn runtime_shutdown_rejects_new_work_before_worker_shutdown() {
         let runtime_shutdown = Shutdown::default();
         runtime_shutdown.begin(ShutdownCause::default());
-        let worker = Worker::new(Pool::new(Some(limit(1))), runtime_shutdown, PanicPolicy::Ignore);
+        let worker = Worker::new(Pool::new("arty-blocking", Some(limit(1))), runtime_shutdown, PanicPolicy::Ignore);
         let invoked = Arc::new(AtomicBool::new(false));
 
         let rejected = worker.spawn_blocking({
@@ -731,7 +754,7 @@ mod tests {
 
     #[test]
     fn worker_shutdown_rejects_same_pool_join_without_deadlock_guard() {
-        let worker = Worker::new(Pool::new(Some(limit(1))), Shutdown::default(), PanicPolicy::Ignore);
+        let worker = Worker::new(Pool::new("arty-blocking", Some(limit(1))), Shutdown::default(), PanicPolicy::Ignore);
         attach_thread(Arc::clone(&worker.pool.identity));
         worker.remote_results.shutdown().begin(ShutdownCause::default());
 

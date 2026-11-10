@@ -306,7 +306,7 @@ mod tests {
             command_tx: tx,
             waker: Waker::noop().clone(),
             thread: thread.clone(),
-            blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),
+            blocking_worker: Worker::new(Pool::new("arty-blocking", None), Shutdown::default(), PanicPolicy::Ignore),
         }
     }
 

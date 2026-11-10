@@ -263,7 +263,11 @@ mod tests {
             command_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
-            blocking_worker: Worker::new(Pool::new(None), crate::runtime::shutdown::Shutdown::default(), PanicPolicy::Ignore),
+            blocking_worker: Worker::new(
+                Pool::new("arty-blocking", None),
+                crate::runtime::shutdown::Shutdown::default(),
+                PanicPolicy::Ignore,
+            ),
         };
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
@@ -280,7 +284,11 @@ mod tests {
             command_tx: channel::unbounded().0,
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
-            blocking_worker: Worker::new(Pool::new(None), crate::runtime::shutdown::Shutdown::default(), PanicPolicy::Ignore),
+            blocking_worker: Worker::new(
+                Pool::new("arty-blocking", None),
+                crate::runtime::shutdown::Shutdown::default(),
+                PanicPolicy::Ignore,
+            ),
         };
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
