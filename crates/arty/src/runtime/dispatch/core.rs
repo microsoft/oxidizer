@@ -115,7 +115,7 @@ impl DispatcherCore {
 
         for endpoint in &self.worker_endpoints {
             // A closed channel means that the worker no longer accepts commands.
-            _ = endpoint.commands.send_system(SystemCommand::Shutdown);
+            _ = endpoint.commands.system_sender().send(SystemCommand::Shutdown);
             endpoint.waker.wake_by_ref();
         }
         cause
@@ -198,7 +198,7 @@ impl DispatcherCore {
             .worker_endpoints
             .get(usize::from(worker_index))
             .expect("worker index must identify a registered runtime worker");
-        let send_result = endpoint.commands.send_system(SystemCommand::AccessIo {
+        let send_result = endpoint.commands.system_sender().send(SystemCommand::AccessIo {
             access: QueuedIoAccess::new(access),
         });
         endpoint.waker.wake_by_ref();
@@ -274,7 +274,7 @@ impl DispatcherCore {
 
         // A worker can close its channel before this send if shutdown already
         // reached that worker. The join handle detects the disconnection.
-        _ = endpoint.commands.send_spawn(SpawnCommand {
+        _ = endpoint.commands.spawn_sender().send(SpawnCommand {
             future_factory: QueuedFactory::new(future_factory),
         });
 
@@ -490,7 +490,7 @@ mod tests {
         dispatcher.stop_inner(ShutdownCause::default());
 
         // Drain the shutdown command.
-        assert!(matches!(command_rx.system_commands().next(), Some(SystemCommand::Shutdown)));
+        assert!(matches!(command_rx.system_receiver().try_recv(), Ok(SystemCommand::Shutdown)));
 
         // Close the command channel.
         drop(command_rx);
@@ -539,13 +539,13 @@ mod tests {
     #[cfg_attr(test, mutants::skip)]
     fn drain_system(worker_rx: &CommandReceiver) -> Vec<SystemCommand> {
         let mut commands = Vec::new();
-        commands.extend(worker_rx.system_commands());
+        commands.extend(std::iter::from_fn(|| worker_rx.system_receiver().try_recv().ok()));
         commands
     }
 
     fn drain_spawn(worker_rx: &CommandReceiver) -> Vec<SpawnCommand> {
         let mut commands = Vec::new();
-        commands.extend(worker_rx.spawn_commands());
+        commands.extend(std::iter::from_fn(|| worker_rx.spawn_receiver().try_recv().ok()));
         commands
     }
 }

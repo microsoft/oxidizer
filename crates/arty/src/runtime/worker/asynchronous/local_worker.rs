@@ -231,7 +231,7 @@ mod tests {
             LocalWorker::register_scheduler(context, executor.tasks(), executor.shutdown());
 
             let mut join = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 42 }));
-            let registered_locally = command_rx.spawn_commands().next().is_none() && executor.has_tasks();
+            let registered_locally = command_rx.spawn_receiver().try_recv().is_err() && executor.has_tasks();
             let idle_worker_woken = wakes.0.load(Ordering::Relaxed) == 1;
             _ = executor.execute_cycle();
             let local_result = matches!(
@@ -255,7 +255,7 @@ mod tests {
                 parent.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())),
                 Poll::Ready(Ok((7, true)))
             );
-            let nested_registered_locally = command_rx.spawn_commands().next().is_none();
+            let nested_registered_locally = command_rx.spawn_receiver().try_recv().is_err();
 
             let other_thread = ThreadBuilder::default().build(std::thread::current().id());
             let (other_tx, other_rx) = crate::runtime::worker::asynchronous::command_channel();
@@ -269,7 +269,7 @@ mod tests {
                 Shutdown::default(),
             );
             let _remote = other_core.spawn_relocating(&other_thread, |_| async { 9 });
-            let other_owner_queued = matches!(other_rx.spawn_commands().next(), Some(SpawnCommand { .. }));
+            let other_owner_queued = matches!(other_rx.spawn_receiver().try_recv(), Ok(SpawnCommand { .. }));
             let other_owner_not_registered = !executor.has_tasks();
 
             shutdown.begin(ShutdownCause::default());
@@ -279,7 +279,7 @@ mod tests {
                 rejected.as_mut().poll(&mut std::task::Context::from_waker(Waker::noop())),
                 Poll::Ready(Err(error)) if error.is_shutdown()
             );
-            let rejection_not_queued = command_rx.spawn_commands().next().is_none();
+            let rejection_not_queued = command_rx.spawn_receiver().try_recv().is_err();
             let rejection_not_woken = wakes.0.load(Ordering::Relaxed) == before;
             LocalWorker::clear_scheduler();
             [

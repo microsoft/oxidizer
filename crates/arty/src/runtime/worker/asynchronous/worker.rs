@@ -70,7 +70,7 @@ fn can_suspend(cycle_outcome: &CycleOutcome, batch_exhausted: bool) -> bool {
 /// This type is single-threaded. It only exists on its designated worker thread.
 #[derive(Debug)]
 pub(crate) struct Worker {
-    state: WorkerState,
+    state: Option<ReadyWorkerState>,
 
     shutdown: Shutdown,
 
@@ -89,24 +89,16 @@ pub(crate) struct Worker {
 }
 
 #[derive(Debug)]
-enum WorkerState {
-    Ready {
-        commands: CommandReceiver,
-        context: Context,
-        executor: Executor,
-    },
-    Shutdown,
+struct ReadyWorkerState {
+    commands: CommandReceiver,
+    context: Context,
+    executor: Executor,
 }
 
-impl WorkerState {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Unreachable guard for a violated invariant.
-    #[cfg_attr(test, mutants::skip)] // Unreachable guard for a violated invariant.
-    fn ready_executor(&mut self) -> &mut Executor {
-        let Self::Ready { executor, .. } = self else {
-            unreachable!("process_system_commands returns early unless the worker is ready, and only finish_shutdown leaves that state");
-        };
-        executor
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BatchProgress {
+    Drained,
+    LimitReached,
 }
 
 impl Worker {
@@ -141,11 +133,11 @@ impl Worker {
         LocalWorker::register_scheduler(context.clone(), tasks.clone(), executor_shutdown);
 
         Self {
-            state: WorkerState::Ready {
+            state: Some(ReadyWorkerState {
                 commands,
                 context,
                 executor,
-            },
+            }),
             shutdown,
             tasks,
             clock_driver,
@@ -198,14 +190,20 @@ impl Worker {
             return CycleAction::Shutdown;
         };
 
-        let spawn_batch_exhausted = self.process_spawn_commands();
+        let spawn_batch_exhausted = matches!(self.process_spawn_commands(), BatchProgress::LimitReached);
         let batch_exhausted = system_batch_exhausted || spawn_batch_exhausted;
 
         if matches!(self.shutdown.state(), ShutdownState::Started) {
             return CycleAction::Shutdown;
         }
 
-        let cycle_outcome = self.state.ready_executor().execute_cycle();
+        let executor = &mut self
+            .state
+            .as_mut()
+            .expect("system command processing only succeeds while the worker is ready")
+            .executor;
+
+        let cycle_outcome = executor.execute_cycle();
 
         if let CycleOutcome::Shutdown(cause) = cycle_outcome {
             self.shutdown.begin(cause);
@@ -249,12 +247,12 @@ impl Worker {
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
     fn process_system_commands(&self) -> Option<bool> {
-        let WorkerState::Ready { commands, context, .. } = &self.state else {
+        let Some(ReadyWorkerState { commands, context, .. }) = &self.state else {
             return None;
         };
 
         let mut processed = 0_usize;
-        for command in commands.system_commands().take(COMMANDS_PER_CYCLE) {
+        for command in std::iter::from_fn(|| commands.system_receiver().try_recv().ok()).take(COMMANDS_PER_CYCLE) {
             if matches!(self.shutdown.state(), ShutdownState::Started) {
                 return None;
             }
@@ -271,29 +269,32 @@ impl Worker {
         Some(processed == COMMANDS_PER_CYCLE)
     }
 
-    #[cfg_attr(test, mutants::skip)] // If mutated, spawned tasks are never registered or the worker spins - will hang.
-    fn process_spawn_commands(&self) -> bool {
-        let WorkerState::Ready { commands, context, .. } = &self.state else {
-            return false;
+    fn process_spawn_commands(&self) -> BatchProgress {
+        let Some(ReadyWorkerState { commands, context, .. }) = &self.state else {
+            return BatchProgress::Drained;
         };
 
         // Registration does not invoke user factories. If shutdown starts during
         // this batch, prepare_cycle stops before polling the registered tasks.
         let mut processed = 0_usize;
-        for SpawnCommand { future_factory } in commands.spawn_commands().take(COMMANDS_PER_CYCLE) {
+        for SpawnCommand { future_factory } in std::iter::from_fn(|| commands.spawn_receiver().try_recv().ok()).take(COMMANDS_PER_CYCLE) {
             let _registered = future_factory.into_inner().register(context.clone(), &self.tasks);
             processed = processed.saturating_add(1);
         }
-        processed == COMMANDS_PER_CYCLE
+        if processed == COMMANDS_PER_CYCLE {
+            BatchProgress::LimitReached
+        } else {
+            BatchProgress::Drained
+        }
     }
 
     #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
     fn begin_shutdown(&mut self) {
-        let WorkerState::Ready {
+        let Some(ReadyWorkerState {
             commands,
             context,
             executor,
-        } = std::mem::replace(&mut self.state, WorkerState::Shutdown)
+        }) = self.state.take()
         else {
             return;
         };
@@ -318,7 +319,7 @@ impl Worker {
 impl Drop for Worker {
     #[cfg_attr(test, mutants::skip)] // Worker-owned services must retire before the thread can finish shutdown.
     fn drop(&mut self) {
-        if matches!(self.state, WorkerState::Ready { .. }) {
+        if self.state.is_some() {
             self.begin_shutdown();
         }
     }
@@ -387,28 +388,19 @@ mod tests {
     }
 
     fn worker_context(worker: &Worker) -> &Context {
-        let WorkerState::Ready { context, .. } = &worker.state else {
-            panic!("test requires a running worker");
-        };
-        context
+        &worker.state.as_ref().unwrap().context
     }
 
     fn worker_executor(worker: &Worker) -> &Executor {
-        let WorkerState::Ready { executor, .. } = &worker.state else {
-            panic!("test requires a running worker");
-        };
-        executor
+        &worker.state.as_ref().unwrap().executor
     }
 
     fn worker_executor_mut(worker: &mut Worker) -> &mut Executor {
-        let WorkerState::Ready { executor, .. } = &mut worker.state else {
-            panic!("test requires a running worker");
-        };
-        executor
+        &mut worker.state.as_mut().unwrap().executor
     }
 
     fn worker_is_shutdown(worker: &Worker) -> bool {
-        matches!(worker.state, WorkerState::Shutdown)
+        worker.state.is_none()
     }
 
     #[derive(Debug)]
@@ -521,7 +513,8 @@ mod tests {
         enqueue(RemoteFutureFactory::new(move |_, _| {
             processed.fetch_add(1, Ordering::Relaxed);
             sender
-                .send_spawn(replenishing_command(sender.clone(), Arc::clone(&processed)))
+                .spawn_sender()
+                .send(replenishing_command(sender.clone(), Arc::clone(&processed)))
                 .unwrap();
         }))
     }
@@ -632,7 +625,8 @@ mod tests {
                 let forbidden_after_queued_shutdown = self.queued_shutdown;
                 if self
                     .commands
-                    .send_spawn(enqueue(RemoteFutureFactory::new(move |_, _| {
+                    .spawn_sender()
+                    .send(enqueue(RemoteFutureFactory::new(move |_, _| {
                         invocations.fetch_add(1, Ordering::Relaxed);
                         if forbidden_after_queued_shutdown {
                             forbidden.fetch_add(1, Ordering::Relaxed);
@@ -683,7 +677,7 @@ mod tests {
             if !self.queued_shutdown {
                 self.worker.shutdown.begin(ShutdownCause::default());
             }
-            if !self.queued_shutdown && self.commands.send_system(SystemCommand::Shutdown).is_ok() {
+            if !self.queued_shutdown && self.commands.system_sender().send(SystemCommand::Shutdown).is_ok() {
                 self.queued_shutdown = true;
             }
         }
@@ -740,7 +734,8 @@ mod tests {
         for index in 2..4 {
             let order = Arc::clone(&order);
             commands
-                .send_spawn(enqueue(RemoteFutureFactory::new(move |_, _| {
+                .spawn_sender()
+                .send(enqueue(RemoteFutureFactory::new(move |_, _| {
                     order.lock().unwrap().push(index);
                 })))
                 .unwrap();
@@ -748,7 +743,8 @@ mod tests {
         for index in 0..2 {
             let order = Arc::clone(&order);
             commands
-                .send_system(SystemCommand::AccessIo {
+                .system_sender()
+                .send(SystemCommand::AccessIo {
                     access: QueuedIoAccess::new(Box::new(move |_| {
                         order.lock().unwrap().push(index);
                     })),
@@ -776,7 +772,8 @@ mod tests {
         for _ in 0..=COMMANDS_PER_CYCLE {
             let processed = Arc::clone(&processed);
             commands
-                .send_system(SystemCommand::AccessIo {
+                .system_sender()
+                .send(SystemCommand::AccessIo {
                     access: QueuedIoAccess::new(Box::new(move |_| {
                         processed.fetch_add(1, Ordering::Relaxed);
                     })),
@@ -784,7 +781,8 @@ mod tests {
                 .unwrap();
         }
         commands
-            .send_spawn(enqueue(RemoteFutureFactory::new({
+            .spawn_sender()
+            .send(enqueue(RemoteFutureFactory::new({
                 let processed = Arc::clone(&processed);
                 let spawned_after = Arc::clone(&spawned_after);
                 move |_, _| {
@@ -823,12 +821,14 @@ mod tests {
         let first_processed = Arc::clone(&processed);
         let follow_up_commands = commands.clone();
         commands
-            .send_system(SystemCommand::AccessIo {
+            .system_sender()
+            .send(SystemCommand::AccessIo {
                 access: QueuedIoAccess::new(Box::new(move |_| {
                     first_processed.fetch_add(1, Ordering::Relaxed);
                     let second_processed = Arc::clone(&first_processed);
                     follow_up_commands
-                        .send_system(SystemCommand::AccessIo {
+                        .system_sender()
+                        .send(SystemCommand::AccessIo {
                             access: QueuedIoAccess::new(Box::new(move |_| {
                                 second_processed.fetch_add(1, Ordering::Relaxed);
                             })),
@@ -864,13 +864,14 @@ mod tests {
         for _ in 0..=COMMANDS_PER_CYCLE {
             let invocations = Arc::clone(&invocations);
             commands
-                .send_spawn(enqueue(RemoteFutureFactory::new(move |_, _| {
+                .spawn_sender()
+                .send(enqueue(RemoteFutureFactory::new(move |_, _| {
                     invocations.fetch_add(1, Ordering::Relaxed);
                 })))
                 .unwrap();
         }
         let join = worker_context(&worker).dispatcher().spawn(|_| async {});
-        commands.send_system(SystemCommand::Shutdown).unwrap();
+        commands.system_sender().send(SystemCommand::Shutdown).unwrap();
 
         assert!(worker.execute_step().is_break());
 
@@ -880,8 +881,8 @@ mod tests {
             panic!("discarded submission must report shutdown");
         };
         assert!(error.is_shutdown());
-        assert!(commands.send_system(SystemCommand::Shutdown).is_err());
-        assert!(commands.send_spawn(enqueue(RemoteFutureFactory::new(|_, _| {}))).is_err());
+        assert!(commands.system_sender().send(SystemCommand::Shutdown).is_err());
+        assert!(commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).is_err());
     }
 
     #[test]
@@ -945,7 +946,7 @@ mod tests {
 
             drop(delay);
             drop(clock);
-            commands.send_system(SystemCommand::Shutdown).unwrap();
+            commands.system_sender().send(SystemCommand::Shutdown).unwrap();
             worker.run();
         });
         let worker_waker = worker_setup.recv_timeout(TEST_TIMEOUT).unwrap();
@@ -997,7 +998,7 @@ mod tests {
 
         drop(delay);
         drop(clock);
-        commands.send_system(SystemCommand::Shutdown).unwrap();
+        commands.system_sender().send(SystemCommand::Shutdown).unwrap();
         worker_waker.wake_by_ref();
         worker_thread.join().unwrap();
     }
@@ -1088,14 +1089,15 @@ mod tests {
         worker.tasks.add_test(async move {
             clock.delay(Duration::from_secs(1)).await;
             timer_observer.store(true, Ordering::Relaxed);
-            shutdown.send_system(SystemCommand::Shutdown).unwrap();
+            shutdown.system_sender().send(SystemCommand::Shutdown).unwrap();
         });
         _ = worker_executor_mut(&mut worker).execute_cycle();
         assert!(!task_done.load(Ordering::Relaxed));
         assert!(!timer_done.load(Ordering::Relaxed));
 
         commands
-            .send_spawn(replenishing_command(commands.clone(), Arc::clone(&processed)))
+            .spawn_sender()
+            .send(replenishing_command(commands.clone(), Arc::clone(&processed)))
             .unwrap();
         proceed.send(());
         control.advance(Duration::from_secs(1));
@@ -1154,14 +1156,14 @@ mod tests {
         assert!(!signal.is_notified());
 
         for _ in 0..COMMANDS_PER_CYCLE {
-            commands.send_spawn(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+            commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
         }
         Signal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());
         assert!(worker.execute_step().is_continue());
         assert!(signal.is_notified());
 
-        commands.send_system(SystemCommand::Shutdown).unwrap();
+        commands.system_sender().send(SystemCommand::Shutdown).unwrap();
         worker.run();
     }
 
@@ -1178,7 +1180,7 @@ mod tests {
         let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
         let _context = worker_context(&worker).io().context::<WaitRecordingContext>(&Arc::clone(&waits));
         for _ in 0..COMMANDS_PER_CYCLE {
-            commands.send_spawn(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+            commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
         }
         Signal::waker(&signal).wake_by_ref();
         assert!(signal.is_notified());
@@ -1187,7 +1189,7 @@ mod tests {
         assert_eq!(*waits.lock().unwrap(), vec![Duration::ZERO]);
         assert!(signal.is_notified());
 
-        commands.send_system(SystemCommand::Shutdown).unwrap();
+        commands.system_sender().send(SystemCommand::Shutdown).unwrap();
         worker.run();
     }
 
@@ -1216,7 +1218,7 @@ mod tests {
         // Forgetting a timer is legal and avoids a second panic from the poisoned timer lock.
         std::mem::forget(timer);
         thread::sleep(Duration::from_millis(2));
-        commands.send_system(SystemCommand::Shutdown).unwrap();
+        commands.system_sender().send(SystemCommand::Shutdown).unwrap();
 
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));
         assert_eq!(*outcome.unwrap_err().downcast::<&str>().unwrap(), "final timer callback");
@@ -1252,7 +1254,8 @@ mod tests {
             let (inner_completed_tx, inner_completed_rx) = Event::boxed();
 
             commands
-                .send_spawn(enqueue(RemoteFutureFactory::new({
+                .spawn_sender()
+                .send(enqueue(RemoteFutureFactory::new({
                     move |_: Context, tasks: &TaskSet| {
                         tasks.add_test(async move {
                             inner_completed_tx.send(());
@@ -1270,7 +1273,7 @@ mod tests {
             outer_completed_rx.await.unwrap();
 
             // Shut down after the test body completes.
-            commands.send_system(SystemCommand::Shutdown).unwrap();
+            commands.system_sender().send(SystemCommand::Shutdown).unwrap();
             Signal::waker(&signal).wake_by_ref();
 
             // Join the worker so this test reports shutdown errors.
@@ -1302,7 +1305,8 @@ mod tests {
             });
 
             commands
-                .send_spawn(enqueue(RemoteFutureFactory::new({
+                .spawn_sender()
+                .send(enqueue(RemoteFutureFactory::new({
                     move |_: Context, tasks: &TaskSet| {
                         tasks.add_test(async move {
                             spawned_completed_tx.send(());
@@ -1316,7 +1320,7 @@ mod tests {
             initial_completed_rx.into_value().unwrap();
 
             // Shut down after both tasks complete.
-            commands.send_system(SystemCommand::Shutdown).unwrap();
+            commands.system_sender().send(SystemCommand::Shutdown).unwrap();
             Signal::waker(&signal).wake_by_ref();
 
             // Join the worker so this test reports shutdown errors.
@@ -1347,13 +1351,13 @@ mod tests {
             worker.run();
         });
 
-        commands.send_system(SystemCommand::Shutdown).unwrap();
+        commands.system_sender().send(SystemCommand::Shutdown).unwrap();
         Signal::waker(&signal).wake_by_ref();
 
         let (completed_tx, completed_rx) = Event::boxed();
 
         // The channel can already be closed because the worker is shutting down.
-        let _ = commands.send_spawn(enqueue(RemoteFutureFactory::new({
+        let _ = commands.spawn_sender().send(enqueue(RemoteFutureFactory::new({
             move |_: Context, tasks: &TaskSet| {
                 tasks.add_test(async move {
                     completed_tx.send(14);
@@ -1384,7 +1388,7 @@ mod tests {
         worker.tasks.add_test(async move {
             invoked_by_task.store(true, Ordering::Relaxed);
         });
-        commands.send_system(SystemCommand::Shutdown).unwrap();
+        commands.system_sender().send(SystemCommand::Shutdown).unwrap();
 
         worker.run();
 
@@ -1450,7 +1454,8 @@ mod tests {
         let (dropped_tx, dropped_rx) = mpsc::channel();
         let drop_signal = DropSignal(dropped_tx);
         commands
-            .send_system(SystemCommand::AccessIo {
+            .system_sender()
+            .send(SystemCommand::AccessIo {
                 access: QueuedIoAccess::new(Box::new({
                     let invoked = Arc::clone(&invoked);
                     move |_| {
@@ -1484,7 +1489,8 @@ mod tests {
             let invoked = Arc::clone(&invoked);
             let shutdown = shutdown.clone();
             commands
-                .send_spawn(enqueue(RemoteFutureFactory::new(move |_, tasks| {
+                .spawn_sender()
+                .send(enqueue(RemoteFutureFactory::new(move |_, tasks| {
                     if index + 1 == COMMANDS_PER_CYCLE {
                         shutdown.begin(ShutdownCause::default());
                     }
@@ -1511,7 +1517,8 @@ mod tests {
         );
         let shutdown = worker.shutdown.clone();
         commands
-            .send_spawn(enqueue(RemoteFutureFactory::new(move |_, _| {
+            .spawn_sender()
+            .send(enqueue(RemoteFutureFactory::new(move |_, _| {
                 shutdown.begin(ShutdownCause::default());
             })))
             .unwrap();
@@ -1571,7 +1578,7 @@ mod tests {
         assert!(worker_is_shutdown(&worker));
         assert!(blocking_worker.0.is_shutting_down());
         assert!(worker.process_system_commands().is_none());
-        assert!(!worker.process_spawn_commands());
+        assert_eq!(worker.process_spawn_commands(), BatchProgress::Drained);
         drop(commands);
     }
 }
