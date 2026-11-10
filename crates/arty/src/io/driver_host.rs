@@ -103,7 +103,7 @@ mod tests {
         type ContextOptions = bool;
         type Driver = TestDriver;
 
-        fn context(options: Self::ContextOptions) -> Self {
+        fn new(options: Self::ContextOptions) -> Self {
             Self { fail_cycle: options }
         }
 
