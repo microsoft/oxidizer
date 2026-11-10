@@ -796,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn system_commands_arriving_during_a_snapshot_wait_for_the_next_cycle() {
+    fn system_commands_arriving_during_processing_run_in_the_same_cycle() {
         let (commands, command_rx) = command_channel();
         let mut worker = test_worker(
             (commands.clone(), command_rx),
@@ -832,12 +832,8 @@ mod tests {
 
         _ = worker.prepare_cycle();
 
-        assert_eq!(processed.load(Ordering::Relaxed), 1);
-        assert!(task_polled.load(Ordering::Relaxed));
-
-        _ = worker.prepare_cycle();
-
         assert_eq!(processed.load(Ordering::Relaxed), 2);
+        assert!(task_polled.load(Ordering::Relaxed));
     }
 
     #[test]
