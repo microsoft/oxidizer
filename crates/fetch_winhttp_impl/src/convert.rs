@@ -235,19 +235,36 @@ pub(crate) fn headers_to_utf16(headers: &HeaderMap) -> Result<U16CString, Conver
             // ": " and "\r\n" are appended per field below.
             .and_then(|unit_count| unit_count.checked_add(4))
     });
-    let unit_count = unit_count.ok_or_else(RequestHeadersTooLargeError::new)?;
-    validate_request_header_unit_count(unit_count)?;
-    let capacity = unit_count.checked_add(1).ok_or_else(RequestHeadersTooLargeError::new)?;
-    let mut units = Vec::with_capacity(capacity);
+    request_header_capacity(unit_count).and_then(|capacity| {
+        let mut units = Vec::with_capacity(capacity);
 
-    for (name, value) in headers {
-        units.extend(name.as_str().bytes().map(u16::from));
-        units.extend([u16::from(b':'), u16::from(b' ')]);
-        units.extend(value.as_bytes().iter().copied().map(u16::from));
-        units.extend([u16::from(b'\r'), u16::from(b'\n')]);
-    }
+        for (name, value) in headers {
+            units.extend(name.as_str().bytes().map(u16::from));
+            units.extend([u16::from(b':'), u16::from(b' ')]);
+            units.extend(value.as_bytes().iter().copied().map(u16::from));
+            units.extend([u16::from(b'\r'), u16::from(b'\n')]);
+        }
 
+        request_header_units_to_utf16(units)
+    })
+}
+
+fn request_header_units_to_utf16(units: Vec<u16>) -> Result<U16CString, ConversionError> {
     U16CString::from_vec(units).map_err(|_contains_nul| EmbeddedNulError::new("request headers").into())
+}
+
+#[gamma::skip(
+    literal.int_decrement,
+    literal.int_increment,
+    reason = "Reserved capacity is not observable in the encoded headers; Vec grows and U16CString supplies the terminator."
+)]
+fn request_header_capacity(unit_count: Option<usize>) -> Result<usize, ConversionError> {
+    unit_count
+        .ok_or_else(|| RequestHeadersTooLargeError::new().into())
+        .and_then(|unit_count| {
+            validate_request_header_unit_count(unit_count)?;
+            unit_count.checked_add(1).ok_or_else(|| RequestHeadersTooLargeError::new().into())
+        })
 }
 
 fn validate_request_header_unit_count(unit_count: usize) -> Result<(), ConversionError> {
@@ -393,7 +410,7 @@ mod tests {
         WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE, connection_idle_timeout_millis, context_bytes, decompression_mask,
         disable_feature_mask, dword_bytes, dword_millis, header_buffer_units, headers_to_utf16, host_to_utf16, http2_keep_alive_millis,
         http3_keep_alive_millis, method_to_utf16, parse_header_buffer, parse_protocol_used, path_to_utf16, protocol_options,
-        request_open_flags, validate_request_header_unit_count,
+        request_header_capacity, request_header_units_to_utf16, request_open_flags, validate_request_header_unit_count,
     };
 
     // The generated error wrappers retain user-erased source error state.
@@ -525,7 +542,7 @@ mod tests {
         let path = path_to_utf16("/bad\0path").unwrap_err();
         assert_eq!(path.find_source::<EmbeddedNulError>().unwrap().field, "request path");
 
-        let headers = super::string_to_utf16("x-test: bad\0value\r\n", "request headers").unwrap_err();
+        let headers = request_header_units_to_utf16("x-test: bad\0value\r\n".encode_utf16().collect()).unwrap_err();
         assert_eq!(headers.find_source::<EmbeddedNulError>().unwrap().field, "request headers");
     }
 
@@ -536,6 +553,19 @@ mod tests {
 
         if let Ok(too_large) = usize::try_from(u64::from(u32::MAX) + 1) {
             let error = validate_request_header_unit_count(too_large).unwrap_err();
+            assert!(error.find_source::<RequestHeadersTooLargeError>().is_some());
+        }
+    }
+
+    #[test]
+    fn request_header_sizing_rejects_overflow_without_allocating() {
+        for unit_count in [None, Some(usize::MAX)] {
+            let error = request_header_capacity(unit_count).unwrap_err();
+            assert!(error.find_source::<RequestHeadersTooLargeError>().is_some());
+        }
+
+        if let Ok(too_large) = usize::try_from(u64::from(u32::MAX) + 1) {
+            let error = request_header_capacity(Some(too_large)).unwrap_err();
             assert!(error.find_source::<RequestHeadersTooLargeError>().is_some());
         }
     }

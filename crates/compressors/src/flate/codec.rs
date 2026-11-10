@@ -40,6 +40,11 @@ fn step_count(delta: u64) -> Result<usize> {
 // Native zlib-rs stream errors require invalid slices or an invalid stream order.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cold]
+#[gamma::skip(
+    literal.str_to_empty,
+    literal.str_to_xyzzy,
+    reason = "The native engine cannot report compression failure with valid slices and stream ordering."
+)]
 fn compression_failed(error: flate2::CompressError) -> Error {
     Error::invalid_state("the compression engine reported a failure").with_source(error)
 }
@@ -87,6 +92,10 @@ impl Drop for FlateCompress {
 // SAFETY: `step` writes through `flate2`'s `*_uninit` entry points, which take the uninitialized
 // slice and report what they filled, so the count is the engine's own.
 unsafe impl Codec for FlateCompress {
+    #[gamma::skip(
+        try.propagate_to_unwrap,
+        reason = "Valid slices and stream ordering prevent native compression errors; each counter delta fits its supplied slice."
+    )]
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
         let flush = match operation {
             Operation::Process => FlushCompress::None,

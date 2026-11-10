@@ -339,6 +339,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn oversized_descriptor_is_rejected_before_a_later_read_error() {
+        struct OversizedReader {
+            remaining: usize,
+        }
+
+        impl Read for OversizedReader {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if self.remaining == 0 {
+                    return Err(io::Error::new(io::ErrorKind::PermissionDenied, "read beyond oversized descriptor"));
+                }
+                let count = buf.len().min(self.remaining);
+                buf[..count].fill(0);
+                self.remaining -= count;
+                Ok(count)
+            }
+        }
+
+        let reader = OversizedReader {
+            remaining: MAX_DESCRIPTOR_BYTES + 1,
+        };
+        assert!(matches!(
+            read_descriptor_bytes(reader, Path::new("descriptor.monitor")),
+            Err(Error::MessageTooLarge)
+        ));
+    }
+
+    #[test]
     fn descriptor_byte_read_failure_preserves_the_path_and_source() {
         struct FailingReader;
 

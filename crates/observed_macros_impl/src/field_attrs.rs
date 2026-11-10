@@ -197,7 +197,7 @@ pub(crate) enum FieldRedaction {
     #[default]
     Default,
     Unredacted,
-    DataClass(Expr),
+    DataClass(Box<Expr>),
 }
 
 /// Behavior for an `Option<T>` field when it holds no value (`None`), controlled
@@ -296,7 +296,7 @@ impl SharedFieldAttrs {
                 ));
             }
             let expr: Expr = attr.parse_args()?;
-            self.redaction = Some(FieldRedaction::DataClass(expr));
+            self.redaction = Some(FieldRedaction::DataClass(Box::new(expr)));
             Ok(true)
         } else {
             Ok(false)

@@ -475,7 +475,11 @@ pub(crate) fn try_activity() -> Result<Activity, crate::Error> {
 #[cfg(any(test, feature = "monitor"))]
 fn read_activity(include_threads: bool) -> Result<Activity, crate::Error> {
     let _suppression = SuppressionGuard::enter();
-    let deadline = wait_deadline();
+    read_activity_until(include_threads, wait_deadline())
+}
+
+#[cfg(any(test, feature = "monitor"))]
+fn read_activity_until(include_threads: bool, deadline: Instant) -> Result<Activity, crate::Error> {
     // Keep counters, policies, and session identity on the same side of every
     // configuration/reset boundary, without quiescing concurrent event writers.
     let _configuration =
@@ -609,11 +613,17 @@ pub(crate) fn snapshot(disposition: crate::snapshot::EventBufferDisposition) -> 
 
 pub(crate) fn try_snapshot(disposition: crate::snapshot::EventBufferDisposition) -> Result<Option<Events>, crate::Error> {
     let _suppression = SuppressionGuard::enter();
+    try_snapshot_with_configuration_deadline(disposition, wait_deadline())
+}
+
+fn try_snapshot_with_configuration_deadline(
+    disposition: crate::snapshot::EventBufferDisposition,
+    deadline: Instant,
+) -> Result<Option<Events>, crate::Error> {
     if disposition != crate::snapshot::EventBufferDisposition::Retain {
         return reset_event_buffers(disposition, true);
     }
-    let _configuration =
-        ConfigurationLock::acquire_until_or_error(wait_deadline(), "seismograph snapshot timed out waiting for configuration")?;
+    let _configuration = ConfigurationLock::acquire_until_or_error(deadline, "seismograph snapshot timed out waiting for configuration")?;
     let session = LAST_SESSION.load(Ordering::Acquire);
     if session == 0 {
         return Ok(None);
@@ -1310,7 +1320,15 @@ fn reset_event_buffers_with_writer_wait(
     capture: bool,
     writer_wait_expired: impl FnMut(Instant) -> bool,
 ) -> Result<Option<Events>, crate::Error> {
-    let deadline = wait_deadline();
+    reset_event_buffers_until(disposition, capture, writer_wait_expired, wait_deadline())
+}
+
+fn reset_event_buffers_until(
+    disposition: crate::snapshot::EventBufferDisposition,
+    capture: bool,
+    writer_wait_expired: impl FnMut(Instant) -> bool,
+    deadline: Instant,
+) -> Result<Option<Events>, crate::Error> {
     let _configuration = ConfigurationLock::acquire_until_or_error(deadline, "seismograph recorder timed out waiting for configuration")?;
     let stop = disposition == crate::snapshot::EventBufferDisposition::Stop;
     let allocation_policy = ALLOCATION_POLICY.load(Ordering::SeqCst);
@@ -2183,6 +2201,56 @@ mod tests {
                 (expected, session),
                 Some(session)
             )
+        );
+    }
+
+    fn assert_configuration_timeout(mut operation: impl FnMut(Instant) -> Result<(), crate::Error>, message: &str) {
+        let _test = TEST_LOCK.lock().unwrap();
+        let expected = timeout_configuration();
+        configure(expected);
+        let session = ACTIVE_SESSION.load(Ordering::Acquire);
+        let generation = ACTIVITY_GENERATION.load(Ordering::Acquire);
+        let lock = ConfigurationLock::acquire();
+        let error = operation(Instant::now()).unwrap_err();
+        let still_locked = ConfigurationLock::acquire_until(Instant::now()).is_none();
+        drop(lock);
+        let restored = (
+            configuration(),
+            ACTIVE_SESSION.load(Ordering::Acquire),
+            ACTIVITY_GENERATION.load(Ordering::Acquire),
+        );
+        let recovered = operation(wait_deadline()).is_ok();
+        configure(Configuration::default());
+
+        assert_eq!(error.to_string(), message);
+        assert_eq!(restored, (expected, session, generation));
+        assert!(still_locked);
+        assert!(recovered);
+    }
+
+    #[test]
+    fn activity_configuration_timeout_preserves_recording() {
+        for include_threads in [false, true] {
+            assert_configuration_timeout(
+                |deadline| read_activity_until(include_threads, deadline).map(|_| ()),
+                "seismograph recorder statistics timed out waiting for configuration",
+            );
+        }
+    }
+
+    #[test]
+    fn retained_snapshot_configuration_timeout_preserves_recording() {
+        assert_configuration_timeout(
+            |deadline| try_snapshot_with_configuration_deadline(crate::snapshot::EventBufferDisposition::Retain, deadline).map(|_| ()),
+            "seismograph snapshot timed out waiting for configuration",
+        );
+    }
+
+    #[test]
+    fn clear_configuration_timeout_preserves_recording() {
+        assert_configuration_timeout(
+            |deadline| reset_event_buffers_until(crate::snapshot::EventBufferDisposition::Clear, false, wait_expired, deadline).map(|_| ()),
+            "seismograph recorder timed out waiting for configuration",
         );
     }
 

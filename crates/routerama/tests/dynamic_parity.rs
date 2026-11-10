@@ -8,6 +8,36 @@ use routerama::__rt::{RawResolver, Route, RouteMatch};
 use routerama::{HttpMethod, ResolveError};
 
 #[routerama::resolver]
+#[derive(Debug, PartialEq, Eq)]
+enum BacktrackingRoute<'p> {
+    #[route(GET, "/{id}/details")]
+    Details { id: &'p str },
+    #[route(GET, "/**")]
+    Rest,
+}
+
+#[test]
+fn rest_route_survives_a_failed_single_segment_branch() {
+    let runtime = RawResolver::new([
+        Route::new(
+            "Details",
+            HttpMethod::GET,
+            PathTemplate::parse("/{id}/details", Grammar::default()).unwrap(),
+        ),
+        Route::new("Rest", HttpMethod::GET, PathTemplate::parse("/**", Grammar::default()).unwrap()),
+    ]);
+    let generated = BacktrackingRoute::resolver();
+
+    assert_eq!(
+        generated.resolve("GET", "/x/details").unwrap(),
+        BacktrackingRoute::Details { id: "x" }
+    );
+    assert_eq!(runtime.resolve("GET", "/x/details").unwrap().name(), "Details");
+    assert_eq!(generated.resolve("GET", "/x/missing").unwrap(), BacktrackingRoute::Rest);
+    assert_eq!(runtime.resolve("GET", "/x/missing").unwrap().name(), "Rest");
+}
+
+#[routerama::resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ApiRoute<'p> {
     #[route(GET, "/books")]
