@@ -5,7 +5,7 @@ use std::num::{NonZero, NonZeroUsize};
 
 use many_cpus::ProcessorSet;
 
-use crate::runtime::config::{BlockingPoolPolicy, MonitorOptions, PanicPolicy};
+use crate::runtime::config::{BlockingPoolPolicy, MonitorOptions, PanicPolicy, RuntimeName};
 use crate::runtime::error::Error;
 
 /// Selects how many async workers run and which processors they use.
@@ -175,7 +175,7 @@ enum WorkersPolicyKind {
 /// Resource settings validated during runtime construction.
 #[derive(Debug)]
 pub(crate) struct RuntimeConfig {
-    pub(crate) name: Box<str>,
+    pub(crate) name: RuntimeName,
     pub(crate) workers_policy: WorkersPolicy,
     pub(crate) stack_size: NonZeroUsize,
     pub(crate) blocking_pool_policy: BlockingPoolPolicy,
@@ -186,7 +186,7 @@ pub(crate) struct RuntimeConfig {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            name: "arty".into(),
+            name: RuntimeName::default(),
             workers_policy: WorkersPolicy::default(),
             // Match Rust's Tier-1 thread-stack baseline instead of platform-native defaults.
             // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.

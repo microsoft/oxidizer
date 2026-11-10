@@ -353,7 +353,7 @@ mod tests {
         let shutdown = Shutdown::default();
         (
             blocking::Worker::new(
-                blocking::Pool::new("arty-blocking", None),
+                blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
                 shutdown.clone(),
                 blocking::PanicPolicy::Ignore,
             ),

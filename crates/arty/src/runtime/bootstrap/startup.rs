@@ -25,8 +25,8 @@ fn build_with_processors(
     thread_builder: &ThreadBuilder,
     available: &ProcessorSet,
 ) -> Result<Runtime, Error> {
-    let name = &processor_config.name;
-    if name.contains('\0') {
+    let name = processor_config.name;
+    if name.contains_null() {
         return Err(Error::invalid_name());
     }
     let processors = processor_config.workers_policy.select(available)?;
@@ -43,19 +43,17 @@ fn build_with_processors(
 
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
-    let blocking_pools = processor_config
-        .blocking_pool_policy
-        .into_pools(&format!("{name}-blocking"))?;
+    let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         workers.push(asynchronous::start(
-            &format!("{name}-async-{worker_index}"),
+            &name.async_worker(worker_index),
             asynchronous::StartOptions {
                 stack_size,
                 inactive_clock: clock.clone(),
                 processor,
                 thread_builder: thread_builder.clone(),
-                blocking_pools: blocking_pools.clone(),
+                blocking_pool: blocking_pools.pool_for_worker(worker_index),
                 shutdown: shutdown.clone(),
                 io_runtime: io_runtime.clone(),
                 monitor_options: monitor_options.for_worker(),
@@ -294,7 +292,7 @@ mod tests {
     fn runtime_with_processors(policy: WorkersPolicy, monitor_options: MonitorOptions, processors: &ProcessorSet) -> Runtime {
         build_with_processors(
             RuntimeConfig {
-                name: "arty".into(),
+                name: crate::runtime::config::RuntimeName::default(),
                 workers_policy: policy,
                 stack_size: NonZero::new(2 * 1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(),

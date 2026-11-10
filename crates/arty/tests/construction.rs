@@ -43,8 +43,8 @@ fn default_worker_names_use_arty() {
     assert_eq!(
         worker_names(&runtime),
         vec![
-            ("arty-async-0".to_owned(), "arty-blocking".to_owned()),
-            ("arty-async-1".to_owned(), "arty-blocking".to_owned()),
+            ("arty-async-0".to_owned(), "arty-blocking-0".to_owned()),
+            ("arty-async-1".to_owned(), "arty-blocking-0".to_owned()),
         ]
     );
     runtime.stop().unwrap();
@@ -52,7 +52,10 @@ fn default_worker_names_use_arty() {
 
 #[test]
 fn runtime_name_is_copied_and_replaces_the_previous_name() {
-    for policy in [BlockingPoolPolicy::shared(), BlockingPoolPolicy::per_worker()] {
+    for (policy, blocking_names) in [
+        (BlockingPoolPolicy::shared(), ["requests-blocking-0", "requests-blocking-0"]),
+        (BlockingPoolPolicy::per_worker(), ["requests-blocking-0-0", "requests-blocking-1-0"]),
+    ] {
         let name = String::from("requests");
         let builder = Runtime::builder()
             .name("invalid\0name")
@@ -65,8 +68,8 @@ fn runtime_name_is_copied_and_replaces_the_previous_name() {
         assert_eq!(
             worker_names(&runtime),
             vec![
-                ("requests-async-0".to_owned(), "requests-blocking".to_owned()),
-                ("requests-async-1".to_owned(), "requests-blocking".to_owned()),
+                ("requests-async-0".to_owned(), blocking_names[0].to_owned()),
+                ("requests-async-1".to_owned(), blocking_names[1].to_owned()),
             ]
         );
         runtime.stop().unwrap();
@@ -78,8 +81,14 @@ fn runtime_names_are_independent() {
     let first = Runtime::builder().name(String::from("first")).build().unwrap();
     let second = Runtime::builder().name("second").build().unwrap();
 
-    assert_eq!(worker_names(&first), vec![("first-async-0".to_owned(), "first-blocking".to_owned())]);
-    assert_eq!(worker_names(&second), vec![("second-async-0".to_owned(), "second-blocking".to_owned())]);
+    assert_eq!(
+        worker_names(&first),
+        vec![("first-async-0".to_owned(), "first-blocking-0".to_owned())]
+    );
+    assert_eq!(
+        worker_names(&second),
+        vec![("second-async-0".to_owned(), "second-blocking-0".to_owned())]
+    );
     first.stop().unwrap();
     second.stop().unwrap();
 }
@@ -88,7 +97,7 @@ fn runtime_names_are_independent() {
 fn empty_runtime_name_is_accepted() {
     let runtime = Runtime::builder().name("").build().unwrap();
 
-    assert_eq!(worker_names(&runtime), vec![("-async-0".to_owned(), "-blocking".to_owned())]);
+    assert_eq!(worker_names(&runtime), vec![("-async-0".to_owned(), "-blocking-0".to_owned())]);
     runtime.stop().unwrap();
 }
 

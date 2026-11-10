@@ -124,6 +124,7 @@ mod tests {
     use thread_aware::Thread;
 
     use super::*;
+    use crate::runtime::config::RuntimeName;
     use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
     use crate::runtime::worker::blocking::{PanicPolicy, Pool};
     use crate::task::scheduler::Scheduler;
@@ -137,7 +138,7 @@ mod tests {
                 command_tx,
                 waker: Waker::noop().clone(),
                 thread: thread.clone(),
-                blocking_worker: Worker::new(Pool::new("arty-blocking", None), shutdown.clone(), PanicPolicy::Ignore),
+                blocking_worker: Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone(), PanicPolicy::Ignore),
             };
             Self::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown))
         }
@@ -150,7 +151,11 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: test_threads(1).pop().unwrap(),
-            blocking_worker: Worker::new(Pool::new("arty-blocking", None), Shutdown::default(), PanicPolicy::Ignore),
+            blocking_worker: Worker::new(
+                Pool::new(RuntimeName::default(), None, None),
+                Shutdown::default(),
+                PanicPolicy::Ignore,
+            ),
         };
         let client = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(worker), Shutdown::default()));
         let clone = client.clone();
@@ -167,7 +172,11 @@ mod tests {
         let (worker0_tx, worker0_rx) = channel::unbounded();
         let (worker1_tx, worker1_rx) = channel::unbounded();
         let threads = test_threads(2);
-        let blocking_worker = Worker::new(Pool::new("arty-blocking", None), Shutdown::default(), PanicPolicy::Ignore);
+        let blocking_worker = Worker::new(
+            Pool::new(RuntimeName::default(), None, None),
+            Shutdown::default(),
+            PanicPolicy::Ignore,
+        );
 
         let dispatcher = DispatcherCore::new(
             nonempty::NonEmpty::from_vec(vec![
@@ -209,9 +218,17 @@ mod tests {
     fn relocate_switches_blocking_worker() {
         let threads = test_threads(2);
 
-        let source_worker = Worker::new(Pool::new("arty-blocking", None), Shutdown::default(), PanicPolicy::Ignore);
+        let source_worker = Worker::new(
+            Pool::new(RuntimeName::default(), None, None),
+            Shutdown::default(),
+            PanicPolicy::Ignore,
+        );
         let destination_shutdown = Shutdown::default();
-        let destination_worker = Worker::new(Pool::new("arty-blocking", None), destination_shutdown.clone(), PanicPolicy::Ignore);
+        let destination_worker = Worker::new(
+            Pool::new(RuntimeName::default(), None, None),
+            destination_shutdown.clone(),
+            PanicPolicy::Ignore,
+        );
         destination_shutdown.begin(ShutdownCause::default());
 
         let dispatcher = DispatcherCore::new(
@@ -294,7 +311,11 @@ mod tests {
             command_tx,
             waker: Waker::noop().clone(),
             thread: threads[0].clone(),
-            blocking_worker: Worker::new(Pool::new("arty-blocking", None), Shutdown::default(), PanicPolicy::Ignore),
+            blocking_worker: Worker::new(
+                Pool::new(RuntimeName::default(), None, None),
+                Shutdown::default(),
+                PanicPolicy::Ignore,
+            ),
         };
         let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(worker), Shutdown::default()));
         let thread = if registered { threads[0].clone() } else { threads[1].clone() };

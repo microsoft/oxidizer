@@ -34,8 +34,9 @@
 //!
 //! [`Runtime::new`] and an unchanged [`RuntimeBuilder`] use these defaults:
 //!
-//! - The runtime name is `arty`. Async threads use `arty-async-<index>` and
-//!   blocking threads use `arty-blocking`.
+//! - The runtime name is `arty`. Async threads use `arty-async-<index>`.
+//!   Shared blocking pools use `arty-blocking-<thread index>`. Per-worker pools
+//!   also include the async worker index before the thread index.
 //! - [`WorkersPolicy::default`] starts one async worker.
 //! - Each async worker uses a 2 MiB stack. A larger `RUST_MIN_STACK` value
 //!   overrides this default.

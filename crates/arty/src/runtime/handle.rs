@@ -264,7 +264,7 @@ mod tests {
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
             blocking_worker: Worker::new(
-                Pool::new("arty-blocking", None),
+                Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
                 crate::runtime::shutdown::Shutdown::default(),
                 PanicPolicy::Ignore,
             ),
@@ -285,7 +285,7 @@ mod tests {
             waker: Waker::noop().clone(),
             thread: ThreadBuilder::default().build(worker.thread().id()),
             blocking_worker: Worker::new(
-                Pool::new("arty-blocking", None),
+                Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
                 crate::runtime::shutdown::Shutdown::default(),
                 PanicPolicy::Ignore,
             ),

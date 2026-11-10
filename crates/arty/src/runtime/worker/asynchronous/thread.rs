@@ -28,7 +28,7 @@ pub(crate) struct StartOptions {
     pub(crate) inactive_clock: InactiveClock,
     pub(crate) processor: ProcessorSet,
     pub(crate) thread_builder: ThreadBuilder,
-    pub(crate) blocking_pools: blocking::Pools,
+    pub(crate) blocking_pool: blocking::Pool,
     pub(crate) shutdown: Shutdown,
     pub(crate) io_runtime: IoRuntime,
     pub(crate) monitor_options: MonitorOptions,
@@ -123,7 +123,7 @@ impl ThreadEntry {
             inactive_clock,
             processor,
             thread_builder,
-            blocking_pools,
+            blocking_pool,
             shutdown,
             io_runtime,
             monitor_options,
@@ -145,7 +145,7 @@ impl ThreadEntry {
             arty_executor::PanicPolicy::Ignore => blocking::PanicPolicy::Ignore,
             arty_executor::PanicPolicy::Shutdown => blocking::PanicPolicy::Shutdown(worker_waker.clone()),
         };
-        let blocking_worker = blocking::Worker::new(blocking_pools.pool_for_worker(), shutdown, blocking_panic_policy);
+        let blocking_worker = blocking::Worker::new(blocking_pool, shutdown, blocking_panic_policy);
 
         endpoint_tx
             .send(Endpoint {
@@ -287,7 +287,7 @@ mod tests {
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(
-            blocking::Pool::new("arty-blocking", None),
+            blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
             shutdown.clone(),
             blocking::PanicPolicy::Ignore,
         );
@@ -310,7 +310,7 @@ mod tests {
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(
-            blocking::Pool::new("arty-blocking", None),
+            blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
             shutdown.clone(),
             blocking::PanicPolicy::Ignore,
         );
