@@ -60,8 +60,7 @@ impl SpawnedWorker {
 }
 
 pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
-    let (system_tx, system_rx) = channel::unbounded();
-    let (spawn_tx, spawn_rx) = channel::unbounded();
+    let (commands, command_rx) = asynchronous::command_channel();
     let (endpoint_tx, endpoint_rx) = channel::unbounded();
     let (activation_tx, activation_rx) = channel::oneshot();
     let (ready_tx, ready_rx) = channel::unbounded();
@@ -69,8 +68,7 @@ pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
     let stack_size = options.stack_size;
     let thread_entry = ThreadEntry {
         options,
-        system_rx,
-        spawn_rx,
+        command_rx,
         activation_rx,
         ready_tx,
         endpoint_tx,
@@ -82,8 +80,7 @@ pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
 
     SpawnedWorker {
         endpoint: WorkerEndpoint {
-            system_tx,
-            spawn_tx,
+            commands,
             waker: endpoint.waker,
             thread: endpoint.thread,
             blocking_worker: endpoint.blocking_worker,
@@ -109,8 +106,7 @@ struct Endpoint {
 #[derive(Debug)]
 struct ThreadEntry {
     options: StartOptions,
-    system_rx: channel::Receiver<asynchronous::SystemCommand>,
-    spawn_rx: channel::Receiver<asynchronous::SpawnCommand>,
+    command_rx: asynchronous::CommandReceiver,
     activation_rx: OneshotReceiver<Activation>,
     ready_tx: Sender<()>,
     endpoint_tx: Sender<Endpoint>,
@@ -120,8 +116,7 @@ impl ThreadEntry {
     fn run(self) {
         let Self {
             options,
-            system_rx,
-            spawn_rx,
+            command_rx,
             activation_rx,
             ready_tx,
             endpoint_tx,
@@ -170,8 +165,7 @@ impl ThreadEntry {
         signal.set_driver_waker(driver_waker);
 
         let mut worker = asynchronous::Worker::new(
-            system_rx,
-            spawn_rx,
+            command_rx,
             dispatcher.clone(),
             current,
             io,
@@ -296,8 +290,7 @@ mod tests {
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
-            system_tx,
-            spawn_tx: channel::unbounded().0,
+            commands: asynchronous::CommandSender::from_channels(system_tx, channel::unbounded().0),
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,
@@ -316,8 +309,7 @@ mod tests {
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
         let endpoint = WorkerEndpoint {
-            system_tx,
-            spawn_tx: channel::unbounded().0,
+            commands: asynchronous::CommandSender::from_channels(system_tx, channel::unbounded().0),
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,

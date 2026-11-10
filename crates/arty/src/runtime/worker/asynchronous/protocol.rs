@@ -6,6 +6,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::discard_task_panic_payload;
+use performables::sync::channel;
 
 use crate::task::Context;
 use crate::task::preparation::RemoteFutureFactory;
@@ -74,6 +75,62 @@ pub(crate) enum SystemCommand {
     /// including submissions queued before this command. Duplicate commands have
     /// no effect.
     Shutdown,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CommandSender {
+    system: channel::Sender<SystemCommand>,
+    spawn: channel::Sender<SpawnCommand>,
+}
+
+impl CommandSender {
+    #[cfg(test)]
+    pub(crate) fn from_channels(system: channel::Sender<SystemCommand>, spawn: channel::Sender<SpawnCommand>) -> Self {
+        Self { system, spawn }
+    }
+
+    pub(crate) fn send_system(&self, command: SystemCommand) -> Result<(), performables::Error<SystemCommand>> {
+        self.system.send(command)
+    }
+
+    pub(crate) fn send_spawn(&self, command: SpawnCommand) -> Result<(), performables::Error<SpawnCommand>> {
+        self.spawn.send(command)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CommandReceiver {
+    system: channel::Receiver<SystemCommand>,
+    spawn: channel::Receiver<SpawnCommand>,
+}
+
+impl CommandReceiver {
+    pub(crate) fn system_snapshot_len(&self) -> usize {
+        self.system.len()
+    }
+
+    pub(crate) fn try_recv_system(&self) -> Result<SystemCommand, performables::Error> {
+        self.system.try_recv()
+    }
+
+    pub(crate) fn try_recv_spawn(&self) -> Result<SpawnCommand, performables::Error> {
+        self.spawn.try_recv()
+    }
+}
+
+pub(crate) fn command_channel() -> (CommandSender, CommandReceiver) {
+    let (system_tx, system_rx) = channel::unbounded();
+    let (spawn_tx, spawn_rx) = channel::unbounded();
+    (
+        CommandSender {
+            system: system_tx,
+            spawn: spawn_tx,
+        },
+        CommandReceiver {
+            system: system_rx,
+            spawn: spawn_rx,
+        },
+    )
 }
 
 #[cfg(test)]

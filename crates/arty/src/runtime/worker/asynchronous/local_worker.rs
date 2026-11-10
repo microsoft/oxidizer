@@ -187,7 +187,7 @@ mod tests {
     use super::*;
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::shutdown::Shutdown;
-    use crate::runtime::worker::asynchronous::SpawnCommand;
+    use crate::runtime::worker::asynchronous::{CommandSender, SpawnCommand};
     use crate::runtime::worker::blocking::{PanicPolicy, Pool, Worker};
 
     #[derive(Default)]
@@ -212,8 +212,7 @@ mod tests {
             let (spawn_tx, spawn_rx) = channel::unbounded();
             let core = DispatcherCore::new(
                 NonEmpty::new(WorkerEndpoint {
-                    system_tx: channel::unbounded().0,
-                    spawn_tx,
+                    commands: CommandSender::from_channels(channel::unbounded().0, spawn_tx),
                     waker: Waker::from(std::sync::Arc::clone(&wakes)),
                     thread: thread.clone(),
                     blocking_worker: Worker::new(Pool::new(None), shutdown.clone(), PanicPolicy::Ignore),
@@ -263,8 +262,7 @@ mod tests {
             let (other_tx, other_rx) = channel::unbounded();
             let other_core = DispatcherCore::new(
                 NonEmpty::new(WorkerEndpoint {
-                    system_tx: channel::unbounded().0,
-                    spawn_tx: other_tx,
+                    commands: CommandSender::from_channels(channel::unbounded().0, other_tx),
                     waker: Waker::noop().clone(),
                     thread: other_thread.clone(),
                     blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),

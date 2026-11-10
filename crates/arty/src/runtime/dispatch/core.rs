@@ -11,11 +11,12 @@ use arty_executor::{ShutdownCause, TaskPlacement};
 use foldhash::HashMap;
 use nonempty::NonEmpty;
 use performables::arc::Arc;
+#[cfg(test)]
 use performables::sync::channel;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
-use crate::runtime::worker::asynchronous::{LocalWorker, QueuedFactory, QueuedIoAccess, SpawnCommand, SystemCommand};
+use crate::runtime::worker::asynchronous::{CommandSender, LocalWorker, QueuedFactory, QueuedIoAccess, SpawnCommand, SystemCommand};
 use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
 use crate::task::Context;
@@ -24,8 +25,7 @@ use crate::task::preparation::prepare_remote;
 
 #[derive(Clone, Debug)]
 pub(crate) struct WorkerEndpoint {
-    pub(crate) system_tx: channel::Sender<SystemCommand>,
-    pub(crate) spawn_tx: channel::Sender<SpawnCommand>,
+    pub(crate) commands: CommandSender,
     pub(crate) waker: Waker,
     pub(crate) thread: Thread,
     pub(crate) blocking_worker: Arc<Worker>,
@@ -117,7 +117,7 @@ impl DispatcherCore {
 
         for endpoint in &self.worker_endpoints {
             // A closed channel means that the worker no longer accepts commands.
-            _ = endpoint.system_tx.send(SystemCommand::Shutdown);
+            _ = endpoint.commands.send_system(SystemCommand::Shutdown);
             endpoint.waker.wake_by_ref();
         }
         cause
@@ -200,7 +200,7 @@ impl DispatcherCore {
             .worker_endpoints
             .get(usize::from(worker_index))
             .expect("worker index must identify a registered runtime worker");
-        let send_result = endpoint.system_tx.send(SystemCommand::AccessIo {
+        let send_result = endpoint.commands.send_system(SystemCommand::AccessIo {
             access: QueuedIoAccess::new(access),
         });
         endpoint.waker.wake_by_ref();
@@ -276,7 +276,7 @@ impl DispatcherCore {
 
         // A worker can close its channel before this send if shutdown already
         // reached that worker. The join handle detects the disconnection.
-        _ = endpoint.spawn_tx.send(SpawnCommand {
+        _ = endpoint.commands.send_spawn(SpawnCommand {
             future_factory: QueuedFactory::new(future_factory),
         });
 
@@ -304,8 +304,7 @@ mod tests {
     #[cfg_attr(test, mutants::skip)]
     fn endpoint(system_tx: channel::Sender<SystemCommand>, spawn_tx: channel::Sender<SpawnCommand>, thread: &Thread) -> WorkerEndpoint {
         WorkerEndpoint {
-            system_tx,
-            spawn_tx,
+            commands: CommandSender::from_channels(system_tx, spawn_tx),
             waker: Waker::noop().clone(),
             thread: thread.clone(),
             blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),

@@ -36,8 +36,10 @@ impl DispatcherClient {
         let (system_tx, _system_rx) = performables::sync::channel::unbounded();
         let shutdown = Shutdown::default();
         let endpoint = crate::runtime::dispatch::WorkerEndpoint {
-            system_tx,
-            spawn_tx: performables::sync::channel::unbounded().0,
+            commands: crate::runtime::worker::asynchronous::CommandSender::from_channels(
+                system_tx,
+                performables::sync::channel::unbounded().0,
+            ),
             waker: std::task::Waker::noop().clone(),
             thread: thread.clone(),
             blocking_worker: Worker::new(
@@ -152,8 +154,7 @@ mod tests {
     fn clients_observe_the_shared_shutdown_state() {
         let (system_tx, _commands) = channel::unbounded();
         let worker = WorkerEndpoint {
-            system_tx,
-            spawn_tx: channel::unbounded().0,
+            commands: crate::runtime::worker::asynchronous::CommandSender::from_channels(system_tx, channel::unbounded().0),
             waker: Waker::noop().clone(),
             thread: test_threads(1).pop().unwrap(),
             blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),
@@ -178,15 +179,13 @@ mod tests {
         let dispatcher = DispatcherCore::new(
             nonempty::NonEmpty::from_vec(vec![
                 WorkerEndpoint {
-                    system_tx: channel::unbounded().0,
-                    spawn_tx: worker0_tx,
+                    commands: crate::runtime::worker::asynchronous::CommandSender::from_channels(channel::unbounded().0, worker0_tx),
                     waker: Waker::noop().clone(),
                     thread: threads[0].clone(),
                     blocking_worker: Arc::clone(&blocking_worker),
                 },
                 WorkerEndpoint {
-                    system_tx: channel::unbounded().0,
-                    spawn_tx: worker1_tx,
+                    commands: crate::runtime::worker::asynchronous::CommandSender::from_channels(channel::unbounded().0, worker1_tx),
                     waker: Waker::noop().clone(),
                     thread: threads[1].clone(),
                     blocking_worker: Arc::clone(&blocking_worker),
@@ -225,15 +224,19 @@ mod tests {
         let dispatcher = DispatcherCore::new(
             nonempty::NonEmpty::from_vec(vec![
                 WorkerEndpoint {
-                    system_tx: channel::unbounded().0,
-                    spawn_tx: channel::unbounded().0,
+                    commands: crate::runtime::worker::asynchronous::CommandSender::from_channels(
+                        channel::unbounded().0,
+                        channel::unbounded().0,
+                    ),
                     waker: Waker::noop().clone(),
                     thread: threads[0].clone(),
                     blocking_worker: Arc::clone(&source_worker),
                 },
                 WorkerEndpoint {
-                    system_tx: channel::unbounded().0,
-                    spawn_tx: channel::unbounded().0,
+                    commands: crate::runtime::worker::asynchronous::CommandSender::from_channels(
+                        channel::unbounded().0,
+                        channel::unbounded().0,
+                    ),
                     waker: Waker::noop().clone(),
                     thread: threads[1].clone(),
                     blocking_worker: Arc::clone(&destination_worker),
@@ -301,8 +304,7 @@ mod tests {
         let (system_tx, system_rx) = channel::unbounded();
         drop(system_rx);
         let worker = WorkerEndpoint {
-            system_tx,
-            spawn_tx: channel::unbounded().0,
+            commands: crate::runtime::worker::asynchronous::CommandSender::from_channels(system_tx, channel::unbounded().0),
             waker: Waker::noop().clone(),
             thread: threads[0].clone(),
             blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),
