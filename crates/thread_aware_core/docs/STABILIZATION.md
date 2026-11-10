@@ -6,8 +6,6 @@ These notes define the stable boundary shared by the `thread_aware` crates.
 
 `thread_aware_core` is the authoritative crate for the shared types. The `thread_aware` crate depends on it and re-exports its public types. It also provides derive support, wrappers, and runtime construction. The `performables` crate provides strategy-partitioned shared state.
 
-[oxidizer#719](https://github.com/microsoft/oxidizer/issues/719) tracks adoption across the package family.
-
 ## Stable boundary
 
 `thread_aware_core` 1.0 contains these types:
