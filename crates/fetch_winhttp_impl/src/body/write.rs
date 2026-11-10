@@ -409,12 +409,12 @@ pub(crate) async fn send_body(body: &mut HttpBody, writer: &mut WinHttpBodyWrite
             Some(Ok(frame)) => match frame.into_data() {
                 Ok(data) => writer.write(data).await?,
                 Err(frame) => {
-                    frame.into_trailers().map_err(
+                    return Err(frame.into_trailers().map_or_else(
                         #[cfg_attr(coverage_nightly, coverage(off))]
                         // http-body exposes only data and trailers; retain the error for future frame kinds.
                         |_unsupported| invalid_request(RequestBodyError::from(UnsupportedBodyFrameError::new())),
-                    )?;
-                    return Err(invalid_request(RequestBodyError::from(UnsupportedTrailerFrameError::new())));
+                        |_trailers| invalid_request(RequestBodyError::from(UnsupportedTrailerFrameError::new())),
+                    ));
                 }
             },
         }
