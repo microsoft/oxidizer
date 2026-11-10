@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 
@@ -11,18 +12,14 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use log::LevelFilter;
+use observed_destination_core::{
+    DestinationResult, IntoLogDestination, IntoMetricDestination, LogDestination, MetricDestination, SeverityFilter, severity_of_level,
+};
 use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
-use opentelemetry_sdk::logs::{
-    InMemoryLogExporter, LogBatch, LogExporter, LogProcessor, LoggerProviderBuilder, SdkLogRecord,
-};
+use opentelemetry_sdk::logs::{InMemoryLogExporter, LogBatch, LogExporter, LogProcessor, LoggerProviderBuilder, SdkLogRecord};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, MeterProviderBuilder};
-
-use observed_destination_core::{
-    DestinationResult, IntoLogDestination, IntoMetricDestination, LogDestination, MetricDestination,
-};
-use observed_destination_core::{SeverityFilter, severity_of_level};
 
 /// Creates an in-memory log destination backed by the given exporter.
 ///
@@ -40,9 +37,7 @@ use observed_destination_core::{SeverityFilter, severity_of_level};
 /// // ... after emission ...
 /// let logs = exporter.get_emitted_logs().unwrap();
 /// ```
-pub fn memory_logs(
-    exporter: InMemoryLogExporter,
-) -> MemoryLogDestinationBuilder<memory_log_destination_builder::SetExporter> {
+pub fn memory_logs(exporter: InMemoryLogExporter) -> MemoryLogDestinationBuilder<memory_log_destination_builder::SetExporter> {
     MemoryLogDestination::builder().exporter(exporter)
 }
 
@@ -59,17 +54,12 @@ pub struct MemoryLogDestination {
 
 impl LogDestination for MemoryLogDestination {
     fn register(self, builder: LoggerProviderBuilder) -> DestinationResult<LoggerProviderBuilder> {
-        let processor = SeverityFilter::new(
-            severity_of_level(self.level),
-            MemoryLogProcessor::new(self.exporter),
-        );
+        let processor = SeverityFilter::new(severity_of_level(self.level), MemoryLogProcessor::new(self.exporter));
         Ok(builder.with_log_processor(processor))
     }
 }
 
-impl<S: memory_log_destination_builder::IsComplete> IntoLogDestination
-    for MemoryLogDestinationBuilder<S>
-{
+impl<S: memory_log_destination_builder::IsComplete> IntoLogDestination for MemoryLogDestinationBuilder<S> {
     type Destination = MemoryLogDestination;
 
     fn into_log_destination(self) -> MemoryLogDestination {
@@ -112,10 +102,7 @@ impl LogProcessor for MemoryLogProcessor {
         let future = pin!(self.exporter.export(LogBatch::new(&batch)));
         let mut cx = Context::from_waker(Waker::noop());
         let ready = matches!(future.poll(&mut cx), Poll::Ready(_));
-        assert!(
-            ready,
-            "InMemoryLogExporter::export must complete synchronously"
-        );
+        assert!(ready, "InMemoryLogExporter::export must complete synchronously");
     }
 
     fn force_flush(&self) -> OTelSdkResult {
@@ -135,9 +122,7 @@ impl LogProcessor for MemoryLogProcessor {
 // ─── In-memory metric destination ────────────────────────────────────────
 
 /// Creates an in-memory metric destination backed by the given exporter.
-pub fn memory_metrics(
-    exporter: InMemoryMetricExporter,
-) -> MemoryMetricDestinationBuilder<memory_metric_destination_builder::SetExporter> {
+pub fn memory_metrics(exporter: InMemoryMetricExporter) -> MemoryMetricDestinationBuilder<memory_metric_destination_builder::SetExporter> {
     MemoryMetricDestination::builder().exporter(exporter)
 }
 
@@ -154,9 +139,7 @@ impl MetricDestination for MemoryMetricDestination {
     }
 }
 
-impl<S: memory_metric_destination_builder::IsComplete> IntoMetricDestination
-    for MemoryMetricDestinationBuilder<S>
-{
+impl<S: memory_metric_destination_builder::IsComplete> IntoMetricDestination for MemoryMetricDestinationBuilder<S> {
     type Destination = MemoryMetricDestination;
 
     fn into_metric_destination(self) -> MemoryMetricDestination {
@@ -166,20 +149,16 @@ impl<S: memory_metric_destination_builder::IsComplete> IntoMetricDestination
 
 #[cfg(test)]
 mod tests {
+    use std::time::SystemTime;
+
     use observed_destination_core::LoggerProviderBuilderExt;
-    use opentelemetry::logs::{Logger, LoggerProvider};
+    use opentelemetry::logs::{LogRecord, Logger, LoggerProvider};
     use opentelemetry::{Key, KeyValue};
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
     use super::*;
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "OTel InMemoryLogExporter construction calls current_exe, unsupported under Miri isolation"
-    )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn formats_processor_debug() {
         let processor = MemoryLogProcessor::new(InMemoryLogExporter::default());
 
@@ -187,12 +166,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "OTel InMemoryLogExporter construction calls current_exe, unsupported under Miri isolation"
-    )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn exported_logs_carry_the_provider_resource() {
         let exporter = InMemoryLogExporter::default();
         let resource = Resource::builder_empty()
@@ -204,7 +177,9 @@ mod tests {
             .unwrap()
             .build();
         let logger = provider.logger("memory");
-        let record = logger.create_log_record();
+        let mut record = logger.create_log_record();
+        // A fixed observation time lets this test run under Miri isolation.
+        record.set_observed_timestamp(SystemTime::UNIX_EPOCH);
 
         logger.emit(record);
         provider.force_flush().unwrap();
@@ -218,12 +193,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "OTel InMemoryLogExporter construction calls current_exe, unsupported under Miri isolation"
-    )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn processor_shutdown_stops_exporting() {
         let exporter = InMemoryLogExporter::default();
         let processor = MemoryLogProcessor::new(exporter.clone());
@@ -236,9 +205,7 @@ mod tests {
 
         assert_eq!(exporter.get_emitted_logs().unwrap().len(), 1);
 
-        processor
-            .shutdown_with_timeout(Duration::from_secs(1))
-            .unwrap();
+        processor.shutdown_with_timeout(Duration::from_secs(1)).unwrap();
 
         assert!(exporter.is_shutdown_called());
 
@@ -248,12 +215,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "OTel InMemoryLogExporter construction calls current_exe, unsupported under Miri isolation"
-    )]
-    // TODO: Re-enable under Miri after upgrading opentelemetry_sdk to a release containing
-    // https://github.com/open-telemetry/opentelemetry-rust/pull/3525.
     fn sdk_provider_shutdown_reaches_exporter() {
         let exporter = InMemoryLogExporter::default();
         let provider = SdkLoggerProvider::builder()

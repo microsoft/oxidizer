@@ -6,7 +6,7 @@ name = "observed_destination_memory"
 description = "In-memory destination for Observed pipeline."
 version = "0.1.0"
 readme = "README.md"
-keywords = ["oxidizer", "observed", "telemetry", "tracing", "logging", "metrics"]
+keywords = ["observed", "telemetry", "tracing", "logging", "metrics"]
 categories = ["development-tools::debugging"]
 
 edition.workspace = true
@@ -17,10 +17,27 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_memory"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "bon::builder_state::IsUnset",
+    "log::LevelFilter",
+    "observed_destination_core::IntoLogDestination",
+    "observed_destination_core::IntoMetricDestination",
+    "observed_destination_core::LogDestination",
+    "observed_destination_core::MetricDestination",
+    "opentelemetry_sdk::logs::in_memory_exporter::InMemoryLogExporter",
+    "opentelemetry_sdk::metrics::in_memory_exporter::InMemoryMetricExporter",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 
 [dependencies]
+bon = { workspace = true }
+log = { workspace = true }
+observed_destination_core = { workspace = true }
+opentelemetry = { workspace = true, features = ["logs"] }
+opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
 
 [dev-dependencies]
 

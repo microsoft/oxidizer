@@ -3790,6 +3790,13 @@ dependencies = [
 [[package]]
 name = "observed_destination_memory"
 version = "0.1.0"
+dependencies = [
+ "bon",
+ "log",
+ "observed_destination_core",
+ "opentelemetry",
+ "opentelemetry_sdk",
+]
 
 [[package]]
 name = "observed_destination_stdout"
