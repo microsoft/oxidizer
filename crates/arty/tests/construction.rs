@@ -20,20 +20,28 @@ fn worker_names(runtime: &Runtime) -> Vec<(String, String)> {
                 let pair = cx
                     .scheduler()
                     .spawn_at(worker, cx.scheduler().clone(), |scheduler| async move {
-                        let async_name = thread::current().name().unwrap().to_owned();
+                        let async_name = thread::current()
+                            .name()
+                            .expect("Arty async worker threads always have names")
+                            .to_owned();
                         let blocking_name = scheduler
-                            .spawn_blocking(|| thread::current().name().unwrap().to_owned())
+                            .spawn_blocking(|| {
+                                thread::current()
+                                    .name()
+                                    .expect("Arty blocking worker threads always have names")
+                                    .to_owned()
+                            })
                             .await
-                            .unwrap();
+                            .expect("the runtime remains active while collecting blocking worker names");
                         (async_name, blocking_name)
                     })
                     .await
-                    .unwrap();
+                    .expect("the runtime remains active while collecting async worker names");
                 names.push(pair);
             }
             names
         })
-        .unwrap()
+        .expect("the runtime remains active while collecting worker names")
 }
 
 #[test]

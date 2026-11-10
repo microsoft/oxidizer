@@ -125,7 +125,6 @@ impl ThreadEntry {
         let StartOptions {
             inactive_clock,
             processor,
-            runtime_name: _,
             worker_index,
             thread_builder,
             blocking_pools,
