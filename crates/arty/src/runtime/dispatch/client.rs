@@ -29,25 +29,6 @@ impl DispatcherClient {
         Self { core }
     }
 
-    #[cfg(test)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
-    pub(crate) fn for_test(thread: &thread_aware::Thread) -> Self {
-        let (command_tx, _command_rx) = performables::sync::channel::unbounded();
-        let shutdown = Shutdown::default();
-        let endpoint = crate::runtime::dispatch::WorkerEndpoint {
-            command_tx,
-            waker: std::task::Waker::noop().clone(),
-            thread: thread.clone(),
-            blocking_worker: Worker::new(
-                crate::runtime::worker::blocking::Pool::new("arty-blocking", None),
-                shutdown.clone(),
-                crate::runtime::worker::blocking::PanicPolicy::Ignore,
-            ),
-        };
-        Self::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown))
-    }
-
     pub(crate) fn worker_index(&self, thread_id: ThreadId) -> Option<WorkerIndex> {
         self.core.worker_index(thread_id)
     }
@@ -146,6 +127,21 @@ mod tests {
     use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
     use crate::runtime::worker::blocking::{PanicPolicy, Pool};
     use crate::task::scheduler::Scheduler;
+
+    impl DispatcherClient {
+        #[cfg_attr(test, mutants::skip)]
+        pub(crate) fn for_test(thread: &Thread) -> Self {
+            let (command_tx, _command_rx) = channel::unbounded();
+            let shutdown = Shutdown::default();
+            let endpoint = WorkerEndpoint {
+                command_tx,
+                waker: Waker::noop().clone(),
+                thread: thread.clone(),
+                blocking_worker: Worker::new(Pool::new("arty-blocking", None), shutdown.clone(), PanicPolicy::Ignore),
+            };
+            Self::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown))
+        }
+    }
 
     #[test]
     fn clients_observe_the_shared_shutdown_state() {
