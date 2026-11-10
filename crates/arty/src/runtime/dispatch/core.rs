@@ -537,7 +537,7 @@ mod tests {
     #[test]
     fn published_shutdown_cause_is_shared_with_dispatcher_and_client() {
         let (core, client, shutdown) = shutdown_dispatcher();
-        let cause = ShutdownCause::panic();
+        let cause = ShutdownCause::panic(&"task panic");
         let expected = cause.as_error().unwrap().clone();
 
         shutdown.begin(cause);
