@@ -3,7 +3,6 @@
 
 //! Commands and queued work sent to an asynchronous worker.
 
-use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::discard_task_panic_payload;
@@ -56,13 +55,17 @@ pub(crate) type QueuedIoAccess = QueuedClosure<IoAccess>;
 ///
 /// The factory registers the future with the worker task set for inline storage.
 /// Shutdown discards queued submissions without invoking their factories.
+#[derive(derive_more::Debug)]
 pub(crate) struct SpawnCommand {
+    #[debug(skip)]
     pub(crate) future_factory: QueuedFactory,
 }
 
 /// System work processed before task submissions in each worker cycle.
+#[derive(derive_more::Debug)]
 pub(crate) enum SystemCommand {
     /// Executes synchronous I/O context access on this worker.
+    #[debug("AccessIo")]
     AccessIo { access: QueuedIoAccess },
 
     /// Starts shutdown on this worker.
@@ -71,25 +74,6 @@ pub(crate) enum SystemCommand {
     /// including submissions queued before this command. Duplicate commands have
     /// no effect.
     Shutdown,
-}
-
-impl fmt::Debug for SystemCommand {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Command names are diagnostic text only.
-    #[cfg_attr(test, mutants::skip)] // We have no contract to test here - can return anything.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::AccessIo { .. } => write!(f, "AccessIo"),
-            Self::Shutdown => write!(f, "Shutdown"),
-        }
-    }
-}
-
-impl fmt::Debug for SpawnCommand {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Command names are diagnostic text only.
-    #[cfg_attr(test, mutants::skip)] // We have no contract to test here - can return anything.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("SpawnCommand")
-    }
 }
 
 #[cfg(test)]

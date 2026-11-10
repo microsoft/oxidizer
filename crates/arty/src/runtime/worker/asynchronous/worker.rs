@@ -54,9 +54,8 @@ fn can_suspend(cycle_outcome: &CycleOutcome, batch_exhausted: bool) -> bool {
 ///    [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) configuration. Bootstrap
 ///    and the worker coordinate initialization until the worker is ready.
 /// 2. Running: The worker processes system commands, registers queued tasks,
-///    polls tasks, advances timers, and waits for commands. Command batches are
-///    bounded so tasks and timers can progress. A full system batch defers task
-///    registration until a later cycle.
+///    polls tasks, advances timers, and waits for commands. It drains system
+///    commands before processing a bounded batch of task submissions.
 /// 3. Shutting down: The worker rejects queued and new submissions, stops
 ///    blocking work, cancels async tasks, and runs final timer callbacks.
 /// 4. Dead: The worker completed shutdown and its thread terminated.
@@ -183,8 +182,13 @@ impl Worker {
     }
 
     fn prepare_cycle(&mut self) -> CycleAction {
-        let system_batch_exhausted = self.process_system_commands();
-        let batch_exhausted = system_batch_exhausted || self.process_spawn_commands();
+        self.process_system_commands();
+
+        if matches!(self.shutdown.state(), ShutdownState::Started) {
+            return CycleAction::Shutdown;
+        }
+
+        let batch_exhausted = self.process_spawn_commands();
 
         if matches!(self.shutdown.state(), ShutdownState::Started) {
             return CycleAction::Shutdown;
@@ -238,21 +242,21 @@ impl Worker {
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
-    fn process_system_commands(&mut self) -> bool {
+    fn process_system_commands(&mut self) {
         let Some(context) = self.context.as_ref() else {
             debug_assert!(self.system_rx.is_none());
 
             // We are shutting down and have dropped worker-local services.
             // Both command channels are closed, so no more commands can be received.
-            return false;
+            return;
         };
 
         let system_rx = self.system_rx.as_ref().expect("context and command channels are dropped together");
 
-        for _ in 0..COMMANDS_PER_CYCLE {
+        loop {
             if matches!(self.shutdown.state(), ShutdownState::Started) {
                 self.begin_shutdown();
-                return false;
+                return;
             }
             match system_rx.try_recv() {
                 Ok(command) => match command {
@@ -263,18 +267,16 @@ impl Worker {
                         self.begin_shutdown();
 
                         // Shutdown closes both command channels. No more commands can arrive.
-                        return false;
+                        return;
                     }
                 },
                 Err(error) => {
                     // Every initialized worker retains its own dispatcher until shutdown.
                     assert!(error.is_empty(), "async worker system channel disconnected without shutdown");
-                    return false;
+                    return;
                 }
             }
         }
-        // An exhausted batch can leave commands queued. Read the queue again before parking.
-        true
     }
 
     fn process_spawn_commands(&mut self) -> bool {
@@ -761,7 +763,7 @@ mod tests {
     }
 
     #[test]
-    fn full_system_batch_defers_spawning_without_blocking_registered_tasks() {
+    fn system_backlog_is_drained_before_spawning_and_polling_tasks() {
         let (system_tx, system_rx) = channel::unbounded();
         let (spawn_tx, spawn_rx) = channel::unbounded();
         let mut worker = test_worker(
@@ -800,14 +802,11 @@ mod tests {
             }
         });
 
-        assert!(matches!(worker.prepare_cycle(), CycleAction::Poll));
-        assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE);
-        assert_eq!(spawned_after.load(Ordering::Relaxed), 0);
-        assert!(task_polled.load(Ordering::Relaxed));
-
         _ = worker.prepare_cycle();
 
+        assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE + 1);
         assert_eq!(spawned_after.load(Ordering::Relaxed), COMMANDS_PER_CYCLE + 1);
+        assert!(task_polled.load(Ordering::Relaxed));
     }
 
     #[test]
@@ -1577,7 +1576,7 @@ mod tests {
         assert!(outcome.is_break());
         assert!(worker.executor.is_none());
         assert!(blocking_worker.0.is_shutting_down());
-        assert!(!worker.process_system_commands());
+        worker.process_system_commands();
         assert!(!worker.process_spawn_commands());
         drop(commands);
     }
