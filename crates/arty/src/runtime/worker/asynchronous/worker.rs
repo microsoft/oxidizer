@@ -183,11 +183,12 @@ impl Worker {
     }
 
     fn prepare_cycle(&mut self) -> CycleAction {
-        if self.process_system_commands() || matches!(self.shutdown.state(), ShutdownState::Started) {
+        let Some(system_batch_exhausted) = self.process_system_commands() else {
             return CycleAction::Shutdown;
-        }
+        };
 
-        let batch_exhausted = self.process_spawn_commands();
+        let spawn_batch_exhausted = self.process_spawn_commands();
+        let batch_exhausted = system_batch_exhausted || spawn_batch_exhausted;
 
         if matches!(self.shutdown.state(), ShutdownState::Started) {
             return CycleAction::Shutdown;
@@ -240,25 +241,27 @@ impl Worker {
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
-    fn process_system_commands(&self) -> bool {
+    fn process_system_commands(&self) -> Option<bool> {
         let WorkerState::Ready { commands, context, .. } = &self.state else {
-            return true;
+            return None;
         };
 
-        for command in commands.system_commands() {
+        let mut processed = 0_usize;
+        for command in commands.system_commands().take(COMMANDS_PER_CYCLE) {
             if matches!(self.shutdown.state(), ShutdownState::Started) {
-                return true;
+                return None;
             }
             match command {
                 SystemCommand::AccessIo { access } => {
                     access.into_inner()(context);
                 }
                 SystemCommand::Shutdown => {
-                    return true;
+                    return None;
                 }
             }
+            processed = processed.saturating_add(1);
         }
-        false
+        Some(processed == COMMANDS_PER_CYCLE)
     }
 
     fn process_spawn_commands(&self) -> bool {
@@ -751,7 +754,7 @@ mod tests {
     }
 
     #[test]
-    fn system_backlog_is_drained_before_spawning_and_polling_tasks() {
+    fn system_batch_precedes_spawning_and_allows_task_progress() {
         let (commands, command_rx) = command_channel();
         let mut worker = test_worker(
             (commands.clone(), command_rx),
@@ -790,9 +793,13 @@ mod tests {
 
         _ = worker.prepare_cycle();
 
-        assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE + 1);
-        assert_eq!(spawned_after.load(Ordering::Relaxed), COMMANDS_PER_CYCLE + 1);
+        assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE);
+        assert_eq!(spawned_after.load(Ordering::Relaxed), COMMANDS_PER_CYCLE);
         assert!(task_polled.load(Ordering::Relaxed));
+
+        _ = worker.prepare_cycle();
+
+        assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE + 1);
     }
 
     #[test]
@@ -1555,7 +1562,7 @@ mod tests {
         assert!(outcome.is_break());
         assert!(worker_is_shutdown(&worker));
         assert!(blocking_worker.0.is_shutting_down());
-        assert!(worker.process_system_commands());
+        assert!(worker.process_system_commands().is_none());
         assert!(!worker.process_spawn_commands());
         drop(commands);
     }
