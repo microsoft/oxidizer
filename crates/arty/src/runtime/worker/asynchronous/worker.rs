@@ -250,28 +250,23 @@ impl Worker {
         };
 
         let commands = self.commands.as_ref().expect("context and command channels are dropped together");
-        let pending = commands.system_snapshot_len();
 
-        for _ in 0..pending {
+        for _ in commands.system_snapshot() {
             if matches!(self.shutdown.state(), ShutdownState::Started) {
                 self.begin_shutdown();
                 return;
             }
-            match commands.try_recv_system() {
-                Ok(command) => match command {
-                    SystemCommand::AccessIo { access } => {
-                        access.into_inner()(context);
-                    }
-                    SystemCommand::Shutdown => {
-                        self.begin_shutdown();
+            let Some(command) = commands.try_recv_system() else {
+                return;
+            };
+            match command {
+                SystemCommand::AccessIo { access } => {
+                    access.into_inner()(context);
+                }
+                SystemCommand::Shutdown => {
+                    self.begin_shutdown();
 
-                        // Shutdown closes both command channels. No more commands can arrive.
-                        return;
-                    }
-                },
-                Err(error) => {
-                    // Every initialized worker retains its own dispatcher until shutdown.
-                    assert!(error.is_empty(), "async worker system channel disconnected without shutdown");
+                    // Shutdown closes both command channels. No more commands can arrive.
                     return;
                 }
             }
@@ -288,15 +283,10 @@ impl Worker {
         // Registration does not invoke user factories. If shutdown starts during
         // this batch, prepare_cycle stops before polling the registered tasks.
         for _ in 0..COMMANDS_PER_CYCLE {
-            match commands.try_recv_spawn() {
-                Ok(SpawnCommand { future_factory }) => {
-                    let _registered = future_factory.into_inner().register(context.clone(), &self.tasks);
-                }
-                Err(error) => {
-                    assert!(error.is_empty(), "async worker spawn channel disconnected without shutdown");
-                    return false;
-                }
-            }
+            let Some(SpawnCommand { future_factory }) = commands.try_recv_spawn() else {
+                return false;
+            };
+            let _registered = future_factory.into_inner().register(context.clone(), &self.tasks);
         }
         true
     }

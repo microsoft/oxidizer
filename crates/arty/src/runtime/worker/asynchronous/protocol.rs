@@ -105,16 +105,16 @@ pub(crate) struct CommandReceiver {
 }
 
 impl CommandReceiver {
-    pub(crate) fn system_snapshot_len(&self) -> usize {
-        self.system.len()
+    pub(crate) fn system_snapshot(&self) -> std::ops::Range<usize> {
+        0..self.system.len()
     }
 
-    pub(crate) fn try_recv_system(&self) -> Result<SystemCommand, performables::Error> {
-        self.system.try_recv()
+    pub(crate) fn try_recv_system(&self) -> Option<SystemCommand> {
+        self.system.try_recv().ok()
     }
 
-    pub(crate) fn try_recv_spawn(&self) -> Result<SpawnCommand, performables::Error> {
-        self.spawn.try_recv()
+    pub(crate) fn try_recv_spawn(&self) -> Option<SpawnCommand> {
+        self.spawn.try_recv().ok()
     }
 }
 
