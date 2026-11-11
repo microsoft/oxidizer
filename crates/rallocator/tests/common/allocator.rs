@@ -85,12 +85,14 @@ fn zero_realloc_and_oom_preserve_input() {
                 ptr = replacement;
                 layout = Layout::from_size_align(size, align).unwrap();
             }
-            // SAFETY: The live block and nonzero new size satisfy the retained
-            // alignment. The valid size exceeds supported user address spaces.
-            let failure = unsafe { Rallocator.realloc(ptr, layout, 1_usize << 62) };
-            assert!(failure.is_null());
-            // SAFETY: Failed realloc preserves this initialized live allocation.
-            assert_eq!(unsafe { *ptr }, 0x5b);
+            for size in [1_usize << 62, (1_usize << 62) + 1] {
+                // SAFETY: Both nonzero sizes fit valid layouts with the retained
+                // alignment but exceed supported user address spaces.
+                let failure = unsafe { Rallocator.realloc(ptr, layout, size) };
+                assert!(failure.is_null());
+                // SAFETY: Failed realloc preserves this initialized live allocation.
+                assert_eq!(unsafe { *ptr }, 0x5b);
+            }
             // SAFETY: The final live allocation is retired exactly once.
             unsafe { Rallocator.dealloc(ptr, layout) };
         }

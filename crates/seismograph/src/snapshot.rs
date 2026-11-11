@@ -311,7 +311,12 @@ pub(crate) fn snapshot(options: SnapshotOptions) -> Result<Snapshot, Error> {
     let mut events = events.unwrap_or_default();
     events.clock = EventClock::CURRENT;
     let sources = capture_sources(SnapshotContext { events: &events })?;
-    let symbols = symbols::capture(&events);
+    let symbols = symbols::capture(&events, |lookup| {
+        #[cfg(not(miri))]
+        symbols::resolve(lookup, |address, visit| backtrace::resolve(address, visit));
+        #[cfg(miri)]
+        let _ = lookup;
+    });
     encode_snapshot(&DecodedSnapshot {
         capture_duration_nanos: u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX),
         events,

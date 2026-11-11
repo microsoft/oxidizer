@@ -29,12 +29,9 @@ pub(super) fn reserve(size: usize, alignment: usize, committed: bool) -> Option<
     if mapping == libc::MAP_FAILED {
         return None;
     }
-    let Some(aligned) = mapping.addr().checked_add(alignment - 1).map(|p| p & !(alignment - 1)) else {
-        // SAFETY: This function still owns the entire fresh mapping.
-        unsafe { release(mapping.cast(), mapped_size) };
-        return None;
-    };
-    let prefix = aligned - mapping.addr();
+    // Page alignment bounds this padding by alignment - page_size, which the
+    // over-reserved mapping contains. No rounded absolute address is needed.
+    let prefix = mapping.addr().wrapping_neg() & (alignment - 1);
     let suffix = mapped_size - prefix - size;
     // SAFETY: The aligned address is within the mapping and retains provenance.
     let address = unsafe { mapping.cast::<u8>().add(prefix) };
@@ -139,15 +136,94 @@ pub(super) fn policy() -> Policy {
 fn read_kernel_file(path: &std::ffi::CStr, buffer: &mut [u8]) -> usize {
     // Use the source allocator's direct syscall path. Interposed libc file
     // functions can allocate while the global allocator is still initializing.
-    // SAFETY: The path is NUL-terminated and the openat arguments have the
-    // kernel ABI types. The syscall does not retain the path pointer.
-    let fd = unsafe { libc::syscall(libc::SYS_openat, libc::AT_FDCWD, path.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC, 0) };
+    read_kernel_file_with(
+        buffer,
+        || {
+            // SAFETY: The path is NUL-terminated and the openat arguments have
+            // kernel ABI types. The syscall does not retain the path pointer.
+            unsafe { libc::syscall(libc::SYS_openat, libc::AT_FDCWD, path.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC, 0) }
+        },
+        |fd, buffer| {
+            // SAFETY: The writable buffer is valid for its full length.
+            unsafe { libc::syscall(libc::SYS_read, fd, buffer.as_mut_ptr(), buffer.len()) }
+        },
+        |fd| {
+            // SAFETY: The reader uniquely owns the descriptor returned by open.
+            unsafe { libc::syscall(libc::SYS_close, fd) };
+        },
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn read_kernel_file_with(
+    buffer: &mut [u8],
+    open: impl FnOnce() -> libc::c_long,
+    read: impl FnOnce(libc::c_long, &mut [u8]) -> libc::c_long,
+    close: impl FnOnce(libc::c_long),
+) -> usize {
+    let fd = open();
     if fd < 0 {
         return 0;
     }
-    // SAFETY: The writable buffer is valid for its full length.
-    let count = unsafe { libc::syscall(libc::SYS_read, fd, buffer.as_mut_ptr(), buffer.len()) };
-    // SAFETY: This call uniquely owns the descriptor returned by open.
-    unsafe { libc::syscall(libc::SYS_close, fd) };
+    let count = read(fd, buffer);
+    close(fd);
     usize::try_from(count).unwrap_or(0)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use std::cell::Cell;
+
+    use super::read_kernel_file_with;
+
+    #[test]
+    fn failed_open_preserves_the_buffer_without_reading_or_closing() {
+        let mut buffer = *b"????";
+
+        let count = read_kernel_file_with(
+            &mut buffer,
+            || -1,
+            |_, _| panic!("a failed open must not be read"),
+            |_| panic!("a failed open owns no descriptor to close"),
+        );
+
+        assert_eq!((count, buffer), (0, *b"????"));
+    }
+
+    #[test]
+    fn failed_read_closes_its_descriptor_and_returns_no_bytes() {
+        let mut buffer = *b"????";
+        let closed = Cell::new(None);
+
+        let count = read_kernel_file_with(
+            &mut buffer,
+            || 17,
+            |fd, _| {
+                assert_eq!(fd, 17);
+                -1
+            },
+            |fd| closed.set(Some(fd)),
+        );
+
+        assert_eq!((count, buffer, closed.get()), (0, *b"????", Some(17)));
+    }
+
+    #[test]
+    fn short_read_keeps_its_exact_byte_count_and_closes_the_descriptor() {
+        let mut buffer = *b"????";
+        let closed = Cell::new(None);
+
+        let count = read_kernel_file_with(
+            &mut buffer,
+            || 17,
+            |fd, buffer| {
+                assert_eq!(fd, 17);
+                buffer[..2].copy_from_slice(b"2\n");
+                2
+            },
+            |fd| closed.set(Some(fd)),
+        );
+
+        assert_eq!((count, buffer, closed.get()), (2, *b"2\n??", Some(17)));
+    }
 }

@@ -58,8 +58,11 @@ impl Operations for Mimalloc {
 
 /// Prepare the replacement without retiring the old allocation.
 ///
+/// An invalid replacement layout returns null without changing the old block.
+///
 /// # Safety
-/// The pointer is live for layout. A successful move leaves both blocks live.
+/// The pointer belongs to this backend and is live for layout. The new size is
+/// nonzero. A successful move leaves both blocks live.
 pub(super) unsafe fn prepare_reallocation(pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
     let Ok(new_layout) = Layout::from_size_align(new_size, layout.align()) else {
         return std::ptr::null_mut();
@@ -83,4 +86,28 @@ pub(super) unsafe fn prepare_reallocation(pointer: *mut u8, layout: Layout, new_
         unsafe { std::ptr::copy_nonoverlapping(pointer, replacement, layout.size().min(new_size)) };
     }
     replacement
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_internal_resize_layout_preserves_the_original_allocation() {
+        let layout = Layout::new::<[u8; 32]>();
+        let pointer = heap::allocate::<false>(layout);
+        assert!(!pointer.is_null());
+        // SAFETY: The checked allocation owns every byte of the layout.
+        unsafe { pointer.write_bytes(0x5b, layout.size()) };
+
+        // SAFETY: This internal helper validates the replacement layout itself.
+        // Its live-block and nonzero-size preconditions still hold.
+        let failure = unsafe { prepare_reallocation(pointer, layout, usize::MAX) };
+
+        assert!(failure.is_null());
+        // SAFETY: A rejected replacement leaves the initialized allocation live.
+        assert_eq!(unsafe { std::slice::from_raw_parts(pointer, layout.size()) }, &[0x5b; 32]);
+        // SAFETY: This test retires its live allocation exactly once.
+        unsafe { heap::deallocate(pointer) };
+    }
 }

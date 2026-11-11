@@ -33,11 +33,7 @@ pub struct Symbol {
     pub column: Option<u32>,
 }
 
-pub(super) fn capture(events: &Events) -> Vec<Symbol> {
-    capture_with(events, resolve)
-}
-
-pub(super) fn capture_with(events: &Events, mut resolve: impl FnMut(&mut Symbol)) -> Vec<Symbol> {
+pub(super) fn capture(events: &Events, mut resolve: impl FnMut(&mut Symbol)) -> Vec<Symbol> {
     let addresses = events
         .events
         .iter()
@@ -63,11 +59,11 @@ pub(super) fn capture_with(events: &Events, mut resolve: impl FnMut(&mut Symbol)
         .collect()
 }
 
-#[cfg(not(miri))]
-fn resolve(lookup: &mut Symbol) {
+#[cfg(any(not(miri), test))]
+pub(super) fn resolve(lookup: &mut Symbol, resolve_address: impl FnOnce(*mut std::ffi::c_void, &mut dyn FnMut(&backtrace::Symbol))) {
     let address = usize::try_from(crate::recorder::symbol_lookup_address(lookup.address).get())
         .expect("native frame addresses originate from pointer-width addresses in this process");
-    backtrace::resolve(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(address), |symbol| {
+    resolve_address(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(address), &mut |symbol| {
         lookup.name = lookup.name.take().or_else(|| symbol.name().map(|name| name.to_string()));
         lookup.filename = lookup
             .filename
@@ -77,9 +73,6 @@ fn resolve(lookup: &mut Symbol) {
         lookup.column = lookup.column.or_else(|| symbol.colno());
     });
 }
-
-#[cfg(miri)]
-fn resolve(_lookup: &mut Symbol) {}
 
 pub(super) fn encoded_len(symbols: &[Symbol]) -> Option<usize> {
     symbols.iter().try_fold(4_usize, |len, symbol| {
@@ -196,7 +189,7 @@ mod tests {
         };
         let mut calls = Vec::new();
 
-        let symbols = capture_with(&events, |lookup| {
+        let symbols = capture(&events, |lookup| {
             calls.push(lookup.address.get());
             if lookup.address == Address::new(16) {
                 lookup.name = Some("application::allocate".into());
@@ -220,9 +213,20 @@ mod tests {
 
     #[test]
     fn capture_without_nonzero_frames_does_not_invoke_the_resolver() {
-        let symbols = capture_with(&Events::default(), |_| panic!("no frames require resolution"));
+        let symbols = capture(&Events::default(), |_| panic!("no frames require resolution"));
 
         assert_eq!(symbols, []);
+    }
+
+    #[test]
+    fn native_resolution_uses_the_lookup_address_without_changing_frame_identity() {
+        let mut lookup = unresolved(17);
+        let mut calls = Vec::new();
+
+        resolve(&mut lookup, |address, _visit| calls.push(address.addr()));
+
+        let expected = if cfg!(windows) { 16 } else { 17 };
+        assert_eq!((calls, lookup), (vec![expected], unresolved(17)));
     }
 
     #[test]
