@@ -345,7 +345,7 @@ where
         Self::retire_payload(maybe_payload);
         let shutdown = shared.shutdown();
         if matches!(shared.panic_policy(), crate::PanicPolicy::Shutdown) {
-            _ = shutdown.publish(ShutdownCause::panic());
+            _ = shutdown.publish(ShutdownCause::panic(panic.as_ref()));
         }
         let cause = shutdown.is_triggered().then(|| shutdown.cause());
         result_target.panicked(panic, cause);

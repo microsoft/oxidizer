@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context as PollContext, Poll, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, ShutdownCause, WorkersPolicy};
 use arty::task::JoinError;
 #[cfg(feature = "macros")]
 use arty::task::{Context, JoinHandle};
@@ -49,6 +49,8 @@ async fn async_and_blocking_panics_are_join_errors(cx: Context) {
         let error = handle.await.unwrap_err();
         assert!(error.is_panic());
         assert!(!error.is_shutdown());
+        assert_eq!(error.shutdown_cause(), None);
+        assert!(error.source().is_none());
     }
     assert_eq!(scheduler.spawn(async |_| 42).await.unwrap(), 42);
 }
@@ -139,7 +141,11 @@ fn shutdown_rejects_blocking_work_before_worker_teardown() {
         panic!("blocking work must be rejected after shutdown starts");
     }
     runtime.stop().unwrap();
-    assert!(result.unwrap_err().is_shutdown());
+    let error = result.unwrap_err();
+    assert!(error.is_shutdown());
+    assert!(!error.is_panic());
+    assert_eq!(error.shutdown_cause(), Some(ShutdownCause::Requested));
+    assert!(error.source().is_none());
 }
 
 #[test]
@@ -164,7 +170,10 @@ fn shutdown_between_same_worker_tasks_skips_later_factory() {
         .unwrap();
 
     stopper.join().unwrap();
-    assert!(skipped.join().unwrap_err().is_shutdown());
+    let error = skipped.join().unwrap_err();
+    assert!(error.is_shutdown());
+    assert_eq!(error.shutdown_cause(), Some(ShutdownCause::Requested));
+    assert!(error.source().is_none());
     runtime.stop().unwrap();
     assert!(!invoked.load(Ordering::Acquire));
 }
@@ -262,6 +271,42 @@ fn external_shutdown_skips_registered_deferred_factory_after_blocked_poll() {
     started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
 
     std::thread::spawn(move || control.request_stop()).join().unwrap();
+    release_tx.send(()).unwrap();
+
+    blocker.join().unwrap();
+    assert!(skipped.join().unwrap_err().is_shutdown());
+    assert!(!invoked.load(Ordering::Acquire));
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn external_shutdown_system_command_precedes_queued_spawn_command() {
+    let runtime = runtime();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let control = support::runtime_control(&runtime);
+    let invoked = Arc::new(AtomicBool::new(false));
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let blocker = scheduler.spawn(move |_| {
+        let mut started_tx = Some(started_tx);
+        poll_fn(move |_| {
+            if let Some(started_tx) = started_tx.take() {
+                started_tx.send(()).unwrap();
+            }
+            release_rx.recv().unwrap();
+            Poll::Ready(())
+        })
+    });
+    started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    let skipped = scheduler.spawn({
+        let invoked = Arc::clone(&invoked);
+        move |_| {
+            invoked.store(true, Ordering::Release);
+            async {}
+        }
+    });
+    control.request_stop();
     release_tx.send(()).unwrap();
 
     blocker.join().unwrap();

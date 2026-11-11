@@ -8,6 +8,8 @@ use std::fmt::{self, Debug, Display};
 use arty_executor::ShutdownError;
 use performables::sync::mutex::Mutex;
 
+use crate::runtime::ShutdownCause;
+
 /// A task failed to return its result.
 ///
 /// Returned by [`JoinHandle`](super::JoinHandle) and as the underlying error of
@@ -26,8 +28,13 @@ use performables::sync::mutex::Mutex;
 /// runtime running while `JoinHandle` still reports the panic.
 /// With `panic = "abort"`, a task panic terminates the process instead.
 ///
-/// If a runtime failure caused shutdown, [`Error::source`] returns that
-/// failure. If shutdown was requested without an error, `source()` returns `None`.
+/// [`shutdown_cause`](Self::shutdown_cause) identifies requested shutdown
+/// and shutdown caused by a contained task panic. Other runtime failures return
+/// no classification, but [`is_shutdown`](Self::is_shutdown) still returns `true`.
+/// For abnormal shutdown,
+/// [`Error::source`] returns the detailed cause. Its [`Display`] output includes
+/// the panic message when the panic payload is a string.
+/// If shutdown was requested without an error, `source()` returns `None`.
 ///
 /// # Examples
 ///
@@ -112,6 +119,40 @@ impl JoinError {
     #[must_use]
     pub const fn is_shutdown(&self) -> bool {
         matches!(&self.kind, Kind::Shutdown(_))
+    }
+
+    /// Identifies shutdown caused by a request or a contained task panic.
+    ///
+    /// Returns `None` for other runtime failures, direct task panics, and invalid
+    /// destinations. Use [`is_shutdown`](Self::is_shutdown) to distinguish runtime
+    /// failures from errors that are not shutdown cancellations or rejections.
+    /// [`ShutdownCause::Requested`] has no error source.
+    /// [`ShutdownCause::Panic`] retains the original panic message through
+    /// [`Error::source`]. Other runtime failures also retain their source.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::ShutdownCause;
+    /// use arty::task::JoinError;
+    ///
+    /// fn report(error: &JoinError) {
+    ///     match error.shutdown_cause() {
+    ///         Some(ShutdownCause::Requested) => println!("shutdown was requested"),
+    ///         Some(ShutdownCause::Panic) => println!("another task panicked"),
+    ///         Some(_) => println!("another shutdown cause"),
+    ///         None if error.is_shutdown() => println!("the runtime failed"),
+    ///         None => println!("the task failed without shutdown cancellation"),
+    ///     }
+    /// }
+    /// ```
+    #[must_use]
+    pub fn shutdown_cause(&self) -> Option<ShutdownCause> {
+        match &self.kind {
+            Kind::Shutdown(None) => Some(ShutdownCause::Requested),
+            Kind::Shutdown(Some(error)) if error.is_panic() => Some(ShutdownCause::Panic),
+            Kind::Shutdown(Some(_)) | Kind::Panic(_) | Kind::InvalidDestination => None,
+        }
     }
 
     /// Returns `true` if the requested destination is not a worker of the runtime.

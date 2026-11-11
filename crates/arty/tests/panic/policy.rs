@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Barrier, mpsc};
 use std::task::{Context as PollContext, Wake, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, RuntimeControl, WorkersPolicy};
+use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, RuntimeControl, ShutdownCause, WorkersPolicy};
 use arty::task::Context;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
@@ -80,20 +80,64 @@ fn default_async_panic_preserves_the_panic_join_and_starts_shutdown() {
     let panic = task.join().unwrap_err();
 
     assert!(panic.is_panic());
+    assert!(!panic.is_shutdown());
+    assert_eq!(panic.shutdown_cause(), None);
+    assert!(panic.source().is_none());
+    assert_eq!(*panic.into_panic().unwrap().downcast::<&str>().unwrap(), "async panic");
     let rejected = runtime.scheduler().spawn_anywhere(Unaware(42), return_value).join().unwrap_err();
     assert!(rejected.is_shutdown());
+    assert!(!rejected.is_panic());
+    assert_eq!(rejected.shutdown_cause(), Some(ShutdownCause::Panic));
     assert_eq!(
-        rejected
-            .source()
-            .unwrap()
-            .downcast_ref::<arty_executor::ShutdownError>()
-            .unwrap()
-            .inner()
-            .to_string(),
-        "a contained runtime operation panicked"
+        rejected.source().unwrap().to_string(),
+        "runtime shutdown was caused by a task panic: async panic"
     );
     let stop = runtime.stop().unwrap_err();
-    assert_eq!(shutdown_cause(&stop).inner().to_string(), "a contained runtime operation panicked");
+    assert_eq!(
+        shutdown_cause(&stop).inner().to_string(),
+        "runtime shutdown was caused by a task panic: async panic"
+    );
+}
+
+#[test]
+fn original_panic_message_reaches_cancelled_and_rejected_join_errors() {
+    let runtime = runtime_builder(1, PanicPolicy::shutdown()).build().unwrap();
+    let (started_tx, started_rx) = mpsc::channel();
+    let pending = runtime
+        .scheduler()
+        .spawn_anywhere(Unaware(started_tx), |_, Unaware(started)| async move {
+            started.send(()).unwrap();
+            pending::<()>().await;
+        });
+    started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    let task: arty::task::JoinHandle<()> = runtime
+        .scheduler()
+        .spawn_blocking(|| std::panic::panic_any(String::from("owned blocking panic")));
+
+    let panic = task.join().unwrap_err();
+    assert!(panic.is_panic());
+    assert_eq!(panic.shutdown_cause(), None);
+    assert!(panic.source().is_none());
+    assert_eq!(*panic.into_panic().unwrap().downcast::<String>().unwrap(), "owned blocking panic");
+
+    let cancelled = pending.join().unwrap_err();
+    let rejected_async = runtime.scheduler().spawn_anywhere(Unaware(42), return_value).join().unwrap_err();
+    let rejected_blocking = runtime.scheduler().spawn_blocking(|| 42).join().unwrap_err();
+    for error in [cancelled, rejected_async, rejected_blocking] {
+        assert!(error.is_shutdown());
+        assert!(!error.is_panic());
+        assert_eq!(error.shutdown_cause(), Some(ShutdownCause::Panic));
+        assert_eq!(
+            error.source().unwrap().to_string(),
+            "runtime shutdown was caused by a task panic: owned blocking panic"
+        );
+        assert!(error.into_panic().is_none());
+    }
+    assert_eq!(
+        shutdown_cause(&runtime.stop().unwrap_err()).to_string(),
+        "runtime shutdown was caused by a task panic: owned blocking panic"
+    );
 }
 
 #[test]
@@ -103,10 +147,16 @@ fn default_factory_panic_cancels_pending_work() {
     let panicking = runtime.scheduler().spawn_anywhere((), panic_factory);
 
     assert!(panicking.join().unwrap_err().is_panic());
-    assert!(pending.join().unwrap_err().is_shutdown());
+    let cancellation = pending.join().unwrap_err();
+    assert!(cancellation.is_shutdown());
+    assert_eq!(cancellation.shutdown_cause(), Some(ShutdownCause::Panic));
+    assert_eq!(
+        cancellation.source().unwrap().to_string(),
+        "runtime shutdown was caused by a task panic: factory panic"
+    );
     assert_eq!(
         shutdown_cause(&runtime.stop().unwrap_err()).inner().to_string(),
-        "a contained runtime operation panicked"
+        "runtime shutdown was caused by a task panic: factory panic"
     );
 }
 
@@ -180,8 +230,12 @@ fn assert_panic_cause_precedes_join_notification(observe_panic: bool, blocking: 
     assert_eq!(error.is_shutdown(), !observe_panic);
     let stop = runtime.stop().unwrap_err();
     let expected = shutdown_cause(&stop);
-    assert_eq!(expected.inner().to_string(), "a contained runtime operation panicked");
+    assert_eq!(
+        expected.inner().to_string(),
+        "runtime shutdown was caused by a task panic: panic before a join notification"
+    );
     if !observe_panic {
+        assert_eq!(error.shutdown_cause(), Some(ShutdownCause::Panic));
         let source = error.source().unwrap().downcast_ref::<arty_executor::ShutdownError>().unwrap();
         assert!(std::ptr::addr_eq(source.inner(), expected.inner()));
     }
@@ -204,20 +258,21 @@ fn blocking_panics_follow_the_configured_policy() {
         assert!(panic.is_panic());
         assert_eq!(*panic.into_panic().unwrap().downcast::<u32>().unwrap(), 42);
         if starts_shutdown {
-            assert!(
-                runtime
-                    .scheduler()
-                    .spawn_anywhere(Unaware(43), return_value)
-                    .join()
-                    .unwrap_err()
-                    .is_shutdown()
-            );
-            assert!(runtime.scheduler().spawn_blocking(|| 44).join().unwrap_err().is_shutdown());
+            let rejected = runtime.scheduler().spawn_anywhere(Unaware(43), return_value).join().unwrap_err();
+            assert!(rejected.is_shutdown());
+            assert_eq!(rejected.shutdown_cause(), Some(ShutdownCause::Panic));
+            let rejected = runtime.scheduler().spawn_blocking(|| 44).join().unwrap_err();
+            assert!(rejected.is_shutdown());
+            assert_eq!(rejected.shutdown_cause(), Some(ShutdownCause::Panic));
             let cancellation = pending.join().unwrap_err();
             assert!(cancellation.is_shutdown());
+            assert_eq!(cancellation.shutdown_cause(), Some(ShutdownCause::Panic));
             let stop = runtime.stop().unwrap_err();
             let expected = shutdown_cause(&stop);
-            assert_eq!(expected.inner().to_string(), "a contained runtime operation panicked");
+            assert_eq!(
+                expected.inner().to_string(),
+                "runtime shutdown was caused by a task panic: non-string panic payload"
+            );
             let actual = cancellation
                 .source()
                 .unwrap()
@@ -301,7 +356,7 @@ fn concurrent_panics_start_one_coordinated_shutdown() {
     }
     assert_eq!(
         shutdown_cause(&runtime.stop().unwrap_err()).inner().to_string(),
-        "a contained runtime operation panicked"
+        "runtime shutdown was caused by a task panic: concurrent panic"
     );
 }
 
@@ -322,6 +377,9 @@ fn panic_during_started_shutdown_keeps_the_first_shutdown_cause() {
     release_tx.send(()).unwrap();
 
     assert!(task.join().unwrap_err().is_panic());
+    let rejected = runtime.scheduler().spawn_blocking(|| 42).join().unwrap_err();
+    assert_eq!(rejected.shutdown_cause(), Some(ShutdownCause::Requested));
+    assert!(rejected.source().is_none());
     runtime.stop().unwrap();
 }
 
@@ -335,9 +393,10 @@ fn a_dropped_join_does_not_suppress_default_shutdown() {
     let rejected = runtime.scheduler().spawn_anywhere(Unaware(42), return_value).join().unwrap_err();
 
     assert!(rejected.is_shutdown());
+    assert_eq!(rejected.shutdown_cause(), Some(ShutdownCause::Panic));
     assert_eq!(
         shutdown_cause(&runtime.stop().unwrap_err()).inner().to_string(),
-        "a contained runtime operation panicked"
+        "runtime shutdown was caused by a task panic: detached panic"
     );
 }
 
@@ -370,9 +429,13 @@ fn detached_async_panic_cascades_its_shutdown_cause_to_every_worker() {
     let cancellations: Vec<_> = pending.into_iter().map(|task| task.join().unwrap_err()).collect();
     let stop = runtime.stop().unwrap_err();
     let expected = shutdown_cause(&stop);
-    assert_eq!(expected.inner().to_string(), "a contained runtime operation panicked");
+    assert_eq!(
+        expected.inner().to_string(),
+        "runtime shutdown was caused by a task panic: relocated panic"
+    );
     for cancellation in cancellations {
         assert!(cancellation.is_shutdown());
+        assert_eq!(cancellation.shutdown_cause(), Some(ShutdownCause::Panic));
         let source = cancellation
             .source()
             .unwrap()
@@ -415,9 +478,13 @@ fn detached_blocking_panic_cascades_its_shutdown_cause_to_every_worker() {
     let cancellations: Vec<_> = pending.into_iter().map(|task| task.join().unwrap_err()).collect();
     let stop = runtime.stop().unwrap_err();
     let expected = shutdown_cause(&stop);
-    assert_eq!(expected.inner().to_string(), "a contained runtime operation panicked");
+    assert_eq!(
+        expected.inner().to_string(),
+        "runtime shutdown was caused by a task panic: detached blocking panic"
+    );
     for cancellation in cancellations {
         assert!(cancellation.is_shutdown());
+        assert_eq!(cancellation.shutdown_cause(), Some(ShutdownCause::Panic));
         let actual = cancellation
             .source()
             .unwrap()

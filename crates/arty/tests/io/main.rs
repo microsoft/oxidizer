@@ -147,6 +147,7 @@ markers!(
     ReservedSecondary,
     ShutdownWhileWaiting,
     ShutdownTaskCleanup,
+    SystemBeforeSpawn,
 );
 
 #[derive(Clone, Copy)]

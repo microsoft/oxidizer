@@ -173,7 +173,7 @@ fn blocking_panic_publishes_its_cause_before_worker_and_join_notifications() {
             },
             None => assert_eq!(
                 shutdown.error().unwrap().inner().to_string(),
-                "a contained runtime operation panicked"
+                "runtime shutdown was caused by a task panic: non-string panic payload"
             ),
         }
     }
