@@ -28,7 +28,7 @@ pub(super) fn emit(address: *mut u8, size: usize, alignment: usize, freed: bool)
         } else {
             Record::allocation(allocation)
         })
-    })
+    });
 }
 
 pub(super) fn resize(old: *mut u8, new: *mut u8, old_size: usize, new_size: usize, alignment: usize) {
@@ -43,5 +43,5 @@ pub(super) fn resize(old: *mut u8, new: *mut u8, old_size: usize, new_size: usiz
             new_size: new_size as u64,
             alignment: alignment as u64,
         }))
-    })
+    });
 }
