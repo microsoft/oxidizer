@@ -847,6 +847,8 @@ fn moved_storage_and_old_address_reuse_remain_separate_task_lifetimes() {
         "resize 0x8000 / 64 B -> 0x9000 / 4096 B align=16 heap=8 (moved)"
     );
     let rows = &captured.allocations.as_ref().unwrap().records;
+    assert!(rows[0].label().starts_with("alloc "));
+    assert!(rows[3].label().starts_with("free "));
     let resize = rows.iter().find(|row| row.label().starts_with("resize ")).unwrap();
     assert!(resize.label().ends_with("matched retained allocation/free pair (source capture)"));
 }
