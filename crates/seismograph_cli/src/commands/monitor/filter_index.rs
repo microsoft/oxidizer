@@ -104,6 +104,7 @@ pub(super) struct FilterIndex {
     allocations: Vec<IndexedAllocation>,
     retained_allocation_events: u64,
     deallocated: HashSet<(u64, u64)>,
+    allocation_identities: Option<crate::allocation_identities::Identities>,
     runtime: Option<RuntimeSource>,
     runtime_windows: BTreeMap<u64, TimeWindow>,
     task_stacks: HashMap<(u64, u64), StackId>,
@@ -120,8 +121,14 @@ impl FilterIndex {
         addresses: Vec<AddressLookup>,
         deallocated: HashSet<(u64, u64)>,
     ) -> Self {
-        let task_events = super::task_events::TaskEventsSnapshot::from_events(&decoded.events, &addresses, runtime.as_ref());
-        Self::with_task_events(decoded, allocator, runtime, addresses, deallocated, task_events)
+        let identities = crate::allocation_identities::for_capture(&decoded.events);
+        let task_events = super::task_events::TaskEventsSnapshot::from_events_with_identities(
+            &decoded.events,
+            &addresses,
+            runtime.as_ref(),
+            identities.as_ref(),
+        );
+        Self::with_task_events(decoded, allocator, runtime, addresses, deallocated, task_events, identities)
     }
 
     pub(super) fn with_task_events(
@@ -131,6 +138,7 @@ impl FilterIndex {
         addresses: Vec<AddressLookup>,
         deallocated: HashSet<(u64, u64)>,
         task_events: super::task_events::TaskEventsSnapshot,
+        allocation_identities: Option<crate::allocation_identities::Identities>,
     ) -> Self {
         let runtime_windows = super::runtime::display_windows(&decoded.events, runtime.as_ref());
         let lookups = addresses
@@ -223,6 +231,7 @@ impl FilterIndex {
             allocations,
             retained_allocation_events,
             deallocated,
+            allocation_identities,
             runtime,
             runtime_windows,
             task_stacks,
@@ -264,6 +273,7 @@ impl FilterIndex {
             capture_duration_nanos: self.header.capture_duration_nanos,
             events: self.header.events.clone(),
             sources: Vec::new(),
+            symbols: Vec::new(),
         };
         decoded.events.events = self
             .events
@@ -298,8 +308,14 @@ impl FilterIndex {
             decoded.events.threads.retain(|thread| visible_threads.contains(&thread.thread_id));
         }
         let source = self.runtime_source(filter, &visible_tasks, &decoded.events.events);
-        let mut runtime =
-            RuntimeSnapshot::from_events_with_attribution(&decoded, &self.addresses, source.as_ref(), task_events, &mut |_| {});
+        let mut runtime = RuntimeSnapshot::from_events_with_attribution(
+            &decoded,
+            &self.addresses,
+            source.as_ref(),
+            task_events,
+            self.allocation_identities.as_ref(),
+            &mut |_| {},
+        );
         self.retain_inferred_task_rows(&mut runtime);
         runtime.runtime.set_windows(&self.runtime_windows);
         super::snapshot::release_stacks(&mut decoded.events.events, |event| drop(std::mem::take(&mut event.call_stack)));
@@ -322,6 +338,7 @@ impl FilterIndex {
         super::snapshot::release_stacks(&mut allocation_events, |event| drop(std::mem::take(&mut event.call_stack)));
         Box::new(CapturedSnapshot {
             native: self.allocator.as_ref().and_then(|source| source.native.clone()),
+            mimalloc: self.allocator.as_ref().and_then(|source| source.mimalloc.clone()),
             memory,
             allocations,
             heap_error: super::snapshot::heap_error(self.allocator.as_ref()),
@@ -534,6 +551,51 @@ mod tests {
         assert_eq!(reset.primitives.groups[0].events, 3);
         assert!(!reset.filter_summary.active);
         assert!(Arc::ptr_eq(reset.filter_index.as_ref().unwrap(), &index));
+    }
+
+    #[test]
+    fn hidden_resize_records_do_not_restore_the_original_retained_size() {
+        let mut allocation = AllocationEvent::default();
+        allocation.allocation_recorded = true;
+        allocation.allocation_id = 1;
+        allocation.thread_log_id = 1;
+        allocation.size = 64;
+        allocation.resized_size = Some(4096);
+        allocation.call_stack = vec![1];
+        let mut resize = allocation.clone();
+        resize.kind = AllocationEventKind::Reallocated;
+        resize.size = 4096;
+        resize.reallocation = Some(seismograph_rallocator::callers::Resize {
+            old_address: 0x1000,
+            old_size: 64,
+        });
+        resize.call_stack = vec![2];
+        let mut source = AllocatorSource::new(Version::new(0, 1, 0));
+        let mut callers = Callers::default();
+        callers.events = vec![allocation, resize];
+        source.callers = Some(callers);
+        let addresses = vec![lookup(1, "app::allocate"), lookup(2, "noise::resize")];
+        let index = Arc::new(FilterIndex::new(
+            DecodedSnapshot::default(),
+            Some(source),
+            None,
+            addresses,
+            HashSet::new(),
+        ));
+
+        let filtered = index.render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap());
+        let allocations = filtered.allocations.unwrap();
+
+        assert_eq!(allocations.records.len(), 1);
+        assert_eq!(
+            (
+                allocations.hotspots[0].allocations,
+                allocations.hotspots[0].allocated_bytes,
+                allocations.hotspots[0].live_bytes
+            ),
+            (1, 64, 4096)
+        );
+        assert_eq!(index.render(&FilterSpec::default()).allocations.unwrap().records.len(), 2);
     }
 
     #[test]

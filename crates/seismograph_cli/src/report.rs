@@ -40,7 +40,12 @@ fn render_event_only(snapshot: &Snapshot, sources: &[seismograph::snapshot::Sour
          A free may have no retained allocation. Address reuse and gaps prevent definitive lifetime reconstruction. \
          Event pairs use view-local identities; container threads identify actors, and native heap identities are unavailable.</p></section>",
     );
-    html.push_str(&crate::native_view::render_html(snapshot.native.as_deref()));
+    if snapshot.native.is_some() || snapshot.mimalloc.is_none() {
+        html.push_str(&crate::native_view::render_html(snapshot.native.as_deref()));
+    }
+    if let Some((header, state)) = snapshot.mimalloc.as_deref().and_then(crate::mimalloc_view::parts) {
+        html.push_str(&crate::mimalloc_view::render_html(header, state));
+    }
     render_sources(&mut html, sources);
     render_recording_coverage(&mut html, snapshot);
     render_runtime_events(&mut html, snapshot);
@@ -65,22 +70,41 @@ fn render_allocation_records(html: &mut String, callers: &Callers, addresses: &[
         .filter(|event| event.kind == EventKind::Deallocated)
         .map(|event| (event.thread_log_id, event.allocation_id))
         .collect::<HashSet<_>>();
-    write!(html, "<h3>Allocation/free records</h3><p>Showing {} of {} retained records. \
+    write!(html, "<h3>Allocation/resize/free records</h3><p>Showing {} of {} retained records. \
         View-local IDs distinguish repeated addresses within this capture only; unmatched allocation evidence is NOT proven live. \
         Orphan frees have no retained allocation origin. Event gaps and sampling can hide counterparts.</p>\
         <table><tr><th>Operation</th><th>Actor</th><th>View ID / origin log</th><th>Address / requested bytes</th><th>Correlation</th><th>Stack</th></tr>",
         callers.events.len().min(MAX_ROWS), callers.events.len()).unwrap();
     for event in callers.events.iter().take(MAX_ROWS) {
-        let operation = if event.kind == EventKind::Allocated { "alloc" } else { "free" };
+        let operation = match event.kind {
+            EventKind::Allocated => "alloc",
+            EventKind::Reallocated => "resize",
+            _ => "free",
+        };
         let status = if event.kind == EventKind::Deallocated && !event.allocation_recorded {
             "orphan free"
+        } else if event.kind == EventKind::Reallocated && !event.allocation_recorded {
+            "orphan resize"
         } else if freed.contains(&(event.thread_log_id, event.allocation_id)) {
             "matched retained pair"
         } else {
             "unmatched allocation evidence"
         };
-        write!(html, "<tr><td>{operation}</td><td>{}</td><td>#{} / {}</td><td>0x{:x} / {} B</td><td>{status}</td><td><details><summary>Operation stack</summary>",
-            escape_html(&thread_label(event.event_thread_id, &names)), event.allocation_id, event.thread_log_id, event.address, event.size).unwrap();
+        let storage = event.reallocation.map_or_else(
+            || format!("0x{:x} / {} B", event.address, event.size),
+            |resize| {
+                format!(
+                    "0x{:x} / {} B → 0x{:x} / {} B ({})",
+                    resize.old_address,
+                    resize.old_size,
+                    event.address,
+                    event.size,
+                    if resize.old_address == event.address { "in place" } else { "moved" }
+                )
+            },
+        );
+        write!(html, "<tr><td>{operation}</td><td>{}</td><td>#{} / {}</td><td>{storage}</td><td>{status}</td><td><details><summary>Operation stack</summary>",
+            escape_html(&thread_label(event.event_thread_id, &names)), event.allocation_id, event.thread_log_id).unwrap();
         render_stack(html, &event.call_stack, &lookups);
         html.push_str("</details></td></tr>");
     }
@@ -122,17 +146,6 @@ pub(crate) fn render_html_with_sources(snapshot: &Snapshot, sources: &[seismogra
     )
     .unwrap();
 
-    if !snapshot.skipped_sections.is_empty() {
-        html.push_str("<section><h2>Compatibility warning</h2><p>This report omitted snapshot sections with unknown identifiers or versions unsupported by this decoder: ");
-        for (index, section) in snapshot.skipped_sections.iter().enumerate() {
-            if index != 0 {
-                html.push_str(", ");
-            }
-            write!(html, "{} (version {})", section.id, section.version).unwrap();
-        }
-        html.push_str(". Use a compatible seismograph version to inspect the omitted data.</p></section>");
-    }
-
     render_sources(&mut html, sources);
     render_recording_coverage(&mut html, snapshot);
     render_domains(&mut html, snapshot);
@@ -164,7 +177,7 @@ pub(crate) fn render_html_with_sources(snapshot: &Snapshot, sources: &[seismogra
         format_bytes(stats.live_bytes),
         concept(
             "Live-byte high-water mark",
-            "A lifetime peak is available only when explicitly tracked. Aggregate-query sample maxima can miss allocations between queries; legacy scope is unavailable."
+            "A lifetime peak is available only when explicitly tracked. Aggregate-query sample maxima can miss allocations between queries; unknown scope is unavailable."
         ),
         concept(
             "Mapped / backing bytes",
@@ -1739,6 +1752,7 @@ struct Hotspot {
 #[derive(Clone, Copy)]
 enum SupportedEventKind {
     Allocated,
+    Reallocated,
     Deallocated,
 }
 
@@ -1747,6 +1761,7 @@ fn supported_events(events: &[Event]) -> impl Iterator<Item = (&Event, Supported
     events.iter().filter_map(|event| {
         let kind = match event.kind {
             EventKind::Allocated => SupportedEventKind::Allocated,
+            EventKind::Reallocated => SupportedEventKind::Reallocated,
             EventKind::Deallocated => SupportedEventKind::Deallocated,
             _ => return None,
         };
@@ -1764,14 +1779,14 @@ fn render_hotspots(html: &mut String, callers: &Callers, addresses: &[AddressLoo
     let mut thread_flows = BTreeMap::<(u64, u64), (u64, u64)>::new();
     for (event, kind) in supported_events(&callers.events) {
         match kind {
-            SupportedEventKind::Allocated => {}
+            SupportedEventKind::Allocated | SupportedEventKind::Reallocated => {}
             SupportedEventKind::Deallocated => {
                 let Some(allocation) = live.remove(&(event.thread_log_id, event.allocation_id)) else {
                     continue;
                 };
                 let flow = thread_flows.entry((allocation.event_thread_id, event.event_thread_id)).or_default();
                 flow.0 += 1;
-                flow.1 += allocation.size;
+                flow.1 += allocation.resized_size.unwrap_or(allocation.size);
                 if allocation.event_thread_id != event.event_thread_id {
                     record_hotspot(&mut cross_thread, allocation, event);
                 }
@@ -1792,7 +1807,7 @@ fn record_hotspot(hotspots: &mut HashMap<(Vec<u64>, Vec<u64>), Hotspot>, allocat
     let key = (allocation.call_stack.clone(), deallocation.call_stack.clone());
     let hotspot = hotspots.entry(key).or_default();
     hotspot.count += 1;
-    hotspot.bytes += allocation.size;
+    hotspot.bytes += allocation.resized_size.unwrap_or(allocation.size);
 }
 
 fn render_hotspot_group(html: &mut String, title: &str, hotspots: &HashMap<(Vec<u64>, Vec<u64>), Hotspot>, addresses: &[AddressLookup]) {
@@ -2067,9 +2082,12 @@ fn render_callers(html: &mut String, callers: &Callers, addresses: &[AddressLook
                 };
                 totals[index].allocations += 1;
                 totals[index].allocated_bytes += event.size;
-                live.insert((event.thread_log_id, event.allocation_id), (index, event.size));
+                live.insert(
+                    (event.thread_log_id, event.allocation_id),
+                    (index, event.resized_size.unwrap_or(event.size)),
+                );
             }
-            SupportedEventKind::Deallocated => {}
+            SupportedEventKind::Deallocated | SupportedEventKind::Reallocated => {}
         }
     }
     // Thread-local sequence numbers do not order records from different threads.
@@ -2198,7 +2216,7 @@ fn format_count(value: u64) -> String {
     formatted
 }
 
-fn escape_html(value: &str) -> Cow<'_, str> {
+pub(crate) fn escape_html(value: &str) -> Cow<'_, str> {
     let Some(first_escape) = value.find(['&', '<', '>', '"']) else {
         return Cow::Borrowed(value);
     };

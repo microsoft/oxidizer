@@ -14,6 +14,10 @@
 //! its cost. Events are kept in bounded per-thread buffers. Snapshots combine
 //! those events with state supplied by registered sources, such as allocators
 //! and runtimes.
+//! Each snapshot resolves captured stack addresses inside the application.
+//! The file stores available function names and source locations for offline use.
+//! This does not require an allocator or runtime source. Missing debug information
+//! remains unknown, and events recorded without backtraces cannot gain them later.
 //!
 //! # Usage
 //!

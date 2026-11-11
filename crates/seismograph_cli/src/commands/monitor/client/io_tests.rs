@@ -81,10 +81,7 @@ fn serve_discoverable(io: &MonitorIo, descriptor: &MonitorDescriptor) -> JoinHan
         io,
         descriptor,
         vec![
-            vec![
-                (Request::Hello, hello(descriptor)),
-                (Request::ReadCacheRecording, Response::CacheRecording(RecordingPolicy::default())),
-            ],
+            vec![(Request::Hello, hello(descriptor))],
             vec![
                 (Request::Hello, hello(descriptor)),
                 (Request::ReadServerVersion, Response::ServerVersion("healthy".into())),
@@ -102,10 +99,7 @@ fn complete_client_commands_use_the_selected_io_instance() {
         &io,
         &descriptor,
         vec![
-            vec![
-                (Request::Hello, hello(&descriptor)),
-                (Request::ReadCacheRecording, Response::CacheRecording(RecordingPolicy::default())),
-            ],
+            vec![(Request::Hello, hello(&descriptor))],
             vec![
                 (Request::Hello, hello(&descriptor)),
                 (
@@ -185,10 +179,7 @@ fn discovery_reports_invalid_entries_and_ignores_only_stale_endpoints() {
         &io,
         &live,
         vec![
-            vec![
-                (Request::Hello, hello(&live)),
-                (Request::ReadCacheRecording, Response::CacheRecording(RecordingPolicy::default())),
-            ],
+            vec![(Request::Hello, hello(&live))],
             vec![
                 (Request::Hello, hello(&live)),
                 (Request::ReadServerVersion, Response::ServerVersion("test-version".into())),
@@ -229,7 +220,7 @@ fn discovery_suppresses_only_missing_or_refused_connections() {
 
 #[test]
 fn oversized_probe_responses_do_not_hide_healthy_monitors() {
-    for probe in [Request::Hello, Request::ReadCacheRecording, Request::ReadServerVersion] {
+    for probe in [Request::Hello, Request::ReadServerVersion] {
         let (io, _) = MonitorIo::new_mocked();
         let (directory, malicious) = descriptor(&io);
         io.publish_descriptor(&directory, &malicious).unwrap();
@@ -245,15 +236,11 @@ fn oversized_probe_responses_do_not_hide_healthy_monitors() {
                 1
             } else {
                 write_response(&mut stream, 1, &hello(&malicious)).unwrap();
-                assert_eq!(read_request(&stream).unwrap(), (2, Request::ReadCacheRecording));
-                if probe == Request::ReadServerVersion {
-                    write_response(&mut stream, 2, &Response::CacheRecording(RecordingPolicy::default())).unwrap();
-                    drop(stream);
-                    stream = accept(&listener);
-                    assert_eq!(read_request(&stream).unwrap(), (1, Request::Hello));
-                    write_response(&mut stream, 1, &hello(&malicious)).unwrap();
-                    assert_eq!(read_request(&stream).unwrap(), (2, Request::ReadServerVersion));
-                }
+                drop(stream);
+                stream = accept(&listener);
+                assert_eq!(read_request(&stream).unwrap(), (1, Request::Hello));
+                write_response(&mut stream, 1, &hello(&malicious)).unwrap();
+                assert_eq!(read_request(&stream).unwrap(), (2, Request::ReadServerVersion));
                 2
             };
             let mut header = Vec::new();
@@ -283,7 +270,6 @@ fn partial_progress_does_not_restart_a_probe_deadline() {
     assert_eq!(&bytes, b"ab");
     control.advance_time(Duration::from_secs(1));
     assert_eq!(connection.read(&mut bytes).unwrap_err().kind(), io::ErrorKind::TimedOut);
-    assert_eq!(connection.peek(&mut bytes).unwrap_err().kind(), io::ErrorKind::TimedOut);
     assert_eq!(connection.write(b"request").unwrap_err().kind(), io::ErrorKind::TimedOut);
     connection.set_read_timeout(None).unwrap();
     assert_eq!(connection.read(&mut bytes).unwrap(), 2);
@@ -435,24 +421,29 @@ fn snapshot_saving_uses_mocked_wall_time_and_preserves_write_errors() {
 }
 
 #[test]
-fn capability_probe_distinguishes_eof_truncation_and_io_failures() {
+fn required_metadata_responses_reject_eof_truncation_and_io_failures() {
     let (io, control) = MonitorIo::new_mocked();
     let (mut peer, connection) = control.connected_pair();
     let mut connection = ClientConnection::new(&io, connection).unwrap();
-    write_response(&mut peer, 2, &Response::CacheRecording(RecordingPolicy::default())).unwrap();
-    control.fail_next(IoOperation::Peek, io::ErrorKind::TimedOut.into());
-    assert!(matches!(read_cache_recording(&mut connection), Err(Error::Io(error)) if error.kind() == io::ErrorKind::TimedOut));
-    assert_eq!(read_cache_recording(&mut connection).unwrap(), Some(RecordingPolicy::default()));
+    write_response(&mut peer, 2, &Response::ServerVersion("current".into())).unwrap();
+    control.fail_next(IoOperation::Read, io::ErrorKind::TimedOut.into());
+    assert!(
+        matches!(read_server_version(&mut connection), Err(Error::Protocol(seismograph_protocol::Error::Io(error))) if error.kind() == io::ErrorKind::TimedOut)
+    );
+    assert_eq!(read_server_version(&mut connection).unwrap(), "current");
     peer.write_all(b"SGMP").unwrap();
     drop(peer);
     assert!(matches!(
-        read_cache_recording(&mut connection),
+        read_server_version(&mut connection),
         Err(Error::Protocol(seismograph_protocol::Error::Io(error))) if error.kind() == io::ErrorKind::UnexpectedEof
     ));
     let (peer, connection) = control.connected_pair();
     let mut connection = ClientConnection::new(&io, connection).unwrap();
     drop(peer);
-    assert_eq!(read_cache_recording(&mut connection).unwrap(), None);
-    assert_eq!(read_server_version(&mut connection).unwrap(), None);
-    assert_eq!(read_recorder_activity(&mut connection).unwrap(), None);
+    assert!(
+        matches!(read_server_version(&mut connection), Err(Error::Protocol(seismograph_protocol::Error::Io(error))) if error.kind() == io::ErrorKind::UnexpectedEof)
+    );
+    assert!(
+        matches!(read_recorder_activity(&mut connection), Err(Error::Protocol(seismograph_protocol::Error::Io(error))) if error.kind() == io::ErrorKind::UnexpectedEof)
+    );
 }

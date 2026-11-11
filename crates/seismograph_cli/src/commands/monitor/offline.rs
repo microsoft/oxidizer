@@ -74,22 +74,16 @@ mod tests {
     }
 
     fn native_bytes(id: seismograph::snapshot::SourceId, data: &[u8]) -> Vec<u8> {
-        // Version 1 native container: no threads/events, one source.
-        let mut bytes = b"SEISMOG\0".to_vec();
-        bytes.extend_from_slice(&1_u16.to_le_bytes());
-        bytes.extend_from_slice(&0_u16.to_le_bytes());
-        bytes.extend_from_slice(&0_u64.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.extend_from_slice(&1_u32.to_le_bytes());
-        bytes.extend_from_slice(&id.get().to_le_bytes());
-        bytes.extend_from_slice(&3_u16.to_le_bytes());
-        bytes.extend_from_slice(&4_u16.to_le_bytes());
-        bytes.extend_from_slice(&u64::try_from(data.len()).unwrap().to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.extend_from_slice(b"test");
-        bytes.extend_from_slice(data);
-        bytes
+        crate::mimalloc_view::fixture::container(&[seismograph::snapshot::SourceSnapshot {
+            id,
+            name: "test".into(),
+            schema_version: if id == seismograph_runtime::snapshot::source::ID {
+                seismograph_runtime::snapshot::source::SCHEMA_VERSION
+            } else {
+                seismograph_rallocator::snapshot::SCHEMA_VERSION
+            },
+            data: data.to_vec(),
+        }])
     }
 
     fn write(name: &str, bytes: &[u8]) -> PathBuf {
@@ -97,6 +91,29 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, bytes).unwrap();
         path
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "requires filesystem access")]
+    fn loads_mimalloc_container_without_changing_backend_state_or_capture_time() {
+        let payload = crate::mimalloc_view::fixture::snapshot();
+        let bytes = crate::mimalloc_view::fixture::container(&[crate::mimalloc_view::fixture::source(&payload)]);
+        let path = write("mimalloc-backend", &bytes);
+        let loader = Loader::start(path.clone(), File::open(&path).unwrap()).unwrap();
+
+        let snapshot = loader.receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap().unwrap();
+        std::fs::remove_file(path).unwrap();
+
+        assert_eq!(
+            (
+                snapshot.mimalloc.as_deref(),
+                snapshot.native.as_deref(),
+                snapshot.heap_error,
+                snapshot.captured_at,
+                snapshot.captured_instant,
+            ),
+            (Some(&payload), None, None, None, None),
+        );
     }
 
     #[test]

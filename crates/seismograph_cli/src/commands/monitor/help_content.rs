@@ -28,6 +28,32 @@ const NATIVE_KEYS: &Section = section!("Navigation";
     "Escape / Backspace" => "Move up one level. Escape disconnects or leaves an offline capture only at the allocator root.",
     "Up/Down / Home/End" => "Select list rows; in focused details, scroll text. Lists retain global indices when longer than the viewport.",
     "PgUp / PgDn" => "Move five rows in lists or scroll focused details by five rendered lines. Mouse rows select and focus their list; Enter opens the selection.",
+    "b" => "If both allocator sources are present, switch between snmalloc and mimalloc. Each backend keeps its own selection.",
+);
+const MIMALLOC_GLOBAL: &Section = section!("Mimalloc global state";
+    "Reservation" => "Arena reservation plus direct OS reservation includes metadata and padding. Arena metadata is already included. Do not add it again.",
+    "Commitment" => "Arena bitmap commitment includes tracked arena metadata. Direct OS data commitment excludes metadata commitment. Total OS commitment is unknown.",
+    "Residency" => "Bitmap commit is not physical residency. Resident and swapped memory are unknown.",
+    "Free / Pending purge slices" => "Free bits advertise reusable arena slices. Pending purge bits await an attempt and do not guarantee that slices can be purged.",
+    "INDEXED regular abandoned pages" => "The index covers regular bins 0..60 only, not live objects. Huge/singleton pages and some OS-backed pages are unindexed. Zeros do not prove their absence. Owner queues exclude abandoned pages.",
+    "Independent observations" => "Global scans read independent atomics. Arena scans are bounded. Partial scans omit arenas and are not a simultaneous census.",
+);
+const MIMALLOC_OWNERS: &Section = section!("Mimalloc heap lifetimes";
+    "Owner" => "A stable heap lifetime identifier, not a pointer or a recorder thread. Selection follows this identifier across captures.",
+    "Active / Exited" => "Active heaps can publish state. Exited heaps retain historical copies after cleanup. Heap identifiers are never reused.",
+    "Freshness" => "Matching session and round means contributed this round, not an exact current census. Age is measured at capture.",
+    "Busy / Unobserved / Unavailable" => "A busy publication slot, no readable copy, or diagnostic storage allocation failure. Missing measurements are unknown, not zero.",
+    "Publication" => "Only an accepted recorded operation can publish. Sampled-out operations do not contribute. A live capture requests the next round after collection.",
+    "Filters" => "Event filters preserve the original allocator inventory, observations and completeness flags.",
+);
+const MIMALLOC_CLASSES: &Section = section!("Mimalloc page classes";
+    "Reserved / Capacity blocks" => "Both counts describe visited pages only. Reserved slots include uninitialized blocks. Capacity counts initialized slots. Neither count measures application-live objects.",
+    "Used blocks" => "Owner-accounted used blocks include pending remote frees until the owner collects them.",
+    "Free / Local free blocks" => "Visited allocation-ready links and locally deferred links. Free-list and page walks have separate visit budgets.",
+    "Queued / Observed pages" => "Queued pages include omitted queue entries but exclude abandoned pages. Observed pages include only visited entries.",
+    "Retired pages" => "Visited pages with an active retirement countdown.",
+    "Partial" => "A bounded page or free-list walk ended early. Shown values describe visited state, not the omitted entries.",
+    "Zero geometry" => "A zero block or page size means no fixed geometry for that bin. Singleton pages can have variable sizes.",
 );
 const NATIVE_MEMORY: &Section = section!("Memory measurements";
     "OS reserved" => "Native allocator virtual reservations: cumulative successful OS object/range reservations plus the separate sparse page-map VA reservation. The sum uses 128-bit arithmetic. This is not physical RAM or app-live memory.",
@@ -45,7 +71,7 @@ const NATIVE_OWNERS: &Section = section!("Owner frontends";
     "Owner" => "A reusable native allocator endpoint with small-class slabs, large ranges, local caches and remote returns. Owner numbers follow the current inventory order and can change on refresh; selection follows stable endpoint identity. Endpoint identity appears only in Observation detail.",
     "Active / Idle" => "Active means leased. Idle endpoints can be freshly inspected under the pool lock; active endpoints are read from immutable published summaries, never by inspecting their borrowed core.",
     "Contributor" => "The recorder thread that last published the observation, not necessarily the current lease holder. Idle inspection has no recorder contributor.",
-    "Quiet owners" => "Publication follows an accepted recorded allocation/free operation. Sampled-out operations do not publish. Never-contributing active endpoints remain explicitly Unknown.",
+    "Quiet owners" => "Publication follows an accepted recorded allocation, resize, or free operation. Sampled-out operations do not publish. Never-contributing active endpoints remain explicitly Unknown.",
 );
 const NATIVE_COVERAGE: &Section = section!("Observation coverage";
     "Observed" => "Published in this session, lease generation and requested observation round, or freshly inspected while idle. Matching round means contributed this round, not an exact simultaneous census.",
@@ -89,6 +115,9 @@ pub(super) const fn title(context: Context) -> &'static str {
         Context::NativeCaches => "Owner-local range caches",
         Context::NativeReturns => "Remote returns",
         Context::NativeObservation => "Observation metadata",
+        Context::MimallocGlobal => "Mimalloc global backend",
+        Context::MimallocOwner => "Mimalloc heap lifetimes",
+        Context::MimallocClasses => "Mimalloc page classes",
         Context::Allocations => "Allocation hotspots and stack",
         Context::PrimitiveTypes => "Primitive types",
         Context::PrimitiveOperations => "Primitive operations",
@@ -130,6 +159,9 @@ pub(super) fn document(context: Context, offline: bool) -> Vec<&'static Section>
         Context::NativeRanges => &[NATIVE_RANGES, NATIVE_COVERAGE, NATIVE_KEYS],
         Context::NativeCaches => &[NATIVE_CACHES, NATIVE_COVERAGE, NATIVE_KEYS],
         Context::NativeReturns => &[NATIVE_RETURNS, NATIVE_COVERAGE, NATIVE_KEYS],
+        Context::MimallocGlobal => &[MIMALLOC_GLOBAL, NATIVE_KEYS],
+        Context::MimallocOwner => &[MIMALLOC_OWNERS, NATIVE_KEYS],
+        Context::MimallocClasses => &[MIMALLOC_CLASSES, MIMALLOC_OWNERS, NATIVE_KEYS],
         Context::Allocations => &[ALLOCATIONS, STACK],
         Context::PrimitiveTypes => &[PRIMITIVE_TYPES],
         Context::PrimitiveOperations => &[PRIMITIVE_OPERATIONS],
@@ -169,7 +201,6 @@ pub(super) fn document(context: Context, offline: bool) -> Vec<&'static Section>
 const VERSIONS: &Section = section!("CRATE VERSIONS";
     "Monitor (seismograph_cli)" => "Semantic version compiled into this local monitor executable. Shown in the Info view for live connections and saved snapshots.",
     "Server (seismograph)" => "Semantic version of the seismograph crate in the connected application, queried during discovery after the OS-authorized handshake, before any capture. Shown in the Info view. This is not the protocol crate version or the application's own version.",
-    "unknown (legacy server)" => "The server closed the version query without a response. Older servers do not report their version; no version is inferred from the local monitor.",
     "unknown (not recorded in snapshot)" => "Saved snapshots do not contain the server crate version. The local monitor version is not the snapshot producer's version.",
 );
 
@@ -365,8 +396,8 @@ const RUNTIME_WORKERS: &Section = section!("RUNTIME WORKERS";
 
 const RUNTIME_TASKS: &Section = section!("RUNTIME TASKS";
     "Task" => "Runtime task ID.",
-    "Future B" => "Inline size of the submitted future, in exact bytes; synchronous tasks use their closure size. Excludes executor bookkeeping, runtime wrappers and separately allocated buffers. Zero is a genuinely zero-sized body; '-' means unavailable in the producer or an older recording.",
-    "State(global)" => "Task-global coherently observed source activity, not execution on this historical worker; unknown for legacy or raced source state. Source-associated tasks remain visible without any completed retained polls.",
+    "Future B" => "Inline size of the submitted future, in exact bytes; synchronous tasks use their closure size. Excludes executor bookkeeping, runtime wrappers and separately allocated buffers. Zero is a genuinely zero-sized body; '-' means unavailable in the producer.",
+    "State(global)" => "Task-global coherently observed source activity, not execution on this historical worker; unknown for missing or raced source state. Source-associated tasks remain visible without any completed retained polls.",
     "Polls" => "Number of retained completed polls on THIS selected worker. Zero completed polls displays 0; not a lifetime counter.",
     "Observed %" => "Union of this task's observed polls on THIS worker / the same displayed per-runtime window duration. Open coherent source polls can contribute. Lower bound, not CPU utilization; unavailable is '-'.",
     "Median poll" => "Median completed poll duration on THIS worker. Even populations use the midpoint rounded down to nanoseconds. '-' means no samples, while 0ns is a genuine measured zero.",
@@ -378,14 +409,14 @@ const RUNTIME_TASKS: &Section = section!("RUNTIME TASKS";
 
 const RUNTIME_ACTIVITY: &Section = section!("RUNTIME ACTIVITY";
     "Running for / Ready for" => "Age at the coherent per-task source observation. Running is inside a poll; Ready is queued and eligible for a poll. Long ages are shown prominently even without a completed poll. '-' means unavailable, not zero.",
-    "Source observation" => "Per-task coherent observations, NOT a globally atomic snapshot of every worker/task. Open execution uses the coherent poll-worker ID, never last-worker metadata or a notifier thread. Older activity schemas without that ID need an exact retained runtime/task/poll-start timestamp match to assign worker occupancy; otherwise only the global running age is shown. Recording stop freezes observation time and ages; viewing or refreshing the stopped snapshot does not advance them. Legacy captures and raced observations have unknown activity rather than guessed ages.",
+    "Source observation" => "Per-task coherent observations, NOT a globally atomic snapshot of every worker/task. Open execution uses the coherent poll-worker ID, never last-worker metadata or a notifier thread. Without that ID, an exact retained runtime/task/poll-start timestamp match is required to assign worker occupancy; otherwise only the global running age is shown. Recording stop freezes observation time and ages; viewing or refreshing the stopped snapshot does not advance them. Missing or raced observations have unknown activity rather than guessed ages.",
     "repoll" => "A wake during a running poll requests another poll. This is not yet queue waiting: for a self-wake, ready wait starts at poll finish, not at the raw wake timestamp.",
     "Poll (worker)" => "Observed execution intervals on this selected worker, including an open coherent source poll. The timeline shares the displayed per-runtime nanosecond window with worker charts.",
     "Ready (global)" => "Task-global ready-to-next-poll intervals, possibly across workers. Ready wait is queue waiting, distinct from poll execution, ordinary pending time and raw wake latency. Do not add this task-global metric to worker execution.",
     "Window / baseline" => "All charts for the same runtime use one displayed window, at most the latest 60 seconds of retained event/source observations, and clip interval unions to it. Filtering preserves this original axis. Eight rising bar heights show occupied fraction: zero stays on the baseline and every positive fraction rises above it. Dim baseline bars mean unobserved, not measured idle. Occupancy denominator is end minus start, not summed task lifetimes. Counts/histograms include all retained completed samples; open ages are not truncated to 60 seconds.",
     "Duration (log10 buckets) / count" => "Duration runs left to right across 12 fixed decades: 0..<10ns, 10..<100ns, 100ns..<1us, and so on through milliseconds and seconds, ending in 100s+ (including overflow). Counts run vertically; one-character bars scale linearly to the largest bucket, with a minimum one-eighth-cell sliver for every nonempty bucket. Each bucket has a gray '_' zero baseline, including empty buckets. Numeric counts remain exact. All buckets fit at once; extremely narrow panels merge adjacent buckets. The selected bucket's lower-inclusive, upper-exclusive range and exact count appear above the bars. Axis endpoints use ns/us/ms/s.",
     "Completed only" => "Poll histograms use completed worker-local polls; Ready wait histograms use completed task-global waits explicitly tagged as coherent queue duration. Open source intervals contribute to timelines/observed fractions but are excluded from BOTH duration histograms. No samples displays '-', never a synthetic zero-duration observation.",
-    "Wake-to-poll (raw)" => "When no coherent completed queue samples exist, the Ready histogram shows available legacy raw wake-to-poll latency instead. This task-global latency includes self-wake overlap with the preceding Running poll; it is NOT pure scheduler queue time. It never populates the Ready timeline or outstanding Ready age, which continue to use coherent queue evidence. Raw and pure-queue samples are never mixed.",
+    "Wake-to-poll (raw)" => "When no coherent completed queue samples exist, the Ready histogram shows available raw wake-to-poll latency instead. This task-global latency includes self-wake overlap with the preceding Running poll; it is NOT pure scheduler queue time. It never populates the Ready timeline or outstanding Ready age, which continue to use coherent queue evidence. Raw and pure-queue samples are never mixed.",
     "Left/Right / PgUp/PgDn" => "In Statistics, select the previous/next bucket or move five buckets. Up/Down also move one bucket. Click a thin bar or its baseline to inspect its duration range and count. This changes presentation only, not the window or metrics.",
     "Backspace / Enter" => "Enter drills Workers -> Tasks -> Statistics -> Operations -> Occurrences; Backspace reverses that path. Narrow terminals show the focused panel. Wide terminals keep worker activity and Statistics beside the task table, with operations, task-only occurrences and stack across the bottom.",
     "t / Poll / Ready" => "Switch the task duration histogram between worker-local completed polls and task-global completed ready waits; click Poll/Ready for direct selection. F1 explains the metrics.",
@@ -415,7 +446,7 @@ const RUNTIME_STATES: &Section = section!("TASK STATE VALUES";
     "Completed" => "A retained successful completion transition.",
     "Canceled" => "A retained cancellation transition.",
     "Panicked" => "A retained panic transition.",
-    "Unknown / incomplete state" => "No coherent source activity, legacy capture, or raced observation. Retained event gaps cannot prove current readiness or running age.",
+    "Unknown / incomplete state" => "No coherent source activity, or a raced observation. Retained event gaps cannot prove current readiness or running age.",
 );
 
 const IO_RESOURCES: &Section = section!("I/O RESOURCES";
@@ -556,7 +587,7 @@ const LIVE: &Section = section!("LIVE NAVIGATION - AFTER CLOSING HELP";
     "s" => "Run the selected Record and continue / Record and stop action. Analysis tables do not continuously refresh.",
     "c" => "Configure recording.",
     "d" => "Switch between Record and continue (default) and Record and stop.",
-    "C (uppercase)" => "Clear server event buffers without capturing; preserve recording policy, displayed snapshot and saved files. Stop and Clear require a supporting server; legacy servers report an explicit unsupported error.",
+    "C (uppercase)" => "Clear server event buffers without capturing; preserve recording policy, displayed snapshot and saved files. A disconnected server produces an error; commands are never replaced with a different action.",
     "F" => "Edit whole-record stack filters.",
     "Esc / q" => "Disconnect to browser / quit.",
     "A/E/X/R/I/C" => "Footer indicators: Allocations, general Events, Arc dereferences, Runtime tasks, I/O, Cache. Letter = enabled; '-' = disabled. Sampling/backtrace settings are in Info or c.",
@@ -573,7 +604,7 @@ const OFFLINE: &Section = section!("OFFLINE NAVIGATION - AFTER CLOSING HELP";
 mod tests {
     use super::*;
 
-    const CONTEXTS: [Context; 31] = [
+    const CONTEXTS: [Context; 34] = [
         Context::Browser,
         Context::Info,
         Context::NativeMemory,
@@ -584,6 +615,9 @@ mod tests {
         Context::NativeCaches,
         Context::NativeReturns,
         Context::NativeObservation,
+        Context::MimallocGlobal,
+        Context::MimallocOwner,
+        Context::MimallocClasses,
         Context::Allocations,
         Context::PrimitiveTypes,
         Context::PrimitiveOperations,
@@ -624,7 +658,6 @@ mod tests {
             for label in [
                 "Monitor (seismograph_cli)",
                 "Server (seismograph)",
-                "unknown (legacy server)",
                 "unknown (not recorded in snapshot)",
             ] {
                 assert!(help.contains(label), "{context:?}: missing {label}");

@@ -6,8 +6,7 @@ use super::filter_index::FilterIndex;
 
 pub(super) fn heap_error(allocator: Option<&crate::allocator_view::Snapshot>) -> Option<String> {
     allocator
-        .and_then(|snapshot| snapshot.native.as_ref())
-        .is_none()
+        .is_none_or(|snapshot| snapshot.native.is_none() && snapshot.mimalloc.is_none())
         .then(|| "Native allocator source unavailable; container allocation events remain available.".into())
 }
 
@@ -40,25 +39,24 @@ pub(super) fn prepare_with_progress(
     mut decoded: seismograph::snapshot::DecodedSnapshot,
     progress: &mut impl FnMut(Phase),
 ) -> Result<Box<CapturedSnapshot>, String> {
-    let mut allocator = None;
+    if decoded
+        .sources
+        .iter()
+        .any(|source| source.id == seismograph_rallocator::source::ID || source.id == seismograph_rallocator::source::MIMALLOC_ID)
+    {
+        progress(Phase::DecodeAllocator);
+    }
+    let mut allocator = Some(crate::allocator_sources::decode(&decoded.sources).map_err(|error| match error {
+        crate::snapshot_error::Error::DecodeAllocator(error) => super::Error::MemorySnapshot(error).to_string(),
+        error => error.to_string(),
+    })?);
     let mut runtime_source = None;
     for source in std::mem::take(&mut decoded.sources) {
-        if source.id == seismograph_rallocator::source::ID {
-            if allocator.is_some() {
-                return Err("duplicate native allocator source".into());
-            }
-            progress(Phase::DecodeAllocator);
-            let native = seismograph_rallocator::decode(&source.data)
-                .map_err(super::Error::MemorySnapshot)
-                .map_err(|error| error.to_string())?;
-            if !matches!(source.schema_version, 3 | seismograph_rallocator::source::SCHEMA_VERSION) {
-                return Err(format!("unsupported allocator source schema {}", source.schema_version));
-            }
-            let mut snapshot = crate::allocator_view::Snapshot::event_only(crate::allocator_view::Version::new(0, 1, 0));
-            snapshot.native = Some(std::sync::Arc::new(native));
-            allocator = Some(snapshot);
-        } else if source.id == seismograph_runtime::snapshot::source::ID {
+        if source.id == seismograph_runtime::snapshot::source::ID {
             progress(Phase::DecodeRuntime);
+            if source.schema_version != seismograph_runtime::snapshot::source::SCHEMA_VERSION {
+                return Err(crate::snapshot_error::Error::UnsupportedRuntimeSchema(source.schema_version).to_string());
+            }
             runtime_source =
                 Some(seismograph_runtime::snapshot::decode(&source.data).map_err(|error| format!("invalid runtime snapshot: {error}"))?);
         }
@@ -66,7 +64,8 @@ pub(super) fn prepare_with_progress(
     // Application events do not depend on the presence of an allocator source.
     let view = allocator.get_or_insert_with(|| crate::allocator_view::Snapshot::event_only(crate::allocator_view::Version::new(0, 1, 0)));
     let mut callers = seismograph_rallocator::events::callers(&decoded.events);
-    callers.session_id = view.native.as_ref().map_or(0, |native| native.session_id);
+    callers.session_id = view.session_id();
+    let identities = crate::allocation_identities::from_callers(&callers);
     view.callers = Some(callers);
 
     progress(Phase::AllocationIndex);
@@ -78,26 +77,13 @@ pub(super) fn prepare_with_progress(
         .map(|snapshot| MemorySnapshot::from_snapshot_with_deallocated(snapshot, &deallocated));
     let heap_error = heap_error(allocator.as_ref());
     progress(Phase::Symbols);
-    let mut addresses = allocator
-        .iter()
-        .flat_map(|allocator| allocator.addresses.iter().cloned())
-        .map(|lookup| (lookup.address, lookup))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    if let Some(source) = &mut runtime_source {
-        for lookup in std::mem::take(&mut source.addresses) {
-            addresses.insert(
-                lookup.address,
-                seismograph_rallocator::callers::AddressLookup::from_fields(seismograph_rallocator::callers::AddressLookupFields {
-                    address: lookup.address,
-                    symbol: lookup.symbol,
-                    filename: lookup.filename,
-                    line: lookup.line,
-                    column: lookup.column,
-                }),
-            );
-        }
-    }
-    let addresses = addresses.into_values().collect::<Vec<_>>();
+    let addresses = crate::snapshot_symbols::merge(
+        allocator.as_mut().map_or_else(Vec::new, |view| std::mem::take(&mut view.addresses)),
+        runtime_source
+            .as_mut()
+            .map_or_else(Vec::new, |source| std::mem::take(&mut source.addresses)),
+        std::mem::take(&mut decoded.symbols),
+    );
     if let Some(view) = &mut allocator {
         view.addresses.clone_from(&addresses);
     }
@@ -105,9 +91,10 @@ pub(super) fn prepare_with_progress(
     let allocations = allocator
         .as_ref()
         .map(|snapshot| AllocationSnapshot::from_snapshot_with_deallocated(snapshot, &deallocated));
-    let runtime = RuntimeSnapshot::from_events_with_progress(&decoded, &addresses, runtime_source.as_ref(), progress);
+    let runtime = RuntimeSnapshot::from_events_with_progress(&decoded, &addresses, runtime_source.as_ref(), identities.as_ref(), progress);
     progress(Phase::IndexStacks);
     let native = allocator.as_ref().and_then(|snapshot| snapshot.native.clone());
+    let mimalloc = allocator.as_ref().and_then(|snapshot| snapshot.mimalloc.clone());
     let filter_index = std::sync::Arc::new(FilterIndex::with_task_events(
         decoded,
         allocator,
@@ -115,11 +102,13 @@ pub(super) fn prepare_with_progress(
         addresses,
         deallocated,
         runtime.task_events.clone(),
+        identities,
     ));
     let filter_summary = filter_index.unfiltered_summary();
     progress(Phase::Ready);
     Ok(Box::new(CapturedSnapshot {
         native,
+        mimalloc,
         memory,
         allocations,
         heap_error,
@@ -181,23 +170,145 @@ mod tests {
 
     use super::{prepare, release_chunks, release_stacks};
 
+    #[test]
+    fn previous_runtime_envelopes_are_rejected_before_payload_decoding() {
+        for version in 0..seismograph_runtime::snapshot::source::SCHEMA_VERSION {
+            let mut source = runtime_source();
+            source.schema_version = version;
+            source.data.clear();
+            let error = prepare(DecodedSnapshot {
+                sources: vec![source],
+                ..DecodedSnapshot::default()
+            })
+            .err()
+            .unwrap();
+            assert_eq!(error, format!("unsupported runtime source schema {version}"));
+        }
+    }
+
+    #[test]
+    fn filtering_a_resize_preserves_the_original_thread_lifetime_relationship() {
+        use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind, Reallocation};
+
+        use super::super::data::ThreadOperationKind;
+        use super::super::filter::{FilterSpec, RuntimeStackMode};
+
+        let allocation = Allocation {
+            allocation_id: AllocationId::new(0x8000),
+            event_thread_id: EventThreadId::new(1001),
+            heap_id: HeapId::new(0),
+            heap_kind: HeapKind::General,
+            freed_after_heap_release: false,
+            address: Address::new(0x8000),
+            size: 64,
+            alignment: 16,
+        };
+        let raw = [
+            (EventKind::Allocation, EventPayload::Allocation(allocation), 0x100),
+            (
+                EventKind::Reallocation,
+                EventPayload::Reallocation(Reallocation {
+                    allocation_id: allocation.allocation_id,
+                    heap_id: allocation.heap_id,
+                    heap_kind: allocation.heap_kind,
+                    old_address: allocation.address,
+                    new_address: Address::new(0x9000),
+                    old_size: 64,
+                    new_size: 4096,
+                    alignment: 16,
+                }),
+                0x200,
+            ),
+            (
+                EventKind::Deallocation,
+                EventPayload::Allocation(Allocation {
+                    allocation_id: AllocationId::new(0x9000),
+                    event_thread_id: EventThreadId::new(1003),
+                    address: Address::new(0x9000),
+                    size: 4096,
+                    ..allocation
+                }),
+                0x100,
+            ),
+        ];
+        let decoded = DecodedSnapshot {
+            events: Events {
+                events: raw
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (kind, payload, frame))| Event {
+                        thread_id: ThreadId::new(index as u64 + 1),
+                        sequence: EventSequence::new(1),
+                        timestamp: EventTimestamp::from_ticks(index as u64 + 1),
+                        kind,
+                        payload,
+                        call_stack: vec![Address::new(frame)],
+                    })
+                    .collect(),
+                ..Events::default()
+            },
+            symbols: [(0x100, "app::work"), (0x200, "noise::resize")]
+                .map(|(address, name)| seismograph::snapshot::Symbol {
+                    address: Address::new(address),
+                    name: Some(name.into()),
+                    filename: None,
+                    line: None,
+                    column: None,
+                })
+                .into(),
+            ..DecodedSnapshot::default()
+        };
+
+        let original = prepare(decoded).unwrap();
+        let participants = |snapshot: &super::super::data::CapturedSnapshot| {
+            snapshot
+                .threads
+                .threads
+                .iter()
+                .find(|thread| thread.thread_id == 1)
+                .unwrap()
+                .operations
+                .iter()
+                .find(|operation| operation.kind == ThreadOperationKind::Allocation)
+                .unwrap()
+                .participants
+                .iter()
+                .map(|participant| participant.thread_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(participants(&original), [2, 3]);
+        let filtered = original
+            .filter_index
+            .as_ref()
+            .unwrap()
+            .render(&FilterSpec::parse("crate:app", "", false, RuntimeStackMode::Event).unwrap());
+
+        assert_eq!(participants(&filtered), [3]);
+        let allocations = filtered.allocations.as_ref().unwrap();
+        assert_eq!(allocations.records.len(), 2);
+        assert_eq!(
+            (allocations.hotspots[0].allocations, allocations.hotspots[0].live_allocations),
+            (1, 0)
+        );
+    }
+
     fn allocator_source(snapshot: &seismograph_rallocator::native::Snapshot) -> SourceSnapshot {
         let mut data = vec![0; seismograph_rallocator::encoded_len(snapshot).unwrap()];
         seismograph_rallocator::encode(snapshot, &mut data).unwrap();
         SourceSnapshot {
             id: seismograph_rallocator::source::ID,
             name: "allocator".into(),
-            schema_version: 3,
+            schema_version: seismograph_rallocator::source::SCHEMA_VERSION,
             data,
         }
     }
 
     fn runtime_source() -> SourceSnapshot {
-        // Runtime wire version 1, schema 3: no runtimes and one symbol lookup.
+        // Current runtime schema: no runtimes and one symbol lookup.
         let symbol = b"application::runtime";
         let mut data = b"SEISRUNT".to_vec();
         data.extend_from_slice(&1_u16.to_le_bytes());
-        data.extend_from_slice(&3_u16.to_le_bytes());
+        data.extend_from_slice(&seismograph_runtime::snapshot::source::SCHEMA_VERSION.to_le_bytes());
         data.extend_from_slice(&0_u32.to_le_bytes());
         data.extend_from_slice(&1_u32.to_le_bytes());
         data.extend_from_slice(&16_u64.to_le_bytes());
@@ -209,13 +320,13 @@ mod tests {
         SourceSnapshot {
             id: seismograph_runtime::snapshot::source::ID,
             name: "runtime".into(),
-            schema_version: 3,
+            schema_version: seismograph_runtime::snapshot::source::SCHEMA_VERSION,
             data,
         }
     }
 
     #[test]
-    fn preparation_uses_container_events_and_runtime_symbols_over_legacy_copies() {
+    fn preparation_uses_container_events_and_runtime_source_symbols() {
         let allocator = seismograph_rallocator::native::Snapshot::default();
         let mut lookup = AddressLookup::default();
         lookup.address = 16;
@@ -365,6 +476,82 @@ mod tests {
             ["application::runtime"]
         );
         assert!(capture.native.is_none());
+    }
+
+    #[test]
+    fn common_symbols_render_and_filter_allocations_without_a_source() {
+        use super::super::data::AllocationStackFilter;
+        use super::super::filter::{FilterSpec, RuntimeStackMode};
+
+        let mut decoded = allocation_capture();
+        decoded.sources.clear();
+        decoded.symbols = vec![
+            seismograph::snapshot::Symbol {
+                address: Address::new(16),
+                name: Some("application::allocate".into()),
+                filename: Some("src\\allocate.rs".into()),
+                line: Some(9),
+                column: None,
+            },
+            seismograph::snapshot::Symbol {
+                address: Address::new(32),
+                name: Some("application::release".into()),
+                filename: None,
+                line: None,
+                column: None,
+            },
+        ];
+
+        let capture = prepare(decoded).unwrap();
+        let filtered = capture
+            .filter_index
+            .as_ref()
+            .unwrap()
+            .render(&FilterSpec::parse("function:application::allocate", "", false, RuntimeStackMode::Event).unwrap());
+
+        assert_eq!(
+            capture.allocations.as_ref().unwrap().records[0].stack(AllocationStackFilter::All),
+            ["application::allocate (allocate.rs:9)"]
+        );
+        let filtered = filtered.allocations.as_ref().unwrap();
+        assert_eq!(filtered.records.len(), 3);
+        assert!(
+            filtered
+                .records
+                .iter()
+                .all(|record| { record.stack(AllocationStackFilter::All) == ["application::allocate (allocate.rs:9)"] })
+        );
+        assert!(capture.native.is_none() && capture.mimalloc.is_none());
+    }
+
+    #[test]
+    fn unresolved_common_symbols_preserve_distinct_frame_addresses() {
+        use super::super::data::AllocationStackFilter;
+
+        let mut decoded = allocation_capture();
+        decoded.sources.clear();
+        let unresolved = |address| seismograph::snapshot::Symbol {
+            address: Address::new(address),
+            name: None,
+            filename: None,
+            line: None,
+            column: None,
+        };
+        decoded.symbols = vec![unresolved(16), unresolved(32)];
+
+        let capture = prepare(decoded).unwrap();
+        let records = &capture.allocations.as_ref().unwrap().records;
+
+        assert_eq!(
+            (
+                records[0].stack(AllocationStackFilter::All),
+                records[1].stack(AllocationStackFilter::All),
+            ),
+            (
+                ["0x0000000000000010".to_owned()].as_slice(),
+                ["0x0000000000000020".to_owned()].as_slice(),
+            )
+        );
     }
 
     #[test]

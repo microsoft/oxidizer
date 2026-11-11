@@ -100,15 +100,10 @@ pub(crate) struct Metadata {
     pub(crate) capture_duration_nanos: u64,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct SkippedSection {
-    pub(crate) id: u16,
-    pub(crate) version: u16,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Snapshot {
     pub(crate) native: Option<std::sync::Arc<seismograph_rallocator::native::Snapshot>>,
+    pub(crate) mimalloc: Option<std::sync::Arc<seismograph_rallocator::snapshot::Snapshot>>,
     pub(crate) metadata: Metadata,
     pub(crate) allocator_state_available: bool,
     pub(crate) stats: Stats,
@@ -120,15 +115,15 @@ pub(crate) struct Snapshot {
     pub(crate) runtime_events: Option<seismograph::recorder::event::Events>,
     pub(crate) histograms: Histograms,
     pub(crate) addresses: Vec<seismograph_rallocator::callers::AddressLookup>,
-    pub(crate) skipped_sections: Vec<SkippedSection>,
 }
 impl Snapshot {
     pub(crate) fn new(producer_version: Version) -> Self {
         Self {
             native: None,
+            mimalloc: None,
             metadata: Metadata {
-                wire_format_version: 1,
-                telemetry_schema_version: 3,
+                wire_format_version: 10,
+                telemetry_schema_version: seismograph_rallocator::snapshot::SCHEMA_VERSION,
                 producer_version,
                 capture_duration_nanos: 0,
             },
@@ -142,12 +137,20 @@ impl Snapshot {
             runtime_events: None,
             histograms: Histograms::default(),
             addresses: Vec::new(),
-            skipped_sections: Vec::new(),
         }
     }
     pub(crate) fn event_only(producer_version: Version) -> Self {
         let mut snapshot = Self::new(producer_version);
         snapshot.allocator_state_available = false;
         snapshot
+    }
+
+    pub(crate) fn session_id(&self) -> u64 {
+        match (self.native.as_deref(), self.mimalloc.as_deref()) {
+            (Some(native), Some(mimalloc)) if native.session_id != mimalloc.header.session_id => 0,
+            (Some(native), _) => native.session_id,
+            (_, Some(mimalloc)) => mimalloc.header.session_id,
+            _ => 0,
+        }
     }
 }

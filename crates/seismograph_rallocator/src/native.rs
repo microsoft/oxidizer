@@ -3,50 +3,9 @@
 
 //! Native v4 owner observations, separate from application allocation events.
 
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
-
-static PUBLICATION_ENABLED: AtomicBool = AtomicBool::new(true);
-static OBSERVATION_ROUND: AtomicU64 = AtomicU64::new(1);
-static EPOCH: OnceLock<Instant> = OnceLock::new();
-
-/// Whether allocation/free operations with an enabled policy can publish observations.
-///
-/// Event sampling does not control native-state publication.
-#[must_use]
-pub fn publication_enabled() -> bool {
-    PUBLICATION_ENABLED.load(Ordering::Relaxed)
-}
-
-/// Enables or disables publication; this does not enable event recording.
-pub fn set_publication_enabled(enabled: bool) {
-    PUBLICATION_ENABLED.store(enabled, Ordering::Relaxed);
-}
-
-/// Round requested by the most recent collector or explicit app-side request.
-#[must_use]
-pub fn observation_round() -> u64 {
-    OBSERVATION_ROUND.load(Ordering::Relaxed)
-}
-
-/// Requests another observation on the next allocation/free with an enabled policy.
-///
-/// Collectors request the next round only after collection. Monitor polling
-/// drives successive rounds; applications can also schedule requests explicitly.
-/// No timer or background worker is started. Saturates instead of wrapping.
-pub fn request_observation() -> u64 {
-    let previous = OBSERVATION_ROUND.try_update(Ordering::Relaxed, Ordering::Relaxed, |round| Some(round.saturating_add(1)));
-    match previous {
-        Ok(round) | Err(round) => round.saturating_add(1),
-    }
-}
-
-/// Process-relative monotonic time, saturated to the wire representation.
-#[must_use]
-pub fn captured_nanos() -> u64 {
-    u64::try_from(EPOCH.get_or_init(Instant::now).elapsed().as_nanos()).unwrap_or(u64::MAX)
-}
+// Preserve existing snmalloc control paths. New code uses the backend-neutral
+// snapshot module; both paths refer to the same process-wide controls.
+pub use crate::observation::{captured_nanos, observation_round, publication_enabled, request_observation, set_publication_enabled};
 
 /// Number of native small-object size classes.
 pub const CLASS_COUNT: usize = 44;
@@ -207,7 +166,7 @@ pub enum ObservationSource {
     /// No safely readable observation exists.
     #[default]
     Unobserved,
-    /// A thread published after an accepted recorded allocation/free completed.
+    /// A thread published after an accepted recorded allocation, resize, or free completed.
     Published,
     /// The collector inspected a returned owner under the pool lock.
     IdleInspection,

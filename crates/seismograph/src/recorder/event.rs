@@ -6,7 +6,7 @@
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use super::alloc::{Allocation, AllocationId};
+use super::alloc::{Allocation, AllocationId, Reallocation};
 use super::io::IoEvent;
 use super::runtime::RuntimeEvent;
 use super::thread::{ThreadId, ThreadLog};
@@ -15,7 +15,7 @@ use super::thread::{ThreadId, ThreadLog};
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
 pub enum EventClass {
-    /// Allocation and deallocation lifecycle events.
+    /// Allocation, resize, and deallocation lifecycle events.
     Allocation,
     /// Primitive events other than Arc dereferences.
     General,
@@ -295,6 +295,8 @@ pub enum EventKind {
     Allocation,
     /// An allocator released an allocation.
     Deallocation,
+    /// An allocator successfully resized an allocation, in place or by moving it.
+    Reallocation,
     /// A logical I/O read operation began.
     IoReadStarted,
     /// A logical I/O read operation finished.
@@ -381,6 +383,7 @@ impl EventKind {
             Self::ArcDrop => 13,
             Self::Allocation => 14,
             Self::Deallocation => 15,
+            Self::Reallocation => 87,
             Self::ArcRelocate => 16,
             Self::BarrierAccess => 17,
             Self::BarrierContention => 18,
@@ -536,6 +539,7 @@ impl EventKind {
             81 => Some(Self::CachePromotionFailed),
             82 => Some(Self::CacheRefreshSuppressed),
             83 => Some(Self::TaskReady),
+            87 => Some(Self::Reallocation),
             _ => None,
         }
     }
@@ -596,6 +600,8 @@ pub enum EventPayload {
     Numeric(NumericEvent),
     /// Allocator lifecycle fields.
     Allocation(Allocation),
+    /// Old and new storage for one successful allocation resize.
+    Reallocation(Reallocation),
     /// Runtime, worker, task, transfer, or I/O context.
     Runtime(RuntimeEvent),
     /// I/O resource, operation, and buffer context.
@@ -627,6 +633,7 @@ impl Event {
             EventPayload::Object(object_id) => Some(object_id),
             EventPayload::Numeric(payload) => Some(payload.object_id),
             EventPayload::Allocation(allocation) => Some(ObjectId::new(allocation.allocation_id.get())),
+            EventPayload::Reallocation(resize) => Some(ObjectId::new(resize.allocation_id.get())),
             EventPayload::Runtime(_) => None,
             EventPayload::Io(io) => Some(ObjectId::new(io.resource_id.get())),
         }
@@ -641,11 +648,22 @@ impl Event {
         }
     }
 
-    /// Returns allocator fields for allocation lifecycle events.
+    /// Returns allocator fields for allocation and deallocation events.
+    ///
+    /// For resize events, use [`Self::reallocation`].
     #[must_use]
     pub const fn allocation(&self) -> Option<Allocation> {
         match self.payload {
             EventPayload::Allocation(allocation) => Some(allocation),
+            _ => None,
+        }
+    }
+
+    /// Returns old and new storage for a successful allocation resize.
+    #[must_use]
+    pub const fn reallocation(&self) -> Option<Reallocation> {
+        match self.payload {
+            EventPayload::Reallocation(resize) => Some(resize),
             _ => None,
         }
     }
@@ -674,7 +692,7 @@ impl EventKind {
     #[must_use]
     pub const fn class(self) -> EventClass {
         match self {
-            Self::Allocation | Self::Deallocation => EventClass::Allocation,
+            Self::Allocation | Self::Reallocation | Self::Deallocation => EventClass::Allocation,
             Self::ArcDeref => EventClass::ArcDereference,
             Self::RuntimeCreated
             | Self::RuntimeStopping
@@ -803,6 +821,17 @@ impl Record {
         Self::allocation_lifecycle(EventKind::Deallocation, allocation)
     }
 
+    /// Creates a successful resize event before the old storage is retired.
+    #[must_use]
+    pub fn reallocation(resize: Reallocation) -> Self {
+        Self {
+            timestamp: EventTimestamp::now(),
+            kind: EventKind::Reallocation,
+            payload: EventPayload::Reallocation(resize),
+            backtrace: BacktraceCapture::Configured,
+        }
+    }
+
     /// Creates a runtime lifecycle or scheduling event.
     ///
     /// Use a runtime event `kind` and a timestamp from [`EventTimestamp`].
@@ -847,6 +876,7 @@ impl Record {
             EventPayload::Object(object_id) => object_id,
             EventPayload::Numeric(payload) => payload.object_id,
             EventPayload::Allocation(allocation) => ObjectId::new(AllocationId::get(allocation.allocation_id)),
+            EventPayload::Reallocation(resize) => ObjectId::new(resize.allocation_id.get()),
             EventPayload::Runtime(runtime) => ObjectId::new(runtime.subject_id),
             EventPayload::Io(io) => ObjectId::new(io.resource_id.get()),
         }
@@ -933,7 +963,7 @@ mod tests {
 
     #[test]
     fn every_event_kind_round_trips_its_stable_wire_value() {
-        for value in (1..=49).chain(54..=86) {
+        for value in (1..=49).chain(54..=87) {
             let kind = EventKind::from_wire_value(value).unwrap();
             assert_eq!(kind.wire_value(), value);
         }

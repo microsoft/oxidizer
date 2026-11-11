@@ -362,7 +362,7 @@ fn strict_flags_schema_reserved_and_source_tags() {
     for (offset, value, expected) in [
         (0, 0, ErrorKind::InvalidMagic),
         (8, 1, ErrorKind::UnsupportedSchema(1)),
-        (10, 1, ErrorKind::Malformed),
+        (10, 0, ErrorKind::Malformed),
         (44, 2, ErrorKind::Malformed),
         (45, 2, ErrorKind::Malformed),
         (595 + 16, 2, ErrorKind::Malformed),
@@ -392,10 +392,7 @@ fn malformed_payload_diagnostics_explain_the_rejection() {
     zero_owner[595..603].fill(0);
     let cases = [
         (decode(&invalid_magic).unwrap_err(), "the magic bytes are invalid"),
-        (
-            decode(&unsupported_schema).unwrap_err(),
-            "schema 7 is unsupported; expected schema 3 or 4",
-        ),
+        (decode(&unsupported_schema).unwrap_err(), "schema 7 is unsupported by this decoder"),
         (decode(&[]).unwrap_err(), "the payload ended before all fields were available"),
         (
             encode(&fixture(), &mut []).unwrap_err(),

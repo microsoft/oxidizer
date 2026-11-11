@@ -16,9 +16,9 @@ use seismograph_protocol::monitor::MonitorDescriptor;
 #[cfg(test)]
 use super::app::HeapFocus;
 use super::app::{
-    ActivitySample, AllocationViewState, App, CacheFocus, CacheViewState, CaptureMode, CaptureStep, HeapViewState, IoFocus, IoViewState,
-    MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeViewState, Screen, ThreadFocus, ThreadViewState,
-    format_sampling_percentage, recording_policy_label,
+    ActivitySample, AllocationViewState, AllocatorBackend, App, CacheFocus, CacheViewState, CaptureMode, CaptureStep, HeapViewState,
+    IoFocus, IoViewState, MonitorTab, PrimitiveFocus, PrimitiveViewState, RecordingConfigurationPopup, RuntimeViewState, Screen,
+    ThreadFocus, ThreadViewState, format_sampling_percentage, recording_policy_label,
 };
 use super::data::{
     AllocationHotspot, AllocationSnapshot, AllocationSort, AllocationStackFilter, CapturedSnapshot, PrimitiveSnapshot, PrimitiveSort,
@@ -68,7 +68,7 @@ impl App {
         let [body, filter_banner, footer] = self.screen_areas(frame.area());
         let server_version = match &self.screen {
             Screen::Browse => "not connected",
-            Screen::Connected { .. } => self.server_version.as_deref().unwrap_or("unknown (legacy server)"),
+            Screen::Connected { .. } => self.server_version.as_deref().unwrap_or("unknown"),
             Screen::Offline { .. } => "unknown (not recorded in snapshot)",
         };
         let snapshot_view = match &self.screen {
@@ -305,11 +305,11 @@ fn draw_connected(frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect, v
     let panels = view.panels.arrange(view.tab, content).areas;
     match view.tab {
         MonitorTab::Info => draw_snapshot_info(frame, content, view),
-        MonitorTab::Heaps => draw_native(
+        MonitorTab::Heaps => draw_allocator(
             frame,
             &view.panels.rows,
             content,
-            view.snapshot.and_then(|capture| capture.native.as_deref()),
+            view.snapshot,
             view.snapshot_error
                 .or_else(|| view.snapshot.and_then(|capture| capture.heap_error.as_deref())),
             view.heap_view,
@@ -870,8 +870,8 @@ fn draw_allocation_records(
         )
         .block(
             Block::default()
-                .title(" Retained allocation/free records · e hotspots · ↑↓ select ")
-                .title_bottom(" View IDs correlate retained evidence only; orphan frees remain explicit ")
+                .title(" Retained allocation/resize/free records · e hotspots · ↑↓ select ")
+                .title_bottom(" View IDs correlate retained evidence only; orphan frees/resizes remain explicit ")
                 .borders(Borders::ALL),
         )
         .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
@@ -884,8 +884,8 @@ fn draw_allocation_records(
         draw_empty_panel_with_message(
             frame,
             stack_area,
-            " Allocation/free evidence ",
-            Some("No retained allocation or free records."),
+            " Allocation/resize/free evidence ",
+            Some("No retained allocation, resize, or free records."),
         );
         return;
     };
@@ -1705,6 +1705,46 @@ fn primitive_selection_line(line: Line<'static>, selected: bool, focused: bool) 
     }
 }
 
+fn draw_allocator(
+    frame: &mut ratatui::Frame<'_>,
+    mouse_rows: &MouseRows,
+    area: Rect,
+    snapshot: Option<&CapturedSnapshot>,
+    unavailable: Option<&str>,
+    view: HeapViewState,
+) {
+    let backend = view.backend(snapshot);
+    let area = if snapshot.is_some_and(|capture| capture.native.is_some() && capture.mimalloc.is_some()) {
+        let [selector, content] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
+        frame.render_widget(
+            Paragraph::new(match backend {
+                AllocatorBackend::Snmalloc => " Backend: snmalloc · b: switch to mimalloc · both sources retained",
+                AllocatorBackend::Mimalloc => " Backend: mimalloc · b: switch to snmalloc · both sources retained",
+            }),
+            selector,
+        );
+        content
+    } else {
+        area
+    };
+    if backend == AllocatorBackend::Mimalloc
+        && let Some((header, state)) = snapshot
+            .and_then(|capture| capture.mimalloc.as_deref())
+            .and_then(crate::mimalloc_view::parts)
+    {
+        super::mimalloc_ui::draw(frame, mouse_rows, area, header, state, view.mimalloc, unavailable);
+    } else {
+        draw_native(
+            frame,
+            mouse_rows,
+            area,
+            snapshot.and_then(|capture| capture.native.as_deref()),
+            unavailable,
+            view,
+        );
+    }
+}
+
 fn draw_native(
     frame: &mut ratatui::Frame<'_>,
     mouse_rows: &MouseRows,
@@ -2271,11 +2311,13 @@ mod tests {
             capture_duration_nanos: 1,
             events,
             sources: Vec::new(),
+            symbols: Vec::new(),
         };
         let runtime = super::super::data::RuntimeSnapshot::from_events(&decoded, &addresses, None);
 
         Box::new(CapturedSnapshot {
             native: Some(std::sync::Arc::new(crate::native_view::fixture::snapshot())),
+            mimalloc: None,
             memory: Some(MemorySnapshot::from_snapshot(&allocator)),
             allocations: Some(AllocationSnapshot::from_snapshot(&allocator)),
             heap_error: None,
@@ -2338,13 +2380,13 @@ mod tests {
         assert!(!output.contains("Server (seismograph): 98.76.54"));
         assert!(matches!(app.screen, Screen::Connected { snapshot: None, .. }));
 
-        // Selecting another (legacy) instance must not retain the previous server version.
+        // Selecting another instance must not retain the previous server version.
         app.screen = Screen::Browse;
         app.instances[0].server_version = None;
         app.handle_key(KeyCode::Enter);
-        let legacy = render(&app);
-        assert!(legacy.contains("Server (seismograph): unknown (legacy server)"));
-        assert!(!legacy.contains("12.34.56-rc.7"));
+        let output = render(&app);
+        assert!(output.contains("Server (seismograph): unknown"));
+        assert!(!output.contains("12.34.56-rc.7"));
     }
 
     #[test]
@@ -2357,7 +2399,6 @@ mod tests {
             let output = render(&app);
             assert!(output.contains(&format!("Monitor (seismograph_cli): {}", env!("CARGO_PKG_VERSION"))));
             assert!(output.contains("Server (seismograph): unknown (not recorded in snapshot)"));
-            assert!(!output.contains("unknown (legacy server)"));
         }
     }
 
@@ -2978,7 +3019,7 @@ mod tests {
         assert!(app.allocation_view.events);
         let output = render(&app);
         for label in [
-            "Retained allocation/free records",
+            "Retained allocation/resize/free records",
             "actor recorder thread",
             "View-local lifetime",
             "Captured operation stack",
@@ -3005,7 +3046,7 @@ mod tests {
         };
         app.handle_key(KeyCode::Char('e'));
         let output = render(&app);
-        assert!(output.contains("No retained allocation or free records."), "{output}");
+        assert!(output.contains("No retained allocation, resize, or free records."), "{output}");
         assert!(!output.contains("Captured operation stack:"), "{output}");
     }
 
@@ -4797,6 +4838,6 @@ mod tests {
             }));
         }
 
-        assert_eq!(stable_digest(&output), (691_747, 16_339_594_940_777_483_572));
+        assert_eq!(stable_digest(&output), (690_177, 2_507_612_830_443_821_740));
     }
 }

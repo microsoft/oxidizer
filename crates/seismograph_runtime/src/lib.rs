@@ -21,6 +21,8 @@
 //! [`snapshot::CaptureOptions::measure_for`]. The diagnostic caller waits for that
 //! interval, not the workers. Private observation windows prevent a poll from a
 //! previous request from entering a new measurement window.
+//! [`snapshot::decode`] accepts only wire version 1 and source schema 9.
+//! Other versions are rejected.
 //!
 //! Runtime-event recording is separate from task inspection. It retains only
 //! events emitted after recording starts. Missing creation times, wake ages,

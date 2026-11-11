@@ -5,45 +5,121 @@
 
 use std::collections::{HashMap, HashSet};
 
-use seismograph::recorder::alloc::Allocation;
-use seismograph::recorder::event::{Event as RuntimeEvent, EventKind as RuntimeKind, Events};
+use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId};
+use seismograph::recorder::event::{Address, Event as RuntimeEvent, EventKind as RuntimeKind, Events};
 
-use crate::callers::{Callers, Event, EventKind, HeapKind, ThreadLog, ThreadName};
+use crate::callers::{Callers, Event, EventKind, HeapKind, Resize, ThreadLog, ThreadName};
 
-// Only these runtime heap kinds have a legacy caller-view representation.
-const LEGACY_HEAP_KINDS: [(seismograph::recorder::alloc::HeapKind, HeapKind); 3] = [
+const HEAP_KINDS: [(seismograph::recorder::alloc::HeapKind, HeapKind); 3] = [
     (seismograph::recorder::alloc::HeapKind::General, HeapKind::General),
     (seismograph::recorder::alloc::HeapKind::Bump, HeapKind::Bump),
     (seismograph::recorder::alloc::HeapKind::Thread, HeapKind::Thread),
 ];
 
-fn chronological_allocations(events: &Events) -> Vec<(usize, &RuntimeEvent, Allocation, HeapKind)> {
+type CorrelationKey = (AllocationId, Address);
+type ProjectedInput<'a> = (usize, &'a RuntimeEvent, Allocation, HeapKind, Option<Resize>);
+
+fn chronological_allocations(events: &Events) -> Vec<ProjectedInput<'_>> {
     let mut allocations = events
         .events
         .iter()
         .enumerate()
         .filter_map(|(index, event)| {
-            let allocation = event.allocation()?;
-            LEGACY_HEAP_KINDS
-                .iter()
-                .find_map(|(runtime, legacy)| (*runtime == allocation.heap_kind).then_some((index, event, allocation, *legacy)))
+            if !matches!(
+                event.kind,
+                RuntimeKind::Allocation | RuntimeKind::Deallocation | RuntimeKind::Reallocation
+            ) {
+                return None;
+            }
+            let (allocation, resize) = if let Some(resize) = event.reallocation() {
+                (
+                    Allocation {
+                        allocation_id: resize.allocation_id,
+                        event_thread_id: EventThreadId::new(0),
+                        heap_id: resize.heap_id,
+                        heap_kind: resize.heap_kind,
+                        freed_after_heap_release: false,
+                        address: resize.new_address,
+                        size: resize.new_size,
+                        alignment: resize.alignment,
+                    },
+                    Some(Resize {
+                        old_address: resize.old_address.get(),
+                        old_size: resize.old_size,
+                    }),
+                )
+            } else {
+                (event.allocation()?, None)
+            };
+            HEAP_KINDS.iter().find_map(|(runtime, projected)| {
+                (*runtime == allocation.heap_kind).then_some((index, event, allocation, *projected, resize))
+            })
         })
         .collect::<Vec<_>>();
-    allocations.sort_by_key(|(_, event, _, _)| (event.timestamp.ticks(), event.thread_id.get(), event.sequence.get()));
+    allocations.sort_by_key(|(_, event, _, _, _)| (event.timestamp.ticks(), event.thread_id.get(), event.sequence.get()));
     allocations
 }
 
-/// Projects authoritative container events into the legacy caller-view model.
+struct Lifetime {
+    thread_log_id: u64,
+    allocation_recorded: bool,
+    keys: [CorrelationKey; 2],
+    resized_size: Option<u64>,
+}
+
+impl Lifetime {
+    fn project(&self, identity: u64, event: &RuntimeEvent, allocation: Allocation, heap_kind: HeapKind, resize: Option<Resize>) -> Event {
+        let kind = match event.kind {
+            RuntimeKind::Allocation => EventKind::Allocated,
+            RuntimeKind::Reallocation => EventKind::Reallocated,
+            _ => EventKind::Deallocated,
+        };
+        Event {
+            allocation_recorded: self.allocation_recorded,
+            thread_log_id: self.thread_log_id,
+            recorder_thread_id: event.thread_id.get(),
+            event_thread_id: if allocation.event_thread_id.get() == 0 {
+                event.thread_id.get()
+            } else {
+                allocation.event_thread_id.get()
+            },
+            sequence: event.sequence.get(),
+            allocation_id: identity,
+            kind,
+            heap_id: allocation.heap_id.get(),
+            heap_kind,
+            freed_after_heap_release: allocation.freed_after_heap_release,
+            address: allocation.address.get(),
+            size: allocation.size,
+            align: allocation.alignment,
+            reallocation: resize,
+            resized_size: None,
+            call_stack: event.call_stack.iter().map(|address| address.get()).collect(),
+        }
+    }
+}
+
+fn remove_keys(pending: &mut HashMap<CorrelationKey, u64>, lifetime: &Lifetime, identity: u64) {
+    for key in lifetime.keys {
+        if pending.get(&key) == Some(&identity) {
+            pending.remove(&key);
+        }
+    }
+}
+
+/// Projects authoritative container events into the caller-view model.
 ///
 /// Unmatched allocation records are not proof of live memory. Counterpart records
 /// may be absent across intervals, suppression, sampling or buffer overwrites.
 /// Address correlation keys can repeat. View-local IDs pair only the most recent
-/// preceding retained allocation with a free; they do not survive captures.
+/// preceding retained allocation with a free. Resizes preserve that identity
+/// and replace its storage keys. These identities do not survive captures.
 /// Pairing uses timestamp, recorder thread, then sequence order. Exact ties retain
 /// input order, and the projected events retain their original recorder order.
 #[must_use]
 pub fn callers(events: &Events) -> Callers {
     let mut pending = HashMap::new();
+    let mut lifetimes = HashMap::<u64, Lifetime>::new();
     let mut deallocated = HashSet::new();
     let mut result = Callers {
         total_events: events.total_events,
@@ -70,44 +146,36 @@ pub fn callers(events: &Events) -> Callers {
     }
     let allocations = chronological_allocations(events);
     let mut projected_events = Vec::with_capacity(allocations.len());
-    for (index, event, allocation, heap_kind) in allocations {
-        if event.kind != RuntimeKind::Allocation && event.kind != RuntimeKind::Deallocation {
-            continue;
-        }
-        let key = (allocation.allocation_id, allocation.address);
-        let identity = (index as u64 + 1, event.thread_id.get());
-        let ((allocation_id, thread_log_id), allocation_recorded) = if event.kind == RuntimeKind::Allocation {
-            pending.insert(key, identity);
-            (identity, true)
-        } else if let Some(identity) = pending.remove(&key) {
-            deallocated.insert(identity.0);
-            (identity, true)
+    for (index, event, allocation, heap_kind, resize) in allocations {
+        let address = resize.map_or(allocation.address, |resize| Address::new(resize.old_address));
+        let old_key = (allocation.allocation_id, address);
+        let allocation_id = if event.kind == RuntimeKind::Allocation {
+            index as u64 + 1
         } else {
-            (identity, false)
+            pending.get(&old_key).copied().unwrap_or(index as u64 + 1)
         };
-        let projected = Event {
-            allocation_recorded,
-            thread_log_id,
-            event_thread_id: if allocation.event_thread_id.get() == 0 {
-                event.thread_id.get()
-            } else {
-                allocation.event_thread_id.get()
-            },
-            sequence: event.sequence.get(),
-            allocation_id,
-            kind: if event.kind == RuntimeKind::Allocation {
-                EventKind::Allocated
-            } else {
-                EventKind::Deallocated
-            },
-            heap_id: allocation.heap_id.get(),
-            heap_kind,
-            freed_after_heap_release: allocation.freed_after_heap_release,
-            address: allocation.address.get(),
-            size: allocation.size,
-            align: allocation.alignment,
-            call_stack: event.call_stack.iter().map(|address| address.get()).collect(),
-        };
+        let lifetime = lifetimes.entry(allocation_id).or_insert_with(|| Lifetime {
+            thread_log_id: event.thread_id.get(),
+            allocation_recorded: event.kind == RuntimeKind::Allocation,
+            keys: [old_key; 2],
+            resized_size: None,
+        });
+        remove_keys(&mut pending, lifetime, allocation_id);
+        if event.kind == RuntimeKind::Deallocation {
+            deallocated.insert(allocation_id);
+        } else if resize.is_some() {
+            lifetime.keys = [
+                (allocation.allocation_id, allocation.address),
+                (AllocationId::new(allocation.address.get()), allocation.address),
+            ];
+            lifetime.resized_size = Some(allocation.size);
+            for key in lifetime.keys {
+                pending.insert(key, allocation_id);
+            }
+        } else {
+            pending.insert(old_key, allocation_id);
+        }
+        let projected = lifetime.project(allocation_id, event, allocation, heap_kind, resize);
         if let Some(name) = recorder_names.get(&event.thread_id.get()) {
             actor_names.insert(projected.event_thread_id, *name);
         }
@@ -122,12 +190,14 @@ pub fn callers(events: &Events) -> Callers {
     }
     projected_events.sort_unstable_by_key(|(index, _)| *index);
     result.events = projected_events.into_iter().map(|(_, event)| event).collect();
-    for event in &result.events {
+    for event in &mut result.events {
+        event.resized_size = lifetimes.get(&event.allocation_id).and_then(|lifetime| lifetime.resized_size);
         if event.kind == EventKind::Allocated
             && !deallocated.contains(&event.allocation_id)
             && let Some(index) = log_indexes.get(&event.thread_log_id)
         {
-            let bucket = (u64::BITS - event.size.leading_zeros()) as usize;
+            let size = event.resized_size.unwrap_or(event.size);
+            let bucket = (u64::BITS - size.leading_zeros()) as usize;
             result.threads[*index].live_histogram[bucket] += 1;
         }
     }

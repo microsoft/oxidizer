@@ -19,8 +19,9 @@ The CLI renders common thread, stack, and runtime-event data directly.
 Rallocator payloads use the built-in schema-specific renderer; unknown
 sources remain visible in the source inventory.
 
-**Native v4**, immediately left of Allocations, explores the global backend
-and every inventoried owner endpoint, including active never-observed owners.
+**Native v4**, immediately left of Allocations, has separate backend views.
+The snmalloc view explores its global backend and every inventoried owner
+endpoint, including active never-observed owners.
 The top diagram follows OS reservations through the shared backend to owners,
 slabs, ranges, caches and returns. Select Memory, Global backend or an owner
 with Up/Down, then Enter to focus category details, subsystem choices and class details.
@@ -38,19 +39,41 @@ Native capacity is not application-live memory, batching budget is not pending
 bytes, and global cached ranges are not guaranteed physically decommitted.
 Self-publication defaults on but costs nothing with recording off. Capture
 requests the next publication round only after collection. Operations publish
-only after an accepted recorded allocation/free event and the native operation
+only after an accepted recorded allocation, resize, or free event and the native operation
 completes; sampled-out events and merely enabled attempts do not contribute.
 Explicit app-side requests also work, without timers or background workers.
 Offline files never request new publications.
 
 In **Allocations**, press `e` to switch between grouped hotspots and individual
-allocation/free records, including actor names, operation stacks, requested
-sizes, addresses, view-local lifetime IDs and explicit orphan frees.
+allocation/resize/free records, including actor names, operation stacks,
+requested sizes, addresses, view-local lifetime IDs and explicit orphan records.
+A resize row shows the old and new storage. It keeps the original lifetime ID.
+Hotspots count the original allocation once and use its last retained size for unmatched bytes.
 Address reuse does not merge retained lifetimes; filtering preserves original
 correlation IDs and whether a free had a retained allocation origin.
 Export the same native inventory with
 `seismograph snapshot html capture.seismograph report.html`.
-Schema 3 is required; older allocator payload schemas are rejected.
+The viewer accepts only allocator schema 5, runtime schema 9, and snapshot format 10.
+Snapshot files carry resize events and symbols for recorded event stacks.
+The application resolves names and source locations during capture.
+Live and offline views use this data without the original executable.
+Frames without captured symbols remain addresses.
+Mimalloc state keeps its own heap lifetimes, page bins, abandoned index,
+arena bitmaps, and direct OS observations. It does not use snmalloc slab fields.
+If both sources are present, press `b` in Native v4 to switch backends.
+Each backend keeps its own selection. HTML reports include both explorers.
+In mimalloc, select the global backend or a heap with Up/Down.
+Enter focuses global details or the 74-bin class list. Enter again focuses
+class details. Home/End and PgUp/PgDn navigate or scroll the focused pane.
+Backspace/Escape returns one level. Selection follows stable heap identifiers
+across live captures. Exited heaps retain historical state.
+Busy, unobserved, unavailable, and truncated observations remain explicit.
+Capacity is not application liveness. Used blocks include pending remote frees.
+Queued pages exclude abandoned pages. Global scans read independent atomics.
+Arena commitment includes tracked metadata. Direct OS commitment covers data
+only, so total OS commitment is unknown. Bitmap commit is not residency.
+Arena metadata is already included in reservations and is never added twice.
+Event filters preserve both backends and their original observation state.
 
 Run `seismograph monitor` to capture a running application, or
 `seismograph view "C:\captures\capture.seismograph"` to inspect a native
@@ -69,8 +92,8 @@ locate custom XDG paths. Elevated Windows discovery enumerates registered
 user profiles.
 Invalid discovery entries are reported as warnings without hiding reachable
 applications belonging to other users.
-Rebuild both applications and the CLI for monitor protocol version 8; the
-former TCP/token protocol is not supported. Offline snapshot files are unchanged.
+Rebuild both applications and the CLI for monitor protocol version 9.
+Older protocol versions, snapshot formats, and source schemas are rejected.
 The offline viewer is read-only: use `Tab` or `1` through `8` to select tabs,
 the usual arrow/Enter/Backspace navigation within tabs, and `q` or `Esc` to quit.
 Large files load on a worker thread while the terminal remains responsive.
@@ -78,8 +101,8 @@ Loading still requires memory for the decoded events and their summaries.
 Snapshot files do not record a wall-clock capture time.
 The Info view identifies the local `seismograph_cli` crate version and the
 connected server’s `seismograph` crate version, even before capture.
-Legacy servers report an unknown version; offline snapshots do not store
-their producer’s version but still show the local monitor version in Info.
+Offline snapshots do not store their producer’s version but still show
+the local monitor version in Info.
 Live Info charts accepted-event rates in separate colors for allocations,
 general events, Arc dereferences, runtime tasks, I/O, and cache events.
 The lower-right thread list shows each recorder on one line: identity, actual
@@ -88,8 +111,6 @@ Home/End, the mouse wheel, or click a thread to browse every recording thread.
 These lightweight counters refresh without a snapshot or stack symbolization;
 snapshot filters do not affect them. New recording sessions reset rate baselines.
 Threads that have never recorded an event are not enumerated OS threads.
-Older servers retain the total-rate chart and explicitly mark detailed counters
-unavailable; rebuild the application as well as the monitor for the new view.
 Metric caveats are in F1 help rather than below the Info metrics.
 Runtime task rows show completed worker-local poll counts, observed execution
 fraction, median poll duration, maximum poll duration and inline future bytes.
@@ -106,8 +127,8 @@ Uppercase `C` independently clears server buffers without a snapshot,
 symbolization or file I/O, keeping active-thread allocations and recording
 policy. Clear never removes the displayed capture or saved files.
 Lowercase `c` still configures each recorder’s off/on/custom policy.
-Capture, configuration and Clear are serialized by the UI. Stop and Clear
-require server support and never fall back to legacy release behavior.
+Capture, configuration and Clear are serialized by the UI.
+All connected servers must support these actions.
 A source, decoding or save failure after Stop cannot restore discarded rings;
 the monitor reads back live recording policy even when the capture fails.
 

@@ -257,14 +257,14 @@ fn owner_label(snapshot: &Snapshot, index: usize) -> String {
     )
 }
 
-fn frame(title: String, focused: bool) -> Block<'static> {
+pub(super) fn frame(title: String, focused: bool) -> Block<'static> {
     Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(if focused { Color::Cyan } else { Color::DarkGray }))
 }
 
-fn list<'a>(
+pub(super) fn list<'a>(
     terminal: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
     area: Rect,
@@ -464,7 +464,15 @@ fn draw_flow(terminal: &mut ratatui::Frame<'_>, area: Rect, snapshot: Option<&Sn
     );
 }
 
-fn detail(terminal: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, title: String, lines: &[String], scroll: usize, focused: bool) {
+pub(super) fn detail(
+    terminal: &mut ratatui::Frame<'_>,
+    mouse: &MouseRows,
+    area: Rect,
+    title: String,
+    lines: &[String],
+    scroll: usize,
+    focused: bool,
+) {
     let (paragraph, limit) = wrapped_detail_with_limit(lines, frame(title, focused), area, scroll);
     mouse.native_scroll_limit.set(limit);
     terminal.render_widget(paragraph, area);

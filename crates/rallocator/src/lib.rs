@@ -8,9 +8,9 @@
 //! We use it to experiment with allocation hinting, compile-time configuration,
 //! and runtime telemetry through `seismograph`.
 //!
-//! For now, it is a shameless Rust port of
-//! [snmalloc](https://github.com/microsoft/snmalloc), but the implementation has
-//! changed before and will probably change again.
+//! The default backend is a Rust port of [snmalloc](https://github.com/microsoft/snmalloc).
+//! An experimental Rust port of [mimalloc](https://github.com/microsoft/mimalloc)
+//! is also available.
 //!
 //! # Why use it
 //!
@@ -27,18 +27,34 @@
 //!
 //! ```toml
 //! [dependencies]
-//! rallocator = "0.2"
+//! rallocator = "0.3"
 //! ```
 //!
 //! Call [`rallocator!`] once in your executable to install the global allocator:
 //!
 //! ```rust
+//! # #![forbid(unsafe_code)]
 //! rallocator::rallocator!();
 //! ```
 //!
-//! Compile-time allocator configuration has historically been cumbersome to
-//! express in a manually declared `#[global_allocator]` static. The macro provides
-//! an installation facade that can be extended with configuration options later.
+//! Select a backend at compile time with `rallocator!(backend = snmalloc)` or
+//! `rallocator!(backend = mimalloc)`. The default remains snmalloc.
+//! The macro installs [`Rallocator`] with the selected backend.
+//! An allocation must return to the backend that created it.
+//! Both backends record allocation events and provide Seismograph state snapshots.
+//! State observations can be incomplete or stale. Allocator capacity is not application-live memory.
+//!
+//! With allocation recording enabled, [`Rallocator`] records allocations, successful
+//! resizes, and frees. A resize is one event with the previous and new addresses
+//! and requested sizes. In-place size changes also produce this event.
+//! Failed resizes and calls that keep both the address and size produce no event.
+//! For a move, recording completes before the old block becomes reusable.
+//! A resize keeps one view-local lifetime in Seismograph instead of adding a new allocation.
+//!
+//! ```rust
+//! # #![forbid(unsafe_code)]
+//! rallocator::rallocator!(backend = mimalloc);
+//! ```
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -48,67 +64,12 @@
 )))]
 compile_error!("rallocator supports x86_64 and aarch64 Linux, macOS and Windows MSVC");
 
-mod abort;
-mod backend;
-mod buddy;
-mod classes;
-mod combining;
-mod core;
-mod hal;
-mod observation;
-mod pagemap;
+mod allocator;
+#[doc(hidden)]
+pub mod backend;
 mod recording;
-mod remote;
-mod thread;
 
-use std::alloc::{GlobalAlloc, Layout};
-
-/// A stateless handle to the process's allocator.
-///
-/// For platform and deployment requirements, see [`rallocator!`].
-#[derive(Debug)]
-pub struct Rallocator;
-
-// SAFETY: The core returns disjoint, suitably aligned live allocations and
-// routes their destruction to their unique owner; failure is reported as null.
-unsafe impl GlobalAlloc for Rallocator {
-    #[inline]
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        recording::allocate(layout, false)
-    }
-
-    #[inline]
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: GlobalAlloc requires a live allocation from this instance.
-        unsafe { recording::deallocate(ptr, layout) };
-    }
-
-    #[inline]
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        recording::allocate(layout, true)
-    }
-
-    #[inline]
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        // SAFETY: GlobalAlloc guarantees the live allocation and valid new size.
-        unsafe { recording::reallocate(ptr, layout, new_size) }
-    }
-}
-
-#[inline]
-unsafe fn reallocate_core(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-    let Some(request) = classes::Request::with_size(layout, new_size) else {
-        return std::ptr::null_mut();
-    };
-    // override/rust.cc retains a pointer exactly when the aligned old and
-    // new layouts select the same size class, not for arbitrary shrinking.
-    if classes::Request::new(layout) == Some(request) {
-        return ptr;
-    }
-    // SAFETY: The caller guarantees ptr is live for layout; the copy bound
-    // fits both the old allocation and requested replacement.
-    unsafe { thread::reallocate(ptr, request, layout.size().min(new_size)) }
-}
+pub use allocator::Rallocator;
 
 /// Defines this crate's allocator as the executable's global allocator.
 ///
@@ -120,10 +81,32 @@ unsafe fn reallocate_core(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut
 ///
 /// Use a single statically linked allocator instance. Allocations must be freed
 /// by the instance that created them, not by independently linked copies in other DLLs.
+///
+/// # Backend selection
+///
+/// The default is snmalloc. Select a backend through the macro:
+///
+/// ```rust
+/// # #![forbid(unsafe_code)]
+/// rallocator::rallocator!(backend = snmalloc);
+/// ```
+///
+/// Use `rallocator!(backend = mimalloc)` for the Rust mimalloc backend.
 #[macro_export]
 macro_rules! rallocator {
     () => {
+        $crate::rallocator!(backend = snmalloc);
+    };
+    (backend = snmalloc) => {
         #[global_allocator]
-        static GLOBAL: $crate::Rallocator = $crate::Rallocator;
+        // SAFETY: The global allocator fixes the backend for all allocation,
+        // resizing, and deallocation calls generated by Rust.
+        static GLOBAL: $crate::Rallocator<$crate::backend::Snmalloc> = unsafe { $crate::Rallocator::new($crate::backend::Snmalloc) };
+    };
+    (backend = mimalloc) => {
+        #[global_allocator]
+        // SAFETY: The global allocator fixes the backend for all allocation,
+        // resizing, and deallocation calls generated by Rust.
+        static GLOBAL: $crate::Rallocator<$crate::backend::Mimalloc> = unsafe { $crate::Rallocator::new($crate::backend::Mimalloc) };
     };
 }

@@ -36,6 +36,7 @@ monitor = ["dep:seismograph_protocol"]
 test-util = ["monitor", "seismograph_protocol/test-util"]
 
 [dependencies]
+backtrace = { workspace = true, features = ["std"] }
 seismograph_protocol = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]

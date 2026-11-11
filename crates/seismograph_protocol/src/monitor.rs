@@ -356,7 +356,7 @@ mod tests {
                 descriptor.instance = instance;
                 let bytes = encode_descriptor(&descriptor).unwrap();
                 assert_eq!(decode_descriptor(&bytes).unwrap(), descriptor);
-                assert_eq!(&bytes[..10], &[b'S', b'G', b'M', b'D', 8, 0, 42, 0, 0, 0]);
+                assert_eq!(&bytes[..10], &[b'S', b'G', b'M', b'D', 9, 0, 42, 0, 0, 0]);
             }
         }
     }

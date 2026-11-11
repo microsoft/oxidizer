@@ -30,12 +30,14 @@ call [`RuntimeHandle::capture`][__link2] with a nonzero
 [`snapshot::CaptureOptions::measure_for`][__link3]. The diagnostic caller waits for that
 interval, not the workers. Private observation windows prevent a poll from a
 previous request from entering a new measurement window.
+[`snapshot::decode`][__link4] accepts only wire version 1 and source schema 9.
+Other versions are rejected.
 
 Runtime-event recording is separate from task inspection. It retains only
 events emitted after recording starts. Missing creation times, wake ages,
 earlier polls, and completed task history are not reconstructed.
 Stopping event recording does not freeze the actual runtime’s current state.
-[`worker::WorkerHandle::task_events`][__link4] supplies a [`Copy`][__link5] context for task
+[`worker::WorkerHandle::task_events`][__link5] supplies a [`Copy`][__link6] context for task
 creation and real outcomes, without per-task registration or shared ownership.
 
 ## Example
@@ -61,10 +63,11 @@ worker.handle().register_task_provider(|request| {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seismograph_runtime">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbe_rSi_eciMkbZ9WZwc9JDqMbs5twE1aCioIb5KjnCXEtXnlhZIKCa3NlaXNtb2dyYXBoZTAuNS4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbd-Jt3Up-brQbiLCAdsiNEtEbZ47AiVrE3lMbLKLlDS1kJGNhZIKCa3NlaXNtb2dyYXBoZTAuNS4wgnNzZWlzbW9ncmFwaF9ydW50aW1lZTAuNS4w
  [__link0]: https://crates.io/crates/seismograph/0.5.0
  [__link1]: https://docs.rs/seismograph_runtime/0.5.0/seismograph_runtime/?search=worker::WorkerHandle::is_observed
  [__link2]: https://docs.rs/seismograph_runtime/0.5.0/seismograph_runtime/?search=RuntimeHandle::capture
  [__link3]: https://docs.rs/seismograph_runtime/0.5.0/seismograph_runtime/?search=snapshot::CaptureOptions::measure_for
- [__link4]: https://docs.rs/seismograph_runtime/0.5.0/seismograph_runtime/?search=worker::WorkerHandle::task_events
- [__link5]: https://doc.rust-lang.org/stable/std/marker/trait.Copy.html
+ [__link4]: https://docs.rs/seismograph_runtime/0.5.0/seismograph_runtime/?search=snapshot::decode
+ [__link5]: https://docs.rs/seismograph_runtime/0.5.0/seismograph_runtime/?search=worker::WorkerHandle::task_events
+ [__link6]: https://doc.rust-lang.org/stable/std/marker/trait.Copy.html

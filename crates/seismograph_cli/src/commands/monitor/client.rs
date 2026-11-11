@@ -8,9 +8,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use seismograph_protocol::io::MonitorIo;
-use seismograph_protocol::message::{
-    RecorderActivity, RecorderStatistics, RecordingConfiguration, RecordingPolicy, Request, Response, SnapshotOptions,
-};
+use seismograph_protocol::message::{RecorderActivity, RecordingConfiguration, Request, Response, SnapshotOptions};
 use seismograph_protocol::monitor::MonitorDescriptor;
 use seismograph_protocol::transport::Connection;
 use seismograph_protocol::{read_control_response, read_response, write_request};
@@ -100,7 +98,7 @@ fn discover_directory(io: &MonitorIo, directory: &seismograph_protocol::discover
         discovery.instances.push(Instance {
             descriptor,
             recording,
-            server_version,
+            server_version: Some(server_version),
         });
     }
 }
@@ -127,25 +125,11 @@ pub(super) fn set_recording(
     descriptor: &MonitorDescriptor,
     configuration: RecordingConfiguration,
 ) -> Result<RecordingConfiguration, Error> {
-    let cache_supported = cache_recording(io, descriptor)?.is_some();
-    if !cache_supported && configuration.cache != RecordingPolicy::default() {
-        return Err(Error::Remote("cache recording is not supported by this monitor".into()));
-    }
-    let legacy_configuration = RecordingConfiguration {
-        cache: RecordingPolicy::default(),
-        ..configuration
-    };
-    match command(io, descriptor, &Request::SetRecording(legacy_configuration))? {
+    match command(io, descriptor, &Request::SetRecording(configuration))? {
         Response::Acknowledged => {}
         _ => return Err(Error::UnexpectedResponse),
     }
-    if cache_supported {
-        match command(io, descriptor, &Request::SetCacheRecording(configuration.cache))? {
-            Response::Acknowledged => {}
-            _ => return Err(Error::UnexpectedResponse),
-        }
-    }
-    recording_configuration(io, descriptor, cache_supported)
+    handshake(io, descriptor)
 }
 
 pub(super) fn capture_snapshot(io: &MonitorIo, descriptor: &MonitorDescriptor, options: SnapshotOptions) -> Result<Vec<u8>, Error> {
@@ -169,37 +153,18 @@ pub(super) fn clear_event_buffers(io: &MonitorIo, descriptor: &MonitorDescriptor
     }
 }
 
-pub(super) fn recorder_statistics(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<RecorderStatistics, Error> {
-    match command(io, descriptor, &Request::ReadRecorderStatistics)? {
-        Response::RecorderStatistics(mut statistics) => {
-            // Statistics describe retained events and may carry the last session's policies.
-            // Hello reports live configuration; the cache policy needs its dedicated message.
-            statistics.recording = handshake(io, descriptor)?;
-            Ok(statistics)
-        }
-        _ => Err(Error::UnexpectedResponse),
-    }
-}
-
 pub(super) fn recorder_activity(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<RecorderUpdate, Error> {
     let mut stream = connected_stream(io, descriptor)?;
     write_request(&mut stream, 2, &Request::ReadRecorderActivity).map_err(Error::Protocol)?;
-    let Some(mut activity) = read_recorder_activity(&mut stream)? else {
-        drop(stream);
-        return recorder_statistics(io, descriptor).map(RecorderUpdate::Legacy);
-    };
+    let mut activity = read_recorder_activity(&mut stream)?;
     drop(stream);
     activity.statistics.recording = handshake(io, descriptor)?;
-    Ok(RecorderUpdate::Detailed(activity))
+    Ok(activity)
 }
 
-fn read_recorder_activity(stream: &mut ClientConnection) -> Result<Option<RecorderActivity>, Error> {
-    // Only a clean close before response bytes is the established legacy capability signal.
-    if stream.peek(&mut [0]).map_err(Error::Io)? == 0 {
-        return Ok(None);
-    }
+fn read_recorder_activity(stream: &mut ClientConnection) -> Result<RecorderActivity, Error> {
     match read_response(stream).map_err(Error::Protocol)? {
-        (2, Response::RecorderActivity(activity)) => Ok(Some(activity)),
+        (2, Response::RecorderActivity(activity)) => Ok(activity),
         (2, Response::Error(message)) => Err(Error::Remote(message)),
         _ => Err(Error::UnexpectedResponse),
     }
@@ -223,76 +188,24 @@ fn save_snapshot_to(io: &MonitorIo, directory: &std::path::Path, descriptor: &Mo
 }
 
 pub(super) fn handshake(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<RecordingConfiguration, Error> {
-    recording_configuration(io, descriptor, false)
-}
-
-fn recording_configuration(io: &MonitorIo, descriptor: &MonitorDescriptor, cache_required: bool) -> Result<RecordingConfiguration, Error> {
     let mut stream = connect(io, descriptor)?;
     write_request(&mut stream, 1, &Request::Hello).map_err(Error::Protocol)?;
     match read_control_response(&mut stream).map_err(Error::Protocol)? {
-        (
-            1,
-            Response::Hello {
-                instance_id,
-                mut recording,
-            },
-        ) if instance_id == descriptor.instance_id => {
-            write_request(&mut stream, 2, &Request::ReadCacheRecording).map_err(Error::Protocol)?;
-            match read_cache_recording(&mut stream)? {
-                Some(cache) => recording.cache = cache,
-                None if cache_required => return Err(Error::UnexpectedResponse),
-                None => {}
-            }
-            Ok(recording)
-        }
+        (1, Response::Hello { instance_id, recording }) if instance_id == descriptor.instance_id => Ok(recording),
         (_, Response::Error(message)) => Err(Error::Remote(message)),
         _ => Err(Error::UnexpectedResponse),
     }
 }
 
-fn cache_recording(
-    io: &MonitorIo,
-    descriptor: &MonitorDescriptor,
-) -> Result<Option<seismograph_protocol::message::RecordingPolicy>, Error> {
-    let mut stream = connect(io, descriptor)?;
-    write_request(&mut stream, 1, &Request::Hello).map_err(Error::Protocol)?;
-    match read_control_response(&mut stream).map_err(Error::Protocol)? {
-        (1, Response::Hello { instance_id, .. }) if instance_id == descriptor.instance_id => {}
-        (_, Response::Error(message)) => return Err(Error::Remote(message)),
-        _ => return Err(Error::UnexpectedResponse),
-    }
-    write_request(&mut stream, 2, &Request::ReadCacheRecording).map_err(Error::Protocol)?;
-    read_cache_recording(&mut stream)
-}
-
-fn read_cache_recording(stream: &mut ClientConnection) -> Result<Option<RecordingPolicy>, Error> {
-    // Legacy monitors close on an unknown request without sending a response. Once any
-    // response bytes arrive, a truncated frame is an error, not a missing capability.
-    if stream.peek(&mut [0]).map_err(Error::Io)? == 0 {
-        return Ok(None);
-    }
-    match read_control_response(stream) {
-        Ok((2, Response::CacheRecording(policy))) => Ok(Some(policy)),
-        Ok((2, Response::Error(message))) => Err(Error::Remote(message)),
-        Ok(_) => Err(Error::UnexpectedResponse),
-        Err(error) => Err(Error::Protocol(error)),
-    }
-}
-
-fn server_version(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<Option<String>, Error> {
+fn server_version(io: &MonitorIo, descriptor: &MonitorDescriptor) -> Result<String, Error> {
     let mut stream = connected_stream(io, descriptor)?;
     write_request(&mut stream, 2, &Request::ReadServerVersion).map_err(Error::Protocol)?;
     read_server_version(&mut stream)
 }
 
-fn read_server_version(stream: &mut ClientConnection) -> Result<Option<String>, Error> {
-    // Only a clean close before any response bytes means a legacy server. Timeouts,
-    // resets, malformed frames and partial responses must remain visible errors.
-    if stream.peek(&mut [0]).map_err(Error::Io)? == 0 {
-        return Ok(None);
-    }
+fn read_server_version(stream: &mut ClientConnection) -> Result<String, Error> {
     match read_control_response(stream).map_err(Error::Protocol)? {
-        (2, Response::ServerVersion(version)) => Ok(Some(version)),
+        (2, Response::ServerVersion(version)) => Ok(version),
         (2, Response::Error(message)) => Err(Error::Remote(message)),
         _ => Err(Error::UnexpectedResponse),
     }
@@ -309,12 +222,6 @@ fn command(io: &MonitorIo, descriptor: &MonitorDescriptor, request: &Request) ->
     let snapshot = matches!(request, Request::CaptureSnapshot(_) | Request::CaptureSnapshotAndStop);
     if snapshot {
         stream.set_read_timeout(None).map_err(Error::Io)?;
-    }
-    if matches!(request, Request::CaptureSnapshotAndStop | Request::ClearEventBuffers) && stream.peek(&mut [0]).map_err(Error::Io)? == 0 {
-        return Err(Error::Remote(
-            "Record and stop / Clear unsupported or completion unknown: monitor closed without a response; no fallback was attempted"
-                .into(),
-        ));
     }
     let (request_id, response) = if snapshot {
         read_response(&mut stream)
@@ -384,11 +291,6 @@ impl ClientConnection {
             })
             .transpose()
     }
-
-    fn peek(&self, bytes: &mut [u8]) -> io::Result<usize> {
-        self.stream.set_read_timeout(self.remaining()?)?;
-        self.stream.peek(bytes)
-    }
 }
 
 impl Read for ClientConnection {
@@ -433,7 +335,7 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    use seismograph_protocol::message::EventBufferDisposition;
+    use seismograph_protocol::message::{EventBufferDisposition, RecorderStatistics, RecordingPolicy};
     use seismograph_protocol::monitor::InstanceId;
     use seismograph_protocol::{read_request, write_response};
 
@@ -479,22 +381,17 @@ mod tests {
     }
 
     fn serve(conversations: Vec<Vec<(u64, Response)>>) -> ScriptedServer {
-        serve_with_cache_support(conversations, true)
+        serve_on_listener(conversations, false, seismograph_protocol::testing::listener())
     }
 
-    fn serve_legacy(conversations: Vec<Vec<(u64, Response)>>) -> ScriptedServer {
-        serve_with_cache_support(conversations, false)
-    }
-
-    #[cfg_attr(coverage_nightly, coverage(off))] // Defensive test-server failures are not product behavior.
-    fn serve_with_cache_support(conversations: Vec<Vec<(u64, Response)>>, cache_supported: bool) -> ScriptedServer {
-        serve_on_listener(conversations, cache_supported, seismograph_protocol::testing::listener())
+    fn serve_closing_after_handshake(conversations: Vec<Vec<(u64, Response)>>) -> ScriptedServer {
+        serve_on_listener(conversations, true, seismograph_protocol::testing::listener())
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))] // Defensive test-server failures are not product behavior.
     fn serve_on_listener(
         conversations: Vec<Vec<(u64, Response)>>,
-        cache_supported: bool,
+        close_after_handshake: bool,
         listener: seismograph_protocol::transport::Listener,
     ) -> ScriptedServer {
         listener.set_nonblocking(true).unwrap();
@@ -505,7 +402,7 @@ mod tests {
         let worker = thread::spawn(move || {
             let mut requests = Vec::new();
             for conversation in conversations {
-                let closes_on_extension_request = !cache_supported
+                let closes_on_request = close_after_handshake
                     && conversation
                         .last()
                         .is_some_and(|(_, response)| matches!(response, Response::Hello { .. }));
@@ -539,22 +436,12 @@ mod tests {
                     }
                     write_response(&mut stream, response_id, &response).unwrap();
                 }
-                if closes_on_extension_request {
+                if closes_on_request {
                     let request = read_request(&mut stream).unwrap();
-                    assert!(matches!(
-                        request,
-                        (
-                            2,
-                            Request::ReadCacheRecording
-                                | Request::ReadServerVersion
-                                | Request::ReadRecorderActivity
-                                | Request::CaptureSnapshotAndStop
-                                | Request::ClearEventBuffers
-                        )
-                    ));
+                    assert_eq!(request.0, 2);
                     requests.push(request);
                 }
-                if !closes_on_extension_request {
+                if !closes_on_request {
                     let mut trailing = Vec::new();
                     stream.read_to_end(&mut trailing).unwrap();
                     assert!(trailing.is_empty());
@@ -584,20 +471,18 @@ mod tests {
     }
 
     #[test]
-    fn legacy_server_rejects_stop_and_clear_without_fallback() {
+    fn interrupted_stop_and_clear_report_errors_without_retrying() {
         let hello = Response::Hello {
             instance_id: InstanceId::from_bytes([1; 16]),
             recording: RecordingConfiguration::default(),
         };
-        let (descriptor, requests, worker) = serve_legacy(vec![vec![(1, hello.clone())], vec![(1, hello)]]);
-        let stop = capture_snapshot_and_stop(&MonitorIo::new_native(), &descriptor)
-            .unwrap_err()
-            .to_string();
-        let clear = clear_event_buffers(&MonitorIo::new_native(), &descriptor).unwrap_err().to_string();
+        let (descriptor, requests, worker) = serve_closing_after_handshake(vec![vec![(1, hello.clone())], vec![(1, hello)]]);
+        let stop = capture_snapshot_and_stop(&MonitorIo::new_native(), &descriptor).unwrap_err();
+        let clear = clear_event_buffers(&MonitorIo::new_native(), &descriptor).unwrap_err();
         let requests = requests.recv_timeout(Duration::from_secs(3)).unwrap();
         worker.join().unwrap();
-        assert!(stop.contains("unsupported"));
-        assert!(clear.contains("unsupported"));
+        assert!(matches!(stop, Error::Protocol(_)));
+        assert!(matches!(clear, Error::Protocol(_)));
         assert_eq!(requests.len(), 4);
         assert_eq!(requests[1], (2, Request::CaptureSnapshotAndStop));
         assert_eq!(requests[3], (2, Request::ClearEventBuffers));
@@ -627,8 +512,8 @@ mod tests {
     }
 
     #[test]
-    fn continue_uses_the_legacy_retain_request() {
-        let (descriptor, requests, worker) = serve_legacy(vec![vec![
+    fn continue_uses_the_retain_request() {
+        let (descriptor, requests, worker) = serve(vec![vec![
             (
                 1,
                 Response::Hello {
@@ -656,9 +541,13 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn version_query_distinguishes_legacy_from_remote_and_unexpected_responses() {
-        let (descriptor, requests, worker) = serve_legacy(vec![vec![(1, hello(&test_descriptor(), RecordingConfiguration::default()))]]);
-        assert_eq!(server_version(&MonitorIo::new_native(), &descriptor).unwrap(), None);
+    fn version_query_rejects_missing_remote_and_unexpected_responses() {
+        let (descriptor, requests, worker) =
+            serve_closing_after_handshake(vec![vec![(1, hello(&test_descriptor(), RecordingConfiguration::default()))]]);
+        assert!(matches!(
+            server_version(&MonitorIo::new_native(), &descriptor),
+            Err(Error::Protocol(_))
+        ));
         assert_eq!(requests.recv().unwrap()[1], (2, Request::ReadServerVersion));
         worker.join().unwrap();
 
@@ -711,7 +600,7 @@ mod tests {
 
         assert!(matches!(
             read_server_version(&mut client),
-            Err(Error::Io(error)) if matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)
+            Err(Error::Protocol(seismograph_protocol::Error::Io(error))) if matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)
         ));
     }
 
@@ -750,41 +639,27 @@ mod tests {
                 (1, hello(&test_descriptor(), recording)),
                 (2, Response::RecorderActivity(activity.clone())),
             ],
-            vec![
-                (1, hello(&test_descriptor(), recording)),
-                (2, Response::CacheRecording(recording.cache)),
-            ],
+            vec![(1, hello(&test_descriptor(), recording))],
         ]);
         let actual = recorder_activity(&MonitorIo::new_native(), &descriptor).unwrap();
         let observed = requests.recv().unwrap();
         worker.join().unwrap();
         let mut expected = activity;
         expected.statistics.recording = recording;
-        assert_eq!(actual, RecorderUpdate::Detailed(expected));
+        assert_eq!(actual, expected);
         assert_eq!(observed[1], (2, Request::ReadRecorderActivity));
         assert!(!observed.iter().any(|(_, request)| matches!(request, Request::CaptureSnapshot(_))));
     }
 
     #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn live_activity_falls_back_only_for_clean_legacy_closure() {
+    fn closed_activity_response_is_an_error_without_a_statistics_fallback() {
         let recording = RecordingConfiguration::default();
-        let statistics = RecorderStatistics {
-            total_events: 123,
-            ..RecorderStatistics::default()
-        };
-        let (descriptor, requests, worker) = serve_legacy(vec![
-            vec![(1, hello(&test_descriptor(), recording))],
-            vec![
-                (1, hello(&test_descriptor(), recording)),
-                (2, Response::RecorderStatistics(statistics)),
-            ],
-            vec![(1, hello(&test_descriptor(), recording))],
-        ]);
-        assert_eq!(
-            recorder_activity(&MonitorIo::new_native(), &descriptor).unwrap(),
-            RecorderUpdate::Legacy(statistics)
-        );
+        let (descriptor, requests, worker) = serve_closing_after_handshake(vec![vec![(1, hello(&test_descriptor(), recording))]]);
+        assert!(matches!(
+            recorder_activity(&MonitorIo::new_native(), &descriptor),
+            Err(Error::Protocol(_))
+        ));
         let observed = requests.recv().unwrap();
         worker.join().unwrap();
         assert_eq!(
@@ -799,7 +674,7 @@ mod tests {
                 .iter()
                 .filter(|(_, request)| matches!(request, Request::ReadRecorderStatistics))
                 .count(),
-            1
+            0
         );
     }
 
@@ -822,7 +697,7 @@ mod tests {
         }
         let (mut client, _server) = connected_pair();
         client.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
-        assert!(matches!(read_recorder_activity(&mut client), Err(Error::Io(_))));
+        assert!(matches!(read_recorder_activity(&mut client), Err(Error::Protocol(_))));
         let (mut client, mut server) = connected_pair();
         write_response(&mut server, 2, &Response::Error("busy".into())).unwrap();
         assert!(matches!(read_recorder_activity(&mut client), Err(Error::Remote(message)) if message == "busy"));
@@ -858,16 +733,13 @@ mod tests {
                 .unwrap();
         let (mut descriptor, requests, worker) = serve_on_listener(
             vec![
-                vec![
-                    (1, hello(&test_descriptor(), RecordingConfiguration::default())),
-                    (2, Response::CacheRecording(RecordingPolicy::default())),
-                ],
+                vec![(1, hello(&test_descriptor(), RecordingConfiguration::default()))],
                 vec![
                     (1, hello(&test_descriptor(), RecordingConfiguration::default())),
                     (2, Response::ServerVersion("12.34.56-rc.7".into())),
                 ],
             ],
-            true,
+            false,
             listener,
         );
         descriptor.name.clone_from(&name);
@@ -908,7 +780,7 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn handshake_reads_legacy_and_cache_recording_state() {
+    fn handshake_reads_the_complete_recording_state() {
         let mut recording = RecordingConfiguration::default();
         recording.allocations.enabled = true;
         let cache = RecordingPolicy {
@@ -916,20 +788,14 @@ mod tests {
             capture_backtraces: true,
             sampling_one_in: 8,
         };
-        let (descriptor, requests, worker) = serve(vec![vec![
-            (1, hello(&test_descriptor(), recording)),
-            (2, Response::CacheRecording(cache)),
-        ]]);
+        recording.cache = cache;
+        let (descriptor, requests, worker) = serve(vec![vec![(1, hello(&test_descriptor(), recording))]]);
         // The scripted response needs the listener's instance identity, not its port.
         let result = handshake(&MonitorIo::new_native(), &descriptor).unwrap();
         let requests = requests.recv().unwrap();
         worker.join().unwrap();
 
-        recording.cache = cache;
-        assert_eq!(
-            (result, requests),
-            (recording, vec![(1, Request::Hello,), (2, Request::ReadCacheRecording),],)
-        );
+        assert_eq!((result, requests), (recording, vec![(1, Request::Hello)],));
     }
 
     #[test]
@@ -963,55 +829,7 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn cache_recording_distinguishes_supported_unsupported_and_rejected_monitors() {
-        let policy = RecordingPolicy {
-            enabled: true,
-            capture_backtraces: false,
-            sampling_one_in: 4,
-        };
-        let (descriptor, requests, worker) = serve(vec![vec![
-            (1, hello(&test_descriptor(), RecordingConfiguration::default())),
-            (2, Response::CacheRecording(policy)),
-        ]]);
-        let supported = cache_recording(&MonitorIo::new_native(), &descriptor).unwrap();
-        requests.recv().unwrap();
-        worker.join().unwrap();
-
-        let (descriptor, requests, worker) = serve_legacy(vec![vec![(1, hello(&test_descriptor(), RecordingConfiguration::default()))]]);
-        let unsupported = cache_recording(&MonitorIo::new_native(), &descriptor).unwrap();
-        requests.recv().unwrap();
-        worker.join().unwrap();
-
-        let (descriptor, requests, worker) = serve(vec![vec![(1, Response::Error("denied".into()))]]);
-        let rejected = cache_recording(&MonitorIo::new_native(), &descriptor).unwrap_err().to_string();
-        requests.recv().unwrap();
-        worker.join().unwrap();
-
-        let (descriptor, requests, worker) = serve(vec![vec![(
-            1,
-            Response::Hello {
-                instance_id: InstanceId::from_bytes([9; 16]),
-                recording: RecordingConfiguration::default(),
-            },
-        )]]);
-        let wrong_identity = cache_recording(&MonitorIo::new_native(), &descriptor).unwrap_err().to_string();
-        requests.recv().unwrap();
-        worker.join().unwrap();
-
-        assert_eq!(
-            (supported, unsupported, rejected, wrong_identity),
-            (
-                Some(policy),
-                None,
-                "monitor rejected the request: denied".to_owned(),
-                "monitor returned an unexpected response".to_owned(),
-            )
-        );
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn set_recording_sends_legacy_and_cache_requests() {
+    fn set_recording_sends_all_policies_in_one_request_and_reads_authoritative_state() {
         let mut configuration = RecordingConfiguration::default();
         configuration.allocations.enabled = true;
         configuration.cache = RecordingPolicy {
@@ -1021,55 +839,36 @@ mod tests {
         };
         let mut authoritative = configuration;
         authoritative.event_capacity_per_thread = 1_024;
-        let authoritative_legacy = RecordingConfiguration {
-            cache: RecordingPolicy::default(),
-            ..authoritative
-        };
         let (descriptor, requests, worker) = serve(vec![
             vec![
                 (1, hello(&test_descriptor(), RecordingConfiguration::default())),
-                (2, Response::CacheRecording(RecordingPolicy::default())),
-            ],
-            vec![
-                (1, hello(&test_descriptor(), RecordingConfiguration::default())),
                 (2, Response::Acknowledged),
             ],
-            vec![
-                (1, hello(&test_descriptor(), RecordingConfiguration::default())),
-                (2, Response::Acknowledged),
-            ],
-            vec![
-                (1, hello(&test_descriptor(), authoritative_legacy)),
-                (2, Response::CacheRecording(authoritative.cache)),
-            ],
+            vec![(1, hello(&test_descriptor(), authoritative))],
         ]);
 
         let actual = set_recording(&MonitorIo::new_native(), &descriptor, configuration).unwrap();
         let requests = requests.recv().unwrap();
         worker.join().unwrap();
-        let mut legacy = configuration;
-        legacy.cache = RecordingPolicy::default();
         assert_eq!(actual, authoritative);
 
         assert_eq!(
             requests,
             vec![
                 (1, Request::Hello,),
-                (2, Request::ReadCacheRecording),
+                (2, Request::SetRecording(configuration)),
                 (1, Request::Hello,),
-                (2, Request::SetRecording(legacy)),
-                (1, Request::Hello,),
-                (2, Request::SetCacheRecording(configuration.cache)),
-                (1, Request::Hello,),
-                (2, Request::ReadCacheRecording),
             ]
         );
     }
 
     #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn set_recording_rejects_cache_configuration_for_legacy_monitor() {
-        let (descriptor, requests, worker) = serve_legacy(vec![vec![(1, hello(&test_descriptor(), RecordingConfiguration::default()))]]);
+    fn set_recording_reports_rejection_without_a_readback() {
+        let (descriptor, requests, worker) = serve(vec![vec![
+            (1, hello(&test_descriptor(), RecordingConfiguration::default())),
+            (2, Response::Error("configuration rejected".into())),
+        ]]);
         let mut configuration = RecordingConfiguration::default();
         configuration.cache.enabled = true;
 
@@ -1081,33 +880,27 @@ mod tests {
 
         assert_eq!(
             (error, observed.len()),
-            (
-                "monitor rejected the request: cache recording is not supported by this monitor".to_owned(),
-                2,
-            )
+            ("monitor rejected the request: configuration rejected".to_owned(), 2,)
         );
     }
 
     #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn cache_read_does_not_hide_remote_errors_or_wrong_response_ids() {
+    fn handshake_does_not_hide_remote_errors_or_wrong_response_ids() {
         for (response_id, response, expected) in [
-            (2, Response::Acknowledged, "monitor returned an unexpected response"),
+            (1, Response::Acknowledged, "monitor returned an unexpected response"),
             (
-                3,
-                Response::CacheRecording(RecordingPolicy::default()),
+                2,
+                hello(&test_descriptor(), RecordingConfiguration::default()),
                 "monitor returned an unexpected response",
             ),
             (
-                2,
-                Response::Error("cache unavailable".into()),
-                "monitor rejected the request: cache unavailable",
+                1,
+                Response::Error("configuration unavailable".into()),
+                "monitor rejected the request: configuration unavailable",
             ),
         ] {
-            let (descriptor, requests, worker) = serve(vec![vec![
-                (1, hello(&test_descriptor(), RecordingConfiguration::default())),
-                (response_id, response),
-            ]]);
+            let (descriptor, requests, worker) = serve(vec![vec![(response_id, response)]]);
             let error = handshake(&MonitorIo::new_native(), &descriptor).unwrap_err().to_string();
             requests.recv().unwrap();
             worker.join().unwrap();
@@ -1117,19 +910,12 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn failed_cache_write_is_not_reported_as_success() {
+    fn unexpected_recording_write_response_is_not_reported_as_success() {
         let configuration = RecordingConfiguration::default();
-        let (descriptor, requests, worker) = serve(vec![
-            vec![
-                (1, hello(&test_descriptor(), configuration)),
-                (2, Response::CacheRecording(configuration.cache)),
-            ],
-            vec![(1, hello(&test_descriptor(), configuration)), (2, Response::Acknowledged)],
-            vec![
-                (1, hello(&test_descriptor(), configuration)),
-                (2, Response::Error("cache write failed".into())),
-            ],
-        ]);
+        let (descriptor, requests, worker) = serve(vec![vec![
+            (1, hello(&test_descriptor(), configuration)),
+            (2, Response::Snapshot(Vec::new())),
+        ]]);
 
         let error = set_recording(&MonitorIo::new_native(), &descriptor, configuration)
             .unwrap_err()
@@ -1137,21 +923,18 @@ mod tests {
         requests.recv().unwrap();
         worker.join().unwrap();
 
-        assert_eq!(error, "monitor rejected the request: cache write failed");
+        assert_eq!(error, "monitor returned an unexpected response");
     }
 
     #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn truncated_cache_response_is_not_mistaken_for_a_legacy_monitor() {
+    fn truncated_handshake_is_not_mistaken_for_an_optional_capability() {
         let listener = seismograph_protocol::testing::listener();
         let descriptor = listener.descriptor().clone();
-        let response = hello(&descriptor, RecordingConfiguration::default());
         let worker = thread::spawn(move || {
             let mut stream = listener.accept().unwrap();
             stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
             read_request(&mut stream).unwrap();
-            write_response(&mut stream, 1, &response).unwrap();
-            assert_eq!(read_request(&mut stream).unwrap(), (2, Request::ReadCacheRecording));
             stream.write_all(b"SGMP").unwrap();
         });
 
@@ -1166,16 +949,11 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn successful_write_requires_complete_readback_from_cache_capable_monitor() {
+    fn successful_write_requires_complete_configuration_readback() {
         let configuration = RecordingConfiguration::default();
-        let (descriptor, requests, worker) = serve_legacy(vec![
-            vec![
-                (1, hello(&test_descriptor(), configuration)),
-                (2, Response::CacheRecording(configuration.cache)),
-            ],
+        let (descriptor, requests, worker) = serve(vec![
             vec![(1, hello(&test_descriptor(), configuration)), (2, Response::Acknowledged)],
-            vec![(1, hello(&test_descriptor(), configuration)), (2, Response::Acknowledged)],
-            vec![(1, hello(&test_descriptor(), configuration))],
+            vec![(1, Response::Acknowledged)],
         ]);
 
         let error = set_recording(&MonitorIo::new_native(), &descriptor, configuration)
@@ -1189,30 +967,7 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn set_recording_accepts_default_cache_configuration_for_legacy_monitor() {
-        let configuration = RecordingConfiguration::default();
-        let (descriptor, requests, worker) = serve_legacy(vec![
-            vec![(1, hello(&test_descriptor(), configuration))],
-            vec![(1, hello(&test_descriptor(), configuration)), (2, Response::Acknowledged)],
-            vec![(1, hello(&test_descriptor(), configuration))],
-        ]);
-
-        set_recording(&MonitorIo::new_native(), &descriptor, configuration).unwrap();
-        let observed = requests.recv().unwrap();
-        worker.join().unwrap();
-
-        assert_eq!(
-            observed
-                .iter()
-                .filter(|(_, request)| matches!(request, Request::SetRecording(_)))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn snapshot_and_statistics_commands_return_complete_payloads() {
+    fn snapshot_and_activity_commands_return_complete_payloads() {
         let options = SnapshotOptions {
             event_buffers: EventBufferDisposition::Release,
         };
@@ -1244,14 +999,17 @@ mod tests {
         let (descriptor, requests, worker) = serve(vec![
             vec![
                 (1, hello(&test_descriptor(), RecordingConfiguration::default())),
-                (2, Response::RecorderStatistics(statistics)),
+                (
+                    2,
+                    Response::RecorderActivity(RecorderActivity {
+                        statistics,
+                        ..RecorderActivity::default()
+                    }),
+                ),
             ],
-            vec![
-                (1, hello(&test_descriptor(), RecordingConfiguration::default())),
-                (2, Response::CacheRecording(recording.cache)),
-            ],
+            vec![(1, hello(&test_descriptor(), recording))],
         ]);
-        let actual_statistics = recorder_statistics(&MonitorIo::new_native(), &descriptor).unwrap();
+        let actual_statistics = recorder_activity(&MonitorIo::new_native(), &descriptor).unwrap().statistics;
         let statistics = RecorderStatistics { recording, ..statistics };
         let statistics_requests = requests.recv().unwrap();
         worker.join().unwrap();
@@ -1267,7 +1025,7 @@ mod tests {
                 vec![1, 2, 3],
                 (2, Request::CaptureSnapshot(options)),
                 statistics,
-                (2, Request::ReadRecorderStatistics),
+                (2, Request::ReadRecorderActivity),
             )
         );
     }
@@ -1288,15 +1046,18 @@ mod tests {
         let (descriptor, requests, worker) = serve(vec![
             vec![
                 (1, hello(&test_descriptor(), current)),
-                (2, Response::RecorderStatistics(statistics)),
+                (
+                    2,
+                    Response::RecorderActivity(RecorderActivity {
+                        statistics,
+                        ..RecorderActivity::default()
+                    }),
+                ),
             ],
-            vec![
-                (1, hello(&test_descriptor(), current)),
-                (2, Response::CacheRecording(current.cache)),
-            ],
+            vec![(1, hello(&test_descriptor(), current))],
         ]);
 
-        let actual = recorder_statistics(&MonitorIo::new_native(), &descriptor).unwrap();
+        let actual = recorder_activity(&MonitorIo::new_native(), &descriptor).unwrap().statistics;
         requests.recv().unwrap();
         worker.join().unwrap();
 
@@ -1373,7 +1134,13 @@ mod tests {
             seismograph_protocol::transport::Listener::bind(&seismograph_protocol::io::MonitorIo::new_native(), &directory.descriptor())
                 .unwrap();
         let (mut second, second_requests, second_worker) = serve_on_listener(
-            vec![vec![(1, hello(&test_descriptor(), RecordingConfiguration::default()))]; 2],
+            vec![
+                vec![(1, hello(&test_descriptor(), RecordingConfiguration::default()))],
+                vec![
+                    (1, hello(&test_descriptor(), RecordingConfiguration::default())),
+                    (2, Response::ServerVersion("current".into())),
+                ],
+            ],
             false,
             second_listener,
         );
@@ -1386,7 +1153,13 @@ mod tests {
             seismograph_protocol::transport::Listener::bind(&seismograph_protocol::io::MonitorIo::new_native(), &directory.descriptor())
                 .unwrap();
         let (mut first, first_requests, first_worker) = serve_on_listener(
-            vec![vec![(1, hello(&test_descriptor(), RecordingConfiguration::default()))]; 2],
+            vec![
+                vec![(1, hello(&test_descriptor(), RecordingConfiguration::default()))],
+                vec![
+                    (1, hello(&test_descriptor(), RecordingConfiguration::default())),
+                    (2, Response::ServerVersion("current".into())),
+                ],
+            ],
             false,
             first_listener,
         );
@@ -1415,8 +1188,8 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             vec![
-                ("alpha", RecordingConfiguration::default(), None),
-                ("zeta", RecordingConfiguration::default(), None),
+                ("alpha", RecordingConfiguration::default(), Some("current")),
+                ("zeta", RecordingConfiguration::default(), Some("current")),
             ]
         );
     }

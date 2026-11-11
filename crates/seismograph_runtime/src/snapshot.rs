@@ -18,17 +18,10 @@ use crate::worker::WorkerRole;
 
 const MAGIC: [u8; 8] = *b"SEISRUNT";
 const WIRE_VERSION: u16 = 1;
-const SCHEMA_VERSION: u16 = 8;
+const SCHEMA_VERSION: u16 = 9;
 const HEADER_LEN: usize = 20;
-const RUNTIME_FIXED_LEN: usize = 128;
+const RUNTIME_FIXED_LEN: usize = 104;
 const WORKER_FIXED_LEN: usize = 32;
-const TASK_V2_FIXED_LEN: usize = 32;
-#[cfg(test)]
-const TASK_V3_FIXED_LEN: usize = 120;
-#[cfg(test)]
-const TASK_V4_FIXED_LEN: usize = 160;
-#[cfg(test)]
-const TASK_V5_FIXED_LEN: usize = 168;
 const TASK_FIXED_LEN: usize = 184;
 const ADDRESS_LOOKUP_FIXED_LEN: usize = 24;
 
@@ -39,7 +32,7 @@ pub mod source {
     /// Human-readable source name.
     pub(crate) const NAME: &str = "runtime";
     /// Current source payload schema version.
-    pub(crate) const SCHEMA_VERSION: u16 = super::SCHEMA_VERSION;
+    pub const SCHEMA_VERSION: u16 = super::SCHEMA_VERSION;
 }
 
 /// Logical lifecycle state of a runtime.
@@ -259,8 +252,8 @@ pub struct Task {
     /// Inline bytes in the concrete future or synchronous task body before runtime wrapping.
     ///
     /// Excludes separately allocated buffers and executor bookkeeping. `Some(0)`
-    /// is a known zero-byte body; `None` denotes an unknown size, including source
-    /// schemas before version 6. The wire format supports sizes below `u64::MAX`.
+    /// is a known zero-byte body; `None` denotes an unknown size.
+    /// The wire format supports sizes below `u64::MAX`.
     pub future_size_bytes: Option<u64>,
     /// Creation time, if it was collected when the task was created.
     pub spawned_at: Option<EventTimestamp>,
@@ -272,7 +265,7 @@ pub struct Task {
     pub metrics: TaskMetrics,
     /// Whether numeric measurements are known and which interval they describe.
     pub metrics_scope: TaskMetricsScope,
-    /// Current native state, or historical activity; absent before source schema 4.
+    /// Current native state, or activity supplied by the task provider.
     pub activity: Option<TaskActivity>,
 }
 
@@ -319,9 +312,8 @@ pub struct TaskActivity {
     pub poll_started_at: Option<EventTimestamp>,
     /// Worker executing this exact poll, coherent with `state` and `poll_started_at`.
     ///
-    /// Present only for `Running`. Schema 4 lacks this field and decodes it as
-    /// `None`; neither the notifier thread nor independently read worker slots
-    /// should be used to invent missing poll-worker identity.
+    /// Present only for `Running`. Neither the notifier thread nor independently
+    /// read worker slots establish the identity of this poll's worker.
     pub poll_worker_id: Option<WorkerId>,
     /// Start of scheduler queue waiting, present only for `Ready`.
     ///
@@ -475,7 +467,7 @@ impl std::error::Error for Error {}
 /// # Errors
 ///
 /// Returns an error for malformed bytes or an unsupported wire or schema
-/// version. Future versions are rejected rather than silently misinterpreted.
+/// version. Only the current wire and schema versions are accepted.
 pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
     let mut reader = Reader::new(bytes);
     if reader.read(MAGIC.len())? != MAGIC {
@@ -486,21 +478,18 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
         return Err(Error::new(ErrorKind::UnsupportedWireVersion(wire_version)));
     }
     let schema_version = reader.u16()?;
-    if !matches!(schema_version, 2 | 3 | 4 | 5 | 6 | SCHEMA_VERSION) {
+    if schema_version != SCHEMA_VERSION {
         return Err(Error::new(ErrorKind::UnsupportedSchemaVersion(schema_version)));
     }
     let runtime_count = reader.u32()? as usize;
     let address_count = reader.u32()? as usize;
-    if schema_version == 2 && address_count != 0 {
-        return Err(Error::new(ErrorKind::Malformed));
-    }
     if !count_fits(runtime_count, RUNTIME_FIXED_LEN, reader.remaining().len()) {
         return Err(Error::new(ErrorKind::Malformed));
     }
 
     let mut runtimes = Vec::with_capacity(runtime_count);
     for _ in 0..runtime_count {
-        runtimes.push(read_runtime(&mut reader, schema_version)?);
+        runtimes.push(read_runtime(&mut reader)?);
     }
     if !count_fits(address_count, ADDRESS_LOOKUP_FIXED_LEN, reader.remaining().len()) {
         return Err(Error::new(ErrorKind::Malformed));
@@ -577,7 +566,7 @@ fn write_runtime(writer: &mut Writer<'_>, runtime: &Runtime) -> Result<(), ()> {
     Ok(())
 }
 
-fn read_runtime(reader: &mut Reader<'_>, schema_version: u16) -> Result<Runtime, Error> {
+fn read_runtime(reader: &mut Reader<'_>) -> Result<Runtime, Error> {
     let id = RuntimeId::from_raw(reader.u64()?).ok_or_else(malformed)?;
     let state = RuntimeState::from_wire_value(reader.u8()?).ok_or_else(malformed)?;
     let lifecycle_backtraces = backtrace_from_wire_value(reader.u8()?).ok_or_else(malformed)?;
@@ -592,7 +581,7 @@ fn read_runtime(reader: &mut Reader<'_>, schema_version: u16) -> Result<Runtime,
     let task_count = reader.u32()? as usize;
     let counters_scope = match reader.u32()? {
         0 => CountersScope::Lifetime,
-        1 if schema_version >= 8 => CountersScope::Uncollected,
+        1 => CountersScope::Uncollected,
         _ => return Err(malformed()),
     };
     let counters = read_counters(reader)?;
@@ -603,17 +592,11 @@ fn read_runtime(reader: &mut Reader<'_>, schema_version: u16) -> Result<Runtime,
     if !count_fits(worker_count, WORKER_FIXED_LEN, reader.remaining().len()) {
         return Err(malformed());
     }
-    let workers = (0..worker_count)
-        .map(|_| read_worker(reader, schema_version))
-        .collect::<Result<Vec<_>, _>>()?;
-    // Every supported task schema is at least this large; read_task performs
-    // the exact per-version validation without duplicating its size table.
-    if !count_fits(task_count, TASK_V2_FIXED_LEN, reader.remaining().len()) {
+    let workers = (0..worker_count).map(|_| read_worker(reader)).collect::<Result<Vec<_>, _>>()?;
+    if !count_fits(task_count, TASK_FIXED_LEN, reader.remaining().len()) {
         return Err(malformed());
     }
-    let tasks = (0..task_count)
-        .map(|_| read_task(reader, schema_version))
-        .collect::<Result<Vec<_>, _>>()?;
+    let tasks = (0..task_count).map(|_| read_task(reader)).collect::<Result<Vec<_>, _>>()?;
     let retired_at = match retired_at_ticks {
         0 => None,
         ticks => Some(EventTimestamp::from_ticks(ticks)),
@@ -646,15 +629,12 @@ fn write_worker(writer: &mut Writer<'_>, worker: &Worker) -> Result<(), ()> {
     writer.u64(worker.current_task.map_or(0, TaskId::get))
 }
 
-fn read_worker(reader: &mut Reader<'_>, schema_version: u16) -> Result<Worker, Error> {
+fn read_worker(reader: &mut Reader<'_>) -> Result<Worker, Error> {
     let id = WorkerId::from_raw(reader.u64()?).ok_or_else(malformed)?;
     let role = WorkerRole::from_wire_value(reader.u8()?).ok_or_else(malformed)?;
     let state = WorkerState::from_wire_value(reader.u8()?).ok_or_else(malformed)?;
     let collection = reader.u16()?;
     let task_collection = TaskCollection::from_wire(collection).ok_or_else(malformed)?;
-    if schema_version < 8 && collection != 0 {
-        return Err(malformed());
-    }
     let processor_index = match reader.u32()? {
         u32::MAX => None,
         value => Some(value),
@@ -685,7 +665,7 @@ fn write_task(writer: &mut Writer<'_>, task: &Task) -> Result<(), ()> {
     writer.u64(task.id.get())?;
     writer.u64(task.parent.map_or(0, TaskId::get))?;
     writer.u64(task.type_descriptor.get())?;
-    // Retain schema compatibility without a second copy of each spawn stack.
+    // Reserved. Creation stacks are stored in events, not duplicated per task.
     writer.u32(0)?;
     writer.u32(match task.metrics_scope {
         TaskMetricsScope::Lifetime => 0,
@@ -720,72 +700,45 @@ fn write_task(writer: &mut Writer<'_>, task: &Task) -> Result<(), ()> {
     Ok(())
 }
 
-fn read_task(reader: &mut Reader<'_>, schema_version: u16) -> Result<Task, Error> {
+fn read_task(reader: &mut Reader<'_>) -> Result<Task, Error> {
     let id = TaskId::from_raw(reader.u64()?).ok_or_else(malformed)?;
     let parent = match reader.u64()? {
         0 => None,
         value => Some(TaskId::from_raw(value).ok_or_else(malformed)?),
     };
     let type_descriptor = TypeDescriptorId::from_raw(reader.u64()?).ok_or_else(malformed)?;
-    let frame_count = reader.u32()? as usize;
-    let metrics_tag = reader.u32()?;
-    if (schema_version < 8 && metrics_tag != 0) || !count_fits(frame_count, std::mem::size_of::<u64>(), reader.remaining().len()) {
+    if reader.u32()? != 0 {
         return Err(malformed());
     }
-    let (spawned_at, last_worker_id, metrics) = if schema_version >= 3 {
-        let timestamp = reader.u64()?;
-        let spawned_at = if schema_version >= 8 {
-            timestamp.checked_sub(1).map(EventTimestamp::from_ticks)
-        } else {
-            (timestamp != 0).then_some(EventTimestamp::from_ticks(timestamp))
-        };
-        let last_worker_id = match reader.u64()? {
-            0 => None,
-            value => Some(WorkerId::from_raw(value).ok_or_else(malformed)?),
-        };
-        (
-            spawned_at,
-            last_worker_id,
-            TaskMetrics {
-                poll_count: reader.u64()?,
-                poll_duration_nanos: reader.u64()?,
-                max_poll_duration_nanos: reader.u64()?,
-                resume_count: reader.u64()?,
-                resume_duration_nanos: reader.u64()?,
-                max_resume_duration_nanos: reader.u64()?,
-                ready_wait_count: reader.u64()?,
-                ready_wait_duration_nanos: reader.u64()?,
-                max_ready_wait_duration_nanos: reader.u64()?,
-            },
-        )
-    } else {
-        (None, None, TaskMetrics::default())
+    let metrics_tag = reader.u32()?;
+    let spawned_at = reader.u64()?.checked_sub(1).map(EventTimestamp::from_ticks);
+    let last_worker_id = match reader.u64()? {
+        0 => None,
+        value => Some(WorkerId::from_raw(value).ok_or_else(malformed)?),
     };
-    let activity = if schema_version >= 4 {
-        read_activity(reader, schema_version)?
-    } else {
-        None
+    let metrics = TaskMetrics {
+        poll_count: reader.u64()?,
+        poll_duration_nanos: reader.u64()?,
+        max_poll_duration_nanos: reader.u64()?,
+        resume_count: reader.u64()?,
+        resume_duration_nanos: reader.u64()?,
+        max_resume_duration_nanos: reader.u64()?,
+        ready_wait_count: reader.u64()?,
+        ready_wait_duration_nanos: reader.u64()?,
+        max_ready_wait_duration_nanos: reader.u64()?,
     };
-    let future_size_bytes = if schema_version >= 6 { reader.u64()?.checked_sub(1) } else { None };
-    let metrics_scope = if schema_version < 8 {
-        TaskMetricsScope::Lifetime
-    } else {
-        let since = reader.u64()?;
-        match metrics_tag {
-            0 if since == 0 => TaskMetricsScope::Lifetime,
-            1 if since == 0 => TaskMetricsScope::Uncollected,
-            2 => TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(since)),
-            _ => return Err(malformed()),
-        }
+    let activity = read_activity(reader)?;
+    let future_size_bytes = reader.u64()?.checked_sub(1);
+    let since = reader.u64()?;
+    let metrics_scope = match metrics_tag {
+        0 if since == 0 => TaskMetricsScope::Lifetime,
+        1 if since == 0 => TaskMetricsScope::Uncollected,
+        2 => TaskMetricsScope::PollsSince(EventTimestamp::from_ticks(since)),
+        _ => return Err(malformed()),
     };
     if metrics_scope == TaskMetricsScope::Uncollected && metrics != TaskMetrics::default() {
         return Err(malformed());
     }
-    if !count_fits(frame_count, std::mem::size_of::<u64>(), reader.remaining().len()) {
-        return Err(malformed());
-    }
-    // Consume legacy task-frame bytes for compatibility; creation stacks come from events.
-    reader.read(frame_count * std::mem::size_of::<u64>())?;
     Ok(Task {
         id,
         parent,
@@ -865,23 +818,21 @@ fn valid_activity(activity: TaskActivity) -> bool {
     }
 }
 
-fn read_activity(reader: &mut Reader<'_>, schema_version: u16) -> Result<Option<TaskActivity>, Error> {
+fn read_activity(reader: &mut Reader<'_>) -> Result<Option<TaskActivity>, Error> {
     let tag = reader.u64()?;
     let observed = reader.u64()?;
     let ready = reader.u64()?;
     let poll = reader.u64()?;
     let queued = reader.u64()?;
-    let worker = if schema_version >= 5 { reader.u64()? } else { 0 };
+    let worker = reader.u64()?;
     let state = match tag {
         0 if observed == 0 && ready == 0 && poll == 0 && queued == 0 && worker == 0 => return Ok(None),
         1 if ready == 0 && poll == 0 && queued == 0 => TaskActivityState::Unknown,
         2 if ready == 0 && poll == 0 && queued == 0 => TaskActivityState::Waiting,
-        3 if poll == 0 && ((ready != 0 && queued >= ready) || (schema_version >= 8 && ready == 0 && queued == 0)) => {
-            TaskActivityState::Ready
-        }
+        3 if poll == 0 && ((ready != 0 && queued >= ready) || (ready == 0 && queued == 0)) => TaskActivityState::Ready,
         4 if queued == 0
             && match (poll, ready) {
-                (0, 0) => schema_version >= 8,
+                (0, 0) => true,
                 (0, _) => false,
                 (_, 0) => true,
                 (poll, ready) => ready >= poll,
@@ -965,14 +916,11 @@ fn write_counters(writer: &mut Writer<'_>, counters: Counters) -> Result<(), ()>
     writer.u64(counters.canceled_tasks)?;
     writer.u64(counters.panicked_tasks)?;
     writer.u64(counters.poll_count)?;
-    writer.u64(counters.poll_duration_nanos)?;
-    writer.u64(0)?;
-    writer.u64(0)?;
-    writer.u64(0)
+    writer.u64(counters.poll_duration_nanos)
 }
 
 fn read_counters(reader: &mut Reader<'_>) -> Result<Counters, Error> {
-    let counters = Counters {
+    Ok(Counters {
         spawned_tasks: reader.u64()?,
         live_tasks: reader.u64()?,
         completed_tasks: reader.u64()?,
@@ -980,11 +928,7 @@ fn read_counters(reader: &mut Reader<'_>) -> Result<Counters, Error> {
         panicked_tasks: reader.u64()?,
         poll_count: reader.u64()?,
         poll_duration_nanos: reader.u64()?,
-    };
-    let _legacy_io_total_duration_nanos = reader.u64()?;
-    let _legacy_io_wait_duration_nanos = reader.u64()?;
-    let _legacy_io_active_duration_nanos = reader.u64()?;
-    Ok(counters)
+    })
 }
 
 const fn backtrace_wire_value(value: BacktraceCapture) -> u8 {
@@ -1154,12 +1098,12 @@ mod tests {
         let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
         encode(&snapshot, &mut bytes).unwrap();
 
-        assert_eq!(bytes.len(), 419);
+        assert_eq!(bytes.len(), 395);
         assert_eq!(decode(&bytes).unwrap(), snapshot);
     }
 
     #[test]
-    fn historical_task_stack_copies_are_skipped_without_losing_symbol_metadata() {
+    fn task_frame_copies_are_rejected() {
         let snapshot = fixture();
         let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
         encode(&snapshot, &mut bytes).unwrap();
@@ -1171,7 +1115,7 @@ mod tests {
             0x1234_u64.to_le_bytes().into_iter().chain(0x5678_u64.to_le_bytes()),
         );
 
-        assert_eq!(decode(&bytes).unwrap(), snapshot);
+        assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
     }
 
     #[test]
@@ -1192,20 +1136,6 @@ mod tests {
         snapshot.runtimes[0].tasks[0].future_size_bytes = Some(u64::MAX);
         let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
         assert_eq!(encode(&snapshot, &mut bytes), Err(()));
-    }
-
-    #[test]
-    fn version_five_task_metadata_has_unknown_future_size() {
-        let mut snapshot = fixture();
-        snapshot.runtimes[0].tasks[0].future_size_bytes = Some(0);
-        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-        encode(&snapshot, &mut bytes).unwrap();
-        bytes[10..12].copy_from_slice(&5_u16.to_le_bytes());
-        let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len() + WORKER_FIXED_LEN;
-        bytes.drain(task_start + TASK_V5_FIXED_LEN..task_start + TASK_FIXED_LEN);
-        bytes[task_start + 32..task_start + 40].copy_from_slice(&11_u64.to_le_bytes());
-        snapshot.runtimes[0].tasks[0].future_size_bytes = None;
-        assert_eq!(decode(&bytes).unwrap(), snapshot);
     }
 
     #[test]
@@ -1258,36 +1188,17 @@ mod tests {
     }
 
     #[test]
-    fn version_two_empty_payload_remains_decodable() {
+    fn previous_source_schemas_are_rejected() {
         let mut bytes = Vec::from(MAGIC);
         bytes.extend_from_slice(&WIRE_VERSION.to_le_bytes());
-        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
         bytes.extend_from_slice(&0_u32.to_le_bytes());
         bytes.extend_from_slice(&0_u32.to_le_bytes());
 
-        assert_eq!(decode(&bytes).unwrap(), Snapshot::default());
-    }
-
-    #[test]
-    fn version_two_task_payload_uses_the_legacy_fixed_length() {
-        let mut snapshot = fixture();
-        snapshot.addresses.clear();
-        let runtime = &mut snapshot.runtimes[0];
-        runtime.name.clear();
-        runtime.workers.clear();
-        runtime.tasks.truncate(1);
-
-        let task_start = HEADER_LEN + RUNTIME_FIXED_LEN;
-        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-        encode(&snapshot, &mut bytes).unwrap();
-        bytes[10..12].copy_from_slice(&2_u16.to_le_bytes());
-        bytes.drain(task_start + TASK_V2_FIXED_LEN..task_start + TASK_FIXED_LEN);
-
-        let task = &mut snapshot.runtimes[0].tasks[0];
-        task.spawned_at = None;
-        task.last_worker_id = None;
-        task.metrics = TaskMetrics::default();
-        assert_eq!(decode(&bytes).unwrap(), snapshot);
+        for version in 0..SCHEMA_VERSION {
+            bytes[10..12].copy_from_slice(&version.to_le_bytes());
+            assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::UnsupportedSchemaVersion(version));
+        }
     }
 
     #[test]
@@ -1376,13 +1287,6 @@ mod tests {
             ErrorKind::UnsupportedSchemaVersion(SCHEMA_VERSION + 1)
         );
 
-        let mut legacy_addresses = Vec::from(MAGIC);
-        legacy_addresses.extend_from_slice(&WIRE_VERSION.to_le_bytes());
-        legacy_addresses.extend_from_slice(&2_u16.to_le_bytes());
-        legacy_addresses.extend_from_slice(&0_u32.to_le_bytes());
-        legacy_addresses.extend_from_slice(&1_u32.to_le_bytes());
-        assert_eq!(decode(&legacy_addresses).unwrap_err().kind(), ErrorKind::Malformed);
-
         let mut excessive_runtimes = Vec::from(MAGIC);
         excessive_runtimes.extend_from_slice(&WIRE_VERSION.to_le_bytes());
         excessive_runtimes.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
@@ -1415,7 +1319,7 @@ mod tests {
             bytes
         }
 
-        for (offset, value) in [(30, 1_u8), (64, 2), (165, 8), (215, 3)] {
+        for (offset, value) in [(30, 1_u8), (64, 2), (141, 8), (191, 3)] {
             let mut bytes = encoded_fixture();
             bytes[offset] = value;
             assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
@@ -1432,7 +1336,7 @@ mod tests {
         assert_eq!(decode(&stopped_without_retirement).unwrap_err().kind(), ErrorKind::Malformed);
 
         let mut excessive_frames = encoded_fixture();
-        excessive_frames[211..215].copy_from_slice(&u32::MAX.to_le_bytes());
+        excessive_frames[187..191].copy_from_slice(&u32::MAX.to_le_bytes());
         assert_eq!(decode(&excessive_frames).unwrap_err().kind(), ErrorKind::Malformed);
     }
 
@@ -1445,73 +1349,19 @@ mod tests {
             bytes
         }
 
-        for offset in [52, 379, 383] {
+        for offset in [52, 355, 359] {
             let mut bytes = encoded_fixture();
             bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
             assert_eq!(decode(&bytes).unwrap_err().kind(), ErrorKind::Malformed);
         }
 
         let mut invalid_runtime_name = encoded_fixture();
-        invalid_runtime_name[148] = 0xff;
+        invalid_runtime_name[124] = 0xff;
         assert_eq!(decode(&invalid_runtime_name).unwrap_err().kind(), ErrorKind::Malformed);
 
         let mut invalid_symbol = encoded_fixture();
-        invalid_symbol[395] = 0xff;
+        invalid_symbol[371] = 0xff;
         assert_eq!(decode(&invalid_symbol).unwrap_err().kind(), ErrorKind::Malformed);
-    }
-
-    #[test]
-    fn version_three_task_metadata_decodes_without_activity() {
-        let snapshot = fixture();
-        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-        encode(&snapshot, &mut bytes).unwrap();
-        bytes[10..12].copy_from_slice(&3_u16.to_le_bytes());
-        let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len() + WORKER_FIXED_LEN;
-        bytes[task_start + 32..task_start + 40].copy_from_slice(&11_u64.to_le_bytes());
-        bytes.drain(task_start + TASK_V3_FIXED_LEN..task_start + TASK_FIXED_LEN);
-        assert_eq!(decode(&bytes).unwrap(), snapshot);
-    }
-
-    #[test]
-    fn version_four_activity_decodes_without_poll_worker_identity() {
-        for activity in [
-            None,
-            Some(TaskActivity {
-                observed_at: EventTimestamp::from_ticks(50),
-                state: TaskActivityState::Running,
-                ready_since: Some(EventTimestamp::from_ticks(20)),
-                poll_started_at: Some(EventTimestamp::from_ticks(10)),
-                poll_worker_id: WorkerId::from_raw(7),
-                queued_since: None,
-            }),
-        ] {
-            let mut snapshot = fixture();
-            snapshot.runtimes[0].tasks[0].activity = activity;
-            let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-            encode(&snapshot, &mut bytes).unwrap();
-            bytes[10..12].copy_from_slice(&4_u16.to_le_bytes());
-            let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len() + WORKER_FIXED_LEN;
-            bytes[task_start + 32..task_start + 40].copy_from_slice(&11_u64.to_le_bytes());
-            bytes.drain(task_start + TASK_V4_FIXED_LEN..task_start + TASK_FIXED_LEN);
-            if let Some(activity) = &mut snapshot.runtimes[0].tasks[0].activity {
-                activity.poll_worker_id = None;
-            }
-            assert_eq!(decode(&bytes).unwrap(), snapshot);
-        }
-    }
-
-    #[test]
-    fn version_five_activity_decodes_without_future_size() {
-        let mut snapshot = fixture();
-        snapshot.runtimes[0].tasks[0].future_size_bytes = Some(64);
-        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
-        encode(&snapshot, &mut bytes).unwrap();
-        bytes[10..12].copy_from_slice(&5_u16.to_le_bytes());
-        let task_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len() + WORKER_FIXED_LEN;
-        bytes[task_start + 32..task_start + 40].copy_from_slice(&11_u64.to_le_bytes());
-        bytes.drain(task_start + TASK_V5_FIXED_LEN..task_start + TASK_FIXED_LEN);
-        snapshot.runtimes[0].tasks[0].future_size_bytes = None;
-        assert_eq!(decode(&bytes).unwrap(), snapshot);
     }
 
     #[test]
@@ -1523,10 +1373,7 @@ mod tests {
             [3, 10, 1, 0, 2, 7],
         ] {
             let bytes = words.into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
-            assert_eq!(
-                read_activity(&mut Reader::new(&bytes), SCHEMA_VERSION).unwrap_err().kind(),
-                ErrorKind::Malformed
-            );
+            assert_eq!(read_activity(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
         }
         let invalid = TaskActivity {
             observed_at: EventTimestamp::from_ticks(10),
@@ -1601,12 +1448,12 @@ mod tests {
                 queued_since: None,
             }),
         ] {
-            let mut bytes = [0; TASK_V5_FIXED_LEN - TASK_V3_FIXED_LEN];
+            let mut bytes = [0; 48];
             write_activity(&mut Writer::new(&mut bytes), activity).unwrap();
-            assert_eq!(read_activity(&mut Reader::new(&bytes), SCHEMA_VERSION).unwrap(), activity);
+            assert_eq!(read_activity(&mut Reader::new(&bytes)).unwrap(), activity);
             for len in 0..bytes.len() {
                 assert_eq!(
-                    read_activity(&mut Reader::new(&bytes[..len]), SCHEMA_VERSION).unwrap_err().kind(),
+                    read_activity(&mut Reader::new(&bytes[..len])).unwrap_err().kind(),
                     ErrorKind::Malformed
                 );
             }
@@ -1636,12 +1483,8 @@ mod tests {
             [4, 10, 0, 11, 0],
         ] {
             let mut bytes = words.into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
-            assert_eq!(read_activity(&mut Reader::new(&bytes), 4).unwrap_err().kind(), ErrorKind::Malformed);
             bytes.extend_from_slice(&0_u64.to_le_bytes());
-            assert_eq!(
-                read_activity(&mut Reader::new(&bytes), SCHEMA_VERSION).unwrap_err().kind(),
-                ErrorKind::Malformed
-            );
+            assert_eq!(read_activity(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
         }
         let invalid = TaskActivity {
             observed_at: EventTimestamp::from_ticks(10),
@@ -1703,19 +1546,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_tasks_and_fixed_buffer_failures_are_handled() {
-        let mut task = Vec::new();
-        task.extend_from_slice(&1_u64.to_le_bytes());
-        task.extend_from_slice(&0_u64.to_le_bytes());
-        task.extend_from_slice(&2_u64.to_le_bytes());
-        task.extend_from_slice(&0_u32.to_le_bytes());
-        task.extend_from_slice(&0_u32.to_le_bytes());
-        let decoded = read_task(&mut Reader::new(&task), 2).unwrap();
-        assert_eq!(
-            (decoded.spawned_at, decoded.last_worker_id, decoded.metrics, decoded.activity),
-            (None, None, TaskMetrics::default(), None)
-        );
-
+    fn fixed_buffer_failures_are_handled() {
         let snapshot = fixture();
         let mut short = vec![0; encoded_len(&snapshot).unwrap() - 1];
         assert_eq!(encode(&snapshot, &mut short), Err(()));
@@ -1789,46 +1620,31 @@ mod tests {
     }
 
     #[test]
-    fn schema_tags_do_not_leak_into_historical_record_formats() {
+    fn unknown_collection_and_inconsistent_metric_tags_are_rejected() {
         let expected = fixture();
         let mut runtime = expected.runtimes[0].clone();
         runtime.counters = Counters::default();
         runtime.counters_scope = CountersScope::Uncollected;
-        let mut bytes = vec![0; RUNTIME_FIXED_LEN + runtime.name.len() + WORKER_FIXED_LEN + TASK_FIXED_LEN];
-        write_runtime(&mut Writer::new(&mut bytes), &runtime).unwrap();
-        assert_eq!(read_runtime(&mut Reader::new(&bytes), 6).unwrap_err().kind(), ErrorKind::Malformed);
-
         let mut worker = runtime.workers[0].clone();
         worker.task_collection = TaskCollection::Complete;
         let mut bytes = [0; WORKER_FIXED_LEN];
         write_worker(&mut Writer::new(&mut bytes), &worker).unwrap();
-        assert_eq!(read_worker(&mut Reader::new(&bytes), 6).unwrap_err().kind(), ErrorKind::Malformed);
         bytes[10..12].copy_from_slice(&99_u16.to_le_bytes());
-        assert_eq!(
-            read_worker(&mut Reader::new(&bytes), SCHEMA_VERSION).unwrap_err().kind(),
-            ErrorKind::Malformed
-        );
+        assert_eq!(read_worker(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
 
         let mut task = runtime.tasks[0].clone();
         task.metrics_scope = TaskMetricsScope::Uncollected;
         task.metrics = TaskMetrics::default();
         let mut bytes = [0; TASK_FIXED_LEN];
         write_task(&mut Writer::new(&mut bytes), &task).unwrap();
-        assert_eq!(read_task(&mut Reader::new(&bytes), 6).unwrap_err().kind(), ErrorKind::Malformed);
         bytes[176..184].copy_from_slice(&7_u64.to_le_bytes());
-        assert_eq!(
-            read_task(&mut Reader::new(&bytes), SCHEMA_VERSION).unwrap_err().kind(),
-            ErrorKind::Malformed
-        );
+        assert_eq!(read_task(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
         bytes[28..32].copy_from_slice(&0_u32.to_le_bytes());
-        assert_eq!(
-            read_task(&mut Reader::new(&bytes), SCHEMA_VERSION).unwrap_err().kind(),
-            ErrorKind::Malformed
-        );
+        assert_eq!(read_task(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
     }
 
     #[test]
-    fn unknown_native_ages_are_valid_only_in_the_native_schema() {
+    fn native_states_remain_known_without_age_measurements() {
         for state in [TaskActivityState::Ready, TaskActivityState::Running] {
             let activity = Some(TaskActivity {
                 observed_at: EventTimestamp::from_ticks(10),
@@ -1841,8 +1657,7 @@ mod tests {
             let mut bytes = [0; 48];
             write_activity(&mut Writer::new(&mut bytes), activity).unwrap();
 
-            assert_eq!(read_activity(&mut Reader::new(&bytes), SCHEMA_VERSION).unwrap(), activity);
-            assert_eq!(read_activity(&mut Reader::new(&bytes), 6).unwrap_err().kind(), ErrorKind::Malformed);
+            assert_eq!(read_activity(&mut Reader::new(&bytes)).unwrap(), activity);
         }
     }
 
@@ -1888,7 +1703,7 @@ mod tests {
         write_task(&mut Writer::new(&mut bytes), &fixture().runtimes[0].tasks[0]).unwrap();
         bytes[24..28].copy_from_slice(&1_u32.to_le_bytes());
 
-        let decoded = read_task(&mut Reader::new(&bytes), SCHEMA_VERSION);
+        let decoded = read_task(&mut Reader::new(&bytes));
 
         assert_eq!(decoded.unwrap_err().kind(), ErrorKind::Malformed);
     }
@@ -1909,7 +1724,7 @@ mod tests {
             (
                 valid_activity(activity),
                 write_activity(&mut Writer::new(&mut [0; 48]), Some(activity)),
-                read_activity(&mut Reader::new(&bytes), SCHEMA_VERSION).unwrap_err().kind()
+                read_activity(&mut Reader::new(&bytes)).unwrap_err().kind()
             ),
             (false, Err(()), ErrorKind::Malformed)
         );

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use rallocator::Rallocator;
+use GLOBAL as Rallocator;
 use seismograph::recorder::{Configuration, Policy, without_recording};
 use seismograph_rallocator::native::{ObservationSource, Snapshot};
 
@@ -36,6 +36,7 @@ fn run_with_fresh_inventory(name: &str) -> bool {
     true
 }
 
+#[expect(clippy::unwrap_used, clippy::panic, reason = "The test fixture requires readable snmalloc state")]
 fn capture() -> Snapshot {
     let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).expect("capture native snapshot");
     without_recording(|| {
@@ -45,8 +46,12 @@ fn capture() -> Snapshot {
             .iter()
             .find(|source| source.id == seismograph_rallocator::source::ID)
             .expect("native allocator source is registered");
-        assert_eq!(source.schema_version, 4);
-        seismograph_rallocator::decode(&source.data).expect("decode native allocator source")
+        assert_eq!(source.schema_version, seismograph_rallocator::snapshot::SCHEMA_VERSION);
+        let snapshot = seismograph_rallocator::snapshot::decode(&source.data).unwrap();
+        let seismograph_rallocator::snapshot::BackendState::Snmalloc(state) = snapshot.backend else {
+            panic!("snmalloc must publish snmalloc state")
+        };
+        (snapshot.header, state).into()
     })
 }
 

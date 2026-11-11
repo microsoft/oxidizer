@@ -23,7 +23,7 @@ fn retained_allocation_events_render_actors_stacks_locations_and_escaped_symbols
     static SYMBOLS: Source = Source::new(
         seismograph_runtime::snapshot::source::ID,
         "allocation-html-symbols",
-        6,
+        seismograph_runtime::snapshot::source::SCHEMA_VERSION,
         capture_allocation_symbol,
     );
     seismograph::recorder(seismograph::recorder::Configuration {
@@ -98,10 +98,10 @@ fn capture_allocation_symbol(
         .first()
         .unwrap()
         .get();
-    // Runtime schema 6: no runtimes and one lookup for the captured allocation stack.
+    // Current runtime schema: no runtimes and one lookup for the allocation stack.
     let mut bytes = b"SEISRUNT".to_vec();
     bytes.extend_from_slice(&1_u16.to_le_bytes());
-    bytes.extend_from_slice(&6_u16.to_le_bytes());
+    bytes.extend_from_slice(&seismograph_runtime::snapshot::source::SCHEMA_VERSION.to_le_bytes());
     bytes.extend_from_slice(&0_u32.to_le_bytes());
     bytes.extend_from_slice(&1_u32.to_le_bytes());
     bytes.extend_from_slice(&address.to_le_bytes());
@@ -184,7 +184,7 @@ fn system_slot_allocation_failure_is_not_presented_as_never_observed() {
         "System slot allocation failed",
         "unavailable 1",
         "not zero or merely never-observed",
-        "accepted recorded allocation/free operations only",
+        "accepted recorded allocation/resize/free operations only",
         "sampled-out events",
     ] {
         assert!(html.contains(evidence), "missing {evidence}");

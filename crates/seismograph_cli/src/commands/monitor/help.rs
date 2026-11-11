@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use super::app::{App, CacheFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, ThreadFocus};
+use super::app::{AllocatorBackend, App, CacheFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, ThreadFocus};
 use super::help_content::Section;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,6 +24,9 @@ pub(super) enum Context {
     NativeCaches,
     NativeReturns,
     NativeObservation,
+    MimallocGlobal,
+    MimallocOwner,
+    MimallocClasses,
     Allocations,
     PrimitiveTypes,
     PrimitiveOperations,
@@ -97,7 +100,16 @@ impl App {
     fn panel_help_context(&self, tab: MonitorTab) -> Context {
         match tab {
             MonitorTab::Info => Context::Info,
-            MonitorTab::Heaps => self.heap_view.native.help(),
+            MonitorTab::Heaps => {
+                let capture = match &self.screen {
+                    Screen::Connected { snapshot, .. } | Screen::Offline { snapshot, .. } => snapshot.as_deref(),
+                    Screen::Browse => None,
+                };
+                match self.heap_view.backend(capture) {
+                    AllocatorBackend::Snmalloc => self.heap_view.native.help(),
+                    AllocatorBackend::Mimalloc => self.heap_view.mimalloc.help(),
+                }
+            }
             MonitorTab::Allocations => Context::Allocations,
             MonitorTab::Primitives => match self.primitive_view.focus {
                 PrimitiveFocus::Types => Context::PrimitiveTypes,

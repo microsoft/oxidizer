@@ -1,0 +1,170 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! First-class successful resize recording and wire compatibility.
+
+use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind, Reallocation};
+use seismograph::recorder::event::{Address, EventClass, EventKind, Record};
+use seismograph::recorder::{Configuration, EventBufferCapacity, EventSampling, Policy};
+use seismograph::snapshot::{DecodedSnapshot, EventBufferDisposition, SnapshotOptions};
+
+#[test]
+fn successful_resizes_keep_one_record_with_both_storage_endpoints() {
+    seismograph::recorder(Configuration {
+        allocations: Policy::all(false),
+        event_capacity_per_thread: EventBufferCapacity::new(64),
+        ..Configuration::default()
+    });
+    let allocation = Allocation {
+        allocation_id: AllocationId::new(0x1000),
+        event_thread_id: EventThreadId::new(0),
+        heap_id: HeapId::new(3),
+        heap_kind: HeapKind::General,
+        freed_after_heap_release: false,
+        address: Address::new(0x1000),
+        size: 64,
+        alignment: 16,
+    };
+    let in_place = Reallocation {
+        allocation_id: allocation.allocation_id,
+        heap_id: allocation.heap_id,
+        heap_kind: HeapKind::General,
+        old_address: allocation.address,
+        new_address: allocation.address,
+        old_size: 64,
+        new_size: 96,
+        alignment: 16,
+    };
+    let moved = Reallocation {
+        old_size: 96,
+        new_size: 4096,
+        new_address: Address::new(0x2000),
+        ..in_place
+    };
+    seismograph::record(EventClass::Allocation, || Some(Record::allocation(allocation)));
+    seismograph::record(EventClass::Allocation, || Some(Record::reallocation(in_place)));
+    seismograph::record(EventClass::Allocation, || Some(Record::reallocation(moved)));
+    seismograph::record(EventClass::Allocation, || {
+        Some(Record::deallocation(Allocation {
+            allocation_id: AllocationId::new(0x2000),
+            address: moved.new_address,
+            size: moved.new_size,
+            ..allocation
+        }))
+    });
+
+    let capture = seismograph::snapshot(SnapshotOptions {
+        event_buffers: EventBufferDisposition::Stop,
+    })
+    .unwrap();
+    let decoded = seismograph::snapshot::decode(capture.as_bytes()).unwrap();
+
+    assert_eq!(
+        decoded.events.events.iter().map(|event| event.kind).collect::<Vec<_>>(),
+        [
+            EventKind::Allocation,
+            EventKind::Reallocation,
+            EventKind::Reallocation,
+            EventKind::Deallocation,
+        ]
+    );
+    assert_eq!(
+        decoded
+            .events
+            .events
+            .iter()
+            .filter_map(seismograph::recorder::event::Event::reallocation)
+            .collect::<Vec<_>>(),
+        [in_place, moved]
+    );
+    assert_eq!(EventKind::Reallocation.class(), EventClass::Allocation);
+    assert_eq!(
+        [
+            EventKind::NotifyAccess,
+            EventKind::NotifyContention,
+            EventKind::NotifySignal,
+            EventKind::Reallocation
+        ]
+        .map(EventKind::wire_value),
+        [84, 85, 86, 87]
+    );
+    assert_eq!(decoded.events.events[1].object_id().unwrap().get(), allocation.allocation_id.get());
+    assert!(decoded.events.events[1].allocation().is_none());
+    assert!(decoded.events.events[0].reallocation().is_none());
+    assert_malformed_resize_rejected(capture.as_bytes(), &decoded);
+    let mut incorrectly_versioned = capture.as_bytes().to_vec();
+    incorrectly_versioned[8..10].copy_from_slice(&9_u16.to_le_bytes());
+    seismograph::snapshot::decode(&incorrectly_versioned).unwrap_err();
+    assert_stable_identity_sampling(allocation, moved);
+}
+
+#[expect(clippy::unwrap_used, reason = "Malformed fixtures must fail decoding")]
+fn assert_malformed_resize_rejected(bytes: &[u8], decoded: &DecodedSnapshot) {
+    // Formats 9 and 10 use a 92-byte header, named thread rows, and 92-byte event rows.
+    let threads_len: usize = decoded.events.threads.iter().map(|thread| 26 + thread.name.len()).sum();
+    let resize_start = 92 + threads_len + 92;
+    for (offset, replacement) in [(24, EventKind::Allocation.wire_value()), (25, 3), (27, 1)] {
+        let mut malformed = bytes.to_vec();
+        malformed[resize_start + offset] = replacement;
+        seismograph::snapshot::decode(&malformed).unwrap_err();
+    }
+    for invalid_heap_kind in [255_u64, 256, u64::MAX] {
+        let mut malformed = bytes.to_vec();
+        malformed[resize_start + 84..resize_start + 92].copy_from_slice(&invalid_heap_kind.to_le_bytes());
+        seismograph::snapshot::decode(&malformed).unwrap_err();
+    }
+}
+
+#[expect(clippy::unwrap_used, reason = "Test configuration and captures must be valid")]
+fn assert_stable_identity_sampling(allocation: Allocation, resize: Reallocation) {
+    seismograph::recorder(Configuration {
+        allocations: Policy {
+            event_sampling: EventSampling::one_in(2).unwrap(),
+            ..Policy::all(false)
+        },
+        event_capacity_per_thread: EventBufferCapacity::new(if cfg!(miri) { 64 } else { 512 }),
+        ..Configuration::default()
+    });
+    let population = if cfg!(miri) { 16 } else { 128 };
+    for id in 1..=population {
+        let allocation_id = AllocationId::new(id);
+        let allocation = Allocation {
+            allocation_id,
+            address: Address::new(0x1000 + id * 64),
+            ..allocation
+        };
+        let resize = Reallocation {
+            allocation_id,
+            old_address: allocation.address,
+            new_address: Address::new(0x0020_0000 + id * 4096),
+            old_size: allocation.size,
+            ..resize
+        };
+        seismograph::record(EventClass::Allocation, || Some(Record::allocation(allocation)));
+        seismograph::record(EventClass::Allocation, || Some(Record::reallocation(resize)));
+        seismograph::record(EventClass::Allocation, || {
+            Some(Record::deallocation(Allocation {
+                address: resize.new_address,
+                size: resize.new_size,
+                ..allocation
+            }))
+        });
+    }
+    let capture = seismograph::snapshot(SnapshotOptions {
+        event_buffers: EventBufferDisposition::Stop,
+    })
+    .unwrap();
+    let events = seismograph::snapshot::decode(capture.as_bytes()).unwrap().events.events;
+    assert!(!events.is_empty());
+    for id in 1..=population {
+        let kinds = events
+            .iter()
+            .filter(|event| event.object_id().unwrap().get() == id)
+            .map(|event| event.kind)
+            .collect::<Vec<_>>();
+        assert!(
+            kinds.is_empty() || kinds == [EventKind::Allocation, EventKind::Reallocation, EventKind::Deallocation],
+            "sampling must use the allocation ID for each retained lifecycle operation"
+        );
+    }
+}

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
+use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind, Reallocation};
 use seismograph::recorder::event::{Address, EventClock, EventSequence, EventTimestamp, NumericEvent, ObjectId};
 use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, TaskId, TypeDescriptorId, WorkerId};
 use seismograph::recorder::thread::{ThreadId, ThreadLog};
@@ -754,6 +754,18 @@ fn all_existing_thread_operations_have_task_history_and_measurements() {
         } else {
             operation(1, sequence, sequence, kind.event_kind(), sequence)
         };
+        if kind == ThreadOperationKind::Reallocation {
+            event.payload = EventPayload::Reallocation(Reallocation {
+                allocation_id: AllocationId::new(1),
+                heap_id: HeapId::new(8),
+                heap_kind: HeapKind::General,
+                old_address: Address::new(0x8000),
+                new_address: Address::new(0x8000),
+                old_size: 64,
+                new_size: 64,
+                alignment: 16,
+            });
+        }
         if kind == ThreadOperationKind::ChannelHighWatermark {
             event.payload = EventPayload::Numeric(NumericEvent {
                 object_id: ObjectId::new(sequence),
@@ -779,7 +791,55 @@ fn all_existing_thread_operations_have_task_history_and_measurements() {
                 .detail
                 .clone()
         ),
-        (37, ThreadOperationKind::ALL.to_vec(), "ChannelHighWatermark; value=32".into()),
+        (38, ThreadOperationKind::ALL.to_vec(), "ChannelHighWatermark; value=32".into()),
+    );
+}
+
+#[test]
+fn moved_storage_and_old_address_reuse_remain_separate_task_lifetimes() {
+    let resize = Event {
+        payload: EventPayload::Reallocation(Reallocation {
+            allocation_id: AllocationId::new(7),
+            heap_id: HeapId::new(8),
+            heap_kind: HeapKind::General,
+            old_address: Address::new(0x8000),
+            new_address: Address::new(0x9000),
+            old_size: 64,
+            new_size: 4096,
+            alignment: 16,
+        }),
+        ..operation(2, 1, 4, EventKind::Reallocation, 7)
+    };
+    let mut free = allocation(3, 1, 6, EventKind::Deallocation, 0x9000);
+    if let EventPayload::Allocation(allocation) = &mut free.payload {
+        allocation.address = Address::new(0x9000);
+        allocation.size = 4096;
+    }
+    let snapshot = summarize(vec![
+        allocation(1, 1, 2, EventKind::Allocation, 7),
+        resize,
+        allocation(2, 2, 5, EventKind::Allocation, 7),
+        free,
+    ]);
+
+    assert_eq!(
+        snapshot
+            .histories
+            .iter()
+            .map(|history| { history.events.iter().map(|event| event.kind).collect::<Vec<_>>() })
+            .collect::<Vec<_>>(),
+        [
+            vec![EventKind::Allocation, EventKind::Reallocation, EventKind::Deallocation],
+            vec![EventKind::Allocation],
+        ]
+    );
+    assert_eq!(
+        snapshot.histories[0].events.iter().map(|event| event.thread_id).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert_eq!(
+        snapshot.histories[0].events[1].detail,
+        "resize 0x8000 / 64 B -> 0x9000 / 4096 B align=16 heap=8 (moved)"
     );
 }
 
