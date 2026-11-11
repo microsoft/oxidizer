@@ -75,6 +75,5 @@ fn sdk_provider_shutdown_reaches_exporter() {
         .build();
 
     provider.shutdown().unwrap();
-
     assert!(exporter.is_shutdown_called());
 }

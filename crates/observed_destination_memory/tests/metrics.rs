@@ -25,7 +25,6 @@ fn metric_destination_exports_recorded_values_on_flush() {
     counter.add(2, &[]);
     provider.force_flush().unwrap();
 
-    // The caller's exporter must receive measurements before the provider shuts down.
     let batches = exporter.get_finished_metrics().unwrap();
     let metric = batches
         .iter()

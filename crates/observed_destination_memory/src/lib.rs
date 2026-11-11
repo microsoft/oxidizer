@@ -191,15 +191,12 @@ mod tests {
         let mut record = logger.create_log_record();
 
         processor.emit(&mut record, &scope);
-
         assert_eq!(exporter.get_emitted_logs().unwrap().len(), 1);
 
         processor.shutdown_with_timeout(Duration::from_secs(1)).unwrap();
-
         assert!(exporter.is_shutdown_called());
 
         processor.emit(&mut record, &scope);
-
         assert!(exporter.get_emitted_logs().unwrap().is_empty());
     }
 }
