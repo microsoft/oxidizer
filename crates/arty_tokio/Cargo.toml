@@ -36,11 +36,13 @@ arty = { workspace = true, features = ["rt"] }
 derive_more = { workspace = true, features = ["debug"] }
 ohno = { workspace = true }
 performables = { workspace = true }
+thread_aware = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
 arty = { path = "../arty", features = ["macros", "rt"] }
 futures = { workspace = true, features = ["executor"] }
+mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
 static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread", "time"] }

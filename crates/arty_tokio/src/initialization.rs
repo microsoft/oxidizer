@@ -5,9 +5,11 @@ use std::future::pending;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use arty::core::{Thread, ThreadAware};
-use arty::task::{Context, JoinHandle};
+use arty::core::Thread;
+use arty::runtime::hook::OnStart;
+use arty::task::{Context, JoinHandle, Scheduler};
 use performables::sync::channel::{OneshotReceiver, OneshotSender, WatchReceiver, WatchSender, oneshot, watch};
+use thread_aware::ThreadAware;
 use tokio::runtime::{Handle, RuntimeFlavor};
 
 use crate::error::{classify_join, context_conflict, initialization_aborted, unsupported_runtime};
@@ -107,14 +109,21 @@ enum StartupResult {
     ContextConflict,
 }
 
+#[derive(ThreadAware)]
 struct InstallerData {
+    #[thread_aware(skip)]
     transaction: Arc<Transaction>,
+    #[thread_aware(skip)]
     phase_changed: WatchReceiver<()>,
+    #[thread_aware(skip)]
     startup: OneshotSender<StartupResult>,
 }
 
-impl ThreadAware for InstallerData {
-    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+#[derive(Clone, ThreadAware)]
+struct StartupInstaller {
+    #[thread_aware(skip)]
+    handle: Handle,
+    scheduler: Scheduler,
 }
 
 struct Installer {
@@ -184,6 +193,13 @@ pub(crate) async fn initialize_all_workers(cx: &Context, tokio: TokioHandle) -> 
     }
 
     if commit_if_started(&transaction, startup_succeeded(failure.as_ref(), ready, installers.len())) {
+        cx.control().on::<OnStart, _>(
+            StartupInstaller {
+                handle: transaction.handle.clone(),
+                scheduler: cx.scheduler().clone(),
+            },
+            install_on_start,
+        );
         abort_on_drop.disarm();
         return Ok(());
     }
@@ -192,6 +208,25 @@ pub(crate) async fn initialize_all_workers(cx: &Context, tokio: TokioHandle) -> 
     finish_installers(&mut installers, &mut failure).await;
     abort_on_drop.disarm();
     Err(failure.unwrap_or_else(initialization_aborted))
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Runs when dynamic scaling starts a worker after init.
+#[cfg_attr(test, mutants::skip)] // Dynamic worker scaling is not implemented yet.
+fn install_on_start(_event: &mut OnStart, installer: &StartupInstaller) {
+    let handle = installer.handle.clone();
+    drop(installer.scheduler.spawn(move |_| enter_worker(handle)));
+}
+
+#[expect(clippy::future_not_send, reason = "the fixed-worker task must retain Tokio's non-Send EnterGuard")]
+#[cfg_attr(coverage_nightly, coverage(off))] // Runs when dynamic scaling starts a worker after init.
+#[cfg_attr(test, mutants::skip)] // Dynamic worker scaling is not implemented yet.
+async fn enter_worker(handle: Handle) {
+    assert!(
+        Handle::try_current().is_err(),
+        "successful arty_tokio initialization installs one Tokio context per Arty worker"
+    );
+    let _entered = handle.enter();
+    pending::<()>().await;
 }
 
 async fn finish_installers(installers: &mut [Installer], failure: &mut Option<InitError>) {
