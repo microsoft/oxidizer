@@ -23,7 +23,7 @@ pub(crate) enum Backtrace {
 
 impl Backtrace {
     /// Create a `Backtrace` from a standard backtrace.
-    #[cfg_attr(coverage_nightly, coverage(off))] // we can't create Unsupported backtraces in tests
+    #[cfg_attr(ohno_has_coverage_attribute, coverage(off))] // we can't create Unsupported backtraces in tests
     pub(crate) fn from_backtrace(bt: StdBacktrace) -> Self {
         match bt.status() {
             BacktraceStatus::Disabled => Self::Disabled,
@@ -69,7 +69,7 @@ impl Backtrace {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(ohno_has_coverage_attribute, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -228,7 +228,7 @@ impl fmt::Display for MessageFormatter<'_> {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(ohno_has_coverage_attribute, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;
