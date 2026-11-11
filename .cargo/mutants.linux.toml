@@ -169,6 +169,13 @@ exclude_re = [
     # native behavioral tests, coverage, and Miri; do not spend minutes per hang.
     'crates/arty/src/runtime/worker/signal.rs:\d+:\d+: delete ! in WorkerSignal::wait_for_notification$',
     'crates/arty/src/runtime/worker/signal.rs:\d+:\d+: replace WorkerSignal::notify with \(\)$',
+    # PR #960, Windows run 42996922132: these eight mutations strand tasks or
+    # prevent worker shutdown. Keep all other mutations in these functions.
+    '^crates/arty/src/runtime/monitoring/task.rs:\d+:\d+: replace (add_task|add_task_with_metadata) with \(\)$',
+    '^crates/arty/src/runtime/worker/blocking/queue.rs:\d+:\d+: replace Queue::push -> bool with (true|false)$',
+    '^crates/arty/src/runtime/worker/blocking/queue.rs:\d+:\d+: replace Queue::pop -> Option<QueuedJob> with None$',
+    '^crates/arty/src/runtime/worker/blocking/queue.rs:\d+:\d+: replace Queue::stop with \(\)$',
+    '^crates/arty/src/runtime/worker/blocking/worker.rs:\d+:\d+: replace JoinableThreadPool::enqueue -> bool with (true|false)$',
     'crates/performables/src/sync/channel.rs:\d+:\d+: replace & with (\||\^) in WatchReceiver<T>::wait_for_async$',
     'crates/performables/src/sync/channel.rs:\d+:\d+: delete ! in WatchReceiver<T>::wait_for_async$',
     'crates/performables/src/sync/notify.rs:\d+:\d+: replace Waiter::wake with \(\)$',
