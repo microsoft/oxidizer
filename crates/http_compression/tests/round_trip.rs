@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests covering each transformation.
+//! Tests each HTTP body transformation.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 #![cfg(not(miri))] // The compression backends exercised here are excluded from Miri.
@@ -22,7 +22,7 @@ use ohno::{ErrorExt as _, Labeled as _};
 
 const URL: &str = "https://example.com/resource";
 
-/// Compresses well, so the transforms have something visible to do.
+/// Compresses well so each transformation has a visible effect.
 fn payload() -> String {
     "the quick brown fox jumps over the lazy dog. ".repeat(64)
 }
@@ -59,7 +59,7 @@ fn bytes(text: &str) -> BytesView {
     BytesView::copied_from_slice(text.as_bytes(), &builder())
 }
 
-/// An inner handler that hands the request body back as the response body.
+/// Returns the request body as the response body.
 fn echo() -> FakeHandler {
     FakeHandler::from_async_fn(|request: HttpRequest| async move {
         let body = request.into_body().into_bytes().await?;
@@ -68,7 +68,7 @@ fn echo() -> FakeHandler {
     })
 }
 
-/// An inner handler returning a fixed response.
+/// Returns a fixed response.
 fn responds_with(response: impl Fn() -> Result<HttpResponse> + Send + Sync + 'static) -> FakeHandler {
     FakeHandler::from_fn(move |_| response())
 }
@@ -202,6 +202,7 @@ async fn a_client_decompresses_the_response_it_gets_back() {
 
     let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
 
+    // These headers do not describe the decompressed body.
     assert!(response.headers().get(CONTENT_ENCODING).is_none());
     assert!(response.headers().get(CONTENT_LENGTH).is_none());
 
@@ -228,7 +229,7 @@ async fn a_client_says_what_it_can_decompress() {
     handler.execute(request(BytesView::default(), None)).await.unwrap();
 
     let value = seen.lock().unwrap_or_else(PoisonError::into_inner).clone().unwrap();
-    // Descending quality values, so the preference is stated rather than implied.
+    // Descending quality values state the preference.
     assert_eq!(value, "zstd, br;q=0.9, gzip;q=0.8");
 }
 
@@ -655,13 +656,13 @@ async fn building_a_server_captures_its_role_settings() {
 async fn a_client_and_a_server_round_trip_through_each_other() {
     let expected = payload();
 
-    // The server sits inside: it decompresses what arrives and compresses what it sends.
+    // The inner server decompresses requests and compresses responses.
     let server = server()
         .decompress_requests(&[Format::Gzip])
         .compress_responses(&[Format::Brotli, Format::Gzip])
         .layer(echo());
 
-    // The client sits outside: it decompresses whatever the server chose to send.
+    // The outer client decompresses the server response.
     let client = client().decompress_responses(&[Format::Brotli, Format::Gzip]).layer(server);
 
     let mut input = request(compress(Format::Gzip, expected.as_bytes()), Some("gzip"));
@@ -669,8 +670,7 @@ async fn a_client_and_a_server_round_trip_through_each_other() {
 
     let response = client.execute(input).await.unwrap();
 
-    // Both hops are invisible: the payload survives being decompressed on the way in
-    // and compressed again on the way out.
+    // The payload survives request decompression and response compression.
     assert_eq!(response.extensions().get::<OriginalBody>().unwrap().formats(), [Format::Brotli]);
     assert_eq!(response.into_body().into_text().await.unwrap(), expected);
 }
@@ -848,8 +848,8 @@ async fn a_no_content_response_is_never_given_a_body() {
 
         let response = handler.execute(input).await.unwrap();
 
-        // These statuses define a body as absent, even when an invalid inner
-        // handler supplies bytes. The middleware must not transform them.
+        // These statuses cannot contain a body. The middleware must leave bytes
+        // from an invalid inner handler unchanged.
         assert!(response.headers().get(CONTENT_ENCODING).is_none(), "status {status}");
         assert_eq!(
             response.into_body().into_text().await.unwrap(),
@@ -909,8 +909,8 @@ async fn a_negotiated_response_says_it_varies_by_accept_encoding() {
 async fn an_uncompressed_response_still_says_it_varies() {
     let handler = server().compress_responses(&[Format::Gzip]).layer(echo());
 
-    // No `Accept-Encoding`, so nothing is compressed - but a cache still must not
-    // reuse this body for a caller that does send one.
+    // Without `Accept-Encoding`, the body stays uncompressed. `Vary` prevents a
+    // cache from reusing it for a caller that accepts compression.
     let response = handler.execute(request(bytes(&payload()), None)).await.unwrap();
 
     assert!(response.headers().get(CONTENT_ENCODING).is_none());
@@ -1092,7 +1092,7 @@ async fn an_existing_wildcard_vary_is_not_extended() {
     assert_eq!(varies, [HeaderValue::from_static("*")]);
 }
 
-/// A body that yields one data frame and then a trailer frame.
+/// Produces one data frame followed by one trailer frame.
 struct TrailingBody {
     data: Option<BytesView>,
     trailers: Option<http::HeaderMap>,
@@ -1258,8 +1258,8 @@ async fn a_response_with_an_unreadable_content_type_is_left_unchanged() {
 async fn only_the_chosen_content_types_are_compressed() {
     use http_compression::DEFAULT_COMPRESSIBLE_TYPES;
 
-    // `application/ld+json` is covered by `application/json` via its suffix;
-    // a JPEG is already compressed and must be left alone.
+    // `application/json` covers the `application/ld+json` suffix. JPEG data is
+    // already compressed, so it stays unchanged.
     let cases = [
         ("text/html; charset=utf-8", true),
         ("text/markdown", true),
@@ -1399,8 +1399,8 @@ async fn compression_weakens_a_strong_validator() {
 
     let response = handler.execute(input).await.unwrap();
 
-    // The compressed body is a different representation, so it must not keep a
-    // strong validator the identity body also claims.
+    // A compressed body has different bytes, so it cannot share a strong entity
+    // tag with the identity body.
     assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
     assert_eq!(response.headers().get(ETAG).unwrap(), "W/\"v1\"");
 }
@@ -1496,8 +1496,8 @@ async fn a_head_response_is_never_decompressed() {
     let input = http::Request::head(URL).body(builder().empty()).unwrap();
     let response = handler.execute(input).await.unwrap();
 
-    // A `HEAD` response describes a body it does not carry, so stripping the
-    // metadata would leave the caller unable to make sense of what it says.
+    // A `HEAD` response describes a body but does not contain it. Preserve its
+    // metadata for the caller.
     assert_eq!(response.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
     assert!(response.extensions().get::<OriginalBody>().is_none());
 }
@@ -1597,8 +1597,7 @@ async fn an_empty_list_member_does_not_stop_decompression() {
 
     let response = handler.execute(request(BytesView::default(), None)).await.unwrap();
 
-    // Empty members come from headers being combined, not from the sender
-    // meaning anything by them.
+    // Combined headers can produce empty members with no meaning.
     assert_eq!(response.into_body().into_text().await.unwrap(), expected);
 }
 

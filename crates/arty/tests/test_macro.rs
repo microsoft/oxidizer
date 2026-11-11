@@ -107,6 +107,10 @@ async fn default_test_runtime_has_exactly_one_worker(cx: Context) {
     }
 }
 
+#[cfg_attr(
+    all(miri, feature = "monitor"),
+    ignore = "native monitor uses OS I/O; native and cargo careful tests cover macro policy wiring"
+)]
 #[test(monitor = enabled)]
 async fn test_can_enable_monitoring(cx: Context) {
     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
