@@ -37,7 +37,7 @@ pub(super) fn capture(events: &Events) -> Vec<Symbol> {
     capture_with(events, resolve)
 }
 
-fn capture_with(events: &Events, mut resolve: impl FnMut(&mut Symbol)) -> Vec<Symbol> {
+pub(super) fn capture_with(events: &Events, mut resolve: impl FnMut(&mut Symbol)) -> Vec<Symbol> {
     let addresses = events
         .events
         .iter()

@@ -33,8 +33,7 @@ pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
     }
 
     let bytes = fs::read(&args.input).map_err(Error::Io)?;
-    let (snapshot, sources) = decode_snapshot(&bytes)?;
-    let html = crate::report::render_html_with_sources(&snapshot, &sources);
+    let html = render_capture(&bytes)?;
     if args.force {
         fs::write(&output, html).map_err(Error::Io)?;
     } else {
@@ -48,6 +47,11 @@ pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
 
     println!("{}", output.display());
     Ok(())
+}
+
+pub(crate) fn render_capture(bytes: &[u8]) -> Result<String, Error> {
+    let (snapshot, sources) = decode_snapshot(bytes)?;
+    Ok(crate::report::render_html_with_sources(&snapshot, &sources))
 }
 
 fn decode_snapshot(bytes: &[u8]) -> Result<(Snapshot, Vec<seismograph::snapshot::SourceSnapshot>), Error> {

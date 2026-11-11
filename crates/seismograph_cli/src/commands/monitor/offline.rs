@@ -43,18 +43,24 @@ fn load(path: &Path, file: File) -> Result<Box<CapturedSnapshot>, Error> {
     load_with_progress(path, file, &mut |_| {})
 }
 
-fn load_with_progress(
-    path: &Path,
-    mut file: File,
-    progress: &mut impl FnMut(super::snapshot::Phase),
-) -> Result<Box<CapturedSnapshot>, Error> {
+fn load_with_progress(path: &Path, file: File, progress: &mut impl FnMut(super::snapshot::Phase)) -> Result<Box<CapturedSnapshot>, Error> {
     use super::snapshot::Phase;
     progress(Phase::Read);
     let length = file.metadata().map_err(|error| Error::snapshot_file(path, error))?.len();
     let length = usize::try_from(length).map_err(|error| Error::snapshot_file(path, error))?;
+    load_reader_with_progress(path, file, length, progress)
+}
+
+fn load_reader_with_progress(
+    path: &Path,
+    mut reader: impl Read,
+    length: usize,
+    progress: &mut impl FnMut(super::snapshot::Phase),
+) -> Result<Box<CapturedSnapshot>, Error> {
+    use super::snapshot::Phase;
     let mut bytes = Vec::new();
     bytes.try_reserve_exact(length).map_err(|error| Error::snapshot_file(path, error))?;
-    file.read_to_end(&mut bytes).map_err(|error| Error::snapshot_file(path, error))?;
+    reader.read_to_end(&mut bytes).map_err(|error| Error::snapshot_file(path, error))?;
     progress(Phase::DecodeContainer);
     let decoded = seismograph::snapshot::decode(&bytes).map_err(|error| Error::snapshot_file(path, error))?;
     // The native decoder owns its data. Release the large input before building summaries.
@@ -94,15 +100,16 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "requires filesystem access")]
     fn loads_mimalloc_container_without_changing_backend_state_or_capture_time() {
         let payload = crate::mimalloc_view::fixture::snapshot();
         let bytes = crate::mimalloc_view::fixture::container(&[crate::mimalloc_view::fixture::source(&payload)]);
-        let path = write("mimalloc-backend", &bytes);
-        let loader = Loader::start(path.clone(), File::open(&path).unwrap()).unwrap();
-
-        let snapshot = loader.receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap().unwrap();
-        std::fs::remove_file(path).unwrap();
+        let snapshot = load_reader_with_progress(
+            Path::new("mimalloc.seismograph"),
+            std::io::Cursor::new(&bytes),
+            bytes.len(),
+            &mut |_| {},
+        )
+        .unwrap();
 
         assert_eq!(
             (

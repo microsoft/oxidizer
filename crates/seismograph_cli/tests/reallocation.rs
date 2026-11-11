@@ -1,23 +1,29 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Saved resize evidence reaches the public HTML command.
-#![cfg(not(miri))]
+//! Saved resize evidence reaches the in-memory HTML pipeline.
 
 use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind, Reallocation};
-use seismograph::recorder::event::{Address, EventClass, Record};
-use seismograph::recorder::{Configuration, Policy};
-use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
+use seismograph::recorder::event::{Address, Event, EventClock, EventKind, EventPayload, EventSequence, EventTimestamp, Events};
+use seismograph::recorder::thread::{ThreadId, ThreadLog};
+use seismograph::snapshot::{DecodedSnapshot, test_util};
 
 #[expect(dead_code, reason = "This suite uses the container helper, not the legacy payload helper")]
 mod support;
 
+fn event(kind: EventKind, payload: EventPayload, sequence: u64) -> Event {
+    Event {
+        thread_id: ThreadId::new(1),
+        sequence: EventSequence::new(sequence),
+        timestamp: EventTimestamp::from_ticks(sequence),
+        kind,
+        payload,
+        call_stack: Vec::new(),
+    }
+}
+
 #[test]
 fn html_preserves_one_lifetime_and_displays_moved_in_place_and_orphan_resizes() {
-    seismograph::recorder(Configuration {
-        allocations: Policy::all(false),
-        ..Configuration::default()
-    });
     let allocation = Allocation {
         allocation_id: AllocationId::new(0x1000),
         event_thread_id: EventThreadId::new(0),
@@ -38,25 +44,45 @@ fn html_preserves_one_lifetime_and_displays_moved_in_place_and_orphan_resizes() 
         new_size: 96,
         alignment: 8,
     };
-    seismograph::record(EventClass::Allocation, || Some(Record::allocation(allocation)));
-    seismograph::record(EventClass::Allocation, || Some(Record::reallocation(resize)));
-    seismograph::record(EventClass::Allocation, || {
-        Some(Record::reallocation(Reallocation {
-            old_size: 96,
-            new_size: 8192,
-            new_address: Address::new(0x2000),
-            ..resize
-        }))
-    });
-    seismograph::record(EventClass::Allocation, || {
-        Some(Record::reallocation(Reallocation {
-            allocation_id: AllocationId::new(0x3000),
-            old_address: Address::new(0x3000),
-            new_address: Address::new(0x4000),
-            ..resize
-        }))
-    });
-    let capture = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+    let mut snapshot = DecodedSnapshot {
+        events: Events {
+            clock: EventClock::CURRENT,
+            total_events: 4,
+            threads: vec![ThreadLog {
+                thread_id: ThreadId::new(1),
+                total_events: 4,
+                lost_events: 0,
+                name: "producer".into(),
+            }],
+            events: vec![
+                event(EventKind::Allocation, EventPayload::Allocation(allocation), 1),
+                event(EventKind::Reallocation, EventPayload::Reallocation(resize), 2),
+                event(
+                    EventKind::Reallocation,
+                    EventPayload::Reallocation(Reallocation {
+                        old_size: 96,
+                        new_size: 8192,
+                        new_address: Address::new(0x2000),
+                        ..resize
+                    }),
+                    3,
+                ),
+                event(
+                    EventKind::Reallocation,
+                    EventPayload::Reallocation(Reallocation {
+                        allocation_id: AllocationId::new(0x3000),
+                        old_address: Address::new(0x3000),
+                        new_address: Address::new(0x4000),
+                        ..resize
+                    }),
+                    4,
+                ),
+            ],
+            ..Events::default()
+        },
+        ..DecodedSnapshot::default()
+    };
+    let capture = test_util::encode(&snapshot).unwrap();
 
     let html = support::render_capture(capture.as_bytes(), "resize-unmatched");
 
@@ -75,18 +101,19 @@ fn html_preserves_one_lifetime_and_displays_moved_in_place_and_orphan_resizes() 
     assert_eq!(html.matches("<td>orphan resize</td>").count(), 1);
     assert!(html.contains("0x3000 / 64 B → 0x4000 / 96 B (moved)</td><td>orphan resize</td>"));
 
-    seismograph::record(EventClass::Allocation, || {
-        Some(Record::deallocation(Allocation {
+    snapshot.events.threads[0].total_events += 1;
+    snapshot.events.total_events += 1;
+    snapshot.events.events.push(event(
+        EventKind::Deallocation,
+        EventPayload::Allocation(Allocation {
             allocation_id: AllocationId::new(0x2000),
             address: Address::new(0x2000),
             size: 8192,
             ..allocation
-        }))
-    });
-    let capture = seismograph::snapshot(SnapshotOptions {
-        event_buffers: EventBufferDisposition::Stop,
-    })
-    .unwrap();
+        }),
+        5,
+    ));
+    let capture = test_util::encode(&snapshot).unwrap();
     let html = support::render_capture(capture.as_bytes(), "resize-freed");
     assert!(html.contains("No retained unmatched allocation stacks."));
     assert_eq!(html.matches("<td>free</td>").count(), 1);

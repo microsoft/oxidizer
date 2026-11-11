@@ -30,13 +30,15 @@ pub(crate) fn merge(
         line: lookup.line,
         column: lookup.column,
     });
-    // Source-specific names take precedence. Shared capture symbols fill missing fields.
+    // Source-specific names take precedence. Keep each location from one lookup.
     for lookup in allocator.into_iter().chain(runtime.map(AddressLookup::from_fields)) {
         if let Some(previous) = lookups.get_mut(&lookup.address) {
             previous.symbol = lookup.symbol.or_else(|| previous.symbol.take());
-            previous.filename = lookup.filename.or_else(|| previous.filename.take());
-            previous.line = lookup.line.or(previous.line);
-            previous.column = lookup.column.or(previous.column);
+            if lookup.filename.is_some() {
+                previous.filename = lookup.filename;
+                previous.line = lookup.line;
+                previous.column = lookup.column;
+            }
         } else {
             lookups.insert(lookup.address, lookup);
         }
@@ -53,7 +55,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn source_specific_symbols_take_precedence_without_erasing_available_common_fields() {
+    fn source_specific_names_do_not_mix_locations_from_different_lookups() {
         let allocator = AddressLookup::from_fields(AddressLookupFields {
             address: 16,
             symbol: Some("allocator::name".into()),
@@ -84,8 +86,37 @@ mod tests {
                 address: 16,
                 symbol: Some("runtime::name".into()),
                 filename: Some("allocator.rs".into()),
-                line: Some(7),
-                column: Some(9),
+                line: Some(5),
+                column: None,
+            })]
+        );
+    }
+
+    #[test]
+    fn a_source_filename_without_coordinates_clears_the_previous_coordinates() {
+        let allocator = AddressLookup::from_fields(AddressLookupFields {
+            address: 16,
+            symbol: Some("allocator::name".into()),
+            filename: Some("new.rs".into()),
+            line: None,
+            column: None,
+        });
+        let shared = Symbol {
+            address: Address::new(16),
+            name: Some("application::allocate".into()),
+            filename: Some("old.rs".into()),
+            line: Some(100),
+            column: Some(4),
+        };
+
+        assert_eq!(
+            merge(vec![allocator], vec![], vec![shared]),
+            vec![AddressLookup::from_fields(AddressLookupFields {
+                address: 16,
+                symbol: Some("allocator::name".into()),
+                filename: Some("new.rs".into()),
+                line: None,
+                column: None,
             })]
         );
     }

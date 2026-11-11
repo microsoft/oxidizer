@@ -18,6 +18,7 @@ Live monitoring, interactive snapshot viewing, and HTML reporting for `seismogra
 The CLI renders common thread, stack, and runtime-event data directly.
 Rallocator payloads use the built-in schema-specific renderer; unknown
 sources remain visible in the source inventory.
+The non-default `test-util` feature exposes in-memory snapshot rendering.
 
 **Native v4**, immediately left of Allocations, has separate backend views.
 The snmalloc view explores its global backend and every inventoried owner

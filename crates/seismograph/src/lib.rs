@@ -57,6 +57,7 @@
 //! - **`monitor`**: Enables the OS-authorized local monitor server.
 //! - **`test-util`**: Enables `monitor`, the protocol's mock I/O controls, and
 //!   `monitor::Builder::isolated` for native tests using a temporary registry.
+//!   It also provides controlled snapshot construction and symbol resolution.
 
 use std::fmt;
 use std::path::PathBuf;

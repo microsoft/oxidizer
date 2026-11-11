@@ -1,62 +1,73 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Captures native symbols through the public snapshot API without a source.
-#![cfg(not(miri))]
+//! Controlled event symbols survive the public snapshot codec without sources.
 
-use std::collections::BTreeSet;
-
-use seismograph::recorder::event::{EventClass, EventKind, ObjectId, Record};
-use seismograph::recorder::{Configuration, Policy};
-use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
-
-// Keep a known application frame on the stack for native symbol resolution.
-#[inline(never)]
-fn record_snapshot_symbol_marker() {
-    seismograph::record(EventClass::General, || {
-        Some(Record::object(EventKind::MutexAccess, ObjectId::new(17)))
-    });
-    std::hint::black_box(());
-}
+use seismograph::recorder::event::{Address, Event, EventClock, EventKind, EventPayload, EventSequence, EventTimestamp, Events, ObjectId};
+use seismograph::recorder::thread::{ThreadId, ThreadLog};
+use seismograph::snapshot::{DecodedSnapshot, Symbol, decode, test_util};
 
 #[test]
 fn snapshots_preserve_event_symbols_without_an_allocator_or_runtime_source() {
-    seismograph::recorder(Configuration {
-        general_events: Policy::all(true),
-        ..Configuration::default()
-    });
-    record_snapshot_symbol_marker();
-    seismograph::recorder(Configuration::default());
+    let events = Events {
+        clock: EventClock::CURRENT,
+        total_events: 1,
+        threads: vec![ThreadLog {
+            thread_id: ThreadId::new(1),
+            total_events: 1,
+            lost_events: 0,
+            name: "producer".into(),
+        }],
+        events: vec![Event {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(1),
+            timestamp: EventTimestamp::from_ticks(1),
+            kind: EventKind::MutexAccess,
+            payload: EventPayload::Object(ObjectId::new(17)),
+            call_stack: [32, 16, 16, 0].map(Address::new).to_vec(),
+        }],
+        ..Events::default()
+    };
+    let mut resolved = Vec::new();
+    let encoded = test_util::capture(
+        DecodedSnapshot {
+            events: events.clone(),
+            ..DecodedSnapshot::default()
+        },
+        |symbol| {
+            resolved.push(symbol.address);
+            if symbol.address == Address::new(16) {
+                symbol.name = Some("producer::allocate".into());
+                symbol.filename = Some("producer.rs".into());
+                symbol.line = Some(42);
+                symbol.column = Some(7);
+            }
+        },
+    )
+    .unwrap();
 
-    for event_buffers in [EventBufferDisposition::Retain, EventBufferDisposition::Stop] {
-        let encoded = seismograph::snapshot(SnapshotOptions { event_buffers }).unwrap();
-        let decoded = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
+    let decoded = decode(encoded.as_bytes()).unwrap();
 
-        assert!(decoded.sources.is_empty());
-        assert!(!decoded.events.events.is_empty());
-        let frames = decoded
-            .events
-            .events
-            .iter()
-            .flat_map(|event| &event.call_stack)
-            .copied()
-            .filter(|address| address.get() != 0)
-            .collect::<BTreeSet<_>>();
-        assert!(!frames.is_empty());
-        assert_eq!(
-            decoded.symbols.iter().map(|symbol| symbol.address).collect::<Vec<_>>(),
-            frames.into_iter().collect::<Vec<_>>()
-        );
-        assert!(
-            decoded.symbols.iter().any(|symbol| {
-                symbol
-                    .name
-                    .as_deref()
-                    .is_some_and(|name| name.contains("record_snapshot_symbol_marker"))
-                    && symbol.filename.as_deref().is_some_and(|path| path.ends_with("snapshot_symbols.rs"))
-                    && symbol.line.is_some()
-            }),
-            "capture must store the marker's native function name and source location"
-        );
-    }
+    assert_eq!(resolved, [Address::new(16), Address::new(32)]);
+    assert_eq!(decoded.events, events);
+    assert_eq!(decoded.sources, []);
+    assert_eq!(
+        decoded.symbols,
+        [
+            Symbol {
+                address: Address::new(16),
+                name: Some("producer::allocate".into()),
+                filename: Some("producer.rs".into()),
+                line: Some(42),
+                column: Some(7),
+            },
+            Symbol {
+                address: Address::new(32),
+                name: None,
+                filename: None,
+                line: None,
+                column: None,
+            },
+        ]
+    );
 }

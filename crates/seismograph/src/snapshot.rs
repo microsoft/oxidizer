@@ -7,6 +7,9 @@
 //! The decoder accepts only this format. Other versions are rejected.
 
 mod symbols;
+/// Controlled snapshot construction for tests.
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_util;
 
 use std::collections::HashSet;
 use std::path::Path;
