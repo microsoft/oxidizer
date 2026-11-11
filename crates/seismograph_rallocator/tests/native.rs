@@ -246,12 +246,12 @@ fn recording_independent_publication_uses_round_and_lease_freshness() {
 }
 
 #[test]
-fn historical_session_tagged_schema_three_remains_readable() {
-    let expected = fixture();
-    let mut encoded = bytes(&expected);
-    encoded[8..10].copy_from_slice(&3_u16.to_le_bytes());
-
-    assert_eq!(decode(&encoded).unwrap(), expected);
+fn previous_native_schemas_are_rejected() {
+    let mut encoded = bytes(&fixture());
+    for version in 0..seismograph_rallocator::source::SCHEMA_VERSION {
+        encoded[8..10].copy_from_slice(&version.to_le_bytes());
+        assert_eq!(decode(&encoded).unwrap_err().kind(), ErrorKind::UnsupportedSchema(version));
+    }
 }
 
 #[test]

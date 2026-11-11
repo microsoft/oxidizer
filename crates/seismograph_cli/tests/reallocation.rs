@@ -6,7 +6,7 @@
 
 use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind, Reallocation};
 use seismograph::recorder::event::{Address, EventClass, Record};
-use seismograph::recorder::{Configuration, RecordingPolicy};
+use seismograph::recorder::{Configuration, Policy};
 use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
 
 #[expect(dead_code, reason = "This suite uses the container helper, not the legacy payload helper")]
@@ -15,7 +15,7 @@ mod support;
 #[test]
 fn html_preserves_one_lifetime_and_displays_moved_in_place_and_orphan_resizes() {
     seismograph::recorder(Configuration {
-        allocations: RecordingPolicy::all(false),
+        allocations: Policy::all(false),
         ..Configuration::default()
     });
     let allocation = Allocation {

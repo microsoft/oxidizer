@@ -676,6 +676,7 @@ fn recording_retains_task_creation_and_real_outcomes_without_a_task_registry() {
 fn disabled_task_event_context_does_not_initialize_event_buffers() {
     let _lock = RECORDING.lock().unwrap();
     seismograph::recorder(Configuration::default());
+    seismograph::recorder::clear_buffers().unwrap();
     let runtime = register_runtime(RuntimeMetadata::new("disabled-task-events", 1));
     let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
     let context = worker.handle().task_events();

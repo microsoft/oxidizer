@@ -178,7 +178,7 @@ pub(crate) fn container(sources: &[SourceSnapshot]) -> Vec<u8> {
     bytes.extend_from_slice(&41_u64.to_le_bytes());
     bytes.extend_from_slice(&1_u64.to_le_bytes());
     bytes.extend_from_slice(&1_u64.to_le_bytes());
-    bytes.extend_from_slice(&[seismograph::recorder::event::EventKind::ArcClone.wire_value(), 1, 1, 0]);
+    bytes.extend_from_slice(&[2, 1, 1, 0]); // ArcClone, object payload, one stack frame.
     bytes.extend_from_slice(&7_u64.to_le_bytes());
     bytes.extend_from_slice(&[0; 7 * 8]);
     bytes.extend_from_slice(&0x1234_u64.to_le_bytes());

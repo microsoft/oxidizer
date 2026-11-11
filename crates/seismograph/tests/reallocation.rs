@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! First-class successful resize recording and wire compatibility.
+//! First-class successful resize recording and current-format validation.
 
 use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind, Reallocation};
 use seismograph::recorder::event::{Address, EventClass, EventKind, Record};
@@ -78,16 +78,6 @@ fn successful_resizes_keep_one_record_with_both_storage_endpoints() {
         [in_place, moved]
     );
     assert_eq!(EventKind::Reallocation.class(), EventClass::Allocation);
-    assert_eq!(
-        [
-            EventKind::NotifyAccess,
-            EventKind::NotifyContention,
-            EventKind::NotifySignal,
-            EventKind::Reallocation
-        ]
-        .map(EventKind::wire_value),
-        [84, 85, 86, 87]
-    );
     assert_eq!(decoded.events.events[1].object_id().unwrap().get(), allocation.allocation_id.get());
     assert!(decoded.events.events[1].allocation().is_none());
     assert!(decoded.events.events[0].reallocation().is_none());
@@ -100,10 +90,10 @@ fn successful_resizes_keep_one_record_with_both_storage_endpoints() {
 
 #[expect(clippy::unwrap_used, reason = "Malformed fixtures must fail decoding")]
 fn assert_malformed_resize_rejected(bytes: &[u8], decoded: &DecodedSnapshot) {
-    // Formats 9 and 10 use a 92-byte header, named thread rows, and 92-byte event rows.
+    // Format 10 uses a 92-byte header, named thread rows, and 92-byte event rows.
     let threads_len: usize = decoded.events.threads.iter().map(|thread| 26 + thread.name.len()).sum();
     let resize_start = 92 + threads_len + 92;
-    for (offset, replacement) in [(24, EventKind::Allocation.wire_value()), (25, 3), (27, 1)] {
+    for (offset, replacement) in [(24, 14), (25, 3), (27, 1)] {
         let mut malformed = bytes.to_vec();
         malformed[resize_start + offset] = replacement;
         seismograph::snapshot::decode(&malformed).unwrap_err();

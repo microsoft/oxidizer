@@ -98,7 +98,7 @@ mod tests {
                 decoded.mimalloc,
                 decoded.metadata.telemetry_schema_version
             ),
-            (Some(&native), None, 4)
+            (Some(&native), None, snapshot::SCHEMA_VERSION)
         );
     }
 

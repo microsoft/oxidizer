@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 
 use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
 use seismograph::recorder::event::{Address, EventClass, Record};
-use seismograph::recorder::{Configuration, RecordingPolicy};
+use seismograph::recorder::{Configuration, Policy};
 use seismograph::snapshot::{EventBufferDisposition, SnapshotOptions};
 
 // Keep an application frame whose symbol must survive the offline CLI process.
@@ -32,7 +32,7 @@ fn record_allocation_symbol_marker() {
 #[test]
 fn html_uses_symbols_resolved_by_the_producing_process_without_a_runtime_source() {
     seismograph::recorder(Configuration {
-        allocations: RecordingPolicy::all(true),
+        allocations: Policy::all(true),
         ..Configuration::default()
     });
     record_allocation_symbol_marker();
