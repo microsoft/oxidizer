@@ -103,11 +103,12 @@ The following package-level exclusions are intentional:
   including Linux
   runtime analysis through `cargo careful`. Its manifest explicitly excludes
   Miri because native VM reservations and CPU prefetch instructions have no
-  interpreter backend. The portable mimalloc bitmap, publication-copy, cached-TLS,
-  and shared resize-ordering tests can run directly under Miri. Their native VM scenarios retain explicit ignores
-  and run natively and under `cargo careful`.
-  Miri is not a supported allocator backend; the old v1
-  Miri backend and telemetry test binaries are removed.
+  interpreter backend. The portable mimalloc bitmap, publication-copy, and shared
+  resize-ordering tests can run directly under Miri. Run the cached-TLS lifetime
+  test under Linux Miri. Its Windows path reads native thread information through
+  assembly, which Miri cannot interpret. Native VM scenarios retain explicit
+  ignores and run natively and under `cargo careful`.
+  Miri is not a supported allocator backend.
   `seismograph` retains its independent portable runtime-analysis coverage,
   and the current native owner/backend inventory codec in
   `seismograph_rallocator` is platform-independent, as is its separate
