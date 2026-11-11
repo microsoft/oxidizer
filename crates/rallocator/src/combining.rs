@@ -360,6 +360,38 @@ mod tests {
     }
 
     #[test]
+    fn promoted_successor_executes_once_and_releases_the_queue() {
+        unsafe fn increment(_node: *mut Node<usize>, value: *mut usize) {
+            // SAFETY: attach grants this invocation exclusive access to value.
+            unsafe { *value += 1 };
+        }
+
+        let mut shared = Combining::new(0_usize);
+        let mut predecessor = Node {
+            status: AtomicU32::new(WAITING),
+            next: AtomicPtr::new(std::ptr::null_mut()),
+            invoke: increment,
+        };
+        let mut promoted = Node {
+            status: AtomicU32::new(HEAD),
+            next: AtomicPtr::new(std::ptr::null_mut()),
+            invoke: increment,
+        };
+        shared.flag.store(true, Ordering::Release);
+        shared.last.store(&raw mut predecessor, Ordering::Release);
+
+        // SAFETY: Both stationary nodes stay live throughout attach. This
+        // exclusive fixture supplies the HEAD value lease, with no other caller.
+        unsafe { shared.attach(&raw mut promoted) };
+
+        assert_eq!(*shared.value.get_mut(), 1);
+        assert_eq!(predecessor.next.load(Ordering::Acquire), &raw mut promoted);
+        assert_eq!(promoted.status.load(Ordering::Acquire), DONE);
+        assert!(shared.last.load(Ordering::Acquire).is_null());
+        assert!(!shared.flag.load(Ordering::Acquire));
+    }
+
+    #[test]
     fn contended_combining_executes_every_action_once() {
         let shared = Arc::new(Combining::new(0usize));
         let barrier = Arc::new(Barrier::new(16));
