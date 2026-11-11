@@ -5,7 +5,7 @@
 
 use std::alloc::{GlobalAlloc, Layout};
 
-use seismograph::recorder::event::EventKind;
+use seismograph::recorder::event::{Event, EventKind};
 use seismograph::recorder::{Configuration, Policy, without_recording};
 
 rallocator::rallocator!(backend = mimalloc);
@@ -57,7 +57,7 @@ fn moves_retained_resizes_and_failed_resizes_record_matching_lifetimes() {
                 .events
                 .events
                 .iter()
-                .filter_map(|event| event.allocation())
+                .filter_map(Event::allocation)
                 .all(|allocation| allocation.address.get() != 0)
         );
         let actual = decoded
