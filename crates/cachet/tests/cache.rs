@@ -755,20 +755,27 @@ fn cache_debug_output() {
 #[test]
 fn cache_debug_with_stampede_protection() {
     let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+    let cache = Cache::builder::<String, i32>(clock)
+        .name("debug-cache")
+        .memory()
+        .stampede_protection()
+        .build();
     let debug_str = format!("{cache:?}");
-    assert!(debug_str.contains("Mergers"), "got: {debug_str}");
-    for field in [
-        "get:",
-        "invalidate:",
-        "get_or_insert:",
-        "get_or_insert_with:",
-        "try_get_or_insert:",
-        "try_get_or_insert_with:",
-        "optionally_get_or_insert:",
-    ] {
-        assert!(debug_str.contains(field), "missing {field} in {debug_str}");
-    }
+    assert_eq!(
+        debug_str,
+        concat!(
+            "Cache { name: \"debug-cache\", storage: DynamicCache(..), ",
+            "clock: Clock { kind: \"controlled\", timers: 0, alive: true, .. }, ",
+            "telemetry: CacheTelemetry { logging_enabled: false, has_handler: false }, ",
+            "mergers: Some(Mergers { get: Merger { inner: DashMap<...> }, ",
+            "invalidate: Merger { inner: DashMap<...> }, ",
+            "get_or_insert: Merger { inner: DashMap<...> }, ",
+            "get_or_insert_with: Merger { inner: DashMap<...> }, ",
+            "try_get_or_insert: Merger { inner: DashMap<...> }, ",
+            "try_get_or_insert_with: Merger { inner: DashMap<...> }, ",
+            "optionally_get_or_insert: Merger { inner: DashMap<...> } }) }",
+        )
+    );
 }
 
 // =============================================================================
