@@ -25,6 +25,8 @@ fn build_with_processors(
     thread_builder: &ThreadBuilder,
     available: &ProcessorSet,
 ) -> Result<Runtime, Error> {
+    let name = processor_config.name;
+    name.validate()?;
     let processors = processor_config.workers_policy.select(available)?;
 
     let mut workers = Vec::with_capacity(processors.len());
@@ -39,13 +41,14 @@ fn build_with_processors(
 
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
-    let blocking_pools = processor_config.blocking_pool_policy.into_pools()?;
+    let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         workers.push(asynchronous::start(asynchronous::StartOptions {
             stack_size,
             inactive_clock: clock.clone(),
             processor,
+            runtime_name: name.clone(),
             worker_index,
             thread_builder: thread_builder.clone(),
             blocking_pools: blocking_pools.clone(),
@@ -286,6 +289,7 @@ mod tests {
     fn runtime_with_processors(policy: WorkersPolicy, monitor_options: MonitorOptions, processors: &ProcessorSet) -> Runtime {
         build_with_processors(
             RuntimeConfig {
+                name: crate::runtime::config::RuntimeName::default(),
                 workers_policy: policy,
                 stack_size: NonZero::new(2 * 1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(),
