@@ -59,10 +59,11 @@ impl RuntimeControl {
     /// Registers a runtime hook on every live async worker.
     ///
     /// Arty clones the hook data for each worker and relocates it before the
-    /// callback can run. Arty sends late hook registration through each
-    /// worker's normal command queue. A worker applies the hook when it
-    /// processes that command. If runtime shutdown has started, Arty ignores
-    /// the registration.
+    /// callback can run. On a runtime worker, Arty applies the hook to that
+    /// worker before this method returns. Arty sends registration to other
+    /// workers through their normal command queues. A worker applies the hook
+    /// when it processes that command. If runtime shutdown has started, Arty
+    /// ignores the registration.
     ///
     /// A late [`OnStart`](crate::runtime::hook::OnStart) registration is stored
     /// but does not run because the workers have already started.

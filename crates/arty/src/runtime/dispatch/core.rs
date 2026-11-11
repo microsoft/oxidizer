@@ -211,7 +211,13 @@ impl DispatcherCore {
         }
 
         let source = LocalWorker::current_thread().filter(|thread| self.owns(thread));
+        if let Some(source) = &source {
+            LocalWorker::install_hook(hook.clone(), Some(source));
+        }
         for endpoint in &self.worker_endpoints {
+            if source.as_ref().is_some_and(|source| source == &endpoint.thread) {
+                continue;
+            }
             _ = endpoint.commands.system_sender().send(SystemCommand::RegisterHook {
                 hook: hook.clone(),
                 source: source.clone(),

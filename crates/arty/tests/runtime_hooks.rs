@@ -177,6 +177,23 @@ fn control_appends_panic_hooks_in_registration_order() {
 }
 
 #[test]
+fn control_registration_applies_before_local_spawn() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            cx.control().on((), OnPanic::IGNORE);
+            let panic = cx.scheduler().spawn(async |_| panic!("local panic")).await.unwrap_err();
+            assert!(panic.is_panic());
+            assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+        })
+        .unwrap();
+
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn panic_callbacks_share_one_borrowed_event() {
     let addresses = EventAddresses(Arc::new(Mutex::new(Vec::new())));
     let runtime = Runtime::builder()
