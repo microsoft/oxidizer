@@ -3792,6 +3792,7 @@ name = "observed_destination_memory"
 version = "0.1.0"
 dependencies = [
  "bon",
+ "derive_more",
  "log",
  "observed_destination_core",
  "opentelemetry",

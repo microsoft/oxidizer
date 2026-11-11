@@ -6,8 +6,8 @@ name = "observed_destination_memory"
 description = "In-memory destination for Observed pipeline."
 version = "0.1.0"
 readme = "README.md"
-keywords = ["observed", "telemetry", "tracing", "logging", "metrics"]
-categories = ["development-tools::debugging"]
+keywords = ["observed", "telemetry", "testing", "logging", "metrics"]
+categories = ["development-tools::testing"]
 
 edition.workspace = true
 rust-version.workspace = true
@@ -34,6 +34,7 @@ all-features = true
 
 [dependencies]
 bon = { workspace = true }
+derive_more = { workspace = true, features = ["debug"] }
 log = { workspace = true }
 observed_destination_core = { workspace = true }
 opentelemetry = { workspace = true, features = ["logs"] }
@@ -46,4 +47,3 @@ static_assertions.workspace = true
 [lints]
 workspace = true
 # <<< anvil-managed: anvil-lints
-

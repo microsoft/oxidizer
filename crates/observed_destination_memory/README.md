@@ -15,9 +15,47 @@
 
 In-memory log and metric destinations for testing.
 
+Use these destinations in tests that make sure that code emits the expected logs
+and metrics. Each destination sends the data to an `opentelemetry_sdk` in-memory
+exporter. Clones of an exporter share one buffer. Keep a clone and read the
+captured data from it.
+
+Add this crate to `[dev-dependencies]`. It turns on the `testing` feature of
+`opentelemetry_sdk`. Cargo merges the features that all crates in a build request
+for a dependency. A normal dependency on this crate thus turns on `testing` for
+every user of `opentelemetry_sdk` in that build.
+
+## Examples
+
+```rust
+use observed_destination_core::LoggerProviderBuilderExt;
+use observed_destination_memory::memory_logs;
+use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
+use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
+
+let exporter = InMemoryLogExporter::default();
+let provider = SdkLoggerProvider::builder()
+    .register(memory_logs(exporter.clone()))?
+    .build();
+
+// The code under test emits through a logger from the provider.
+let logger = provider.logger("example");
+let mut record = logger.create_log_record();
+record.set_body("request received".into());
+logger.emit(record);
+
+// The test reads the captured logs through its clone of the exporter.
+assert_eq!(exporter.get_emitted_logs()?.len(), 1);
+```
+
+For metrics, use [`memory_metrics`][__link0]. Metric values reach the exporter only when the
+provider flushes or shuts down, or when the export interval ends.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_destination_memory">source code</a>.
 </sub>
 
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb8GZWhiVzZr8bozjKHhurnEYbBvOc3qokDOkbx2jMKu3RjKdhZIGCeBtvYnNlcnZlZF9kZXN0aW5hdGlvbl9tZW1vcnllMC4xLjA
+ [__link0]: https://docs.rs/observed_destination_memory/0.1.0/observed_destination_memory/fn.memory_metrics.html
