@@ -346,7 +346,7 @@ mod tests {
     use std::task::Waker;
     use std::thread;
 
-    use arty_executor::{ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, discard_task_panic_payload};
+    use arty_executor::{ShutdownCause, TaskCompletion, TaskPanicPayload, discard_task_panic_payload};
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     #[cfg(not(miri))]
     use events_once::BoxedSender;
@@ -387,7 +387,7 @@ mod tests {
             F: IntoFuture<Output = R> + 'static,
             R: 'static,
         {
-            self.add(future, TaskOptions::default(), DiscardCompletion);
+            self.task(future).register(DiscardCompletion);
         }
     }
 

@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 
-use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskOptions, TaskPlacement, TaskSet};
+use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskPlacement, TaskSet};
 use thread_aware::Thread;
 
 use crate::io::RuntimeDriverHost;
@@ -166,7 +166,7 @@ impl SchedulerContext {
     {
         let (handle, result_tx) = self.results.handle();
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        self.tasks.add(inner, TaskOptions::new(placement), result_tx);
+        self.tasks.task(inner).placement(placement).register(result_tx);
         handle
     }
 }
