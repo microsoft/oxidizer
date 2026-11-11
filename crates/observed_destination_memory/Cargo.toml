@@ -40,6 +40,10 @@ opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
 
 [dev-dependencies]
+static_assertions.workspace = true
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints
+

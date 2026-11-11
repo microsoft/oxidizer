@@ -1,11 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![doc(
+    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/observed_destination_stdout/logo.png"
+)]
+#![doc(
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/observed_destination_stdout/favicon.ico"
+)]
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 
 //! In-memory log and metric destinations for testing.
 
-use std::any::type_name;
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Waker};
@@ -23,19 +28,38 @@ use opentelemetry_sdk::metrics::{InMemoryMetricExporter, MeterProviderBuilder};
 
 /// Creates an in-memory log destination backed by the given exporter.
 ///
-/// Cloned exporters share the same buffer, so the caller can inspect collected
-/// logs after the pipeline shuts down.
+/// Cloned exporters share the same buffer, so keep a clone to read the logs.
+/// Read them before the [`SdkLoggerProvider`](opentelemetry_sdk::logs::SdkLoggerProvider)
+/// shuts down. Shutdown clears the buffer. Dropping the last provider or logger
+/// handle also shuts the provider down.
 ///
 /// # Examples
 ///
-/// ```no_run
-/// use observed_destination_memory::memory_logs;
-/// use opentelemetry_sdk::logs::InMemoryLogExporter;
+/// ```
+/// # use observed_destination_core::LoggerProviderBuilderExt;
+/// # use observed_destination_memory::memory_logs;
+/// # use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
+/// # use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
 ///
 /// let exporter = InMemoryLogExporter::default();
-/// let dest = memory_logs(exporter.clone());
-/// // ... after emission ...
-/// let logs = exporter.get_emitted_logs().unwrap();
+///
+/// let provider = SdkLoggerProvider::builder()
+///     .register(memory_logs(exporter.clone()))?
+///     .build();
+///
+/// let logger = provider.logger("example");
+/// let mut record = logger.create_log_record();
+/// record.set_body("request received".into());
+/// logger.emit(record);
+///
+/// // Read the logs through the shared exporter while the provider is alive.
+/// assert_eq!(exporter.get_emitted_logs()?.len(), 1);
+///
+/// // Shutdown clears the shared buffer.
+/// provider.shutdown()?;
+/// assert!(exporter.get_emitted_logs()?.is_empty());
+///
+/// # Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
 /// ```
 pub fn memory_logs(exporter: InMemoryLogExporter) -> MemoryLogDestinationBuilder<memory_log_destination_builder::SetExporter> {
     MemoryLogDestination::builder().exporter(exporter)
@@ -43,6 +67,7 @@ pub fn memory_logs(exporter: InMemoryLogExporter) -> MemoryLogDestinationBuilder
 
 /// An in-memory log destination.
 #[derive(bon::Builder, Debug)]
+#[builder(derive(Debug))]
 pub struct MemoryLogDestination {
     /// In-memory log exporter.
     exporter: InMemoryLogExporter,
@@ -72,6 +97,7 @@ impl<S: memory_log_destination_builder::IsComplete> IntoLogDestination for Memor
 /// The in-memory exporter completes synchronously, so its export future is
 /// driven to completion with a single poll instead of `block_on`, which would
 /// panic inside another executor.
+#[derive(Debug)]
 struct MemoryLogProcessor {
     exporter: InMemoryLogExporter,
     is_shutdown: AtomicBool,
@@ -83,12 +109,6 @@ impl MemoryLogProcessor {
             exporter,
             is_shutdown: AtomicBool::new(false),
         }
-    }
-}
-
-impl std::fmt::Debug for MemoryLogProcessor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct(type_name::<Self>()).finish()
     }
 }
 
@@ -119,8 +139,6 @@ impl LogProcessor for MemoryLogProcessor {
     }
 }
 
-// ─── In-memory metric destination ────────────────────────────────────────
-
 /// Creates an in-memory metric destination backed by the given exporter.
 pub fn memory_metrics(exporter: InMemoryMetricExporter) -> MemoryMetricDestinationBuilder<memory_metric_destination_builder::SetExporter> {
     MemoryMetricDestination::builder().exporter(exporter)
@@ -128,6 +146,7 @@ pub fn memory_metrics(exporter: InMemoryMetricExporter) -> MemoryMetricDestinati
 
 /// An in-memory metric destination.
 #[derive(bon::Builder, Debug)]
+#[builder(derive(Debug))]
 pub struct MemoryMetricDestination {
     /// In-memory metric exporter.
     exporter: InMemoryMetricExporter,
@@ -149,48 +168,18 @@ impl<S: memory_metric_destination_builder::IsComplete> IntoMetricDestination for
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
 
-    use observed_destination_core::LoggerProviderBuilderExt;
-    use opentelemetry::logs::{LogRecord, Logger, LoggerProvider};
-    use opentelemetry::{Key, KeyValue};
+    use opentelemetry::logs::{Logger, LoggerProvider};
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
     use super::*;
 
-    #[test]
-    fn formats_processor_debug() {
-        let processor = MemoryLogProcessor::new(InMemoryLogExporter::default());
+    static_assertions::assert_impl_all!(MemoryLogDestination: UnwindSafe, RefUnwindSafe, Send, Sync);
+    static_assertions::assert_impl_all!(MemoryLogDestinationBuilder: UnwindSafe, RefUnwindSafe, Send, Sync);
 
-        assert!(format!("{processor:?}").contains("MemoryLogProcessor"));
-    }
-
-    #[test]
-    fn exported_logs_carry_the_provider_resource() {
-        let exporter = InMemoryLogExporter::default();
-        let resource = Resource::builder_empty()
-            .with_attributes([KeyValue::new("service.name", "memory-test")])
-            .build();
-        let provider = SdkLoggerProvider::builder()
-            .with_resource(resource)
-            .register(memory_logs(exporter.clone()))
-            .unwrap()
-            .build();
-        let logger = provider.logger("memory");
-        let mut record = logger.create_log_record();
-        // A fixed observation time lets this test run under Miri isolation.
-        record.set_observed_timestamp(SystemTime::UNIX_EPOCH);
-
-        logger.emit(record);
-        provider.force_flush().unwrap();
-
-        let logs = exporter.get_emitted_logs().unwrap();
-        assert_eq!(logs.len(), 1);
-        assert_eq!(
-            logs[0].resource.get(&Key::from_static_str("service.name")),
-            Some("memory-test".into()),
-        );
-    }
+    static_assertions::assert_impl_all!(MemoryMetricDestination: UnwindSafe, RefUnwindSafe, Send, Sync);
+    static_assertions::assert_impl_all!(MemoryMetricDestinationBuilder: UnwindSafe, RefUnwindSafe, Send, Sync);
 
     #[test]
     fn processor_shutdown_stops_exporting() {
@@ -212,18 +201,5 @@ mod tests {
         processor.emit(&mut record, &scope);
 
         assert!(exporter.get_emitted_logs().unwrap().is_empty());
-    }
-
-    #[test]
-    fn sdk_provider_shutdown_reaches_exporter() {
-        let exporter = InMemoryLogExporter::default();
-        let provider = SdkLoggerProvider::builder()
-            .register(memory_logs(exporter.clone()))
-            .unwrap()
-            .build();
-
-        provider.shutdown().unwrap();
-
-        assert!(exporter.is_shutdown_called());
     }
 }

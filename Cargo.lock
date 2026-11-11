@@ -3796,6 +3796,7 @@ dependencies = [
  "observed_destination_core",
  "opentelemetry",
  "opentelemetry_sdk",
+ "static_assertions",
 ]
 
 [[package]]
