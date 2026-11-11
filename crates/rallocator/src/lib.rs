@@ -27,7 +27,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! rallocator = "0.3"
+//! rallocator = "0.4"
 //! ```
 //!
 //! Call [`rallocator!`] once in your executable to install the global allocator:

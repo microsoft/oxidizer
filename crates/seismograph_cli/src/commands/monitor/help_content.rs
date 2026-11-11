@@ -43,7 +43,7 @@ const MIMALLOC_OWNERS: &Section = section!("Mimalloc heap lifetimes";
     "Active / Exited" => "Active heaps can publish state. Exited heaps retain historical copies after cleanup. Heap identifiers are never reused.",
     "Freshness" => "Matching session and round means contributed this round, not an exact current census. Age is measured at capture.",
     "Busy / Unobserved / Unavailable" => "A busy publication slot, no readable copy, or diagnostic storage allocation failure. Missing measurements are unknown, not zero.",
-    "Publication" => "Only an accepted recorded operation can publish. Sampled-out operations do not contribute. A live capture requests the next round after collection.",
+    "Publication" => "Completed allocation, resize, and free operations can publish while allocation recording is enabled. Event sampling does not control publication. A live capture requests the next round after collection.",
     "Filters" => "Event filters preserve the original allocator inventory, observations and completeness flags.",
 );
 const MIMALLOC_CLASSES: &Section = section!("Mimalloc page classes";
@@ -71,7 +71,7 @@ const NATIVE_OWNERS: &Section = section!("Owner frontends";
     "Owner" => "A reusable native allocator endpoint with small-class slabs, large ranges, local caches and remote returns. Owner numbers follow the current inventory order and can change on refresh; selection follows stable endpoint identity. Endpoint identity appears only in Observation detail.",
     "Active / Idle" => "Active means leased. Idle endpoints can be freshly inspected under the pool lock; active endpoints are read from immutable published summaries, never by inspecting their borrowed core.",
     "Contributor" => "The recorder thread that last published the observation, not necessarily the current lease holder. Idle inspection has no recorder contributor.",
-    "Quiet owners" => "Publication follows an accepted recorded allocation, resize, or free operation. Sampled-out operations do not publish. Never-contributing active endpoints remain explicitly Unknown.",
+    "Quiet owners" => "Publication follows completed operations while allocation recording is enabled, independently of event sampling. Never-contributing active endpoints remain explicitly Unknown.",
 );
 const NATIVE_COVERAGE: &Section = section!("Observation coverage";
     "Observed" => "Published in this session, lease generation and requested observation round, or freshly inspected while idle. Matching round means contributed this round, not an exact simultaneous census.",

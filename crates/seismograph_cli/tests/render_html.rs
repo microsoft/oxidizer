@@ -184,8 +184,8 @@ fn system_slot_allocation_failure_is_not_presented_as_never_observed() {
         "System slot allocation failed",
         "unavailable 1",
         "not zero or merely never-observed",
-        "accepted recorded allocation/resize/free operations only",
-        "sampled-out events",
+        "allocation recording is enabled",
+        "Event sampling does not control publication",
     ] {
         assert!(html.contains(evidence), "missing {evidence}");
     }

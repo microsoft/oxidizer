@@ -17,8 +17,9 @@ pub(crate) const LIMITATIONS: &str = "Native capacity is NOT application-live me
      Ages are measured at capture. Large outstanding allocator ranges include pending/retained frees, not app-live counts. \
      Observations are independent, not a transactional heap census. Global cached ranges are NOT guaranteed \
      physically decommitted; discard failure leaves residency unknown. Batching budget is NOT pending bytes. \
-     Event filters do not filter native inventory. Self-publication follows accepted recorded allocation/resize/free operations only; \
-     sampled-out events and merely enabled attempts do not contribute. Polls request the next round after collection; \
+     Event filters do not filter native inventory. Self-publication follows completed allocation/resize/free operations while \
+     allocation recording is enabled. Event sampling does not control publication. Failed allocations and resizes do not publish. \
+     Polls request the next round after collection; \
      explicit app requests are also supported, without timers or background workers.";
 
 pub(crate) fn overview(snapshot: &Snapshot) -> Vec<String> {

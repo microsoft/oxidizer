@@ -37,7 +37,7 @@ Add the dependency:
 
 ```toml
 [dependencies]
-rallocator = "0.3"
+rallocator = "0.4"
 ```
 
 Call [`rallocator!`][__link3] once in your executable to install the global allocator:
@@ -70,7 +70,7 @@ rallocator::rallocator!(backend = mimalloc);
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb8Vmtwjvha1gbDrP7eqAhO18bqYmoiePEW_MbfZR1haLOp9RhZIGCanJhbGxvY2F0b3JlMC40LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbC8Y1TJO1Sg8bwEdgFkYejY8bzx67V7D_17MbmjZtsqiOsjthZIGCanJhbGxvY2F0b3JlMC40LjA
  [__link0]: https://github.com/microsoft/snmalloc
  [__link1]: https://github.com/microsoft/mimalloc
  [__link2]: https://docs.rs/seismograph/latest/seismograph/fn.recorder.html

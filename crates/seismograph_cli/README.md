@@ -40,8 +40,9 @@ Native capacity is not application-live memory, batching budget is not pending
 bytes, and global cached ranges are not guaranteed physically decommitted.
 Self-publication defaults on but costs nothing with recording off. Capture
 requests the next publication round only after collection. Operations publish
-only after an accepted recorded allocation, resize, or free event and the native operation
-completes; sampled-out events and merely enabled attempts do not contribute.
+after completed allocations, resizes, and frees with allocation recording enabled.
+Event sampling does not control publication. Failed allocations and resizes
+do not publish state.
 Explicit app-side requests also work, without timers or background workers.
 Offline files never request new publications.
 

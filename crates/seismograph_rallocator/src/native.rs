@@ -166,7 +166,9 @@ pub enum ObservationSource {
     /// No safely readable observation exists.
     #[default]
     Unobserved,
-    /// A thread published after an accepted recorded allocation, resize, or free completed.
+    /// A thread published after a completed allocation, resize, or free.
+    ///
+    /// Allocation recording was enabled. Event sampling does not control publication.
     Published,
     /// The collector inspected a returned owner under the pool lock.
     IdleInspection,
