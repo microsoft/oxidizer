@@ -1,0 +1,117 @@
+---
+source: crates/arty/tests/io/main.rs
+expression: io
+---
+Io {
+    runtime: IoRuntime {
+        sink: observed::sink::core::Sink {
+            variant: "Noop",
+        },
+        ..
+    },
+    dispatcher: DispatcherClient {
+        core: DispatcherCore {
+            shutdown_signaled: true,
+            worker_endpoints: NonEmpty {
+                head: WorkerEndpoint {
+                    commands: CommandSender {
+                        system: Sender {
+                            len: 0,
+                            capacity: None,
+                            closed: true,
+                            ..
+                        },
+                        spawn: Sender {
+                            len: 0,
+                            capacity: None,
+                            closed: true,
+                            ..
+                        },
+                    },
+                    waker: Waker {
+                        data: [address],
+                        vtable: [address],
+                    },
+                    thread: Thread {
+                        owner: Owner { id: [id] },
+                        id: ThreadId([id]),
+                        numa_node: NumaNode([node]),
+                    },
+                    blocking_worker: Worker {
+                        pool: Pool {
+                            inner: Mutex {
+                                value: None,
+                                poisoned: false,
+                            },
+                            identity: (),
+                            max_thread_count: 64,
+                        },
+                        remote_results: JoinHandlePool {
+                            events: EventLake {
+                                core: events_once::lake::sync::Core {
+                                    events: Mutex {
+                                        data: plurality::multi_pool::MultiPool {
+                                            layouts: 0,
+                                            max_layouts: None,
+                                            chunks_allocated: 0,
+                                            len: 0,
+                                            ..
+                                        },
+                                        poisoned: false,
+                                        ..
+                                    },
+                                },
+                            },
+                            shutdown: Shutdown { .. },
+                        },
+                        panic_policy: Shutdown(
+                            Waker {
+                                data: [address],
+                                vtable: [address],
+                            },
+                        ),
+                    },
+                },
+                tail: [],
+            },
+            workers: Workers {
+                inner: [
+                    Thread {
+                        owner: Owner { id: [id] },
+                        id: ThreadId([id]),
+                        numa_node: NumaNode([node]),
+                    },
+                ],
+            },
+            worker_indices: {
+                ThreadId([id]): WorkerIndex(
+                    0,
+                ),
+            },
+            next_async_worker_index: 1,
+            remote_results: JoinHandlePool {
+                events: EventLake {
+                    core: events_once::lake::sync::Core {
+                        events: Mutex {
+                            data: plurality::multi_pool::MultiPool {
+                                layouts: 1,
+                                max_layouts: None,
+                                chunks_allocated: 1,
+                                len: 0,
+                                ..
+                            },
+                            poisoned: false,
+                            ..
+                        },
+                    },
+                },
+                shutdown: Shutdown { .. },
+            },
+        },
+    },
+    thread: Thread {
+        owner: Owner { id: [id] },
+        id: ThreadId([id]),
+        numa_node: NumaNode([node]),
+    },
+}
