@@ -120,7 +120,6 @@ mod tests {
 
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     use observed::Sink;
-    use performables::sync::channel;
     use thread_aware::Thread;
 
     use super::*;
@@ -132,10 +131,10 @@ mod tests {
     impl DispatcherClient {
         #[cfg_attr(test, mutants::skip)]
         pub(crate) fn for_test(thread: &Thread) -> Self {
-            let (command_tx, _command_rx) = channel::unbounded();
+            let (commands, _command_rx) = crate::runtime::worker::asynchronous::command_channel();
             let shutdown = Shutdown::default();
             let endpoint = WorkerEndpoint {
-                command_tx,
+                commands,
                 waker: Waker::noop().clone(),
                 thread: thread.clone(),
                 blocking_worker: Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone(), PanicPolicy::Ignore),
@@ -146,9 +145,9 @@ mod tests {
 
     #[test]
     fn clients_observe_the_shared_shutdown_state() {
-        let (command_tx, _commands) = channel::unbounded();
+        let (commands, _command_rx) = crate::runtime::worker::asynchronous::command_channel();
         let worker = WorkerEndpoint {
-            command_tx,
+            commands,
             waker: Waker::noop().clone(),
             thread: test_threads(1).pop().unwrap(),
             blocking_worker: Worker::new(
@@ -169,8 +168,8 @@ mod tests {
     #[test]
     fn relocate_updates_task_placement() {
         // Create two workers and observe which one receives each task.
-        let (worker0_tx, worker0_rx) = channel::unbounded();
-        let (worker1_tx, worker1_rx) = channel::unbounded();
+        let (worker0_tx, worker0_rx) = crate::runtime::worker::asynchronous::command_channel();
+        let (worker1_tx, worker1_rx) = crate::runtime::worker::asynchronous::command_channel();
         let threads = test_threads(2);
         let blocking_worker = Worker::new(
             Pool::new(RuntimeName::default(), None, None),
@@ -181,13 +180,13 @@ mod tests {
         let dispatcher = DispatcherCore::new(
             nonempty::NonEmpty::from_vec(vec![
                 WorkerEndpoint {
-                    command_tx: worker0_tx,
+                    commands: worker0_tx,
                     waker: Waker::noop().clone(),
                     thread: threads[0].clone(),
                     blocking_worker: Arc::clone(&blocking_worker),
                 },
                 WorkerEndpoint {
-                    command_tx: worker1_tx,
+                    commands: worker1_tx,
                     waker: Waker::noop().clone(),
                     thread: threads[1].clone(),
                     blocking_worker: Arc::clone(&blocking_worker),
@@ -207,11 +206,14 @@ mod tests {
 
         // Worker 0 receives no task.
         assert!(
-            worker0_rx.try_recv().is_err(),
+            worker0_rx.spawn_receiver().try_recv().is_err(),
             "task must not dispatch to the original worker after relocation"
         );
         // Worker 1 receives the task.
-        assert!(worker1_rx.try_recv().is_ok(), "task must dispatch to the relocated worker");
+        assert!(
+            worker1_rx.spawn_receiver().try_recv().is_ok(),
+            "task must dispatch to the relocated worker"
+        );
     }
 
     #[test]
@@ -230,17 +232,19 @@ mod tests {
             PanicPolicy::Ignore,
         );
         destination_shutdown.begin(ShutdownCause::default());
+        let (source_commands, _source_rx) = crate::runtime::worker::asynchronous::command_channel();
+        let (destination_commands, _destination_rx) = crate::runtime::worker::asynchronous::command_channel();
 
         let dispatcher = DispatcherCore::new(
             nonempty::NonEmpty::from_vec(vec![
                 WorkerEndpoint {
-                    command_tx: channel::unbounded().0,
+                    commands: source_commands,
                     waker: Waker::noop().clone(),
                     thread: threads[0].clone(),
                     blocking_worker: Arc::clone(&source_worker),
                 },
                 WorkerEndpoint {
-                    command_tx: channel::unbounded().0,
+                    commands: destination_commands,
                     waker: Waker::noop().clone(),
                     thread: threads[1].clone(),
                     blocking_worker: Arc::clone(&destination_worker),
@@ -305,10 +309,10 @@ mod tests {
 
     fn io(registered: bool) -> crate::io::Io {
         let threads = test_threads(2);
-        let (command_tx, command_rx) = channel::unbounded();
+        let (commands, command_rx) = crate::runtime::worker::asynchronous::command_channel();
         drop(command_rx);
         let worker = WorkerEndpoint {
-            command_tx,
+            commands,
             waker: Waker::noop().clone(),
             thread: threads[0].clone(),
             blocking_worker: Worker::new(

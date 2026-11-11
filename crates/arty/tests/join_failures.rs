@@ -278,6 +278,42 @@ fn external_shutdown_skips_registered_deferred_factory_after_blocked_poll() {
 }
 
 #[test]
+fn external_shutdown_system_command_precedes_queued_spawn_command() {
+    let runtime = runtime();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let control = support::runtime_control(&runtime);
+    let invoked = Arc::new(AtomicBool::new(false));
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let blocker = scheduler.spawn(move |_| {
+        let mut started_tx = Some(started_tx);
+        poll_fn(move |_| {
+            if let Some(started_tx) = started_tx.take() {
+                started_tx.send(()).unwrap();
+            }
+            release_rx.recv().unwrap();
+            Poll::Ready(())
+        })
+    });
+    started_rx.recv_timeout(TEST_TIMEOUT).unwrap();
+
+    let skipped = scheduler.spawn({
+        let invoked = Arc::clone(&invoked);
+        move |_| {
+            invoked.store(true, Ordering::Release);
+            async {}
+        }
+    });
+    control.request_stop();
+    release_tx.send(()).unwrap();
+
+    blocker.join().unwrap();
+    assert!(skipped.join().unwrap_err().is_shutdown());
+    assert!(!invoked.load(Ordering::Acquire));
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn stop_rejects_remote_and_blocking_factories_immediately() {
     runtime()
         .scheduler()

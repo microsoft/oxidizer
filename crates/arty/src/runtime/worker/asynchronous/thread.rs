@@ -61,7 +61,7 @@ impl SpawnedWorker {
 }
 
 pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
-    let (command_tx, command_rx) = channel::unbounded();
+    let (commands, command_rx) = asynchronous::command_channel();
     let (endpoint_tx, endpoint_rx) = channel::unbounded();
     let (activation_tx, activation_rx) = channel::oneshot();
     let (ready_tx, ready_rx) = channel::unbounded();
@@ -81,7 +81,7 @@ pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
 
     SpawnedWorker {
         endpoint: WorkerEndpoint {
-            command_tx,
+            commands,
             waker: endpoint.waker,
             thread: endpoint.thread,
             blocking_worker: endpoint.blocking_worker,
@@ -107,7 +107,7 @@ struct Endpoint {
 #[derive(Debug)]
 struct ThreadEntry {
     options: StartOptions,
-    command_rx: channel::Receiver<asynchronous::Command>,
+    command_rx: asynchronous::CommandReceiver,
     activation_rx: OneshotReceiver<Activation>,
     ready_tx: Sender<()>,
     endpoint_tx: Sender<Endpoint>,
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn failure_publishes_shutdown_cause() {
-        let (command_tx, _command_rx) = channel::unbounded();
+        let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(
@@ -296,7 +296,7 @@ mod tests {
             blocking::PanicPolicy::Ignore,
         );
         let endpoint = WorkerEndpoint {
-            command_tx,
+            commands,
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn success_does_not_publish_shutdown_cause() {
-        let (command_tx, _command_rx) = channel::unbounded();
+        let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(
@@ -319,7 +319,7 @@ mod tests {
             blocking::PanicPolicy::Ignore,
         );
         let endpoint = WorkerEndpoint {
-            command_tx,
+            commands,
             waker: Waker::noop().clone(),
             thread: current,
             blocking_worker,
