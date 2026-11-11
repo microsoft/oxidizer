@@ -3,10 +3,10 @@
 
 //! Commands and queued work sent to an asynchronous worker.
 
-use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::discard_task_panic_payload;
+use performables::sync::channel;
 
 use crate::task::Context;
 use crate::task::preparation::RemoteFutureFactory;
@@ -52,35 +52,76 @@ pub(crate) type QueuedFactory = QueuedClosure<RemoteFutureFactory>;
 /// Owns a synchronous I/O access closure until the destination worker invokes it.
 pub(crate) type QueuedIoAccess = QueuedClosure<IoAccess>;
 
-pub(crate) enum Command {
-    /// Schedules a new task on this worker.
-    ///
-    /// The factory creates the task future and registers it with the worker task
-    /// set. This lets the executor store the future inline. The task does not
-    /// run if shutdown reaches the worker first.
-    EnqueueTask { future_factory: QueuedFactory },
+/// Registers a task after the worker processes its system commands.
+///
+/// The factory registers the future with the worker task set for inline storage.
+/// Shutdown discards queued submissions without invoking their factories.
+#[derive(derive_more::Debug)]
+pub(crate) struct SpawnCommand {
+    #[debug(skip)]
+    pub(crate) future_factory: QueuedFactory,
+}
 
+/// System work processed before task submissions in each worker cycle.
+#[derive(derive_more::Debug)]
+pub(crate) enum SystemCommand {
     /// Executes synchronous I/O context access on this worker.
+    #[debug("AccessIo")]
     AccessIo { access: QueuedIoAccess },
 
     /// Starts shutdown on this worker.
     ///
-    /// The worker stops accepting new tasks. It discards tasks enqueued after
-    /// this command, including tasks from threads that have not observed
-    /// shutdown. Duplicate commands have no effect.
+    /// The worker stops accepting new tasks and discards all queued submissions,
+    /// including submissions queued before this command. Duplicate commands have
+    /// no effect.
     Shutdown,
 }
 
-impl fmt::Debug for Command {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Command names are diagnostic text only.
-    #[cfg_attr(test, mutants::skip)] // We have no contract to test here - can return anything.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EnqueueTask { .. } => write!(f, "EnqueueTask"),
-            Self::AccessIo { .. } => write!(f, "AccessIo"),
-            Self::Shutdown => write!(f, "Shutdown"),
-        }
+#[derive(Clone, Debug)]
+pub(crate) struct CommandSender {
+    system: channel::Sender<SystemCommand>,
+    spawn: channel::Sender<SpawnCommand>,
+}
+
+impl CommandSender {
+    pub(crate) fn system_sender(&self) -> &channel::Sender<SystemCommand> {
+        &self.system
     }
+
+    pub(crate) fn spawn_sender(&self) -> &channel::Sender<SpawnCommand> {
+        &self.spawn
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CommandReceiver {
+    system: channel::Receiver<SystemCommand>,
+    spawn: channel::Receiver<SpawnCommand>,
+}
+
+impl CommandReceiver {
+    pub(crate) fn system_receiver(&self) -> &channel::Receiver<SystemCommand> {
+        &self.system
+    }
+
+    pub(crate) fn spawn_receiver(&self) -> &channel::Receiver<SpawnCommand> {
+        &self.spawn
+    }
+}
+
+pub(crate) fn command_channel() -> (CommandSender, CommandReceiver) {
+    let (system_tx, system_rx) = channel::unbounded();
+    let (spawn_tx, spawn_rx) = channel::unbounded();
+    (
+        CommandSender {
+            system: system_tx,
+            spawn: spawn_tx,
+        },
+        CommandReceiver {
+            system: system_rx,
+            spawn: spawn_rx,
+        },
+    )
 }
 
 #[cfg(test)]

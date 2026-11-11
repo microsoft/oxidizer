@@ -11,7 +11,7 @@ use std::io;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
 use arty::runtime::{
-    BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, RuntimeBuilder, RuntimeControl, Workers, WorkersPolicy,
+    BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, RuntimeBuilder, RuntimeControl, ShutdownCause, Workers, WorkersPolicy,
 };
 use arty::task::{Context, JoinError, JoinHandle, RuntimeScheduler, Scheduler};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
@@ -26,6 +26,8 @@ assert_impl_all!(Scheduler: Send, Sync, Clone, Debug);
 assert_not_impl_any!(Scheduler: UnwindSafe, RefUnwindSafe);
 assert_impl_all!(JoinHandle<()>: Future, Send, UnwindSafe, RefUnwindSafe);
 assert_impl_all!(JoinError: StdError, Send, Sync, Debug);
+assert_impl_all!(ShutdownCause: Send, Sync, Clone, Debug, Eq);
+assert_not_impl_any!(ShutdownCause: Copy);
 assert_impl_all!(RuntimeControl: Send, Sync, Clone, Debug);
 assert_not_impl_any!(RuntimeControl: ThreadAware, From<&'static Context>, From<&'static Runtime>);
 assert_impl_all!(Workers: Send, Sync, Debug);
@@ -48,6 +50,7 @@ const _: fn() -> MonitorPolicy = MonitorPolicy::disabled;
 const _: fn() -> PanicPolicy = PanicPolicy::shutdown;
 const _: fn() -> PanicPolicy = PanicPolicy::ignore;
 const _: fn(RuntimeBuilder, PanicPolicy) -> RuntimeBuilder = RuntimeBuilder::panic;
+const _: fn(&JoinError) -> Option<ShutdownCause> = JoinError::shutdown_cause;
 
 const _: fn(&Runtime) -> &RuntimeScheduler = Runtime::scheduler;
 const _: fn(Runtime) -> Result<(), Error> = Runtime::stop;

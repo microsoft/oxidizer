@@ -11,6 +11,23 @@ Arty reports these panics through `JoinError` when possible. By default, the
 first panic that Arty catches from these operations shuts down the runtime.
 `PanicPolicy::ignore()` keeps the runtime running.
 
+`JoinError::is_panic()` identifies the task that panicked.
+`JoinError::into_panic()` returns its original panic payload.
+For tasks cancelled or rejected by shutdown, `JoinError::shutdown_cause()`
+identifies two causes through `arty::runtime::ShutdownCause`.
+`Requested` means that shutdown started without an error.
+`Panic` means that a contained task panic started shutdown.
+
+Other runtime failures return `None`, but `JoinError::is_shutdown()` still returns
+`true` and `std::error::Error::source()` retains the failure.
+The method also returns `None` for a direct task panic or an invalid destination.
+The first shutdown cause remains authoritative. Later failures do not replace it.
+Requested shutdown has no error source. For abnormal shutdown, inspect
+`std::error::Error::source()` on the join error.
+For tasks cancelled or rejected because another task panicked, the source's
+`Display` output includes the original string panic payload.
+Other panic payloads use the diagnostic `non-string panic payload`.
+
 A waker tells a worker that a task is ready to run again.
 Do not rely on Arty to recover from panics in cleanup or notification code.
 This includes `Drop` implementations, custom wakers, and code that announces task completion.
