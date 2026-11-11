@@ -15,7 +15,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context as PollContext, Poll, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, ShutdownCause, WorkersPolicy};
+use arty::runtime::hook::OnPanic;
+use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeBuilder, ShutdownCause, WorkersPolicy};
 use arty::task::JoinError;
 #[cfg(feature = "macros")]
 use arty::task::{Context, JoinHandle};
@@ -418,7 +419,7 @@ fn blocking_callback_can_poll_rejected_blocking_join_after_shutdown() {
 
 #[test]
 fn root_execution_returns_errors_and_preserves_borrowed_storage() {
-    let runtime = runtime_builder().panic(PanicPolicy::ignore()).build().unwrap();
+    let runtime = runtime_builder().on((), OnPanic::IGNORE).build().unwrap();
     assert!(
         runtime
             .scheduler()

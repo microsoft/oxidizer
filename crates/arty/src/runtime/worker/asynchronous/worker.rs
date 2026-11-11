@@ -17,6 +17,7 @@ use tick::runtime::{ClockDriver, InactiveClock};
 use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::DispatcherClient;
+use crate::runtime::hook::{Hooks, PanicAction};
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{CommandReceiver, LocalWorker, Signal, SpawnCommand, SystemCommand};
 #[cfg(test)]
@@ -26,6 +27,15 @@ use crate::runtime::worker::blocking;
 use crate::task::Context;
 
 const COMMANDS_PER_CYCLE: usize = 256;
+
+fn resolve_task_panic(panic: arty_executor::TaskPanicPayload) -> (arty_executor::PanicAction, arty_executor::TaskPanicPayload) {
+    let (action, panic) = LocalWorker::on_panic(panic);
+    let action = match action {
+        PanicAction::Ignore => arty_executor::PanicAction::Ignore,
+        PanicAction::Shutdown => arty_executor::PanicAction::Shutdown,
+    };
+    (action, panic)
+}
 
 fn suspend_wait(deadline: Instant, now: Instant) -> Duration {
     deadline.saturating_duration_since(now)
@@ -114,7 +124,7 @@ impl Worker {
         clock: InactiveClock,
         signal: Arc<Signal>,
         monitor_options: MonitorOptions,
-        panic_policy: crate::runtime::PanicPolicy,
+        hooks: Hooks,
     ) -> Self {
         let worker_waker = Signal::waker(&signal);
         let shutdown = dispatcher.shutdown().clone();
@@ -124,13 +134,13 @@ impl Worker {
         let executor = Executor::builder()
             .owner_waker(worker_waker)
             .thread(thread.clone())
-            .panic_policy(panic_policy.into_executor_policy())
+            .panic_policy(arty_executor::PanicPolicy::dynamic(resolve_task_panic))
             .build();
         let tasks = executor.tasks();
         let executor_shutdown = executor.shutdown();
 
         let context = Context::new(dispatcher, clock, io, thread);
-        LocalWorker::register_scheduler(context.clone(), tasks.clone(), executor_shutdown);
+        LocalWorker::install_scheduler(context.clone(), tasks.clone(), executor_shutdown, hooks);
 
         Self {
             state: Some(ReadyWorkerState {
@@ -258,6 +268,9 @@ impl Worker {
                 SystemCommand::AccessIo { access } => {
                     access.into_inner()(context);
                 }
+                SystemCommand::RegisterHook { hook, source } => {
+                    LocalWorker::install_hook(hook, source.as_ref());
+                }
                 SystemCommand::Shutdown => {
                     return None;
                 }
@@ -353,19 +366,15 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::runtime::config::MonitorPolicy;
-    use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
+    use crate::runtime::config::{MonitorPolicy, RuntimeName};
+    use crate::runtime::dispatch::DispatcherCore;
     use crate::runtime::worker::asynchronous::{QueuedFactory, QueuedIoAccess};
     use crate::task::preparation::RemoteFutureFactory;
 
     fn test_blocking_worker() -> (Arc<blocking::Worker>, Shutdown) {
         let shutdown = Shutdown::default();
         (
-            blocking::Worker::new(
-                blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
-                shutdown.clone(),
-                blocking::PanicPolicy::Ignore,
-            ),
+            blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
             shutdown,
         )
     }
@@ -482,12 +491,8 @@ mod tests {
         let (blocking_worker, shutdown) = blocking;
         let (command_tx, command_rx) = commands;
         let thread = ThreadBuilder::default().build(thread::current().id());
-        let endpoint = WorkerEndpoint {
-            commands: command_tx,
-            waker: Signal::waker(&signal),
-            thread: thread.clone(),
-            blocking_worker: Arc::clone(&blocking_worker),
-        };
+        let endpoint =
+            crate::runtime::testing::worker_endpoint(command_tx, Signal::waker(&signal), thread.clone(), Arc::clone(&blocking_worker));
         let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown));
         let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
@@ -497,16 +502,9 @@ mod tests {
         let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, Signal::waker(&signal));
         signal.set_driver_waker(driver_waker);
 
-        Worker::new(
-            command_rx,
-            dispatcher,
-            thread,
-            io,
-            clock,
-            signal,
-            monitor_options,
-            crate::runtime::PanicPolicy::default(),
-        )
+        let mut hooks = Hooks::default();
+        hooks.relocate(None, &thread);
+        Worker::new(command_rx, dispatcher, thread, io, clock, signal, monitor_options, hooks)
     }
 
     fn replenishing_command(sender: CommandSender, processed: Arc<AtomicUsize>) -> SpawnCommand {

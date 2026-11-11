@@ -14,10 +14,10 @@ use thread_aware::{Thread as ThreadCoordinate, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
 
 use crate::io::{Io, RuntimeDriverHost};
-use crate::runtime::PanicPolicy;
 use crate::runtime::config::{MonitorOptions, RuntimeName};
 use crate::runtime::dispatch::{DispatcherClient, WorkerEndpoint};
 use crate::runtime::error::Error;
+use crate::runtime::hook::Hooks;
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::worker::{asynchronous, blocking};
 
@@ -34,7 +34,7 @@ pub(crate) struct StartOptions {
     pub(crate) shutdown: Shutdown,
     pub(crate) io_runtime: IoRuntime,
     pub(crate) monitor_options: MonitorOptions,
-    pub(crate) panic_policy: PanicPolicy,
+    pub(crate) hooks: Hooks,
 }
 
 /// A spawned worker waiting for runtime activation.
@@ -131,7 +131,7 @@ impl ThreadEntry {
             shutdown,
             io_runtime,
             monitor_options,
-            panic_policy,
+            hooks,
             ..
         } = options;
 
@@ -145,11 +145,9 @@ impl ThreadEntry {
 
         let signal = Arc::new(asynchronous::Signal::default());
         let worker_waker = asynchronous::Signal::waker(&signal);
-        let blocking_panic_policy = match panic_policy.clone().into_executor_policy() {
-            arty_executor::PanicPolicy::Ignore => blocking::PanicPolicy::Ignore,
-            arty_executor::PanicPolicy::Shutdown => blocking::PanicPolicy::Shutdown(worker_waker.clone()),
-        };
-        let blocking_worker = blocking::Worker::new(blocking_pools.pool_for_worker(worker_index), shutdown, blocking_panic_policy);
+        let mut worker_hooks = hooks;
+        worker_hooks.relocate(None, &current);
+        let blocking_worker = blocking::Worker::new(blocking_pools.pool_for_worker(worker_index), shutdown);
 
         endpoint_tx
             .send(Endpoint {
@@ -174,9 +172,10 @@ impl ThreadEntry {
             clock,
             signal,
             monitor_options,
-            panic_policy,
+            worker_hooks,
         );
 
+        asynchronous::LocalWorker::on_start();
         _ = ready_tx.send(());
 
         let run_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));
@@ -290,17 +289,8 @@ mod tests {
         let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(
-            blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
-            shutdown.clone(),
-            blocking::PanicPolicy::Ignore,
-        );
-        let endpoint = WorkerEndpoint {
-            commands,
-            waker: Waker::noop().clone(),
-            thread: current,
-            blocking_worker,
-        };
+        let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
+        let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
         let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone()));
 
         report_failure(&Err(Box::new("worker panic")), &dispatcher);
@@ -313,17 +303,8 @@ mod tests {
         let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(
-            blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
-            shutdown.clone(),
-            blocking::PanicPolicy::Ignore,
-        );
-        let endpoint = WorkerEndpoint {
-            commands,
-            waker: Waker::noop().clone(),
-            thread: current,
-            blocking_worker,
-        };
+        let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
+        let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
         let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone()));
 
         report_failure(&Ok(()), &dispatcher);

@@ -15,7 +15,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use arty_executor::{
-    CycleOutcome, Executor, PanicPolicy, Shutdown, ShutdownCause, ShutdownError, TaskCompletion, TaskPanicPayload, TaskPlacement, TaskSet,
+    CycleOutcome, Executor, PanicAction, PanicPolicy, Shutdown, ShutdownCause, ShutdownError, TaskCompletion, TaskPanicPayload,
+    TaskPlacement, TaskSet,
 };
 use observed::Sink;
 use observed::enrichment::{Enrichment, EnrichmentEntry};
@@ -554,6 +555,11 @@ impl TaskCompletion<()> for CapturePanic {
 
 #[test]
 fn panic_notification_carries_the_authoritative_shutdown_cause() {
+    fn shutdown(panic: TaskPanicPayload) -> (PanicAction, TaskPanicPayload) {
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"panic notification"));
+        (PanicAction::Shutdown, panic)
+    }
+
     fn assert_same_cause(actual: &ShutdownCause, expected: &ShutdownCause) {
         match (actual.as_error(), expected.as_error()) {
             (Some(actual), Some(expected)) => assert!(std::ptr::addr_eq(actual.inner(), expected.inner())),
@@ -562,16 +568,29 @@ fn panic_notification_carries_the_authoritative_shutdown_cause() {
         }
     }
 
-    for (policy, existing) in [
-        (PanicPolicy::Ignore, None),
-        (PanicPolicy::Shutdown, None),
-        (PanicPolicy::Ignore, Some(ShutdownCause::default())),
+    let inspected = Rc::new(Cell::new(false));
+    let dynamic_ignore = PanicPolicy::dynamic({
+        let inspected = Rc::clone(&inspected);
+        move |panic| {
+            assert_eq!(panic.downcast_ref::<&str>(), Some(&"panic notification"));
+            inspected.set(true);
+            (PanicAction::Ignore, panic)
+        }
+    });
+
+    for (policy, existing, expects_policy_shutdown) in [
+        (PanicPolicy::Ignore, None, false),
+        (PanicPolicy::Shutdown, None, true),
+        (dynamic_ignore, None, false),
+        (PanicPolicy::dynamic(shutdown), None, true),
+        (PanicPolicy::Ignore, Some(ShutdownCause::default()), false),
         (
             PanicPolicy::Shutdown,
             Some(ShutdownError::new(std::io::Error::other("first shutdown cause")).into()),
+            true,
         ),
     ] {
-        let expects_shutdown = matches!(policy, PanicPolicy::Shutdown) || existing.is_some();
+        let expects_shutdown = expects_policy_shutdown || existing.is_some();
         let mut executor = Executor::builder().panic_policy(policy).build();
         let shutdown = executor.shutdown();
         let notification = Rc::new(RefCell::new(None));
@@ -616,6 +635,7 @@ fn panic_notification_carries_the_authoritative_shutdown_cause() {
             assert!(matches!(outcome, CycleOutcome::Suspend));
         }
     }
+    assert!(inspected.get());
 }
 
 struct ReadyDropPanic;

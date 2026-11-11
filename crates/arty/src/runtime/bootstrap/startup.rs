@@ -37,8 +37,10 @@ fn build_with_processors(
         .get()
         .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
     let monitor_options = processor_config.monitor_options;
-    let panic_policy = processor_config.panic_policy;
-
+    let hooks = processor_config
+        .hooks
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
@@ -55,7 +57,7 @@ fn build_with_processors(
             shutdown: shutdown.clone(),
             io_runtime: io_runtime.clone(),
             monitor_options: monitor_options.for_worker(),
-            panic_policy: panic_policy.clone(),
+            hooks: hooks.clone(),
         }));
     }
 
@@ -110,7 +112,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::config::MonitorOptions;
-    use crate::runtime::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, WorkersPolicy};
+    use crate::runtime::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 
     thread_local! {
         static WORKER_LOCAL_CALLS: AtomicUsize = const { AtomicUsize::new(0) };
@@ -294,7 +296,7 @@ mod tests {
                 stack_size: NonZero::new(2 * 1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(),
                 monitor_options,
-                panic_policy: PanicPolicy::default(),
+                hooks: std::sync::Mutex::default(),
             },
             &InactiveClock::new_isolated(),
             &ThreadBuilder::default(),

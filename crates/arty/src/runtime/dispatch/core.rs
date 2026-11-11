@@ -13,6 +13,7 @@ use nonempty::NonEmpty;
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
+use crate::runtime::hook::HookRegistration;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{CommandSender, LocalWorker, QueuedFactory, QueuedIoAccess, SpawnCommand, SystemCommand};
 use crate::runtime::worker::blocking::Worker;
@@ -204,6 +205,21 @@ impl DispatcherCore {
         send_result.map_err(|_error| self.runtime_shutting_down_error())
     }
 
+    pub(crate) fn register_hook(&self, hook: &HookRegistration) {
+        if matches!(self.shutdown().state(), ShutdownState::Started) {
+            return;
+        }
+
+        let source = LocalWorker::current_thread().filter(|thread| self.owns(thread));
+        for endpoint in &self.worker_endpoints {
+            _ = endpoint.commands.system_sender().send(SystemCommand::RegisterHook {
+                hook: hook.clone(),
+                source: source.clone(),
+            });
+            endpoint.waker.wake_by_ref();
+        }
+    }
+
     fn runtime_shutting_down_error(&self) -> Error {
         Error::from_shutdown(self.shutdown()).unwrap_or_else(Error::runtime_shutting_down)
     }
@@ -293,9 +309,10 @@ mod tests {
     use arty_executor::ShutdownError;
 
     use super::*;
+    use crate::runtime::config::RuntimeName;
     use crate::runtime::dispatch::{DispatcherClient, test_threads};
     use crate::runtime::worker::asynchronous::{CommandReceiver, command_channel};
-    use crate::runtime::worker::blocking::{PanicPolicy, Pool};
+    use crate::runtime::worker::blocking::Pool;
 
     fn endpoint(thread: &Thread) -> (WorkerEndpoint, CommandReceiver) {
         let (commands, command_rx) = command_channel();
@@ -304,11 +321,7 @@ mod tests {
                 commands,
                 waker: Waker::noop().clone(),
                 thread: thread.clone(),
-                blocking_worker: Worker::new(
-                    Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
-                    Shutdown::default(),
-                    PanicPolicy::Ignore,
-                ),
+                blocking_worker: Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
             },
             command_rx,
         )

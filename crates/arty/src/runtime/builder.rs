@@ -7,15 +7,17 @@ use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
 use crate::runtime::bootstrap;
-use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, RuntimeConfig, RuntimeName, WorkersPolicy};
+use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, RuntimeConfig, RuntimeName, WorkersPolicy};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
+use crate::runtime::hook::Hook;
 
 /// Configures workers and clocks before starting a runtime.
 ///
 /// Obtain a builder from [`Runtime::builder`]. Change its configuration, then
 /// call [`build`](Self::build) to start the workers.
-/// Each method replaces any earlier value for the same configuration.
+/// Policy methods replace any earlier value for the same configuration.
+/// Hook methods append callbacks in registration order.
 /// Configuring a builder does not start threads.
 ///
 /// See the [runtime defaults](crate::runtime#defaults) for the initial
@@ -50,42 +52,37 @@ impl RuntimeBuilder {
     /// The builder copies the name. Empty names are accepted.
     /// [`build`](Self::build) rejects names that contain a null character (`\0`).
     /// Operating systems can truncate thread names in diagnostic tools.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use arty::runtime::Runtime;
-    ///
-    /// let runtime = Runtime::builder().name("requests").build()?;
-    /// runtime.scheduler().block_on(async |_| {
-    ///     assert_eq!(std::thread::current().name(), Some("requests-async-0"));
-    /// })?;
-    /// runtime.stop()?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
     pub fn name(mut self, name: impl AsRef<str>) -> Self {
         self.processor_config.name = RuntimeName::new(name);
         self
     }
 
-    /// Sets how the runtime responds to a panic that it catches in a user task.
+    /// Registers a runtime hook with worker-local callback data.
     ///
-    /// The default is [`PanicPolicy::shutdown`]. Use
-    /// [`PanicPolicy::ignore`] to keep the runtime available after a panic.
-    /// With either policy, awaiting the task's [`JoinHandle`](crate::task::JoinHandle) returns an error.
-    /// This also applies to blocking functions.
+    /// Arty clones the hook data for each worker and relocates it before a
+    /// callback can run. Registering another hook of the same type appends it
+    /// after earlier callbacks.
     ///
     /// # Examples
     ///
     /// ```
-    /// use arty::runtime::{PanicPolicy, Runtime};
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::hook::OnPanic;
     ///
-    /// let builder = Runtime::builder().panic(PanicPolicy::ignore());
+    /// let builder = Runtime::builder().on((), OnPanic::IGNORE);
     /// ```
     #[must_use]
-    pub const fn panic(mut self, policy: PanicPolicy) -> Self {
-        self.processor_config.panic_policy = policy;
+    pub fn on<H, D>(mut self, data: D, callback: fn(&mut H, &D)) -> Self
+    where
+        H: Hook,
+        D: thread_aware::ThreadAware + Clone + 'static,
+    {
+        self.processor_config
+            .hooks
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .add(data, callback);
         self
     }
 
@@ -219,8 +216,7 @@ impl RuntimeBuilder {
     ///
     /// # Errors
     ///
-    /// Returns [`Error`] if the worker count or blocking-pool limit is zero,
-    /// or if the runtime name contains a null character (`\0`).
+    /// Returns [`Error`] if the worker count or blocking-pool limit is zero.
     ///
     /// # Panics
     ///
@@ -283,10 +279,6 @@ mod tests {
         assert_eq!(builder.processor_config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
         assert_eq!(builder.processor_config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
         assert!(builder.processor_config.monitor_options.policy().is_enabled());
-        assert!(matches!(
-            builder.processor_config.panic_policy.into_executor_policy(),
-            arty_executor::PanicPolicy::Shutdown
-        ));
     }
 
     #[test]
@@ -340,16 +332,6 @@ mod tests {
         let builder = Runtime::builder().monitor(MonitorPolicy::disabled());
 
         assert!(!builder.processor_config.monitor_options.policy().is_enabled());
-    }
-
-    #[test]
-    fn panic_replaces_the_default() {
-        let builder = Runtime::builder().panic(PanicPolicy::ignore());
-
-        assert!(matches!(
-            builder.processor_config.panic_policy.into_executor_policy(),
-            arty_executor::PanicPolicy::Ignore
-        ));
     }
 
     #[test]

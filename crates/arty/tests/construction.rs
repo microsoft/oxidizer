@@ -9,7 +9,8 @@
 use std::error::Error as StdError;
 use std::thread;
 
-use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, WorkersPolicy};
+use arty::runtime::hook::OnPanic;
+use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, Runtime, WorkersPolicy};
 
 fn worker_names(runtime: &Runtime) -> Vec<(String, String)> {
     runtime
@@ -165,8 +166,14 @@ fn default_runtime_construction_uses_one_worker() {
 
 #[test]
 fn explicit_panic_policies_preserve_runtime_construction() {
-    for policy in [PanicPolicy::shutdown(), PanicPolicy::ignore()] {
-        let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).panic(policy).build().unwrap();
+    type PanicCallback = fn(&mut OnPanic, &());
+
+    for callback in [(|event: &mut OnPanic, ()| event.shutdown()) as PanicCallback, OnPanic::IGNORE] {
+        let runtime = Runtime::builder()
+            .workers(WorkersPolicy::exactly(1))
+            .on::<OnPanic, _>((), callback)
+            .build()
+            .unwrap();
 
         assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
         runtime.stop().unwrap();

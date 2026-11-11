@@ -3,6 +3,7 @@
 
 use crate::runtime::Workers;
 use crate::runtime::dispatch::DispatcherClient;
+use crate::runtime::hook::{Hook, HookRegistration};
 
 /// Requests runtime shutdown from any thread.
 ///
@@ -53,6 +54,40 @@ impl RuntimeControl {
     #[must_use]
     pub fn workers(&self) -> &Workers {
         self.dispatcher.workers()
+    }
+
+    /// Registers a runtime hook on every live async worker.
+    ///
+    /// Arty clones the hook data for each worker and relocates it before the
+    /// callback can run. Arty sends late hook registration through each
+    /// worker's normal command queue. A worker applies the hook when it
+    /// processes that command. If runtime shutdown has started, Arty ignores
+    /// the registration.
+    ///
+    /// A late [`OnStart`](crate::runtime::hook::OnStart) registration is stored
+    /// but does not run because the workers have already started.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    /// use arty::runtime::hook::OnPanic;
+    ///
+    /// let runtime = Runtime::new()?;
+    /// let control = runtime
+    ///     .scheduler()
+    ///     .block_on(async |cx| cx.control().clone())?;
+    /// control.on((), OnPanic::IGNORE);
+    /// runtime.stop()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn on<H, D>(&self, data: D, callback: fn(&mut H, &D))
+    where
+        H: Hook,
+        D: thread_aware::ThreadAware + Clone + 'static,
+    {
+        let hook = HookRegistration::new(data, callback);
+        self.dispatcher.register_hook(&hook);
     }
 
     /// Requests shutdown without blocking the calling thread.
