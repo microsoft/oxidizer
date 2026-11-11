@@ -141,8 +141,10 @@ To generate documentation locally with all features enabled (including feature-g
 just anvil-doc-build --open
 ```
 
-Anvil uses the repository's selected stable toolchain for this command. The
-script generates documentation and opens it in your default browser.
+Anvil uses Rust 1.97, selected by `rust-toolchain.toml`, for stable development
+and verification commands. The library MSRV remains Rust 1.95, declared in
+`Cargo.toml` and checked separately. The script generates documentation and
+opens it in your default browser.
 
 ### CI Workflows
 

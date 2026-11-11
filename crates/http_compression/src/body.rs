@@ -1,20 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Body plumbing shared by compression and decompression.
+//! Adapts HTTP bodies for compression and decompression.
 //!
-//! `compressors` transforms a [`Stream`] of bytes, while an HTTP body is a
-//! sequence of frames that also carries trailers. Bridging the two leaves the
-//! trailers with nowhere to live for the duration of the transform.
+//! `compressors` transforms a [`Stream`] of bytes. An HTTP body contains data
+//! frames and trailers. The adapter stores trailers while it transforms data.
 //!
-//! [`CompressionChain`] keeps them where they were read. It is recursive, so any
-//! number of successive compression steps is still one concrete type. Once the
-//! bytes run out, it is unwrapped through [`CompressionStream::into_inner`] back
-//! to the adapter holding the trailers. Nothing is shared, and nothing is
-//! type-erased.
+//! [`CompressionChain`] represents all transformation stages as one concrete
+//! type. After the data ends, [`CompressionStream::into_inner`] returns each
+//! source stream. The chain unwraps these streams until it reaches the adapter
+//! that stores the trailers. Each stage keeps its compression engine's concrete
+//! type. The source uses [`StreamingBody`], which erases the body's concrete
+//! type.
 //!
-//! The same shape serves both directions: the engine is the only thing that
-//! differs, so it is a type parameter.
+//! The compression engine is a type parameter, so one chain supports both
+//! compression and decompression.
 
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
@@ -25,7 +25,8 @@ use compressors::core::{Compress, Compression, Decompress};
 use futures::Stream;
 use http::HeaderMap;
 use http_body::{Body, Frame, SizeHint};
-use http_extensions::{HttpBody, HttpError, Result};
+use http_extensions::body::StreamingBody;
+use http_extensions::{HttpError, Result};
 use seatbelt::{Recovery as _, RecoveryInfo};
 
 use crate::error::{LABEL_COMPRESSION_INVALID, LABEL_COMPRESSION_LIMIT_EXCEEDED};
@@ -33,30 +34,26 @@ use crate::{CONTENT_DIGEST_HEADER, REPR_DIGEST_HEADER};
 
 /// A body being read as a stream of transformed bytes.
 ///
-/// Boxing the layer is what gives the recursion a finite size; it costs one
-/// allocation per compression or decompression stage, not per chunk.
+/// A boxed layer gives the recursive type a finite size.
+///
+/// Each transformation stage allocates one box. Data chunks do not allocate a
+/// box.
 #[derive(Debug)]
 pub(crate) enum CompressionChain<C> {
-    /// The bottom of the chain: the body itself, plus any trailers seen so far.
-    Source {
-        body: Pin<Box<HttpBody>>,
-        trailers: Option<HeaderMap>,
-    },
+    /// The source body and any trailers read from it.
+    Source { body: StreamingBody, trailers: Option<HeaderMap> },
 
-    /// One compression or decompression stage wrapping the preceding stream.
+    /// One transformation stage around the previous stream.
     Layer(Box<CompressionStream<Self, C>>),
 }
 
 impl<C> CompressionChain<C> {
-    /// Starts a chain by reading data frames off `body`.
-    pub(crate) fn new(body: HttpBody) -> Self {
-        Self::Source {
-            body: Box::pin(body),
-            trailers: None,
-        }
+    /// Starts a chain that reads data frames from `body`.
+    pub(crate) fn new(body: StreamingBody) -> Self {
+        Self::Source { body, trailers: None }
     }
 
-    /// Unwraps the chain to recover the trailers read off the body.
+    /// Returns the trailers read from the body.
     fn into_trailers(self) -> Option<HeaderMap> {
         match self {
             Self::Source { trailers, .. } => trailers,
@@ -66,14 +63,14 @@ impl<C> CompressionChain<C> {
 }
 
 impl<C: Compression<Mode = Decompress>> CompressionChain<C> {
-    /// Adds one decompression stage on top of this one.
+    /// Adds one decompression stage.
     pub(crate) fn decompress(self, decompressor: C) -> Self {
         Self::Layer(Box::new(CompressionStream::decompress(self, decompressor)))
     }
 }
 
 impl<C: Compression<Mode = Compress>> CompressionChain<C> {
-    /// Adds one compression stage on top of this one.
+    /// Adds one compression stage.
     pub(crate) fn compress(self, compressor: C) -> Self {
         Self::Layer(Box::new(CompressionStream::compress(self, compressor).flush_on_pending(true)))
     }
@@ -84,19 +81,19 @@ impl<C: Compression> Stream for CompressionChain<C> {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.get_mut() {
-            // Every layer is `Unpin`, because the only thing under it is a box.
+            // Every layer is `Unpin` because it contains only a box.
             Self::Layer(stream) => Pin::new(stream.as_mut())
                 .poll_next(cx)
                 .map(|item| item.map(|chunk| chunk.map_err(to_http_error))),
 
             Self::Source { body, trailers } => loop {
-                let Some(frame) = ready!(body.as_mut().poll_frame(cx)) else {
+                let Some(frame) = ready!(Pin::new(&mut *body).poll_frame(cx)) else {
                     return Poll::Ready(None);
                 };
 
                 match frame?.into_data() {
                     Ok(data) => return Poll::Ready(Some(Ok(data))),
-                    // Not a data frame; keep any trailers and read on.
+                    // Store trailers and continue to the next frame.
                     Err(frame) => {
                         let new = frame.into_trailers().expect("a non-data HTTP frame must contain trailers");
                         match trailers.as_mut() {
@@ -112,11 +109,11 @@ impl<C: Compression> Stream for CompressionChain<C> {
 
 /// A body that is transformed as it is polled.
 ///
-/// The work is lazy, so a malformed or oversized body fails here rather than
-/// when the headers arrive.
+/// The transformation is lazy. A malformed or oversized body fails when this
+/// body is read, not when its headers arrive.
 ///
-/// The chain is dropped as soon as it is finished with, which releases the
-/// engines and their buffers without waiting for the caller to drop the body.
+/// The body drops a completed chain immediately. This releases its engines and
+/// buffers before the caller drops the body.
 #[derive(Debug)]
 pub(crate) struct CompressionBody<C> {
     chain: Option<CompressionChain<C>>,
@@ -142,8 +139,7 @@ impl<C: Compression> Body for CompressionBody<C> {
         match ready!(Pin::new(chain).poll_next(cx)) {
             Some(Ok(data)) => Poll::Ready(Some(Ok(Frame::data(data)))),
 
-            // Trailers describe a body that was never delivered, so dropping the
-            // chain here drops them too.
+            // The body failed, so its trailers must not be delivered.
             Some(Err(err)) => {
                 this.chain = None;
                 Poll::Ready(Some(Err(err)))
@@ -165,18 +161,17 @@ impl<C: Compression> Body for CompressionBody<C> {
         self.chain.is_none()
     }
 
-    /// The transformed length is not known until the body has been read.
+    /// The transformed length is unknown until the complete body is read.
     #[cfg_attr(test, mutants::skip)] // Replacing `SizeHint::default()` with `Default::default()` is equivalent.
     fn size_hint(&self) -> SizeHint {
         SizeHint::default()
     }
 }
 
-/// Translates an engine failure into an [`HttpError`].
-fn to_http_error(err: compressors::Error) -> HttpError {
+/// Converts an engine failure to an [`HttpError`].
+pub(crate) fn to_http_error(err: compressors::Error) -> HttpError {
     if err.is_source() {
-        // The source is the layer beneath, which already produced an
-        // `HttpError`; take it back out rather than bury it under this one.
+        // Preserve an `HttpError` from the source layer.
         if let Some(original) = err.into_source().and_then(|source| source.downcast::<HttpError>().ok()) {
             return *original;
         }

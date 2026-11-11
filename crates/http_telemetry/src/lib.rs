@@ -19,7 +19,7 @@
 //! use observed::Sink;
 //!
 //! # fn build(sink: Sink, body_builder: HttpBodyBuilder) {
-//! let layer = Telemetry::server(sink, body_builder.clone());
+//! let layer = Telemetry::server(sink);
 //! let handler = Execute::new(move |_request: HttpRequest| {
 //!     let response = HttpResponse::new(body_builder.empty());
 //!     async move { Ok::<_, HttpError>(response) }
@@ -151,7 +151,7 @@
 //! }
 //!
 //! # async fn serve(sink: Sink, body_builder: HttpBodyBuilder, request: HttpRequest) {
-//! # let layer = Telemetry::server(sink.clone(), body_builder.clone());
+//! # let layer = Telemetry::server(sink.clone());
 //! # let handler = Execute::new(move |_request: HttpRequest| {
 //! #     let response = HttpResponse::new(body_builder.empty());
 //! #     async move { Ok::<_, HttpError>(response) }

@@ -3,15 +3,13 @@
 
 //! Builds an HTTP client on the WinHTTP transport and issues one request.
 //!
-//! Two things differ from the usual `fetch` client setup. The transport is selected through
-//! the `HttpClientWinHttpExt` extension trait instead of `HttpClient::builder`, and its
-//! environment dependencies - a clock, a memory provider, and a telemetry sink - are required
-//! constructor arguments. Nothing defaults, so the transport never picks a clock or an
-//! allocator on the caller's behalf.
+//! Import `HttpClientWinHttpExt` to select this transport instead of
+//! `HttpClient::builder`. The constructor requires a clock, memory provider,
+//! and telemetry sink. The transport does not select these values for the
+//! caller.
 //!
-//! The example runs on Tokio. The transport itself is runtime-neutral - its I/O completes on
-//! WinHTTP's own worker threads - but a real application still supplies the clock its runtime
-//! drives, here via `Clock::new_tokio()`.
+//! This example runs on Tokio and supplies `Clock::new_tokio()`. The transport
+//! does not depend on Tokio. WinHTTP completes I/O on its own worker threads.
 //!
 //! Run with `cargo run -p fetch_winhttp --example quick_start`.
 
@@ -42,7 +40,7 @@ mod example {
         let deps = WinHttpDeps::builder(Clock::new_tokio(), GlobalPool::new(), Sink::noop()).build();
 
         let client = HttpClient::builder_winhttp(deps)
-            // The fixture speaks plaintext, which production callers should not allow.
+            // The fixture uses plaintext. Production clients must use TLS.
             .insecure_allow_http()
             .supported_http_versions(&[Version::HTTP_11])
             .minimal_pipeline()

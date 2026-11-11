@@ -21,7 +21,7 @@ use common::{ACTIVE, Echoing, Failing, NeverResponding, Responding, Step, Tenant
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::RedactionEngine;
 use http::{Method, StatusCode, Version};
-use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
+use http_extensions::{HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::Telemetry;
 use layered::Layer;
 use observed::context::Transfer;
@@ -150,7 +150,7 @@ fn abandon(handler: &impl RequestHandler, request: HttpRequest) {
 /// The server middleware over `sink`, in front of [`Responding`]. The stack already got one
 /// request.
 fn responding_stack(sink: Sink) -> Telemetry<Responding> {
-    let stack = Telemetry::server(sink, HttpBodyBuilder::new_fake()).layer(common::responding(StatusCode::OK));
+    let stack = Telemetry::server(sink).layer(common::responding(StatusCode::OK));
     drop(send(&stack, common::get()));
     stack
 }
@@ -158,7 +158,7 @@ fn responding_stack(sink: Sink) -> Telemetry<Responding> {
 /// The server middleware over `sink`, in front of [`NeverResponding`]. The stack already got
 /// one request.
 fn never_responding_stack(sink: Sink) -> Telemetry<NeverResponding> {
-    let stack = Telemetry::server(sink, HttpBodyBuilder::new_fake()).layer(NeverResponding);
+    let stack = Telemetry::server(sink).layer(NeverResponding);
     abandon(&stack, common::get());
     stack
 }
@@ -167,14 +167,14 @@ fn never_responding_stack(sink: Sink) -> Telemetry<NeverResponding> {
 /// field, so the allocation count shows that the error event builds `error.type` once. The stack
 /// already got one request.
 fn failing_stack(handler: Failing) -> Telemetry<Failing> {
-    let stack = Telemetry::server(reading_sink(2), HttpBodyBuilder::new_fake()).layer(handler);
+    let stack = Telemetry::server(reading_sink(2)).layer(handler);
     drop(send(&stack, common::get()));
     stack
 }
 
 /// The server middleware over `sink`, in front of [`Echoing`]. The stack already got one request.
 fn echoing_stack(sink: Sink) -> Telemetry<Echoing> {
-    let stack = Telemetry::server(sink, HttpBodyBuilder::new_fake()).layer(Echoing(StatusCode::OK));
+    let stack = Telemetry::server(sink).layer(Echoing(StatusCode::OK));
     drop(send(&stack, common::get()));
     stack
 }
@@ -182,7 +182,7 @@ fn echoing_stack(sink: Sink) -> Telemetry<Echoing> {
 /// The server middleware with the excluded path `/books/`, over a sink with one processor
 /// that reads every field, in front of [`Responding`]. The stack already got one request.
 fn excluded_stack() -> Telemetry<Responding> {
-    let stack = Telemetry::server(reading_sink(1), HttpBodyBuilder::new_fake())
+    let stack = Telemetry::server(reading_sink(1))
         .excluded_paths([BasePath::from_static("/books/")])
         .layer(common::responding(StatusCode::OK));
     drop(send(&stack, common::get()));

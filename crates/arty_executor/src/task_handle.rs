@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::cell::OnceCell;
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::pin::Pin;
 use std::ptr::{self, NonNull};
 use std::rc::Rc;
-use std::sync::OnceLock;
 
 use plurality::{Arc as PoolArc, coerce};
 
@@ -16,7 +16,9 @@ use crate::TypeErasedTask;
 ///
 /// Counted handles and owned raw pointers keep the task alive. The template is never dropped.
 /// This keeps raw ownership private without a detached allocation or new plurality APIs.
-pub(crate) type TaskHandleSlot = OnceLock<ManuallyDrop<TaskHandleTemplate>>;
+/// Only the owner accesses the cell, initializing it before publishing any task pointer.
+/// Remote owners read the immutable template directly through that published pointer.
+pub(crate) type TaskHandleSlot = OnceCell<ManuallyDrop<TaskHandleTemplate>>;
 
 pub(crate) struct TaskHandleTemplate {
     inner: Pin<PoolArc<dyn TypeErasedTask>>,

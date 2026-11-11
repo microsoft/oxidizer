@@ -95,7 +95,7 @@ impl ContextSlot {
         C: IoContext,
     {
         let registered = self.context.get_or_init(|| RegisteredContext {
-            context: Mutex::new(Box::new(NeutralContext(C::context(options)))),
+            context: Mutex::new(Box::new(NeutralContext(C::new(options)))),
         });
         registered.clone_context::<C>()
     }
@@ -277,7 +277,7 @@ mod tests {
         type ContextOptions = ();
         type Driver = TestDriver;
 
-        fn context((): Self::ContextOptions) -> Self {
+        fn new((): Self::ContextOptions) -> Self {
             CONTEXT_CALLS.fetch_add(1, Ordering::SeqCst);
             Self
         }

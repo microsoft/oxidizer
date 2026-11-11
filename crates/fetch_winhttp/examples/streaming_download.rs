@@ -3,13 +3,12 @@
 
 //! Consumes a response body frame by frame and reads the trailer section that follows it.
 //!
-//! Response bodies are pulled, not pushed: the transport issues a WinHTTP read only when the
-//! consumer polls for the next frame, so a slow consumer applies backpressure without any
-//! buffering in between. Abandoning the body mid-stream cancels the request.
+//! The transport reads from WinHTTP only when the consumer polls for the next
+//! frame. A slow consumer applies backpressure without extra buffering.
+//! Dropping the body during the stream cancels the request.
 //!
-//! The transport also preserves a response trailer section as a final frame instead of
-//! discarding it. Trailers are an HTTP/2 and HTTP/3 feature as WinHTTP exposes them, so this
-//! example uses an HTTP/2 fixture over TLS.
+//! The transport returns response trailers as the final frame. WinHTTP exposes
+//! trailers for HTTP/2 and HTTP/3, so this example uses HTTP/2 over TLS.
 //!
 //! Run with `cargo run -p fetch_winhttp --example streaming_download`.
 
@@ -48,7 +47,7 @@ mod example {
             [ResponsePlan::chunks([Bytes::from_static(b"first "), Bytes::from_static(b"second")]).trailers(trailers)],
             &["localhost"],
         );
-        // The fixture presents a self-signed certificate, so certificate validation is relaxed.
+        // The fixture has a self-signed certificate, so the client accepts it.
         let test_client = client(
             &[Version::HTTP_2],
             WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
@@ -65,8 +64,8 @@ mod example {
     }
 
     async fn abandon_a_download() -> Result<(), ohno::AppError> {
-        // The fixture sends one chunk and then leaves the response in flight forever. Nothing
-        // here waits for it: the consumer polls once, sees `Pending`, and drops the stream.
+        // The fixture sends one chunk and then stalls. The consumer sees
+        // `Pending` on the next poll and drops the stream.
         let server = TestServer::http([
             ResponsePlan::chunks([Bytes::from_static(b"partial")]).stall_after_frames(),
             ResponsePlan::ok("the connection pool is still usable"),
@@ -86,9 +85,9 @@ mod example {
             let mut context = Context::from_waker(&waker);
             let still_waiting = matches!(pending.as_mut().poll(&mut context), Poll::Pending);
             println!("second chunk still outstanding: {still_waiting}");
-            // Dropping the body cancels the WinHTTP request and releases its handles.
-            // The poll state must not outlive this block: `Context` is not `Send`, and the
-            // next request below awaits on the Tokio runtime.
+            // Dropping the body cancels the WinHTTP request and releases its
+            // handles. Keep the poll state in this block because `Context` is
+            // not `Send`. The next request runs on the Tokio runtime.
         }
         drop(stream);
 

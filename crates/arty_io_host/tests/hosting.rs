@@ -79,7 +79,7 @@ impl IoContext for ReentrantContext {
     type ContextOptions = (IoRuntime, Arc<State>);
     type Driver = TestDriver;
 
-    fn context((runtime, state): Self::ContextOptions) -> Self {
+    fn new((runtime, state): Self::ContextOptions) -> Self {
         let thread = ThreadBuilder::default().build(std::thread::current().id());
         let host = runtime.driver_host(thread, Waker::noop().clone()).unwrap();
         let _ = host.context::<Context<true>>(Arc::clone(&state)).unwrap();
@@ -113,7 +113,7 @@ impl IoContext for SameTypeReentrantContext {
     type ContextOptions = Arc<State>;
     type Driver = TestDriver;
 
-    fn context(options: Self::ContextOptions) -> Self {
+    fn new(options: Self::ContextOptions) -> Self {
         Self { state: options }
     }
 
@@ -151,7 +151,7 @@ impl IoContext for SameTypeContextReentrantContext {
     type ContextOptions = (IoRuntime, Arc<State>);
     type Driver = TestDriver;
 
-    fn context((runtime, state): Self::ContextOptions) -> Self {
+    fn new((runtime, state): Self::ContextOptions) -> Self {
         let error = host(&runtime).context::<Self>((runtime.clone(), Arc::clone(&state))).err().unwrap();
         state.nested_context_errors.lock().unwrap().push(error.to_string());
         Self { state }
@@ -181,7 +181,7 @@ impl IoContext for HandledFailureContext {
     type ContextOptions = (IoRuntime, Arc<State>);
     type Driver = TestDriver;
 
-    fn context((runtime, state): Self::ContextOptions) -> Self {
+    fn new((runtime, state): Self::ContextOptions) -> Self {
         state.fail_initialization.store(true, Ordering::SeqCst);
         let host = host(&runtime);
         let _ = host.context::<Context<true>>(Arc::clone(&state));
@@ -213,7 +213,7 @@ impl IoContext for FormattingFailureContext {
     type ContextOptions = Arc<State>;
     type Driver = FormattingFailureDriver;
 
-    fn context(options: Self::ContextOptions) -> Self {
+    fn new(options: Self::ContextOptions) -> Self {
         Self { state: options }
     }
 
@@ -272,7 +272,7 @@ impl<const SECOND: bool> IoContext for Context<SECOND> {
     type ContextOptions = Arc<State>;
     type Driver = TestDriver;
 
-    fn context(options: Self::ContextOptions) -> Self {
+    fn new(options: Self::ContextOptions) -> Self {
         options.context_calls.fetch_add(1, Ordering::SeqCst);
         assert!(!options.panic_context.load(Ordering::SeqCst), "context construction failed");
         Self { state: options }
@@ -315,7 +315,7 @@ impl IoContext for MoveOnlyContext {
     type ContextOptions = MoveOnlyOptions;
     type Driver = TestDriver;
 
-    fn context(options: Self::ContextOptions) -> Self {
+    fn new(options: Self::ContextOptions) -> Self {
         Self { state: options.0 }
     }
 

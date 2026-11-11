@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Picking a compression format from an `Accept-Encoding` header.
+//! Selects a compression format from an `Accept-Encoding` header.
 
 use compressors::format::Format;
 use http::HeaderMap;
@@ -9,8 +9,8 @@ use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
 
 /// The quality value of one `Accept-Encoding` entry, scaled to thousandths.
 ///
-/// RFC 9110 allows three decimal places and no more, so thousandths hold every
-/// legal value exactly and compare without floating point.
+/// RFC 9110 permits at most three decimal places. Thousandths represent each
+/// valid value without floating-point arithmetic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Quality(u16);
 
@@ -27,7 +27,7 @@ impl Quality {
     }
 }
 
-/// The result of negotiating an encoding for one response.
+/// The selected content coding for one response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Selection {
     /// Apply this compression format.
@@ -40,10 +40,9 @@ pub(crate) enum Selection {
 
 /// Chooses the best representation the client will accept.
 ///
-/// `offered` is in server preference order, which breaks ties between compression formats
-/// the client rates equally. An entry the client rejects outright with `q=0` is
-/// never chosen, and a format absent from the header is only chosen when the
-/// header allows a wildcard.
+/// `offered` lists formats in server preference order. This order resolves equal
+/// client quality values. The function never selects an entry with `q=0`. It
+/// selects an unnamed format only if the header contains a matching wildcard.
 pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Selection {
     if offered.is_empty() {
         return Selection::Identity;
@@ -64,18 +63,14 @@ pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Selection {
             continue;
         };
 
-        // Strictly greater, so the first of two equally rated formats wins and
-        // the server's own preference order decides.
+        // A strict comparison preserves server order for equal quality values.
         if best.is_none_or(|(_, best_quality)| quality > best_quality) {
             best = Some((*format, quality));
         }
     }
 
-    // `identity` is the caller asking for no compression at all. If they rate it
-    // at least as highly as anything on offer, honouring the preference means
-    // sending the body as it is.
-    // Only a named `identity` says so. A bare `*` means anything is acceptable,
-    // not that the caller would rather have nothing applied.
+    // A named `identity` value is the client's preference for no content coding.
+    // A wildcard permits unnamed formats but does not prefer `identity`.
     let explicit_identity = quality_for(headers, "identity", Wildcard::Ignored);
     let identity_acceptable = identity_acceptable(headers);
     let identity_preference = explicit_identity.unwrap_or(Quality::ZERO);
@@ -133,17 +128,17 @@ pub(crate) fn content_encoding_acceptable(request_headers: &HeaderMap, response_
     found
 }
 
-/// Whether `*` may stand in for a format the header does not name.
+/// Whether `*` can stand in for a format that the header does not name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Wildcard {
     Allowed,
     Ignored,
 }
 
-/// The quality the header assigns to `token`, including zero, or `None` if it is absent.
+/// Returns the quality for `token`, including zero.
 ///
-/// A list header may be split across several lines, so every one is read in
-/// order, as though they had been joined with commas.
+/// Returns `None` if the token is absent. The function reads repeated header
+/// lines in order as one comma-separated list.
 fn quality_for(headers: &HeaderMap, token: &str, wildcard_use: Wildcard) -> Option<Quality> {
     let mut wildcard = None;
 
@@ -171,7 +166,7 @@ fn quality_for(headers: &HeaderMap, token: &str, wildcard_use: Wildcard) -> Opti
             }
 
             if name.eq_ignore_ascii_case(token) {
-                // An explicit entry always beats the wildcard, even to reject.
+                // An explicit entry overrides the wildcard, including with zero.
                 return Some(quality);
             }
 
@@ -184,7 +179,7 @@ fn quality_for(headers: &HeaderMap, token: &str, wildcard_use: Wildcard) -> Opti
     wildcard
 }
 
-/// Parses a `q=` value into thousandths, rejecting anything malformed.
+/// Parses a valid `q=` value into thousandths.
 fn parse_quality(value: &str) -> Option<Quality> {
     let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
 
@@ -197,7 +192,7 @@ fn parse_quality(value: &str) -> Option<Quality> {
         return None;
     }
 
-    // Pad so "5" and "500" both mean 0.5.
+    // Pad the fraction so "5" and "500" both mean 0.5.
     let mut thousandths = 0;
     for index in 0..3 {
         thousandths = thousandths * 10 + u16::from(fraction.as_bytes().get(index).map_or(0, |b| b - b'0'));
@@ -265,8 +260,7 @@ mod tests {
 
     #[test]
     fn a_preference_for_no_compression_is_respected() {
-        // Rating `identity` above the alternatives is how a caller says it
-        // would rather have the body uncompressed.
+        // A higher `identity` quality value prefers an uncompressed body.
         assert_eq!(select(&headers("identity, gzip;q=0.5"), OFFERED), Selection::Identity);
         assert_eq!(select(&headers("identity;q=0.5, gzip;q=0.5"), OFFERED), Selection::Identity);
         assert_eq!(select(&headers("identity;q=0.5, gzip"), OFFERED), Selection::Format(Format::Gzip));
@@ -291,7 +285,7 @@ mod tests {
     #[test]
     fn a_wildcard_covers_formats_the_header_does_not_name() {
         assert_eq!(select(&headers("*"), OFFERED), Selection::Format(Format::Zstd));
-        // An explicit entry overrides the wildcard, even to reject.
+        // An explicit zero value overrides the wildcard.
         assert_eq!(select(&headers("*, zstd;q=0"), OFFERED), Selection::Format(Format::Brotli));
     }
 
@@ -384,7 +378,7 @@ mod tests {
 
     #[test]
     fn a_header_split_over_several_lines_is_read_as_one_list() {
-        // RFC 9110 lets a list header be sent as repeated lines.
+        // RFC 9110 permits a list header on repeated lines.
         assert_eq!(
             select(&split_headers(&["gzip;q=0.2", "br;q=0.9"]), OFFERED),
             Selection::Format(Format::Brotli)

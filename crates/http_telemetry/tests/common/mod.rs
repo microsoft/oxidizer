@@ -21,7 +21,7 @@ use std::time::Duration;
 use bytesbuf::BytesView;
 use http::{HeaderMap, Method, Request, StatusCode, Uri, Version};
 use http_body::{Body, Frame, SizeHint};
-use http_extensions::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler};
+use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::{Telemetry, TelemetryLayer};
 use layered::{Execute, Service};
 use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind};
@@ -38,7 +38,7 @@ pub(crate) const DURATION: &str = "http.server.request.duration";
 /// A server layer over `sink` with a frozen clock. If a test does not set its own clock, each
 /// duration is `0`.
 pub(crate) fn server(sink: Sink) -> TelemetryLayer {
-    Telemetry::server(sink, HttpBodyBuilder::new_fake()).clock(SimpleClock::new_frozen())
+    Telemetry::server(sink).clock(SimpleClock::new_frozen())
 }
 
 /// The value that one field records in a metric, and the description of that metric.
@@ -380,13 +380,13 @@ impl Body for Scripted {
 /// A streamed body that takes `steps`. Its length is unknown.
 pub(crate) fn scripted(steps: impl IntoIterator<Item = Step>) -> HttpBody {
     let steps = steps.into_iter().collect();
-    HttpBodyBuilder::new_fake().body(Scripted { steps, sized: false }, &HttpBodyOptions::new())
+    HttpBodyBuilder::new_fake().body(Scripted { steps, sized: false })
 }
 
 /// A streamed body that takes `steps`, with an exact size hint.
 pub(crate) fn sized_scripted(steps: impl IntoIterator<Item = Step>) -> HttpBody {
     let steps = steps.into_iter().collect();
-    HttpBodyBuilder::new_fake().body(Scripted { steps, sized: true }, &HttpBodyOptions::new())
+    HttpBodyBuilder::new_fake().body(Scripted { steps, sized: true })
 }
 
 /// Polls `body` once, with a waker that does nothing.
