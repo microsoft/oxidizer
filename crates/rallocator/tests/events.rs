@@ -402,6 +402,8 @@ fn disabled_and_failed_operations_emit_nothing_but_enabled_resizes_and_frees_do(
         Rallocator.dealloc(resized, Layout::from_size_align(18, 8).unwrap());
         let too_large = Layout::from_size_align((1_usize << 46) + 1, 8).unwrap();
         assert!(Rallocator.alloc(too_large).is_null());
+        assert!(Rallocator.alloc_zeroed(too_large).is_null());
+        assert!(at_address(&events(), std::ptr::null_mut()).is_empty());
         let records = operations_at(pointer);
         assert_eq!(
             records.iter().map(|event| event.kind).collect::<Vec<_>>(),

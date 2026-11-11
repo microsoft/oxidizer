@@ -2,16 +2,14 @@
 // Licensed under the MIT License.
 
 //! The allocation event format shared by the backends.
+//!
+//! [`crate::Rallocator`] rejects failed operations before calling these helpers.
 
 use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind, Reallocation};
 use seismograph::recorder::event::{Address, EventClass, Record};
 
 pub(super) fn emit(address: *mut u8, size: usize, alignment: usize, freed: bool) {
     seismograph::record(EventClass::Allocation, || {
-        if address.is_null() {
-            return None;
-        }
-
         let allocation = Allocation {
             // This is an address correlation key, not a unique lifetime ID.
             allocation_id: AllocationId::new(address.addr() as u64),

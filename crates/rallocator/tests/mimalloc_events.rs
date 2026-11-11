@@ -17,6 +17,11 @@ fn moves_retained_resizes_and_failed_resizes_record_matching_lifetimes() {
         ..Default::default()
     });
     let layout = Layout::from_size_align(17, 8).unwrap();
+    let too_large = Layout::from_size_align(1_usize << 62, layout.align()).unwrap();
+    // SAFETY: The valid nonzero layout exceeds every supported address space.
+    assert!(unsafe { GLOBAL.alloc(too_large) }.is_null());
+    // SAFETY: The zeroed request uses the same valid nonzero layout.
+    assert!(unsafe { GLOBAL.alloc_zeroed(too_large) }.is_null());
     // SAFETY: The layout is valid and nonzero.
     let original = unsafe { GLOBAL.alloc(layout) };
     assert!(!original.is_null());
@@ -30,8 +35,8 @@ fn moves_retained_resizes_and_failed_resizes_record_matching_lifetimes() {
     let retained = unsafe { GLOBAL.realloc(original, layout, 18) };
     assert_eq!(retained, original);
     let retained_layout = Layout::from_size_align(18, 8).unwrap();
-    // SAFETY: An invalid resize must fail without retiring the original.
-    let failure = unsafe { GLOBAL.realloc(retained, retained_layout, usize::MAX) };
+    // SAFETY: The live block and nonzero new size satisfy the resize contract.
+    let failure = unsafe { GLOBAL.realloc(retained, retained_layout, too_large.size()) };
     assert!(failure.is_null());
     // SAFETY: The failed resize leaves the initialized prefix accessible.
     assert_eq!(unsafe { retained.read() }, 0x5c);
@@ -47,6 +52,14 @@ fn moves_retained_resizes_and_failed_resizes_record_matching_lifetimes() {
     let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
     without_recording(|| {
         let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        assert!(
+            decoded
+                .events
+                .events
+                .iter()
+                .filter_map(|event| event.allocation())
+                .all(|allocation| allocation.address.get() != 0)
+        );
         let actual = decoded
             .events
             .events
