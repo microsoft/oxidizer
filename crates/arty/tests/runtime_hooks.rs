@@ -179,17 +179,22 @@ fn control_appends_panic_hooks_in_registration_order() {
 #[test]
 fn control_registration_applies_before_local_spawn() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
 
     runtime
         .scheduler()
         .block_on(async |cx| {
             cx.control().on((), OnPanic::IGNORE);
+            cx.control().on::<OnPanic, _>(PanicCount(Arc::clone(&calls)), |_event, data| {
+                data.0.fetch_add(1, Ordering::SeqCst);
+            });
             let panic = cx.scheduler().spawn(async |_| panic!("local panic")).await.unwrap_err();
             assert!(panic.is_panic());
             assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
         })
         .unwrap();
 
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     runtime.stop().unwrap();
 }
 
