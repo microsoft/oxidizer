@@ -283,7 +283,7 @@ mod tests {
     fn fallback_cachet_inner_debug() {
         let mut cache = make_fallback_cache();
         Arc::get_mut(&mut cache.inner).unwrap().refresh = Some(TimeToRefresh::new(
-            std::time::Duration::from_secs(60),
+            std::time::Duration::from_mins(1),
             anyspawn::Spawner::new_tokio(None),
         ));
         insta::assert_debug_snapshot!(cache);
