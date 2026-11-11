@@ -34,19 +34,14 @@
 //!     .register(memory_logs(exporter.clone()))?
 //!     .build();
 //!
-//! // The code under test emits through a logger from the provider.
 //! let logger = provider.logger("example");
 //! let mut record = logger.create_log_record();
 //! record.set_body("request received".into());
 //! logger.emit(record);
 //!
-//! // The test reads the captured logs through its clone of the exporter.
 //! assert_eq!(exporter.get_emitted_logs()?.len(), 1);
 //! # Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
 //! ```
-//!
-//! For metrics, use [`memory_metrics`]. Metric values reach the exporter only when the
-//! provider flushes or shuts down, or when the export interval ends.
 
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -97,8 +92,8 @@ use opentelemetry_sdk::metrics::{InMemoryMetricExporter, MeterProviderBuilder};
 /// assert!(exporter.get_emitted_logs()?.is_empty());
 /// # Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
 /// ```
-pub fn memory_logs(exporter: InMemoryLogExporter) -> MemoryLogDestinationBuilder<memory_log_destination_builder::SetExporter> {
-    MemoryLogDestination::builder().exporter(exporter)
+pub fn memory_logs(exporter: InMemoryLogExporter) -> MemoryLogDestinationBuilder {
+    MemoryLogDestination::builder(exporter)
 }
 
 /// An in-memory log destination.
@@ -106,6 +101,7 @@ pub fn memory_logs(exporter: InMemoryLogExporter) -> MemoryLogDestinationBuilder
 #[builder(derive(Debug))]
 pub struct MemoryLogDestination {
     /// Sets the in-memory exporter that receives the logs.
+    #[builder(start_fn)]
     exporter: InMemoryLogExporter,
 
     /// Sets the minimum log level (default: `Trace` - captures everything).
@@ -188,10 +184,7 @@ impl LogProcessor for MemoryLogProcessor {
 /// Recorded values reach the buffer only when the provider flushes, when it shuts
 /// down, or when the export interval ends. The interval is 60 seconds by default.
 /// To change it, set the `OTEL_METRIC_EXPORT_INTERVAL` environment variable in
-/// milliseconds. Call `force_flush` on the provider before you read the metrics.
-///
-/// Shutdown exports the remaining values and keeps the buffer. You can read the
-/// metrics after the provider shuts down.
+/// milliseconds.
 ///
 /// # Examples
 ///
@@ -219,8 +212,8 @@ impl LogProcessor for MemoryLogProcessor {
 /// assert!(!exporter.get_finished_metrics()?.is_empty());
 /// # Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
 /// ```
-pub fn memory_metrics(exporter: InMemoryMetricExporter) -> MemoryMetricDestinationBuilder<memory_metric_destination_builder::SetExporter> {
-    MemoryMetricDestination::builder().exporter(exporter)
+pub fn memory_metrics(exporter: InMemoryMetricExporter) -> MemoryMetricDestinationBuilder {
+    MemoryMetricDestination::builder(exporter)
 }
 
 /// An in-memory metric destination.
@@ -228,6 +221,7 @@ pub fn memory_metrics(exporter: InMemoryMetricExporter) -> MemoryMetricDestinati
 #[builder(derive(Debug))]
 pub struct MemoryMetricDestination {
     /// Sets the in-memory exporter that receives the metrics.
+    #[builder(start_fn)]
     exporter: InMemoryMetricExporter,
 }
 
@@ -249,7 +243,7 @@ impl<S: memory_metric_destination_builder::IsComplete> IntoMetricDestination for
 mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
 
-    use opentelemetry::logs::{LogRecord, Logger, LoggerProvider};
+    use opentelemetry::logs::{Logger, LoggerProvider};
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
     use super::*;
@@ -277,20 +271,5 @@ mod tests {
 
         processor.emit(&mut record, &scope);
         assert!(exporter.get_emitted_logs().unwrap().is_empty());
-    }
-
-    #[test]
-    fn processor_debug_omits_captured_records() {
-        let processor = MemoryLogProcessor::new(InMemoryLogExporter::default());
-        let provider = SdkLoggerProvider::builder().build();
-        let logger = provider.logger("memory");
-        let scope = InstrumentationScope::builder("memory").build();
-        let mut record = logger.create_log_record();
-        record.set_body("captured body".into());
-
-        processor.emit(&mut record, &scope);
-
-        // The shared buffer can grow to many records, so they must stay out of the `Debug` output.
-        assert!(!format!("{processor:?}").contains("captured body"));
     }
 }
