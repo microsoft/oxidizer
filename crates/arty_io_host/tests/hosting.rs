@@ -478,12 +478,57 @@ fn first_context_is_primary_and_later_contexts_are_secondary() {
 
 #[test]
 fn runtime_identity_is_shared_only_by_clones() {
-    let sink = observed::Sink::noop();
-    let runtime = IoRuntime::new(sink.clone());
+    let runtime = test_runtime();
 
     assert_eq!(runtime, runtime.clone());
     assert_ne!(runtime, test_runtime());
-    assert_eq!(format!("{runtime:?}"), format!("IoRuntime {{ sink: {sink:?}, .. }}"));
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
+fn driver_host_debug_snapshot() {
+    let host = host(&test_runtime());
+    insta::with_settings!({filters => [
+        (r"0x[0-9a-fA-F]+", "[address]"),
+        (r"ThreadId\(\s*\d+,?\s*\)", "ThreadId([id])"),
+        (r"Owner \{\s*id: \d+,\s*\}", "Owner { id: [id] }"),
+    ]}, {
+        insta::assert_debug_snapshot!(host, @r#"
+        DriverHost {
+            runtime: IoRuntime {
+                sink: observed::sink::core::Sink {
+                    variant: "Noop",
+                },
+                ..
+            },
+            thread: Thread {
+                owner: Owner { id: [id] },
+                id: ThreadId([id]),
+                numa_node: NumaNode(
+                    0,
+                ),
+            },
+            owner_waker: Waker {
+                data: [address],
+                vtable: [address],
+            },
+            initializing: Cell {
+                value: false,
+            },
+            _single_threaded: PhantomData<alloc::rc::Rc<()>>,
+            ..
+        }
+        "#);
+    });
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
+fn reentrant_error_debug_snapshot() {
+    let error = ReentrantFormatError {
+        state: Arc::new(State::default()),
+    };
+    insta::assert_debug_snapshot!(error, @"ReentrantFormatError { .. }");
 }
 
 #[test]
@@ -911,11 +956,6 @@ fn interrupt_waker_tracks_primary_and_is_safe_after_drop() {
     let state = Arc::new(State::default());
     let interrupt = host.waker();
     let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
-    let rendered = format!("{host:?}");
-    assert!(rendered.starts_with("DriverHost { runtime: IoRuntime { sink: "));
-    assert!(rendered.contains("thread: "));
-    assert!(rendered.contains("owner_waker: "));
-
     interrupt.wake_by_ref();
     assert_eq!(state.interrupts.load(Ordering::SeqCst), 1);
 

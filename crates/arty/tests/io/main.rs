@@ -562,6 +562,155 @@ fn runtime(workers: usize) -> Runtime {
     Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
 }
 
+#[test]
+#[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
+fn io_debug_snapshot() {
+    let runtime = runtime(1);
+    let io = runtime
+        .scheduler()
+        .spawn_anywhere((), |cx, ()| async move { cx.io().clone() })
+        .join()
+        .unwrap();
+    runtime.stop().unwrap();
+
+    insta::with_settings!({filters => [
+        (r"0x[0-9a-fA-F]+", "[address]"),
+        (r"ThreadId\(\s*\d+,?\s*\)", "ThreadId([id])"),
+        (r"Owner \{\s*id: \d+,\s*\}", "Owner { id: [id] }"),
+        (r"NumaNode\(\s*\d+,?\s*\)", "NumaNode([node])"),
+    ]}, {
+        insta::assert_debug_snapshot!(io, @r#"
+        Io {
+            runtime: IoRuntime {
+                sink: observed::sink::core::Sink {
+                    variant: "Noop",
+                },
+                ..
+            },
+            dispatcher: DispatcherClient {
+                core: DispatcherCore {
+                    shutdown_signaled: true,
+                    worker_endpoints: NonEmpty {
+                        head: WorkerEndpoint {
+                            commands: CommandSender {
+                                system: Sender {
+                                    len: 0,
+                                    capacity: None,
+                                    closed: true,
+                                    ..
+                                },
+                                spawn: Sender {
+                                    len: 0,
+                                    capacity: None,
+                                    closed: true,
+                                    ..
+                                },
+                            },
+                            waker: Waker {
+                                data: [address],
+                                vtable: [address],
+                            },
+                            thread: Thread {
+                                owner: Owner { id: [id] },
+                                id: ThreadId([id]),
+                                numa_node: NumaNode([node]),
+                            },
+                            blocking_worker: Worker {
+                                pool: Pool {
+                                    inner: Mutex {
+                                        value: None,
+                                        poisoned: false,
+                                    },
+                                    identity: (),
+                                    max_thread_count: 64,
+                                },
+                                remote_results: JoinHandlePool {
+                                    events: EventLake {
+                                        core: events_once::lake::sync::Core {
+                                            events: Mutex {
+                                                data: plurality::multi_pool::MultiPool {
+                                                    layouts: 0,
+                                                    max_layouts: None,
+                                                    chunks_allocated: 0,
+                                                    len: 0,
+                                                    ..
+                                                },
+                                                poisoned: false,
+                                                ..
+                                            },
+                                            registry: events_once::pool::registry::EventRegistry {
+                                                backtraces: Mutex {
+                                                    data: {},
+                                                    poisoned: false,
+                                                    ..
+                                                },
+                                            },
+                                        },
+                                    },
+                                    shutdown: Shutdown { .. },
+                                },
+                                panic_policy: Shutdown(
+                                    Waker {
+                                        data: [address],
+                                        vtable: [address],
+                                    },
+                                ),
+                            },
+                        },
+                        tail: [],
+                    },
+                    workers: Workers {
+                        inner: [
+                            Thread {
+                                owner: Owner { id: [id] },
+                                id: ThreadId([id]),
+                                numa_node: NumaNode([node]),
+                            },
+                        ],
+                    },
+                    worker_indices: {
+                        ThreadId([id]): WorkerIndex(
+                            0,
+                        ),
+                    },
+                    next_async_worker_index: 1,
+                    remote_results: JoinHandlePool {
+                        events: EventLake {
+                            core: events_once::lake::sync::Core {
+                                events: Mutex {
+                                    data: plurality::multi_pool::MultiPool {
+                                        layouts: 1,
+                                        max_layouts: None,
+                                        chunks_allocated: 1,
+                                        len: 0,
+                                        ..
+                                    },
+                                    poisoned: false,
+                                    ..
+                                },
+                                registry: events_once::pool::registry::EventRegistry {
+                                    backtraces: Mutex {
+                                        data: {},
+                                        poisoned: false,
+                                        ..
+                                    },
+                                },
+                            },
+                        },
+                        shutdown: Shutdown { .. },
+                    },
+                },
+            },
+            thread: Thread {
+                owner: Owner { id: [id] },
+                id: ThreadId([id]),
+                numa_node: NumaNode([node]),
+            },
+        }
+        "#);
+    });
+}
+
 fn worker_schedulers(runtime: &Runtime, workers: usize) -> Vec<Scheduler> {
     let schedulers: Vec<_> = (0..workers)
         .map(|_| {

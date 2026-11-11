@@ -361,13 +361,14 @@ mod tests {
     }
 
     #[test]
-    fn remote_wake_has_non_exhaustive_diagnostics() {
+    #[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
+    fn remote_wake_debug_snapshot() {
         let pool = MultiPool::new();
         let task = crate::allocate_test_task_in(&pool);
         // SAFETY: `task` keeps the initialized template alive.
         let remote = RemoteWake(unsafe { task.as_ptr().retain_remote() });
 
-        assert_eq!(format!("{remote:?}"), "RemoteWake(..)");
+        insta::assert_debug_snapshot!(remote, @"RemoteWake(..)");
 
         drop((remote, task));
         assert!(pool.is_empty());

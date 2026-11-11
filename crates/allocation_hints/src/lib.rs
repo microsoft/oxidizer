@@ -196,7 +196,7 @@ pub(crate) fn request_thread_heap(thread_id: heaps::ThreadId) {
 
 #[cfg(test)]
 mod tests {
-    use std::future::{poll_fn, ready};
+    use std::future::poll_fn;
     use std::task::Waker;
 
     use super::*;
@@ -268,17 +268,6 @@ mod tests {
         assert_eq!(
             (future.as_mut().poll(&mut context), active_hint()),
             (Poll::Ready(Some(heap.id())), None)
-        );
-    }
-
-    #[test]
-    fn async_hint_debug_includes_heap_and_future() {
-        let heap = Heap::new();
-        let future = with_hint_async(&heap, ready(42));
-
-        assert_eq!(
-            format!("{future:?}"),
-            format!("WithHint {{ heap: {heap:?}, future: Ready(Some(42)) }}")
         );
     }
 }

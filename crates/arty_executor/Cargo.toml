@@ -45,6 +45,7 @@ tick = { workspace = true, features = ["fast-instant"] }
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
+insta = { workspace = true, features = ["filters"] }
 metabench = { path = "../metabench", default-features = false }
 mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }

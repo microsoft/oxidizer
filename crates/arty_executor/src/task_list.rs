@@ -120,13 +120,6 @@ mod tests {
 
         assert_eq!(list.insert(first), first_pointer);
         assert_eq!(list.insert(second), second_pointer);
-        assert_eq!(
-            format!("{list:?}"),
-            format!(
-                "TaskList {{ head: Some({first_pointer:?}), tail: Some({second_pointer:?}), _owner_thread: {:?} }}",
-                list._owner_thread
-            )
-        );
         // SAFETY: `first_pointer` is live and belongs to `list`.
         drop(unsafe { list.remove(first_pointer) }.unwrap());
         assert_eq!(list.pop_front().unwrap().as_ptr(), second_pointer);

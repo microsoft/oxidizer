@@ -88,6 +88,7 @@ foldhash = { workspace = true, features = ["std"] }
 futures = { workspace = true, features = ["executor", "async-await"] }
 
 gungraun = { workspace = true, features = ["default"] }
+insta = { workspace = true, features = ["filters"] }
 many_cpus = { workspace = true, features = ["test-util"] }
 metabench = { path = "../metabench" }
 mutants = { workspace = true }

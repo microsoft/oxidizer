@@ -219,14 +219,21 @@ mod tests {
         let handle = crate::allocate_test_task_in(&pool);
         let pointer = handle.as_ptr();
         assert_eq!(format!("{handle:?}"), format!("TaskHandle({pointer:?})"));
-        let template = handle.inner.as_ref().get_ref().handle_slot().get().unwrap();
-        assert_eq!(format!("{:?}", **template), "TaskHandleTemplate { .. }");
 
         let owned = handle.into_raw();
         assert_eq!(owned, pointer);
         // SAFETY: `into_raw` transferred exactly one strong reference.
         drop(unsafe { owned.into_handle() });
         assert!(pool.is_empty());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
+    fn task_handle_template_debug_snapshot() {
+        let pool = MultiPool::new();
+        let handle = crate::allocate_test_task_in(&pool);
+        let template = handle.inner.as_ref().get_ref().handle_slot().get().unwrap();
+        insta::assert_debug_snapshot!(**template, @"TaskHandleTemplate { .. }");
     }
 
     #[test]

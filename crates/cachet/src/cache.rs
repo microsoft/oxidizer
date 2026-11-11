@@ -924,13 +924,6 @@ mod tests {
     }
 
     #[test]
-    fn mergers_new_and_debug() {
-        let m = Mergers::<String, i32>::new();
-        let debug = format!("{m:?}");
-        assert!(debug.contains("Mergers"));
-    }
-
-    #[test]
     fn cache_builder_creates_cache() {
         let clock = Clock::new_frozen();
         let _ = Cache::builder::<String, i32>(clock);

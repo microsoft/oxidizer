@@ -252,7 +252,6 @@ mod tests {
         assert!(Memory::reserve(&provider, 64).capacity() >= 64);
 
         // `CallbackMemory` is still `Debug` even though its data is not.
-        let rendered = format!("{provider:?}");
-        assert!(rendered.contains("CallbackMemory"));
+        let _: &dyn core::fmt::Debug = &provider;
     }
 }

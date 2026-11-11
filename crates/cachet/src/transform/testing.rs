@@ -89,13 +89,22 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
     fn debug_output() {
-        let codec = MockCodec::<i32>::value();
-        let debug = format!("{codec:?}");
-        assert!(debug.contains("MockCodec"));
-
-        let codec = MockCodec::<i32>::soft_failure("reason");
-        let debug = format!("{codec:?}");
-        assert!(debug.contains("reason"));
+        let codecs = (MockCodec::<i32>::value(), MockCodec::<i32>::soft_failure("reason"));
+        insta::assert_debug_snapshot!(codecs, @r#"
+        (
+            MockCodec {
+                soft_failure: None,
+                _phantom: PhantomData<i32>,
+            },
+            MockCodec {
+                soft_failure: Some(
+                    "reason",
+                ),
+                _phantom: PhantomData<i32>,
+            },
+        )
+        "#);
     }
 }

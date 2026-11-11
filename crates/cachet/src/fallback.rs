@@ -279,19 +279,41 @@ mod tests {
 
     /// Tests that `FallbackCacheInner` Debug output is correct.
     #[test]
+    #[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
     fn fallback_cachet_inner_debug() {
-        let cache = make_fallback_cache();
-
-        let debug_str = format!("{cache:?}");
-        assert_eq!(
-            debug_str,
-            concat!(
-                "FallbackCache { inner: FallbackCacheInner { name: \"fallback\", ",
-                "clock: Clock { kind: \"controlled\", timers: 0, alive: true, .. }, ",
-                "refresh: None, telemetry: CacheTelemetry { logging_enabled: false, has_handler: false }, ",
-                "_phantom: PhantomData<(alloc::string::String, i32)>, .. } }"
-            )
-        );
+        let mut cache = make_fallback_cache();
+        Arc::get_mut(&mut cache.inner).unwrap().refresh = Some(TimeToRefresh::new(
+            std::time::Duration::from_secs(60),
+            anyspawn::Spawner::new_tokio(None),
+        ));
+        insta::assert_debug_snapshot!(cache, @r#"
+        FallbackCache {
+            inner: FallbackCacheInner {
+                name: "fallback",
+                clock: Clock {
+                    kind: "controlled",
+                    timers: 0,
+                    alive: true,
+                    ..
+                },
+                refresh: Some(
+                    TimeToRefresh {
+                        duration: 60s,
+                        spawner: Spawner(
+                            "tokio",
+                        ),
+                        ..
+                    },
+                ),
+                telemetry: CacheTelemetry {
+                    logging_enabled: false,
+                    has_handler: false,
+                },
+                _phantom: PhantomData<(alloc::string::String, i32)>,
+                ..
+            },
+        }
+        "#);
     }
 
     /// Tests that conditional promotion policy only promotes matching entries.

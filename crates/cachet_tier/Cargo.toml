@@ -39,6 +39,7 @@ parking_lot = { workspace = true, optional = true }
 recoverable = { workspace = true }
 
 [dev-dependencies]
+insta = { workspace = true }
 parking_lot = { workspace = true }
 tick = { path = "../tick", features = ["test-util"] }
 tokio = { workspace = true, features = [
