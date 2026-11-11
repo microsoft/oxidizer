@@ -77,6 +77,22 @@ fn records_below_the_level_are_not_captured() {
 }
 
 #[test]
+fn flush_keeps_captured_records() {
+    let exporter = InMemoryLogExporter::default();
+    let provider = SdkLoggerProvider::builder()
+        .register(memory_logs(exporter.clone()))
+        .unwrap()
+        .build();
+    let logger = provider.logger("memory");
+    logger.emit(record_with_severity(&logger, Severity::Info));
+
+    // Callers often flush before they read, so the flush must keep the captured records.
+    provider.force_flush().unwrap();
+
+    assert_eq!(exporter.get_emitted_logs().unwrap().len(), 1);
+}
+
+#[test]
 fn sdk_provider_shutdown_reaches_exporter() {
     let exporter = InMemoryLogExporter::default();
     let provider = SdkLoggerProvider::builder()
