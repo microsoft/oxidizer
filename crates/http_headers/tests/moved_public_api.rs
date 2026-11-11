@@ -156,6 +156,25 @@ mod cache_control {
     use super::*;
 
     #[test]
+    fn preserves_only_if_cached_as_a_valueless_directive() {
+        for value in ["only-if-cached", "OnLy-If-CaChEd"] {
+            let mut map = HeaderMap::new();
+            map.insert("cache-control", HeaderValue::from_static(value));
+            let view = CacheControl::view(&map).unwrap().unwrap();
+            let mut directives = view.directives();
+            let directive = directives.next().unwrap();
+            assert_eq!(directive.name(), value);
+            assert_eq!(directive.value(), None);
+            assert!(directives.next().is_none());
+
+            let owned = CacheControl::owned(&map).unwrap().unwrap();
+            let mut encoded = HeaderMap::new();
+            CacheControl::insert(&mut encoded, owned).unwrap();
+            assert_eq!(encoded["cache-control"], value);
+        }
+    }
+
+    #[test]
     fn parses_multiple_lines_and_preserves_extensions() {
         let mut map = HeaderMap::new();
         map.append("cache-control", HeaderValue::from_static("no-cache, x-mode=\"fast, safe\""));
