@@ -815,12 +815,17 @@ fn moved_storage_and_old_address_reuse_remain_separate_task_lifetimes() {
         allocation.address = Address::new(0x9000);
         allocation.size = 4096;
     }
-    let snapshot = summarize(vec![
-        allocation(1, 1, 2, EventKind::Allocation, 7),
-        resize,
-        allocation(2, 2, 5, EventKind::Allocation, 7),
-        free,
-    ]);
+    let captured = super::super::snapshot::prepare(DecodedSnapshot {
+        events: events(vec![
+            allocation(1, 1, 2, EventKind::Allocation, 7),
+            resize,
+            allocation(2, 2, 5, EventKind::Allocation, 7),
+            free,
+        ]),
+        ..DecodedSnapshot::default()
+    })
+    .unwrap();
+    let snapshot = &captured.task_events;
 
     assert_eq!(
         snapshot
@@ -841,6 +846,9 @@ fn moved_storage_and_old_address_reuse_remain_separate_task_lifetimes() {
         snapshot.histories[0].events[1].detail,
         "resize 0x8000 / 64 B -> 0x9000 / 4096 B align=16 heap=8 (moved)"
     );
+    let rows = &captured.allocations.as_ref().unwrap().records;
+    let resize = rows.iter().find(|row| row.label().starts_with("resize ")).unwrap();
+    assert!(resize.label().ends_with("matched retained allocation/free pair (source capture)"));
 }
 
 #[test]
@@ -873,6 +881,12 @@ fn resize_only_capture_preserves_one_orphan_lifetime_across_moves() {
             .collect::<Vec<_>>(),
         [vec![(1, EventKind::Reallocation), (2, EventKind::Reallocation)]]
     );
+    let rows = &captured.allocations.as_ref().unwrap().records;
+    assert_eq!(rows.len(), 2);
+    for row in rows {
+        assert!(row.label().starts_with("resize "));
+        assert!(row.label().ends_with("orphan resize (no retained allocation)"));
+    }
 }
 
 fn with_stack(mut event: Event, addresses: &[u64]) -> Event {
