@@ -843,6 +843,38 @@ fn moved_storage_and_old_address_reuse_remain_separate_task_lifetimes() {
     );
 }
 
+#[test]
+fn resize_only_capture_preserves_one_orphan_lifetime_across_moves() {
+    let resize = |thread, old, new, old_size, new_size| Event {
+        payload: EventPayload::Reallocation(Reallocation {
+            allocation_id: AllocationId::new(old),
+            heap_id: HeapId::new(8),
+            heap_kind: HeapKind::General,
+            old_address: Address::new(old),
+            new_address: Address::new(new),
+            old_size,
+            new_size,
+            alignment: 16,
+        }),
+        ..operation(thread, 1, thread, EventKind::Reallocation, old)
+    };
+    let captured = super::super::snapshot::prepare(DecodedSnapshot {
+        events: events(vec![resize(1, 0x8000, 0x9000, 64, 4096), resize(2, 0x9000, 0xa000, 4096, 8192)]),
+        ..DecodedSnapshot::default()
+    })
+    .unwrap();
+
+    assert_eq!(
+        captured
+            .task_events
+            .histories
+            .iter()
+            .map(|history| history.events.iter().map(|event| (event.thread_id, event.kind)).collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        [vec![(1, EventKind::Reallocation), (2, EventKind::Reallocation)]]
+    );
+}
+
 fn with_stack(mut event: Event, addresses: &[u64]) -> Event {
     event.call_stack = addresses.iter().copied().map(Address::new).collect();
     event
