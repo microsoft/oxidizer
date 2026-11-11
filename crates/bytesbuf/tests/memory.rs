@@ -15,12 +15,7 @@ fn callback_memory_debug_snapshot() {
 
     let memory = CallbackMemory::new(CallbackData, |_, size| GlobalPool::new().reserve(size));
     insta::with_settings!({filters => [(r"0x[0-9a-fA-F]+", "[address]")]}, {
-        insta::assert_debug_snapshot!(memory, @"
-        CallbackMemory {
-            reserve_fn: [address],
-            ..
-        }
-        ");
+        insta::assert_debug_snapshot!(memory);
     });
 }
 

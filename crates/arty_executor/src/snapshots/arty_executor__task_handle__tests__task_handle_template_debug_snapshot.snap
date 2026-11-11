@@ -1,0 +1,5 @@
+---
+source: crates/arty_executor/src/task_handle.rs
+expression: "**template"
+---
+TaskHandleTemplate { .. }

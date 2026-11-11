@@ -747,23 +747,7 @@ async fn optionally_get_or_insert_with_storage_error_propagates() {
 fn cache_debug_output() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder::<String, i32>(clock).name("debug-cache").memory().build();
-    insta::assert_debug_snapshot!(cache, @r#"
-    Cache {
-        name: "debug-cache",
-        storage: DynamicCache(..),
-        clock: Clock {
-            kind: "controlled",
-            timers: 0,
-            alive: true,
-            ..
-        },
-        telemetry: CacheTelemetry {
-            logging_enabled: false,
-            has_handler: false,
-        },
-        mergers: None,
-    }
-    "#);
+    insta::assert_debug_snapshot!(cache);
 }
 
 #[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
@@ -775,47 +759,7 @@ fn cache_debug_with_stampede_protection() {
         .memory()
         .stampede_protection()
         .build();
-    insta::assert_debug_snapshot!(cache, @r#"
-    Cache {
-        name: "debug-cache",
-        storage: DynamicCache(..),
-        clock: Clock {
-            kind: "controlled",
-            timers: 0,
-            alive: true,
-            ..
-        },
-        telemetry: CacheTelemetry {
-            logging_enabled: false,
-            has_handler: false,
-        },
-        mergers: Some(
-            Mergers {
-                get: Merger {
-                    inner: DashMap<...>,
-                },
-                invalidate: Merger {
-                    inner: DashMap<...>,
-                },
-                get_or_insert: Merger {
-                    inner: DashMap<...>,
-                },
-                get_or_insert_with: Merger {
-                    inner: DashMap<...>,
-                },
-                try_get_or_insert: Merger {
-                    inner: DashMap<...>,
-                },
-                try_get_or_insert_with: Merger {
-                    inner: DashMap<...>,
-                },
-                optionally_get_or_insert: Merger {
-                    inner: DashMap<...>,
-                },
-            },
-        ),
-    }
-    "#);
+    insta::assert_debug_snapshot!(cache);
 }
 
 // =============================================================================

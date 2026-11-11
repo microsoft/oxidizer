@@ -493,32 +493,7 @@ fn driver_host_debug_snapshot() {
         (r"ThreadId\(\s*\d+,?\s*\)", "ThreadId([id])"),
         (r"Owner \{\s*id: \d+,\s*\}", "Owner { id: [id] }"),
     ]}, {
-        insta::assert_debug_snapshot!(host, @r#"
-        DriverHost {
-            runtime: IoRuntime {
-                sink: observed::sink::core::Sink {
-                    variant: "Noop",
-                },
-                ..
-            },
-            thread: Thread {
-                owner: Owner { id: [id] },
-                id: ThreadId([id]),
-                numa_node: NumaNode(
-                    0,
-                ),
-            },
-            owner_waker: Waker {
-                data: [address],
-                vtable: [address],
-            },
-            initializing: Cell {
-                value: false,
-            },
-            _single_threaded: PhantomData<alloc::rc::Rc<()>>,
-            ..
-        }
-        "#);
+        insta::assert_debug_snapshot!(host);
     });
 }
 
@@ -528,7 +503,7 @@ fn reentrant_error_debug_snapshot() {
     let error = ReentrantFormatError {
         state: Arc::new(State::default()),
     };
-    insta::assert_debug_snapshot!(error, @"ReentrantFormatError { .. }");
+    insta::assert_debug_snapshot!(error);
 }
 
 #[test]

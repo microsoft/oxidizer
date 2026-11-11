@@ -286,34 +286,7 @@ mod tests {
             std::time::Duration::from_secs(60),
             anyspawn::Spawner::new_tokio(None),
         ));
-        insta::assert_debug_snapshot!(cache, @r#"
-        FallbackCache {
-            inner: FallbackCacheInner {
-                name: "fallback",
-                clock: Clock {
-                    kind: "controlled",
-                    timers: 0,
-                    alive: true,
-                    ..
-                },
-                refresh: Some(
-                    TimeToRefresh {
-                        duration: 60s,
-                        spawner: Spawner(
-                            "tokio",
-                        ),
-                        ..
-                    },
-                ),
-                telemetry: CacheTelemetry {
-                    logging_enabled: false,
-                    has_handler: false,
-                },
-                _phantom: PhantomData<(alloc::string::String, i32)>,
-                ..
-            },
-        }
-        "#);
+        insta::assert_debug_snapshot!(cache);
     }
 
     /// Tests that conditional promotion policy only promotes matching entries.

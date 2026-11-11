@@ -1,0 +1,16 @@
+---
+source: crates/cachet/src/transform/testing.rs
+expression: codecs
+---
+(
+    MockCodec {
+        soft_failure: None,
+        _phantom: PhantomData<i32>,
+    },
+    MockCodec {
+        soft_failure: Some(
+            "reason",
+        ),
+        _phantom: PhantomData<i32>,
+    },
+)

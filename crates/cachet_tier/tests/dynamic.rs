@@ -12,5 +12,5 @@ use cachet_tier::MockCache;
 #[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
 fn debug_output_is_correct() {
     let cache = DynamicCache::new(MockCache::<String, i32>::new());
-    insta::assert_debug_snapshot!(cache, @"DynamicCache(..)");
+    insta::assert_debug_snapshot!(cache);
 }

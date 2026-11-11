@@ -196,62 +196,7 @@ fn shutdown_error_debug_snapshot() {
     let borrowed = ShutdownCause::panic(&"borrowed panic").into_error().unwrap();
     let owned = ShutdownCause::panic(&String::from("owned panic")).into_error().unwrap();
     let other = ShutdownCause::panic(&42_u32).into_error().unwrap();
-    insta::assert_debug_snapshot!((source, borrowed, owned, other), @r#"
-    (
-        ShutdownError {
-            inner: ShutdownErrorInner {
-                core: OhnoCore {
-                    source: Error(
-                        TestShutdownError(
-                            "executor failed",
-                        ),
-                    ),
-                    backtrace: Disabled,
-                    enrichment: [],
-                },
-            },
-        },
-        ShutdownError {
-            inner: ShutdownErrorInner {
-                core: OhnoCore {
-                    source: Error(
-                        ContainedRuntimePanic {
-                            message: "borrowed panic",
-                        },
-                    ),
-                    backtrace: Disabled,
-                    enrichment: [],
-                },
-            },
-        },
-        ShutdownError {
-            inner: ShutdownErrorInner {
-                core: OhnoCore {
-                    source: Error(
-                        ContainedRuntimePanic {
-                            message: "owned panic",
-                        },
-                    ),
-                    backtrace: Disabled,
-                    enrichment: [],
-                },
-            },
-        },
-        ShutdownError {
-            inner: ShutdownErrorInner {
-                core: OhnoCore {
-                    source: Error(
-                        ContainedRuntimePanic {
-                            message: "non-string panic payload",
-                        },
-                    ),
-                    backtrace: Disabled,
-                    enrichment: [],
-                },
-            },
-        },
-    )
-    "#);
+    insta::assert_debug_snapshot!((source, borrowed, owned, other));
 }
 
 #[test]
@@ -262,64 +207,7 @@ fn executor_debug_snapshot() {
         (r"0x[0-9a-fA-F]+", "[address]"),
         (r"ThreadId\(\s*\d+,?\s*\)", "ThreadId([id])"),
     ]}, {
-        insta::assert_debug_snapshot!(executor, @r#"
-        Executor {
-            shared: ExecutorShared {
-                inner: ExecutorSharedInner {
-                    new_tasks: RefCell {
-                        value: [],
-                    },
-                    task_storage: plurality::multi_pool::MultiPool {
-                        layouts: 0,
-                        max_layouts: None,
-                        chunks_allocated: 0,
-                        len: 0,
-                        ..
-                    },
-                    task_count: Cell {
-                        value: 0,
-                    },
-                    shutdown: Shutdown { .. },
-                    wake: WakeShared {
-                        inner: WakeSharedInner {
-                            thread_id: ThreadId([id]),
-                            parent_waker: Waker {
-                                data: [address],
-                                vtable: [address],
-                            },
-                            remote_wake_tx: Sender {
-                                len: 0,
-                                capacity: None,
-                                closed: false,
-                                ..
-                            },
-                            remote_wakes_pending: false,
-                        },
-                    },
-                    remote_wakes: Receiver {
-                        len: 0,
-                        capacity: None,
-                        closed: false,
-                        ..
-                    },
-                    sink: observed::sink::core::Sink {
-                        variant: "Noop",
-                    },
-                    panic_policy: Shutdown,
-                },
-            },
-            active: [],
-            pending: TaskList {
-                head: None,
-                tail: None,
-                _owner_thread: PhantomData<alloc::rc::Rc<()>>,
-            },
-            clock: SimpleClock(
-                SystemFast,
-            ),
-            last_cycle_ended: None,
-        }
-        "#);
+        insta::assert_debug_snapshot!(executor);
     });
 }
 

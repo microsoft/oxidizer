@@ -1,0 +1,28 @@
+---
+source: crates/arty_io_host/tests/hosting.rs
+expression: host
+---
+DriverHost {
+    runtime: IoRuntime {
+        sink: observed::sink::core::Sink {
+            variant: "Noop",
+        },
+        ..
+    },
+    thread: Thread {
+        owner: Owner { id: [id] },
+        id: ThreadId([id]),
+        numa_node: NumaNode(
+            0,
+        ),
+    },
+    owner_waker: Waker {
+        data: [address],
+        vtable: [address],
+    },
+    initializing: Cell {
+        value: false,
+    },
+    _single_threaded: PhantomData<alloc::rc::Rc<()>>,
+    ..
+}

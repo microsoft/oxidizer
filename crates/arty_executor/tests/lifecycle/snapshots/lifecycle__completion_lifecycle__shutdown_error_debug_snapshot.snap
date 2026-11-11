@@ -1,0 +1,58 @@
+---
+source: crates/arty_executor/tests/lifecycle/completion_lifecycle.rs
+expression: "(source, borrowed, owned, other)"
+---
+(
+    ShutdownError {
+        inner: ShutdownErrorInner {
+            core: OhnoCore {
+                source: Error(
+                    TestShutdownError(
+                        "executor failed",
+                    ),
+                ),
+                backtrace: Disabled,
+                enrichment: [],
+            },
+        },
+    },
+    ShutdownError {
+        inner: ShutdownErrorInner {
+            core: OhnoCore {
+                source: Error(
+                    ContainedRuntimePanic {
+                        message: "borrowed panic",
+                    },
+                ),
+                backtrace: Disabled,
+                enrichment: [],
+            },
+        },
+    },
+    ShutdownError {
+        inner: ShutdownErrorInner {
+            core: OhnoCore {
+                source: Error(
+                    ContainedRuntimePanic {
+                        message: "owned panic",
+                    },
+                ),
+                backtrace: Disabled,
+                enrichment: [],
+            },
+        },
+    },
+    ShutdownError {
+        inner: ShutdownErrorInner {
+            core: OhnoCore {
+                source: Error(
+                    ContainedRuntimePanic {
+                        message: "non-string panic payload",
+                    },
+                ),
+                backtrace: Disabled,
+                enrichment: [],
+            },
+        },
+    },
+)

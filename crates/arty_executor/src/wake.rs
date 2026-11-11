@@ -368,7 +368,7 @@ mod tests {
         // SAFETY: `task` keeps the initialized template alive.
         let remote = RemoteWake(unsafe { task.as_ptr().retain_remote() });
 
-        insta::assert_debug_snapshot!(remote, @"RemoteWake(..)");
+        insta::assert_debug_snapshot!(remote);
 
         drop((remote, task));
         assert!(pool.is_empty());

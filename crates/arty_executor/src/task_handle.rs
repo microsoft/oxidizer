@@ -233,7 +233,7 @@ mod tests {
         let pool = MultiPool::new();
         let handle = crate::allocate_test_task_in(&pool);
         let template = handle.inner.as_ref().get_ref().handle_slot().get().unwrap();
-        insta::assert_debug_snapshot!(**template, @"TaskHandleTemplate { .. }");
+        insta::assert_debug_snapshot!(**template);
     }
 
     #[test]

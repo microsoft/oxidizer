@@ -11,23 +11,6 @@ use allocation_hints::with_hint_async;
 fn async_hint_debug_snapshot() {
     let future = with_hint_async(&Heap::new(), std::future::ready(42));
     insta::with_settings!({filters => [(r"HeapId\(\s*\d+,?\s*\)", "HeapId([id])")]}, {
-        insta::assert_debug_snapshot!(future, @"
-        WithHint {
-            heap: Heap {
-                id: HeapId([id]),
-                kind: General(
-                    Options {
-                        locality_segment_bytes: 4194304,
-                        medium_cache_max_bytes: 8388608,
-                    },
-                ),
-            },
-            future: Ready(
-                Some(
-                    42,
-                ),
-            ),
-        }
-        ");
+        insta::assert_debug_snapshot!(future);
     });
 }
