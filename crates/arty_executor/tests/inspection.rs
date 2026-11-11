@@ -467,8 +467,8 @@ fn rejected_inspector_cleanup_panics_are_disposed_before_cancellation() {
 
     #[derive(Debug)]
     struct Canceled(Calls);
-    impl TaskCompletion<()> for Canceled {
-        fn completed(self, (): ()) {
+    impl TaskCompletion<u32> for Canceled {
+        fn completed(self, _: u32) {
             panic!("a rejected task must not complete");
         }
         fn panicked(self, panic: TaskPanicPayload, _: Option<ShutdownCause>) {
@@ -495,32 +495,42 @@ fn rejected_inspector_cleanup_panics_are_disposed_before_cancellation() {
         }
     }
 
-    let executor = Executor::builder().build();
-    let calls = Arc::new(Mutex::new(Vec::new()));
-    executor.shutdown().trigger(ShutdownCause::default());
+    for stop_during_conversion in [false, true] {
+        let executor = Executor::builder().build();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let converted = Rc::new(Cell::new(false));
+        if !stop_during_conversion {
+            executor.shutdown().trigger(ShutdownCause::default());
+        }
 
-    let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        executor
-            .tasks()
-            .task(std::future::pending::<()>())
-            .inspect({
-                let capture = Capture(Arc::clone(&calls));
-                move |_, _| {
-                    let _keep = &capture;
-                    Some(())
-                }
-            })
-            .register(Canceled(Arc::clone(&calls)));
-    }));
-    let contained = rejected.is_ok();
-    if let Err(panic) = rejected {
-        arty_executor::discard_task_panic_payload(panic);
+        let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            executor
+                .tasks()
+                .task(InspectionInput {
+                    converted: Rc::clone(&converted),
+                    shutdown: stop_during_conversion.then(|| executor.shutdown()),
+                })
+                .inspect({
+                    let capture = Capture(Arc::clone(&calls));
+                    move |_, _| {
+                        let _keep = &capture;
+                        Some(())
+                    }
+                })
+                .register(Canceled(Arc::clone(&calls)));
+        }));
+        let contained = rejected.is_ok();
+        if let Err(panic) = rejected {
+            arty_executor::discard_task_panic_payload(panic);
+        }
+
+        assert_eq!(
+            (contained, std::mem::take(&mut *calls.lock().unwrap())),
+            (true, vec!["capture dropped", "payload dropped", "cancelled"])
+        );
+        assert_eq!(converted.get(), stop_during_conversion);
+        assert!(!executor.has_tasks());
     }
-
-    assert_eq!(
-        (contained, std::mem::take(&mut *calls.lock().unwrap())),
-        (true, vec!["capture dropped", "payload dropped", "cancelled"])
-    );
 }
 
 #[test]
