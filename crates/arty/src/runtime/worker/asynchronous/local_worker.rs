@@ -252,6 +252,14 @@ mod tests {
     }
 
     #[test]
+    fn panic_without_installed_scheduler_defaults_to_shutdown() {
+        let (action, panic) = LocalWorker::on_panic(Box::new(42_u32));
+
+        assert_eq!(action, PanicAction::Shutdown);
+        assert_eq!(*panic.downcast::<u32>().unwrap(), 42);
+    }
+
+    #[test]
     fn relocating_registration_checks_owner_execution_and_shutdown() {
         let observations = std::thread::spawn(|| {
             let thread = ThreadBuilder::default().build(std::thread::current().id());
