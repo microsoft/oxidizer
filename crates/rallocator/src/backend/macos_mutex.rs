@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Inline allocator locking: Darwin's std mutex allocates on its first lock.
+//! Allocation-free locking shared by the allocator implementations.
+//!
+//! Darwin's standard mutex allocates on its first lock.
 
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;

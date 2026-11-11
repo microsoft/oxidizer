@@ -7,6 +7,8 @@
 //! The selectors do not implement [`GlobalAlloc`](std::alloc::GlobalAlloc).
 
 pub(crate) mod abort;
+#[cfg(target_os = "macos")]
+mod macos_mutex;
 mod mimalloc;
 pub(crate) mod snmalloc;
 

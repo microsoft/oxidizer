@@ -15,13 +15,17 @@
 //! Arenas stay NUMA-neutral, as with the reference default `arena_is_numa_local=0`.
 
 use std::cell::Cell;
+#[cfg(not(target_os = "macos"))]
+use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use super::hal::bitmap::{Bitmap, CHUNK_SLICES, Claim, MAX_SLICES};
 use super::hal::{self, Policy, Reservation, SLICE, VirtualMemory};
 use super::heap::PAGE_META_SIZE;
+#[cfg(target_os = "macos")]
+use crate::backend::macos_mutex::Mutex;
 
 // types.h: eight 512-slice chunks share one aligned page-metadata table.
 // The Rust Page size determines the table size, as sizeof(mi_page_t) does in C.

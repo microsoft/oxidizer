@@ -5,8 +5,7 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-mod mutex;
-pub(crate) use mutex::{Mutex, MutexGuard};
+pub(crate) use crate::backend::macos_mutex::{Mutex, MutexGuard};
 
 #[cfg(target_arch = "aarch64")]
 pub(crate) const PAGE: usize = 16384;
