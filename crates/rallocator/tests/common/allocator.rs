@@ -495,7 +495,8 @@ fn owner_exit_remote_free_and_address_reuse_soak() {
 #[test]
 fn repeated_oversized_failures_leave_allocator_operational() {
     for alignment in [1, 16, 4096, 1 << 20] {
-        let oversized = Layout::from_size_align(1 << 47, alignment).unwrap();
+        // A 128-TiB request can succeed on ARM hosts with wider address spaces.
+        let oversized = Layout::from_size_align(1_usize << 62, alignment).unwrap();
         for _ in 0..128 {
             // SAFETY: The layout is valid; allocation failure is represented by null.
             assert!(unsafe { Rallocator.alloc(oversized) }.is_null());
