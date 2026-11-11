@@ -15,7 +15,7 @@ use tick::runtime::InactiveClock;
 
 use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::PanicPolicy;
-use crate::runtime::config::MonitorOptions;
+use crate::runtime::config::{MonitorOptions, RuntimeName};
 use crate::runtime::dispatch::{DispatcherClient, WorkerEndpoint};
 use crate::runtime::error::Error;
 use crate::runtime::shutdown::Shutdown;
@@ -27,6 +27,7 @@ pub(crate) struct StartOptions {
     pub(crate) stack_size: usize,
     pub(crate) inactive_clock: InactiveClock,
     pub(crate) processor: ProcessorSet,
+    pub(crate) runtime_name: RuntimeName,
     pub(crate) worker_index: usize,
     pub(crate) thread_builder: ThreadBuilder,
     pub(crate) blocking_pools: blocking::Pools,
@@ -64,7 +65,7 @@ pub(crate) fn start(options: StartOptions) -> SpawnedWorker {
     let (endpoint_tx, endpoint_rx) = channel::unbounded();
     let (activation_tx, activation_rx) = channel::oneshot();
     let (ready_tx, ready_rx) = channel::unbounded();
-    let thread_name = format!("oxidizer-rt-{}", options.worker_index);
+    let thread_name = options.runtime_name.async_worker(options.worker_index);
     let stack_size = options.stack_size;
     let thread_entry = ThreadEntry {
         options,
@@ -124,6 +125,7 @@ impl ThreadEntry {
         let StartOptions {
             inactive_clock,
             processor,
+            worker_index,
             thread_builder,
             blocking_pools,
             shutdown,
@@ -147,7 +149,7 @@ impl ThreadEntry {
             arty_executor::PanicPolicy::Ignore => blocking::PanicPolicy::Ignore,
             arty_executor::PanicPolicy::Shutdown => blocking::PanicPolicy::Shutdown(worker_waker.clone()),
         };
-        let blocking_pool = blocking_pools.pool_for_worker();
+        let blocking_pool = blocking_pools.pool_for_worker(worker_index);
         #[cfg(feature = "monitor")]
         if let Some(runtime) = monitor_options.runtime() {
             blocking_pool.enable_monitoring(runtime);
@@ -293,7 +295,11 @@ mod tests {
         let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
+        let blocking_worker = blocking::Worker::new(
+            blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+            shutdown.clone(),
+            blocking::PanicPolicy::Ignore,
+        );
         let endpoint = WorkerEndpoint {
             commands,
             waker: Waker::noop().clone(),
@@ -312,7 +318,11 @@ mod tests {
         let (commands, _command_rx) = asynchronous::command_channel();
         let shutdown = Shutdown::default();
         let current = ThreadBuilder::default().build(thread::current().id());
-        let blocking_worker = blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore);
+        let blocking_worker = blocking::Worker::new(
+            blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+            shutdown.clone(),
+            blocking::PanicPolicy::Ignore,
+        );
         let endpoint = WorkerEndpoint {
             commands,
             waker: Waker::noop().clone(),

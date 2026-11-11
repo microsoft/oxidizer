@@ -7,7 +7,7 @@ use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
 use crate::runtime::bootstrap;
-use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, RuntimeConfig, WorkersPolicy};
+use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, RuntimeConfig, RuntimeName, WorkersPolicy};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
 
@@ -41,6 +41,35 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
+    /// Sets the runtime name used in worker thread names.
+    ///
+    /// Async threads use `<name>-async-<index>`, with indices starting at zero.
+    /// Shared blocking pools use `<name>-blocking-<thread index>`.
+    /// Per-worker pools use `<name>-blocking-<async worker index>-<thread index>`.
+    /// The default name is `arty`.
+    ///
+    /// The builder copies the name. Empty names are accepted.
+    /// [`build`](Self::build) rejects names that contain a null character (`\0`).
+    /// Operating systems can truncate thread names in diagnostic tools.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use arty::runtime::Runtime;
+    ///
+    /// let runtime = Runtime::builder().name("requests").build()?;
+    /// runtime.scheduler().block_on(async |_| {
+    ///     assert_eq!(std::thread::current().name(), Some("requests-async-0"));
+    /// })?;
+    /// runtime.stop()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn name(mut self, name: impl AsRef<str>) -> Self {
+        self.processor_config.name = RuntimeName::new(name);
+        self
+    }
+
     /// Sets how the runtime responds to a panic that it catches in a user task.
     ///
     /// The default is [`PanicPolicy::shutdown`]. Use
@@ -196,7 +225,8 @@ impl RuntimeBuilder {
     ///
     /// # Errors
     ///
-    /// Returns [`Error`] if the worker count or blocking-pool limit is zero.
+    /// Returns [`Error`] if the worker count or blocking-pool limit is zero,
+    /// or if the runtime name contains a null character (`\0`).
     /// With monitoring enabled, also returns an error if the local monitor cannot start.
     ///
     /// # Panics

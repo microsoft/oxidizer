@@ -217,7 +217,11 @@ mod tests {
                     commands,
                     waker: Waker::from(std::sync::Arc::clone(&wakes)),
                     thread: thread.clone(),
-                    blocking_worker: Worker::new(Pool::new(None), shutdown.clone(), PanicPolicy::Ignore),
+                    blocking_worker: Worker::new(
+                        Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+                        shutdown.clone(),
+                        PanicPolicy::Ignore,
+                    ),
                 }),
                 shutdown.clone(),
             );
@@ -267,7 +271,11 @@ mod tests {
                     commands: other_tx,
                     waker: Waker::noop().clone(),
                     thread: other_thread.clone(),
-                    blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),
+                    blocking_worker: Worker::new(
+                        Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+                        Shutdown::default(),
+                        PanicPolicy::Ignore,
+                    ),
                 }),
                 Shutdown::default(),
             );

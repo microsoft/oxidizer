@@ -3,43 +3,37 @@
 
 //! The [`Thread`] coordinate and its component identifier types.
 //!
-//! A [`Thread`] records where a value runs: which runtime owns it, which OS thread it names,
-//! and which memory is closest to that OS thread. See
-//! [what the ids mean](crate#what-the-ids-mean) for the guarantees each id carries.
+//! A [`Thread`] records the runtime, OS thread, and nearest memory for a value. See
+//! [what the ids mean](crate#what-the-ids-mean) for each id's guarantees.
 
 use core::hash::{Hash, Hasher};
 use core::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(any(test, feature = "std"))]
 use std::thread::ThreadId;
 
-/// A record of where a value runs: its runtime, its OS thread, and its nearest memory.
+/// The runtime, OS thread, and nearest memory for a value.
 ///
-/// Library authors should not construct these directly. Each runtime manages construction,
-/// usually creating one per worker at startup, and passes them to
-/// [`ThreadAware::relocate`](crate::ThreadAware::relocate). An implementation reads whichever
-/// part it depends on; [what the ids mean](crate#what-the-ids-mean) describes which to choose.
-/// The coordinate passed as `destination` must describe the thread that is executing
-/// [`relocate`](crate::ThreadAware::relocate), not a remote thread where the runtime hopes to
-/// run the callback.
+/// A runtime creates these coordinates, usually one for each worker. It passes them to
+/// [`ThreadAware::relocate`](crate::ThreadAware::relocate). An implementation reads only the
+/// coordinate that its state needs. The `destination` coordinate must describe the thread that
+/// runs `relocate`, not a remote target.
 ///
 /// # Relation to `std::thread::Thread`
 ///
-/// This `Thread` is a coordinate, not a handle: it records where a value runs and owns no
-/// operating-system resource. [`std::thread::Thread`] is unrelated, and naming both in one
-/// module is `error[E0252]`; alias the standard handle if you need it.
+/// This `Thread` is a coordinate, not a handle. It owns no operating-system resource.
+/// [`std::thread::Thread`] is a separate type. Alias one type if a module needs both.
 ///
-/// `Thread` is cheap to clone but deliberately not `Copy`, and is passed by reference to
-/// [`relocate`](crate::ThreadAware::relocate), so cloning is rarely necessary.
+/// `Thread` is `Clone` but not `Copy`. [`relocate`](crate::ThreadAware::relocate) takes it by
+/// reference, so cloning is rarely necessary.
 ///
-/// Two values are equal only if all their ids match. Code concerned only with memory
-/// locality compares [`numa_node`](Self::numa_node) rather than whole `Thread`s, since
-/// threads sharing a NUMA node still have different thread ids.
+/// Two values are equal if all their ids match. Compare [`numa_node`](Self::numa_node) if only
+/// memory locality matters. Threads on one NUMA node still have different thread ids.
 ///
 /// # Without `std`
 ///
-/// The thread id is `std::thread::ThreadId`, so without the `std` feature a `Thread` cannot
-/// be constructed and holds only [`owner`](Self::owner) and [`numa_node`](Self::numa_node).
-/// Equality and hashing then compare those two alone.
+/// Without the `std` feature, a `Thread` has no `std::thread::ThreadId` and cannot be constructed.
+/// It keeps [`owner`](Self::owner) and [`numa_node`](Self::numa_node). Equality and hashing use
+/// those two coordinates.
 ///
 /// # Examples
 ///
@@ -53,11 +47,9 @@ use std::thread::ThreadId;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Thread {
     owner: Owner,
-    // `test` is part of the gate so the crate's own test build compiles this field without
-    // enumerating features (see docs/optional-deps-in-test-builds.md). The cost is that no
-    // unit test can observe the `no_std` shape: `cfg(test)` puts `id` back, so a test gated
-    // on `not(feature = "std")` still sees three fields and would assert the wrong thing.
-    // `tests/no_std_surface.rs` covers that shape from outside the test build instead.
+    // The `test` gate compiles this field in the crate's test build without listing features.
+    // Because `cfg(test)` restores `id`, only `tests/no_std_surface.rs` can test the `no_std`
+    // shape as an external dependency.
     #[cfg(any(test, feature = "std"))]
     id: ThreadId,
     numa_node: NumaNode,
@@ -77,8 +69,8 @@ impl Thread {
 
     /// Returns the identifier of the runtime that owns this [`Thread`].
     ///
-    /// Comparing owners detects that a value has moved between runtimes. Such a move remains
-    /// sound; implementations decide whether runtime-specific state remains useful.
+    /// Compare owners to detect a move between runtimes. The move remains sound. The
+    /// implementation decides if runtime-specific state remains useful.
     ///
     /// # Examples
     ///
@@ -97,10 +89,9 @@ impl Thread {
 
     /// Returns the [`ThreadId`](std::thread::ThreadId) of the OS thread this `Thread` names.
     ///
-    /// Distinct live OS threads have distinct ids, so this partitions state by OS thread
-    /// without keys colliding. Whether that state is contended depends on the storage around
-    /// it. A [`ThreadId`](std::thread::ThreadId) has no defined relationship to whatever
-    /// identifier the platform assigns.
+    /// Distinct live OS threads have distinct ids. Code can use them to key state by OS thread.
+    /// The storage determines if that state is contended. The platform's thread identifier has no
+    /// defined relationship to [`ThreadId`](std::thread::ThreadId).
     ///
     /// Requires the `std` feature.
     ///
@@ -122,8 +113,8 @@ impl Thread {
 
     /// Returns the identifier of the memory nearest to this [`Thread`].
     ///
-    /// This is the id to use when what matters is which memory is nearby rather than which
-    /// thread is running, since threads on the same node share that memory cheaply.
+    /// Use this id when nearby memory matters more than the OS thread. Threads on one node have
+    /// similar access to that node's memory.
     ///
     /// # Examples
     ///
@@ -141,24 +132,22 @@ impl Thread {
     }
 }
 
-/// Hands the next identity to each [`Owner`] created in this process.
+/// Provides a new identity for each [`Owner`] in this process.
 ///
-/// Concrete values and their sequence carry no meaning; a counter is simply the smallest
-/// allocator that issues distinct identities before exhaustion. Pointer-width makes exhaustion
-/// impractical. Relaxed ordering is sufficient because this atomic provides uniqueness only
-/// and neither publishes nor orders any other state.
+/// The values and their order have no meaning. A counter provides distinct values until it is
+/// exhausted. Pointer-width makes exhaustion impractical. Relaxed ordering is enough because the
+/// atomic only provides uniqueness. It does not publish or order other state.
 static NEXT_OWNER: AtomicUsize = AtomicUsize::new(0);
 
 /// An identifier for the runtime that owns a [`Thread`].
 ///
-/// Every new owner is unique, so two runtimes alive at the same time never share one. That
-/// is what lets a value notice it has crossed from one runtime into another and adapt any
-/// runtime-specific optimization.
+/// Each new owner is unique. Two live runtimes do not share an owner. A value can compare owners
+/// to detect a move between runtimes.
 ///
 /// Two owners are the same runtime exactly when their identities match.
 ///
-/// An owner names one live runtime, so it is `Clone` but not `Copy`, and
-/// [`Thread::owner`] lends it rather than handing out duplicates.
+/// An owner names one live runtime. It is `Clone` but not `Copy`. [`Thread::owner`] returns a
+/// reference.
 ///
 /// # Examples
 ///
@@ -193,12 +182,12 @@ impl Hash for Owner {
 impl Owner {
     /// Creates an owner for a runtime.
     ///
-    /// The owner is unique: no other owner in this process compares equal to it.
+    /// No other owner in this process compares equal to the new owner.
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
-            // The atomic read-modify-write order makes each returned identity distinct. Refuse to
-            // wrap rather than allowing a future runtime to compare equal to an earlier one.
+            // The atomic update makes each identity distinct. Refuse to wrap because a wrapped
+            // identity can make a new runtime equal to an earlier runtime.
             id: NEXT_OWNER
                 .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
                 .expect("owner identity space exhausted before allocating a unique runtime owner"),
@@ -206,19 +195,15 @@ impl Owner {
     }
 }
 
-/// An identifier for the memory closest to a thread, usually a non-uniform memory access
+/// An identifier for the memory nearest to a thread, usually a non-uniform memory access
 /// (NUMA) node.
 ///
-/// A NUMA node is a hardware locality domain whose processors have similarly local memory.
-/// On a large machine, a thread reaches memory in its own node fastest. Unlike the thread id,
-/// this identifier is shared: every thread near the same memory reports the same `NumaNode`,
-/// which is what makes it suitable for state that is shared within a region but not across
-/// the machine. Sharing between runtimes holds only while they all number the regions
-/// identically; see
+/// A NUMA node is a hardware region whose processors have similar access to local memory.
+/// Threads near the same memory share a `NumaNode`. This makes it useful for state shared within
+/// one region. Runtimes can share node-keyed state only if they number regions identically. See
 /// [what the ids mean](crate#what-the-ids-mean).
 ///
-/// Nodes carry no meaning beyond identity, and the width is wide enough that no real
-/// machine can exhaust it.
+/// A node value has no meaning beyond identity. Its width is enough for real hardware.
 ///
 /// # Examples
 ///

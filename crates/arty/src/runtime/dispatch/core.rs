@@ -368,7 +368,11 @@ mod tests {
                 commands,
                 waker: Waker::noop().clone(),
                 thread: thread.clone(),
-                blocking_worker: Worker::new(Pool::new(None), Shutdown::default(), PanicPolicy::Ignore),
+                blocking_worker: Worker::new(
+                    Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+                    Shutdown::default(),
+                    PanicPolicy::Ignore,
+                ),
             },
             command_rx,
         )

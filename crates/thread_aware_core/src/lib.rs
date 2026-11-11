@@ -13,72 +13,56 @@
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/favicon.ico"
 )]
 
-//! Support for values that adapt after arriving on a different thread.
+//! Core types for values that adapt after a move to another thread.
 //!
-//! This crate contains the small API shared by thread-aware libraries:
+//! This crate provides the shared API for thread-aware libraries:
 //!
-//! - [`ThreadAware`] is the trait for values that adapt after a move; its
-//!   [`relocate`](ThreadAware::relocate) callback reports the current destination.
-//! - [`Thread`] is the coordinate where a value now runs, composed of runtime, OS-thread, and
-//!   nearest-memory identifiers.
+//! - [`ThreadAware`] is the trait for values that adapt after a move.
+//! - [`Thread`] describes the runtime, OS thread, and nearest memory for a value.
 //!
-//! [`Thread`] is a coordinate, not a handle: a runtime builds one to describe where a value
-//! is running, and it owns no operating-system resource. It is unrelated to
-//! [`std::thread::Thread`], which is a handle to a live OS thread. Naming both in one module
-//! requires aliasing one of them.
+//! [`Thread`] is a coordinate, not a handle. It owns no operating-system resource.
+//! [`std::thread::Thread`] is a separate handle to a live OS thread. Use an alias if a module
+//! needs both types.
 //!
 //! # The `thread_aware` family
 //!
-//! Downstream libraries need one small contract they can implement and expose in public APIs
-//! without also adopting derive macros, closure adapters, policy wrappers, partitioned storage,
-//! or runtime integration. Keeping that contract here lets unrelated libraries interoperate while
-//! the larger utility surface evolves independently.
+//! Use this crate for the core types that public APIs expose. It has no derive macros, closure
+//! adapters, policy wrappers, or runtime integration.
 //!
-//! - **`thread_aware_core`** (this crate) — the vocabulary that two unrelated libraries must
-//!   agree on before either can relocate a value defined by the other. It evolves
-//!   conservatively, reducing how much public APIs couple to changes in the utility crate.
-//! - **[`thread_aware`]** — the utilities that make relocation convenient: a
-//!   [`#[derive(ThreadAware)]`][derive] macro, closure adapters, wrappers for foreign types, and
-//!   runtime coordinate construction. Free to evolve, and not meant to appear in a public API. Its
-//!   [authoring guide] is the how-to for making your own types thread-aware.
+//! The [`thread_aware`] crate provides those utilities. It includes a
+//! [`#[derive(ThreadAware)]`][derive] macro, closure adapters, wrappers for foreign types, and
+//! runtime coordinate construction. Its [authoring guide] explains how to make a type
+//! thread-aware. The `performables` crate provides strategy-partitioned shared state.
 //!
 //! [`thread_aware`]: https://docs.rs/thread_aware
 //! [derive]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
 //! [arc]: https://docs.rs/performables/latest/performables/arc/struct.Arc.html
 //! [authoring guide]: https://docs.rs/thread_aware/latest/thread_aware/documentation/index.html
 //!
-//! Depend on this crate directly when all you need is the trait. It has no normal dependencies
-//! and works without `std`: with default features turned off, [`Thread`] loses its thread id
-//! component and keeps [`Owner`] and [`NumaNode`].
+//! Depend on this crate directly if you only need the core types. It has no normal
+//! dependencies. Without the default `std` feature, [`Thread`] keeps [`Owner`] and [`NumaNode`]
+//! but has no thread id.
 //!
 //! # Why relocation exists
 //!
-//! Thread-isolated and non-uniform memory access (NUMA)-aware runtimes are fast because each
-//! worker keeps to itself: it uses memory close to its own thread, talks to its own I/O
-//! driver, and does not synchronize with other workers. When a value moves to another
-//! worker, what used to be close by is now in the wrong place: a cache line shared between
-//! threads, memory in a distant region, a handle to another thread's driver.
-//!
-//! [`ThreadAware`] lets that state repair itself. The runtime moves the value, then calls
-//! [`relocate`](ThreadAware::relocate) to report where it now lives. Relocation has two
-//! sides, and most code sits on only one of them.
+//! A runtime can keep memory and resources close to each worker. A moved value can still refer to
+//! memory or resources from its old worker. [`ThreadAware`] lets the value adapt this state.
+//! The runtime moves the value, then calls [`relocate`](ThreadAware::relocate) on its new thread.
 //!
 //! # Library authors: implementing the trait
 //!
-//! **Library and application authors** implement [`ThreadAware`], usually through the
-//! [`#[derive(ThreadAware)]`][derive] macro. They never call
-//! [`relocate`](ThreadAware::relocate) and never construct a [`Thread`]; the runtime does
-//! both and then invokes the implementation. It is a callback, like [`Drop::drop`].
+//! Library and application authors implement [`ThreadAware`]. They usually use the
+//! [`#[derive(ThreadAware)]`][derive] macro. A runtime constructs [`Thread`] values and calls
+//! [`relocate`](ThreadAware::relocate). The method is a callback like [`Drop::drop`].
 //!
-//! The derive lives in [`thread_aware`], so a library that wants it depends on that crate.
-//! Only the trait, [`Thread`], and its component identifiers cross the public boundary, and all
-//! come from here, so the dependency stays an implementation detail:
+//! The derive macro is in [`thread_aware`]. A library can use that crate as an implementation
+//! dependency while its public API uses types from this crate:
 //!
 //! ```ignore
-//! // A build dependency, not part of what this library promises.
+//! // An implementation dependency, not part of the public API.
 //! use thread_aware::ThreadAware;
 //!
-//! /// A codec whose scratch buffer should follow the memory it is used from.
+//! /// A codec with a scratch buffer that follows its nearest memory.
 //! #[derive(ThreadAware)]
 //! pub struct Encoder {
 //!     scratch: Scratch,
@@ -86,71 +70,60 @@
 //! }
 //! ```
 //!
-//! The derive writes the forwarding implementation, calling `relocate` on `scratch` and
-//! `dictionary` in turn. Because a composed type forwards to its fields, one call at the top
-//! reaches everything below it. Callers of `Encoder` never name [`thread_aware`].
+//! The derive forwards `relocate` to `scratch` and `dictionary`. Callers of `Encoder` do not need
+//! to name [`thread_aware`].
 //!
 //! # Runtime authors: driving relocation
 //!
-//! **Runtime authors** create a list of [`Thread`] values describing their workers. How that
-//! list is constructed is a runtime implementation detail and is not relevant to runtime
-//! consumers.
+//! Runtime authors create [`Thread`] values for their workers. After a runtime moves a value, the
+//! destination thread calls [`relocate`](ThreadAware::relocate).
 //!
-//! After moving a value, the runtime calls [`relocate`](ThreadAware::relocate), passing where
-//! the value came from and where it now runs.
-//! The call must execute on the thread that now owns the value: `destination` describes the
-//! current thread, rather than requesting that work be performed on another thread. A runtime
-//! must move or schedule the value to its destination first, then let that destination thread
-//! invoke `relocate`; a coordinator must not invoke it on the destination's behalf. This ordering
-//! matters because relocation may release, allocate, or initialize thread- and NUMA-local state,
-//! and those operations must happen on the thread whose locality they are intended to use.
+//! `destination` describes the thread that runs the callback. It does not request work on another
+//! thread. This order lets the callback release or create state with the destination thread's
+//! memory locality.
 //!
 //! # Performance, not correctness
 //!
-//! Relocation is an optimization, not a guarantee. A value must remain correct if the call
-//! never comes, comes twice, or reports the same source and destination. Missing calls are
-//! normal: a value can reach another thread through `std::thread::spawn`, a channel, or a
-//! runtime that knows nothing about this trait. That may make things slower, but it must
-//! never cause a panic, a deadlock, or a wrong answer.
+//! Relocation is an optimization. A value must remain correct if the runtime never calls
+//! `relocate`, calls it more than once, or gives it equal coordinates. A missed call can reduce
+//! performance, but it must not cause a panic, deadlock, or wrong result.
 //!
-//! Call frequency is runtime-dependent. Implementations should make repeated calls with unchanged
-//! relevant coordinates cheap, while avoiding synchronization and other blocking work on every
-//! call.
+//! The runtime controls call frequency. Implementations must keep calls with unchanged relevant
+//! coordinates cheap. They must also avoid contended synchronization and long blocking work.
 //!
 //! # What the ids mean
 //!
-//! - **Thread id** identifies a live OS thread.
-//! - **[`NumaNode`]** identifies nearby memory and is shared by threads in the same region.
-//!   It is meaningful across runtimes only when they number regions identically.
-//! - **[`Owner`]** uniquely identifies the runtime a [`Thread`] belongs to.
+//! - A thread id identifies a live OS thread.
+//! - [`NumaNode`] identifies nearby memory. Runtimes can compare nodes only if they use the same
+//!   numbering.
+//! - [`Owner`] identifies the runtime that owns a [`Thread`].
 //!
-//! These ids are opaque and need not be consecutive. Use only the coordinate your state
-//! depends on, and store keyed state in a map rather than an indexed array.
+//! These ids are opaque and do not have to be consecutive. Use only the coordinate that the state
+//! needs. Use a map instead of an indexed array for keyed state.
 //!
 //! # Relation to `Send`
 //!
-//! [`ThreadAware`] requires [`Send`], and in that order: a value is sent to its destination thread
-//! first, then told where it landed on that same thread. [`Send`] is what makes the move safe, and
-//! [`ThreadAware`] adds nothing to it.
+//! [`ThreadAware`] requires [`Send`]. The runtime first sends the value to its destination thread.
+//! It then tells the value where it arrived. [`Send`] makes the move safe. [`ThreadAware`] adds
+//! only the adaptation callback.
 //!
 //! # Provided implementations
 //!
-//! Values with no thread-local state use an empty implementation. Containers forward
-//! relocation to their values, while map keys remain unchanged.
+//! Values without thread-local state use an empty implementation. Containers forward relocation
+//! to their values. Map keys stay unchanged.
 //!
-//! General references, sets, `Cow`, and `Arc` have no implementation because relocation would be
-//! ambiguous or could violate their invariants. The narrow reference exception is `&'static str`:
-//! immutable process-lifetime labels cannot dangle and carry no referent state to relocate.
-//! [`thread_aware`] provides wrappers for cases that need an explicit policy, and the companion
-//! `performables` crate adds a strategy-partitioned [`Arc`][arc].
+//! General references, sets, `Cow`, and `Arc` have no implementation. Their relocation policy is
+//! ambiguous or can break their invariants. The exception is `&'static str`, which cannot dangle
+//! and has no referent state to relocate. [`thread_aware`] provides wrappers for explicit policies.
+//! The `performables` crate provides a strategy-partitioned [`Arc`][arc].
 //!
 //! # Features
 //!
-//! - **`std`** *(default)* - Adds runtime construction support and [`Thread::id`], which need
-//!   [`ThreadId`](std::thread::ThreadId), and implements [`ThreadAware`] for standard library
-//!   types such as `HashMap`, `Path`, `PathBuf`, `SocketAddr`, `SocketAddrV4` and
-//!   `SocketAddrV6`. Turn it off for `no_std`, which needs only `alloc` and pointer-width
-//!   atomics.
+//! - `std` (default): Adds runtime construction support and [`Thread::id`]. It also implements
+//!   [`ThreadAware`] for `HashMap`, `Path`, `PathBuf`, `SocketAddr`, `SocketAddrV4`, and
+//!   `SocketAddrV6`.
+//!
+//! Without `std`, the crate needs `alloc` and pointer-width atomics.
 
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]
