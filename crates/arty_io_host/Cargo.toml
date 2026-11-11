@@ -38,6 +38,7 @@ default = []
 [dependencies]
 arty_io_core = { workspace = true }
 data_privacy = { workspace = true }
+derive_more = { workspace = true, features = ["debug"] }
 foldhash = { workspace = true, features = ["std"] }
 observed = { workspace = true }
 thread_aware_core = { workspace = true, features = ["std"] }

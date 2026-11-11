@@ -74,6 +74,7 @@ dependencies = [
 name = "allocation_hints"
 version = "0.2.0"
 dependencies = [
+ "derive_more",
  "pin-project-lite",
 ]
 
@@ -306,6 +307,7 @@ version = "0.6.1"
 dependencies = [
  "arty_io_core",
  "data_privacy",
+ "derive_more",
  "foldhash 0.2.0",
  "observed",
  "observed_testing",
@@ -862,6 +864,7 @@ dependencies = [
  "benchmarking",
  "bytes",
  "criterion",
+ "derive_more",
  "gungraun",
  "libc",
  "mutants",
@@ -907,6 +910,7 @@ dependencies = [
  "criterion",
  "ctor",
  "dashmap",
+ "derive_more",
  "future_assert",
  "futures",
  "layered",
@@ -955,6 +959,7 @@ dependencies = [
 name = "cachet_tier"
 version = "0.6.1"
 dependencies = [
+ "derive_more",
  "dynosaur",
  "ohno",
  "parking_lot 0.13.0",

@@ -81,7 +81,8 @@ struct ShutdownInner {
 ///
 /// Clones share the same immutable source error. Use [`inner`](Self::inner) or
 /// [`Error::source`] to inspect the original error and its source chain.
-#[derive(Clone)]
+/// Debug output includes the original error and any panic message.
+#[derive(Clone, derive_more::Debug)]
 pub struct ShutdownError {
     inner: ShutdownErrorInner,
 }
@@ -126,12 +127,6 @@ impl ShutdownError {
             .core
             .source()
             .expect("ShutdownError construction always records a source error")
-    }
-}
-
-impl Debug for ShutdownError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ShutdownError").finish_non_exhaustive()
     }
 }
 

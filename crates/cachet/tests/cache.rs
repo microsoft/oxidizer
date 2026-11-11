@@ -758,6 +758,17 @@ fn cache_debug_with_stampede_protection() {
     let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
     let debug_str = format!("{cache:?}");
     assert!(debug_str.contains("Mergers"), "got: {debug_str}");
+    for field in [
+        "get:",
+        "invalidate:",
+        "get_or_insert:",
+        "get_or_insert_with:",
+        "try_get_or_insert:",
+        "try_get_or_insert_with:",
+        "optionally_get_or_insert:",
+    ] {
+        assert!(debug_str.contains(field), "missing {field} in {debug_str}");
+    }
 }
 
 // =============================================================================

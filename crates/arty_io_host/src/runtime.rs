@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::any::{Any, TypeId};
-use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::task::Waker;
 
@@ -144,18 +143,14 @@ impl Registry {
 /// The first context type gets the primary role. Each later type gets the
 /// secondary role. A worker-local [`DriverHost`](crate::DriverHost) creates a
 /// driver when it first requests a context type.
-#[derive(Clone)]
+#[derive(Clone, derive_more::Debug)]
 pub struct IoRuntime {
+    #[debug(skip)]
     registry: Arc<Mutex<Registry>>,
     sink: Sink,
     #[cfg(test)]
+    #[debug(skip)]
     resolution_hook: Option<Arc<dyn Fn(TypeId) + Send + Sync>>,
-}
-
-impl fmt::Debug for IoRuntime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("IoRuntime").finish_non_exhaustive()
-    }
 }
 
 impl PartialEq for IoRuntime {

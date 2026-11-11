@@ -19,22 +19,18 @@ use crate::cache::CacheName;
 use crate::refresh::TimeToRefresh;
 use crate::telemetry::CacheTelemetry;
 
+#[derive(derive_more::Debug)]
 pub(crate) struct FallbackCacheInner<K, V, P, F> {
     pub(crate) name: CacheName,
+    // P and F need not implement Debug.
+    #[debug(skip)]
     pub(crate) primary: P,
+    #[debug(skip)]
     pub(crate) fallback: F,
     pub(crate) clock: Clock,
     pub(crate) refresh: Option<TimeToRefresh<K>>,
     pub(crate) telemetry: CacheTelemetry,
     _phantom: PhantomData<(K, V)>,
-}
-
-impl<K, V, P, F> std::fmt::Debug for FallbackCacheInner<K, V, P, F> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FallbackCacheInner")
-            .field("name", &self.name)
-            .finish_non_exhaustive()
-    }
 }
 
 /// A two-tier cache that checks a primary tier, then falls back to a secondary tier.
@@ -287,7 +283,15 @@ mod tests {
         let cache = make_fallback_cache();
 
         let debug_str = format!("{cache:?}");
-        assert_eq!(debug_str, "FallbackCache { inner: FallbackCacheInner { name: \"fallback\", .. } }");
+        assert_eq!(
+            debug_str,
+            concat!(
+                "FallbackCache { inner: FallbackCacheInner { name: \"fallback\", ",
+                "clock: Clock { kind: \"controlled\", timers: 0, alive: true, .. }, ",
+                "refresh: None, telemetry: CacheTelemetry { logging_enabled: false, has_handler: false }, ",
+                "_phantom: PhantomData<(alloc::string::String, i32)>, .. } }"
+            )
+        );
     }
 
     /// Tests that conditional promotion policy only promotes matching entries.

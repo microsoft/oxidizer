@@ -9,7 +9,7 @@ use std::rc::Rc;
 use crate::{TaskHandle, TaskPtr};
 
 /// Intrusive owner-thread inventory of all pending tasks.
-#[derive(Default)]
+#[derive(Default, derive_more::Debug)]
 pub(crate) struct TaskList {
     head: Option<TaskPtr>,
     tail: Option<TaskPtr>,
@@ -91,12 +91,6 @@ impl TaskList {
     }
 }
 
-impl std::fmt::Debug for TaskList {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TaskList").finish_non_exhaustive()
-    }
-}
-
 impl Drop for TaskList {
     fn drop(&mut self) {
         while self.pop_front().is_some() {}
@@ -126,7 +120,13 @@ mod tests {
 
         assert_eq!(list.insert(first), first_pointer);
         assert_eq!(list.insert(second), second_pointer);
-        assert_eq!(format!("{list:?}"), "TaskList { .. }");
+        assert_eq!(
+            format!("{list:?}"),
+            format!(
+                "TaskList {{ head: Some({first_pointer:?}), tail: Some({second_pointer:?}), _owner_thread: {:?} }}",
+                list._owner_thread
+            )
+        );
         // SAFETY: `first_pointer` is live and belongs to `list`.
         drop(unsafe { list.remove(first_pointer) }.unwrap());
         assert_eq!(list.pop_front().unwrap().as_ptr(), second_pointer);

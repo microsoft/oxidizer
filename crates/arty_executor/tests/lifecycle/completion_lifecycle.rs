@@ -187,6 +187,9 @@ fn shutdown_cause_exposes_the_original_error() {
     let expected = expected.inner().downcast_ref::<TestShutdownError>().unwrap();
     assert!(std::ptr::eq(source, expected));
     assert_eq!(format!("{cause:?}"), "ShutdownCause { has_error: true }");
+    let rendered = format!("{actual:?}");
+    assert!(rendered.contains("inner:"));
+    assert!(rendered.contains("executor failed"));
 }
 
 #[test]
@@ -205,6 +208,7 @@ fn panic_causes_retain_messages_without_consuming_payloads() {
         assert!(error.is_panic());
         assert!(cloned.is_panic());
         assert_eq!(error.to_string(), format!("runtime shutdown was caused by a task panic: {message}"));
+        assert!(format!("{error:?}").contains(message));
         assert!(error.inner().source().is_none());
         assert!(std::ptr::addr_eq(error.inner(), cloned.inner()));
         if let Some(value) = payload.downcast_ref::<u32>() {

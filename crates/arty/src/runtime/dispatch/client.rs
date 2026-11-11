@@ -3,8 +3,6 @@
 
 //! Runtime submission and control capabilities.
 
-use std::any::type_name;
-use std::fmt::Debug;
 use std::thread::ThreadId;
 
 use arty_executor::ShutdownCause;
@@ -19,7 +17,7 @@ use crate::task::Context;
 use crate::task::handle::JoinHandle;
 
 /// Cheap shared access to one runtime's routing and shutdown state.
-#[derive(Clone)]
+#[derive(Clone, derive_more::Debug)]
 pub(crate) struct DispatcherClient {
     core: Arc<DispatcherCore>,
 }
@@ -102,14 +100,6 @@ impl DispatcherClient {
     #[cfg_attr(test, mutants::skip)] // Will cause tests to hang due to runtime never stopping.
     pub(crate) fn stop(&self, cause: impl Into<ShutdownCause>) -> ShutdownCause {
         self.core.stop_inner(cause.into())
-    }
-}
-
-impl Debug for DispatcherClient {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Opaque diagnostic formatting only.
-    #[cfg_attr(test, mutants::skip)] // Debug formatting not tested
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct(type_name::<Self>()).finish()
     }
 }
 

@@ -240,14 +240,10 @@ impl Driver for FormattingFailureDriver {
     }
 }
 
+#[derive(derive_more::Debug)]
 struct ReentrantFormatError {
+    #[debug(skip)]
     state: Arc<State>,
-}
-
-impl fmt::Debug for ReentrantFormatError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReentrantFormatError").finish_non_exhaustive()
-    }
 }
 
 impl fmt::Display for ReentrantFormatError {
@@ -482,11 +478,12 @@ fn first_context_is_primary_and_later_contexts_are_secondary() {
 
 #[test]
 fn runtime_identity_is_shared_only_by_clones() {
-    let runtime = test_runtime();
+    let sink = observed::Sink::noop();
+    let runtime = IoRuntime::new(sink.clone());
 
     assert_eq!(runtime, runtime.clone());
     assert_ne!(runtime, test_runtime());
-    assert_eq!(format!("{runtime:?}"), "IoRuntime { .. }");
+    assert_eq!(format!("{runtime:?}"), format!("IoRuntime {{ sink: {sink:?}, .. }}"));
 }
 
 #[test]
@@ -914,7 +911,10 @@ fn interrupt_waker_tracks_primary_and_is_safe_after_drop() {
     let state = Arc::new(State::default());
     let interrupt = host.waker();
     let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
-    assert!(format!("{host:?}").starts_with("DriverHost { thread: "));
+    let rendered = format!("{host:?}");
+    assert!(rendered.starts_with("DriverHost { runtime: IoRuntime { sink: "));
+    assert!(rendered.contains("thread: "));
+    assert!(rendered.contains("owner_waker: "));
 
     interrupt.wake_by_ref();
     assert_eq!(state.interrupts.load(Ordering::SeqCst), 1);

@@ -20,14 +20,10 @@ use crate::TypeErasedTask;
 /// Remote owners read the immutable template directly through that published pointer.
 pub(crate) type TaskHandleSlot = OnceCell<ManuallyDrop<TaskHandleTemplate>>;
 
+#[derive(derive_more::Debug)]
 pub(crate) struct TaskHandleTemplate {
+    #[debug(skip)]
     inner: Pin<PoolArc<dyn TypeErasedTask>>,
-}
-
-impl std::fmt::Debug for TaskHandleTemplate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TaskHandleTemplate").finish_non_exhaustive()
-    }
 }
 
 /// A counted owner of a pinned, type-erased task allocation.

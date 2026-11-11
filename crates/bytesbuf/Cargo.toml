@@ -49,6 +49,7 @@ test-util = ["std"]
 
 [dependencies]
 bytes = { workspace = true, optional = true }
+derive_more = { workspace = true, features = ["debug"] }
 nm = { workspace = true, optional = true }
 performables = { workspace = true, default-features = false, optional = true }
 plurality = { workspace = true, optional = true }

@@ -71,6 +71,7 @@ bytesbuf = { workspace = true, features = ["std"], optional = true }
 cachet_memory = { workspace = true, optional = true }
 cachet_service = { workspace = true, optional = true }
 cachet_tier = { workspace = true }
+derive_more = { workspace = true, features = ["debug"] }
 futures = { workspace = true, features = ["async-await", "executor"] }
 layered = { workspace = true, optional = true }
 parking_lot = { workspace = true }
