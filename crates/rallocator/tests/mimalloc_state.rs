@@ -74,7 +74,7 @@ enum Response {
 }
 
 #[expect(clippy::unwrap_used, reason = "The worker must complete the scripted test protocol")]
-fn worker(layout: Layout, os_layout: Layout, commands: mpsc::Receiver<Command>, responses: &mpsc::Sender<Response>) {
+fn worker(layout: Layout, os_layout: Layout, commands: &mpsc::Receiver<Command>, responses: &mpsc::Sender<Response>) {
     let (_retained, _os) = without_recording(|| {
         // Warm the native NULL-slot entry before arranging the fixed class.
         drop(Allocation::new(Layout::from_size_align(64, 16).unwrap()));
@@ -112,7 +112,7 @@ fn owner_publication_is_cooperative_and_survives_thread_cleanup() {
             let (responses, receive_responses) = mpsc::channel();
             let layout = Layout::from_size_align(512, 16).unwrap();
             let os_layout = Layout::from_size_align(131_073, 131_072).unwrap();
-            let worker = scope.spawn(move || worker(layout, os_layout, receive_commands, &responses));
+            let worker = scope.spawn(move || worker(layout, os_layout, &receive_commands, &responses));
             assert!(matches!(receive_responses.recv().unwrap(), Response::Ready));
             let (_, before) = capture();
             assert!(before.global.reserved_bytes > 0);
