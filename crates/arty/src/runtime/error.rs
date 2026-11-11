@@ -37,6 +37,10 @@ impl Error {
         Self::new(RuntimeValidation::InvalidWorkerCount)
     }
 
+    pub(crate) fn invalid_name() -> Self {
+        Self::new(RuntimeValidation::InvalidName)
+    }
+
     pub(crate) fn invalid_blocking_pool_limit() -> Self {
         Self::new(RuntimeValidation::InvalidBlockingPoolLimit)
     }
@@ -95,6 +99,7 @@ impl StdError for Error {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeValidation {
+    InvalidName,
     InvalidWorkerCount,
     InvalidBlockingPoolLimit,
     BlockOnFromWorker,
@@ -103,6 +108,7 @@ pub(crate) enum RuntimeValidation {
 impl Display for RuntimeValidation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::InvalidName => "runtime name must not contain a null character",
             Self::InvalidWorkerCount => "worker count must be greater than zero",
             Self::InvalidBlockingPoolLimit => "blocking pool max_workers must be greater than zero",
             Self::BlockOnFromWorker => "block_on cannot be called from an Arty worker",
@@ -180,6 +186,11 @@ mod tests {
     #[test]
     fn validation_failures_preserve_private_identity_and_display_context() {
         let cases = [
+            (
+                Error::invalid_name(),
+                RuntimeValidation::InvalidName,
+                "runtime name must not contain a null character",
+            ),
             (
                 Error::invalid_worker_count(),
                 RuntimeValidation::InvalidWorkerCount,

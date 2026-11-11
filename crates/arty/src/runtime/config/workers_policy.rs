@@ -1,11 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::num::{NonZero, NonZeroUsize};
+use std::num::NonZero;
 
 use many_cpus::ProcessorSet;
 
-use crate::runtime::config::{BlockingPoolPolicy, MonitorOptions, PanicPolicy};
 use crate::runtime::error::Error;
 
 /// Selects how many async workers run and which processors they use.
@@ -172,30 +171,6 @@ enum WorkersPolicyKind {
     All,
 }
 
-/// Resource settings validated during runtime construction.
-#[derive(Debug)]
-pub(crate) struct RuntimeConfig {
-    pub(crate) workers_policy: WorkersPolicy,
-    pub(crate) stack_size: NonZeroUsize,
-    pub(crate) blocking_pool_policy: BlockingPoolPolicy,
-    pub(crate) monitor_options: MonitorOptions,
-    pub(crate) panic_policy: PanicPolicy,
-}
-
-impl Default for RuntimeConfig {
-    fn default() -> Self {
-        Self {
-            workers_policy: WorkersPolicy::default(),
-            // Match Rust's Tier-1 thread-stack baseline instead of platform-native defaults.
-            // The builder can override it; bootstrap also honors a larger RUST_MIN_STACK.
-            stack_size: NonZeroUsize::new(2 * 1024 * 1024).expect("the default stack size is nonzero"),
-            blocking_pool_policy: BlockingPoolPolicy::default(),
-            monitor_options: MonitorOptions::default(),
-            panic_policy: PanicPolicy::default(),
-        }
-    }
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
 mod tests {
@@ -203,11 +178,6 @@ mod tests {
     use many_cpus::fake::HardwareBuilder;
 
     use super::*;
-
-    #[test]
-    fn default_runtime_shares_blocking_pool() {
-        assert_eq!(RuntimeConfig::default().blocking_pool_policy, BlockingPoolPolicy::shared());
-    }
 
     #[test]
     fn exact_count_assigns_requested_workers() {
