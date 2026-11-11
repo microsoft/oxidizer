@@ -85,13 +85,9 @@ fn zero_realloc_and_oom_preserve_input() {
                 ptr = replacement;
                 layout = Layout::from_size_align(size, align).unwrap();
             }
-            // SAFETY: ptr remains live; the impossible replacement is expected to fail.
-            let failure = unsafe { Rallocator.realloc(ptr, layout, usize::MAX) };
-            assert!(failure.is_null());
-            // SAFETY: The valid size 2^62 exceeds every supported user address
-            // space. Exercise genuine allocation
-            // failure as well as invalid-layout rejection above.
-            let failure = unsafe { Rallocator.realloc(ptr, layout, 1usize << 62) };
+            // SAFETY: The live block and nonzero new size satisfy the retained
+            // alignment. The valid size exceeds supported user address spaces.
+            let failure = unsafe { Rallocator.realloc(ptr, layout, 1_usize << 62) };
             assert!(failure.is_null());
             // SAFETY: Failed realloc preserves this initialized live allocation.
             assert_eq!(unsafe { *ptr }, 0x5b);
