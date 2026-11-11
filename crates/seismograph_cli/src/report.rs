@@ -1752,16 +1752,15 @@ struct Hotspot {
 #[derive(Clone, Copy)]
 enum SupportedEventKind {
     Allocated,
-    Reallocated,
     Deallocated,
 }
 
+// Original allocation records already carry the last retained resize size.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn supported_events(events: &[Event]) -> impl Iterator<Item = (&Event, SupportedEventKind)> {
     events.iter().filter_map(|event| {
         let kind = match event.kind {
             EventKind::Allocated => SupportedEventKind::Allocated,
-            EventKind::Reallocated => SupportedEventKind::Reallocated,
             EventKind::Deallocated => SupportedEventKind::Deallocated,
             _ => return None,
         };
@@ -1779,7 +1778,7 @@ fn render_hotspots(html: &mut String, callers: &Callers, addresses: &[AddressLoo
     let mut thread_flows = BTreeMap::<(u64, u64), (u64, u64)>::new();
     for (event, kind) in supported_events(&callers.events) {
         match kind {
-            SupportedEventKind::Allocated | SupportedEventKind::Reallocated => {}
+            SupportedEventKind::Allocated => {}
             SupportedEventKind::Deallocated => {
                 let Some(allocation) = live.remove(&(event.thread_log_id, event.allocation_id)) else {
                     continue;
@@ -2087,7 +2086,7 @@ fn render_callers(html: &mut String, callers: &Callers, addresses: &[AddressLook
                     (index, event.resized_size.unwrap_or(event.size)),
                 );
             }
-            SupportedEventKind::Deallocated | SupportedEventKind::Reallocated => {}
+            SupportedEventKind::Deallocated => {}
         }
     }
     // Thread-local sequence numbers do not order records from different threads.

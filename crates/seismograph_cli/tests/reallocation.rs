@@ -72,6 +72,8 @@ fn html_preserves_one_lifetime_and_displays_moved_in_place_and_orphan_resizes() 
     }
     assert_eq!(html.matches("<td>alloc</td>").count(), 1);
     assert_eq!(html.matches("<td>resize</td>").count(), 3);
+    assert_eq!(html.matches("<td>orphan resize</td>").count(), 1);
+    assert!(html.contains("0x3000 / 64 B → 0x4000 / 96 B (moved)</td><td>orphan resize</td>"));
 
     seismograph::record(EventClass::Allocation, || {
         Some(Record::deallocation(Allocation {
@@ -88,4 +90,7 @@ fn html_preserves_one_lifetime_and_displays_moved_in_place_and_orphan_resizes() 
     let html = support::render_capture(capture.as_bytes(), "resize-freed");
     assert!(html.contains("No retained unmatched allocation stacks."));
     assert_eq!(html.matches("<td>free</td>").count(), 1);
+    assert!(html.contains("1 allocations · 8.00 KiB</text>"));
+    assert!(html.contains("1 frees · 8.00 KiB</text>"));
+    assert!(html.contains("8.00 KiB · 1 frees</title>"));
 }
