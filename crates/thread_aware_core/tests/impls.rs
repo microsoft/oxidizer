@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Exercises public [`ThreadAware`](thread_aware_core::ThreadAware) implementations from
-//! outside the crate.
+//! Tests public [`ThreadAware`](thread_aware_core::ThreadAware) implementations as a consumer.
 
 #![cfg(feature = "std")]
 
@@ -20,8 +19,7 @@ use std::thread;
 use thread_aware_core::__private::v1::{new_numa_node, new_owner, new_thread};
 use thread_aware_core::{Thread, ThreadAware};
 
-/// A type whose `relocate` visibly mutates state, so mutation tests catch
-/// no-op replacements.
+/// A type that changes state in `relocate`, which makes no-op mutations visible.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Tracker(bool);
 
@@ -113,12 +111,10 @@ fn tuples_of_every_supported_arity_relocate() {
     assert_relocation_is_noop((1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12), source, destination);
 }
 
-/// `impl_thread_aware_tuple!` recurses by peeling one element off the head, so the
-/// 1-tuple is the last impl it generates before the `()` base case. That arm is
-/// the one where a missing comma would silently change meaning: `let (A) = self`
-/// is a parenthesized pattern binding the whole tuple, which sends the impl back
-/// into itself instead of reaching the element. `Tracker` makes the visit
-/// observable, so this pins the head, the tail and the 12-element maximum.
+/// `impl_thread_aware_tuple!` removes the first element in each recursive step. The 1-tuple is
+/// the last implementation before `()`. Its comma is required. Without it, `let (A) = self`
+/// binds the whole tuple and recursively relocates the tuple instead of its element. `Tracker`
+/// makes each visit visible at the minimum, middle, and maximum supported sizes.
 #[test]
 fn every_tuple_element_is_relocated() {
     let threads = sample_threads();
@@ -169,7 +165,7 @@ fn every_tuple_element_is_relocated() {
 
 #[test]
 fn function_pointers_stay_callable_after_relocate() {
-    // Helper functions for testing
+    // Functions with different signatures test each supported arity.
     fn no_args() -> i32 {
         42
     }
@@ -190,7 +186,7 @@ fn function_pointers_stay_callable_after_relocate() {
         arg0 + arg1 + arg2 + arg3 + arg4 + arg5
     }
 
-    // Test with different return types
+    // These functions also test different return types.
     fn returns_string() -> String {
         "hello".to_string()
     }
@@ -203,27 +199,22 @@ fn function_pointers_stay_callable_after_relocate() {
     let source = Some(&threads[0]);
     let destination = &threads[1];
 
-    // Test fn() -> R
     let mut fn_ptr_no_args: fn() -> i32 = no_args;
     fn_ptr_no_args.relocate(source, destination);
     assert_eq!(fn_ptr_no_args(), 42);
 
-    // Test fn(A) -> R
     let mut fn_ptr_one: fn(i32) -> i32 = one_arg;
     fn_ptr_one.relocate(source, destination);
     assert_eq!(fn_ptr_one(5), 10);
 
-    // Test fn(A, B) -> R
     let mut fn_ptr_two: fn(i32, i32) -> i32 = two_args;
     fn_ptr_two.relocate(source, destination);
     assert_eq!(fn_ptr_two(3, 7), 10);
 
-    // Test fn(A, B, C) -> R
     let mut fn_ptr_three: fn(i32, i32, i32) -> i32 = three_args;
     fn_ptr_three.relocate(source, destination);
     assert_eq!(fn_ptr_three(1, 2, 3), 6);
 
-    // Test with many arguments
     let mut fn_ptr_many: fn(i32, i32, i32, i32, i32, i32) -> i32 = many_args;
     fn_ptr_many.relocate(source, destination);
     assert_eq!(fn_ptr_many(1, 2, 3, 4, 5, 6), 21);
