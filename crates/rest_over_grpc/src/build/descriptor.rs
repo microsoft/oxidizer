@@ -1322,9 +1322,17 @@ mod tests {
         assert!(err.to_string().contains("custom pattern is not a message"));
 
         let custom_ext = pool.get_extension_by_name("malformed_fields.custom_rule").unwrap();
-        for (present, value, message) in [
-            ("path", "/v1/custom", "custom pattern has no kind"),
-            ("kind", "REPORT", "custom pattern has no path"),
+        for (present, value, expected) in [
+            (
+                "path",
+                "/v1/custom",
+                "RPC `Custom` has a malformed http annotation: custom pattern has no kind",
+            ),
+            (
+                "kind",
+                "REPORT",
+                "RPC `Custom` has a malformed http annotation: custom pattern has no path",
+            ),
         ] {
             let mut custom = DynamicMessage::new(pool.get_message_by_name("malformed_fields.CustomPattern").unwrap());
             custom.set_field_by_name(present, Value::String(value.into()));
@@ -1334,7 +1342,8 @@ mod tests {
             options.set_extension(&custom_ext, Value::Message(rule));
 
             let error = read_http_rule("Custom", &options, Some(&custom_ext), &msg, &msg).unwrap_err();
-            assert!(error.to_string().contains(message), "{error}");
+            assert!(error.is_malformed());
+            assert_eq!(error.to_string(), expected);
         }
 
         let bad_additional_ext = pool
