@@ -10,7 +10,7 @@ use crate::runtime::bootstrap;
 use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, RuntimeConfig, RuntimeName, WorkersPolicy};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
-use crate::runtime::hook::Hook;
+use crate::runtime::hook::{Hook, HookFn};
 
 /// Configures workers and clocks before starting a runtime.
 ///
@@ -70,10 +70,10 @@ impl RuntimeBuilder {
     /// use arty::runtime::Runtime;
     /// use arty::runtime::hook::OnPanic;
     ///
-    /// let builder = Runtime::builder().on((), OnPanic::IGNORE);
+    /// let builder = Runtime::builder().on(OnPanic::IGNORE);
     /// ```
     #[must_use]
-    pub fn on<H, D>(mut self, data: D, callback: fn(&mut H, &D)) -> Self
+    pub fn on<H, D>(mut self, hook: impl Into<HookFn<H, D>>) -> Self
     where
         H: Hook,
         D: thread_aware::ThreadAware + Clone + 'static,
@@ -82,7 +82,7 @@ impl RuntimeBuilder {
             .hooks
             .get_mut()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .add(data, callback);
+            .add(hook.into());
         self
     }
 

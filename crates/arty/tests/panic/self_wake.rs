@@ -47,7 +47,7 @@ fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .on((), OnPanic::IGNORE)
+        .on(OnPanic::IGNORE)
         .build()
         .unwrap();
     let polls = Arc::new(AtomicUsize::new(0));

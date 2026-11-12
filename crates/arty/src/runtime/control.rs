@@ -3,7 +3,7 @@
 
 use crate::runtime::Workers;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{Hook, HookRegistration};
+use crate::runtime::hook::{Hook, HookFn, HookRegistration};
 
 /// Requests runtime shutdown from any thread.
 ///
@@ -78,16 +78,16 @@ impl RuntimeControl {
     /// let control = runtime
     ///     .scheduler()
     ///     .block_on(async |cx| cx.control().clone())?;
-    /// control.on((), OnPanic::IGNORE);
+    /// control.on(OnPanic::IGNORE);
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn on<H, D>(&self, data: D, callback: fn(&mut H, &D))
+    pub fn on<H, D>(&self, hook: impl Into<HookFn<H, D>>)
     where
         H: Hook,
         D: thread_aware::ThreadAware + Clone + 'static,
     {
-        let hook = HookRegistration::new(data, callback);
+        let hook = HookRegistration::new(hook.into());
         self.dispatcher.register_hook(&hook);
     }
 

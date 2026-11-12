@@ -3,7 +3,7 @@
 
 use thread_aware::Thread;
 
-use super::typed::{HookCallback, TypedHook};
+use super::typed::TypedHook;
 
 /// Reports that an async worker is starting.
 ///
@@ -40,11 +40,8 @@ impl super::Hook for OnStart {}
 pub(crate) struct StartHook(TypedHook<OnStart>);
 
 impl StartHook {
-    pub(crate) fn new<D>(data: D, callback: HookCallback<OnStart, D>) -> Self
-    where
-        D: thread_aware::ThreadAware + Clone + 'static,
-    {
-        Self(TypedHook::<OnStart>::new(data, callback))
+    pub(crate) const fn new(hook: TypedHook<OnStart>) -> Self {
+        Self(hook)
     }
     pub(crate) fn execute(&mut self, event: &mut OnStart) {
         self.0.execute(event);

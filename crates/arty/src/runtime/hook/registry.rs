@@ -7,7 +7,7 @@ use thread_aware::{Thread, ThreadAware};
 
 use super::on_panic::PanicHook;
 use super::on_start::StartHook;
-use super::typed::HookCallback;
+use super::typed::{HookFn, TypedHook};
 use super::{Hook, OnPanic, OnStart};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,14 +22,6 @@ enum HookType {
     Panic,
 }
 
-struct HookWithData<H: Hook, D>
-where
-    D: ThreadAware + Clone + 'static,
-{
-    data: D,
-    callback: HookCallback<H, D>,
-}
-
 #[derive(Clone, derive_more::Debug, ThreadAware)]
 pub(crate) enum HookRegistration {
     Start(StartHook),
@@ -37,24 +29,24 @@ pub(crate) enum HookRegistration {
 }
 
 impl HookRegistration {
-    pub(crate) fn new<H, D>(data: D, callback: HookCallback<H, D>) -> Self
+    pub(crate) fn new<H, D>(hook: HookFn<H, D>) -> Self
     where
         H: Hook,
         D: ThreadAware + Clone + 'static,
     {
-        let hook: Box<dyn Any + Send> = Box::new(HookWithData { data, callback });
+        let hook: Box<dyn Any + Send> = Box::new(hook.erased());
         match hook_type::<H>() {
             HookType::Start => {
                 let hook = *hook
-                    .downcast::<HookWithData<OnStart, D>>()
+                    .downcast::<TypedHook<OnStart>>()
                     .expect("OnStart hook type is selected by its TypeId");
-                Self::Start(StartHook::new(hook.data, hook.callback))
+                Self::Start(StartHook::new(hook))
             }
             HookType::Panic => {
                 let hook = *hook
-                    .downcast::<HookWithData<OnPanic, D>>()
+                    .downcast::<TypedHook<OnPanic>>()
                     .expect("OnPanic hook type is selected by its TypeId");
-                Self::Panic(PanicHook::new(hook.data, hook.callback))
+                Self::Panic(PanicHook::new(hook))
             }
         }
     }
@@ -67,12 +59,12 @@ pub(crate) struct Hooks {
 }
 
 impl Hooks {
-    pub(crate) fn add<H, D>(&mut self, data: D, callback: HookCallback<H, D>)
+    pub(crate) fn add<H, D>(&mut self, hook: HookFn<H, D>)
     where
         H: Hook,
         D: ThreadAware + Clone + 'static,
     {
-        self.push(HookRegistration::new(data, callback));
+        self.push(HookRegistration::new(hook));
     }
 
     pub(crate) fn install(&mut self, mut hook: HookRegistration, source: Option<&Thread>, destination: &Thread) {

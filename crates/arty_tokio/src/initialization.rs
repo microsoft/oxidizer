@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use arty::core::Thread;
-use arty::runtime::hook::OnStart;
+use arty::runtime::hook::{HookFn, OnStart};
 use arty::task::{Context, JoinHandle, Scheduler};
 use performables::sync::channel::{OneshotReceiver, OneshotSender, WatchReceiver, WatchSender, oneshot, watch};
 use thread_aware::ThreadAware;
@@ -193,13 +193,13 @@ pub(crate) async fn initialize_all_workers(cx: &Context, tokio: TokioHandle) -> 
     }
 
     if commit_if_started(&transaction, startup_succeeded(failure.as_ref(), ready, installers.len())) {
-        cx.control().on::<OnStart, _>(
+        cx.control().on(HookFn::<OnStart, _>::new(
             StartupInstaller {
                 handle: transaction.handle.clone(),
                 scheduler: cx.scheduler().clone(),
             },
             install_on_start,
-        );
+        ));
         abort_on_drop.disarm();
         return Ok(());
     }

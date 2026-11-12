@@ -425,7 +425,7 @@ fn dropping_another_runtime_from_a_worker_panics() {
     let target = runtime(1);
     let caller = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .on((), OnPanic::IGNORE)
+        .on(OnPanic::IGNORE)
         .build()
         .unwrap();
     let retained = worker_scheduler(&target);

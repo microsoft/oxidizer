@@ -10,7 +10,7 @@ use std::fmt::Debug;
 use std::io;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
-use arty::runtime::hook::{Hook, OnPanic, OnStart};
+use arty::runtime::hook::{Hook, HookFn, OnPanic, OnStart};
 use arty::runtime::{
     BlockingPoolPolicy, Error, MonitorPolicy, Runtime, RuntimeBuilder, RuntimeControl, ShutdownCause, Workers, WorkersPolicy,
 };
@@ -40,8 +40,10 @@ assert_impl_all!(MonitorPolicy: Clone, Debug, Default);
 assert_not_impl_any!(MonitorPolicy: Copy);
 assert_impl_all!(OnStart: Debug, Hook);
 assert_impl_all!(OnPanic: Debug, Hook);
+assert_impl_all!(HookFn<OnPanic, ()>: Clone, ThreadAware);
 assert_not_impl_any!(OnStart: Copy);
 assert_not_impl_any!(OnPanic: Copy);
+assert_not_impl_any!(HookFn<OnPanic, ()>: Copy);
 assert_impl_all!(WorkersPolicy: Clone, Copy, Debug, Default);
 assert_impl_all!(Error: StdError, Send, Sync);
 assert_not_impl_any!(Error: From<io::Error>, From<Box<dyn StdError + Send + Sync>>);
@@ -50,9 +52,6 @@ const _: fn(usize) -> WorkersPolicy = WorkersPolicy::exactly;
 const _: fn(usize) -> WorkersPolicy = WorkersPolicy::at_most;
 const _: fn() -> MonitorPolicy = MonitorPolicy::enabled;
 const _: fn() -> MonitorPolicy = MonitorPolicy::disabled;
-type PanicCallback = fn(&mut OnPanic, &());
-
-const _: fn(RuntimeBuilder, (), PanicCallback) -> RuntimeBuilder = RuntimeBuilder::on::<OnPanic, ()>;
 const _: fn(&JoinError) -> Option<ShutdownCause> = JoinError::shutdown_cause;
 
 const _: fn(&Runtime) -> &RuntimeScheduler = Runtime::scheduler;
@@ -60,6 +59,5 @@ const _: fn(Runtime) -> Result<(), Error> = Runtime::stop;
 const _: fn(&Context) -> &RuntimeControl = Context::control;
 const _: fn(&RuntimeControl) = RuntimeControl::request_stop;
 const _: fn(&RuntimeControl) -> &Workers = RuntimeControl::workers;
-const _: fn(&RuntimeControl, (), PanicCallback) = RuntimeControl::on::<OnPanic, ()>;
 fn assert_join_output<F: Future<Output = Result<u32, JoinError>>>() {}
 const _: fn() = assert_join_output::<JoinHandle<u32>>;

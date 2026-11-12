@@ -323,7 +323,7 @@ fn factory_and_poll_panics_return_errors_and_preserve_runtime_usability() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .on((), OnPanic::IGNORE)
+        .on(OnPanic::IGNORE)
         .build()
         .unwrap();
     let factory = runtime.scheduler().spawn_anywhere((), |cx, ()| panic_factory(cx));

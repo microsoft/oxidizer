@@ -5,7 +5,7 @@ use arty_executor::TaskPanicPayload;
 use thread_aware::Thread;
 
 use super::registry::PanicAction;
-use super::typed::{HookCallback, TypedHook};
+use super::typed::{HookFn, TypedHook};
 
 /// Reports that Arty contained a panic from user task code.
 ///
@@ -30,7 +30,7 @@ pub struct OnPanic {
 
 impl OnPanic {
     /// Keeps the runtime running after a contained panic.
-    pub const IGNORE: fn(&mut Self, &()) = |event, ()| event.ignore();
+    pub const IGNORE: HookFn<Self, ()> = HookFn::new((), |event, ()| event.ignore());
 
     pub(crate) const fn new(payload: TaskPanicPayload) -> Self {
         Self {
@@ -66,11 +66,8 @@ impl super::Hook for OnPanic {}
 pub(crate) struct PanicHook(TypedHook<OnPanic>);
 
 impl PanicHook {
-    pub(crate) fn new<D>(data: D, callback: HookCallback<OnPanic, D>) -> Self
-    where
-        D: thread_aware::ThreadAware + Clone + 'static,
-    {
-        Self(TypedHook::<OnPanic>::new(data, callback))
+    pub(crate) const fn new(hook: TypedHook<OnPanic>) -> Self {
+        Self(hook)
     }
     pub(crate) fn execute(&mut self, event: &mut OnPanic) {
         self.0.execute(event);

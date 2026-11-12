@@ -139,7 +139,7 @@ fn arty_spawn_blocking_returns_output() {
 fn arty_task_panics_return_join_errors() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .on((), OnPanic::IGNORE)
+        .on(OnPanic::IGNORE)
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
