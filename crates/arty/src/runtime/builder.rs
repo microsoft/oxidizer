@@ -215,7 +215,8 @@ impl RuntimeBuilder {
     ///
     /// # Errors
     ///
-    /// Returns [`Error`] if the worker count or blocking-pool limit is zero.
+    /// Returns [`Error`] if the worker count or blocking-pool limit is zero,
+    /// or if the runtime name contains a null character (`\0`).
     ///
     /// # Panics
     ///
