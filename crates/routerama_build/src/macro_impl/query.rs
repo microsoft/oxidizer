@@ -497,7 +497,6 @@ fn encode_parameter(parameter: &str) -> String {
 }
 
 // Reversing the collision predicate makes uniqueness search non-terminating.
-#[cfg_attr(test, mutants::skip)]
 fn unique_lifetime_marker(parsed: &QueryInput<'_>) -> Ident {
     let mut candidate = "__routerama_query_lifetime".to_owned();
     while parsed.fields.iter().any(|field| field.ident == candidate.as_str()) {
@@ -831,7 +830,6 @@ fn lifetime_names(generics: &Generics) -> HashSet<String> {
 }
 
 // Reversing the collision predicate makes uniqueness search non-terminating.
-#[cfg_attr(test, mutants::skip)]
 fn unique_generic_ident(base: &str, used: &mut HashSet<String>) -> Ident {
     let mut name = base.to_owned();
     while !used.insert(name.clone()) {

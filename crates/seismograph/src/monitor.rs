@@ -389,9 +389,7 @@ fn run_listener(
                 let registration = match active_clients.register(&stream) {
                     Ok(Some(registration)) => registration,
                     Ok(None) => {
-                        if let Err(error) = stream.close() {
-                            set_last_error(last_error, &error);
-                        }
+                        close_rejected_client(&stream, last_error);
                         continue;
                     }
                     Err(error) => {
@@ -417,6 +415,12 @@ fn run_listener(
 
 const fn listener_accept_should_retry(kind: io::ErrorKind) -> bool {
     matches!(kind, io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted)
+}
+
+fn close_rejected_client(stream: &Connection, last_error: &Mutex<Option<String>>) {
+    if let Err(error) = stream.close() {
+        set_last_error(last_error, &error);
+    }
 }
 
 fn spawn_listener_thread(
@@ -601,8 +605,7 @@ fn connected_response_with_guard(request: &Request) -> ConnectedResponse {
                 };
             };
             ConnectedResponse {
-                response: crate::recorder::clear_buffers()
-                    .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
+                response: acknowledgement_response(crate::recorder::clear_buffers()),
                 _snapshot_guard: None,
             }
         }
@@ -611,8 +614,7 @@ fn connected_response_with_guard(request: &Request) -> ConnectedResponse {
             _snapshot_guard: None,
         },
         Request::SetRecording(configuration) => ConnectedResponse {
-            response: apply_recording_configuration(*configuration)
-                .map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged),
+            response: acknowledgement_response(apply_recording_configuration(*configuration)),
             _snapshot_guard: None,
         },
         Request::SetCacheRecording(policy) => {
@@ -674,6 +676,10 @@ fn apply_recording_configuration(configuration: RecordingConfiguration) -> Resul
         cache: recorder_policy(configuration.cache),
         event_capacity_per_thread,
     })
+}
+
+fn acknowledgement_response(result: Result<(), crate::Error>) -> Response {
+    result.map_or_else(|error| Response::Error(error.to_string()), |()| Response::Acknowledged)
 }
 
 fn recorder_statistics_response() -> Response {
@@ -1748,6 +1754,60 @@ mod tests {
         );
         drop(monitor);
         assert_eq!((response_received, connection_is_closed(&mut blocked)), (true, true));
+    }
+
+    #[test]
+    fn exhausted_client_identifiers_reject_registration() {
+        let (_io, control) = MonitorIo::new_mocked();
+        let (_peer, stream) = control.connected_pair();
+        let clients = Arc::new(ActiveClients::new());
+        clients.state.lock().unwrap().next_id = u64::MAX;
+
+        let error = clients.register(&stream).err().unwrap();
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(error.to_string().contains("identifier"));
+        assert!(clients.state.lock().unwrap().streams.is_empty());
+    }
+
+    #[test]
+    fn rejected_client_close_failure_is_reported() {
+        let (_io, control) = MonitorIo::new_mocked();
+        let (_peer, stream) = control.connected_pair();
+        control.fail_next(
+            seismograph_protocol::io::IoOperation::Close,
+            io::Error::new(io::ErrorKind::PermissionDenied, "close denied"),
+        );
+        let last_error = Mutex::new(None);
+
+        close_rejected_client(&stream, &last_error);
+
+        assert_eq!(last_error.lock().unwrap().as_deref(), Some("close denied"));
+    }
+
+    #[test]
+    fn rejected_client_close_preserves_previous_error() {
+        let (_io, control) = MonitorIo::new_mocked();
+        let (mut peer, stream) = control.connected_pair();
+        let last_error = Mutex::new(Some("previous error".to_owned()));
+
+        close_rejected_client(&stream, &last_error);
+
+        assert_eq!(peer.write(b"rejected").unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(last_error.lock().unwrap().as_deref(), Some("previous error"));
+    }
+
+    #[test]
+    fn unrepresentable_read_timeout_is_rejected() {
+        let (io, control) = MonitorIo::new_mocked();
+        let (_peer, mut stream) = control.connected_pair();
+
+        let error = read_request_with_timeout(&io, &mut stream, &AtomicBool::new(false), Duration::MAX, ReadTimeout::Idle).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ClientError::Io(error) if error.kind() == io::ErrorKind::InvalidInput
+        ));
     }
 
     #[test]

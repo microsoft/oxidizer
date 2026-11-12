@@ -415,7 +415,6 @@ fn grow_target(cur: usize, needed: usize) -> usize {
 }
 
 #[inline]
-#[cfg_attr(test, mutants::skip)] // `<` → `<=` only calls the cold no-op reserve path at exact capacity
 const fn extend_needs_growth(remaining: usize, additional: usize) -> bool {
     remaining < additional
 }

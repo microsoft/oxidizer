@@ -91,21 +91,18 @@ impl From<WinHttpError> for QueryError {
 
 /// Every operand is a distinct bit, so `|` and `^` compute the same value and a
 /// mutation between them is equivalent rather than a defect.
-#[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
 const fn status_code_query_flags() -> u32 {
     WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER
 }
 
 /// Every operand is a distinct bit, so `|` and `^` compute the same value and a
 /// mutation between them is equivalent rather than a defect.
-#[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
 const fn raw_headers_query_flags() -> u32 {
     WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_WIRE_ENCODING
 }
 
 /// Every operand is a distinct bit, so `|` and `^` compute the same value and a
 /// mutation between them is equivalent rather than a defect.
-#[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
 const fn raw_trailers_query_flags() -> u32 {
     WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_TRAILERS | WINHTTP_QUERY_FLAG_WIRE_ENCODING
 }

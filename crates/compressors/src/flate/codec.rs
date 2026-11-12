@@ -25,11 +25,9 @@ use crate::trailing::TrailingData;
 ///
 /// On a 64-bit target the conversion is a no-op and this cannot fail, which is why it is excluded
 /// from coverage. It is required on narrower targets.
-// Excluded from mutation testing for a related reason: this runs on every engine step, so a mutant
-// that fixes the result to a small constant makes every step report a byte-sized delta. The pump
-// then needs one step per byte and the harness times out before any assertion can fail.
+// A mutant that fixes the result to a small constant makes every engine step report a byte-sized
+// delta. The pump then needs one step per byte and can time out before any assertion can fail.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 fn step_count(delta: u64) -> Result<usize> {
     usize::try_from(delta).map_err(|error| {
         Error::invalid_state(format!(
@@ -37,6 +35,14 @@ fn step_count(delta: u64) -> Result<usize> {
         ))
         .with_source(error)
     })
+}
+
+// Native zlib-rs stream errors require invalid slices or an invalid stream order.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cold]
+// #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, reason = "The native engine cannot report compression failure with valid slices and stream ordering.")]
+fn compression_failed(error: flate2::CompressError) -> Error {
+    Error::invalid_state("the compression engine reported a failure").with_source(error)
 }
 
 /// Drives `flate2`'s encoder for one compressed stream.
@@ -82,6 +88,7 @@ impl Drop for FlateCompress {
 // SAFETY: `step` writes through `flate2`'s `*_uninit` entry points, which take the uninitialized
 // slice and report what they filled, so the count is the engine's own.
 unsafe impl Codec for FlateCompress {
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "Valid slices and stream ordering prevent native compression errors; each counter delta fits its supplied slice.")]
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
         let flush = match operation {
             Operation::Process => FlushCompress::None,
@@ -93,9 +100,7 @@ unsafe impl Codec for FlateCompress {
         let before_in = compress.total_in();
         let before_out = compress.total_out();
 
-        let status = compress
-            .compress_uninit(input, output, flush)
-            .map_err(|error| Error::invalid_state("the compression engine reported a failure").with_source(error))?;
+        let status = compress.compress_uninit(input, output, flush).map_err(compression_failed)?;
 
         let consumed = step_count(compress.total_in() - before_in)?;
         let produced = step_count(compress.total_out() - before_out)?;
@@ -243,10 +248,8 @@ unsafe impl Codec for FlateDecompress {
         self.limits.check(total_in, total_out, streams)
     }
 
-    // Delegates to `FormatLimits::remaining_output`, and is excluded for the same reason: a mutant
-    // that answers a small constant only shrinks the slice offered per step, so the pump crawls and
-    // the harness times out rather than reaching a verdict.
-    #[cfg_attr(test, mutants::skip)]
+    // A small constant shrinks the slice offered per step without changing the result.
+    // That can exceed the mutation harness's time budget.
     fn remaining_output(&self, total_out: u64) -> Option<u64> {
         self.limits.remaining_output(total_out)
     }

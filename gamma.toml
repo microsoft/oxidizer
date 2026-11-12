@@ -1,0 +1,53 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+files = ["crates/**"]
+exclude-files = [
+    # Shared test fixtures are not production behavior.
+    "crates/fetch_winhttp_impl/src/testing/**",
+    "crates/fakeable_test/**",
+    "crates/observed_testing/**",
+    "crates/rest_over_grpc_examples/**",
+    "crates/rest_over_grpc_tests/**",
+    "crates/testing_aids/**",
+    # Keep the existing package exclusions.
+    "crates/http_headers/**",
+    "crates/http_headers_simd/**",
+    "crates/rallocator/**",
+    "crates/seismograph_rallocator/**",
+    # Terminal rendering, layout, mouse routing, and presentation-only formatting.
+    "crates/seismograph_cli/src/commands/monitor/help.rs",
+    "crates/seismograph_cli/src/commands/monitor/info_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/mouse.rs",
+    "crates/seismograph_cli/src/commands/monitor/native_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/native_ui/**",
+    "crates/seismograph_cli/src/commands/monitor/panels.rs",
+    "crates/seismograph_cli/src/commands/monitor/runtime_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/task_events_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/ui.rs",
+]
+all-features = true
+profile = "mutants"
+cargo-args = ["--locked"]
+
+# Diagnostic formatting has no stable behavioral contract.
+# Gamma matches the final written trait name, not a resolved trait identity.
+exclude-trait-impls = [
+    "Debug", "Redactor", "RedactedDebug", "RedactedDisplay", "RedactedToString",
+]
+
+# Gamma selects unit and integration test targets itself.
+# Keep the existing intentional-abort and real-time stress filters.
+# Type-system contracts run in the native and careful suites.
+cargo-test-args = [
+    "--skip", "abort::tests::subprocess_oracle_rejects_normal_return",
+    "--skip", "abort::tests::subprocess_oracle_accepts_genuine_abort",
+    "--skip", "backend::tests::missing_initialization_aborts_before_reading_range_metadata",
+    "--skip", "combining::tests::consumed_action_aborts_instead_of_running_twice",
+    "--skip", "observation::tests::poisoned_publication_copy_aborts_instead_of_reporting_empty_state",
+    "--skip", "observation::tests::poisoned_publisher_aborts_instead_of_overwriting_failed_state",
+    "--skip", "observation::tests::generation_overflow_aborts_instead_of_reusing_a_lease_identity",
+    "--skip", "thread::tests::poisoned_pool_aborts_before_lending_an_owner",
+    "--skip", "runner::tests::captured_logs_bound_sustained_output_and_timeout_cleanup",
+    "--skip", "type_system_contracts",
+]

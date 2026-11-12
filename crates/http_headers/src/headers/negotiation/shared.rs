@@ -156,9 +156,7 @@ fn validate_custom_values(values: &FieldLines<'_>, name: &'static FieldName, val
     let mut item_count = 0_usize;
     for value in values.repeated() {
         for item in QuotedItems::comma(value.as_bytes(), name) {
-            item_count = item_count
-                .checked_add(1)
-                .ok_or_else(|| invalid(name, DecodeErrorKind::SourceLimitExceeded))?;
+            item_count = item_count.saturating_add(1);
             if item_count > MAX_CUSTOM_LIST_ITEMS {
                 return Err(invalid(name, DecodeErrorKind::SourceLimitExceeded));
             }

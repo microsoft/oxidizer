@@ -111,7 +111,6 @@ impl WinHttpTlsConfigBuilder {
 ///
 /// Every operand is a distinct bit, so `|` and `^` compute the same value and a
 /// mutation between them is equivalent rather than a defect.
-#[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
 const fn ignored_certificate_checks() -> u32 {
     SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
 }

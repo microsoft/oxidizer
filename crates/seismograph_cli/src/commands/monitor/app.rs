@@ -1148,7 +1148,6 @@ impl App {
             }
     }
 
-    #[cfg_attr(test, mutants::skip)] // Top-level key routing is terminal input glue covered by focused handlers.
     pub(super) fn handle_key(&mut self, code: KeyCode) -> bool {
         if self.handle_help_key(code) || self.native_back(code) {
             return false;
@@ -1250,7 +1249,6 @@ impl App {
         false
     }
 
-    #[cfg_attr(test, mutants::skip)] // Selection-to-connection state transfer is interactive monitor glue.
     fn connect_selected_instance(&mut self) {
         if let Some(instance) = self.instances.get(self.selected) {
             self.filters.invalidate();
@@ -1276,7 +1274,6 @@ impl App {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
     fn handle_recording_configuration_key(&mut self, code: KeyCode) {
         if code == KeyCode::Enter {
             if let Some(popup) = self.recording_configuration_popup {
@@ -1511,7 +1508,6 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)] // Thread creation and capture progress are nondeterministic integration glue.
     fn start_snapshot_capture(&mut self, descriptor: MonitorDescriptor, mode: CaptureMode) {
         let (sender, receiver) = unbounded();
         let instance_id = descriptor.instance_id;
@@ -1692,7 +1688,6 @@ impl App {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Row-navigation arithmetic is terminal input glue.
 fn handle_info_key(code: KeyCode, selected: &mut usize, count: usize) -> bool {
     let last = count.saturating_sub(1);
     match code {
@@ -1742,7 +1737,6 @@ fn activity_rate(previous_total: u64, current_total: u64, elapsed: Duration) -> 
     u64::try_from(rate).unwrap_or(u64::MAX)
 }
 
-#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_allocation_key(code: KeyCode, view: &mut AllocationViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     match code {
         KeyCode::Up => {
@@ -1791,7 +1785,6 @@ fn tier_with_kind(tiers: &[MemoryTierData], kind: MemoryTier) -> Option<&MemoryT
     tiers.iter().find(|tier| tier.kind == kind)
 }
 
-#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_heap_key(code: KeyCode, view: &mut HeapViewState, snapshot: Option<&CapturedSnapshot>, scroll_limit: usize) -> bool {
     view.backend = view.backend(snapshot);
     if code == KeyCode::Char('b') && snapshot.is_some_and(|capture| capture.native.is_some() && capture.mimalloc.is_some()) {
@@ -1867,7 +1860,6 @@ fn handle_heap_key(code: KeyCode, view: &mut HeapViewState, snapshot: Option<&Ca
     true
 }
 
-#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_primitive_key(code: KeyCode, view: &mut PrimitiveViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let primitives = snapshot.map(|snapshot| &snapshot.primitives);
     let group = primitives.and_then(|primitives| primitives.groups.get(view.primitive_selected));
@@ -1944,7 +1936,6 @@ fn handle_primitive_key(code: KeyCode, view: &mut PrimitiveViewState, snapshot: 
     true
 }
 
-#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_thread_key(code: KeyCode, view: &mut ThreadViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let threads = snapshot.map(|snapshot| &snapshot.threads);
     let thread = threads.and_then(|threads| threads.threads.get(view.thread_selected));
@@ -2018,7 +2009,6 @@ fn handle_thread_key(code: KeyCode, view: &mut ThreadViewState, snapshot: Option
     true
 }
 
-#[cfg_attr(test, mutants::skip)] // Dashboard focus and scrolling are terminal input glue.
 fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let runtime = snapshot.map(|snapshot| &snapshot.runtime);
     let worker = runtime.and_then(|runtime| runtime.workers.get(view.worker_selected));
@@ -2107,7 +2097,6 @@ fn handle_runtime_key(code: KeyCode, view: &mut RuntimeViewState, snapshot: Opti
     true
 }
 
-#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_task_events_key(code: KeyCode, view: &mut TaskEventsViewState, task: Option<&super::task_events::TaskEventSummary>) -> bool {
     let operation = task.and_then(|task| {
         task.operations
@@ -2157,7 +2146,6 @@ fn handle_task_events_key(code: KeyCode, view: &mut TaskEventsViewState, task: O
     true
 }
 
-#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_io_key(code: KeyCode, view: &mut IoViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let io = snapshot.map(|snapshot| &snapshot.io);
     let resource = io.and_then(|io| io.resources.get(view.resource_selected));
@@ -2192,7 +2180,6 @@ fn handle_io_key(code: KeyCode, view: &mut IoViewState, snapshot: Option<&Captur
     true
 }
 
-#[cfg_attr(test, mutants::skip)] // Terminal navigation is excluded from mutation testing.
 fn handle_cache_key(code: KeyCode, view: &mut CacheViewState, snapshot: Option<&CapturedSnapshot>) -> bool {
     let cache = snapshot.map(|snapshot| &snapshot.cache);
     let tier = cache.and_then(|cache| cache.tiers.get(view.tier_selected));

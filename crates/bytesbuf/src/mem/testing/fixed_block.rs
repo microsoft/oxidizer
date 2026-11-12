@@ -95,7 +95,6 @@ impl FixedBlockMemory {
 }
 
 impl Memory for FixedBlockMemory {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
     }

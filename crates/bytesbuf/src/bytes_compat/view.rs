@@ -9,18 +9,15 @@ use bytes::Buf;
 use crate::BytesView;
 
 impl Buf for BytesView {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn remaining(&self) -> usize {
         self.len()
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn chunk(&self) -> &[u8] {
         self.first_slice()
     }
 
     #[cfg(feature = "std")]
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn chunks_vectored<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
         if dst.is_empty() {
             return 0;
@@ -35,7 +32,6 @@ impl Buf for BytesView {
         slice_count
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn advance(&mut self, cnt: usize) {
         self.advance(cnt);
     }

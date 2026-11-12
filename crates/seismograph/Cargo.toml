@@ -43,8 +43,8 @@ seismograph_protocol = { workspace = true, optional = true }
 windows-sys = { workspace = true, features = ["Win32_System_Diagnostics_Debug"] }
 
 [dev-dependencies]
-mutants.workspace = true
 seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
+tempfile = { workspace = true }
 
 [[test]]
 name = "snapshot_symbols"

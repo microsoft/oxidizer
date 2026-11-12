@@ -35,7 +35,22 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs anvil-impact
         # coverage-gate runs that target's tests without measuring coverage.
         '--no-coverage-target', 'aarch64-pc-windows-msvc'
     )
-    & cargo '+{{ rust_nightly }}' coverage-gate run @packageArgs @collectionArgs
+    $metadataOutput = (& cargo '+{{ rust_nightly }}' metadata --format-version 1 --no-deps --locked | Out-String)
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $metadata = ConvertFrom-Json -InputObject $metadataOutput
+    $ownsCollector = @(
+        $metadata.packages |
+            Where-Object { $_.name -ceq 'cargo-coverage-gate' -and $_.id -cin $metadata.workspace_members } |
+            ForEach-Object { $_.targets } |
+            Where-Object { $_.name -ceq 'cargo-coverage-gate' -and 'bin' -cin $_.kind }
+    ).Count -gt 0
+    if ($ownsCollector) {
+        $hostTarget = & rustc '+{{ rust_nightly }}' --print host-tuple
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & cargo '+{{ rust_nightly }}' run --locked --package cargo-coverage-gate --bin cargo-coverage-gate --target $hostTarget -- coverage-gate run @packageArgs @collectionArgs
+    } else {
+        & cargo '+{{ rust_nightly }}' coverage-gate run @packageArgs @collectionArgs
+    }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # --- pr-test members (shared with scheduled-test) ---

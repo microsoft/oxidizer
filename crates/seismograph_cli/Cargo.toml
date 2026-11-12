@@ -44,7 +44,6 @@ seismograph_rallocator.workspace = true
 seismograph_runtime.workspace = true
 
 [dev-dependencies]
-mutants.workspace = true
 seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
 tempfile.workspace = true
 

@@ -145,7 +145,6 @@ impl MultiPool<Global> {
 
     /// Starts a [`MultiPoolBuilder`].
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Replacing the builder with Default is an unviable/equivalent mutant.
     pub fn builder() -> MultiPoolBuilder<Global> {
         MultiPoolBuilder::new()
     }

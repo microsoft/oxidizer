@@ -1101,7 +1101,7 @@ mod tests {
     }
 
     #[test]
-    fn source_storage_debug_and_file_persistence_work() {
+    fn source_storage_and_debug_work() {
         fn capture(_context: SnapshotContext<'_>) -> Result<SourceData, Error> {
             SourceData::copy_from(b"source")
         }
@@ -1132,18 +1132,6 @@ mod tests {
         })
         .unwrap();
         assert!(format!("{snapshot:?}").contains("bytes"));
-        #[cfg(not(miri))]
-        {
-            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("..")
-                .join("..")
-                .join("target")
-                .join(format!("seismograph-snapshot-{}.bin", std::process::id()));
-            snapshot.write_file(&path).unwrap();
-            assert_eq!(std::fs::read(&path).unwrap(), snapshot.as_bytes());
-            std::fs::remove_file(&path).unwrap();
-            assert!(snapshot.write_file(Path::new(env!("CARGO_MANIFEST_DIR"))).is_err());
-        }
     }
 
     #[test]

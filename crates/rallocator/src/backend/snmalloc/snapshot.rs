@@ -34,10 +34,10 @@ fn capture_state() -> Result<seismograph::snapshot::SourceData, seismograph::Err
         publication_enabled: seismograph_rallocator::snapshot::publication_enabled(),
     };
     let len = seismograph_rallocator::snapshot::encoded_len_snmalloc(&header, &global, owners.as_slice())
-        .map_err(|_error| seismograph::Error::new("rallocator source sizing failed"))?;
+        .expect("pool inventory emits unique nonzero owners and valid observations, capped at OWNER_LIMIT");
     let mut data = seismograph::snapshot::SourceData::zeroed(len)?;
     seismograph_rallocator::snapshot::encode_snmalloc(&header, &global, owners.as_slice(), data.as_mut_bytes())
-        .map_err(|_error| seismograph::Error::new("rallocator source encoding failed"))?;
+        .expect("output length was computed from the same immutable snapshot and owner rows");
     seismograph_rallocator::snapshot::request_observation();
     Ok(data)
 }

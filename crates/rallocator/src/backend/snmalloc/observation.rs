@@ -64,25 +64,28 @@ impl Metadata {
     }
 
     /// # Safety
-    /// The caller holds the pool lock or this owner's exclusive lease.
+    /// The caller holds the pool lock or this owner's exclusive lease,
+    /// or exclusively owns unpublished metadata.
     pub(crate) unsafe fn generation(&self) -> u64 {
-        // SAFETY: The generation cannot change during a current owner lease.
+        // SAFETY: The caller excludes concurrent lease-state updates.
         unsafe { *self.generation.get() }
     }
 
     /// # Safety
-    /// The caller holds the pool lock and is transferring an inactive owner.
+    /// The caller holds the pool lock or exclusively owns unpublished metadata.
+    /// The owner is inactive.
     pub(crate) unsafe fn begin_lease(&self) {
-        // SAFETY: The pool lock exclusively owns lease-state updates.
+        // SAFETY: The caller guarantees exclusive access to lease-state updates.
         let generation = unsafe { &mut *self.generation.get() };
         debug_assert_eq!(*generation & 1, 0);
         *generation = next_generation(*generation);
     }
 
     /// # Safety
-    /// The caller holds the pool lock and the previous core action has ended.
+    /// The caller holds the pool lock or exclusively owns unpublished metadata.
+    /// The previous core action has ended.
     pub(crate) unsafe fn end_lease(&self) {
-        // SAFETY: The pool lock exclusively owns lease-state updates.
+        // SAFETY: The caller guarantees exclusive access to lease-state updates.
         let generation = unsafe { &mut *self.generation.get() };
         // Isolated pool tests may return a freshly initialized, unleased owner.
         if *generation & 1 != 0 {
@@ -168,7 +171,7 @@ impl OwnerBuffer {
     pub(crate) fn new(capacity: usize) -> Result<Self, seismograph::Error> {
         let capacity = capacity.clamp(1, OWNER_LIMIT);
         let layout = Layout::array::<seismograph_rallocator::native::Owner>(capacity)
-            .map_err(|_error| seismograph::Error::new("rallocator inventory size overflow"))?;
+            .expect("capacity is clamped to OWNER_LIMIT, whose owner array fits within isize::MAX");
         // SAFETY: System bypasses GlobalAlloc; layout describes an array of owner rows.
         let pointer = unsafe { System.alloc(layout) }.cast::<seismograph_rallocator::native::Owner>();
         let pointer =
@@ -260,6 +263,23 @@ mod tests {
 
     // SAFETY: These tests keep every block within this linked snmalloc instance.
     const ALLOCATOR: crate::Rallocator = unsafe { crate::Rallocator::new(crate::backend::Snmalloc) };
+
+    #[test]
+    fn an_unleased_owner_can_be_returned_before_its_first_lease() {
+        let metadata = Metadata::new();
+
+        // SAFETY: This isolated metadata has no concurrent users or live core action.
+        unsafe {
+            metadata.end_lease();
+        }
+        // SAFETY: The metadata still has no concurrent users or live core action.
+        unsafe {
+            metadata.begin_lease();
+        }
+
+        // SAFETY: The test exclusively owns this metadata.
+        assert_eq!(unsafe { metadata.generation() } & 1, 1);
+    }
 
     #[test]
     fn inventory_buffer_stops_exactly_at_its_capacity() {

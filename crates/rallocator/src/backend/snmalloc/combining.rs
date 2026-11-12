@@ -134,12 +134,9 @@ impl<T: Send> Combining<T> {
             }
             crate::backend::snmalloc::hal::pause();
         }
-        if status
+        let _ = status
             .compare_exchange(WAITING, SLEEPING, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
-            crate::backend::snmalloc::hal::wait(status, SLEEPING);
-        }
+            .inspect(|_| crate::backend::snmalloc::hal::wait(status, SLEEPING));
     }
 
     unsafe fn attach(&self, node: *mut Node<T>) {

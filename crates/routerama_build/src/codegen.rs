@@ -312,7 +312,6 @@ fn collect_variants(routes: &[Route], templates: &[PathTemplate<'_>]) -> (Vec<Va
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 const fn use_indexed_variant_collection(route_count: usize) -> bool {
     route_count >= 1_024
 }

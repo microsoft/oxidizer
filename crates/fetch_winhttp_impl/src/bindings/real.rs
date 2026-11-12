@@ -42,8 +42,8 @@ impl RealBindings {
         WinHttpError::new(code, operation)
     }
 
-    fn map_error(error: &WindowsError, operation: WinHttpOperation) -> WinHttpError {
-        WinHttpError::from_hresult(error.code().0, operation)
+    fn unit_result(result: std::result::Result<(), WindowsError>, operation: WinHttpOperation) -> Result<()> {
+        result.map_err(|error| WinHttpError::from_hresult(error.code().0, operation))
     }
 
     fn handle_result(handle: *mut c_void, operation: WinHttpOperation) -> Result<RawHandle> {
@@ -103,11 +103,14 @@ unsafe impl Bindings for RealBindings {
         Self::handle_result(handle, WinHttpOperation::Open)
     }
 
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn set_timeouts(&self, handle: RawHandle, resolve: i32, connect: i32, send: i32, receive: i32) -> Result<()> {
         // SAFETY: the typed handle is non-null and the timeout values use the
         // exact WinHttpSetTimeouts ABI types.
-        unsafe { WinHttpSetTimeouts(handle.as_ptr(), resolve, connect, send, receive) }
-            .map_err(|error| Self::map_error(&error, WinHttpOperation::SetTimeouts))
+        Self::unit_result(
+            unsafe { WinHttpSetTimeouts(handle.as_ptr(), resolve, connect, send, receive) },
+            WinHttpOperation::SetTimeouts,
+        )
     }
 
     #[expect(
@@ -148,22 +151,29 @@ unsafe impl Bindings for RealBindings {
         Self::handle_result(handle, WinHttpOperation::OpenRequest)
     }
 
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, option.some_to_none, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn set_option(&self, handle: RawHandle, option: u32, value: &[u8]) -> Result<()> {
         // SAFETY: the handle is non-null and the byte slice remains valid for
         // the synchronous option-setting call.
-        unsafe { WinHttpSetOption(Some(handle.as_const_ptr()), option, Some(value)) }
-            .map_err(|error| Self::map_error(&error, WinHttpOperation::SetOption))
+        Self::unit_result(
+            unsafe { WinHttpSetOption(Some(handle.as_const_ptr()), option, Some(value)) },
+            WinHttpOperation::SetOption,
+        )
     }
 
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, literal.int_increment, option.some_to_none, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn send_request(&self, request: RawHandle, headers: &U16CStr, total_len: u32, context: usize) -> Result<()> {
         // SAFETY: the caller upholds the request-context lifetime contract.
         // U16CStr::as_slice excludes the trailing NUL from the header length;
         // request bodies are submitted through sequential WinHttpWriteData
         // calls, so the optional buffer is intentionally null.
-        unsafe { WinHttpSendRequest(request.as_ptr(), Some(headers.as_slice()), None, 0, total_len, context) }
-            .map_err(|error| Self::map_error(&error, WinHttpOperation::SendRequest))
+        Self::unit_result(
+            unsafe { WinHttpSendRequest(request.as_ptr(), Some(headers.as_slice()), None, 0, total_len, context) },
+            WinHttpOperation::SendRequest,
+        )
     }
 
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn write_data(&self, request: RawHandle, buffer: Option<NonNull<u8>>, len: u32) -> Result<()> {
         debug_assert!(buffer.is_some() || len == 0, "only the final zero-length write may omit its buffer");
         let buffer = buffer.map(|buffer| buffer.as_ptr().cast_const().cast());
@@ -171,32 +181,43 @@ unsafe impl Bindings for RealBindings {
         // SAFETY: the caller upholds the asynchronous buffer-lifetime
         // contract; a null buffer is paired only with zero length, and the
         // asynchronous OUT pointer is intentionally null.
-        unsafe { WinHttpWriteData(request.as_ptr(), buffer, len, null_mut()) }
-            .map_err(|error| Self::map_error(&error, WinHttpOperation::WriteData))
+        Self::unit_result(
+            unsafe { WinHttpWriteData(request.as_ptr(), buffer, len, null_mut()) },
+            WinHttpOperation::WriteData,
+        )
     }
 
+    // #[gamma::skip(fn_value.ok, reason = "Only the native WinHTTP call can distinguish success from failure here.")]
     unsafe fn receive_response(&self, request: RawHandle) -> Result<()> {
         // SAFETY: the request handle is non-null and the reserved pointer is
         // required to be null.
-        unsafe { WinHttpReceiveResponse(request.as_ptr(), null_mut()) }
-            .map_err(|error| Self::map_error(&error, WinHttpOperation::ReceiveResponse))
+        Self::unit_result(
+            unsafe { WinHttpReceiveResponse(request.as_ptr(), null_mut()) },
+            WinHttpOperation::ReceiveResponse,
+        )
     }
 
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn query_headers(&self, request: RawHandle, info_level: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()> {
         let buffer = buffer.map(|pointer| pointer.as_ptr().cast());
 
         // SAFETY: the caller guarantees the optional output buffer capacity;
         // header name and index are intentionally null.
-        unsafe { WinHttpQueryHeaders(request.as_ptr(), info_level, PCWSTR::null(), buffer, buffer_len, null_mut()) }
-            .map_err(|error| Self::map_error(&error, WinHttpOperation::QueryHeaders))
+        Self::unit_result(
+            unsafe { WinHttpQueryHeaders(request.as_ptr(), info_level, PCWSTR::null(), buffer, buffer_len, null_mut()) },
+            WinHttpOperation::QueryHeaders,
+        )
     }
 
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn query_option(&self, handle: RawHandle, option: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()> {
         let buffer = buffer.map(|pointer| pointer.as_ptr().cast());
 
         // SAFETY: the caller guarantees the optional output buffer capacity.
-        unsafe { WinHttpQueryOption(handle.as_ptr(), option, buffer, buffer_len) }
-            .map_err(|error| Self::map_error(&error, WinHttpOperation::QueryOption))
+        Self::unit_result(
+            unsafe { WinHttpQueryOption(handle.as_ptr(), option, buffer, buffer_len) },
+            WinHttpOperation::QueryOption,
+        )
     }
 
     unsafe fn read_data_ex(&self, request: RawHandle, buffer: NonNull<u8>, len: u32, fill_buffer: bool) -> Result<()> {
@@ -210,10 +231,11 @@ unsafe impl Bindings for RealBindings {
         Self::status_result(status, WinHttpOperation::ReadData)
     }
 
+    // #[gamma::skip(fn_value.ok, reason = "Only the native WinHTTP call can distinguish success from failure here.")]
     unsafe fn close_handle(&self, handle: RawHandle) -> Result<()> {
         // SAFETY: the typed handle is non-null and ownership ensures this
         // close operation is issued at most once.
-        unsafe { WinHttpCloseHandle(handle.as_ptr()) }.map_err(|error| Self::map_error(&error, WinHttpOperation::CloseHandle))
+        Self::unit_result(unsafe { WinHttpCloseHandle(handle.as_ptr()) }, WinHttpOperation::CloseHandle)
     }
 }
 
@@ -225,14 +247,24 @@ mod tests {
     use std::ptr::null_mut;
 
     use static_assertions::assert_impl_all;
-    use windows::Win32::Foundation::{ERROR_IO_PENDING, ERROR_SUCCESS, SetLastError, WIN32_ERROR};
+    use windows::Win32::Foundation::{E_FAIL, ERROR_IO_PENDING, ERROR_SUCCESS, SetLastError, WIN32_ERROR};
 
-    use super::RealBindings;
+    use super::{RealBindings, WindowsError};
     use crate::bindings::StatusCallback;
     use crate::error::{WinHttpError, WinHttpOperation};
 
     assert_impl_all!(StatusCallback: UnwindSafe, RefUnwindSafe);
     assert_impl_all!(RealBindings: UnwindSafe, RefUnwindSafe);
+
+    #[test]
+    fn native_unit_results_preserve_failure_code_and_operation() {
+        RealBindings::unit_result(Ok(()), WinHttpOperation::SendRequest).unwrap();
+
+        let error = RealBindings::unit_result(Err(WindowsError::from_hresult(E_FAIL)), WinHttpOperation::SendRequest).unwrap_err();
+
+        assert_eq!(error.code(), E_FAIL.0.cast_unsigned());
+        assert_eq!(error.operation(), WinHttpOperation::SendRequest);
+    }
 
     #[test]
     fn null_handle_path_captures_failure() {

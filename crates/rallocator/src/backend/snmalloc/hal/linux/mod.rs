@@ -101,15 +101,14 @@ pub(crate) unsafe fn release(address: *mut u8, size: usize) {
 }
 
 pub(crate) fn wait(word: &AtomicU32, expected: u32) {
+    // Bound broken wake protocols in unit tests so mutation runs fail rather
+    // than strand the test process. Production waits have no deadline.
+    const TIMEOUT: *const libc::timespec = if cfg!(test) {
+        &libc::timespec { tv_sec: 30, tv_nsec: 0 }
+    } else {
+        std::ptr::null()
+    };
     while word.load(Ordering::Acquire) == expected {
-        // Bound broken wake protocols in unit tests so mutation runs fail rather
-        // than strand the test process. Production waits have no deadline.
-        #[cfg(test)]
-        let deadline = libc::timespec { tv_sec: 30, tv_nsec: 0 };
-        #[cfg(test)]
-        let timeout = &raw const deadline;
-        #[cfg(not(test))]
-        let timeout = std::ptr::null::<libc::timespec>();
         // SAFETY: AtomicU32 provides the aligned four-byte futex word, which
         // stays live until this wait returns. The optional timeout stays live
         // through the syscall.
@@ -119,7 +118,7 @@ pub(crate) fn wait(word: &AtomicU32, expected: u32) {
                 word.as_ptr(),
                 libc::FUTEX_WAIT | libc::FUTEX_PRIVATE_FLAG,
                 expected,
-                timeout,
+                TIMEOUT,
             )
         };
         check_wait_result(result);

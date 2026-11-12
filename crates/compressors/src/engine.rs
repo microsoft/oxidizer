@@ -102,23 +102,15 @@ pub(crate) unsafe trait Codec {
     }
 
     /// Validates the cumulative byte counts, for engines that enforce limits.
-    // Equivalent mutant. The body already reduces to `Ok(())` for every input. `mutants::skip`
-    // documents that no test can distinguish this default from a mutant that also always
-    // returns `Ok(())`, since the two are behaviorally identical (the only difference is
-    // dropping the parameter-discarding `let` binding, which has no runtime effect).
-    #[cfg_attr(test, mutants::skip)]
+    // Replacing this default with `Ok(())` has no observable effect.
     fn check_limits(&self, total_in: u64, total_out: u64, streams: u64) -> Result<()> {
         let _ = (total_in, total_out, streams);
         Ok(())
     }
 
     /// Returns the remaining absolute output budget, if one is configured.
-    // Excluded for the same reason as the implementations that override it: a mutant answering a
-    // small constant is not wrong, only slow. Every compressor keeps this default. Such a mutant
-    // receives one byte per step, so the suite runs orders of magnitude
-    // slower and the harness's timeout expires before the failing assertion is reached. That
-    // timeout is derived from the suite's own runtime, so it is now ~20s and there is no margin.
-    #[cfg_attr(test, mutants::skip)]
+    // A small constant reduces each step to a few bytes without changing the result.
+    // That can exceed the mutation harness's time budget before an assertion is reached.
     fn remaining_output(&self, _total_out: u64) -> Option<u64> {
         None
     }
@@ -187,7 +179,6 @@ pub(crate) struct Pump {
 /// unconditionally makes it report progress without ever advancing.
 // Either answer leaves every drain loop spinning, so those mutants hang rather than failing and
 // mutation testing records a timeout instead of a verdict.
-#[cfg_attr(test, mutants::skip)]
 fn yields_to_the_caller(steps: usize, input_work: usize) -> bool {
     steps >= MAX_STEPS_PER_PULL || input_work >= MAX_INPUT_PER_PULL
 }
@@ -196,18 +187,16 @@ fn yields_to_the_caller(steps: usize, input_work: usize) -> bool {
 ///
 /// This is the engine's only guard against an engine that can never finish.
 // Answering `false` unconditionally removes that guard, so the mutant hangs rather than failing.
-#[cfg_attr(test, mutants::skip)]
 fn made_no_progress(consumed: usize, produced: usize) -> bool {
     consumed == 0 && produced == 0
 }
 
 /// The tighter of two optional bounds, where absent means unbounded.
-// Excluded for the same reason as its output-budget caller: a mutant answering a small constant is
-// not wrong, only slow. Through `remaining_output` it shrinks the per-step slice to the probe byte,
+// A mutant answering a small constant is not wrong, only slow.
+// Through `remaining_output` it shrinks the per-step slice to the probe byte,
 // so the pump produces the right bytes one at a time and the harness times out instead of reaching
 // a verdict. A `None` result loosens a bound, and tests catch that change. Tests also mutate and
 // catch `Pump::max_streams`, the other caller.
-#[cfg_attr(test, mutants::skip)]
 fn tighter(engine: Option<u64>, buffered: Option<u64>) -> Option<u64> {
     match (engine, buffered) {
         (Some(engine), Some(buffered)) => Some(engine.min(buffered)),
@@ -266,7 +255,6 @@ impl Pump {
     // at least the probe byte, so the pump still produces exactly the right bytes, one per step.
     // Every drain loop then needs one step per byte and mutation testing records a timeout instead
     // of a verdict. Tests detect `None`, which is the answer that loosens the bound.
-    #[cfg_attr(test, mutants::skip)]
     fn remaining_output(&self, codec: &impl Codec, into: Destination) -> Option<u64> {
         let buffered = self
             .buffered(into)
@@ -364,7 +352,6 @@ impl Pump {
     // Emptying this leaves every drain loop, including the crate's own `process`, asking for input
     // that will never end the stream. The mutant hangs rather than failing, so the harness records a
     // timeout instead of a verdict. No test can report this mutation.
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn end_input(&mut self) {
         self.state = match self.state {
             State::Open => State::Finishing,
@@ -392,7 +379,6 @@ impl Pump {
     // Answering `Some(empty)` unconditionally hands every drain loop an endless supply of empty
     // chunks, so the mutant hangs rather than failing and mutation testing records a timeout
     // instead of a verdict.
-    #[cfg_attr(test, mutants::skip)]
     fn take_output(&mut self) -> Option<BytesView> {
         if self.output.is_empty() {
             return None;
@@ -408,7 +394,6 @@ impl Pump {
     // is indistinguishable from skipping the call: either way `reserve` does nothing. Takes the
     // output buffer and memory provider by reference, rather than `&mut self`, so it borrows
     // disjointly from `self.input` at the call site.
-    #[cfg_attr(test, mutants::skip)]
     fn ensure_output_capacity(output: &mut BytesBuf, memory: &OpaqueMemory, additional_bytes: usize) {
         if output.remaining_capacity() < additional_bytes {
             output.reserve(additional_bytes, memory);

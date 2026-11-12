@@ -47,7 +47,6 @@ pub trait FromQuery<'q>: DecodeFields<'q> {
     /// resource-limit exhaustion.
     // Wide/scalar selection changes performance only; scan implementations are
     // checked differentially at their threshold.
-    #[cfg_attr(test, mutants::skip)]
     fn from_query_with(input: &'q str, limits: QueryLimits) -> Result<Self, Error> {
         if input.len() >= INPUT_SIMD_THRESHOLD {
             parse::<Self, true>(input, limits)

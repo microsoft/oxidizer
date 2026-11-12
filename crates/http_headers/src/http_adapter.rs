@@ -19,6 +19,18 @@ use crate::sink::{
 use crate::source::{FieldLines, FieldSource};
 use crate::{FieldName, FieldValue};
 
+impl From<http::header::MaxSizeReached> for InsertError {
+    fn from(error: http::header::MaxSizeReached) -> Self {
+        capacity_exceeded(error)
+    }
+}
+
+// HeaderMap::try_entry also reports capacity failures as InvalidHeaderName.
+// This adapter passes only validated HeaderName values to that method.
+fn capacity_exceeded<E>(_: E) -> InsertError {
+    InsertError::new(InsertErrorKind::CapacityExceeded)
+}
+
 impl FieldSource for HeaderMap {
     #[expect(clippy::inline_always, reason = "header decoding must inline the external map adapter")]
     #[inline(always)]
@@ -60,8 +72,7 @@ impl FieldSink for HeaderMap {
         if output.values.len() > 1 {
             return append_http_values(self, http_name(name), output.values);
         }
-        self.try_reserve(output.values.len())
-            .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?;
+        self.try_reserve(output.values.len()).map_err(InsertError::from)?;
         let name = http_name(name);
         for value in output.values {
             self.append(name.clone(), value);
@@ -271,16 +282,12 @@ impl FieldValueWriter for HttpWriter<'_> {
 }
 
 fn append_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[HeaderValue; 1]>) -> Result<(), InsertError> {
-    map.try_reserve(encoded.len())
-        .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?;
+    map.try_reserve(encoded.len())?;
     let mut values = encoded.into_iter();
     let first = values
         .next()
         .expect("append_http_values is called only for multiple encoded values");
-    match map
-        .try_entry(name)
-        .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?
-    {
+    match map.try_entry(name).map_err(capacity_exceeded)? {
         Entry::Occupied(mut entry) => {
             entry.append(first);
             for value in values {
@@ -288,9 +295,7 @@ fn append_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[
             }
         }
         Entry::Vacant(entry) => {
-            let mut entry = entry
-                .try_insert_entry(first)
-                .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?;
+            let mut entry = entry.try_insert_entry(first)?;
             for value in values {
                 entry.append(value);
             }
@@ -301,17 +306,13 @@ fn append_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[
 
 /// Replaces every value stored under `name` with the encoded field lines.
 fn insert_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[HeaderValue; 1]>) -> Result<(), InsertError> {
-    map.try_reserve(encoded.len())
-        .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?;
+    map.try_reserve(encoded.len())?;
     let mut values = encoded.into_iter();
     let Some(first) = values.next() else {
         map.remove(&name);
         return Ok(());
     };
-    match map
-        .try_entry(name)
-        .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?
-    {
+    match map.try_entry(name).map_err(capacity_exceeded)? {
         Entry::Occupied(mut entry) => {
             entry.insert(first);
             for value in values {
@@ -319,9 +320,7 @@ fn insert_http_values(map: &mut HeaderMap, name: HeaderName, encoded: SmallVec<[
             }
         }
         Entry::Vacant(entry) => {
-            let mut entry = entry
-                .try_insert_entry(first)
-                .map_err(|_full| InsertError::new(InsertErrorKind::CapacityExceeded))?;
+            let mut entry = entry.try_insert_entry(first)?;
             for value in values {
                 entry.append(value);
             }
