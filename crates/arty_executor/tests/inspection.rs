@@ -265,9 +265,9 @@ fn inspection_ignores_descriptions_of_a_different_type() {
     let mut executor = Executor::builder().build();
     executor
         .tasks()
-        .add_with_inspection(std::future::pending::<()>(), TaskOptions::default(), Completion, |_, state| {
-            Some(state)
-        });
+        .task(std::future::pending::<()>())
+        .inspect(|_, state| Some(state))
+        .register(Completion);
     let mut described = Vec::new();
 
     let status = executor.inspect(1, |value: &u32| described.push(*value)).unwrap();
@@ -281,13 +281,15 @@ fn inspectors_can_decline_to_describe_a_task() {
     let calls = Rc::new(Cell::new(0));
     executor
         .tasks()
-        .add_with_inspection(std::future::pending::<()>(), TaskOptions::default(), Completion, {
+        .task(std::future::pending::<()>())
+        .inspect({
             let calls = Rc::clone(&calls);
             move |_, _| {
                 calls.set(calls.get() + 1);
                 None::<TaskState>
             }
-        });
+        })
+        .register(Completion);
     let mut described = Vec::new();
 
     let status = executor.inspect(1, |state: &TaskState| described.push(*state)).unwrap();
