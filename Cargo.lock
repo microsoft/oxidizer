@@ -6436,6 +6436,7 @@ dependencies = [
  "async-once-cell",
  "criterion",
  "dashmap",
+ "future_assert",
  "futures-util",
  "mutants",
  "performables",
