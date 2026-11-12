@@ -78,7 +78,7 @@ where
 }
 
 #[derive(derive_more::Debug, ThreadAware)]
-pub(crate) struct ErasedHookFn<H: Hook> {
+pub struct ErasedHookFn<H: Hook> {
     #[debug(ignore)]
     callback: Box<dyn ErasedCallback<H>>,
 }
