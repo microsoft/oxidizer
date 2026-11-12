@@ -8,8 +8,9 @@
 mod support;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread::ThreadId;
+use std::time::Duration;
 
 use arty::core::{Thread, ThreadAware};
 use arty::runtime::hook::{HookFn, Panic};
@@ -34,9 +35,34 @@ impl ThreadAware for SharedLog {
 }
 
 #[derive(Clone)]
+struct RegistrationLog {
+    log: SharedLog,
+    installed: mpsc::Sender<()>,
+}
+
+impl ThreadAware for RegistrationLog {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
+        self.installed.send(()).unwrap();
+    }
+}
+
+#[derive(Clone)]
 struct PanicCount(Arc<AtomicUsize>);
 
 impl ThreadAware for PanicCount {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+struct CloneCount(Arc<AtomicUsize>);
+
+impl Clone for CloneCount {
+    fn clone(&self) -> Self {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl ThreadAware for CloneCount {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
@@ -139,10 +165,18 @@ fn control_appends_panic_hooks_in_registration_order() {
     let control = support::runtime_control(&runtime);
 
     let order = SharedLog(Arc::new(Mutex::new(Vec::new())));
-    control.on(HookFn::<Panic, _>::new(order.clone(), |event, data| {
-        data.push("ignore");
-        event.ignore();
-    }));
+    let (installed, installation) = mpsc::channel();
+    control.on(HookFn::<Panic, _>::new(
+        RegistrationLog {
+            log: order.clone(),
+            installed,
+        },
+        |event, data| {
+            data.log.push("ignore");
+            event.ignore();
+        },
+    ));
+    installation.recv_timeout(Duration::from_secs(5)).unwrap();
     assert!(
         runtime
             .scheduler()
@@ -154,10 +188,18 @@ fn control_appends_panic_hooks_in_registration_order() {
     assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap(), 42);
     assert_eq!(order.take(), ["ignore"]);
 
-    control.on(HookFn::<Panic, _>::new(order.clone(), |event, data| {
-        data.push("shutdown");
-        event.shutdown();
-    }));
+    let (installed, installation) = mpsc::channel();
+    control.on(HookFn::<Panic, _>::new(
+        RegistrationLog {
+            log: order.clone(),
+            installed,
+        },
+        |event, data| {
+            data.log.push("shutdown");
+            event.shutdown();
+        },
+    ));
+    installation.recv_timeout(Duration::from_secs(5)).unwrap();
     assert!(
         runtime
             .scheduler()
@@ -230,13 +272,11 @@ fn panic_callbacks_share_one_borrowed_event() {
 fn control_ignores_registration_after_shutdown_starts() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
-    let calls = Arc::new(AtomicUsize::new(0));
+    let clones = Arc::new(AtomicUsize::new(0));
 
     control.request_stop();
-    control.on(HookFn::<Panic, _>::new(PanicCount(Arc::clone(&calls)), |_event, data| {
-        data.0.fetch_add(1, Ordering::SeqCst);
-    }));
+    control.on(HookFn::<Panic, _>::new(CloneCount(Arc::clone(&clones)), |_event, _data| {}));
 
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(clones.load(Ordering::SeqCst), 0);
     runtime.stop().unwrap();
 }
