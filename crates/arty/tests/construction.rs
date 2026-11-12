@@ -13,6 +13,7 @@ use std::thread;
 use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
 use testing_aids::TEST_TIMEOUT;
 
+#[cfg(test)]
 fn indexed_worker_names(builder: RuntimeBuilder, policy: BlockingPoolPolicy) -> (String, Vec<String>) {
     let runtime = builder
         .workers(WorkersPolicy::exactly(3))

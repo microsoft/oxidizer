@@ -27,6 +27,7 @@ struct SpawnOnDrop {
     spawned: mpsc::Sender<JoinHandle<()>>,
 }
 
+#[cfg(test)]
 impl Drop for SpawnOnDrop {
     fn drop(&mut self) {
         self.spawned.send(self.scheduler.spawn(async |_| {})).unwrap();
