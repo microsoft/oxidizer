@@ -19,7 +19,7 @@ thread_local! {
     static PANIC_HOOKS: RefCell<Option<Vec<ErasedHookFn<Panic>>>> = const { RefCell::new(None) };
 }
 
-const LOCAL_PANIC_HOOK: LocalHook<Panic> = LocalHook::new(&PANIC_HOOKS);
+const LOCAL_PANIC_HOOK: LocalHook<Panic> = LocalHook { hooks: &PANIC_HOOKS };
 
 /// Asynchronous worker state that remains attached throughout thread teardown.
 #[derive(Debug)]

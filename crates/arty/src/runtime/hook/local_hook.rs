@@ -9,14 +9,10 @@ use thread_aware::{Thread, ThreadAware};
 use super::{ErasedHookFn, Hook};
 
 pub(crate) struct LocalHook<H: Hook> {
-    hooks: &'static LocalKey<RefCell<Option<Vec<ErasedHookFn<H>>>>>,
+    pub(crate) hooks: &'static LocalKey<RefCell<Option<Vec<ErasedHookFn<H>>>>>,
 }
 
 impl<H: Hook> LocalHook<H> {
-    pub(crate) const fn new(hooks: &'static LocalKey<RefCell<Option<Vec<ErasedHookFn<H>>>>>) -> Self {
-        Self { hooks }
-    }
-
     pub(crate) fn initialize(&self) {
         self.hooks.with_borrow_mut(|hooks| {
             assert!(

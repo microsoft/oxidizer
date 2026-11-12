@@ -42,7 +42,10 @@ struct RegistrationLog {
 
 impl ThreadAware for RegistrationLog {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
-        self.installed.send(()).unwrap();
+        assert!(
+            self.installed.send(()).is_ok(),
+            "the test retains the installation receiver until the hook is relocated"
+        );
     }
 }
 
