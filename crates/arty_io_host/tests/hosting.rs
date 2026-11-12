@@ -489,6 +489,7 @@ fn runtime_identity_is_shared_only_by_clones() {
 fn driver_host_debug_snapshot() {
     let host = host(&test_runtime());
     insta::with_settings!({filters => [
+        (r"alloc::rcs::rc::Rc", "alloc::rc::Rc"),
         (r"0x[0-9a-fA-F]+", "[address]"),
         (r"ThreadId\(\s*\d+,?\s*\)", "ThreadId([id])"),
         (r"Owner \{\s*id: \d+,\s*\}", "Owner { id: [id] }"),

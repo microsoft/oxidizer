@@ -203,6 +203,7 @@ fn shutdown_error_debug_snapshot() {
 fn executor_debug_snapshot() {
     let executor = Executor::builder().build();
     insta::with_settings!({filters => [
+        (r"alloc::rcs::rc::Rc", "alloc::rc::Rc"),
         (r"0x[0-9a-fA-F]+", "[address]"),
         (r"ThreadId\(\s*\d+,?\s*\)", "ThreadId([id])"),
     ]}, {
