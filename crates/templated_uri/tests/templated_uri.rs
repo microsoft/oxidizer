@@ -59,7 +59,7 @@ fn templated_uri() {
 
 #[test]
 fn empty_uri_debug() {
-    assert!(!format!("{:?}", Uri::new()).is_empty());
+    assert_eq!(format!("{:?}", Uri::new()), "Uri { path_and_query: None }");
 }
 
 #[test]

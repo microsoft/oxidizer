@@ -443,7 +443,10 @@ mod tests {
         let host = runtime.driver_host(thread, Waker::noop().clone()).unwrap();
         let drivers = host.drivers.borrow_mut();
 
-        assert!(host.context::<TestContext>(()).is_err());
+        let Err(error) = host.context::<TestContext>(()) else {
+            panic!("context retrieval should fail while drivers are borrowed");
+        };
+        assert_eq!(error.to_string(), "I/O context retrieval cannot overlap driver cycle execution");
         drop(drivers);
         host.context::<TestContext>(()).unwrap();
     }

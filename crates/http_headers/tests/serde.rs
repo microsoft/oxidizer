@@ -561,9 +561,21 @@ fn field_value_deserialization_covers_sequence_metadata_and_diagnostics() {
     let with_unknown: FieldValue = serde_json::from_str(r#"{"ignored":0,"bytes":[97],"sensitivity":"NonSensitive"}"#).unwrap();
     assert_eq!(with_unknown.as_bytes(), b"a");
 
+    for (invalid, expected) in [
+        (
+            "[]",
+            "invalid length 0, expected a field value with bytes and sensitivity at line 1 column 2",
+        ),
+        (
+            "[[97]]",
+            "invalid length 1, expected a field value with bytes and sensitivity at line 1 column 6",
+        ),
+    ] {
+        let error = serde_json::from_str::<FieldValue>(invalid).unwrap_err();
+        assert_eq!(error.to_string(), expected, "{invalid}");
+    }
+
     for invalid in [
-        "[]",
-        "[[97]]",
         r#"{"bytes":[97],"bytes":[98],"sensitivity":"NonSensitive"}"#,
         r#"{"bytes":[97],"sensitivity":"NonSensitive","sensitivity":"Sensitive"}"#,
         r#"{"sensitivity":"NonSensitive"}"#,
@@ -575,7 +587,7 @@ fn field_value_deserialization_covers_sequence_metadata_and_diagnostics() {
     assert!(serde_json::from_str::<FieldValue>(r#"{"bytes":"not bytes","sensitivity":"NonSensitive"}"#).is_err());
     assert!(serde_json::from_str::<EncodedValues>("null").is_err());
     let absent = serde_json::from_str::<AcceptOwned>("[]").unwrap_err();
-    assert!(absent.to_string().contains("at least one field value"));
+    assert_eq!(absent.to_string(), "an owned header must contain at least one field value");
 
     for byte_count in [65_536, MAX_CUSTOM_FIELD_BYTES] {
         let boundary = UserAgentOwned::deserialize(HostileValuesDeserializer {

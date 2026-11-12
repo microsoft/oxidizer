@@ -67,5 +67,8 @@ fn invalid_utf8_source_name_is_rejected() {
 
     *bytes.last_mut().unwrap() = 0xff;
 
-    snapshot::decode(&bytes).unwrap_err();
+    assert_eq!(
+        snapshot::decode(&bytes).unwrap_err().to_string(),
+        "the seismograph snapshot is malformed or unsupported"
+    );
 }
