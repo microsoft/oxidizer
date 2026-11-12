@@ -32,8 +32,8 @@ fn indexed_worker_names(builder: RuntimeBuilder, policy: BlockingPoolPolicy) -> 
                         gate.1.notify_all();
                     });
                     let (started, received) = mpsc::channel();
-                    // Queued callbacks force growth to the limit before any worker can be reused.
-                    let tasks: Vec<_> = (0..16)
+                    // Extra queued callbacks cover counter snapshots taken while workers start.
+                    let tasks: Vec<_> = (0..20)
                         .map(|_| {
                             let gate = Arc::clone(&gate);
                             let started = started.clone();

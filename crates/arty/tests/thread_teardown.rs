@@ -73,7 +73,9 @@ fn dispatcher_shutdown_rejects_direct_submissions_immediately() {
     let rejected = runtime
         .scheduler()
         .block_on(async |cx| {
-            cx.control().request_stop();
+            let control = cx.control().clone();
+            // Publish dispatcher shutdown without stopping this worker's executor in this poll.
+            std::thread::spawn(move || control.request_stop()).join().unwrap();
             let mut task = pin!(cx.scheduler().spawn(async |_| 42));
 
             matches!(
