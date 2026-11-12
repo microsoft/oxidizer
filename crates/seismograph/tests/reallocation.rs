@@ -84,11 +84,11 @@ fn successful_resizes_keep_one_record_with_both_storage_endpoints() {
     assert_malformed_resize_rejected(capture.as_bytes(), &decoded);
     let mut incorrectly_versioned = capture.as_bytes().to_vec();
     incorrectly_versioned[8..10].copy_from_slice(&9_u16.to_le_bytes());
-    seismograph::snapshot::decode(&incorrectly_versioned).unwrap_err();
+    assert_invalid_format(&incorrectly_versioned);
     assert_stable_identity_sampling(allocation, moved);
 }
 
-#[expect(clippy::unwrap_used, reason = "Malformed fixtures must fail decoding")]
+#[expect(clippy::unwrap_used, reason = "The valid-payload control must decode successfully")]
 fn assert_malformed_resize_rejected(bytes: &[u8], decoded: &DecodedSnapshot) {
     // Format 10 uses a 92-byte header, named thread rows, and 92-byte event rows.
     let threads_len: usize = decoded.events.threads.iter().map(|thread| 26 + thread.name.len()).sum();
@@ -97,20 +97,26 @@ fn assert_malformed_resize_rejected(bytes: &[u8], decoded: &DecodedSnapshot) {
     for (offset, replacement) in [(24, 14), (27, 1)] {
         let mut malformed = bytes.to_vec();
         malformed[resize_start + offset] = replacement;
-        seismograph::snapshot::decode(&malformed).unwrap_err();
+        assert_invalid_format(&malformed);
     }
     let mut mismatched = bytes.to_vec();
     mismatched[resize_start + 25] = 3;
     mismatched.copy_within(allocation_start + 28..allocation_start + 92, resize_start + 28);
-    seismograph::snapshot::decode(&mismatched).unwrap_err();
+    assert_invalid_format(&mismatched);
     mismatched[resize_start + 24] = bytes[allocation_start + 24];
     let valid = seismograph::snapshot::decode(&mismatched).unwrap();
     assert_eq!(valid.events.events[1].allocation(), decoded.events.events[0].allocation());
     for invalid_heap_kind in [255_u64, 256, u64::MAX] {
         let mut malformed = bytes.to_vec();
         malformed[resize_start + 84..resize_start + 92].copy_from_slice(&invalid_heap_kind.to_le_bytes());
-        seismograph::snapshot::decode(&malformed).unwrap_err();
+        assert_invalid_format(&malformed);
     }
+}
+
+#[expect(clippy::unwrap_used, reason = "Malformed fixtures must fail decoding")]
+fn assert_invalid_format(bytes: &[u8]) {
+    let error = seismograph::snapshot::decode(bytes).unwrap_err();
+    assert_eq!(error.to_string(), "the seismograph snapshot is malformed or unsupported");
 }
 
 #[expect(clippy::unwrap_used, reason = "Test configuration and captures must be valid")]
