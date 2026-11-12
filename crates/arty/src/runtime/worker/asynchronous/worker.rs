@@ -98,6 +98,8 @@ pub(crate) struct Worker {
     _single_threaded: PhantomData<*const ()>,
 }
 
+pub(crate) struct WorkerSignal(pub(crate) Arc<Signal>);
+
 #[derive(Debug)]
 struct ReadyWorkerState {
     commands: CommandReceiver,
@@ -122,10 +124,11 @@ impl Worker {
         thread: Thread,
         io: Io,
         clock: InactiveClock,
-        signal: Arc<Signal>,
+        signal: WorkerSignal,
         monitor_options: MonitorOptions,
         hook_registrations: Vec<HookRegistration>,
     ) -> Self {
+        let WorkerSignal(signal) = signal;
         let worker_waker = Signal::waker(&signal);
         let shutdown = dispatcher.shutdown().clone();
         let (clock, clock_driver) = clock.activate(worker_waker.clone());
@@ -515,7 +518,16 @@ mod tests {
         let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, Signal::waker(&signal));
         signal.set_driver_waker(driver_waker);
 
-        Worker::new(command_rx, dispatcher, thread, io, clock, signal, monitor_options, Vec::new())
+        Worker::new(
+            command_rx,
+            dispatcher,
+            thread,
+            io,
+            clock,
+            WorkerSignal(signal),
+            monitor_options,
+            Vec::new(),
+        )
     }
 
     fn replenishing_command(sender: CommandSender, processed: Arc<AtomicUsize>) -> SpawnCommand {

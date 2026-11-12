@@ -168,7 +168,7 @@ impl ThreadEntry {
             current,
             io,
             clock,
-            signal,
+            asynchronous::WorkerSignal(signal),
             monitor_options,
             hook_registrations,
         );

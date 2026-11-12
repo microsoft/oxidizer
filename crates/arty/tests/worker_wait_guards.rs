@@ -20,7 +20,7 @@ use std::task::{Context, Poll, Waker};
 use arty::runtime::Runtime;
 use panic_support::runtime;
 use support::JoinHandleExt as _;
-use testing_aids::TEST_TIMEOUT;
+use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 use thread_aware::Unaware;
 
 thread_local! {
@@ -83,11 +83,15 @@ fn a_remote_task_wake_is_retained_before_the_runtime_worker_parks() {
                     ready,
                     waker: Some(sender),
                 });
-        let received = received.recv_timeout(TEST_TIMEOUT);
-        if received.is_err() {
-            std::mem::forget(runtime.take().unwrap());
-        }
-        let waker = received.unwrap();
+        let waker = if is_mutation_testing() {
+            received.recv().unwrap()
+        } else {
+            let received = received.recv_timeout(TEST_TIMEOUT);
+            if received.is_err() {
+                std::mem::forget(runtime.take().unwrap());
+            }
+            received.unwrap()
+        };
         // Publish the predicate before the wake. The test does not use the wake as a memory barrier.
         ready.store(true, Ordering::Release);
         waker.wake_by_ref();

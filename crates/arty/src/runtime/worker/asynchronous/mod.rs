@@ -18,4 +18,4 @@ pub(crate) use command::{CommandReceiver, CommandSender, QueuedFactory, QueuedIo
 pub(crate) use local_worker::LocalWorker;
 pub(crate) use signal::Signal;
 pub(crate) use thread::{StartOptions, start};
-pub(crate) use worker::Worker;
+pub(crate) use worker::{Worker, WorkerSignal};
