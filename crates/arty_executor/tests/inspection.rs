@@ -88,6 +88,49 @@ fn inspection_builder_defers_conversion_and_inspects_the_native_future() {
 }
 
 #[test]
+fn replacing_inspector_preserves_preconfigured_metadata() {
+    use observed::enrichment::{Enrichment, EnrichmentEntry};
+
+    struct TaskContext;
+
+    impl data_privacy::RedactedDisplay for TaskContext {
+        fn fmt(&self, _: &dyn data_privacy::Redactor, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            Ok(())
+        }
+    }
+
+    impl Enrichment for TaskContext {
+        fn into_entries(self) -> Vec<EnrichmentEntry> {
+            vec![EnrichmentEntry::new("task.context", self)]
+        }
+    }
+
+    let (sink, processor) = observed_testing::test_emitter(observed_testing::TEST_ID);
+    let mut executor = Executor::builder().sink(sink.clone()).build();
+    executor
+        .tasks()
+        .task(std::future::ready(42))
+        .context(sink.transfer_context().with_enrichment(TaskContext))
+        .placement(TaskPlacement::SpecificThread)
+        .inspect(|_, _| -> Option<()> { panic!("the replaced inspector must not run") })
+        .inspect(|_, state| Some(state))
+        .register(Completion);
+
+    let mut descriptions = Vec::new();
+    executor.inspect(1, |state: &TaskState| descriptions.push(*state)).unwrap();
+    assert_eq!(descriptions, [TaskState::Ready]);
+
+    let _ = executor.execute_cycle();
+    let events = processor.events();
+    let created = events.iter().find(|event| event.name() == "arty.rt.task.spawned").unwrap();
+    assert!(created.dimensions().contains(&("placement".to_owned(), "specific_thread".into())));
+    for name in ["arty.rt.task.spawned", "arty.rt.task.succeeded"] {
+        let event = events.iter().find(|event| event.name() == name).unwrap();
+        assert!(event.dimensions().iter().any(|(key, _)| key == "task.context"));
+    }
+}
+
+#[test]
 fn inspected_input_checks_shutdown_before_and_after_conversion() {
     #[derive(Debug)]
     struct Canceled(Rc<Cell<bool>>);
