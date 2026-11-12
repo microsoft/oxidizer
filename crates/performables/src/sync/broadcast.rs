@@ -149,3 +149,36 @@ impl Shard {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::task::Wake;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn ready_registration_preserves_other_waiters_on_its_shard() {
+        let broadcast = Broadcast::new();
+        let pending = Arc::new(WakeCounter::default());
+        let ready = Arc::new(WakeCounter::default());
+        let mut pending_registration = None;
+        let mut ready_registration = None;
+        assert!(!broadcast.register(&mut pending_registration, &Waker::from(Arc::clone(&pending)), || false));
+
+        assert!(broadcast.register(&mut ready_registration, &Waker::from(Arc::clone(&ready)), || true));
+        assert!(ready_registration.is_none());
+        broadcast.wake_all();
+
+        assert_eq!((pending.0.load(Ordering::Relaxed), ready.0.load(Ordering::Relaxed)), (1, 0));
+    }
+}

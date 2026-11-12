@@ -246,7 +246,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Box: with-closure fill path. Uses an `InitGuard`-equivalent loop
     /// so a panicking `f` drops the already-initialized prefix.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // `+= → *=` on the fill counter ⇒ infinite loop
     fn impl_alloc_slice_box_with<T, F: FnMut(usize) -> T>(&self, len: usize, mut f: F) -> Result<Box<[T], A>, AllocError> {
         check_slice_box_layout::<T, _>(self, len)?;
         // Check overflow before the refill loop.

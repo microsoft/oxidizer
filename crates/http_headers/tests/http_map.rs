@@ -9,7 +9,7 @@
 use std::sync::LazyLock;
 
 use http::{HeaderMap, HeaderValue};
-use http_headers::headers::{Accept, Allow, SetCookie, SetCookieOwned, UserAgent};
+use http_headers::headers::{Accept, Allow, ContentType, SetCookie, SetCookieOwned, UserAgent};
 use http_headers::sink::{
     EncodedValues, FieldEncodeOutput, FieldEncoder, FieldSink as _, FieldSinkExt, FieldValueWriter, InsertError, InsertErrorKind,
 };
@@ -101,6 +101,17 @@ fn known_and_custom_names_reach_the_same_storage() {
             .as_bytes(),
         b"client/1"
     );
+}
+
+#[test]
+fn borrowed_singleton_rejects_multiple_http_field_lines() {
+    let mut map = HeaderMap::new();
+    map.insert(http::header::CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+    map.append(http::header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+    let error = ContentType::view(&map).unwrap_err();
+
+    assert_eq!(error.kind(), DecodeErrorKind::UnexpectedMultipleValues);
 }
 
 #[test]

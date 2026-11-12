@@ -52,7 +52,6 @@ fn initialize(output: &mut [MaybeUninit<u8>]) -> &mut [u8] {
 /// does not document the complete set of conditions under which it reports failure, so this
 /// forwards whatever it reports rather than asserting a condition upstream has not promised.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 #[cold]
 fn compress_stream_failed() -> Error {
     Error::invalid_state("the brotli compression engine reported a failure")

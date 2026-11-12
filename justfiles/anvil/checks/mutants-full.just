@@ -14,20 +14,22 @@
 [script("pwsh", "-NoProfile")]
 anvil-mutants-full: anvil-mutants-full-validate-prereqs
     $ErrorActionPreference = 'Stop'
-    if ($IsWindows -and ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64')) {
-        Write-Host 'anvil-mutants-full: aarch64-pc-windows-msvc -- cargo-mutants does not build here (winapi); skipping'
-        exit 0
-    }
-    & cargo {{_anvil_stable_toolchain_args}} mutants --workspace --no-shuffle --jobs 0 {{_anvil_mutants_config_arg}}
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $reportArgs = @()
+    if ($env:GITHUB_ACTIONS -eq 'true') { $reportArgs = @('--artifact-dir', 'target/cargo-gamma') }
+    & cargo {{_anvil_stable_toolchain_args}} gamma run --workspace --min-score 100 --max-flaky 0 @reportArgs
+    $campaignExit = $LASTEXITCODE
+    & cargo {{_anvil_stable_toolchain_args}} gamma hints
+    $hintsExit = $LASTEXITCODE
+    if ($campaignExit -ne 0) { exit $campaignExit }
+    exit $hintsExit
 
-# --- scheduled-exhaustive members (mutants-full reuses cargo-mutants;
+# --- scheduled-exhaustive members (mutants-full reuses cargo-gamma;
 #     cargo-hack and bench are dedicated tools) ---
 
 # Install prerequisites for the `anvil-mutants-full` recipe.
 [private]
-anvil-mutants-full-setup installer="install": (anvil-tool-cargo-mutants-install installer)
+anvil-mutants-full-setup installer="install": (anvil-tool-cargo-gamma-install installer)
 
 # Validate prerequisites for the `anvil-mutants-full` recipe.
 [private]
-anvil-mutants-full-validate-prereqs: anvil-tool-cargo-mutants-validate-prereqs
+anvil-mutants-full-validate-prereqs: anvil-tool-cargo-gamma-validate-prereqs

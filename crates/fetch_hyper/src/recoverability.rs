@@ -34,7 +34,6 @@ fn for_other_errors(error: &(dyn StdError + 'static)) -> RecoveryInfo {
 // `hyper::Error` has no public constructor for the internal flags inspected
 // here (`is_canceled`, `is_timeout`, `is_closed`, `is_body_write_aborted`),
 // so the individual guard arms cannot be exercised by tests.
-#[cfg_attr(test, mutants::skip)]
 fn from_hyper_error(error: &hyper::Error) -> RecoveryInfo {
     match error {
         _ if error.is_canceled() => RecoveryInfo::retry(),

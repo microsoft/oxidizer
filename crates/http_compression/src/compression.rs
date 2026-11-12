@@ -932,8 +932,7 @@ impl Config {
         headers.remove(CONTENT_DIGEST_HEADER);
         headers.remove(REPR_DIGEST_HEADER);
 
-        // Build every engine before reading the body. Configuration failure then
-        // fails the message before partial decompression.
+        // These formats use validated default decoder options.
         // `formats` is in header order, so decompression walks it backwards.
         let decompressors = formats
             .iter()
@@ -942,9 +941,9 @@ impl Config {
                 DecompressorBuilder::new()
                     .limits(self.limits)
                     .build_format(*format, &self.resources)
-                    .map_err(invalid)
+                    .expect("HTTP formats use validated default decoder options")
             })
-            .collect::<Result<SmallVec<[_; 2]>>>()?;
+            .collect::<SmallVec<[_; 2]>>();
 
         let decompressed = body.map(|content| {
             let inner = match content {

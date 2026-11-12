@@ -33,7 +33,6 @@ seismograph.workspace = true
 tick.workspace = true
 
 [dev-dependencies]
-mutants.workspace = true
 static_assertions.workspace = true
 tick = { path = "../tick", features = ["test-util"] }
 

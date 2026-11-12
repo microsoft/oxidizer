@@ -283,7 +283,6 @@ impl<'a, T> Uninit<'a, [T]> {
     /// Like [`Self::init_with`] but returns raw `NonNull<[T]>` to preserve
     /// chunk-wide provenance for smart-pointer header recovery.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // `+= → *=` on counter ⇒ infinite loop
     pub(crate) fn init_with_ptr<F>(self, mut f: F) -> NonNull<[T]>
     where
         F: FnMut(usize) -> T,

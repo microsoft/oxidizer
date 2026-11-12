@@ -24,6 +24,21 @@ use tick::ClockControl;
 const FAILING_HOST: &str = "https://failing.example.com";
 const HEALTHY_HOST: &str = "https://healthy.example.com";
 
+#[test]
+fn metrics_without_an_explicit_meter_preserve_the_response() {
+    use fetch::handlers::Metrics;
+    use layered::{Layer as _, Service as _};
+
+    let handler = Metrics::layer()
+        .clock(tick::SimpleClock::new_frozen())
+        .layer(FakeHandler::from(StatusCode::ACCEPTED));
+    let request = http_extensions::HttpRequestBuilder::new_fake().uri(HEALTHY_HOST).build().unwrap();
+
+    let response = futures::executor::block_on(handler.execute(request)).unwrap();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+}
+
 // Helpers.
 
 /// Counts fake-handler calls.

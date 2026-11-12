@@ -23,7 +23,6 @@ use crate::{Alloc, AllocError};
 
 /// Worst-case bytes consumed by a single value allocation of type `T` in
 /// a chunk: value bytes + alignment padding.
-#[cfg_attr(test, mutants::skip)] // under-sized hint ⇒ refill loop spin (OOM)
 #[inline]
 const fn worst_case_payload<T>() -> usize {
     mem::size_of::<T>().saturating_add(mem::align_of::<T>())
@@ -36,7 +35,6 @@ const fn worst_case_payload<T>() -> usize {
 /// Using `S::block_align` keeps the hint tight for `Rc`'s sub-4-byte alignments
 /// instead of over-budgeting at the `Arc` 4-byte strong-count floor. (`Box` is
 /// not strong-prefixed — it allocates through the separate non-prefixed path.)
-#[cfg_attr(test, mutants::skip)] // under-sized hint ⇒ refill loop spin (OOM)
 #[inline]
 fn worst_case_strong_payload<S: thin_dst::Strong, T>() -> usize {
     let align = mem::align_of::<T>();
@@ -884,7 +882,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// adoption). Split out so the single `S::adopt` lives in
     /// [`Self::impl_alloc_smart_prefixed_with`].
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // routing-predicate mutations ⇒ refill spin (OOM)
     fn alloc_smart_prefixed_with_raw<S: thin_dst::Strong, T, F: FnOnce() -> T>(&self, f: F) -> Result<NonNull<u8>, AllocError> {
         if self.rejects_smart_ptr_align(mem::align_of::<T>()) {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
@@ -918,7 +915,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// chunk, which would break the header-recovery mask used by the
     /// smart pointers' `Drop` impls.
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // routing-predicate mutations ⇒ refill spin (OOM)
     fn impl_alloc_smart_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<NonNull<T>, AllocError> {
         if self.rejects_smart_ptr_align(mem::align_of::<T>()) {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);

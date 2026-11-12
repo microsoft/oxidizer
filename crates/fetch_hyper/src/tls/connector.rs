@@ -99,7 +99,6 @@ fn no_tls_backend_unreachable() -> ! {
 // boolean mutations on `http1`/`http2` produce observably identical results
 // when the connector is exercised over plain HTTP.
 #[cfg(any(feature = "rustls", test))]
-#[cfg_attr(test, mutants::skip)]
 fn build_rustls_connector<C, S>(
     mut config: rustls::ClientConfig,
     connector: C,

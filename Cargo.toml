@@ -198,7 +198,6 @@ msvc_spectre_libs_build = { path = "crates/msvc_spectre_libs_build", default-fea
 multitude = { path = "crates/multitude", default-features = false, version = "0.14.0" }
 multitude_macros = { path = "crates/multitude_macros", default-features = false, version = "=0.14.0" }
 multitude_macros_impl = { path = "crates/multitude_macros_impl", default-features = false, version = "=0.14.0" }
-mutants = { version = "0.0.3", default-features = false }
 native-tls = { version = "0.2.18", default-features = false }
 new_zealand = { version = "1.0.4", default-features = false }
 nix = { version = "0.31.3", default-features = false }
@@ -423,14 +422,6 @@ wildcard_imports = "allow"
 
 # Repository-specific Clippy lint policy beyond the Anvil catalog.
 panic = "warn"
-
-[patch.crates-io]
-# Runtime processor discovery reaches `ohno` through `cpulist`. Use the same
-# version and source as `observed` so packaging and CI selectors stay unambiguous.
-ohno = { path = "crates/ohno" }
-# `events_once` depends on the published crate. Reuse this workspace member so
-# Cargo package selectors remain unambiguous in impact-scoped CI.
-plurality = { path = "crates/plurality" }
 
 # A bit of debugging support for release builds.
 [profile.release]

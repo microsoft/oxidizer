@@ -30,7 +30,6 @@ impl RuntimeDiagnostics {
         self.registration.handle()
     }
 
-    #[cfg_attr(test, mutants::skip)] // A monitor failure fixture would duplicate Seismograph's protocol tests.
     pub(crate) fn finish(self) -> Result<(), Error> {
         self.registration.stopped();
         let error = self.monitor.last_error();

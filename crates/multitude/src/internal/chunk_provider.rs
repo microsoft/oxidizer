@@ -319,7 +319,6 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
 
     /// Returns the provider's configuration.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // Default::default mutation observably equivalent for reachable inputs
     pub(crate) fn config(&self) -> ChunkProviderConfig {
         self.config
     }
@@ -345,7 +344,6 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     /// when needed.
     //
     // Advancing at the current floor is an observationally equivalent no-op.
-    #[cfg_attr(test, mutants::skip)]
     fn acquire_normal(&self, class: SizeClass) -> Result<NonNull<Chunk<A>>, AllocError> {
         // SAFETY: only the owning thread bumps the floor / pops (single-
         // popper Treiber-stack invariant); a popped chunk is uniquely
@@ -405,7 +403,6 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     }
 
     /// Allocates a fresh normal chunk, bypassing the cache.
-    #[cfg_attr(test, mutants::skip)] // `total - header → total / header` ⇒ runaway allocations
     fn allocate_fresh(&self, class: SizeClass) -> Result<NonNull<Chunk<A>>, AllocError> {
         let header = Chunk::<A>::header_size();
         let total = class.bytes();
@@ -657,7 +654,6 @@ fn is_cacheable_size(total: usize) -> bool {
 /// alignment (`align_of::<usize>()`). Returns `Err(AllocError)` on overflow.
 /// Keeps the usable capacity from falling below `min_payload` after the bump
 /// cursor pays any payload-start alignment skew.
-#[cfg_attr(test, mutants::skip)]
 #[inline]
 fn round_up_to_word_align(min_payload: usize) -> Result<usize, AllocError> {
     let mask = mem::align_of::<usize>() - 1;
@@ -672,14 +668,12 @@ fn round_up_to_word_align(min_payload: usize) -> Result<usize, AllocError> {
 /// requests so the first allocation always fits after alignment.
 #[inline]
 // `align - 1` is the exact maximum skew; extra slack is unobservable.
-#[cfg_attr(test, mutants::skip)]
 fn oversized_payload_align_slack() -> usize {
     mem::align_of::<usize>() - 1
 }
 
 /// Wraps the `needed_total > MAX_CHUNK_BYTES` check used by the
 /// `acquire_*` routing gates.
-#[cfg_attr(test, mutants::skip)]
 #[inline]
 fn exceeds_max_chunk_bytes(needed_total: usize) -> bool {
     needed_total > MAX_CHUNK_BYTES

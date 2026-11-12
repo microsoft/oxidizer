@@ -362,6 +362,9 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn end_to_end_response_is_returned_with_body() {
+        use futures::FutureExt;
+        use ohno::Labeled;
+
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
         let handler = make_handler(connector, ConnectionLifetime::unlimited());
@@ -369,6 +372,25 @@ mod tests {
         assert_eq!(resp.status(), 200);
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(&*body, b"hello");
+
+        let control = tick::ClockControl::new();
+        let clock = control.to_clock();
+        let connector =
+            FakeConnector::new_pending_response(Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n"), clock.clone());
+        let mut options = fetch_options::TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(None), clock.clone(), options)
+            .body_builder(HttpBodyBuilder::new(bytesbuf::mem::GlobalPool::new(), &clock))
+            .build(tls());
+        let mut request = test_request();
+        request.extensions_mut().insert(BodyTimeout::new(Duration::from_secs(1)));
+        let response = handler.execute(request).await.unwrap();
+        let mut body = std::pin::pin!(response.into_body().collect());
+        assert!(body.as_mut().now_or_never().is_none());
+
+        control.advance(Duration::from_secs(1));
+        let error = body.as_mut().now_or_never().unwrap().unwrap_err();
+        assert_eq!(error.label(), "body_timeout");
     }
 
     #[test]

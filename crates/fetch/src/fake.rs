@@ -36,7 +36,6 @@ impl Default for FakeDeps {
 }
 
 impl From<&Clock> for FakeDeps {
-    #[cfg_attr(test, mutants::skip)] // A wrong clock causes test timeouts.
     fn from(clock: &Clock) -> Self {
         Self { clock: clock.clone() }
     }

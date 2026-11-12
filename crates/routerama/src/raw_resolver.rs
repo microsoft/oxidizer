@@ -164,9 +164,9 @@ impl<T> RawResolver<T> {
             }
             let walk = Walk { path: &path, method, verb };
             let leaf = if self.any_verb {
-                walk.descend_iterative::<true>(&self.root, 0)
+                walk.descend_iterative::<true>(&self.root)
             } else {
-                walk.descend_iterative::<false>(&self.root, 0)
+                walk.descend_iterative::<false>(&self.root)
             };
             let Some(leaf) = leaf else {
                 return Ok(None);
@@ -210,9 +210,9 @@ impl<T> RawResolver<T> {
     ) -> Option<R> {
         let walk = Walk { path, method, verb };
         let leaf = if self.any_verb {
-            walk.descend_iterative::<true>(&self.root, 0)
+            walk.descend_iterative::<true>(&self.root)
         } else {
-            walk.descend_iterative::<false>(&self.root, 0)
+            walk.descend_iterative::<false>(&self.root)
         }?;
         let value = &self.payloads[leaf.route_index];
         Some(finish(leaf, value, path))

@@ -734,29 +734,38 @@ fn recording_retains_task_creation_and_real_outcomes_without_a_task_registry() {
 #[test]
 fn disabled_task_event_context_does_not_initialize_event_buffers() {
     let _lock = RECORDING.lock().unwrap();
+    seismograph::recorder(Configuration {
+        runtime_tasks: Policy::all(false),
+        ..Configuration::default()
+    });
+    let previous = register_runtime(RuntimeMetadata::new("previous-task-events", 1));
+    let previous_worker = previous.register_worker(WorkerMetadata::new(WorkerRole::Core));
+    previous_worker
+        .handle()
+        .task_events()
+        .spawned(allocate_type_descriptor_id(), None, 0)
+        .unwrap();
     seismograph::recorder(Configuration::default());
-    // Disabling recording preserves earlier tests' buffers. Release them before
-    // checking that this disabled path creates none.
-    drop(
-        seismograph::snapshot(SnapshotOptions {
-            event_buffers: EventBufferDisposition::Stop,
-        })
-        .unwrap(),
-    );
-    let runtime = register_runtime(RuntimeMetadata::new("disabled-task-events", 1));
-    let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
-    let context = worker.handle().task_events();
-    let id = allocate_task_id();
-    let descriptor = allocate_type_descriptor_id();
+    seismograph::recorder::clear_buffers().unwrap();
+    let (created, events) = std::thread::spawn(|| {
+        let runtime = register_runtime(RuntimeMetadata::new("disabled-task-events", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let context = worker.handle().task_events();
+        let id = allocate_task_id();
+        let descriptor = allocate_type_descriptor_id();
 
-    let created = context.spawned(descriptor, None, 64);
-    context.completed(id);
-    context.panicked(id);
-    context.canceled(id);
-    let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
+        let created = context.spawned(descriptor, None, 64);
+        context.completed(id);
+        context.panicked(id);
+        context.canceled(id);
+        let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+        let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
+        (created, snapshot.events)
+    })
+    .join()
+    .unwrap();
 
-    assert_eq!((created, snapshot.events.events.len(), snapshot.events.threads.len()), (None, 0, 0));
+    assert_eq!((created, events.events.len(), events.threads.len()), (None, 0, 0));
 }
 
 #[test]

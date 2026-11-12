@@ -8,7 +8,6 @@ use syn::{Data, DeriveInput, Fields};
 use crate::bail;
 
 /// Generates the `Escape` trait implementation for a newtype struct.
-#[cfg_attr(test, mutants::skip)] // not relevant for auto-generated proc macros
 pub(crate) fn uri_param_impl(input: DeriveInput) -> TokenStream {
     let ident = &input.ident;
 

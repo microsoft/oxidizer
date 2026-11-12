@@ -157,6 +157,53 @@ fn standard_arc_processor_delivers_synthetic_events() {
 }
 
 #[test]
+fn fields_without_signal_metadata_keep_their_field_name() {
+    struct UnmappedField;
+
+    impl DynEvent for UnmappedField {
+        fn name(&self) -> &'static str {
+            "unmapped.field"
+        }
+
+        fn body(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+
+        fn source_file(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+
+        fn source_line(&self) -> Option<u32> {
+            None
+        }
+
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            visitor(&FieldDescriptor::new("detail", None, None), &|_| Value::from("payload"))
+        }
+
+        fn description(&self) -> EventDescription {
+            EventDescription::new(
+                "unmapped.field",
+                None,
+                Some(LogDescription::new("unmapped.field", Severity::Info, None)),
+                None,
+                false,
+                false,
+            )
+        }
+    }
+
+    let mock = MockProcessor::new();
+    let view = EventView::new_synthetic(&UnmappedField, SystemTime::UNIX_EPOCH);
+    mock.process(&view);
+
+    assert_eq!(mock.single_event().dimensions(), vec![("detail".into(), Value::from("payload"))]);
+}
+#[test]
 fn dyn_event_dispatch_reads_every_accessor() {
     let saw = Arc::new(AtomicBool::new(false));
     let mock = MockProcessor::new();

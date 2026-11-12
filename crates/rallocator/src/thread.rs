@@ -117,8 +117,8 @@ fn create_owner(pool: &mut Pool) -> usize {
     };
     // SAFETY: map is the unique backend map in which global refills register.
     let metadata = pool.metadata.get_or_insert_with(|| unsafe { backend::Local::new(map) });
-    let address = metadata.alloc_meta(Owner::ALLOC_SIZE);
-    if address != 0 {
+    std::num::NonZeroUsize::new(metadata.alloc_meta(Owner::ALLOC_SIZE)).map_or(0, |address| {
+        let address = address.get();
         // SAFETY: Fresh, committed ALLOC_SIZE-aligned envelope backing remains
         // live permanently. Only this creation path initializes and donates;
         // acquire returns existing pool entries without reinitialization.
@@ -132,8 +132,8 @@ fn create_owner(pool: &mut Pool) -> usize {
         pool.all = address;
         pool.count += 1;
         crate::recording::register_source();
-    }
-    address
+        address
+    })
 }
 
 /// Lends only an existing current-thread lease; observation never creates one.

@@ -92,7 +92,6 @@ impl GlobalPool {
 }
 
 impl Memory for GlobalPool {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     #[inline]
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
@@ -330,7 +329,6 @@ struct BlockMeta<const SIZE: usize> {
     ref_count: AtomicUsize,
 }
 
-#[cfg_attr(test, mutants::skip)] // Failure to initialize can violate memory safety.
 fn in_place_initialize_block<const SIZE: usize>(block: &mut MaybeUninit<NeutralBlock<SIZE>>, meta: BlockMeta<SIZE>) {
     let block_ptr = block.as_mut_ptr();
 
@@ -413,7 +411,6 @@ const BLOCK_REF_FNS_64K: BlockRefVTable<BlockMeta<65_536>> = BlockRefVTable::fro
 unsafe impl<const SIZE: usize> BlockRefDynamic for BlockMeta<SIZE> {
     type State = Self;
 
-    #[cfg_attr(test, mutants::skip)] // Mutations can violate memory safety and cause UB.
     fn clone(state_ptr: NonNull<Self::State>) -> NonNull<Self::State> {
         // SAFETY: The state pointer is always valid for reads.
         // We only ever access it via shared references - no exclusive references are created.
@@ -426,7 +423,6 @@ unsafe impl<const SIZE: usize> BlockRefDynamic for BlockMeta<SIZE> {
         state_ptr
     }
 
-    #[cfg_attr(test, mutants::skip)] // Mutations can violate memory safety and cause UB.
     fn drop(state_ptr: NonNull<Self::State>) {
         // SAFETY: The state pointer is always valid for reads.
         // We only ever access it via shared references - no exclusive references are created.

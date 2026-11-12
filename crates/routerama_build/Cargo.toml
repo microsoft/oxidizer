@@ -46,7 +46,6 @@ unicode-ident = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
-mutants = { workspace = true }
 prettyplease = { workspace = true }
 proc-macro-crate = { workspace = true }
 proc-macro2 = { workspace = true }

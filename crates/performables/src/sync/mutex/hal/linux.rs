@@ -11,7 +11,6 @@ pub(super) type LockWord = u32;
 const WAIT_PRIVATE: libc::c_int = libc::FUTEX_WAIT | libc::FUTEX_PRIVATE_FLAG;
 const WAKE_PRIVATE: libc::c_int = libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG;
 
-#[cfg_attr(test, mutants::skip)] // OS waits may wake spuriously; deleting one changes parking cost, not state-loop behavior.
 pub(super) fn wait_lock(state: &AtomicLockWord, expected: LockWord) {
     wait_condition(state, expected, None);
 }
