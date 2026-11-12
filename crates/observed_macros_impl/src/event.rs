@@ -8,7 +8,7 @@
 //!    `ItemStruct` (with its sibling log/metric helper attributes) into
 //!    intermediate structs.
 //! 2. **Code generation phase**: generate a `TokenStream` (the re-emitted struct
-//!    plus its `Event` impl) from the parsed definitions.
+//!    plus its `VisitFields` and `Event` impls) from the parsed definitions.
 //!
 //! See the [`event`](macro@crate::event) attribute macro documentation for the full
 //! attribute syntax reference.
@@ -250,16 +250,22 @@ struct FieldDef<'a> {
     redaction: FieldRedaction,
     /// Behavior when an `Option<T>` field holds no value (`None`).
     if_none: IfNone,
+    /// Set by `#[flatten]`: the value visits its own fields through `observed::VisitFields`.
+    flatten: bool,
 }
 
 impl FieldDef<'_> {
     /// Returns the field's log key, or `None` when the field is excluded from
-    /// the log signal. A field is logged under its own name by default.
+    /// the log signal. A field is logged under its own name by default. A
+    /// flattened field has no key of its own.
     ///
     /// The name is unraw-ed, so a field written as `r#type` is logged under the
     /// domain key `type` rather than leaking Rust's raw-identifier escape into
     /// telemetry.
     fn log_key(&self) -> Option<Cow<'_, str>> {
+        if self.flatten {
+            return None;
+        }
         match &self.log {
             LogRouting::Default => Some(Cow::Owned(self.ident.unraw().to_string())),
             LogRouting::Rename(name) => Some(Cow::Borrowed(name)),
@@ -593,6 +599,16 @@ fn resolve_metrics(specs: SmallVec<[MetricSpec<'_>; 2]>, fields: &mut [FieldDef<
             )
         })?;
 
+        if field.flatten {
+            return Err(Error::new_spanned(
+                attr,
+                format!(
+                    "`#[{}({field_ident})]` cannot record field `{field_ident}`: a `#[flatten]` field holds \
+                     fields, not a measurement",
+                    kind.attr_name(),
+                ),
+            ));
+        }
         if field.metric_value.is_some() {
             return Err(Error::new_spanned(
                 attr,
@@ -716,13 +732,25 @@ fn parse_field_def(field: &Field) -> Result<FieldDef<'_>> {
         .expect("parse_event_def rejects tuple structs before parsing fields");
 
     let mut shared = SharedFieldAttrs::default();
+    let mut flatten = false;
 
     for attr in &field.attrs {
         if shared.try_parse(attr)? {
-            // #[gamma::skip(loop.delete_continue, tag = "equivalent", reason = "Consumed shared attributes have names disjoint from metric instruments, so the remaining rejection check cannot match them.")]
+            // #[gamma::skip(loop.delete_continue, tag = "equivalent", reason = "Consumed shared attributes have names disjoint from `flatten` and from metric instruments, so the remaining checks cannot match them.")]
             continue;
         }
-        if attr
+        if attr.path().is_ident("flatten") {
+            if !matches!(&attr.meta, Meta::Path(_)) {
+                return Err(Error::new_spanned(
+                    attr,
+                    "`#[flatten]` is a marker and does not accept arguments or a value",
+                ));
+            }
+            if flatten {
+                return Err(Error::new_spanned(attr, "duplicate `#[flatten]` attribute"));
+            }
+            flatten = true;
+        } else if attr
             .path()
             .get_ident()
             .is_some_and(|i| InstrumentKindValue::from_ident(i).is_some())
@@ -733,6 +761,14 @@ fn parse_field_def(field: &Field) -> Result<FieldDef<'_>> {
                  and name this field positionally, e.g. `#[histogram(duration_ms)]`",
             ));
         }
+    }
+
+    if flatten && (shared.dimension.is_some() || shared.redaction.is_some() || shared.if_none.is_some()) {
+        return Err(Error::new_spanned(
+            field,
+            "`#[flatten]` cannot be combined with `#[dimension]`, `#[unredacted]`, `#[data_class]` or `#[if_none]`; \
+             the `observed::VisitFields` implementation of the value routes and redacts each of its fields",
+        ));
     }
 
     let (log, metric_dimension) = match shared.dimension {
@@ -759,6 +795,7 @@ fn parse_field_def(field: &Field) -> Result<FieldDef<'_>> {
         metric_value: None,
         redaction: shared.redaction.unwrap_or_default(),
         if_none: shared.if_none.unwrap_or_default(),
+        flatten,
     })
 }
 
@@ -786,7 +823,7 @@ fn reject_mutable_reference(field: &Field) -> Result<()> {
 /// Entry point for `#[event("name" [, disabled])]`.
 ///
 /// Consumes the struct's log/metric/field helper attributes, strips them from
-/// the re-emitted struct, and appends the generated `Event` impl. Because the
+/// the re-emitted struct, and appends the generated `VisitFields` and `Event` impls. Because the
 /// attribute macro expands before its sibling attributes are resolved, the
 /// helper attributes never need to resolve as real macros. (The `warn` severity
 /// is spelled `#[warning(...)]` to avoid the built-in `warn` lint attribute,
@@ -808,7 +845,7 @@ pub(crate) fn event_attr(attr: TokenStream, item: TokenStream) -> Result<TokenSt
     })
 }
 
-/// Generates just the `Event` trait impl (without re-emitting the struct).
+/// Generates just the `VisitFields` and `Event` trait impls (without re-emitting the struct).
 pub(crate) fn generate_event(
     ident: &Ident,
     generics: &Generics,
@@ -818,7 +855,7 @@ pub(crate) fn generate_event(
 ) -> Result<TokenStream> {
     let def = parse_event_def(ident, generics, attrs, fields, args)?;
     validate_message_placeholders(&def)?;
-    Ok(generate_event_impl(&def))
+    Ok(generate_event_impls(&def))
 }
 
 /// Returns whether `attr` is a struct-level helper consumed by `#[event]`
@@ -831,10 +868,10 @@ fn is_event_helper_attr(attr: &Attribute) -> bool {
 }
 
 /// Returns whether `attr` is a field-level helper (`#[dimension]`, `#[unredacted]`,
-/// `#[data_class]`, `#[if_none]`) that must be stripped from the re-emitted struct.
+/// `#[data_class]`, `#[if_none]`, `#[flatten]`) that must be stripped from the re-emitted struct.
 fn is_field_helper_attr(attr: &Attribute) -> bool {
     // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "The membership test uses any; order does not affect whether the attribute name is present.")]
-    ["dimension", "unredacted", "data_class", "if_none"]
+    ["dimension", "unredacted", "data_class", "if_none", "flatten"]
         .iter()
         .any(|name| attr.path().is_ident(name))
 }
@@ -942,11 +979,12 @@ fn field_reaches_signal(field: &FieldDef<'_>, has_log: bool) -> bool {
     routed_to_log || routed_to_metric
 }
 
-/// Collects the `where` predicates the generated `Event` impl relies on.
+/// Collects the `where` predicates the generated `VisitFields` and `Event` impls rely on.
 ///
 /// `Event: Send + Sync` needs every generic field type to be `Send + Sync` -
 /// the auto traits then carry `Self` - and each getter needs the bounds of its
-/// own redaction path. Concrete field types are skipped; the compiler resolves
+/// own redaction path. A flattened field instead needs its type to implement
+/// `observed::VisitFields`. Concrete field types are skipped; the compiler resolves
 /// those without help.
 ///
 /// The redaction bounds are added only for fields that reach a signal, since a
@@ -957,18 +995,23 @@ fn event_predicates(def: &EventDef<'_>) -> Vec<syn::WherePredicate> {
     let has_log = def.log.is_some();
     let mut predicates = Vec::new();
     for field in &def.fields {
-        if field_reaches_signal(field, has_log) {
+        let ty = field.ty;
+        let generic = crate::field_attrs::mentions_any_type_param(ty, &params);
+        if field.flatten {
+            if generic {
+                predicates.push(syn::parse_quote!(#ty: ::observed::VisitFields));
+            }
+        } else if field_reaches_signal(field, has_log) {
             predicates.extend(crate::field_attrs::field_predicates(field.ty, &field.redaction, &params));
         }
-        let ty = field.ty;
-        if crate::field_attrs::mentions_any_type_param(ty, &params) {
+        if generic {
             predicates.push(syn::parse_quote!(#ty: ::core::marker::Send + ::core::marker::Sync));
         }
     }
     predicates
 }
 
-fn generate_event_impl(def: &EventDef<'_>) -> TokenStream {
+fn generate_event_impls(def: &EventDef<'_>) -> TokenStream {
     let struct_ident = &def.ident;
 
     // Event identity comes from the required `#[event("...")]` attribute.
@@ -1050,6 +1093,16 @@ fn generate_event_impl(def: &EventDef<'_>) -> TokenStream {
 
     quote! {
         const _: () = {
+            impl #impl_generics ::observed::VisitFields for #struct_ident #ty_generics #where_clause {
+                fn visit_fields(
+                    &self,
+                    visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+                ) -> ::core::ops::ControlFlow<()> {
+                    #visit_fields_body
+                    ::core::ops::ControlFlow::Continue(())
+                }
+            }
+
             impl #impl_generics ::observed::Event for #struct_ident #ty_generics #where_clause {
                 const DESCRIPTION: ::observed::metadata::EventDescription =
                     ::observed::metadata::EventDescription::new(
@@ -1060,14 +1113,6 @@ fn generate_event_impl(def: &EventDef<'_>) -> TokenStream {
                         #has_field_metrics,
                         #disabled,
                     );
-
-                fn visit_fields(
-                    &self,
-                    visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-                ) -> ::core::ops::ControlFlow<()> {
-                    #visit_fields_body
-                    ::core::ops::ControlFlow::Continue(())
-                }
             }
         };
     }
@@ -1078,12 +1123,19 @@ fn generate_visit_fields_body(fields: &[FieldDef<'_>], has_log: bool) -> TokenSt
 }
 
 fn generate_field_visit(field: &FieldDef<'_>, has_log: bool) -> TokenStream {
+    let field_ident = &field.ident;
+    // The descriptors of a flattened value decide the signals of its fields, so the visit always runs.
+    if field.flatten {
+        return quote! {
+            ::observed::VisitFields::visit_fields(&self.#field_ident, visitor)?;
+        };
+    }
+
     // The where clause uses the same predicate, so it bounds exactly the visited fields.
     if !field_reaches_signal(field, has_log) {
         return TokenStream::new();
     }
 
-    let field_ident = &field.ident;
     // Unraw-ed so a field written as `r#type` is exported under the domain key
     // `type`; `field_ident` keeps the raw form because it addresses the field.
     let default_key = field.ident.unraw().to_string();

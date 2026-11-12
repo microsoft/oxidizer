@@ -66,21 +66,7 @@ struct Subject {
     request_id: ClassifiedString,
 }
 const _: () = {
-    impl ::observed::Event for Subject {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "e",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "e",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::Some("nothing to interpolate"),
-                ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+    impl ::observed::VisitFields for Subject {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -111,6 +97,22 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
     }
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "e",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "e",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::Some("nothing to interpolate"),
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+    }
 };
 
 ---- input ----
@@ -132,23 +134,7 @@ struct Subject {
     request_id: ClassifiedString,
 }
 const _: () = {
-    impl ::observed::Event for Subject {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "e",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "e",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::Some(
-                        "{{literal}} {status} {} and a dangling {",
-                    ),
-                ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+    impl ::observed::VisitFields for Subject {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -178,5 +164,23 @@ const _: () = {
             }
             ::core::ops::ControlFlow::Continue(())
         }
+    }
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "e",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "e",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::Some(
+                        "{{literal}} {status} {} and a dangling {",
+                    ),
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
     }
 };

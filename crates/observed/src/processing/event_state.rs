@@ -6,10 +6,10 @@
 use std::borrow::Cow;
 use std::ops::ControlFlow;
 
-use crate::Event;
 use crate::interop::DynEvent;
 use crate::metadata::{EventDescription, SourceLocation};
 use crate::processing::FieldVisitorFn;
+use crate::{Event, VisitFields};
 
 /// An intermediate event state that can be either a lazy typed event or a pre-constructed dynamic
 /// event reference.
@@ -79,6 +79,15 @@ pub(crate) enum EvaluatedEvent<'a, T: Event> {
     Dyn(&'a dyn DynEvent),
 }
 
+impl<T: Event> VisitFields for EvaluatedEvent<'_, T> {
+    fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+        match self {
+            Self::Typed(event, _) => event.visit_fields(visitor),
+            Self::Dyn(event) => event.visit_fields(visitor),
+        }
+    }
+}
+
 impl<T: Event> DynEvent for EvaluatedEvent<'_, T> {
     fn name(&self) -> &'static str {
         match self {
@@ -118,13 +127,6 @@ impl<T: Event> DynEvent for EvaluatedEvent<'_, T> {
         }
     }
 
-    fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-        match self {
-            Self::Typed(event, _) => event.visit_fields(visitor),
-            Self::Dyn(event) => event.visit_fields(visitor),
-        }
-    }
-
     fn description(&self) -> EventDescription {
         match self {
             Self::Typed(_, _) => T::DESCRIPTION,
@@ -140,13 +142,15 @@ impl<T: Event> DynEvent for EvaluatedEvent<'_, T> {
 /// the `T: Event` bound when the actual event is dispatched via `&dyn DynEvent`.
 pub(crate) struct NoopEvent;
 
-impl Event for NoopEvent {
-    const DESCRIPTION: EventDescription = EventDescription::new("noop", None, None, None, false, false);
-
+impl VisitFields for NoopEvent {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
         unreachable!("NoopEvent should never have its fields accessed")
     }
+}
+
+impl Event for NoopEvent {
+    const DESCRIPTION: EventDescription = EventDescription::new("noop", None, None, None, false, false);
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -162,12 +166,14 @@ mod tests {
 
     struct TestEvent;
 
-    impl Event for TestEvent {
-        const DESCRIPTION: EventDescription = EventDescription::new("test.event", None, None, None, false, false);
-
+    impl VisitFields for TestEvent {
         fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             ControlFlow::Continue(())
         }
+    }
+
+    impl Event for TestEvent {
+        const DESCRIPTION: EventDescription = EventDescription::new("test.event", None, None, None, false, false);
     }
 
     #[test]

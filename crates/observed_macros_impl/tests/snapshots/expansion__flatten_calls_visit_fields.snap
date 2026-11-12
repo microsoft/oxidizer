@@ -1,0 +1,68 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"flattened\"\"#,\nr\"\n        #[info]\n        struct Flattened<'a, T> {\n            #[unredacted]\n            before: i64,\n            #[flatten]\n            concrete: Parameters<'a>,\n            #[flatten]\n            generic: T,\n            #[unredacted]\n            after: i64,\n        }\n        \",)"
+---
+struct Flattened<'a, T> {
+    before: i64,
+    concrete: Parameters<'a>,
+    generic: T,
+    after: i64,
+}
+const _: () = {
+    impl<'a, T: 'static> ::observed::VisitFields for Flattened<'a, T>
+    where
+        T: ::observed::VisitFields,
+        T: ::core::marker::Send + ::core::marker::Sync,
+    {
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "before",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("before"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.before.clone()))?;
+            }
+            ::observed::VisitFields::visit_fields(&self.concrete, visitor)?;
+            ::observed::VisitFields::visit_fields(&self.generic, visitor)?;
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "after",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("after"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.after.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+    impl<'a, T: 'static> ::observed::Event for Flattened<'a, T>
+    where
+        T: ::observed::VisitFields,
+        T: ::core::marker::Send + ::core::marker::Sync,
+    {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "flattened",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<Flattened<'static, T>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "flattened",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+    }
+};

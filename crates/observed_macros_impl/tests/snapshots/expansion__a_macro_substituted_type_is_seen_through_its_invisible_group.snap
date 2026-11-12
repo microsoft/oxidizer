@@ -8,23 +8,7 @@ struct FromMacro<'a> {
     label: &'a str,
 }
 const _: () = {
-    impl<'a> ::observed::Event for FromMacro<'a> {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "macro.built",
-            ::core::option::Option::Some(
-                ::core::any::TypeId::of::<FromMacro<'static>>(),
-            ),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "macro.built",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
-                ),
-            ),
-            ::core::option::Option::None,
-            true,
-            false,
-        );
+    impl<'a> ::observed::VisitFields for FromMacro<'a> {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -79,5 +63,23 @@ const _: () = {
             }
             ::core::ops::ControlFlow::Continue(())
         }
+    }
+    impl<'a> ::observed::Event for FromMacro<'a> {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "macro.built",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<FromMacro<'static>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "macro.built",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            true,
+            false,
+        );
     }
 };

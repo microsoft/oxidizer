@@ -9,21 +9,7 @@ struct Ignored {
     v: i64,
 }
 const _: () = {
-    impl ::observed::Event for Ignored {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "ignored",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Ignored>()),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "ignored",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
-                ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+    impl ::observed::VisitFields for Ignored {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -40,5 +26,21 @@ const _: () = {
             }
             ::core::ops::ControlFlow::Continue(())
         }
+    }
+    impl ::observed::Event for Ignored {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "ignored",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Ignored>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "ignored",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
     }
 };

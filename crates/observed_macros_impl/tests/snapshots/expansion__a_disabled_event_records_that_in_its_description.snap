@@ -6,21 +6,7 @@ struct AuditWrite {
     attempts: i64,
 }
 const _: () = {
-    impl ::observed::Event for AuditWrite {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "audit.write",
-            ::core::option::Option::Some(::core::any::TypeId::of::<AuditWrite>()),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "audit.write",
-                    ::observed::Severity::Warn,
-                    ::core::option::Option::None,
-                ),
-            ),
-            ::core::option::Option::None,
-            false,
-            true,
-        );
+    impl ::observed::VisitFields for AuditWrite {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -40,5 +26,21 @@ const _: () = {
             }
             ::core::ops::ControlFlow::Continue(())
         }
+    }
+    impl ::observed::Event for AuditWrite {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "audit.write",
+            ::core::option::Option::Some(::core::any::TypeId::of::<AuditWrite>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "audit.write",
+                    ::observed::Severity::Warn,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            true,
+        );
     }
 };

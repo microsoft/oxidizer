@@ -21,14 +21,13 @@
 //! [`DynEvent::body`] for the contract an adaptor has to uphold.
 
 use std::borrow::Cow;
-use std::ops::ControlFlow;
 
-use crate::Sink;
 use crate::metadata::EventDescription;
-use crate::processing::{FieldVisitorFn, IntermediateEvent};
+use crate::processing::IntermediateEvent;
+use crate::{Sink, VisitFields};
 
 /// Adaptor for foreign event types that cannot implement [`Event`](crate::Event) directly.
-pub trait DynEvent: Send + Sync {
+pub trait DynEvent: VisitFields + Send + Sync {
     /// The event name.
     ///
     /// Compile-time events return `&'static str` (zero-copy).
@@ -51,7 +50,7 @@ pub trait DynEvent: Send + Sync {
     /// An adaptor must therefore return only text it has already sanitized -
     /// typically a message template or a value it produced itself. Untrusted
     /// runtime input, user-controlled text, PII, and secrets must instead be
-    /// reported through [`visit_fields`](Self::visit_fields), where each value
+    /// reported through [`visit_fields`](VisitFields::visit_fields), where each value
     /// carries a data class and is redacted per processor.
     fn body(&self) -> Option<Cow<'static, str>>;
 
@@ -63,16 +62,6 @@ pub trait DynEvent: Send + Sync {
 
     /// The name of the crate where the event originated, if available.
     fn source_crate(&self) -> Option<Cow<'static, str>>;
-
-    /// Lazily visits all key-value fields on this event.
-    ///
-    /// For each field, the visitor receives a [`FieldDescriptor`](crate::metadata::FieldDescriptor) and a getter
-    /// closure. The getter takes a `&dyn Redactor` and returns the redacted
-    /// [`Value`](crate::Value). It is only invoked if the processor wants the value.
-    ///
-    /// The visitor returns [`ControlFlow::Continue`] to keep iterating or
-    /// [`ControlFlow::Break`] to stop early.
-    fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()>;
 
     /// Returns the event description (metadata) for processor prefiltering.
     ///
@@ -109,6 +98,7 @@ pub fn emit_dyn_event(sink: &Sink, event: &dyn DynEvent) {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::ops::ControlFlow;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -116,9 +106,15 @@ mod tests {
 
     use super::*;
     use crate::FlushError;
-    use crate::processing::{EventProcessor, EventView};
+    use crate::processing::{EventProcessor, EventView, FieldVisitorFn};
 
     struct Bridged;
+
+    impl VisitFields for Bridged {
+        fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+    }
 
     impl DynEvent for Bridged {
         fn name(&self) -> &'static str {
@@ -139,10 +135,6 @@ mod tests {
 
         fn source_crate(&self) -> Option<Cow<'static, str>> {
             None
-        }
-
-        fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            ControlFlow::Continue(())
         }
 
         fn description(&self) -> EventDescription {

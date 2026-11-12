@@ -13,21 +13,7 @@ struct Strings<'a> {
     classified_ref: &'a Classified,
 }
 const _: () = {
-    impl<'a> ::observed::Event for Strings<'a> {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "strings",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Strings<'static>>()),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "strings",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
-                ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+    impl<'a> ::observed::VisitFields for Strings<'a> {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -151,5 +137,21 @@ const _: () = {
             }
             ::core::ops::ControlFlow::Continue(())
         }
+    }
+    impl<'a> ::observed::Event for Strings<'a> {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "strings",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Strings<'static>>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "strings",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
     }
 };

@@ -235,6 +235,23 @@ fn a_generic_event_spells_out_the_bounds_its_body_relies_on() {
 }
 
 #[test]
+fn a_generic_field_routed_to_no_signal_is_bound_only_by_send_and_sync() {
+    // No severity attribute, so `payload` reaches neither signal. The body generates no code
+    // for it, so the `where` clause must not ask for the bounds of its redaction path.
+    insta::assert_snapshot!(expand_event(
+        r#""generic.metric""#,
+        r"
+        #[counter(hits)]
+        struct GenericMetric<T> {
+            #[unredacted]
+            hits: u64,
+            payload: T,
+        }
+        ",
+    ));
+}
+
+#[test]
 fn a_borrowed_string_is_copied_but_a_static_one_is_not() {
     // `Value` owns its data, so a non-`'static` `&str` has to be copied into an
     // `Arc<str>`. `&'static str` is stored as-is, and a reference to a non-string type
@@ -301,6 +318,28 @@ fn a_raw_identifier_field_is_reported_under_its_domain_name() {
             #[dimension(metric)]
             #[unredacted]
             r#match: i64,
+        }
+        ",
+    ));
+}
+
+#[test]
+fn flatten_calls_visit_fields() {
+    // The `VisitFields` implementation of the value names and routes its own fields, so the macro hands it the visitor. A
+    // type that mentions a type parameter is bound by `VisitFields` instead of a redaction bound.
+    insta::assert_snapshot!(expand_event(
+        r#""flattened""#,
+        r"
+        #[info]
+        struct Flattened<'a, T> {
+            #[unredacted]
+            before: i64,
+            #[flatten]
+            concrete: Parameters<'a>,
+            #[flatten]
+            generic: T,
+            #[unredacted]
+            after: i64,
         }
         ",
     ));
@@ -666,6 +705,28 @@ fn an_instrument_looks_through_parentheses_around_its_value_type() {
         r#""wrapped""#,
         "#[counter(v)] struct Wrapped { #[unredacted] v: (u64) }",
     ));
+}
+
+#[test]
+fn flatten_attribute_is_validated() {
+    // The value routes and redacts each of its fields, so a flattened field takes no other field attribute. It has
+    // no value of its own, so no instrument can record it and no log message can name it.
+    let output = report(
+        [
+            "struct Subject { #[flatten(x)] f: T }",
+            r#"struct Subject { #[flatten = "x"] f: T }"#,
+            "struct Subject { #[flatten] #[flatten] f: T }",
+            "struct Subject { #[flatten] #[dimension] f: T }",
+            "struct Subject { #[flatten] #[unredacted] f: T }",
+            "struct Subject { #[flatten] #[data_class(Euii)] f: T }",
+            "struct Subject { #[flatten] #[if_none(drop)] f: Option<T> }",
+            "#[counter(f)] struct Subject { #[flatten] f: T }",
+            r#"#[info("{f}")] struct Subject { #[flatten] f: T }"#,
+        ]
+        .into_iter()
+        .map(|item| (event_source(r#""e""#, item), event_error(r#""e""#, item))),
+    );
+    insta::assert_snapshot!(output);
 }
 
 // ============================================================================================

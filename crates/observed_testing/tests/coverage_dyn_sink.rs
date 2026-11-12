@@ -19,7 +19,7 @@ use observed::enrichment::{EnrichFutureExt, Enrichment};
 use observed::interop::{DynEvent, emit_dyn_event};
 use observed::metadata::{EventDescription, FieldDescriptor, InstrumentKind, LogDescription, MetricDescription};
 use observed::processing::{EventProcessor, EventView, FieldVisitorFn};
-use observed::{Severity, Sink, SinkId, Value, emit};
+use observed::{Severity, Sink, SinkId, Value, VisitFields, emit};
 use observed_testing::events::ProbeEvent;
 use observed_testing::types::PublicString;
 use observed_testing::{ExpectedEvent, MockProcessor};
@@ -27,6 +27,12 @@ use observed_testing::{ExpectedEvent, MockProcessor};
 /// A foreign event type dispatched through the type-erased pipeline. It states
 /// a log signal explicitly, as every adaptor must.
 struct DynProbe;
+
+impl VisitFields for DynProbe {
+    fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+        ControlFlow::Continue(())
+    }
+}
 
 impl DynEvent for DynProbe {
     fn name(&self) -> &'static str {
@@ -47,10 +53,6 @@ impl DynEvent for DynProbe {
 
     fn source_crate(&self) -> Option<Cow<'static, str>> {
         Some(Cow::Borrowed("probe_crate"))
-    }
-
-    fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-        ControlFlow::Continue(())
     }
 
     fn description(&self) -> EventDescription {
@@ -160,6 +162,12 @@ fn standard_arc_processor_delivers_synthetic_events() {
 fn fields_without_signal_metadata_keep_their_field_name() {
     struct UnmappedField;
 
+    impl VisitFields for UnmappedField {
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            visitor(&FieldDescriptor::new("detail", None, None), &|_| Value::from("payload"))
+        }
+    }
+
     impl DynEvent for UnmappedField {
         fn name(&self) -> &'static str {
             "unmapped.field"
@@ -179,10 +187,6 @@ fn fields_without_signal_metadata_keep_their_field_name() {
 
         fn source_crate(&self) -> Option<Cow<'static, str>> {
             None
-        }
-
-        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            visitor(&FieldDescriptor::new("detail", None, None), &|_| Value::from("payload"))
         }
 
         fn description(&self) -> EventDescription {
@@ -249,6 +253,12 @@ fn a_dyn_event_without_a_log_signal_has_no_severity_and_never_reaches_logs() {
     /// Reports a body, but describes no signal.
     struct UndeclaredProbe;
 
+    impl VisitFields for UndeclaredProbe {
+        fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+    }
+
     impl DynEvent for UndeclaredProbe {
         fn name(&self) -> &'static str {
             "dyn.undeclared"
@@ -268,10 +278,6 @@ fn a_dyn_event_without_a_log_signal_has_no_severity_and_never_reaches_logs() {
 
         fn source_crate(&self) -> Option<Cow<'static, str>> {
             None
-        }
-
-        fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            ControlFlow::Continue(())
         }
 
         fn description(&self) -> EventDescription {
@@ -314,6 +320,17 @@ fn dyn_event_body_bypasses_redaction_while_fields_do_not() {
     /// A foreign event carrying one classified field alongside its body.
     struct FieldProbe;
 
+    impl VisitFields for FieldProbe {
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            visitor(&FieldDescriptor::log_only("detail"), &|engine| {
+                observed::Value::from(observed::__private::RedactedToString::to_redacted_string(
+                    &PublicString("field-secret".to_owned()),
+                    engine,
+                ))
+            })
+        }
+    }
+
     impl DynEvent for FieldProbe {
         fn name(&self) -> &'static str {
             "dyn.redaction"
@@ -333,15 +350,6 @@ fn dyn_event_body_bypasses_redaction_while_fields_do_not() {
 
         fn source_crate(&self) -> Option<Cow<'static, str>> {
             None
-        }
-
-        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            visitor(&FieldDescriptor::log_only("detail"), &|engine| {
-                observed::Value::from(observed::__private::RedactedToString::to_redacted_string(
-                    &PublicString("field-secret".to_owned()),
-                    engine,
-                ))
-            })
         }
 
         fn description(&self) -> EventDescription {

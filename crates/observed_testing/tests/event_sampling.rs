@@ -13,7 +13,7 @@ use data_privacy::{DataClass, Sensitive};
 use observed::interop::{DynEvent, emit_dyn_event};
 use observed::metadata::{EventDescription, LogDescription};
 use observed::processing::FieldVisitorFn;
-use observed::{EventSampler, EventSamplingContext, EventSamplingDecision, Severity, Sink, SinkId, emit, event};
+use observed::{EventSampler, EventSamplingContext, EventSamplingDecision, Severity, Sink, SinkId, VisitFields, emit, event};
 use observed_testing::types::{PiiString, PublicI64};
 use observed_testing::{ExpectedEvent, MockProcessor, TEST_ID, test_emitter};
 
@@ -127,6 +127,12 @@ struct BridgedEvent<'a> {
     message: &'a str,
 }
 
+impl VisitFields for BridgedEvent<'_> {
+    fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+        ControlFlow::Continue(())
+    }
+}
+
 impl DynEvent for BridgedEvent<'_> {
     fn name(&self) -> &'static str {
         "bridge.event"
@@ -146,10 +152,6 @@ impl DynEvent for BridgedEvent<'_> {
 
     fn source_crate(&self) -> Option<Cow<'static, str>> {
         Some(Cow::Borrowed("bridge"))
-    }
-
-    fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-        ControlFlow::Continue(())
     }
 
     fn description(&self) -> EventDescription {

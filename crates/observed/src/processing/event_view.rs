@@ -275,6 +275,7 @@ impl std::fmt::Debug for EventView<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::VisitFields;
     use crate::processing::FieldVisitorFn;
 
     #[test]
@@ -328,6 +329,12 @@ mod tests {
     /// that answers from the wrong one (or from a constant) is visible.
     struct SourcedEvent;
 
+    impl VisitFields for SourcedEvent {
+        fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+    }
+
     impl DynEvent for SourcedEvent {
         fn name(&self) -> &'static str {
             "test.event"
@@ -347,10 +354,6 @@ mod tests {
 
         fn source_crate(&self) -> Option<Cow<'static, str>> {
             Some(Cow::Borrowed("observed"))
-        }
-
-        fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-            ControlFlow::Continue(())
         }
 
         fn description(&self) -> EventDescription {

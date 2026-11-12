@@ -6,15 +6,7 @@ struct Wrapped {
     v: (u64),
 }
 const _: () = {
-    impl ::observed::Event for Wrapped {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "wrapped",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Wrapped>()),
-            ::core::option::Option::None,
-            ::core::option::Option::None,
-            true,
-            false,
-        );
+    impl ::observed::VisitFields for Wrapped {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -39,5 +31,15 @@ const _: () = {
             }
             ::core::ops::ControlFlow::Continue(())
         }
+    }
+    impl ::observed::Event for Wrapped {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "wrapped",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Wrapped>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            true,
+            false,
+        );
     }
 };

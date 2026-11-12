@@ -4,6 +4,14 @@ expression: "expand_event(r#\"\"no.fields\"\"#, \"#[info] struct NoFields;\")"
 ---
 struct NoFields;
 const _: () = {
+    impl ::observed::VisitFields for NoFields {
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for NoFields {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
             "no.fields",
@@ -19,11 +27,5 @@ const _: () = {
             false,
             false,
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

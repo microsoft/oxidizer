@@ -14,11 +14,11 @@ use crate::processing::FieldVisitorFn;
 /// attribute macro. Default and `#[data_class(<expr>)]` fields are extracted
 /// through the processor-supplied redactor. Fields marked `#[unredacted]` and
 /// unclassified enrichment values bypass it and must already be appropriate to
-/// emit. Fields supplied by a [`DynEvent`](crate::interop::DynEvent) adaptor are
-/// not a bypass: their getters receive the same per-processor redactor, but the
-/// adaptor writes those getters, so applying redaction is its responsibility
-/// rather than something this crate enforces. Only the dynamic event body skips
-/// the redactor outright.
+/// emit. Fields supplied by a [`DynEvent`](crate::interop::DynEvent) adaptor or a
+/// hand-written [`VisitFields`] implementation are not a bypass: their getters receive the same
+/// per-processor redactor, but the adaptor or the implementation writes those
+/// getters, so applying redaction is its responsibility rather than something
+/// this crate enforces. Only the dynamic event body skips the redactor outright.
 ///
 /// # Attribute macro
 ///
@@ -38,11 +38,17 @@ use crate::processing::FieldVisitorFn;
 ///     duration_ms: f64,
 /// }
 /// ```
-pub trait Event: Send + Sync {
+pub trait Event: VisitFields + Send + Sync {
     /// Static metadata describing this event's shape, severity, and fields.
     const DESCRIPTION: EventDescription;
+}
 
-    /// Lazily visits all fields on this event.
+/// Visits the fields of an [`Event`] or a [`DynEvent`](crate::interop::DynEvent).
+///
+/// An [`event`](macro@crate::event) can get fields whose names are known only at run time from a field marked
+/// `#[flatten]`.
+pub trait VisitFields {
+    /// Lazily visits all fields.
     ///
     /// For each field, the visitor receives a [`FieldDescriptor`](crate::metadata::FieldDescriptor) and a getter
     /// closure. The getter takes a `&dyn Redactor` and returns the redacted
