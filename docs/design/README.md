@@ -49,6 +49,18 @@ If macros make source ownership uncertain, the filter keeps ambiguous counters.
 Keep explicit exclusions for exceptional production paths and helpers that the
 filter cannot classify.
 
+Package-isolated all-target checks run in scheduled validation, not in the
+generated PR tiers. This division follows the standard Anvil catalog.
+`anvil-check-all-targets` checks each package separately with default features
+and with default features disabled.
+PR Clippy and coverage builds select packages together.
+Cargo can combine their features, so these PR builds can miss a dependency or
+target requirement that fails in an isolated build.
+Scheduled validation detects those failures later.
+Run `just anvil-check-all-targets` before publication when a change needs this
+isolated check. The package-isolated `http_headers_simd` PR jobs described below
+remain in place to test its documented `no_std` configurations.
+
 Anvil runs examples by default. Fetch examples that send real requests use
 public endpoints such as `https://example.com`. Automated runs require public
 network access and can fail if the endpoint or network is unavailable.

@@ -62,25 +62,28 @@ impl Metadata {
     }
 
     /// # Safety
-    /// The caller holds the pool lock or this owner's exclusive lease.
+    /// The caller holds the pool lock or this owner's exclusive lease,
+    /// or exclusively owns unpublished metadata.
     pub(crate) unsafe fn generation(&self) -> u64 {
-        // SAFETY: The generation cannot change during a current owner lease.
+        // SAFETY: The caller excludes concurrent lease-state updates.
         unsafe { *self.generation.get() }
     }
 
     /// # Safety
-    /// The caller holds the pool lock and is transferring an inactive owner.
+    /// The caller holds the pool lock or exclusively owns unpublished metadata.
+    /// The owner is inactive.
     pub(crate) unsafe fn begin_lease(&self) {
-        // SAFETY: The pool lock exclusively owns lease-state updates.
+        // SAFETY: The caller guarantees exclusive access to lease-state updates.
         let generation = unsafe { &mut *self.generation.get() };
         debug_assert_eq!(*generation & 1, 0);
         *generation = next_generation(*generation);
     }
 
     /// # Safety
-    /// The caller holds the pool lock and the previous core action has ended.
+    /// The caller holds the pool lock or exclusively owns unpublished metadata.
+    /// The previous core action has ended.
     pub(crate) unsafe fn end_lease(&self) {
-        // SAFETY: The pool lock exclusively owns lease-state updates.
+        // SAFETY: The caller guarantees exclusive access to lease-state updates.
         let generation = unsafe { &mut *self.generation.get() };
         // Isolated pool tests may return a freshly initialized, unleased owner.
         if *generation & 1 != 0 {
