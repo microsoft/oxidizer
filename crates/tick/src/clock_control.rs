@@ -535,7 +535,6 @@ impl State {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // causes test timeout
     fn advance(&mut self, duration: Duration, flow: TimeFlow, ready: &mut ReadyWakers) {
         self.advance_time(duration, flow);
         self.evaluate_timers(ready);

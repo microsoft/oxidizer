@@ -69,7 +69,6 @@ impl Redactor for SimpleRedactor {
         !matches!(self.mode, SimpleRedactorMode::Passthrough)
     }
 
-    #[cfg_attr(test, mutants::skip)]
     fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn Write) -> core::fmt::Result {
         const ASTERISKS: &str =
             "************************************************************************************************************************";

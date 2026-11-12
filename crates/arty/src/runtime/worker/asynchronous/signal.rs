@@ -51,7 +51,6 @@ impl Signal {
         Waker::from(Arc::into_std_arc(Arc::clone(signal)))
     }
 
-    #[cfg_attr(test, mutants::skip)] // Removing driver interruption strands primary waits across unrelated runtime tests.
     pub(crate) fn set_driver_waker(&self, waker: Waker) {
         assert!(
             self.driver_waker.set(waker).is_ok(),
@@ -61,12 +60,10 @@ impl Signal {
 
     #[cfg(test)]
     #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn is_notified(&self) -> bool {
         self.ready.is_notified()
     }
 
-    #[cfg_attr(test, mutants::skip)] // Removing all worker and driver wake effects strands runtime tests; each effect is tested directly.
     fn notify(&self) {
         self.ready.notify_one();
         if let Some(driver_waker) = self.driver_waker.get() {

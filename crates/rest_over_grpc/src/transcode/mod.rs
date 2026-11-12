@@ -109,7 +109,6 @@ fn validate_query_budget(query: &[(&str, &str)]) -> Result<(), TranscodeError> {
 }
 
 /// Deserializes directly when no body/query merge is needed.
-#[cfg_attr(test, mutants::skip)]
 fn try_decode_fast<T: DeserializeOwned>(
     body_kind: &RequestBodyKind,
     query: &[(&str, &str)],

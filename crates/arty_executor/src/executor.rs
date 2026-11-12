@@ -128,7 +128,6 @@ impl ObservePoll for &dyn PollObserver {
 
 impl Executor {
     /// Starts building a new instance of [`Executor`].
-    #[cfg_attr(test, mutants::skip)] // Gets mutated into equivalent.
     pub fn builder() -> ExecutorBuilder {
         ExecutorBuilder::new()
     }
@@ -393,7 +392,6 @@ impl Executor {
 
     /// Returns whether an immediate cycle can do useful work.
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Mutation can make the executor spin without useful work.
     fn has_work_to_do(&self) -> bool {
         debug_assert!(self.active.is_empty(), "active tasks are drained before deciding the next cycle");
         self.shared.has_new_tasks() || executor_context::has_wakes(self.shared.wake().thread_id()) || self.shared.wake().has_remote_wakes()
@@ -433,7 +431,6 @@ impl Executor {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     #[must_use]
     fn evaluate_shutdown_completion(&self) -> bool {
         if !self.shared.shutdown().is_triggered() {
@@ -475,7 +472,6 @@ impl Drop for Executor {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Just metrics reporting, not practical to test.
 fn record_poll_metrics(pending_count: usize, completed_count: usize) {
     if pending_count != 0 {
         TASKS_INACTIVATED.with(|event| event.observe(pending_count));

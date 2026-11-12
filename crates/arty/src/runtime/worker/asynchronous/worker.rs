@@ -158,7 +158,6 @@ impl Worker {
         self.execute_phase();
     }
 
-    #[cfg_attr(test, mutants::skip)] // Critical for code execution to occur in async contexts.
     fn execute_phase(&mut self) {
         while matches!(self.execute_step(), ControlFlow::Continue(())) {}
     }
@@ -245,7 +244,6 @@ impl Worker {
         ControlFlow::Break(())
     }
 
-    #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
     fn process_system_commands(&self) -> Option<bool> {
         let Some(ReadyWorkerState { commands, context, .. }) = &self.state else {
             return None;
@@ -288,7 +286,6 @@ impl Worker {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
     fn begin_shutdown(&mut self) {
         let Some(ReadyWorkerState {
             commands,
@@ -317,7 +314,6 @@ impl Worker {
 }
 
 impl Drop for Worker {
-    #[cfg_attr(test, mutants::skip)] // Worker-owned services must retire before the thread can finish shutdown.
     fn drop(&mut self) {
         if self.state.is_some() {
             self.begin_shutdown();

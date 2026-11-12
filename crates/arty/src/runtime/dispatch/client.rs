@@ -57,7 +57,6 @@ impl DispatcherClient {
         self.core.shutdown()
     }
 
-    #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
     /// Submits to a previously resolved worker without discarding destination affinity.
     pub(crate) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
     where
@@ -99,7 +98,6 @@ impl DispatcherClient {
         self.core.access_io(worker_index, access)
     }
 
-    #[cfg_attr(test, mutants::skip)] // Will cause tests to hang due to runtime never stopping.
     pub(crate) fn stop(&self, cause: impl Into<ShutdownCause>) -> ShutdownCause {
         self.core.stop_inner(cause.into())
     }
@@ -107,7 +105,6 @@ impl DispatcherClient {
 
 impl Debug for DispatcherClient {
     #[cfg_attr(coverage_nightly, coverage(off))] // Opaque diagnostic formatting only.
-    #[cfg_attr(test, mutants::skip)] // Debug formatting not tested
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(type_name::<Self>()).finish()
     }
@@ -129,7 +126,6 @@ mod tests {
     use crate::task::scheduler::Scheduler;
 
     impl DispatcherClient {
-        #[cfg_attr(test, mutants::skip)]
         pub(crate) fn for_test(thread: &Thread) -> Self {
             let (commands, _command_rx) = crate::runtime::worker::asynchronous::command_channel();
             let shutdown = Shutdown::default();

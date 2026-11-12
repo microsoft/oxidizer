@@ -44,7 +44,6 @@ impl<'p> ScannedPath<'p, '_> {
     #[inline]
     // Guard mutations can invoke unchecked indexing with invalid synthetic
     // offsets; valid and invalid ranges are covered directly below.
-    #[cfg_attr(test, mutants::skip)]
     pub fn segment(&self, index: usize) -> Option<&'p str> {
         if index >= self.count || index >= self.capacity {
             return None;
@@ -61,7 +60,6 @@ impl<'p> ScannedPath<'p, '_> {
     /// Returns a capture spanning the inclusive segment range `first..=last`.
     #[must_use]
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     pub fn capture(&self, first: usize, last: usize) -> Option<&'p str> {
         if first > last || last >= self.count || last >= self.capacity {
             return None;
@@ -78,7 +76,6 @@ impl<'p> ScannedPath<'p, '_> {
     /// Returns a capture from `first` through the end of the path.
     #[must_use]
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     pub fn rest(&self, first: usize) -> Option<&'p str> {
         if first == self.count {
             return Some("");
@@ -99,7 +96,6 @@ impl<'p> ScannedPath<'p, '_> {
     /// Returns a segment capture after removing literal prefix and suffix bytes.
     #[must_use]
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     pub fn affix(&self, index: usize, prefix_len: usize, suffix_len: usize) -> Option<&'p str> {
         if index >= self.count || index >= self.capacity {
             return None;

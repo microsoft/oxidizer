@@ -137,7 +137,6 @@ impl Timer {
             self.period = Duration::MAX;
         }
     }
-    #[cfg_attr(test, mutants::skip)] // cannot reliably check that poll_tick has been called
     fn poll_next_tick(&mut self, cx: &Context<'_>) -> Poll<TimerTick> {
         if self.period == Duration::MAX {
             return Poll::Pending;

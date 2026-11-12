@@ -261,6 +261,41 @@ fn complete_inspection_visits_pending_tasks_and_enforces_its_limit() {
 }
 
 #[test]
+fn inspection_ignores_descriptions_of_a_different_type() {
+    let mut executor = Executor::builder().build();
+    executor
+        .tasks()
+        .add_with_inspection(std::future::pending::<()>(), TaskOptions::default(), Completion, |_, state| {
+            Some(state)
+        });
+    let mut described = Vec::new();
+
+    let status = executor.inspect(1, |value: &u32| described.push(*value)).unwrap();
+
+    assert_eq!((status, described), (InspectionStatus::Complete, Vec::new()));
+}
+
+#[test]
+fn inspectors_can_decline_to_describe_a_task() {
+    let mut executor = Executor::builder().build();
+    let calls = Rc::new(Cell::new(0));
+    executor
+        .tasks()
+        .add_with_inspection(std::future::pending::<()>(), TaskOptions::default(), Completion, {
+            let calls = Rc::clone(&calls);
+            move |_, _| {
+                calls.set(calls.get() + 1);
+                None::<TaskState>
+            }
+        });
+    let mut described = Vec::new();
+
+    let status = executor.inspect(1, |state: &TaskState| described.push(*state)).unwrap();
+
+    assert_eq!((status, described, calls.get()), (InspectionStatus::Complete, Vec::new(), 1));
+}
+
+#[test]
 fn invalid_limits_and_panicking_visitors_report_errors() {
     let mut executor = Executor::builder().build();
     executor

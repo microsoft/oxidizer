@@ -181,10 +181,17 @@ Loom or Bolero executables whose source is disabled by `cfg(loom)` or
 `cfg(not(miri))`. Do not hand-edit generated `justfiles/anvil/**` to remove
 them. Target-level omission requires a cargo-anvil catalog enhancement.
 
-The Bolero recipe likewise has no supported manifest target-exclusion metadata;
-on Linux it discovers every `bolero::check!` target and gives each a 60-second
-libFuzzer smoke campaign. Repository code must not silently shorten or remove
-attacker-facing and unsafe-lifecycle campaigns to work around this limitation.
+The Bolero recipe likewise has no supported manifest target-exclusion metadata.
+On Linux it discovers every selected `bolero::check!` target and runs each with
+libFuzzer. Fuzzing runs in the separate `anvil-pr-fuzzing` group, not in
+`anvil-pr-runtime-analysis`.
+The PR campaign uses 30,000 iterations per target and the fixed seed `2027`.
+The scheduled campaign uses 90 seconds per target without a fixed seed.
+`anvil-scheduled-test` selects that campaign and the whole workspace.
+Non-Linux hosts skip these campaigns, but the coverage tier still runs the
+harnesses as ordinary tests.
+Repository code must not silently shorten or remove attacker-facing and
+unsafe-lifecycle campaigns to work around the target-selection limitation.
 
 ## Whole-workspace measurement
 
@@ -194,6 +201,13 @@ complete validation boundary:
 ```powershell
 $env:ANVIL_IMPACT = 'off'
 just anvil-pr-runtime-analysis
+```
+
+Run the whole-workspace PR fuzzing campaign separately:
+
+```powershell
+$env:ANVIL_IMPACT = 'off'
+just anvil-pr-fuzzing
 ```
 
 Compare warm runs on the same host and toolchain. Report compilation separately

@@ -85,6 +85,30 @@ mod tests {
     }
 
     #[test]
+    fn deadline_overflow_after_clock_advancement_returns_an_error() {
+        let (io, control) = MonitorIo::new_mocked();
+        let (mut connection, _peer) = control.connected_pair();
+        let start = io.instant();
+        let mut valid = 0;
+        let mut invalid = u64::MAX;
+        while invalid - valid > 1 {
+            let seconds = valid + (invalid - valid) / 2;
+            if start.checked_add(Duration::from_secs(seconds)).is_some() {
+                valid = seconds;
+            } else {
+                invalid = seconds;
+            }
+        }
+        let timeout = Duration::from_secs(valid);
+        connection.set_read_timeout(Some(timeout)).unwrap();
+        connection.set_write_timeout(Some(timeout)).unwrap();
+        control.advance_time(Duration::from_secs(2));
+
+        assert_eq!(connection.read(&mut [0]).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(connection.write(&[1]).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
     fn discovery_is_read_only_and_startup_initializes_the_user_registry() {
         let (io, control) = MonitorIo::new_mocked();
         control.fail_next(IoOperation::CreateDirectory, io::ErrorKind::PermissionDenied.into());

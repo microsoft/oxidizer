@@ -42,7 +42,6 @@ struct StdAllocBlock {
 unsafe impl BlockRefDynamic for StdAllocBlock {
     type State = Self;
 
-    #[cfg_attr(test, mutants::skip)] // Mutations can violate memory safety and cause UB.
     fn clone(state_ptr: NonNull<Self::State>) -> NonNull<Self::State> {
         // SAFETY: The state pointer is always valid for reads.
         // We only ever created shared references to it - the data in this structure is immutable.
@@ -55,7 +54,6 @@ unsafe impl BlockRefDynamic for StdAllocBlock {
         state_ptr
     }
 
-    #[cfg_attr(test, mutants::skip)] // Mutations can violate memory safety and cause UB.
     fn drop(state_ptr: NonNull<Self::State>) {
         // SAFETY: The state pointer is always valid for reads.
         // We only ever created shared references to it - the data in this structure is immutable.

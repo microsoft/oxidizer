@@ -404,7 +404,6 @@ impl Drop for OperationFuture<'_> {
     // endpoint and lets the request handle close ahead of it, inverting the
     // teardown order this type exists to enforce. Neither consequence is
     // observable from a test assertion; Miri owns that guarantee.
-    #[cfg_attr(test, mutants::skip)]
     fn drop(&mut self) {
         if self.receiver_live {
             // SAFETY: ManuallyDrop::drop requires that the value is never used
@@ -731,6 +730,28 @@ mod tests {
         // context installed and the awaited future proves it has returned;
         // consuming the guard discharges the obligation forbidding later use of
         // it.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
+    }
+
+    #[test]
+    fn inline_completion_wins_over_a_later_submission_error() {
+        let (mut guard, context, contexts, session, closes) = installed();
+        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| {
+            // SAFETY: The context remains installed, this status has no
+            // payload, and submission holds no exclusive context borrow.
+            // The notification runs synchronously and overlaps no other.
+            unsafe {
+                complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+            }
+            Err(WinHttpError::new(12004, WinHttpOperation::SendRequest))
+        });
+
+        assert!(matches!(drive(future).unwrap(), CompletionResult::SendRequestComplete));
+
+        // SAFETY: The notification has returned, the context is still
+        // installed, and consuming the guard prevents later access.
         unsafe {
             finish(guard, context, &contexts, session, &closes);
         }

@@ -60,7 +60,6 @@ pub(in crate::internal) fn chunk_alloc_size(header_size: usize, payload_size: us
 ///
 /// On size-overflow or end-of-address-space overflow, the allocation is
 /// freed and `AllocError` is returned.
-#[cfg_attr(test, mutants::skip)]
 #[inline]
 pub(in crate::internal) fn alloc_chunk_raw<A: Allocator>(
     allocator: &A,

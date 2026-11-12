@@ -55,7 +55,6 @@ impl<A: Allocator + Clone> RetiredLocalChunks<A> {
     }
 
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // `false` only selects the equivalent slow reset path
     pub(in crate::arena) fn is_empty(&self) -> bool {
         self.head.get().is_null()
     }

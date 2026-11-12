@@ -450,7 +450,6 @@ fn relocate_and_observe(policy: BlockingPoolPolicy, target: RelocationTarget) ->
 ///
 /// The worker-pool policy does not change this behavior. The task runs on the
 /// origin worker before relocation and on the distinct destination worker after it.
-#[cfg_attr(test, mutants::skip)] // This is a test oracle, not production behavior. Assertion mutations invalidate the test.
 fn assert_async_follows_relocation(observation: &RelocationObservation) {
     assert_eq!(
         observation.async_task.before, observation.origin,

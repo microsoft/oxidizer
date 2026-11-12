@@ -42,7 +42,7 @@ use crate::convert::{
     decompression_mask, disable_feature_mask, dword_bytes, headers_to_utf16, host_to_utf16, method_to_utf16, path_to_utf16,
     protocol_options, request_open_flags,
 };
-use crate::error::{Result as WinHttpResult, callback_protocol_error, invalid_request, invalid_response, query_error};
+use crate::error::{Result as WinHttpResult, invalid_request, invalid_response, query_error};
 use crate::handle::{ConnectHandle, RawHandle, RequestHandle};
 use crate::operation::{ContextInstallation, ContextPool, RequestGuard};
 use crate::options::ProtocolOptions;
@@ -237,7 +237,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
                 });
                 let completion = receive
                     .await
-                    .map_err(|_disconnected| callback_protocol_error("the headers completion channel disconnected"))?;
+                    .expect("the live operation retains the request context and its completion sender");
                 expect_completion(completion, OperationKind::HeadersAvailable)?;
             }
 
@@ -273,12 +273,10 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             .body(body);
         *response
             .headers_mut()
-            .ok_or_else(|| invalid_response("the HTTP response builder rejected response metadata"))
-            .map_err(|error| RequestFailure::after_context_installation(error, cold_connect_state, connect_duration))? = headers;
-        response
+            .expect("typed status and version leave the response builder valid") = headers;
+        Ok(response
             .build()
-            .map_err(invalid_response)
-            .map_err(|error| RequestFailure::after_context_installation(error, cold_connect_state, connect_duration))
+            .expect("the body was supplied and its length comes from the existing Content-Length header"))
     }
 }
 
@@ -328,10 +326,11 @@ async fn send_request_headers(
     match outcome {
         Ok(completion) => {
             let cold_connect_state = guard.cold_connect_state();
-            completion
-                .map_err(|_disconnected| callback_protocol_error("the send completion channel disconnected"))
-                .and_then(|completion| expect_completion(completion, OperationKind::SendRequest))
-                .map_err(|error| (error, cold_connect_state))
+            expect_completion(
+                completion.expect("the live operation retains the request context and its completion sender"),
+                OperationKind::SendRequest,
+            )
+            .map_err(|error| (error, cold_connect_state))
         }
         Err(cold_connect_state) => Err((HttpError::timeout(timeout), cold_connect_state)),
     }
@@ -371,9 +370,7 @@ impl TranslatedRequest {
                 ))));
             }
         };
-        let authority = uri
-            .authority()
-            .ok_or_else(|| invalid_request(RequestTranslationError::from(MissingAuthorityError::new())))?;
+        let authority = uri.authority().expect("a parsed URI with a scheme always has an authority");
         if authority.as_str().contains('@') {
             return Err(invalid_request(RequestTranslationError::from(UserInfoInAuthorityError::new())));
         }
@@ -405,14 +402,14 @@ fn authority_port(authority: &Authority, host: &str, default: u16) -> Result<u16
     let suffix = authority
         .as_str()
         .strip_prefix(host)
-        .ok_or_else(|| InvalidAuthorityError::new(authority.as_str().to_owned()))?;
+        .expect("caller passes this authority's host after rejecting user information");
     if suffix.is_empty() {
         return Ok(default);
     }
 
     let explicit = suffix
         .strip_prefix(':')
-        .ok_or_else(|| InvalidAuthorityError::new(authority.as_str().to_owned()))?;
+        .expect("the suffix of a parsed authority after its host is a colon-prefixed port");
     if explicit.is_empty() {
         return Err(EmptyPortError::new().into());
     }
@@ -1171,6 +1168,11 @@ mod tests {
                 request(Method::GET, "ftp://example.com/"),
                 TransportOptions::default(),
                 "unsupported scheme",
+            ),
+            (
+                request(Method::GET, "https://:443/"),
+                TransportOptions::default(),
+                "request URI has no host",
             ),
             (
                 request(Method::GET, "http://example.com/"),
@@ -2008,6 +2010,26 @@ mod tests {
         .unwrap_err();
         assert_eq!(malformed.label(), "request_winhttp");
         assert!(malformed.to_string().contains("callback 0x00020000 with 3 bytes"));
+    }
+
+    #[test]
+    fn invalid_native_status_codes_reject_metadata_and_close_handles() {
+        for status in [99, u32::MAX] {
+            let (result, record) = run_lifecycle(
+                request(Method::GET, "https://example.com/"),
+                TransportOptions::default(),
+                WinHttpTlsConfig::default(),
+                LifecycleConfig {
+                    status,
+                    ..LifecycleConfig::default()
+                },
+            );
+            let error = result.unwrap_err();
+            assert_eq!(error.label(), "request_winhttp");
+            assert_eq!(error.recovery(), RecoveryInfo::never());
+            assert!(error.to_string().contains("invalid HTTP status code"));
+            assert_lifecycle_closed(&record);
+        }
     }
 
     #[test]

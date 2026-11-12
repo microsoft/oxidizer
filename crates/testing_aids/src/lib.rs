@@ -12,6 +12,7 @@
 
 #![allow(clippy::panic, clippy::unwrap_used, missing_docs, reason = "Test code")]
 
+use std::ffi::{OsStr, OsString};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -37,14 +38,17 @@ crate::init_tracing!();
 /// We are conservative here and allow much time - this is only to break out of infinite loops, not for any
 /// situations that are actually expected.
 ///
-/// This should be significantly smaller than the .cargo/mutants.toml timeout because multiple
-/// tests may be executed during a single cargo-mutants run, so this timeout might not start
-/// immediately at the start of a test run.
+/// Mutation runs disable this watchdog so Gamma can report its own timeout verdict.
+/// Ordinary runs use it to stop a test that makes no progress.
 pub const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[must_use]
 pub fn is_mutation_testing() -> bool {
-    env::var("MUTATION_TESTING").as_deref() == Ok("1")
+    is_mutation_testing_with(|name| env::var_os(name))
+}
+
+fn is_mutation_testing_with(get_env: impl Fn(&str) -> Option<OsString>) -> bool {
+    get_env("CARGO_GAMMA").is_some() || get_env("MUTATION_TESTING").as_deref() == Some(OsStr::new("1"))
 }
 
 /// Executes a thread-safe function on a background thread and abandons it if
@@ -154,4 +158,32 @@ where
     execute_or_terminate_process(|| {
         ::futures::executor::block_on(f());
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+
+    use super::is_mutation_testing_with;
+
+    #[test]
+    fn mutation_testing_recognizes_gamma_and_legacy_opt_in() {
+        for (legacy, gamma, expected) in [
+            (None, None, false),
+            (Some("0"), None, false),
+            (Some("1"), None, true),
+            (None, Some("1"), true),
+            (Some("0"), Some(""), true),
+        ] {
+            let actual = is_mutation_testing_with(|name| {
+                let value = match name {
+                    "MUTATION_TESTING" => legacy,
+                    "CARGO_GAMMA" => gamma,
+                    _ => panic!("unexpected environment variable: {name}"),
+                };
+                value.map(OsString::from)
+            });
+            assert_eq!(actual, expected, "MUTATION_TESTING={legacy:?}, CARGO_GAMMA={gamma:?}");
+        }
+    }
 }

@@ -139,7 +139,6 @@ impl LocalLexicon {
     /// assert_eq!(lexicon.resolve(a), "hello");
     /// ```
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Capacity hints affect allocation behavior, not observable values.
     pub fn with_capacity(strings: usize, bytes: usize) -> Self {
         Self::with_capacity_and_hasher(strings, bytes, FxBuildHasher)
     }
@@ -169,7 +168,6 @@ impl<S: BuildHasher> LocalLexicon<S> {
     /// Hashes a byte slice directly (see the
     /// [`ThreadedLexicon`](crate::ThreadedLexicon) note).
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // Constant hashes remain correct under collision resolution, but are pathologically slow.
     fn hash_bytes(&self, bytes: &[u8]) -> u64 {
         let mut hasher = self.hasher.build_hasher();
         hasher.write(bytes);

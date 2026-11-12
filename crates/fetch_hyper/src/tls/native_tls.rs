@@ -68,7 +68,6 @@ pub(crate) enum NativeTlsStream<S> {
 
 // Pure I/O forwarding preserves the behavior of the wrapped HTTP/TLS stream;
 // mutating these methods only creates equivalent behavior or artificial hangs.
-#[cfg_attr(test, mutants::skip)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl<S: Read + Write + Unpin> Read for NativeTlsStream<S> {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: ReadBufCursor<'_>) -> Poll<std::io::Result<()>> {
@@ -79,7 +78,6 @@ impl<S: Read + Write + Unpin> Read for NativeTlsStream<S> {
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl<S: Read + Write + Unpin> Write for NativeTlsStream<S> {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
@@ -134,7 +132,6 @@ impl<S: HyperIo + Unpin> Connection for NativeTlsStream<S> {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Native TLS owns ALPN negotiation; this only maps its reported protocol into hyper metadata.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn negotiated_h2<S: std::io::Read + std::io::Write>(stream: &native_tls::TlsStream<S>) -> bool {
     stream.negotiated_alpn().unwrap_or(None).is_some_and(|protocol| protocol == b"h2")
@@ -160,14 +157,12 @@ impl<S: Read + Unpin> Read for RecordingIo<S> {
 }
 
 impl<S: Write + Unpin> Write for RecordingIo<S> {
-    #[cfg_attr(test, mutants::skip)] // Returning artificial zero-progress writes makes native-tls spin without yielding.
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
         let result = Pin::new(&mut self.inner).poll_write(cx, buf);
         record_error_kind(&self.error_kind, &result);
         result
     }
 
-    #[cfg_attr(test, mutants::skip)] // Pure forwarding; native TLS handshakes use poll_write.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_write_vectored(mut self: Pin<&mut Self>, cx: &mut Context<'_>, bufs: &[IoSlice<'_>]) -> Poll<std::io::Result<usize>> {
         let result = Pin::new(&mut self.inner).poll_write_vectored(cx, bufs);
@@ -175,13 +170,11 @@ impl<S: Write + Unpin> Write for RecordingIo<S> {
         result
     }
 
-    #[cfg_attr(test, mutants::skip)] // Pure capability forwarding.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn is_write_vectored(&self) -> bool {
         self.inner.is_write_vectored()
     }
 
-    #[cfg_attr(test, mutants::skip)] // Pure forwarding; the handshake's transient I/O path is covered through poll_read.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let result = Pin::new(&mut self.inner).poll_flush(cx);
@@ -189,7 +182,6 @@ impl<S: Write + Unpin> Write for RecordingIo<S> {
         result
     }
 
-    #[cfg_attr(test, mutants::skip)] // Pure forwarding after connection establishment.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let result = Pin::new(&mut self.inner).poll_shutdown(cx);
@@ -198,7 +190,6 @@ impl<S: Write + Unpin> Write for RecordingIo<S> {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Pure connection-metadata forwarding.
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl<S: Connection> Connection for RecordingIo<S> {
     fn connected(&self) -> Connected {
@@ -265,7 +256,6 @@ where
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    #[cfg_attr(test, mutants::skip)] // Pure readiness delegation; replacing Ready(Ok(())) is observationally equivalent for the adapter.
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.http.poll_ready(cx).map(|result| result.map_err(Into::into))
     }
@@ -324,7 +314,6 @@ async fn connect_https<S: HyperIo + Unpin>(
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Type-only adaptation after a successful platform TLS handshake.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn wrap_https_stream<S>(stream: tokio_native_tls::TlsStream<TokioIo<RecordingIo<S>>>) -> NativeTlsStream<S> {
     NativeTlsStream::Https(TokioIo::new(stream))

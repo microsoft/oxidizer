@@ -138,7 +138,6 @@ const fn is_valid_ascii_ident_continue(byte: u8) -> bool {
 /// - Continue with zero or more `_`, ASCII letters, or ASCII digits (0-9)
 ///
 /// This function is `const` and can be used in both const and runtime contexts.
-#[cfg_attr(test, mutants::skip)] // leads to build timeouts in mutant tests
 const fn is_valid_identifier(s: &str) -> bool {
     let bytes = s.as_bytes();
     if bytes.is_empty() {

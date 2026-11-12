@@ -227,7 +227,6 @@ where
             .promote_remote_notification()
     }
 
-    #[cfg_attr(test, mutants::skip)] // Mutation causes resources not to be released, leading to executor shutdown never happening.
     fn abort(self: Pin<&Self>, cause: ShutdownCause) {
         if let Some(wake_signal) = self.wake_signal.get() {
             wake_signal.retire();
@@ -374,7 +373,6 @@ where
     not(test),
     expect(clippy::needless_pass_by_value, reason = "semantically correct to consume the panic")
 )]
-#[cfg_attr(test, mutants::skip)] // Impractical to unit test process termination.
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn on_unhandled_task_panic(panic: TaskPanicPayload) -> ! {
     #[cfg(test)]
@@ -478,7 +476,6 @@ impl<F: Future> Future for FutureStorage<F> {
 #[pinned_drop]
 impl<F> PinnedDrop for FutureStorage<F> {
     #[cfg_attr(coverage_nightly, coverage(off))] // Wrapper-invariant fallback terminates in a child process.
-    #[cfg_attr(test, mutants::skip)] // A no-op differs only in the process-terminating panicking-destructor fallback.
     fn drop(self: Pin<&mut Self>) {
         if let Err(panic) = self.destroy_pinned() {
             on_unhandled_task_panic(panic);
@@ -606,6 +603,29 @@ mod tests {
         fn drop(&mut self) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    #[cfg(feature = "inspection")]
+    #[test]
+    fn uninitialized_task_can_be_aborted_and_has_no_description() {
+        let pool = MultiPool::new();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let handle = allocate_task(
+            &pool,
+            DropCountingFuture(Arc::clone(&drops)),
+            TaskOptions::default(),
+            Sink::noop(),
+            TestCompletion,
+        );
+        let task = handle.as_ref();
+        let mut descriptions = 0;
+
+        task.abort(ShutdownCause::default());
+        task.inspect(TaskState::Ready, &mut |_| descriptions += 1);
+        drop(handle);
+
+        assert_eq!((drops.load(Ordering::Relaxed), descriptions), (1, 0));
+        assert!(pool.is_empty());
     }
 
     #[test]

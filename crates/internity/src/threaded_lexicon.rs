@@ -336,7 +336,6 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
     /// Selects the owning shard for a hash. Uses a multiply-mix so the shard bits
     /// are independent of the hash bits `hashbrown` relies on internally.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // Shard selection affects distribution and performance, not correctness.
     fn shard_of(h: u64) -> usize {
         (h.wrapping_mul(MIX) >> (64 - SHARD_BITS)) as usize
     }
@@ -348,7 +347,6 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
     /// That is sound here because interner keys are whole strings never combined
     /// with other hashed fields, so no prefix-disambiguation framing is needed.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // Constant hashes remain correct under collision resolution, but are pathologically slow.
     fn hash_bytes(&self, b: &[u8]) -> u64 {
         #[cfg(target_pointer_width = "32")]
         if self.stable_default_hash {

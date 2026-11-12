@@ -372,7 +372,6 @@ impl FormatLimits {
     // offers the engine without changing which bytes are produced or where `check` rejects, so
     // every drain loop needs one step per byte and mutation testing records a timeout instead of a
     // verdict. `check` is what enforces the bound, and its mutants are caught.
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn remaining_output(self, output_len: u64) -> Option<u64> {
         self.output_len.map(|maximum| maximum.saturating_sub(output_len))
     }

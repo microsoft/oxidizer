@@ -29,7 +29,6 @@ http = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
-mutants = { workspace = true }
 static_assertions = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
