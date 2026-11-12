@@ -331,6 +331,13 @@ mod tests {
             let rejection_not_queued = command_rx.spawn_receiver().try_recv().is_err();
             let rejection_not_woken = wakes.0.load(Ordering::Relaxed) == before;
             LocalWorker::clear_scheduler();
+            let (scheduler_cleared, retained_scheduler, retained_hooks) = LocalWorker::with_current_mut(|current| {
+                let current = current.expect("the test worker remains attached until thread teardown");
+                let cleared = current.scheduler.is_none() && current.panic_hooks.is_none();
+                (cleared, current.scheduler.take(), current.panic_hooks.take())
+            });
+            drop(retained_scheduler);
+            drop(retained_hooks);
             [
                 ("same-owner registration stays local", registered_locally),
                 ("idle worker is woken", idle_worker_woken),
@@ -342,6 +349,7 @@ mod tests {
                 ("shutdown rejects registration", rejected_after_shutdown),
                 ("shutdown rejection sends no command", rejection_not_queued),
                 ("shutdown rejection does not wake the worker", rejection_not_woken),
+                ("scheduler cleanup releases worker-local state", scheduler_cleared),
             ]
         })
         .join()

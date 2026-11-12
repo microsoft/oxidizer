@@ -412,6 +412,19 @@ mod tests {
         worker.state.is_none()
     }
 
+    #[test]
+    fn a_constructed_worker_uses_the_provided_signal() {
+        let signal = Arc::new(Signal::default());
+        let worker = test_worker(
+            command_channel(),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::clone(&signal),
+        );
+
+        assert!(Arc::ptr_eq(&worker.signal, &signal));
+    }
+
     #[derive(Debug)]
     struct DiscardCompletion;
 

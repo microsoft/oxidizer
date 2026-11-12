@@ -20,7 +20,7 @@ use std::task::{Context, Poll, Waker};
 use arty::runtime::Runtime;
 use panic_support::runtime;
 use support::JoinHandleExt as _;
-use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
+use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
 thread_local! {
@@ -70,28 +70,31 @@ fn a_remote_task_wake_is_retained_before_the_runtime_worker_parks() {
         }
     }
 
-    let runtime = runtime();
+    let mut runtime = Some(runtime());
     for _ in 0..if cfg!(miri) { 2 } else { 20 } {
         let ready = Arc::new(AtomicBool::new(false));
         let (sent, received) = mpsc::channel();
-        let task = runtime
-            .scheduler()
-            .spawn_anywhere(Unaware((Arc::clone(&ready), sent)), |_, Unaware((ready, sender))| RemoteWake {
-                ready,
-                waker: Some(sender),
-            });
-        let waker = if is_mutation_testing() {
-            received.recv().unwrap()
-        } else {
-            received.recv_timeout(TEST_TIMEOUT).unwrap()
-        };
+        let task =
+            runtime
+                .as_ref()
+                .unwrap()
+                .scheduler()
+                .spawn_anywhere(Unaware((Arc::clone(&ready), sent)), |_, Unaware((ready, sender))| RemoteWake {
+                    ready,
+                    waker: Some(sender),
+                });
+        let received = received.recv_timeout(TEST_TIMEOUT);
+        if received.is_err() {
+            std::mem::forget(runtime.take().unwrap());
+        }
+        let waker = received.unwrap();
         // Publish the predicate before the wake. The test does not use the wake as a memory barrier.
         ready.store(true, Ordering::Release);
         waker.wake_by_ref();
         waker.wake_by_ref();
         assert_eq!(task.join().unwrap(), 7);
     }
-    runtime.stop().unwrap();
+    runtime.take().unwrap().stop().unwrap();
 }
 
 #[test]
