@@ -58,6 +58,7 @@ fn configured_current_thread_builds_the_executor() {
 
 struct PanicOnce(Arc<AtomicUsize>);
 
+#[cfg(test)]
 impl Drop for PanicOnce {
     fn drop(&mut self) {
         self.0.fetch_add(1, Ordering::Relaxed);

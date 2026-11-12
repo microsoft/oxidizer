@@ -295,7 +295,7 @@ fn observed_options_keep_context_and_placement() {
     let (sink, processor) = test_emitter(TEST_ID);
     let context = sink.transfer_context().with_enrichment(TaskContext);
     let mut executor = Executor::builder().sink(sink.clone()).build();
-    let task_sink = sink.clone();
+    let task_sink = sink;
     let mut handle = executor.tasks().add_test(
         async move { enrichment_keys(&task_sink) },
         TaskOptions::observed(context, TaskPlacement::SameThread),
@@ -317,7 +317,7 @@ fn new_options_keep_placement_without_context() {
     let caller = sink.transfer_context().with_enrichment(CallerContext);
     let _guard = caller.apply_current_thread();
     let mut executor = Executor::builder().sink(sink.clone()).build();
-    let task_sink = sink.clone();
+    let task_sink = sink;
     let mut handle = executor.tasks().add_test(async move { enrichment_keys(&task_sink) }, options);
 
     _ = executor.execute_cycle();
