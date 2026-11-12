@@ -71,8 +71,8 @@ ohno = { workspace = true, optional = true }
 performables = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 plurality = { workspace = true, features = ["std"], optional = true }
-seismograph = { workspace = true, optional = true }
 scopeguard = { workspace = true }
+seismograph = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true }
