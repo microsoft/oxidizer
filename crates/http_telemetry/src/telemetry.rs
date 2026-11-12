@@ -4,22 +4,26 @@
 //! The telemetry middleware, and the layer that creates it.
 
 use std::any::type_name;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::Arc;
 
+use data_privacy::{DataClass, IntoDataClass};
 use futures::FutureExt;
 use futures::future::Either;
 use http::header::HOST;
+use http::{HeaderMap, HeaderName};
 use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
 use layered::{Layer, Service};
 use observed::{Event, Sink};
+use routerama::RouteTable;
 use templated_uri::BasePath;
 use tick::SimpleClock;
 
 use crate::server::{
-    ActiveRequests, OTHER, RequestAbandoned, RequestComplete, RequestEnd, RequestError, TelemetryDropGuard, UriAuthority,
-    emit_when_body_ends,
+    ActiveRequests, HeaderField, HeaderValues, OTHER, RequestAbandoned, RequestAndResponseHeaders, RequestComplete, RequestEnd,
+    RequestError, RouteFields, RouteValues, TelemetryDropGuard, UriAuthority, emit_when_body_ends, header_fields,
 };
 
 /// Produces telemetry about the requests that go through it, in the form of `observed` events.
@@ -30,6 +34,9 @@ use crate::server::{
 pub struct Telemetry<T> {
     pub(crate) inner: T,
     pub(crate) layer: TelemetryLayer,
+    pub(crate) route_fields: Option<Arc<RouteFields>>,
+    pub(crate) request_header_fields: Option<Arc<[HeaderField]>>,
+    pub(crate) response_header_fields: Option<Arc<[HeaderField]>>,
 }
 
 impl Telemetry<()> {
@@ -40,6 +47,10 @@ impl Telemetry<()> {
             sink,
             clock: SimpleClock::new_system(),
             excluded_paths: ExcludedPaths::default(),
+            route_resolver: None,
+            route_parameter_data_classes: BTreeMap::new(),
+            request_header_data_classes: HeaderMap::default(),
+            response_header_data_classes: HeaderMap::default(),
         }
     }
 }
@@ -84,6 +95,22 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
                 Some(authority) => Some(UriAuthority::Uri(authority.clone(), default_port)),
                 None => input.headers().get(HOST).cloned().map(UriAuthority::Host),
             },
+            route_values: self.route_fields.as_ref().and_then(|fields| {
+                let path_and_query = input.uri().path_and_query()?.clone();
+                Some(RouteValues {
+                    route_fields: Arc::clone(fields),
+                    path_and_query,
+                })
+            }),
+            headers: (self.request_header_fields.is_some() || self.response_header_fields.is_some()).then(|| {
+                Box::new(RequestAndResponseHeaders {
+                    request: self
+                        .request_header_fields
+                        .clone()
+                        .map(|fields| HeaderValues::new(fields, input.headers())),
+                    response: None,
+                })
+            }),
             finished: false,
         };
         guard.add_active_request(1);
@@ -99,7 +126,15 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
         };
         Either::Right(async move {
             match AssertUnwindSafe(response).catch_unwind().await {
-                Ok(Ok(response)) => Ok(emit_when_body_ends(guard, response)),
+                Ok(Ok(response)) => {
+                    if let Some(headers) = &mut guard.headers {
+                        headers.response = self
+                            .response_header_fields
+                            .clone()
+                            .map(|fields| HeaderValues::new(fields, response.headers()));
+                    }
+                    Ok(emit_when_body_ends(guard, response))
+                }
                 Ok(Err(error)) => {
                     guard.emit(RequestEnd::Error(&error, None));
                     Err(error)
@@ -127,6 +162,10 @@ pub struct TelemetryLayer {
     pub(crate) sink: Sink,
     pub(crate) clock: SimpleClock,
     pub(crate) excluded_paths: ExcludedPaths,
+    pub(crate) route_resolver: Option<Arc<dyn RouteTable + Send + Sync>>,
+    pub(crate) route_parameter_data_classes: BTreeMap<String, DataClass>,
+    pub(crate) request_header_data_classes: HeaderMap<DataClass>,
+    pub(crate) response_header_data_classes: HeaderMap<DataClass>,
 }
 
 impl TelemetryLayer {
@@ -158,6 +197,49 @@ impl TelemetryLayer {
         self.excluded_paths = ExcludedPaths::new(paths);
         self
     }
+
+    /// Sets the resolver that matches each request to its route.
+    ///
+    /// The middleware does not see how the application routes a request, so it matches the request again with this
+    /// resolver. If a route matches, the events of the request have the field `http.route`.
+    #[must_use]
+    pub fn route_resolver(mut self, resolver: Arc<dyn RouteTable + Send + Sync>) -> Self {
+        self.route_resolver = Some(resolver);
+        self
+    }
+
+    /// Sets the route parameters to log and their data classes for redaction.
+    ///
+    /// By default, no route parameter is logged.
+    #[must_use]
+    pub fn route_parameter_data_classes(mut self, data_classes: impl IntoIterator<Item = (impl Into<String>, impl IntoDataClass)>) -> Self {
+        for (name, class) in data_classes {
+            self.route_parameter_data_classes.insert(name.into(), class.into_data_class());
+        }
+        self
+    }
+
+    /// Sets the request headers to log and their data classes for redaction.
+    ///
+    /// By default, no request header is logged.
+    #[must_use]
+    pub fn request_header_data_classes(mut self, data_classes: impl IntoIterator<Item = (HeaderName, impl IntoDataClass)>) -> Self {
+        for (name, class) in data_classes {
+            self.request_header_data_classes.insert(name, class.into_data_class());
+        }
+        self
+    }
+
+    /// Sets the response headers to log and their data classes for redaction.
+    ///
+    /// By default, no response header is logged.
+    #[must_use]
+    pub fn response_header_data_classes(mut self, data_classes: impl IntoIterator<Item = (HeaderName, impl IntoDataClass)>) -> Self {
+        for (name, class) in data_classes {
+            self.response_header_data_classes.insert(name, class.into_data_class());
+        }
+        self
+    }
 }
 
 impl<S> Layer<S> for TelemetryLayer {
@@ -167,6 +249,9 @@ impl<S> Layer<S> for TelemetryLayer {
         Telemetry {
             inner,
             layer: self.clone(),
+            route_fields: RouteFields::new(self).map(Arc::new),
+            request_header_fields: header_fields(&self.request_header_data_classes, "http.request.header."),
+            response_header_fields: header_fields(&self.response_header_data_classes, "http.response.header."),
         }
     }
 }

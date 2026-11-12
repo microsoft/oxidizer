@@ -2636,6 +2636,8 @@ dependencies = [
  "observed",
  "observed_testing",
  "ohno 0.5.4",
+ "routerama",
+ "smallvec",
  "templated_uri",
  "tick",
  "tokio",

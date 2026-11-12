@@ -26,10 +26,12 @@ exclude = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
+    "data_privacy_core::data_class::IntoDataClass",
     "http::*",
     "http_extensions::*",
     "layered::service::Service",
     "observed::sink::core::Sink",
+    "routerama::route_table::RouteTable",
     "templated_uri::base_path::BasePath",
     "tick::simple_clock::SimpleClock",
     "tower_layer::Layer",
@@ -40,6 +42,7 @@ all-features = true
 
 [dependencies]
 bytesbuf = { workspace = true }
+data_privacy = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
@@ -48,13 +51,14 @@ http_headers = { workspace = true, features = ["headers-content-length", "header
 layered = { workspace = true }
 observed = { workspace = true }
 ohno = { workspace = true }
+routerama = { workspace = true }
+smallvec = { workspace = true }
 templated_uri = { workspace = true }
 tick = { workspace = true }
 
 [dev-dependencies]
 bytesbuf = { path = "../bytesbuf", features = ["bytes-compat"] }
 criterion = { workspace = true }
-data_privacy = { path = "../data_privacy" }
 future_assert = { path = "../future_assert" }
 futures = { workspace = true, features = ["executor"] }
 http-body-util = { workspace = true }
