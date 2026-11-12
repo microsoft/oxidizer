@@ -32,16 +32,12 @@ name = "seismograph"
 path = "src/main.rs"
 doc = false
 
-[features]
-test-util = []
-
 [dependencies]
 chrono = { workspace = true, features = ["clock"] }
 clap = { workspace = true, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"] }
 crossterm.workspace = true
 performables = { workspace = true, features = ["seismograph"] }
 ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
-same-file.workspace = true
 seismograph.workspace = true
 seismograph_protocol.workspace = true
 seismograph_rallocator.workspace = true
@@ -49,25 +45,8 @@ seismograph_runtime.workspace = true
 
 [dev-dependencies]
 mutants.workspace = true
-seismograph = { path = "../seismograph", features = ["test-util"] }
 seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
 tempfile.workspace = true
-
-[[test]]
-name = "mimalloc_html"
-required-features = ["test-util"]
-
-[[test]]
-name = "reallocation"
-required-features = ["test-util"]
-
-[[test]]
-name = "render_html"
-required-features = ["test-util"]
-
-[[test]]
-name = "snapshot_symbols"
-required-features = ["test-util"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

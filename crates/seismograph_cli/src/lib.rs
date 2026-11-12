@@ -10,12 +10,11 @@
     reason = "Display implementations use descriptive formatter names"
 )]
 
-//! Live monitoring, interactive snapshot viewing, and HTML reporting for `seismograph`.
+//! Live monitoring and interactive snapshot viewing for `seismograph`.
 //!
 //! The CLI renders common thread, stack, and runtime-event data directly.
 //! Rallocator payloads use the built-in schema-specific renderer; unknown
 //! sources remain visible in the source inventory.
-//! The non-default `test-util` feature exposes in-memory snapshot rendering.
 //!
 //! **Native v4**, immediately left of Allocations, has separate backend views.
 //! The snmalloc view explores its global backend and every inventoried owner
@@ -50,8 +49,6 @@
 //! Hotspots count the original allocation once and use its last retained size for unmatched bytes.
 //! Address reuse does not merge retained lifetimes; filtering preserves original
 //! correlation IDs and whether a free had a retained allocation origin.
-//! Export the same native inventory with
-//! `seismograph snapshot html capture.seismograph report.html`.
 //! The viewer accepts only allocator schema 5, runtime schema 9, and snapshot format 10.
 //! Snapshot files carry resize events and symbols for recorded event stacks.
 //! The application resolves names and source locations during capture.
@@ -60,7 +57,7 @@
 //! Mimalloc state keeps its own heap lifetimes, page bins, abandoned index,
 //! arena bitmaps, and direct OS observations. It does not use snmalloc slab fields.
 //! If both sources are present, press `b` in Native v4 to switch backends.
-//! Each backend keeps its own selection. HTML reports include both explorers.
+//! Each backend keeps its own selection.
 //! In mimalloc, select the global backend or a heap with Up/Down.
 //! Enter focuses global details or the 74-bin class list. Enter again focuses
 //! class details. Home/End and PgUp/PgDn navigate or scroll the focused pane.
@@ -246,13 +243,13 @@ mod allocator_topology;
 mod allocator_view;
 mod commands;
 mod mimalloc_view;
-mod native_view;
-mod report;
 mod snapshot_error;
 mod snapshot_symbols;
-/// In-memory controls for testing the snapshot rendering pipeline.
-#[cfg(any(test, feature = "test-util"))]
-pub mod test_util;
+
+#[cfg(test)]
+mod native_view {
+    pub(crate) mod fixture;
+}
 
 use std::ffi::OsString;
 use std::process::ExitCode;
@@ -272,15 +269,6 @@ enum Command {
     Monitor(commands::monitor::VerbArgs),
     /// Opens a saved native snapshot in the read-only interactive viewer.
     View(commands::monitor::ViewArgs),
-    Snapshot {
-        #[command(subcommand)]
-        command: SnapshotCommand,
-    },
-}
-
-#[derive(Subcommand)]
-enum SnapshotCommand {
-    Html(commands::snapshot::html::VerbArgs),
 }
 
 /// Runs the command-line interface with explicit process arguments.
@@ -324,15 +312,37 @@ fn run(
     match cli.command {
         Command::Monitor(args) => run_monitor(args).map_err(Into::into),
         Command::View(args) => run_view(args).map_err(Into::into),
-        Command::Snapshot { command } => match command {
-            SnapshotCommand::Html(args) => commands::snapshot::html::verb(args).map_err(Into::into),
-        },
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Cli, Command, run};
+
+    #[test]
+    fn removed_html_export_is_not_a_command() {
+        use clap::Parser;
+
+        let error = Cli::try_parse_from(["seismograph", "snapshot", "html", "capture.seismograph"])
+            .err()
+            .unwrap();
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn help_version_and_unknown_commands_use_standard_parser_results() {
+        use clap::Parser;
+
+        for (argument, expected) in [
+            ("--help", clap::error::ErrorKind::DisplayHelp),
+            ("--version", clap::error::ErrorKind::DisplayVersion),
+            ("unknown", clap::error::ErrorKind::InvalidSubcommand),
+        ] {
+            let error = Cli::try_parse_from(["seismograph", argument]).err().unwrap();
+            assert_eq!(error.kind(), expected);
+        }
+    }
 
     #[test]
     #[cfg_attr(coverage_nightly, coverage(off))] // Wrong-command panic callbacks are test-only failure paths.

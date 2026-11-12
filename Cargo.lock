@@ -5338,7 +5338,6 @@ dependencies = [
  "mutants",
  "performables",
  "ratatui",
- "same-file",
  "seismograph",
  "seismograph_protocol",
  "seismograph_rallocator",

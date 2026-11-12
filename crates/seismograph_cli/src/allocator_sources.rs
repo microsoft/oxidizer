@@ -50,14 +50,6 @@ fn find(sources: &[SourceSnapshot], id: seismograph::snapshot::SourceId, duplica
     Ok(source)
 }
 
-pub(crate) fn decode_payload(bytes: &[u8]) -> Result<Snapshot, seismograph_rallocator::Error> {
-    let payload = snapshot::decode(bytes)?;
-    let mut view = Snapshot::event_only(Version::new(0, 1, 0));
-    view.metadata.telemetry_schema_version = snapshot::SCHEMA_VERSION;
-    attach(&mut view, payload);
-    Ok(view)
-}
-
 fn attach(view: &mut Snapshot, payload: snapshot::Snapshot) {
     let snapshot::Snapshot { header, backend } = payload;
     match backend {

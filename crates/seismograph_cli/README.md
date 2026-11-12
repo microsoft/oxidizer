@@ -13,12 +13,11 @@
 
 </div>
 
-Live monitoring, interactive snapshot viewing, and HTML reporting for `seismograph`.
+Live monitoring and interactive snapshot viewing for `seismograph`.
 
 The CLI renders common thread, stack, and runtime-event data directly.
 Rallocator payloads use the built-in schema-specific renderer; unknown
 sources remain visible in the source inventory.
-The non-default `test-util` feature exposes in-memory snapshot rendering.
 
 **Native v4**, immediately left of Allocations, has separate backend views.
 The snmalloc view explores its global backend and every inventoried owner
@@ -53,8 +52,6 @@ A resize row shows the old and new storage. It keeps the original lifetime ID.
 Hotspots count the original allocation once and use its last retained size for unmatched bytes.
 Address reuse does not merge retained lifetimes; filtering preserves original
 correlation IDs and whether a free had a retained allocation origin.
-Export the same native inventory with
-`seismograph snapshot html capture.seismograph report.html`.
 The viewer accepts only allocator schema 5, runtime schema 9, and snapshot format 10.
 Snapshot files carry resize events and symbols for recorded event stacks.
 The application resolves names and source locations during capture.
@@ -63,7 +60,7 @@ Frames without captured symbols remain addresses.
 Mimalloc state keeps its own heap lifetimes, page bins, abandoned index,
 arena bitmaps, and direct OS observations. It does not use snmalloc slab fields.
 If both sources are present, press `b` in Native v4 to switch backends.
-Each backend keeps its own selection. HTML reports include both explorers.
+Each backend keeps its own selection.
 In mimalloc, select the global backend or a heap with Up/Down.
 Enter focuses global details or the 74-bin class list. Enter again focuses
 class details. Home/End and PgUp/PgDn navigate or scroll the focused pane.

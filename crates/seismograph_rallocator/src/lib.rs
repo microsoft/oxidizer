@@ -57,7 +57,6 @@
 //! ```text
 //! cargo +1.95.0 run -p seismograph_rallocator --example native_snapshot
 //! cargo +1.95.0 run -p seismograph_cli -- view native-demo.seismograph
-//! cargo +1.95.0 run -p seismograph_cli -- snapshot html native-demo.seismograph
 //! ```
 //!
 //! The example uses synthetic native state and real recorder events, including

@@ -1,12 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Mimalloc state presentation shared by the terminal and HTML report.
+//! Mimalloc state presentation for the terminal viewer.
 
 #[cfg(test)]
 pub(crate) mod fixture;
-
-use std::fmt::Write as _;
 
 use seismograph_rallocator::mimalloc::{ClassState, ObservationSource, Owner, State};
 use seismograph_rallocator::native::Freshness;
@@ -14,18 +12,6 @@ use seismograph_rallocator::snapshot::{BackendState, Header, Snapshot};
 
 // Matches the producer's ARENA_BINS. Other page bins do not participate in its abandoned index.
 const REGULAR_ABANDONED_BIN_COUNT: usize = 61;
-
-pub(crate) const LIMITATIONS: &str = "Capacity is NOT application-live memory. Used blocks include pending remote frees that the owner has not collected. \
-     Queued pages exclude abandoned pages. Reserved blocks include uninitialized slots. \
-     Abandoned counts cover INDEXED regular pages in bins 0..60 only. Huge/singleton pages and some OS-backed pages are unindexed. \
-     Zeros do not prove their absence. \
-     Page and free-list walks are bounded and can be truncated independently. \
-     Busy, unobserved and unavailable state is unknown, not zero. Exited heaps retain historical observations. Heap identifiers are never reused. \
-     Matching rounds mean contributed this round, not an exact current census. Ages are measured at capture. \
-     Global scans read independent atomics, not a simultaneous census. Bitmap commit is NOT physical residency. \
-     Arena commitment includes tracked metadata. Direct OS commitment covers data only; metadata commitment is unknown. \
-     OS reservation already includes metadata; do not add arena metadata again. \
-     Pending purge bits do not guarantee that slices can be purged. Event filters do not filter allocator state.";
 
 pub(crate) const fn parts(snapshot: &Snapshot) -> Option<(&Header, &State)> {
     match &snapshot.backend {
@@ -281,54 +267,6 @@ pub(crate) fn class_lines(header: &Header, owner: &Owner, index: usize) -> Vec<S
         format!("Retired pages: {} (active retirement countdown)", class.retired_pages),
     ]);
     lines
-}
-
-fn html_lines(html: &mut String, lines: &[String]) {
-    html.push_str("<pre>");
-    for line in lines {
-        writeln!(html, "{}", crate::report::escape_html(line)).expect("formatting into String cannot fail");
-    }
-    html.push_str("</pre>");
-}
-
-pub(crate) fn render_html(header: &Header, state: &State) -> String {
-    let mut html = String::from(
-        "<section class=\"mimalloc\"><h2>Mimalloc structure explorer</h2>\
-         <style>.mimalloc pre{overflow-x:auto;white-space:pre-wrap}.mimalloc details{margin:8px 0}</style>",
-    );
-    html_lines(&mut html, &overview(header, state));
-    html.push_str("<h3>Global backend</h3>");
-    html_lines(&mut html, &global_lines(state));
-    html.push_str("<p>");
-    html.push_str(&crate::report::escape_html(LIMITATIONS));
-    html.push_str("</p><h3>Heap owners</h3>");
-    if state.owners.is_empty() {
-        html.push_str("<p>No heap rows were captured. Inventory coverage above distinguishes empty from omitted state.</p>");
-    }
-    for owner in &state.owners {
-        write!(
-            html,
-            "<details class=\"mimalloc-owner\"><summary>{}</summary>",
-            crate::report::escape_html(&owner_label(header, owner))
-        )
-        .expect("formatting into String cannot fail");
-        html_lines(&mut html, &owner_lines(header, owner));
-        if owner.observation.is_some() {
-            for index in 0..seismograph_rallocator::mimalloc::CLASS_COUNT {
-                write!(
-                    html,
-                    "<details class=\"mimalloc-class\"><summary>{}</summary>",
-                    crate::report::escape_html(&class_label(owner, index))
-                )
-                .expect("formatting into String cannot fail");
-                html_lines(&mut html, &class_lines(header, owner, index));
-                html.push_str("</details>");
-            }
-        }
-        html.push_str("</details>");
-    }
-    html.push_str("</section>");
-    html
 }
 
 #[cfg(test)]

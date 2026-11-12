@@ -28,14 +28,6 @@ pub(crate) enum PeakLiveBytesScope {
     #[default]
     Unavailable,
 }
-impl std::fmt::Display for PeakLiveBytesScope {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Unavailable => "unavailable",
-        })
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Stats {
     pub(crate) allocated_bytes: u64,
