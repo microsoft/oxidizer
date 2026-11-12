@@ -48,15 +48,6 @@ where
     }
 }
 
-impl<H> From<fn(&mut H, &())> for HookFn<H, ()>
-where
-    H: Hook,
-{
-    fn from(callback: fn(&mut H, &())) -> Self {
-        Self::new((), callback)
-    }
-}
-
 impl<H, D> ThreadAware for HookFn<H, D>
 where
     H: Hook,
@@ -87,7 +78,7 @@ where
 }
 
 #[derive(derive_more::Debug, ThreadAware)]
-pub struct ErasedHookFn<H: Hook> {
+pub(crate) struct ErasedHookFn<H: Hook> {
     #[debug(ignore)]
     callback: Box<dyn ErasedCallback<H>>,
 }
