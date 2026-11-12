@@ -13,12 +13,23 @@ pub(crate) enum PanicAction {
 }
 
 #[derive(Clone, derive_more::Debug, ThreadAware)]
-pub enum HookRegistration {
+pub struct HookRegistration(HookRegistrationKind);
+
+#[derive(Clone, derive_more::Debug, ThreadAware)]
+enum HookRegistrationKind {
     Start(ErasedHookFn<OnStart>),
     Panic(ErasedHookFn<OnPanic>),
 }
 
 impl HookRegistration {
+    pub(super) const fn start(hook: ErasedHookFn<OnStart>) -> Self {
+        Self(HookRegistrationKind::Start(hook))
+    }
+
+    pub(super) const fn panic(hook: ErasedHookFn<OnPanic>) -> Self {
+        Self(HookRegistrationKind::Panic(hook))
+    }
+
     pub(crate) fn new<H, D>(hook: HookFn<H, D>) -> Self
     where
         H: Hook,
@@ -49,9 +60,9 @@ impl Hooks {
     }
 
     fn push(&mut self, hook: HookRegistration) {
-        match hook {
-            HookRegistration::Start(hook) => self.start.push(hook),
-            HookRegistration::Panic(hook) => self.panic.push(hook),
+        match hook.0 {
+            HookRegistrationKind::Start(hook) => self.start.push(hook),
+            HookRegistrationKind::Panic(hook) => self.panic.push(hook),
         }
     }
 

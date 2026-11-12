@@ -66,6 +66,6 @@ impl super::private::Sealed for OnPanic {
     where
         D: thread_aware::ThreadAware + Clone + 'static,
     {
-        HookRegistration::Panic(hook.erased())
+        HookRegistration::panic(hook.erased())
     }
 }

@@ -42,6 +42,6 @@ impl super::private::Sealed for OnStart {
     where
         D: thread_aware::ThreadAware + Clone + 'static,
     {
-        HookRegistration::Start(hook.erased())
+        HookRegistration::start(hook.erased())
     }
 }
