@@ -101,6 +101,39 @@ fn panic_hook_covers_async_user_panics_only() {
 }
 
 #[test]
+fn panic_hook_selects_shutdown_from_the_payload() {
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .on(HookFn::<Panic, _>::new((), |event, ()| {
+            if event.payload().downcast_ref::<u32>() != Some(&2) {
+                event.ignore();
+            }
+        }))
+        .build()
+        .unwrap();
+
+    assert!(
+        runtime
+            .scheduler()
+            .spawn_anywhere((), |_, ()| async { std::panic::panic_any(1_u32) })
+            .join()
+            .unwrap_err()
+            .is_panic()
+    );
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap(), 42);
+
+    assert!(
+        runtime
+            .scheduler()
+            .spawn_anywhere((), |_, ()| async { std::panic::panic_any(2_u32) })
+            .join()
+            .unwrap_err()
+            .is_panic()
+    );
+    assert!(runtime.stop().is_err());
+}
+
+#[test]
 fn control_appends_panic_hooks_in_registration_order() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
