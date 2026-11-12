@@ -28,6 +28,9 @@ pub struct Panic {
 }
 
 impl Panic {
+    /// Stops the runtime after a contained panic.
+    pub const SHUTDOWN: HookFn<Self, ()> = HookFn::new((), |event, ()| event.shutdown());
+
     /// Keeps the runtime running after a contained panic.
     pub const IGNORE: HookFn<Self, ()> = HookFn::new((), |event, ()| event.ignore());
 

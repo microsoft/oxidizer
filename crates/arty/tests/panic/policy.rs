@@ -33,7 +33,7 @@ fn runtime_builder(workers: usize, response: PanicResponse) -> RuntimeBuilder {
         // callbacks whose completion or cancellation the test observes.
         .blocking_pool(BlockingPoolPolicy::shared().max(2));
     match response {
-        PanicResponse::Shutdown => builder.on(HookFn::<Panic, _>::new((), |event, ()| event.shutdown())),
+        PanicResponse::Shutdown => builder.on(Panic::SHUTDOWN),
         PanicResponse::Ignore => builder.on(Panic::IGNORE),
     }
 }
