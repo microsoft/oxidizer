@@ -37,10 +37,7 @@ fn build_with_processors(
         .get()
         .max(std::env::var("RUST_MIN_STACK").unwrap_or_default().parse().unwrap_or(0));
     let monitor_options = processor_config.monitor_options;
-    let hooks = processor_config
-        .hooks
-        .into_inner()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let hook_registrations = processor_config.hook_registrations;
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
@@ -57,7 +54,7 @@ fn build_with_processors(
             shutdown: shutdown.clone(),
             io_runtime: io_runtime.clone(),
             monitor_options: monitor_options.for_worker(),
-            hooks: hooks.clone(),
+            hook_registrations: hook_registrations.clone(),
         }));
     }
 
@@ -296,7 +293,7 @@ mod tests {
                 stack_size: NonZero::new(2 * 1024 * 1024).unwrap(),
                 blocking_pool_policy: BlockingPoolPolicy::shared(),
                 monitor_options,
-                hooks: std::sync::Mutex::default(),
+                hook_registrations: Vec::new(),
             },
             &InactiveClock::new_isolated(),
             &ThreadBuilder::default(),

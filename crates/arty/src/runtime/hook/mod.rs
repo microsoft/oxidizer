@@ -32,9 +32,10 @@ mod hook_fn;
 mod panic;
 mod registry;
 
+pub(crate) use hook_fn::ErasedHookFn;
 pub use hook_fn::HookFn;
 pub use panic::Panic;
-pub(crate) use registry::{HookRegistration, Hooks, PanicAction, registration};
+pub(crate) use registry::{HookRegistration, PanicAction, registration};
 
 /// Marks an event that can be registered as a runtime hook.
 ///

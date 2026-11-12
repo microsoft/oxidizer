@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use thread_aware::{Thread, ThreadAware};
+use thread_aware::ThreadAware;
 
 use super::hook_fn::{ErasedHookFn, HookFn};
 use super::{Hook, Panic};
@@ -30,44 +30,4 @@ where
 {
     let hook: <H as super::private::Sealed>::Erased<D> = hook.into();
     hook.into()
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Hooks {
-    panic: Vec<ErasedHookFn<Panic>>,
-}
-
-impl Hooks {
-    pub(crate) fn add<H, D>(&mut self, hook: HookFn<H, D>)
-    where
-        H: Hook,
-        D: ThreadAware + Clone + 'static,
-    {
-        self.push(registration(hook));
-    }
-
-    pub(crate) fn install(&mut self, mut hook: HookRegistration, source: Option<&Thread>, destination: &Thread) {
-        hook.relocate(source, destination);
-        self.push(hook);
-    }
-
-    fn push(&mut self, hook: HookRegistration) {
-        match hook {
-            HookRegistration::Panic(hook) => self.panic.push(hook),
-        }
-    }
-
-    pub(crate) fn execute_panic(&mut self, event: &mut Panic) {
-        for hook in &mut self.panic {
-            hook.execute(event);
-        }
-    }
-}
-
-impl ThreadAware for Hooks {
-    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        for hook in &mut self.panic {
-            hook.relocate(source, destination);
-        }
-    }
 }

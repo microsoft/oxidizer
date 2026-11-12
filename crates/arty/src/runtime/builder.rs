@@ -37,7 +37,7 @@ use crate::runtime::hook::{Hook, HookFn};
 /// ```
 #[derive(Debug)]
 pub struct RuntimeBuilder {
-    processor_config: RuntimeConfig,
+    config: RuntimeConfig,
     clock: InactiveClock,
 }
 
@@ -54,7 +54,7 @@ impl RuntimeBuilder {
     /// Operating systems can truncate thread names in diagnostic tools.
     #[must_use]
     pub fn name(mut self, name: impl AsRef<str>) -> Self {
-        self.processor_config.name = RuntimeName::new(name);
+        self.config.name = RuntimeName::new(name);
         self
     }
 
@@ -81,11 +81,7 @@ impl RuntimeBuilder {
         H: Hook,
         D: thread_aware::ThreadAware + Clone + 'static,
     {
-        self.processor_config
-            .hooks
-            .get_mut()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .add(hook.into());
+        self.config.hook_registrations.push(crate::runtime::hook::registration(hook.into()));
         self
     }
 
@@ -104,7 +100,7 @@ impl RuntimeBuilder {
     /// ```
     #[must_use]
     pub fn monitor(mut self, policy: MonitorPolicy) -> Self {
-        self.processor_config.monitor_options = policy.into();
+        self.config.monitor_options = policy.into();
         self
     }
 
@@ -125,7 +121,7 @@ impl RuntimeBuilder {
     /// ```
     #[must_use]
     pub const fn workers(mut self, count: WorkersPolicy) -> Self {
-        self.processor_config.workers_policy = count;
+        self.config.workers_policy = count;
         self
     }
 
@@ -149,7 +145,7 @@ impl RuntimeBuilder {
     #[must_use]
     pub const fn stack_size(mut self, size: usize) -> Self {
         assert!(size > 0, "stack size must be greater than zero");
-        self.processor_config.stack_size = NonZeroUsize::new(size).expect("size was asserted above to be nonzero");
+        self.config.stack_size = NonZeroUsize::new(size).expect("size was asserted above to be nonzero");
         self
     }
 
@@ -171,7 +167,7 @@ impl RuntimeBuilder {
     /// ```
     #[must_use]
     pub const fn blocking_pool(mut self, policy: BlockingPoolPolicy) -> Self {
-        self.processor_config.blocking_pool_policy = policy;
+        self.config.blocking_pool_policy = policy;
         self
     }
 
@@ -236,7 +232,7 @@ impl RuntimeBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build(self) -> Result<Runtime, Error> {
-        bootstrap::build(self.processor_config, &self.clock, &ThreadBuilder::default())
+        bootstrap::build(self.config, &self.clock, &ThreadBuilder::default())
     }
 }
 
@@ -245,7 +241,7 @@ impl RuntimeBuilder {
     pub(crate) fn new() -> Self {
         Self {
             clock: InactiveClock::new_isolated(),
-            processor_config: RuntimeConfig::default(),
+            config: RuntimeConfig::default(),
         }
     }
 }
@@ -278,10 +274,10 @@ mod tests {
             .workers(WorkersPolicy::exactly(2))
             .stack_size(1024 * 1024)
             .blocking_pool(BlockingPoolPolicy::shared().max(1));
-        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::exactly(2));
-        assert_eq!(builder.processor_config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
-        assert_eq!(builder.processor_config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
-        assert!(builder.processor_config.monitor_options.policy().is_enabled());
+        assert_eq!(builder.config.workers_policy, WorkersPolicy::exactly(2));
+        assert_eq!(builder.config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
+        assert_eq!(builder.config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
+        assert!(builder.config.monitor_options.policy().is_enabled());
     }
 
     #[test]
@@ -289,24 +285,24 @@ mod tests {
         let builder = Runtime::builder()
             .workers(WorkersPolicy::exactly(2))
             .workers(WorkersPolicy::at_most(1));
-        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::at_most(1),);
+        assert_eq!(builder.config.workers_policy, WorkersPolicy::at_most(1),);
     }
 
     #[test]
     fn zero_worker_policies_can_be_replaced_before_building() {
         for policy in [WorkersPolicy::exactly(0), WorkersPolicy::at_most(0)] {
             let builder = Runtime::builder().workers(policy);
-            assert_eq!(builder.processor_config.workers_policy, policy);
+            assert_eq!(builder.config.workers_policy, policy);
 
             let builder = builder.workers(WorkersPolicy::at_most(1));
-            assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::at_most(1));
+            assert_eq!(builder.config.workers_policy, WorkersPolicy::at_most(1));
         }
     }
 
     #[test]
     fn all_workers_policy_replaces_maximum_count() {
         let builder = Runtime::builder().workers(WorkersPolicy::at_most(1)).workers(WorkersPolicy::all());
-        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::all(),);
+        assert_eq!(builder.config.workers_policy, WorkersPolicy::all(),);
     }
 
     #[test]
@@ -314,7 +310,7 @@ mod tests {
         let builder = Runtime::builder()
             .workers(WorkersPolicy::exactly(2))
             .workers(WorkersPolicy::default());
-        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::default());
+        assert_eq!(builder.config.workers_policy, WorkersPolicy::default());
     }
 
     #[test]
@@ -324,17 +320,17 @@ mod tests {
             .blocking_pool(BlockingPoolPolicy::shared().max(1))
             .workers(WorkersPolicy::at_most(1))
             .workers(WorkersPolicy::exactly(2));
-        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::exactly(2));
-        assert_eq!(builder.processor_config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
-        assert_eq!(builder.processor_config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
-        assert!(builder.processor_config.monitor_options.policy().is_enabled());
+        assert_eq!(builder.config.workers_policy, WorkersPolicy::exactly(2));
+        assert_eq!(builder.config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
+        assert_eq!(builder.config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
+        assert!(builder.config.monitor_options.policy().is_enabled());
     }
 
     #[test]
     fn monitor_policy_replaces_the_default() {
         let builder = Runtime::builder().monitor(MonitorPolicy::disabled());
 
-        assert!(!builder.processor_config.monitor_options.policy().is_enabled());
+        assert!(!builder.config.monitor_options.policy().is_enabled());
     }
 
     #[test]
