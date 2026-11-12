@@ -36,7 +36,7 @@ const DEFAULT_POOL_LIFETIME: Duration = Duration::from_mins(1);
 /// A server can close a connection while HTTP/2 keep-alive pings are active. Some
 /// servers reset their idle timers for pings. Other servers ignore pings.
 ///
-/// If a server ignores pings, send periodic HTTP requests to keep the connection active.
+/// If a server ignores pings, periodic HTTP requests can keep the connection active.
 ///
 /// ## Keep-Alive Pings
 ///
@@ -53,8 +53,10 @@ const DEFAULT_POOL_LIFETIME: Duration = Duration::from_mins(1);
 ///
 /// A supporting transport closes a connection that stays idle in the pool longer
 /// than [`connection_idle_timeout`](Self::connection_idle_timeout). The effect of
-/// keep-alive pings depends on the transport. The default is 60 seconds. Pass
-/// `None` to this method to disable idle eviction.
+/// keep-alive pings depends on the transport. The default is 60 seconds. Pass `None`
+/// to [`connection_idle_timeout`](Self::connection_idle_timeout) to disable idle
+/// eviction. Some transports round this value, set a minimum, or approximate an
+/// unlimited timeout.
 ///
 /// ## Connection Lifetime
 ///
@@ -97,7 +99,8 @@ impl ConnectionPoolOptions {
     /// Sets how long an idle connection stays in the pool.
     ///
     /// `None` disables idle eviction. The server or a keep-alive probe can still
-    /// close the connection. The default is 60 seconds.
+    /// close the connection. The default is 60 seconds. Some transports round
+    /// this value, set a minimum, or approximate an unlimited timeout.
     ///
     /// ```
     /// use std::time::Duration;

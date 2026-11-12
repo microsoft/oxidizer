@@ -9,7 +9,9 @@ use crate::{DEFAULT_KEEP_ALIVE_INTERVAL, DEFAULT_KEEP_ALIVE_TIMEOUT};
 
 /// Controls how HTTP connections are kept alive between requests.
 ///
-/// Keep-alive sends probes that keep open connections available for reuse.
+/// Keep-alive sends probes that can help keep open connections available for reuse.
+/// Probes apply to HTTP/2 and to HTTP/3 when the transport supports it.
+/// HTTP/1.1 connections do not get probes.
 ///
 /// Use [`disabled`](Self::disabled), [`active_connections`](Self::active_connections),
 /// or [`active_and_idle_connections`](Self::active_and_idle_connections). The two
