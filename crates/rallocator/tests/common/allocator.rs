@@ -4,10 +4,40 @@
 //! Whole-process allocator, ownership, payload, and external size-class regressions.
 
 use std::alloc::{GlobalAlloc, Layout};
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Barrier, mpsc};
 
 use super::Allocator as Rallocator;
+
+#[test]
+fn caught_worker_panics_allow_allocation_during_cleanup_and_afterward() {
+    struct AllocateOnDrop<'a>(&'a AtomicBool);
+
+    impl Drop for AllocateOnDrop<'_> {
+        fn drop(&mut self) {
+            assert!(std::thread::panicking());
+            drop(vec![0x5b_u8; 2 * 1024 * 1024]);
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+
+    let outcome = std::thread::spawn(|| {
+        let cleaned_up = AtomicBool::new(false);
+        let payload = std::panic::catch_unwind(|| {
+            let _cleanup = AllocateOnDrop(&cleaned_up);
+            std::panic::panic_any(17_u32);
+        })
+        .unwrap_err()
+        .downcast::<u32>()
+        .unwrap();
+
+        (*payload, cleaned_up.load(Ordering::Relaxed), vec![0xa6_u8; 128])
+    })
+    .join()
+    .unwrap();
+
+    assert_eq!(outcome, (17, true, vec![0xa6; 128]));
+}
 
 #[test]
 fn sizes_alignments_and_payloads() {

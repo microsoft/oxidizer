@@ -5,6 +5,8 @@
 //! Work stays on the waiting caller's stack; no waiter allocation is necessary.
 //! Unlike a mutex, the holder can execute a run of queued range operations
 //! without moving the buddy working set between processors for each request.
+//! Successful operations can run during an existing thread unwind.
+//! An action that unwinds aborts before queued stack nodes can expire.
 
 use std::cell::UnsafeCell;
 use std::mem::MaybeUninit;
@@ -28,7 +30,9 @@ struct Work<T, F, R> {
     result: UnsafeCell<MaybeUninit<R>>,
 }
 
-struct AbortOnUnwind;
+struct AbortOnUnwind {
+    completed: bool,
+}
 
 fn take_action<F>(action: &mut Option<F>) -> F {
     action.take().unwrap_or_else(|| crate::backend::snmalloc::abort::abort())
@@ -36,7 +40,7 @@ fn take_action<F>(action: &mut Option<F>) -> F {
 
 impl Drop for AbortOnUnwind {
     fn drop(&mut self) {
-        if std::thread::panicking() {
+        if !self.completed {
             // An unwinding combiner must not leave pointers to departed stacks
             // in the queue. GlobalAlloc also forbids unwinding.
             crate::backend::snmalloc::abort::abort();
@@ -81,11 +85,12 @@ impl<T: Send> Combining<T> {
             // SAFETY: The combiner owns the exclusive value lease.
             result.write(action(unsafe { &mut *value }));
         }
-        let _abort = AbortOnUnwind;
+        let mut abort = AbortOnUnwind { completed: false };
         if self.last.load(Ordering::Relaxed).is_null() && !self.flag.swap(true, Ordering::Acquire) {
             // SAFETY: Successfully acquiring the flag grants exclusive value access.
             let result = action(unsafe { &mut *self.value.get() });
             self.flag.store(false, Ordering::Release);
+            abort.completed = true;
             return result;
         }
         let mut work = Work {
@@ -103,7 +108,9 @@ impl<T: Send> Combining<T> {
         // SAFETY: attach acquired DONE after the only invocation wrote the result.
         let result = unsafe { &*work.result.get() };
         // SAFETY: The initialized result is moved out exactly once.
-        unsafe { result.assume_init_read() }
+        let result = unsafe { result.assume_init_read() };
+        abort.completed = true;
+        result
     }
 
     unsafe fn wake(node: *mut Node<T>, status: u32) {
