@@ -70,14 +70,35 @@ pub trait PollObserver: std::fmt::Debug {
 }
 
 /// Builds a temporary description while the native future is borrowed on its owner.
-pub(crate) trait Inspector<F, T>: 'static {
+pub(crate) trait CompletionInspector<F, T>: 'static {
     #[cfg(feature = "inspection")]
     fn inspect(&self, future: &F, completion: &T, state: TaskState, visitor: &mut dyn FnMut(&dyn Any));
 }
 
-impl<F, T> Inspector<F, T> for () {
+// The private module seals this trait. Public visibility permits opaque builder returns.
+pub trait Inspector<F>: 'static {
+    #[cfg(feature = "inspection")]
+    /// Visits the description of a live future.
+    fn inspect(&self, future: &F, state: TaskState, visitor: &mut dyn FnMut(&dyn Any));
+}
+
+impl<F, T> CompletionInspector<F, T> for () {
     #[cfg(feature = "inspection")]
     fn inspect(&self, _future: &F, _completion: &T, _state: TaskState, _visitor: &mut dyn FnMut(&dyn Any)) {}
+}
+
+impl<F> Inspector<F> for () {
+    #[cfg(feature = "inspection")]
+    fn inspect(&self, _future: &F, _state: TaskState, _visitor: &mut dyn FnMut(&dyn Any)) {}
+}
+
+pub(crate) struct FutureInspector<I>(pub(crate) I);
+
+impl<F, T, I: Inspector<F>> CompletionInspector<F, T> for FutureInspector<I> {
+    #[cfg(feature = "inspection")]
+    fn inspect(&self, future: &F, _completion: &T, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
+        self.0.inspect(future, state, visitor);
+    }
 }
 
 #[cfg(feature = "inspection")]
@@ -98,13 +119,26 @@ impl<I, D> InspectWith<I, D> {
 }
 
 #[cfg(feature = "inspection")]
-impl<F, T, I, D> Inspector<F, T> for InspectWith<I, D>
+impl<F, T, I, D> CompletionInspector<F, T> for InspectWith<I, D>
 where
     I: Fn(&F, &T, TaskState) -> Option<D> + 'static,
     D: 'static,
 {
     fn inspect(&self, future: &F, completion: &T, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
         if let Some(description) = (self.inspect)(future, completion, state) {
+            visitor(&description);
+        }
+    }
+}
+
+#[cfg(feature = "inspection")]
+impl<F, I, D> Inspector<F> for InspectWith<I, D>
+where
+    I: Fn(&F, TaskState) -> Option<D> + 'static,
+    D: 'static,
+{
+    fn inspect(&self, future: &F, state: TaskState, visitor: &mut dyn FnMut(&dyn Any)) {
+        if let Some(description) = (self.inspect)(future, state) {
             visitor(&description);
         }
     }

@@ -178,7 +178,7 @@ mod tests {
         crate::runtime::monitoring::add_task::<(), _, _, _>(
             &executor.tasks(),
             std::future::pending::<()>(),
-            arty_executor::TaskOptions::default(),
+            arty_executor::TaskPlacement::Any,
             sender,
         );
         assert_eq!(

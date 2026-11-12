@@ -6,7 +6,7 @@ use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use arty_executor::{ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskSet, TaskState};
+use arty_executor::{ShutdownCause, TaskCompletion, TaskPanicPayload, TaskPlacement, TaskSet, TaskState};
 use seismograph::recorder::event::{EventClass, EventTimestamp};
 use seismograph::recorder::runtime::{TaskId, TypeDescriptorId};
 use seismograph_runtime::snapshot::{Task, TaskActivityState};
@@ -249,7 +249,7 @@ impl<R: 'static, T: TaskCompletion<R>> TaskCompletion<R> for Completion<T> {
     }
 }
 
-pub(crate) fn add_task<Body, F, R, T>(tasks: &TaskSet, future: F, options: TaskOptions, completion: T)
+pub(crate) fn add_task<Body, F, R, T>(tasks: &TaskSet, future: F, placement: TaskPlacement, completion: T)
 where
     Body: 'static,
     F: IntoFuture<Output = R> + 'static,
@@ -257,13 +257,13 @@ where
     T: TaskCompletion<R>,
 {
     // The function item stores no bytes. Only erased scoped futures carry a size.
-    add_task_with_metadata::<Body, _, _, _, _>(tasks, future, options, completion, current_task(), size_of::<Body>);
+    add_task_with_metadata::<Body, _, _, _, _>(tasks, future, placement, completion, current_task(), size_of::<Body>);
 }
 
 pub(crate) fn add_task_with_metadata<Body, F, R, T, S>(
     tasks: &TaskSet,
     future: F,
-    options: TaskOptions,
+    placement: TaskPlacement,
     completion: T,
     parent: Option<TaskId>,
     body_size: S,
@@ -275,21 +275,24 @@ pub(crate) fn add_task_with_metadata<Body, F, R, T, S>(
     S: Fn() -> usize + 'static,
 {
     let Some(events) = current_events() else {
-        tasks.add(future, options, completion);
+        tasks.task(future).placement(placement).register(completion);
         return;
     };
     let completion = Completion {
         target: completion,
         info: AsyncTaskInfo::new::<Body>(events, parent, body_size()),
     };
-    tasks.add_with_completion_inspection(future.into_future(), options, completion, move |_, completion, state| {
-        let info = &completion.info;
-        Some(seismograph::recorder::without_recording(|| match state {
-            TaskState::Ready => Description::Snapshot(info.describe::<Body>(TaskActivityState::Ready, body_size())),
-            TaskState::Waiting => Description::Snapshot(info.describe::<Body>(TaskActivityState::Waiting, body_size())),
-            TaskState::Running => Description::Poll(info.id()),
-        }))
-    });
+    tasks
+        .task(future)
+        .placement(placement)
+        .register_with_inspection(completion, move |_, completion, state| {
+            let info = &completion.info;
+            Some(seismograph::recorder::without_recording(|| match state {
+                TaskState::Ready => Description::Snapshot(info.describe::<Body>(TaskActivityState::Ready, body_size())),
+                TaskState::Waiting => Description::Snapshot(info.describe::<Body>(TaskActivityState::Waiting, body_size())),
+                TaskState::Running => Description::Poll(info.id()),
+            }))
+        });
 }
 
 #[cfg(test)]
@@ -338,14 +341,7 @@ mod tests {
         let completion = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
         let (_handle, sender) = completion.handle();
 
-        super::add_task_with_metadata::<(), _, _, _, _>(
-            &executor.tasks(),
-            future,
-            arty_executor::TaskOptions::default(),
-            sender,
-            None,
-            || 0,
-        );
+        super::add_task_with_metadata::<(), _, _, _, _>(&executor.tasks(), future, arty_executor::TaskPlacement::Any, sender, None, || 0);
         let _ = executor.execute_cycle();
 
         assert!(ran.get());
