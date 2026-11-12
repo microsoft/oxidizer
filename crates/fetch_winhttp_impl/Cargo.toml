@@ -59,7 +59,6 @@ private-test-util = [
 bytes = { workspace = true, optional = true }
 bytesbuf = { workspace = true }
 bytesbuf_io = { workspace = true }
-cargo-gamma-attrs = { workspace = true }
 events_once = { workspace = true }
 fetch = { workspace = true }
 futures = { workspace = true, features = ["std"], optional = true }

@@ -102,7 +102,6 @@ cachet = { path = "crates/cachet", default-features = false, version = "0.18.0" 
 cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.9.2" }
 cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.6.1" }
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.6.1" }
-cargo-gamma-attrs = { version = "0.4.0", default-features = false }
 cc = { version = "1.2", default-features = false }
 cfg_aliases = { version = "0.2.2", default-features = false }
 chrono = { version = "0.4.40", default-features = false }

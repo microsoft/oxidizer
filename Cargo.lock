@@ -958,26 +958,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cargo-gamma-attrs"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ecdebd334fe4b58c8776c3e6dadb42b94a50f57ecb1babdcb9c57beeec51e9b"
-dependencies = [
- "cargo-gamma-attrs-impl",
-]
-
-[[package]]
-name = "cargo-gamma-attrs-impl"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "536eeac7b97c044da76d389d5fd90a8bee5c3729537ea7d1477f890569fd1cc2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.9",
-]
-
-[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1206,7 +1186,6 @@ dependencies = [
  "bolero",
  "brotli",
  "bytesbuf",
- "cargo-gamma-attrs",
  "cfg_aliases",
  "criterion",
  "flate2",
@@ -1979,7 +1958,6 @@ dependencies = [
  "bytes",
  "bytesbuf",
  "bytesbuf_io",
- "cargo-gamma-attrs",
  "events_once",
  "fetch",
  "future_assert",

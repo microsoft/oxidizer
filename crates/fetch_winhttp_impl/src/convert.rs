@@ -253,11 +253,7 @@ fn request_header_units_to_utf16(units: Vec<u16>) -> Result<U16CString, Conversi
     U16CString::from_vec(units).map_err(|_contains_nul| EmbeddedNulError::new("request headers").into())
 }
 
-#[gamma::skip(
-    literal.int_decrement,
-    literal.int_increment,
-    reason = "Reserved capacity is not observable in the encoded headers; Vec grows and U16CString supplies the terminator."
-)]
+// #[gamma::skip(literal.int_decrement, literal.int_increment, reason = "Reserved capacity is not observable in the encoded headers; Vec grows and U16CString supplies the terminator.")]
 fn request_header_capacity(unit_count: Option<usize>) -> Result<usize, ConversionError> {
     unit_count
         .ok_or_else(|| RequestHeadersTooLargeError::new().into())

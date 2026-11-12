@@ -139,7 +139,9 @@ Legacy function-wide skips and cargo-mutants description patterns are not transl
 
 Do not add mutation suppressions in advance.
 Run Gamma first and review its actual findings.
-If a finding needs suppression, add a narrow, compiler-checked directive beside the source and explain the reason.
+If a finding needs suppression, add a narrow directive beside the source and explain the reason.
+Use Gamma's dependency-free comment form in published code.
+Run Gamma to validate comment-form directives.
 Do not suppress a whole function or file to silence one finding.
 Gamma bounds mutant execution with time and memory limits.
 A timeout is an undetected mutant, not a successful assertion.

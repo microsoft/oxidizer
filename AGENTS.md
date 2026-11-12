@@ -103,7 +103,9 @@ Attach the exclusion to the `no_std` arm alone, splitting the item into per-conf
 Gamma evaluates conditional compilation during discovery.
 Do not add mutation suppressions in advance.
 Run Gamma first and review its actual findings.
-If a finding needs suppression, add a narrow, compiler-checked directive beside the source and explain the reason.
+If a finding needs suppression, add a narrow directive beside the source and explain the reason.
+Use Gamma's dependency-free comment form in published code.
+Run Gamma to validate comment-form directives.
 Do not suppress a whole function or file to silence one finding.
 
 ## GitHub Actions Pinning

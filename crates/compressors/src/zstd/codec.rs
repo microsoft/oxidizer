@@ -195,10 +195,7 @@ pub(crate) struct ZstdCompress {
 }
 
 impl ZstdCompress {
-    #[gamma::skip(
-        try.propagate_to_unwrap,
-        reason = "Fresh or reset contexts accept levels validated against the linked zstd library's own bounds."
-    )]
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "Fresh or reset contexts accept levels validated against the linked zstd library's own bounds.")]
     pub(crate) fn new(level: Level, options: &Zstd, pool: Pool) -> ::core::result::Result<Self, BuildError> {
         let level = options.level.map_or_else(|| compression_level(level), CompressionLevel::get);
         let mut context = pool.take_zstd_compressor().unwrap_or_else(CCtx::create);
@@ -281,10 +278,7 @@ pub(crate) struct ZstdDecompress {
 }
 
 impl ZstdDecompress {
-    #[gamma::skip(
-        try.propagate_to_unwrap,
-        reason = "Fresh or reset contexts accept WindowLog values bounded by the linked zstd library's own limits."
-    )]
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "Fresh or reset contexts accept WindowLog values bounded by the linked zstd library's own limits.")]
     pub(crate) fn new(
         limits: FormatLimits,
         multi_stream: bool,

@@ -103,13 +103,7 @@ unsafe impl Bindings for RealBindings {
         Self::handle_result(handle, WinHttpOperation::Open)
     }
 
-    #[gamma::skip(
-        expr.decrement,
-        expr.increment,
-        fn_value.ok,
-        parameter.default_shadow,
-        reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary."
-    )]
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn set_timeouts(&self, handle: RawHandle, resolve: i32, connect: i32, send: i32, receive: i32) -> Result<()> {
         // SAFETY: the typed handle is non-null and the timeout values use the
         // exact WinHttpSetTimeouts ABI types.
@@ -157,14 +151,7 @@ unsafe impl Bindings for RealBindings {
         Self::handle_result(handle, WinHttpOperation::OpenRequest)
     }
 
-    #[gamma::skip(
-        expr.decrement,
-        expr.increment,
-        fn_value.ok,
-        option.some_to_none,
-        parameter.default_shadow,
-        reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary."
-    )]
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, option.some_to_none, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn set_option(&self, handle: RawHandle, option: u32, value: &[u8]) -> Result<()> {
         // SAFETY: the handle is non-null and the byte slice remains valid for
         // the synchronous option-setting call.
@@ -174,15 +161,7 @@ unsafe impl Bindings for RealBindings {
         )
     }
 
-    #[gamma::skip(
-        expr.decrement,
-        expr.increment,
-        fn_value.ok,
-        literal.int_increment,
-        option.some_to_none,
-        parameter.default_shadow,
-        reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary."
-    )]
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, literal.int_increment, option.some_to_none, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn send_request(&self, request: RawHandle, headers: &U16CStr, total_len: u32, context: usize) -> Result<()> {
         // SAFETY: the caller upholds the request-context lifetime contract.
         // U16CStr::as_slice excludes the trailing NUL from the header length;
@@ -194,13 +173,7 @@ unsafe impl Bindings for RealBindings {
         )
     }
 
-    #[gamma::skip(
-        expr.decrement,
-        expr.increment,
-        fn_value.ok,
-        parameter.default_shadow,
-        reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary."
-    )]
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn write_data(&self, request: RawHandle, buffer: Option<NonNull<u8>>, len: u32) -> Result<()> {
         debug_assert!(buffer.is_some() || len == 0, "only the final zero-length write may omit its buffer");
         let buffer = buffer.map(|buffer| buffer.as_ptr().cast_const().cast());
@@ -214,7 +187,7 @@ unsafe impl Bindings for RealBindings {
         )
     }
 
-    #[gamma::skip(fn_value.ok, reason = "Only the native WinHTTP call can distinguish success from failure here.")]
+    // #[gamma::skip(fn_value.ok, reason = "Only the native WinHTTP call can distinguish success from failure here.")]
     unsafe fn receive_response(&self, request: RawHandle) -> Result<()> {
         // SAFETY: the request handle is non-null and the reserved pointer is
         // required to be null.
@@ -224,13 +197,7 @@ unsafe impl Bindings for RealBindings {
         )
     }
 
-    #[gamma::skip(
-        expr.decrement,
-        expr.increment,
-        fn_value.ok,
-        parameter.default_shadow,
-        reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary."
-    )]
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn query_headers(&self, request: RawHandle, info_level: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()> {
         let buffer = buffer.map(|pointer| pointer.as_ptr().cast());
 
@@ -242,13 +209,7 @@ unsafe impl Bindings for RealBindings {
         )
     }
 
-    #[gamma::skip(
-        expr.decrement,
-        expr.increment,
-        fn_value.ok,
-        parameter.default_shadow,
-        reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary."
-    )]
+    // #[gamma::skip(expr.decrement, expr.increment, fn_value.ok, parameter.default_shadow, reason = "Native WinHTTP argument forwarding is outside the mocked Bindings boundary.")]
     unsafe fn query_option(&self, handle: RawHandle, option: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()> {
         let buffer = buffer.map(|pointer| pointer.as_ptr().cast());
 
@@ -270,7 +231,7 @@ unsafe impl Bindings for RealBindings {
         Self::status_result(status, WinHttpOperation::ReadData)
     }
 
-    #[gamma::skip(fn_value.ok, reason = "Only the native WinHTTP call can distinguish success from failure here.")]
+    // #[gamma::skip(fn_value.ok, reason = "Only the native WinHTTP call can distinguish success from failure here.")]
     unsafe fn close_handle(&self, handle: RawHandle) -> Result<()> {
         // SAFETY: the typed handle is non-null and ownership ensures this
         // close operation is issued at most once.

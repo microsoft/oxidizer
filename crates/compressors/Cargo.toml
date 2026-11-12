@@ -56,7 +56,6 @@ zstd = ["dep:zstd-safe"]
 [dependencies]
 brotli = { workspace = true, features = ["std"], optional = true }
 bytesbuf = { workspace = true, features = ["std"] }
-cargo-gamma-attrs = { workspace = true }
 # Use `zlib-rs` instead of the flate2 default, `miniz_oxide`. It is the fastest flate2 backend.
 # Unlike the `zlib` and `zlib-ng` bindings, it is pure Rust. The soundness issue above prevents
 # Miri validation.
