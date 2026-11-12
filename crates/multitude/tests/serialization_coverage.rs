@@ -343,4 +343,6 @@ fn json_alloc_reports_root_allocation_failure() {
     let arena = Arena::new_in(FailingAllocator::new(0));
     let error = arena.deserialize_json_alloc_with_limits::<u64, _>("42", unlimited()).unwrap_err();
     assert!(error.as_json_error().is_data());
+    assert_eq!(error.as_json_error().to_string(), "the backing allocator failed to provide memory");
+    assert!(error.limit_exceeded().is_none());
 }
