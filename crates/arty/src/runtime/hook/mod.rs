@@ -15,14 +15,9 @@
 //!
 //! ```
 //! use arty::runtime::Runtime;
-//! use arty::runtime::hook::{HookFn, OnPanic, OnStart};
+//! use arty::runtime::hook::Panic;
 //!
-//! let runtime = Runtime::builder()
-//!     .on(HookFn::<OnStart, _>::new((), |event, ()| {
-//!         let _worker = event.thread();
-//!     }))
-//!     .on(OnPanic::IGNORE)
-//!     .build()?;
+//! let runtime = Runtime::builder().on(Panic::IGNORE).build()?;
 //! runtime.stop()?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
@@ -32,18 +27,17 @@
 //! [`ThreadAware`]: crate::core::ThreadAware
 
 mod hook_fn;
-mod on_panic;
-mod on_start;
+mod panic;
 mod registry;
 
 pub use hook_fn::HookFn;
-pub use on_panic::OnPanic;
-pub use on_start::OnStart;
-pub(crate) use registry::{HookRegistration, Hooks, PanicAction};
+pub use panic::Panic;
+pub(crate) use registry::{HookRegistration, Hooks, PanicAction, registration};
 
 /// Marks an event that can be registered as a runtime hook.
 ///
 /// This trait is sealed. Only Arty can implement it.
+#[allow(private_bounds)]
 pub trait Hook: private::Sealed + 'static {}
 
 mod private {
@@ -51,8 +45,8 @@ mod private {
 
     use super::{HookFn, HookRegistration};
 
-    pub trait Sealed: Sized {
-        fn into_registration<D>(hook: HookFn<Self, D>) -> HookRegistration
+    pub(crate) trait Sealed: Sized {
+        type Erased<D>: From<HookFn<Self, D>> + Into<HookRegistration>
         where
             Self: super::Hook,
             D: ThreadAware + Clone + 'static;

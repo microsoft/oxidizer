@@ -46,7 +46,7 @@
 //! - The clock follows real time.
 //! - [`MonitorPolicy::default`] enables monitoring in the runtime configuration.
 //!   This choice does not start a monitor or add task measurements.
-//! - Without an [`OnPanic`](hook::OnPanic) hook, the runtime stops after Arty
+//! - Without a [`Panic`](hook::Panic) hook, the runtime stops after Arty
 //!   catches a panic while it creates or polls an async task.
 //! - A blocking function panic returns through its join handle without
 //!   stopping the runtime.

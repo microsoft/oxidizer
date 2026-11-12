@@ -339,11 +339,9 @@ dependencies = [
  "arty",
  "derive_more",
  "futures",
- "mutants",
  "ohno 0.5.4",
  "performables",
  "static_assertions",
- "thread_aware",
  "tokio",
 ]
 

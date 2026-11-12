@@ -10,7 +10,7 @@ use std::fmt::Debug;
 use std::io;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
-use arty::runtime::hook::{Hook, HookFn, OnPanic, OnStart};
+use arty::runtime::hook::{Hook, HookFn, Panic};
 use arty::runtime::{
     BlockingPoolPolicy, Error, MonitorPolicy, Runtime, RuntimeBuilder, RuntimeControl, ShutdownCause, Workers, WorkersPolicy,
 };
@@ -38,12 +38,10 @@ assert_not_impl_any!(RuntimeScheduler: Clone, ThreadAware);
 assert_impl_all!(BlockingPoolPolicy: Clone, Debug);
 assert_impl_all!(MonitorPolicy: Clone, Debug, Default);
 assert_not_impl_any!(MonitorPolicy: Copy);
-assert_impl_all!(OnStart: Debug, Hook);
-assert_impl_all!(OnPanic: Debug, Hook);
-assert_impl_all!(HookFn<OnPanic, ()>: Clone, ThreadAware);
-assert_not_impl_any!(OnStart: Clone, Copy);
-assert_not_impl_any!(OnPanic: Clone, Copy);
-assert_not_impl_any!(HookFn<OnPanic, ()>: Copy);
+assert_impl_all!(Panic: Debug, Hook);
+assert_impl_all!(HookFn<Panic, ()>: Clone, ThreadAware);
+assert_not_impl_any!(Panic: Clone, Copy);
+assert_not_impl_any!(HookFn<Panic, ()>: Copy);
 assert_impl_all!(WorkersPolicy: Clone, Copy, Debug, Default);
 assert_impl_all!(Error: StdError, Send, Sync);
 assert_not_impl_any!(Error: From<io::Error>, From<Box<dyn StdError + Send + Sync>>);

@@ -175,7 +175,6 @@ impl ThreadEntry {
             worker_hooks,
         );
 
-        asynchronous::LocalWorker::on_start();
         _ = ready_tx.send(());
 
         let run_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run()));

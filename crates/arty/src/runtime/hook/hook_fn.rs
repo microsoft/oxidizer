@@ -29,10 +29,6 @@ where
     pub const fn new(data: D, callback: fn(&mut H, &D)) -> Self {
         Self { data, callback }
     }
-
-    pub(crate) fn erased(self) -> ErasedHookFn<H> {
-        ErasedHookFn { callback: Box::new(self) }
-    }
 }
 
 impl<H, D> Clone for HookFn<H, D>
@@ -81,6 +77,16 @@ where
 pub(crate) struct ErasedHookFn<H: Hook> {
     #[debug(ignore)]
     callback: Box<dyn ErasedCallback<H>>,
+}
+
+impl<H, D> From<HookFn<H, D>> for ErasedHookFn<H>
+where
+    H: Hook,
+    D: ThreadAware + Clone + 'static,
+{
+    fn from(hook: HookFn<H, D>) -> Self {
+        Self { callback: Box::new(hook) }
+    }
 }
 
 impl<H: Hook> ErasedHookFn<H> {

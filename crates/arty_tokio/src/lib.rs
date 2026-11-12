@@ -154,8 +154,7 @@ impl From<&Handle> for TokioHandle {
 ///
 /// Pass the owned or borrowed [`Handle`] of an application-owned multi-thread
 /// Tokio runtime. The function returns after every fixed worker enters the
-/// same context. It also prepares workers that a future dynamic scaling policy
-/// starts later. The contexts remain until Arty stops.
+/// same context. The contexts remain until Arty stops.
 ///
 /// Calling this function again on the same Arty runtime returns an error and
 /// leaves the existing contexts in place.

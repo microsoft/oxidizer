@@ -68,9 +68,9 @@ impl RuntimeBuilder {
     ///
     /// ```
     /// use arty::runtime::Runtime;
-    /// use arty::runtime::hook::OnPanic;
+    /// use arty::runtime::hook::Panic;
     ///
-    /// let builder = Runtime::builder().on(OnPanic::IGNORE);
+    /// let builder = Runtime::builder().on(Panic::IGNORE);
     /// ```
     #[must_use]
     pub fn on<H, D>(mut self, hook: impl Into<HookFn<H, D>>) -> Self

@@ -3,7 +3,7 @@
 
 use crate::runtime::Workers;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{Hook, HookFn, HookRegistration};
+use crate::runtime::hook::{Hook, HookFn, registration};
 
 /// Requests runtime shutdown from any thread.
 ///
@@ -65,20 +65,17 @@ impl RuntimeControl {
     /// when it processes that command. If runtime shutdown has started, Arty
     /// ignores the registration.
     ///
-    /// A late [`OnStart`](crate::runtime::hook::OnStart) registration is stored
-    /// but does not run because the workers have already started.
-    ///
     /// # Examples
     ///
     /// ```
     /// use arty::runtime::Runtime;
-    /// use arty::runtime::hook::OnPanic;
+    /// use arty::runtime::hook::Panic;
     ///
     /// let runtime = Runtime::new()?;
     /// let control = runtime
     ///     .scheduler()
     ///     .block_on(async |cx| cx.control().clone())?;
-    /// control.on(OnPanic::IGNORE);
+    /// control.on(Panic::IGNORE);
     /// runtime.stop()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -87,7 +84,7 @@ impl RuntimeControl {
         H: Hook,
         D: thread_aware::ThreadAware + Clone + 'static,
     {
-        let hook = HookRegistration::new(hook.into());
+        let hook = registration(hook.into());
         self.dispatcher.register_hook(&hook);
     }
 

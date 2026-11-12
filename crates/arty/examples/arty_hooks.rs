@@ -3,13 +3,13 @@
 
 //! Register and print a panic hook from an async entry point.
 
-use arty::runtime::hook::{HookFn, OnPanic};
+use arty::runtime::hook::{HookFn, Panic};
 use arty::task::{Context, JoinError};
 
 #[arty::main]
 #[expect(clippy::panic, reason = "this example demonstrates runtime panic hook behavior")]
 async fn main(cx: Context) -> Result<(), JoinError> {
-    cx.control().on(HookFn::<OnPanic, _>::new((), |event, ()| {
+    cx.control().on(HookFn::<Panic, _>::new((), |event, ()| {
         println!("{event:?}");
         event.ignore();
     }));

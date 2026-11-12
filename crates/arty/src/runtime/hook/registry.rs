@@ -4,7 +4,7 @@
 use thread_aware::{Thread, ThreadAware};
 
 use super::hook_fn::{ErasedHookFn, HookFn};
-use super::{Hook, OnPanic, OnStart};
+use super::{Hook, Panic};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PanicAction {
@@ -13,36 +13,28 @@ pub(crate) enum PanicAction {
 }
 
 #[derive(Clone, derive_more::Debug, ThreadAware)]
-pub struct HookRegistration(HookRegistrationKind);
-
-#[derive(Clone, derive_more::Debug, ThreadAware)]
-enum HookRegistrationKind {
-    Start(ErasedHookFn<OnStart>),
-    Panic(ErasedHookFn<OnPanic>),
+pub(crate) enum HookRegistration {
+    Panic(ErasedHookFn<Panic>),
 }
 
-impl HookRegistration {
-    pub(super) const fn start(hook: ErasedHookFn<OnStart>) -> Self {
-        Self(HookRegistrationKind::Start(hook))
+impl From<ErasedHookFn<Panic>> for HookRegistration {
+    fn from(hook: ErasedHookFn<Panic>) -> Self {
+        Self::Panic(hook)
     }
+}
 
-    pub(super) const fn panic(hook: ErasedHookFn<OnPanic>) -> Self {
-        Self(HookRegistrationKind::Panic(hook))
-    }
-
-    pub(crate) fn new<H, D>(hook: HookFn<H, D>) -> Self
-    where
-        H: Hook,
-        D: ThreadAware + Clone + 'static,
-    {
-        H::into_registration(hook)
-    }
+pub(crate) fn registration<H, D>(hook: HookFn<H, D>) -> HookRegistration
+where
+    H: Hook,
+    D: ThreadAware + Clone + 'static,
+{
+    let hook: <H as super::private::Sealed>::Erased<D> = hook.into();
+    hook.into()
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Hooks {
-    start: Vec<ErasedHookFn<OnStart>>,
-    panic: Vec<ErasedHookFn<OnPanic>>,
+    panic: Vec<ErasedHookFn<Panic>>,
 }
 
 impl Hooks {
@@ -51,7 +43,7 @@ impl Hooks {
         H: Hook,
         D: ThreadAware + Clone + 'static,
     {
-        self.push(HookRegistration::new(hook));
+        self.push(registration(hook));
     }
 
     pub(crate) fn install(&mut self, mut hook: HookRegistration, source: Option<&Thread>, destination: &Thread) {
@@ -60,19 +52,12 @@ impl Hooks {
     }
 
     fn push(&mut self, hook: HookRegistration) {
-        match hook.0 {
-            HookRegistrationKind::Start(hook) => self.start.push(hook),
-            HookRegistrationKind::Panic(hook) => self.panic.push(hook),
+        match hook {
+            HookRegistration::Panic(hook) => self.panic.push(hook),
         }
     }
 
-    pub(crate) fn execute_start(&mut self, event: &mut OnStart) {
-        for hook in &mut self.start {
-            hook.execute(event);
-        }
-    }
-
-    pub(crate) fn execute_panic(&mut self, event: &mut OnPanic) {
+    pub(crate) fn execute_panic(&mut self, event: &mut Panic) {
         for hook in &mut self.panic {
             hook.execute(event);
         }
@@ -81,9 +66,6 @@ impl Hooks {
 
 impl ThreadAware for Hooks {
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        for hook in &mut self.start {
-            hook.relocate(source, destination);
-        }
         for hook in &mut self.panic {
             hook.relocate(source, destination);
         }

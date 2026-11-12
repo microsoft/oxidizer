@@ -202,7 +202,7 @@ impl RuntimeScheduler {
     /// Uses a pool chosen by the runtime for synchronous I/O or other calls
     /// that can stop an async worker from running other tasks.
     /// A panic in this function returns an error through [`JoinHandle`] and
-    /// follows the configured [`OnPanic`](crate::runtime::hook::OnPanic) hook.
+    /// follows the configured [`Panic`](crate::runtime::hook::Panic) hook.
     /// The function and its result must implement `Send + 'static`.
     ///
     /// Shutdown rejects new blocking functions and cancels queued ones before they start.
@@ -413,7 +413,7 @@ mod tests {
     fn check_borrowed_future_completion(panics: bool) {
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
-            .on(crate::runtime::hook::OnPanic::IGNORE)
+            .on(crate::runtime::hook::Panic::IGNORE)
             .build()
             .unwrap();
         let worker = runtime.scheduler().block_on(async |_| thread::current().id()).unwrap();

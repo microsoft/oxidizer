@@ -12,55 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
 use arty::core::{Thread, ThreadAware};
-use arty::runtime::hook::{HookFn, OnPanic, OnStart};
+use arty::runtime::hook::{HookFn, Panic};
 use arty::runtime::{Runtime, WorkersPolicy};
 use support::JoinHandleExt as _;
-
-#[derive(Clone)]
-struct StartProbe {
-    destination: Option<ThreadId>,
-    observations: Arc<Mutex<Vec<(ThreadId, ThreadId)>>>,
-}
-
-impl ThreadAware for StartProbe {
-    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
-        self.destination = Some(destination.id());
-    }
-}
-
-impl StartProbe {
-    fn on_start(event: &mut OnStart, data: &Self) {
-        let worker = event.thread().id();
-        let destination = data.destination.unwrap();
-        data.observations.lock().unwrap().push((worker, destination));
-    }
-}
-
-impl From<StartProbe> for HookFn<OnStart, StartProbe> {
-    fn from(probe: StartProbe) -> Self {
-        HookFn::new(probe, StartProbe::on_start)
-    }
-}
-
-#[test]
-fn builder_start_hook_runs_after_relocation_and_before_build_returns() {
-    let observations = Arc::new(Mutex::new(Vec::new()));
-    let runtime = Runtime::builder()
-        .workers(WorkersPolicy::exactly(2))
-        .on(StartProbe {
-            destination: None,
-            observations: Arc::clone(&observations),
-        })
-        .build()
-        .unwrap();
-
-    let observations = observations.lock().unwrap();
-    assert_eq!(observations.len(), 2);
-    assert!(observations.iter().all(|(event, relocated)| event == relocated));
-    assert_ne!(observations[0].0, observations[1].0);
-    drop(observations);
-    runtime.stop().unwrap();
-}
 
 #[derive(Clone)]
 struct SharedLog(Arc<Mutex<Vec<&'static str>>>);
@@ -110,7 +64,7 @@ fn panic_hook_covers_async_user_panics_only() {
     let count = Arc::new(AtomicUsize::new(0));
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .on(HookFn::<OnPanic, _>::new(
+        .on(HookFn::<Panic, _>::new(
             PanicProbe {
                 count: Arc::clone(&count),
                 destination: None,
@@ -152,7 +106,7 @@ fn control_appends_panic_hooks_in_registration_order() {
     let control = support::runtime_control(&runtime);
 
     let order = SharedLog(Arc::new(Mutex::new(Vec::new())));
-    control.on(HookFn::<OnPanic, _>::new(order.clone(), |event, data| {
+    control.on(HookFn::<Panic, _>::new(order.clone(), |event, data| {
         data.push("ignore");
         event.ignore();
     }));
@@ -167,7 +121,7 @@ fn control_appends_panic_hooks_in_registration_order() {
     assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap(), 42);
     assert_eq!(order.take(), ["ignore"]);
 
-    control.on(HookFn::<OnPanic, _>::new(order.clone(), |event, data| {
+    control.on(HookFn::<Panic, _>::new(order.clone(), |event, data| {
         data.push("shutdown");
         event.shutdown();
     }));
@@ -191,9 +145,9 @@ fn control_registration_applies_before_local_spawn() {
     runtime
         .scheduler()
         .block_on(async |cx| {
-            cx.control().on(OnPanic::IGNORE);
+            cx.control().on(Panic::IGNORE);
             cx.control()
-                .on(HookFn::<OnPanic, _>::new(PanicCount(Arc::clone(&calls)), |_event, data| {
+                .on(HookFn::<Panic, _>::new(PanicCount(Arc::clone(&calls)), |_event, data| {
                     data.0.fetch_add(1, Ordering::SeqCst);
                 }));
             let panic = cx.scheduler().spawn(async |_| panic!("local panic")).await.unwrap_err();
@@ -211,12 +165,12 @@ fn panic_callbacks_share_one_borrowed_event() {
     let addresses = EventAddresses(Arc::new(Mutex::new(Vec::new())));
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .on(HookFn::<OnPanic, _>::new(addresses.clone(), |event, data| {
+        .on(HookFn::<Panic, _>::new(addresses.clone(), |event, data| {
             let address = std::ptr::from_mut(event).addr();
             data.0.lock().unwrap().push(address);
             event.ignore();
         }))
-        .on(HookFn::<OnPanic, _>::new(addresses.clone(), |event, data| {
+        .on(HookFn::<Panic, _>::new(addresses.clone(), |event, data| {
             let address = std::ptr::from_mut(event).addr();
             data.0.lock().unwrap().push(address);
             event.ignore();
@@ -240,27 +194,13 @@ fn panic_callbacks_share_one_borrowed_event() {
 }
 
 #[test]
-fn late_start_registration_does_not_replay_worker_start() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
-    let control = support::runtime_control(&runtime);
-    let calls = Arc::new(AtomicUsize::new(0));
-
-    control.on(HookFn::<OnStart, _>::new(PanicCount(Arc::clone(&calls)), |_event, data| {
-        data.0.fetch_add(1, Ordering::SeqCst);
-    }));
-
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    runtime.stop().unwrap();
-}
-
-#[test]
 fn control_ignores_registration_after_shutdown_starts() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
     let calls = Arc::new(AtomicUsize::new(0));
 
     control.request_stop();
-    control.on(HookFn::<OnPanic, _>::new(PanicCount(Arc::clone(&calls)), |_event, data| {
+    control.on(HookFn::<Panic, _>::new(PanicCount(Arc::clone(&calls)), |_event, data| {
         data.0.fetch_add(1, Ordering::SeqCst);
     }));
 

@@ -4,7 +4,7 @@
 use arty_executor::TaskPanicPayload;
 
 use super::hook_fn::HookFn;
-use super::registry::{HookRegistration, PanicAction};
+use super::registry::PanicAction;
 
 /// Reports that Arty contained a panic from user task code.
 ///
@@ -21,13 +21,13 @@ use super::registry::{HookRegistration, PanicAction};
 /// The callback must not panic. Arty cannot repair application data that a
 /// task panic left in an invalid state.
 #[derive(derive_more::Debug)]
-pub struct OnPanic {
+pub struct Panic {
     pub(super) action: PanicAction,
     #[debug(ignore)]
     pub(super) payload: TaskPanicPayload,
 }
 
-impl OnPanic {
+impl Panic {
     /// Keeps the runtime running after a contained panic.
     pub const IGNORE: HookFn<Self, ()> = HookFn::new((), |event, ()| event.ignore());
 
@@ -59,13 +59,11 @@ impl OnPanic {
     }
 }
 
-impl super::Hook for OnPanic {}
+impl super::Hook for Panic {}
 
-impl super::private::Sealed for OnPanic {
-    fn into_registration<D>(hook: HookFn<Self, D>) -> HookRegistration
+impl super::private::Sealed for Panic {
+    type Erased<D>
+        = super::hook_fn::ErasedHookFn<Self>
     where
-        D: thread_aware::ThreadAware + Clone + 'static,
-    {
-        HookRegistration::panic(hook.erased())
-    }
+        D: thread_aware::ThreadAware + Clone + 'static;
 }

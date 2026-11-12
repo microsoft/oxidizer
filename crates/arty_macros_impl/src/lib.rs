@@ -98,11 +98,11 @@ impl Args {
         });
         let panic = self.panic.map(|panic| match panic {
             PanicSetting::Shutdown => quote!(.on(#runtime_path::runtime::hook::HookFn::<
-                #runtime_path::runtime::hook::OnPanic,
+                #runtime_path::runtime::hook::Panic,
                 _,
             >::new((), |event, ()| event.shutdown()))),
             PanicSetting::Ignore => quote!(.on(#runtime_path::runtime::hook::HookFn::<
-                #runtime_path::runtime::hook::OnPanic,
+                #runtime_path::runtime::hook::Panic,
                 _,
             >::new((), |event, ()| event.ignore()))),
         });
@@ -644,7 +644,7 @@ mod tests {
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
                         .on(::arty::runtime::hook::HookFn::<
-                            ::arty::runtime::hook::OnPanic,
+                            ::arty::runtime::hook::Panic,
                             _,
                         >::new((), |event, ()| event.#policy()))
                         .build()
@@ -678,7 +678,7 @@ mod tests {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
                         .monitor(::arty::runtime::MonitorPolicy::disabled())
                         .on(::arty::runtime::hook::HookFn::<
-                            ::arty::runtime::hook::OnPanic,
+                            ::arty::runtime::hook::Panic,
                             _,
                         >::new((), |event, ()| event.#policy()))
                         .build()
@@ -852,7 +852,7 @@ mod tests {
             quote!("ignore"),
             quote!(continue),
             quote!(abort),
-            quote!(OnPanic::shutdown()),
+            quote!(Panic::shutdown()),
             quote!(::shutdown),
         ] {
             for expand in [main, test] {

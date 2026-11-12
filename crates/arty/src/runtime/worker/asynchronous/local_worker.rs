@@ -8,7 +8,7 @@ use thread_aware::Thread;
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{HookRegistration, Hooks, OnPanic, OnStart, PanicAction};
+use crate::runtime::hook::{HookRegistration, Hooks, Panic, PanicAction};
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
@@ -85,24 +85,11 @@ impl LocalWorker {
         });
     }
 
-    pub(crate) fn on_start() {
-        let mut event = Self::with_scheduler(|current| {
-            let current = current.expect("task worker startup registers hooks before invoking OnStart");
-            OnStart::new(current.thread.clone())
-        });
-        HOOKS.with_borrow_mut(|hooks| {
-            hooks
-                .as_mut()
-                .expect("task worker startup installs hooks before invoking OnStart")
-                .execute_start(&mut event);
-        });
-    }
-
     pub(crate) fn on_panic(panic: arty_executor::TaskPanicPayload) -> (PanicAction, arty_executor::TaskPanicPayload) {
         if !Self::with_scheduler(|current| current.is_some()) {
-            return OnPanic::new(panic).into_parts();
+            return Panic::new(panic).into_parts();
         }
-        let mut event = OnPanic::new(panic);
+        let mut event = Panic::new(panic);
         HOOKS.with_borrow_mut(|hooks| {
             hooks
                 .as_mut()
