@@ -3,22 +3,17 @@
 
 //! Connection pooling configuration types.
 //!
-//! This module contains types for configuring connection pool behavior,
-//! including pool lifetime, size limits, and multi-pool distribution strategies.
+//! This module configures pool lifetime, size limits, and request distribution.
 
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-// Matches `SocketsHttpHandler.PooledConnectionIdleTimeout` in .NET (1 minute).
+// This matches the one-minute value of `SocketsHttpHandler.PooledConnectionIdleTimeout` in .NET.
 const DEFAULT_POOL_LIFETIME: Duration = Duration::from_mins(1);
 
-/// Configuration options for HTTP connection pooling.
-///
-/// Controls connection pool behavior including connection lifetime and limits.
-/// Connection pooling improves performance by reusing established connections
-/// rather than creating new ones for each request.
+/// Configures HTTP connection pools.
 ///
 /// # Defaults
 ///
@@ -29,59 +24,49 @@ const DEFAULT_POOL_LIFETIME: Duration = Duration::from_mins(1);
 /// | `multiple_pools` | `None` (single pool) |
 /// | `connection_lifetime` | no maximum lifetime |
 ///
-/// # Connection Handling
+/// # Connection handling
 ///
-/// The connection pool automatically manages connection lifecycle and reuses established
-/// connections to improve performance. However, connections that end without proper
-/// graceful shutdown may result in the next request failing.
-///
-/// When such failures occur, the problematic connection is discarded and subsequent requests
-/// will establish a new healthy connection. The pool implements various strategies to minimize
-/// the impact of connection failures, but applications should be prepared to handle occasional
-/// connection-related errors through appropriate resilience mechanisms.
+/// The pool reuses open connections. A request can fail if its connection closed
+/// without a graceful shutdown. The pool discards that connection. A later request
+/// uses another pooled connection or creates a new one when necessary. Applications
+/// can retry or otherwise handle this failure.
 ///
 /// ## Server-Side Connection Closure
 ///
-/// A server may decide to close the connection at any time, even when HTTP/2 keep-alive
-/// pings are being sent. Whether pings prevent server-side closure depends on the server
-/// implementation: some servers treat HTTP/2 pings as active traffic and reset their idle
-/// timers, while others ignore pings entirely and close the connection based on their own
-/// idle timeout policy.
+/// A server can close a connection while HTTP/2 keep-alive pings are active. Some
+/// servers reset their idle timers for pings. Other servers ignore pings.
 ///
-/// For servers that do not treat HTTP/2 pings as active traffic, consider periodically
-/// sending real HTTP requests (e.g., lightweight health-check or no-op requests) to force
-/// the server to recognize the connection as active and keep it open.
+/// If a server ignores pings, send periodic HTTP requests to keep the connection active.
 ///
 /// ## Keep-Alive Pings
 ///
-/// HTTP/2 keep-alive pings can be sent for both active and idle connections. This behavior
-/// is controlled by [`ConnectionKeepAlive`](super::ConnectionKeepAlive):
+/// [`ConnectionKeepAlive`](super::ConnectionKeepAlive) controls HTTP/2 keep-alive pings:
 ///
 /// - [`ConnectionKeepAlive::active_connections`](super::ConnectionKeepAlive::active_connections)
-///   sends pings only on connections that are actively handling requests.
+///   requests pings only on connections that are handling requests.
 /// - [`ConnectionKeepAlive::active_and_idle_connections`](super::ConnectionKeepAlive::active_and_idle_connections)
-///   sends pings on all connections, including idle ones sitting in the pool.
+///   requests pings on all connections, including idle pooled connections.
+///
+/// Some transports treat both modes in the same way.
 ///
 /// ## Pool Idle Timeout
 ///
-/// Independently of keep-alive pings, the underlying HTTP client (hyper) will close
-/// connections that have been idle in the pool for longer than the configured
-/// [`connection_idle_timeout`](Self::connection_idle_timeout). The default is 60 seconds. Pass
-/// `None` to keep connections in the pool indefinitely, relying solely on the server or
-/// keep-alive probes to determine when a connection is closed.
+/// A supporting transport closes a connection that stays idle in the pool longer
+/// than [`connection_idle_timeout`](Self::connection_idle_timeout). The effect of
+/// keep-alive pings depends on the transport. The default is 60 seconds. Pass
+/// `None` to this method to disable idle eviction.
 ///
 /// ## Connection Lifetime
 ///
-/// Independently of idle eviction, [`connection_lifetime`](Self::connection_lifetime) caps
-/// the **total** wall-clock age of a pooled connection. After serving a response, a
-/// connection older than the configured lifetime is dropped instead of being returned to
-/// the pool, forcing the next request to establish a fresh connection. This is useful for
-/// picking up `DNS` changes, load-balancer rotations, or refreshed credentials within a
-/// bounded window. By default no maximum lifetime is enforced.
+/// [`connection_lifetime`](Self::connection_lifetime) limits the total age of a
+/// pooled connection. After a response, a supporting transport drops an older
+/// connection instead of returning it to the pool. A later request uses another
+/// pooled connection or creates a new one when necessary. This can apply `DNS`
+/// changes, load-balancer rotations, or new credentials within a set time. The
+/// default does not limit the lifetime. Some transports ignore this setting.
 ///
-/// For per-connection customization (e.g. adding jitter so that pools created via
-/// [`multiple_pools`](Self::multiple_pools) don't all recycle at the same instant), use
-/// [`ConnectionLifetime::per_connection`].
+/// Use [`ConnectionLifetime::per_connection`] to set a different lifetime for each
+/// connection. For example, jitter can prevent all pools from recycling together.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct ConnectionPoolOptions {
@@ -109,10 +94,10 @@ impl Default for ConnectionPoolOptions {
 }
 
 impl ConnectionPoolOptions {
-    /// Caps how long an idle connection stays in the pool before being evicted.
+    /// Sets how long an idle connection stays in the pool.
     ///
-    /// Pass `None` to disable idle eviction (connections live until the server or a
-    /// keep-alive probe closes them). Defaults to 60 seconds.
+    /// `None` disables idle eviction. The server or a keep-alive probe can still
+    /// close the connection. The default is 60 seconds.
     ///
     /// ```
     /// use std::time::Duration;
@@ -133,25 +118,24 @@ impl ConnectionPoolOptions {
 
     /// Sets the maximum number of idle connections per host in the pool.
     ///
-    /// This controls how many idle connections can be kept open for each host.
-    /// By default, this value is set to `usize::MAX`, meaning no limit on idle connections.
+    /// The default is `usize::MAX`, which does not limit idle connections.
+    /// Some transports ignore this setting.
     #[must_use]
     pub fn max_connections(mut self, max: usize) -> Self {
         self.max_connections = max;
         self
     }
 
-    /// Caps the **total** wall-clock lifetime of a pooled connection.
+    /// Sets the total wall-clock lifetime of a pooled connection.
     ///
-    /// Unlike [`connection_idle_timeout`](Self::connection_idle_timeout) (which only bounds
-    /// idle time), this bounds the time since the connection was established. After serving a
-    /// response, a connection older than the configured cap is dropped instead of being
-    /// returned to the pool — useful for picking up `DNS` changes, load-balancer rotations, or
-    /// refreshed credentials within a bounded window.
+    /// [`connection_idle_timeout`](Self::connection_idle_timeout) limits only idle time.
+    /// This value limits time since connection creation. After a response, a supporting
+    /// transport drops an older connection. This can apply `DNS` changes, load-balancer
+    /// rotations, or new credentials within a set time. Some transports ignore this setting.
     ///
     /// Use [`ConnectionLifetime::fixed`] for a constant cap, [`ConnectionLifetime::per_connection`]
-    /// for per-connection customization (e.g. jitter), or [`ConnectionLifetime::unlimited`]
-    /// (the default) to disable lifetime-based recycling.
+    /// to set each connection separately, or [`ConnectionLifetime::unlimited`] to
+    /// disable lifetime-based recycling. `unlimited` is the default.
     ///
     /// ```
     /// use std::time::Duration;
@@ -167,21 +151,17 @@ impl ConnectionPoolOptions {
         self
     }
 
-    /// Configures multiple connection pools for high-throughput scenarios.
+    /// Configures multiple connection pools.
     ///
-    /// This creates `count` separate connection pools and distributes requests across them
-    /// according to the specified `selection` strategy.
+    /// This creates `count` pools. The `selection` strategy distributes requests.
     ///
     /// Passing `count <= 1` disables multi-pool routing (equivalent to `None`).
     ///
-    /// # When to Use
+    /// # When to use
     ///
-    /// **For most scenarios, multiple pools are not needed.** A single HTTP/2 connection
-    /// can handle many concurrent requests efficiently through multiplexing.
-    ///
-    /// Only enable multiple pools if you have measured and confirmed that your client is being
-    /// throttled by a single HTTP/2 connection. This can happen in very high-throughput
-    /// scenarios where the connection's stream limit becomes a bottleneck.
+    /// A single HTTP/2 connection can handle concurrent requests through multiplexing.
+    /// Use multiple pools only when measurements show that the stream limit of one
+    /// HTTP/2 connection restricts throughput.
     #[must_use]
     pub fn multiple_pools(mut self, count: usize, selection: PoolSelection) -> Self {
         self.multiple_pools = (count > 1).then_some((count, selection));
@@ -243,11 +223,10 @@ impl ConnectionLifetime {
         Self(Inner::Fixed(duration))
     }
 
-    /// Returns a policy that evaluates `generator` once per new connection to
-    /// determine that connection's cap (`None` opts it out of recycling).
+    /// Returns a policy that calls `generator` once for each new connection.
     ///
-    /// Useful for jitter caps across connections so that pools created via
-    /// [`ConnectionPoolOptions::multiple_pools`] don't all recycle at the same instant.
+    /// The result sets that connection's lifetime. `None` disables recycling for
+    /// that connection. Jitter can prevent multiple pools from recycling together.
     ///
     /// ```
     /// use std::time::Duration;
@@ -271,9 +250,9 @@ impl ConnectionLifetime {
 
     /// Resolves the cap for a freshly established connection.
     ///
-    /// Returns `None` when no lifetime cap should be applied, or `Some(duration)`
-    /// with the maximum age for the connection. For [`ConnectionLifetime::per_connection`]
-    /// policies this invokes the user-supplied closure exactly once per call.
+    /// `None` means that the connection has no lifetime limit. `Some(duration)` is
+    /// its maximum age. A [`ConnectionLifetime::per_connection`] policy calls the
+    /// supplied closure once for each call to this function.
     #[must_use]
     pub fn resolve(&self) -> Option<Duration> {
         match &self.0 {
@@ -296,9 +275,9 @@ impl fmt::Debug for ConnectionLifetime {
 
 /// Selects a specific connection pool for a request by index.
 ///
-/// When inserted into a request's [extensions](http::Extensions), this directs the
+/// When inserted into a request's [extensions](http::Extensions), this sends the
 /// request to the pool at the given index. If the index is out of bounds or the
-/// client uses a single pool, the default pool selection strategy is used instead.
+/// client uses one pool, the client uses its default selection strategy.
 ///
 /// # Example
 ///
@@ -314,7 +293,7 @@ impl fmt::Debug for ConnectionLifetime {
 pub struct PoolIndex(usize);
 
 impl PoolIndex {
-    /// Creates a new `PoolIndex` targeting the pool at the given zero-based index.
+    /// Creates a `PoolIndex` for the given zero-based pool index.
     #[must_use]
     pub fn new(index: usize) -> Self {
         Self(index)
@@ -345,12 +324,10 @@ impl PoolSelection {
     /// [`PoolSelection::saturating`] before moving to the next.
     pub const DEFAULT_REQUESTS_PER_CLIENT: u32 = 100;
 
-    /// Creates a `PoolSelection` that routes requests in a round-robin fashion,
-    /// with each pool handling a well-defined number of requests before moving
-    /// to the next pool.
+    /// Creates a selection that sends a set number of requests to each pool in turn.
     ///
-    /// Use [`PoolSelection::DEFAULT_REQUESTS_PER_CLIENT`] for the standard
-    /// threshold (100 requests), or pass any other `u32` value.
+    /// [`PoolSelection::DEFAULT_REQUESTS_PER_CLIENT`] sets 100 requests per pool.
+    /// You can pass another `u32` value.
     ///
     /// # Panics
     ///
@@ -361,10 +338,10 @@ impl PoolSelection {
     /// ```
     /// use fetch_options::PoolSelection;
     ///
-    /// // With the default threshold
+    /// // Use the default number of requests.
     /// let selection = PoolSelection::saturating(PoolSelection::DEFAULT_REQUESTS_PER_CLIENT);
     ///
-    /// // With a custom threshold
+    /// // Use a different number of requests.
     /// let selection = PoolSelection::saturating(50);
     /// ```
     #[must_use]
@@ -376,12 +353,9 @@ impl PoolSelection {
         }
     }
 
-    /// Creates a `PoolSelection` that distributes requests evenly across
-    /// pools in a strict round-robin fashion.
+    /// Creates a selection that sends each request to the next pool.
     ///
-    /// Each successive request is routed to the next pool,
-    /// cycling back to the first pool after reaching the last one.
-    /// This provides the most even distribution of requests across all pools.
+    /// After the last pool, the next request uses the first pool.
     #[must_use]
     pub fn round_robin() -> Self {
         Self { mode: Mode::RoundRobin }
@@ -389,8 +363,8 @@ impl PoolSelection {
 
     /// Converts this selection strategy into a selector function.
     ///
-    /// Returns a function that can be called repeatedly to select clients from an array.
-    /// The function maintains internal state to track round-robin or saturating distribution.
+    /// The returned function selects clients from a slice. It keeps the state for
+    /// round-robin or saturating distribution.
     ///
     /// # Examples
     ///
@@ -679,17 +653,17 @@ mod tests {
         let clients = [1, 2];
         let strategy = PoolSelectionStrategy::from(PoolSelection::saturating(PoolSelection::DEFAULT_REQUESTS_PER_CLIENT));
 
-        // saturate first
+        // Send 100 requests to the first client.
         for _ in 0..100 {
             assert_eq!(strategy.select(&clients).0, &1);
         }
 
-        // saturate second
+        // Send 100 requests to the second client.
         for _ in 0..100 {
             assert_eq!(strategy.select(&clients).0, &2);
         }
 
-        // back to beginning
+        // Send 100 more requests to the first client.
         for _ in 0..100 {
             assert_eq!(strategy.select(&clients).0, &1);
         }
@@ -707,7 +681,7 @@ mod tests {
         let clients = [1, 2, 3];
         let strategy = PoolSelectionStrategy::from(PoolSelection::round_robin());
 
-        // Each request should go to the next client in sequence
+        // Each request goes to the next client.
         let selection = strategy.select(&clients);
         assert_eq!(selection.0, &1);
         assert_eq!(selection.1, PoolIndex::new(0));
@@ -715,7 +689,7 @@ mod tests {
         assert_eq!(strategy.select(&clients).0, &2);
         assert_eq!(strategy.select(&clients).0, &3);
 
-        // Wraps back around
+        // Return to the first client.
         assert_eq!(strategy.select(&clients).0, &1);
         assert_eq!(strategy.select(&clients).0, &2);
         assert_eq!(strategy.select(&clients).0, &3);
@@ -772,22 +746,22 @@ mod tests {
         let selector = PoolSelection::round_robin().into_selector::<i32>();
         let clients = [10, 20, 30];
 
-        // First call should return first client
+        // The first call returns the first client.
         let (first, index) = selector(&clients);
         assert_eq!(*first, 10);
         assert_eq!(index, PoolIndex::new(0));
 
-        // Second call should return second client
+        // The second call returns the second client.
         let (second, index) = selector(&clients);
         assert_eq!(*second, 20);
         assert_eq!(index, PoolIndex::new(1));
 
-        // Third call should return third client
+        // The third call returns the third client.
         let (third, index) = selector(&clients);
         assert_eq!(*third, 30);
         assert_eq!(index, PoolIndex::new(2));
 
-        // Fourth call should wrap around to first client
+        // The fourth call returns to the first client.
         let (wrapped, index) = selector(&clients);
         assert_eq!(*wrapped, 10);
         assert_eq!(index, PoolIndex::new(0));
@@ -798,15 +772,15 @@ mod tests {
         let selector = PoolSelection::saturating(2).into_selector::<&str>();
         let clients = ["a", "b"];
 
-        // First 2 calls should return first client
+        // The first two calls return the first client.
         assert_eq!(*selector(&clients).0, "a");
         assert_eq!(*selector(&clients).0, "a");
 
-        // Next 2 calls should return second client
+        // The next two calls return the second client.
         assert_eq!(*selector(&clients).0, "b");
         assert_eq!(*selector(&clients).0, "b");
 
-        // Then back to first client
+        // Then return to the first client.
         assert_eq!(*selector(&clients).0, "a");
     }
 
@@ -818,7 +792,7 @@ mod tests {
         let (count, owned_selection) = options.multiple_pools.unwrap();
         assert_eq!(count, 2);
 
-        // We should be able to use the owned selection to create a selector
+        // The owned selection can create a selector.
         let selector = owned_selection.into_selector::<i32>();
         let clients = [1, 2];
         let (selected, _) = selector(&clients);

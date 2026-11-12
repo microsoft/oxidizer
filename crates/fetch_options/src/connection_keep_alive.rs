@@ -9,19 +9,18 @@ use crate::{DEFAULT_KEEP_ALIVE_INTERVAL, DEFAULT_KEEP_ALIVE_TIMEOUT};
 
 /// Controls how HTTP connections are kept alive between requests.
 ///
-/// Keep-alive maintains open connections, reducing latency for subsequent requests
-/// by avoiding the overhead of establishing new TCP connections. This can significantly
-/// improve performance when making multiple requests to the same server.
+/// Keep-alive sends probes that keep open connections available for reuse.
 ///
-/// Use [`disabled`](Self::disabled), [`active_connections`](Self::active_connections), or
-/// [`active_and_idle_connections`](Self::active_and_idle_connections) to construct values
-/// with sensible defaults, or match on the variants directly when full control is required.
+/// Use [`disabled`](Self::disabled), [`active_connections`](Self::active_connections),
+/// or [`active_and_idle_connections`](Self::active_and_idle_connections). The two
+/// probe constructors use 20 seconds for each argument that is `None`. You can also
+/// build the variants directly.
 #[derive(Debug, Default, Clone)]
 pub enum ConnectionKeepAlive {
     /// Keep-alive is disabled.
     ///
-    /// Connections aren't actively kept alive. The server may close them at any time,
-    /// and they'll be transparently discarded when the client tries to use them again.
+    /// The server can close these connections. The client discards a closed connection
+    /// when it tries to use it again.
     #[default]
     Disabled,
     /// Send keep-alive probes only on connections that are actively handling requests.
@@ -33,9 +32,7 @@ pub enum ConnectionKeepAlive {
         /// Maximum time to wait for a probe response before closing the connection.
         timeout: Duration,
     },
-    /// Send keep-alive probes on all connections, including idle ones sitting in the pool.
-    ///
-    /// This is the most aggressive connection reuse strategy.
+    /// Send keep-alive probes on all connections, including idle pooled connections.
     ActiveAndIdleConnections {
         /// How frequently keep-alive probes are sent.
         interval: Duration,
@@ -52,13 +49,12 @@ impl ConnectionKeepAlive {
         Self::Disabled
     }
 
-    /// Creates a keep-alive configuration that only maintains active connections.
+    /// Creates a configuration that sends probes only on active connections.
     ///
-    /// This mode sends keep-alive probes for connections currently in use while
-    /// allowing idle connections to close naturally. The `interval` controls how
-    /// frequently keep-alive probes are sent (defaults to 20 seconds if `None`),
-    /// and `timeout` sets the maximum time to wait for a response before closing
-    /// the connection (defaults to 20 seconds if `None`).
+    /// Idle connections can close. `interval` sets the time between probes.
+    /// `timeout` sets how long to wait for a response before closing the connection.
+    /// Each value defaults to 20 seconds when it is `None`. Some transports ignore
+    /// `timeout` or treat both probe modes in the same way.
     #[must_use]
     pub fn active_connections(interval: impl Into<Option<Duration>>, timeout: impl Into<Option<Duration>>) -> Self {
         Self::ActiveConnections {
@@ -67,13 +63,12 @@ impl ConnectionKeepAlive {
         }
     }
 
-    /// Creates a keep-alive configuration that maintains both active and idle connections.
+    /// Creates a configuration that sends probes on active and idle connections.
     ///
-    /// This is the most aggressive connection reuse strategy, keeping all connections alive
-    /// whether they're currently in use or waiting in the pool. The `interval` controls how
-    /// frequently keep-alive probes are sent (defaults to 20 seconds if `None`), and `timeout`
-    /// sets the maximum time to wait for a response before closing the connection (defaults to
-    /// 20 seconds if `None`).
+    /// `interval` sets the time between probes. `timeout` sets how long to wait for
+    /// a response before closing the connection. Each value defaults to 20 seconds
+    /// when it is `None`. Some transports ignore `timeout` or treat both probe modes
+    /// in the same way.
     #[must_use]
     pub fn active_and_idle_connections(interval: impl Into<Option<Duration>>, timeout: impl Into<Option<Duration>>) -> Self {
         Self::ActiveAndIdleConnections {
