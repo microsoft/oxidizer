@@ -201,8 +201,9 @@ impl RuntimeScheduler {
     ///
     /// Uses a pool chosen by the runtime for synchronous I/O or other calls
     /// that can stop an async worker from running other tasks.
-    /// A panic in this function returns an error through [`JoinHandle`] and
-    /// follows the configured [`Panic`](crate::runtime::hook::Panic) hook.
+    /// A panic in this function returns an error through [`JoinHandle`].
+    /// It does not invoke the configured [`Panic`](crate::runtime::hook::Panic)
+    /// hook or stop the runtime.
     /// The function and its result must implement `Send + 'static`.
     ///
     /// Shutdown rejects new blocking functions and cancels queued ones before they start.

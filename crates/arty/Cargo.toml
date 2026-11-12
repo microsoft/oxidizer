@@ -136,7 +136,7 @@ required-features = ["macros"]
 
 [[example]]
 name = "arty_hooks"
-required-features = ["rt"]
+required-features = ["macros"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

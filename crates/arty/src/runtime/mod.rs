@@ -60,7 +60,7 @@
 //! - [`BlockingPoolPolicy`] selects a shared or per-worker blocking pool and
 //!   sets its thread limit.
 //! - [`MonitorPolicy`] selects the monitoring configuration.
-//! - [`hook`] provides worker-start, task-spawn, task-poll, and panic hooks.
+//! - [`hook`] provides panic hooks.
 //!
 //! [`RuntimeBuilder::stack_size`] sets the async worker stack size.
 //! [`RuntimeBuilder::name`] sets the name used in async and blocking thread names.

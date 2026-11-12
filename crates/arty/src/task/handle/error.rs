@@ -23,9 +23,10 @@ use crate::runtime::ShutdownCause;
 /// This is separate from an error returned by the task's own code. Awaiting a
 /// task that returns `Result<T, E>` produces `Result<Result<T, E>, JoinError>`.
 /// Receiving a panic error does not restart the panic or repair application data.
-/// By default, a task panic that Arty catches also starts runtime shutdown.
+/// By default, a panic from async task creation or polling starts runtime shutdown.
 /// [`Panic::ignore`](crate::runtime::hook::Panic::ignore) keeps the
 /// runtime running while `JoinHandle` still reports the panic.
+/// A blocking function panic does not invoke the hook or stop the runtime.
 /// With `panic = "abort"`, a task panic terminates the process instead.
 ///
 /// [`shutdown_cause`](Self::shutdown_cause) identifies requested shutdown
