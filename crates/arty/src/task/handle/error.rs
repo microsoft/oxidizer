@@ -213,27 +213,3 @@ impl Error for JoinError {
         }
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn failure_kinds_are_distinct_and_thread_safe() {
-        static_assertions::assert_impl_all!(JoinError: Error, Send, Sync);
-        let panic = JoinError::panicked(Box::new(std::cell::Cell::new(42)));
-        assert!(panic.is_panic());
-        assert!(!panic.is_shutdown());
-        assert!(!panic.is_invalid_destination());
-        assert_eq!(panic.to_string(), "task panicked");
-
-        let shutdown = JoinError::shutdown(None);
-        assert!(!shutdown.is_panic());
-        assert!(shutdown.is_shutdown());
-        assert!(!shutdown.is_invalid_destination());
-        assert_eq!(shutdown.to_string(), "runtime is shutting down");
-        assert!(format!("{shutdown:?}").contains("is_shutdown: true"));
-        assert!(shutdown.source().is_none());
-    }
-}

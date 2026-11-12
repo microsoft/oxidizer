@@ -98,33 +98,3 @@ impl TaskOptions {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use std::panic::{RefUnwindSafe, UnwindSafe};
-
-    use static_assertions::{assert_impl_all, assert_not_impl_any};
-
-    use super::*;
-
-    assert_impl_all!(TaskPlacement: UnwindSafe, RefUnwindSafe);
-    // Captured enrichment can contain user-defined interior state. Options do
-    // not promise that they can cross a caught-unwind boundary.
-    assert_not_impl_any!(TaskOptions: UnwindSafe, RefUnwindSafe);
-
-    #[test]
-    fn observed_options_keep_context_and_placement() {
-        let options = TaskOptions::observed(Sink::noop().transfer_context(), TaskPlacement::SameThread);
-
-        assert!(options.context.is_some());
-        assert_eq!(options.placement, TaskPlacement::SameThread);
-    }
-
-    #[test]
-    fn new_options_keep_placement_without_context() {
-        let options = TaskOptions::new(TaskPlacement::SpecificThread);
-
-        assert!(options.context.is_none());
-        assert_eq!(options.placement, TaskPlacement::SpecificThread);
-    }
-}

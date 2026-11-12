@@ -291,6 +291,46 @@ fn noop_executor_applies_task_context_and_restores_caller_context() {
 }
 
 #[test]
+fn observed_options_keep_context_and_placement() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let context = sink.transfer_context().with_enrichment(TaskContext);
+    let mut executor = Executor::builder().sink(sink.clone()).build();
+    let task_sink = sink.clone();
+    let mut handle = executor.tasks().add_test(
+        async move { enrichment_keys(&task_sink) },
+        TaskOptions::observed(context, TaskPlacement::SameThread),
+    );
+
+    _ = executor.execute_cycle();
+
+    assert_eq!(poll_completed(&mut handle), [String::from("task.context")]);
+    assert_eq!(
+        processor.events()[0].dimensions()[0],
+        ("placement".to_owned(), "same_thread".into())
+    );
+}
+
+#[test]
+fn new_options_keep_placement_without_context() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let options = TaskOptions::new(TaskPlacement::SpecificThread);
+    let caller = sink.transfer_context().with_enrichment(CallerContext);
+    let _guard = caller.apply_current_thread();
+    let mut executor = Executor::builder().sink(sink.clone()).build();
+    let task_sink = sink.clone();
+    let mut handle = executor.tasks().add_test(async move { enrichment_keys(&task_sink) }, options);
+
+    _ = executor.execute_cycle();
+
+    assert_eq!(poll_completed(&mut handle), [String::from("caller.context")]);
+    assert!(
+        processor.events()[0]
+            .dimensions()
+            .contains(&("placement".to_owned(), "specific_thread".into()))
+    );
+}
+
+#[test]
 fn completed_result_remains_available_after_executor_stops() {
     let mut executor = Executor::builder().build();
     let mut handle = executor.tasks().add_test(async { 42 }, TaskOptions::default());

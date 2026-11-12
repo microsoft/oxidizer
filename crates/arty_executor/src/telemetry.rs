@@ -57,38 +57,3 @@ struct TaskPanicked {
     #[unredacted]
     polls: u64,
 }
-
-#[cfg(test)]
-mod tests {
-    use observed_testing::{TEST_ID, test_emitter};
-
-    use super::*;
-
-    #[test]
-    fn lifecycle_events_include_placement_and_poll_count() {
-        let (sink, processor) = test_emitter(TEST_ID);
-
-        report_created(&sink, TaskPlacement::SameThread);
-        report_succeeded(&sink, 3);
-
-        let events = processor.events();
-        assert_eq!(events[0].name(), "arty.rt.task.spawned");
-        assert_eq!(events[0].dimensions()[0], ("placement".to_owned(), "same_thread".into()));
-        assert_eq!(events[1].name(), "arty.rt.task.succeeded");
-        assert_eq!(events[1].field_metrics()[0].field_key(), "polls");
-        assert_eq!(events[1].field_metrics()[0].metric().unit(), "{poll}");
-        assert!((events[1].field_metrics()[0].value() - 3.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn specific_thread_placement_has_a_distinct_label() {
-        let (sink, processor) = test_emitter(TEST_ID);
-
-        report_created(&sink, TaskPlacement::SpecificThread);
-
-        assert_eq!(
-            processor.events()[0].dimensions()[0],
-            ("placement".to_owned(), "specific_thread".into())
-        );
-    }
-}

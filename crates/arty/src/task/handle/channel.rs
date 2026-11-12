@@ -98,6 +98,7 @@ fn discard_unwind(action: impl FnOnce()) {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// Public joins cannot independently disconnect senders or delay shutdown-cause publication.
 mod tests {
     use std::error::Error as _;
     use std::pin::Pin;

@@ -563,6 +563,7 @@ pub(crate) trait TypeErasedTask: Send + Sync {
 }
 
 #[cfg(test)]
+// The executor prevents repolling retired tasks and repeated pinned-storage destruction.
 mod tests {
     use std::pin::pin;
     use std::sync::Arc;

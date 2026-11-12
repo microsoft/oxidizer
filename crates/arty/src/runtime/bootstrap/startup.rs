@@ -94,6 +94,7 @@ fn available_processors() -> ProcessorSet {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// The public builder cannot inject the fake processor topology used by these startup checks.
 mod tests {
     use std::collections::HashSet;
     use std::num::NonZero;

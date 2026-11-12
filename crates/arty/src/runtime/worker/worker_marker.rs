@@ -25,6 +25,7 @@ impl WorkerMarker {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public APIs cannot attach or inspect the worker-classification TLS marker.
 mod tests {
     use super::*;
     use crate::runtime::worker::asynchronous;

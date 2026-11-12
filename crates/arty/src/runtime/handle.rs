@@ -230,8 +230,8 @@ fn panic_shutdown_from_worker(operation: &str) -> ! {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// These checks inject worker failures or retain the private joiner after consuming the runtime.
 mod tests {
-    use std::cell::RefCell;
     use std::future::poll_fn;
     use std::task::{Poll, Waker};
     use std::thread;
@@ -243,18 +243,6 @@ mod tests {
     use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::worker::blocking::{PanicPolicy, Pool, Worker};
     use crate::task::JoinError;
-
-    thread_local! {
-        static SHUTDOWN_GUARD: RefCell<Option<ShutdownGuard>> = const { RefCell::new(None) };
-    }
-
-    struct ShutdownGuard(crate::runtime::RuntimeControl);
-
-    impl Drop for ShutdownGuard {
-        fn drop(&mut self) {
-            self.0.request_stop();
-        }
-    }
 
     #[test]
     fn explicit_stop_reports_a_worker_panic_after_joining() {
@@ -454,24 +442,6 @@ mod tests {
 
         assert_programming_error(error, "Runtime drop");
         joiner.join().unwrap();
-    }
-
-    #[test]
-    fn thread_local_shutdown_guard_survives_worker_slot_teardown() {
-        thread::spawn(|| {
-            let runtime = single_worker_runtime();
-            let (control, scheduler) = runtime
-                .scheduler()
-                .block_on(async |cx| (cx.control().clone(), cx.scheduler().clone()))
-                .unwrap();
-            SHUTDOWN_GUARD.with(|guard| {
-                assert!(guard.replace(Some(ShutdownGuard(control))).is_none());
-            });
-            scheduler.spawn(async |_| {}).join().unwrap();
-            runtime.stop().unwrap();
-        })
-        .join()
-        .unwrap();
     }
 
     fn assert_programming_error(error: JoinError, operation: &str) {

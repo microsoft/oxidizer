@@ -126,6 +126,7 @@ pub(crate) fn command_channel() -> (CommandSender, CommandReceiver) {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public submission cannot separately close or drain the worker command queues.
 mod tests {
     use std::pin::pin;
     use std::sync::Arc;

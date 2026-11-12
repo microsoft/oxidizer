@@ -58,6 +58,7 @@ impl Shutdown {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// Public stop requests cannot inject competing causes or report which publication won.
 mod tests {
     use std::error::Error;
     use std::fmt::{self, Debug, Display};

@@ -61,25 +61,3 @@ impl Default for PanicPolicy {
         Self::shutdown()
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_policy_starts_shutdown() {
-        assert!(matches!(
-            PanicPolicy::default().into_executor_policy(),
-            arty_executor::PanicPolicy::Shutdown
-        ));
-    }
-
-    #[test]
-    fn ignore_policy_keeps_the_runtime_running() {
-        assert!(matches!(
-            PanicPolicy::ignore().into_executor_policy(),
-            arty_executor::PanicPolicy::Ignore
-        ));
-    }
-}

@@ -130,6 +130,7 @@ fn validated_max(max_workers: Option<usize>) -> Result<Option<NonZeroUsize>, Err
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// The pre-start pool variant and its exact stored limits are not public API.
 mod tests {
     use super::*;
 

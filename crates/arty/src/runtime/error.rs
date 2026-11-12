@@ -153,6 +153,7 @@ impl StdError for SharedDriverError {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// Public errors cannot construct or downcast the private source-wrapper types checked here.
 mod tests {
     use std::io;
 
