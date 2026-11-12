@@ -12,15 +12,13 @@ use std::task;
 
 use observed::Sink;
 use pin_project::{pin_project, pinned_drop};
-use plurality::{Arc as PoolArc, MultiPool};
+use plurality::MultiPool;
 
-#[cfg(test)]
-use crate::TaskHandle;
 #[cfg(feature = "inspection")]
 use crate::TaskState;
 use crate::inspection::Inspector;
 use crate::{
-    ExecutorShared, ShutdownCause, TaskCreatedReporter, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal,
+    ExecutorShared, ShutdownCause, TaskCreatedReporter, TaskHandle, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal,
     discard_task_panic_payload,
 };
 
@@ -145,29 +143,23 @@ pub(crate) fn allocate_inspected_task<F, R, T, I>(
     sink: Sink,
     completion: T,
     inspector: I,
-) -> Pin<PoolArc<impl TypeErasedTask + 'static>>
+) -> TaskHandle
 where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
     I: Inspector<F>,
 {
-    pool.alloc_arc_pin_with(|| Task::new_inspected(future, completion, options, sink, inspector))
+    TaskHandle::new(pool.alloc_arc_pin_with(|| Task::new_inspected(future, completion, options, sink, inspector)))
 }
 
-pub(crate) fn allocate_task<F, R, T>(
-    pool: &MultiPool,
-    future: F,
-    options: TaskOptions,
-    sink: Sink,
-    completion: T,
-) -> Pin<PoolArc<impl TypeErasedTask + 'static>>
+pub(crate) fn allocate_task<F, R, T>(pool: &MultiPool, future: F, options: TaskOptions, sink: Sink, completion: T) -> TaskHandle
 where
     F: Future<Output = R> + 'static,
     R: 'static,
     T: TaskCompletion<R>,
 {
-    pool.alloc_arc_pin_with(|| Task::new_with_target(future, completion, options, sink))
+    TaskHandle::new(pool.alloc_arc_pin_with(|| Task::new_with_target(future, completion, options, sink)))
 }
 
 #[cfg(test)]
@@ -189,13 +181,13 @@ impl<R: 'static> TaskCompletion<R> for TestCompletion {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn allocate_test_task_in(pool: &MultiPool) -> TaskHandle {
-    TaskHandle::new(allocate_task(
+    allocate_task(
         pool,
         std::future::pending::<()>(),
         TaskOptions::default(),
         Sink::noop(),
         TestCompletion,
-    ))
+    )
 }
 
 impl<F, R, T, I> TypeErasedTask for Task<F, R, T, I>
@@ -572,7 +564,7 @@ mod tests {
     use super::*;
 
     fn initialized_task<R: 'static>(pool: &MultiPool, future: impl Future<Output = R> + 'static) -> TaskHandle {
-        let handle = TaskHandle::new(allocate_task(pool, future, TaskOptions::default(), Sink::noop(), TestCompletion));
+        let handle = allocate_task(pool, future, TaskOptions::default(), Sink::noop(), TestCompletion);
         let (shared, _remote_wakes) = crate::WakeShared::new(Waker::noop().clone(), std::thread::current().id());
         let signal = WakeSignal::new(shared, handle.as_ptr());
         // SAFETY: The handle owns the task on its creating thread.
