@@ -82,10 +82,38 @@ impl ThreadAware for PanicProbe {
 }
 
 #[derive(Clone)]
+struct RemotePanicProbe {
+    source: Option<ThreadId>,
+    destination: Option<ThreadId>,
+    installed: mpsc::Sender<(ThreadId, ThreadId)>,
+    observed: mpsc::Sender<(ThreadId, ThreadId, ThreadId, u8)>,
+}
+
+impl ThreadAware for RemotePanicProbe {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        let source = source
+            .expect("runtime control supplies the source worker for worker-local registration")
+            .id();
+        let destination = destination.id();
+        self.source = Some(source);
+        self.destination = Some(destination);
+        assert!(
+            self.installed.send((source, destination)).is_ok(),
+            "the test retains the installation receiver until both workers install the hook"
+        );
+    }
+}
+
+#[derive(Clone)]
 struct EventAddresses(Arc<Mutex<Vec<usize>>>);
 
 impl ThreadAware for EventAddresses {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+#[expect(clippy::panic, reason = "this test helper creates a contained task panic")]
+async fn panic_with_payload(payload: u8) {
+    std::panic::panic_any(payload);
 }
 
 #[test]
@@ -235,6 +263,68 @@ fn control_registration_applies_before_local_spawn() {
         .unwrap();
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn worker_registration_relocates_and_runs_on_every_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let (installed, installations) = mpsc::channel();
+    let (observed, observations) = mpsc::channel();
+
+    let (workers, source, scheduler) = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let workers: Vec<_> = cx.control().workers().into_iter().cloned().collect();
+            let source = cx.thread().id();
+            cx.control().on(HookFn::<Panic, _>::new(
+                RemotePanicProbe {
+                    source: None,
+                    destination: None,
+                    installed,
+                    observed,
+                },
+                |event, data| {
+                    let payload = *event.payload().downcast_ref::<u8>().unwrap();
+                    assert!(
+                        data.observed
+                            .send((
+                                std::thread::current().id(),
+                                data.source.unwrap(),
+                                data.destination.unwrap(),
+                                payload,
+                            ))
+                            .is_ok(),
+                        "the test retains the observation receiver until both callbacks run"
+                    );
+                    event.ignore();
+                },
+            ));
+            (workers, source, cx.scheduler().clone())
+        })
+        .unwrap();
+
+    let installed: Vec<_> = (0..workers.len())
+        .map(|_| installations.recv_timeout(Duration::from_secs(5)).unwrap())
+        .collect();
+    assert!(workers.iter().all(|worker| installed.contains(&(source, worker.id()))));
+
+    for (payload, worker) in (0_u8..).zip(&workers) {
+        assert!(
+            scheduler
+                .spawn_at(worker, payload, panic_with_payload)
+                .join()
+                .unwrap_err()
+                .is_panic()
+        );
+    }
+
+    for _ in &workers {
+        let (current, observed_source, destination, payload) = observations.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(observed_source, source);
+        assert_eq!(current, destination);
+        assert_eq!(destination, workers[usize::from(payload)].id());
+    }
     runtime.stop().unwrap();
 }
 
