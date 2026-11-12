@@ -4,11 +4,11 @@
 use std::cell::RefCell;
 
 use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskPlacement, TaskSet};
-use thread_aware::{Thread, ThreadAware};
+use thread_aware::Thread;
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{ErasedHookFn, HookRegistration, Panic, PanicAction};
+use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, Panic, PanicAction};
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
@@ -18,6 +18,8 @@ thread_local! {
     static CURRENT: RefCell<Option<LocalWorker>> = const { RefCell::new(None) };
     static PANIC_HOOKS: RefCell<Option<Vec<ErasedHookFn<Panic>>>> = const { RefCell::new(None) };
 }
+
+const LOCAL_PANIC_HOOK: LocalHook<Panic> = LocalHook::new(&PANIC_HOOKS);
 
 /// Asynchronous worker state that remains attached throughout thread teardown.
 #[derive(Debug)]
@@ -56,12 +58,7 @@ impl LocalWorker {
             executor_shutdown,
             results,
         };
-        PANIC_HOOKS.with_borrow_mut(|current| {
-            assert!(
-                current.replace(Vec::new()).is_none(),
-                "panic hooks are already installed on this task worker"
-            );
-        });
+        LOCAL_PANIC_HOOK.initialize();
         Self::with_current_mut(|current| {
             let current = current.expect("task worker startup attaches its local worker before installing the scheduler");
             assert!(current.scheduler.is_none(), "a scheduler is already installed on this task worker");
@@ -101,11 +98,7 @@ impl LocalWorker {
             return Panic::new(panic).into_parts();
         }
         let mut event = Panic::new(panic);
-        PANIC_HOOKS.with_borrow_mut(|hooks| {
-            for hook in hooks.as_mut().expect("a running worker retains its installed panic hooks") {
-                hook.execute(&mut event);
-            }
-        });
+        LOCAL_PANIC_HOOK.execute(&mut event);
         event.into_parts()
     }
 
@@ -114,22 +107,16 @@ impl LocalWorker {
             let current = current.expect("a running worker retains its scheduler while processing hook registration");
             current.thread.clone()
         });
-        let mut hook = hook;
-        hook.relocate(source, &destination);
-        PANIC_HOOKS.with_borrow_mut(|hooks| {
-            let hooks = hooks.as_mut().expect("a running worker retains its installed panic hooks");
-            match hook {
-                HookRegistration::Panic(hook) => hooks.push(hook),
-            }
-        });
+        match hook {
+            HookRegistration::Panic(hook) => LOCAL_PANIC_HOOK.install(hook, source, &destination),
+        }
     }
 
     #[cfg_attr(test, mutants::skip)] // Retaining direct registration during executor teardown can strand shutdown.
     pub(super) fn clear_scheduler() {
         let scheduler = Self::with_current_mut(|current| current.and_then(|current| current.scheduler.take()));
         drop(scheduler);
-        let hooks = PANIC_HOOKS.with_borrow_mut(Option::take);
-        drop(hooks);
+        LOCAL_PANIC_HOOK.clear();
     }
 
     pub(crate) fn install_driver_host(driver_host: RuntimeDriverHost) {

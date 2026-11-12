@@ -29,11 +29,13 @@
 //! [`ThreadAware`]: crate::core::ThreadAware
 
 mod hook_fn;
+mod local_hook;
 mod panic;
 mod registry;
 
 pub(crate) use hook_fn::ErasedHookFn;
 pub use hook_fn::HookFn;
+pub(crate) use local_hook::LocalHook;
 pub use panic::Panic;
 pub(crate) use registry::{HookRegistration, PanicAction, registration};
 
