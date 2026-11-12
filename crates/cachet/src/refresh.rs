@@ -122,9 +122,11 @@ where
                     let inner = Arc::clone(&inner);
                     let key = key.clone();
                     move || {
-                        if let Some(refresh) = &inner.refresh {
-                            refresh.finish_refresh(&key);
-                        }
+                        inner
+                            .refresh
+                            .as_ref()
+                            .expect("refresh tasks are spawned only when this shared configuration enables refresh")
+                            .finish_refresh(&key);
                     }
                 });
                 let request_id = next_request_id();

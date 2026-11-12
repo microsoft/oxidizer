@@ -46,7 +46,6 @@ pub(crate) struct PoolCore {
 }
 
 #[inline]
-#[cfg_attr(test, mutants::skip)] // Differences occur only at the unallocatable u32 slot-index ceiling.
 const fn unbounded_chunk_cap(chunk_size: u32) -> u64 {
     MAX_POOL_SLOTS / chunk_size as u64
 }
@@ -153,7 +152,6 @@ impl<T> Pool<T, Global> {
 
     /// Starts a [`PoolBuilder`].
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Replacing the builder with Default is an unviable/equivalent mutant.
     pub fn builder() -> PoolBuilder<T, Global> {
         PoolBuilder::new()
     }

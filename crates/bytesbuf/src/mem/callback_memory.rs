@@ -108,7 +108,6 @@ impl<D: ThreadAware + Clone + Send + Sync + 'static> CallbackMemory<D> {
 }
 
 impl<D: ThreadAware + Clone + Send + Sync + 'static> Memory for CallbackMemory<D> {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         self.reserve(min_bytes)
     }

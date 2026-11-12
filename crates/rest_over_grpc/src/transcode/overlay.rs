@@ -182,7 +182,6 @@ impl<'de> DeserializeSeed<'de> for BodyTopSeed<'_, '_> {
         impl<'de> Visitor<'de> for TopVisitor<'_, '_> {
             type Value = BodyTop<'de>;
 
-            #[cfg_attr(test, mutants::skip)]
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a JSON object")
             }
@@ -512,7 +511,7 @@ fn insert_query_node<'a>(
     };
     let key = path
         .next()
-        .ok_or_else(|| TranscodeError::structure("query parameter has an empty field path"))?;
+        .expect("split supplies an initial segment, and recursion follows only a confirmed next segment");
     let has_more = path.clone().next().is_some();
     let node = if let Some((_, node)) = map.iter_mut().find(|(existing, _)| existing == key) {
         node

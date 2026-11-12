@@ -58,6 +58,11 @@ fn templated_uri() {
 }
 
 #[test]
+fn empty_uri_debug() {
+    assert_eq!(format!("{:?}", Uri::new()), "Uri { path_and_query: None }");
+}
+
+#[test]
 fn uri_with_template() {
     let test = TemplatedTestPath {
         param: "value1".to_string(),

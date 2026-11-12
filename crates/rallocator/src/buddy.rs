@@ -93,18 +93,14 @@ impl Nodes {
         let (l, r, c) = unsafe { self.read(h) };
         // SAFETY: Recoloring leaves the owned root's links intact.
         unsafe { self.color(h, !c) };
-        if l != 0 {
-            // SAFETY: This child belongs to the exclusive tree.
-            let red = unsafe { self.red(l) };
-            // SAFETY: Only the child's color changes.
-            unsafe { self.color(l, !red) };
-        }
-        if r != 0 {
-            // SAFETY: This child belongs to the exclusive tree.
-            let red = unsafe { self.red(r) };
-            // SAFETY: Only the child's color changes.
-            unsafe { self.color(r, !red) };
-        }
+        // SAFETY: Both helpers accept null children and owned tree nodes.
+        let red = unsafe { self.red(l) };
+        // SAFETY: Only the child's color changes; null children are ignored.
+        unsafe { self.color(l, !red) };
+        // SAFETY: Both helpers accept null children and owned tree nodes.
+        let red = unsafe { self.red(r) };
+        // SAFETY: Only the child's color changes; null children are ignored.
+        unsafe { self.color(r, !red) };
     }
 
     unsafe fn balance(self, mut h: usize) -> usize {

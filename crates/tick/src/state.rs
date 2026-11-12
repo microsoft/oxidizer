@@ -170,16 +170,16 @@ impl ClockState {
     pub(crate) fn unregister_driver(&self, registration: DriverRegistration) {
         match self {
             Self::System(storage) => {
-                if let Some(driver_id) = registration.driver_id() {
-                    storage.unregister_driver(driver_id);
-                }
+                let driver_id = registration
+                    .driver_id()
+                    .expect("register_driver always supplies a registration for a system-clock driver");
+                storage.unregister_driver(driver_id);
             }
             #[cfg(any(feature = "test-util", test))]
             Self::ClockControl(_) => unregister_controlled_driver(registration),
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // causes test timeout
     pub(crate) fn driver_is_finished(&self) -> bool {
         match self {
             Self::System(storage) => storage.has_no_clock_owners(),
@@ -328,7 +328,6 @@ impl SystemClockStorage {
         key
     }
 
-    #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
         // The single-slot probe keeps the idle and one-ready-timer paths small. Larger bursts use
         // eight stack slots per follow-up lock acquisition and loop without imposing a limit.

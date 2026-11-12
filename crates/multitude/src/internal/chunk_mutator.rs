@@ -104,7 +104,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     #[cfg(test)]
     #[inline]
     #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)] // test-only helper
     fn free_bytes(&self) -> usize {
         let top = self.end.get().as_ptr() as usize;
         let cur = self.bump.get().as_ptr() as usize;
@@ -184,7 +183,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// `checked_add` because `size` is caller-controlled.
     #[inline]
     // Always rejecting requests would make caller refill loops infinite.
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn try_alloc(&self, size: usize, align: usize) -> Option<InChunk<u8>> {
         self.try_alloc_before_commit(size, align, || {})
     }
@@ -192,7 +190,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// [`Self::try_alloc`] that also records the reservation in `marker`.
     /// See [`mark_local_reference`] for what the marker guarantees.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     fn try_alloc_local(&self, size: usize, align: usize, marker: &Cell<bool>) -> Option<InChunk<u8>> {
         self.try_alloc_before_commit(size, align, || mark_local_reference(marker))
     }
@@ -200,7 +197,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// Shared allocation core with a success-only action immediately before the
     /// bump cursor is committed.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     fn try_alloc_before_commit(&self, size: usize, align: usize, before_commit: impl FnOnce()) -> Option<InChunk<u8>> {
         debug_assert!(align.is_power_of_two(), "align must be a power of two");
         debug_assert!(size.checked_add(align).is_some(), "size + align overflows usize");
@@ -241,7 +237,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// Reserves storage for one `T` and returns an `Uninit<'_, T>` ticket.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     pub(crate) fn try_alloc_uninit<T>(&self) -> Option<Uninit<'_, T>> {
         let bytes = self.try_alloc(mem::size_of::<T>(), mem::align_of::<T>())?;
         Some(Uninit::new(bytes.cast::<T>()))
@@ -250,7 +245,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// [`Self::try_alloc_uninit`] that also records the reservation in
     /// `marker`. See [`mark_local_reference`].
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) fn try_alloc_uninit_local<T>(&self, marker: &Cell<bool>) -> Option<Uninit<'_, T>> {
         let bytes = self.try_alloc_local(mem::size_of::<T>(), mem::align_of::<T>(), marker)?;
         Some(Uninit::new(bytes.cast::<T>()))
@@ -261,7 +255,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// caller doesn't need to use [`Self::chunk_ptr_unchecked`] (which
     /// would require an `unsafe` block) afterwards.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     pub(crate) fn try_alloc_with_chunk(&self, size: usize, align: usize) -> Option<(InChunk<u8>, NonNull<Chunk<A>>)> {
         let in_chunk = self.try_alloc(size, align)?;
         // SAFETY: a successful `try_alloc` proves the mutator owns a
@@ -272,7 +265,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// Byte-slice fast path: skips the alignment mask, `checked_mul`,
     /// and ZST branch. Only valid for `T = u8` (align 1, size 1).
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin
     pub(crate) fn try_alloc_bytes(&self, len: usize) -> Option<Uninit<'_, [u8]>> {
         self.try_alloc_bytes_before_commit(len, || {})
     }
@@ -280,13 +272,11 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// [`Self::try_alloc_bytes`] that also records the reservation in
     /// `marker`. See [`mark_local_reference`].
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin
     pub(crate) fn try_alloc_bytes_local(&self, len: usize, marker: &Cell<bool>) -> Option<Uninit<'_, [u8]>> {
         self.try_alloc_bytes_before_commit(len, || mark_local_reference(marker))
     }
 
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin
     fn try_alloc_bytes_before_commit(&self, len: usize, before_commit: impl FnOnce()) -> Option<Uninit<'_, [u8]>> {
         let cur = self.bump.get();
         let cur_addr = cur.as_ptr() as usize;
@@ -306,7 +296,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// [`Self::try_alloc_bytes`] paired with the owning chunk pointer.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin
     pub(crate) fn try_alloc_bytes_with_chunk(&self, len: usize) -> Option<ByteAllocation<'_, A>> {
         let uninit = self.try_alloc_bytes(len)?;
         // SAFETY: a successful byte reservation proves the mutator owns a
@@ -316,7 +305,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// Reserves storage for `len` consecutive `T`s and returns an
     /// `Uninit<'_, [T]>` ticket.
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     pub(crate) fn try_alloc_uninit_slice<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
         let size = mem::size_of::<T>().checked_mul(len)?;
         let bytes = self.try_alloc(size, mem::align_of::<T>())?;
@@ -325,7 +313,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// [`Self::try_alloc_uninit_slice`] that also records the reservation in
     /// `marker`. See [`mark_local_reference`].
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) fn try_alloc_uninit_slice_local<T>(&self, len: usize, marker: &Cell<bool>) -> Option<Uninit<'_, [T]>> {
         let size = mem::size_of::<T>().checked_mul(len)?;
         let bytes = self.try_alloc_local(size, mem::align_of::<T>(), marker)?;
@@ -337,7 +324,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// # Safety
     ///
     /// `size` must equal `size_of::<T>() * len` without overflow.
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) unsafe fn try_alloc_uninit_slice_with_size_local<T>(
         &self,
         len: usize,
@@ -362,7 +348,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// The returned [`Uninit<[T]>`] ticket addresses the payload only;
     /// init helpers fill exactly `len * size_of::<T>()` bytes and have
     /// no awareness of the prefix.
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) fn try_alloc_uninit_slice_prefixed<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
         let (payload, _) = self.try_alloc_prefixed_slice_payload::<T>(len)?;
         Some(Uninit::new(payload))
@@ -374,7 +359,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// # Safety
     ///
     /// `payload_bytes` must equal `size_of::<T>() * len` without overflow.
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) unsafe fn try_alloc_uninit_slice_prefixed_with_size<T>(&self, len: usize, payload_bytes: usize) -> Option<Uninit<'_, [T]>> {
         // SAFETY: forwarded to the caller.
         let (payload, _) = unsafe { self.try_alloc_prefixed_slice_payload_unchecked::<T>(len, payload_bytes) }?;
@@ -390,7 +374,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// `payload_bytes` is floored to 1 so the value pointer stays inside the
     /// chunk and preserves header recovery by mask.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     fn try_alloc_smart_prefixed<S: super::thin_dst::Strong>(
         &self,
         payload_bytes: usize,
@@ -401,7 +384,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     }
 
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     fn try_alloc_smart_prefixed_local<S: super::thin_dst::Strong>(
         &self,
         payload_bytes: usize,
@@ -413,7 +395,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     }
 
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     fn try_alloc_smart_prefixed_before_commit<S: super::thin_dst::Strong>(
         &self,
         payload_bytes: usize,
@@ -436,7 +417,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// [`Self::try_alloc_smart_prefixed`] plus the owning chunk pointer.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     pub(crate) fn try_alloc_arc_value<S: super::thin_dst::Strong, T>(&self) -> Option<(Uninit<'_, T>, NonNull<Chunk<A>>)> {
         let value_ptr = self.try_alloc_smart_prefixed::<S>(mem::size_of::<T>(), mem::align_of::<T>(), 0)?;
         // SAFETY: a successful reservation proves the mutator owns a chunk.
@@ -448,7 +428,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// Slice form of [`Self::try_alloc_arc_value`], including the strong
     /// prefix and slice-length metadata word.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
@@ -465,7 +444,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     ///
     /// `payload_bytes` must equal `size_of::<T>() * len` (without overflow).
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
@@ -503,7 +481,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     ///
     /// `payload_bytes` must equal `size_of::<T>() * len` without overflow.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     unsafe fn try_alloc_freezable_slice_with_size<T>(&self, len: usize, payload_bytes: usize) -> Option<Uninit<'_, [T]>> {
         debug_assert_eq!(payload_bytes, mem::size_of::<T>().wrapping_mul(len));
         let value_ptr =
@@ -514,7 +491,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// Checked form of [`Self::try_alloc_freezable_slice_with_size`].
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     pub(crate) fn try_alloc_freezable_slice<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
         let payload_bytes = mem::size_of::<T>().checked_mul(len)?;
         // SAFETY: `payload_bytes == size_of::<T>() * len` (just checked).
@@ -524,7 +500,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// [`Self::try_alloc_freezable_slice`] that also records the reservation
     /// in `marker`. See [`mark_local_reference`].
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) fn try_alloc_freezable_slice_local<T>(&self, len: usize, marker: &Cell<bool>) -> Option<Uninit<'_, [T]>> {
         let payload_bytes = mem::size_of::<T>().checked_mul(len)?;
         debug_assert_eq!(payload_bytes, mem::size_of::<T>().wrapping_mul(len));
@@ -540,7 +515,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// DST form of [`Self::try_alloc_arc_value`]. The caller writes metadata
     /// before the returned value pointer and initializes the payload.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
     #[cfg(feature = "dst")]
     pub(crate) fn try_alloc_arc_dst<S: super::thin_dst::Strong>(
         &self,
@@ -556,7 +530,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// Thin-DST slice reservation; returns the payload ticket and absolute
     /// payload address.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     fn try_alloc_prefixed_slice_payload<T>(&self, len: usize) -> Option<(InChunk<[T]>, usize)> {
         let payload_bytes = mem::size_of::<T>().checked_mul(len)?;
         // SAFETY: just verified by `checked_mul`.
@@ -571,7 +544,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// `payload_bytes` must equal `size_of::<T>() * len` (without
     /// overflow).
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     #[expect(
         clippy::cast_ptr_alignment,
         reason = "prefix slot may be unaligned for T's whose align < align_of::<usize>(); paired with write_unaligned/read_unaligned"
@@ -738,7 +710,6 @@ impl<A: Allocator + Clone> Drop for ChunkMutator<A> {
 /// sourced from a real chunk in the lower half of the address space).
 #[expect(clippy::inline_always, reason = "pure codegen hint; must inline to take effect")]
 #[inline(always)]
-#[cfg_attr(test, mutants::skip)] // pure hint, no observable behavior
 fn hint_chunk_cur_addr_nonnull(cur_addr: usize) {
     // SAFETY: `cur_addr` is the address of a `NonNull<u8>` bump cursor sourced
     // from a real chunk, so it is non-zero; on 64-bit targets that chunk lives

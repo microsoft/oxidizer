@@ -126,7 +126,6 @@ where
     ///     .time_to_idle(Duration::from_secs(60))
     ///     .build();
     /// ```
-    #[cfg_attr(test, mutants::skip)] // Default::default() for InMemoryCacheBuilder calls new(), identical behavior
     #[must_use]
     pub fn builder() -> InMemoryCacheBuilder<K, V> {
         InMemoryCacheBuilder::new()

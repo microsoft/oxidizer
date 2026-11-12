@@ -13,7 +13,6 @@ use proc_macro::TokenStream;
 use syn::{Path, parse_quote};
 
 #[proc_macro_derive(DeserializeIn, attributes(serde, multitude))]
-#[cfg_attr(test, mutants::skip)]
 #[expect(missing_docs, reason = "Documented in the multitude crate's reexport")]
 pub fn derive_deserialize_in(input: TokenStream) -> TokenStream {
     let root_path: Path = parse_quote!(::multitude::de);

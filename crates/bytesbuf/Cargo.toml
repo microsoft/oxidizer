@@ -63,7 +63,6 @@ benchmarking = { path = "../benchmarking" }
 bytes = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 insta = { workspace = true, features = ["filters"] }
-mutants = { workspace = true }
 new_zealand = { workspace = true }
 nm = { workspace = true }
 plurality = { path = "../plurality" }

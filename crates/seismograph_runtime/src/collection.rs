@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
@@ -38,7 +38,12 @@ pub(crate) struct Measured {
 }
 
 impl Measurements {
-    pub(crate) fn add(&mut self, window: u64, task: TaskId, start: EventTimestamp, elapsed: u64) {
+    pub(crate) fn add(&mut self, window: u64, active_window: &AtomicU64, task: TaskId, start: EventTimestamp, elapsed: u64) {
+        // The last observer publishes zero before clearing under the measurements lock.
+        // Recheck here so a concurrent finish cannot refill a retired window.
+        if active_window.load(Ordering::Acquire) != window {
+            return;
+        }
         if self.window != window {
             self.window = window;
             self.tasks.clear();
@@ -258,7 +263,6 @@ fn discard_panic_with(mut panic: Box<dyn std::any::Any + Send>, terminal: impl F
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Terminal repeated-panic disposal aborts the process.
-#[cfg_attr(test, mutants::skip)] // Intentional terminal fallback, not recoverable diagnostic behavior.
 fn abort_repeated_panic(_panic: Box<dyn std::any::Any + Send>) -> ! {
     std::process::abort()
 }
@@ -769,16 +773,38 @@ mod tests {
     }
 
     #[test]
+    fn a_retired_window_cannot_refill_worker_measurements() {
+        let runtime = register_runtime(RuntimeMetadata::new("retired-measurement-window", 1));
+        let _worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let observation = Observation::new(&runtime.handle.control, true);
+        let window = runtime.handle.control.timing_window.load(Ordering::Acquire);
+        drop(observation);
+
+        let workers = lock(&runtime.handle.control.workers);
+        let mut measurements = lock(&workers[0].measurements);
+        measurements.add(
+            window,
+            &runtime.handle.control.timing_window,
+            allocate_task_id(),
+            EventTimestamp::from_ticks(10),
+            20,
+        );
+
+        assert!(measurements.tasks.is_empty());
+    }
+
+    #[test]
     fn measurement_capacity_retains_existing_tasks_and_omits_new_unmeasured_tasks() {
         let mut measured = Measurements::default();
+        let active_window = AtomicU64::new(1);
         let first = allocate_task_id();
-        measured.add(1, first, EventTimestamp::from_ticks(10), 20);
+        measured.add(1, &active_window, first, EventTimestamp::from_ticks(10), 20);
         for _ in 1..MEASUREMENT_TASK_LIMIT {
-            measured.add(1, allocate_task_id(), EventTimestamp::from_ticks(10), 2);
+            measured.add(1, &active_window, allocate_task_id(), EventTimestamp::from_ticks(10), 2);
         }
-        measured.add(1, first, EventTimestamp::from_ticks(40), 30);
+        measured.add(1, &active_window, first, EventTimestamp::from_ticks(40), 30);
         let omitted = allocate_task_id();
-        measured.add(1, omitted, EventTimestamp::from_ticks(40), 1);
+        measured.add(1, &active_window, omitted, EventTimestamp::from_ticks(40), 1);
 
         assert_eq!(
             (

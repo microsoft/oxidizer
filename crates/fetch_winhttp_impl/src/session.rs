@@ -38,7 +38,6 @@ const TRUE_BYTES: [u8; size_of::<i32>()] = 1_i32.to_ne_bytes();
 ///
 /// Every operand below is a distinct bit, so `|` and `^` compute the same
 /// value here and a mutation between them is equivalent rather than a defect.
-#[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
 pub(crate) fn session_notification_flags() -> u32 {
     let dispatched_completions = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE
         | WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE

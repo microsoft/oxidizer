@@ -6,16 +6,10 @@
 
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
-# Affected tier. cargo-mutants does its own diff-scoping via --in-diff;
+# Affected tier. cargo-gamma does its own diff-scoping via --in-diff;
 # the affected-tier guard is the wiring-layer's coarse filter (if no
 # affected packages exist, the entire mutants run is pointless).
 #
-# Skip on aarch64-pc-windows-msvc: cargo-mutants doesn't build there
-# (upstream winapi incompatibility), so `_anvil-require cargo-mutants`
-# would fail. The merged pr-slow group runs on all four OS legs; mutants
-# is the only sub-recipe that can't follow, so it bails out early on the
-# affected leg. Coverage on the other three legs is unchanged.
-
 # Run mutation testing for changes relative to the base branch.
 [group("anvil")]
 [script("pwsh", "-NoProfile")]
@@ -24,10 +18,6 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
     $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
-    if ($IsWindows -and ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64')) {
-        Write-Host 'anvil-mutants-diff: anvil-mutants-diff-validate-prereqs aarch64-pc-windows-msvc -- cargo-mutants does not build here (winapi); skipping'
-        exit 0
-    }
     if ($include -eq '--skip') {
         Write-Host 'anvil-mutants-diff: anvil-mutants-diff-validate-prereqs no affected packages; skipping'
         exit 0
@@ -36,32 +26,48 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs anvil-impact
     # across the impact steps and this recipe; see _anvil-base-ref).
     $base = (& "{{just_executable()}}" _anvil-base-ref)
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    # cargo-mutants --in-diff takes a FILE path containing a unified
+    # cargo-gamma --in-diff takes a FILE path containing a unified
     # diff, not a git revision range. Write the diff to a temp file
     # first. RUNNER_TEMP (GH) and AGENT_TEMPDIRECTORY (ADO) point at
     # the job's scratch dir; fall back to the system temp dir locally.
     $tmp_dir = $env:RUNNER_TEMP
     if (-not $tmp_dir) { $tmp_dir = $env:AGENT_TEMPDIRECTORY }
     if (-not $tmp_dir) { $tmp_dir = [System.IO.Path]::GetTempPath() }
-    $diff_path = Join-Path $tmp_dir 'anvil-mutants-diff.diff'
-    # Diff the base against the WORKING TREE, not against HEAD.
-    # cargo-mutants validates every line of the diff against the file on
-    # disk and aborts when they disagree, so a commit-to-commit diff fails
-    # the moment anything is uncommitted -- which is the normal local state,
-    # since the point of running a tier locally is to check work in progress.
-    # CI has a clean tree, so the two forms are identical there and this is
-    # not a behaviour change for it.
-    git diff "$base" --output=$diff_path
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & cargo {{_anvil_stable_toolchain_args}} mutants --in-diff $diff_path --no-shuffle --jobs 0 {{_anvil_mutants_config_arg}}
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $diff_path = Join-Path $tmp_dir ('anvil-mutants-diff-' + [Guid]::NewGuid().ToString('N') + '.diff')
+    New-Item -ItemType File -Path $diff_path | Out-Null
+    # Include uncommitted local changes as well as commits after the base.
+    $exitCode = 0
+    $completed = $false
+    $reportArgs = @()
+    if ($env:GITHUB_ACTIONS -eq 'true') { $reportArgs = @('--artifact-dir', 'target/cargo-gamma') }
+    try {
+        git diff --src-prefix=a/ --dst-prefix=b/ "$base" --output=$diff_path
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) {
+            & cargo {{_anvil_stable_toolchain_args}} gamma run --workspace --in-diff $diff_path --min-score 100 --max-flaky 0 @reportArgs
+            $campaignExit = $LASTEXITCODE
+            & cargo {{_anvil_stable_toolchain_args}} gamma hints
+            $hintsExit = $LASTEXITCODE
+            $exitCode = $campaignExit
+            if ($exitCode -eq 0) { $exitCode = $hintsExit }
+        }
+        $completed = $true
+    } finally {
+        try {
+            Remove-Item -LiteralPath $diff_path
+        } catch {
+            if ($completed -and $exitCode -eq 0) { throw }
+            Write-Warning "Could not remove mutation diff '$diff_path': $_ (preserving the primary failure)"
+        }
+    }
+    exit $exitCode
 
 # --- pr-mutants members ---
 
 # Install prerequisites for the `anvil-mutants-diff` recipe.
 [private]
-anvil-mutants-diff-setup installer="install": (anvil-tool-cargo-mutants-install installer)
+anvil-mutants-diff-setup installer="install": (anvil-tool-cargo-gamma-install installer)
 
 # Validate prerequisites for the `anvil-mutants-diff` recipe.
 [private]
-anvil-mutants-diff-validate-prereqs: anvil-tool-cargo-mutants-validate-prereqs
+anvil-mutants-diff-validate-prereqs: anvil-tool-cargo-gamma-validate-prereqs

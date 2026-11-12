@@ -180,7 +180,6 @@ pub(crate) const fn http_method_name(method: &http::Method) -> &'static str {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Some branches are for optimization and cannot be feasibly distinguished in tests.
 pub(crate) fn url_scheme(scheme: &Scheme) -> Value {
     match scheme.as_str() {
         "http" => Value::from("http"),
@@ -189,7 +188,6 @@ pub(crate) fn url_scheme(scheme: &Scheme) -> Value {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Some branches are for optimization and cannot be feasibly distinguished in tests.
 pub(crate) fn url_scheme_or(scheme: Option<&Scheme>) -> Value {
     scheme.map_or_else(|| Value::from("_OTHER"), url_scheme)
 }

@@ -12,7 +12,6 @@ pub(crate) const SIMD_THRESHOLD: usize = 32;
 #[inline]
 // SIMD selection is performance-only; scalar/SIMD results are checked
 // exhaustively at vector boundaries below.
-#[cfg_attr(test, mutants::skip)]
 pub(crate) fn find_byte<const WIDE: bool>(bytes: &[u8], needle: u8) -> Option<usize> {
     if WIDE && bytes.len() >= SIMD_THRESHOLD {
         #[cfg(target_arch = "x86_64")]
@@ -28,7 +27,6 @@ pub(crate) fn find_byte<const WIDE: bool>(bytes: &[u8], needle: u8) -> Option<us
 }
 
 #[inline]
-#[cfg_attr(test, mutants::skip)]
 pub(crate) fn contains_either<const WIDE: bool>(bytes: &[u8], first: u8, second: u8) -> bool {
     if WIDE && bytes.len() >= SIMD_THRESHOLD {
         #[cfg(target_arch = "x86_64")]
@@ -55,7 +53,6 @@ fn contains_either_scalar(bytes: &[u8], first: u8, second: u8) -> bool {
 
 #[cfg(target_arch = "x86_64")]
 #[inline]
-#[cfg_attr(test, mutants::skip)]
 #[expect(
     clippy::multiple_unsafe_ops_per_block,
     reason = "each vector block shares one in-bounds load precondition"
@@ -81,7 +78,6 @@ fn find_byte_sse2(bytes: &[u8], needle: u8) -> Option<usize> {
 
 #[cfg(target_arch = "x86_64")]
 #[inline]
-#[cfg_attr(test, mutants::skip)]
 #[expect(
     clippy::multiple_unsafe_ops_per_block,
     reason = "each vector block shares one in-bounds load precondition"
@@ -109,7 +105,6 @@ fn contains_either_sse2(bytes: &[u8], first: u8, second: u8) -> bool {
 
 #[cfg(target_arch = "aarch64")]
 #[inline]
-#[cfg_attr(test, mutants::skip)]
 #[expect(
     clippy::multiple_unsafe_ops_per_block,
     reason = "each vector block shares one in-bounds load precondition"
@@ -137,7 +132,6 @@ fn find_byte_neon(bytes: &[u8], needle: u8) -> Option<usize> {
 
 #[cfg(target_arch = "aarch64")]
 #[inline]
-#[cfg_attr(test, mutants::skip)]
 #[expect(
     clippy::multiple_unsafe_ops_per_block,
     reason = "each vector block shares one in-bounds load precondition"

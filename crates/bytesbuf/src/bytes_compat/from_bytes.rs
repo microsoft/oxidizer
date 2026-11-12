@@ -96,7 +96,6 @@ unsafe impl BlockRefDynamic for BytesBlock {
         state_ptr
     }
 
-    #[cfg_attr(test, mutants::skip)] // Impractical to test. Miri will inform about memory leaks.
     fn drop(state_ptr: NonNull<Self::State>) {
         // SAFETY: The state pointer is always valid for reads.
         // We only ever created shared references to the block state - it exists just to track the

@@ -65,7 +65,6 @@ uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
-mutants = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
