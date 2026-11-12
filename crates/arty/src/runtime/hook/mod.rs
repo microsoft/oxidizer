@@ -37,7 +37,7 @@ pub(crate) use registry::{HookRegistration, Hooks, PanicAction, registration};
 /// Marks an event that can be registered as a runtime hook.
 ///
 /// This trait is sealed. Only Arty can implement it.
-#[allow(private_bounds)]
+#[expect(private_bounds, reason = "Hook uses the sealed trait pattern")]
 pub trait Hook: private::Sealed + 'static {}
 
 mod private {
