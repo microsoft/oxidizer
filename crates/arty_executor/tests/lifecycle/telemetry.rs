@@ -4,18 +4,19 @@
 use std::future::poll_fn;
 use std::task::Poll;
 
-use arty_executor::{Executor, TaskOptions, TaskPlacement};
+use arty_executor::{Executor, TaskPlacement};
 use observed_testing::{TEST_ID, test_emitter};
 
-use crate::support::TaskSetExt as _;
+use crate::support::TaskBuilderExt as _;
 
 #[test]
 fn lifecycle_events_include_placement_and_poll_count() {
     let (sink, processor) = test_emitter(TEST_ID);
     let mut executor = Executor::builder().sink(sink).build();
     let mut polls = 0;
-    let _completion = executor.tasks().add_test(
-        poll_fn(move |cx| {
+    let _completion = executor
+        .tasks()
+        .task(poll_fn(move |cx| {
             polls += 1;
             if polls == 3 {
                 Poll::Ready(())
@@ -23,9 +24,9 @@ fn lifecycle_events_include_placement_and_poll_count() {
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
-        }),
-        TaskOptions::new(TaskPlacement::SameThread),
-    );
+        }))
+        .placement(TaskPlacement::SameThread)
+        .register_test();
 
     for _ in 0..3 {
         _ = executor.execute_cycle();
@@ -46,7 +47,11 @@ fn specific_thread_placement_has_a_distinct_label() {
     let (sink, processor) = test_emitter(TEST_ID);
     let executor = Executor::builder().sink(sink).build();
 
-    let _completion = executor.tasks().add_test(async {}, TaskOptions::new(TaskPlacement::SpecificThread));
+    let _completion = executor
+        .tasks()
+        .task(async {})
+        .placement(TaskPlacement::SpecificThread)
+        .register_test();
 
     assert_eq!(
         processor.events()[0].dimensions()[0],

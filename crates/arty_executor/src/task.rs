@@ -20,7 +20,7 @@ use crate::TaskHandle;
 use crate::TaskState;
 use crate::inspection::Inspector;
 use crate::{
-    ExecutorShared, ShutdownCause, TaskCreatedReporter, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal,
+    ExecutorShared, ShutdownCause, TaskCreatedReporter, TaskHandleSlot, TaskMetadata, TaskPanicPayload, TaskPtr, WakeSignal,
     discard_task_panic_payload,
 };
 
@@ -58,7 +58,7 @@ where
 
     handle_slot: TaskHandleSlot,
 
-    options: TaskOptions,
+    metadata: TaskMetadata,
 
     sink: Sink,
 
@@ -98,17 +98,6 @@ where
 {
 }
 
-impl<F, R, T> Task<F, R, T>
-where
-    F: Future<Output = R> + 'static,
-    R: 'static,
-    T: TaskCompletion<R>,
-{
-    fn new_with_target(future: F, result_target: T, options: TaskOptions, sink: Sink) -> Self {
-        Self::new_inspected(future, result_target, options, sink, ())
-    }
-}
-
 impl<F, R, T, I> Task<F, R, T, I>
 where
     F: Future<Output = R> + 'static,
@@ -116,7 +105,7 @@ where
     T: TaskCompletion<R>,
     I: Inspector<F>,
 {
-    fn new_inspected(future: F, result_target: T, options: TaskOptions, sink: Sink, inspector: I) -> Self {
+    fn new(future: F, result_target: T, metadata: TaskMetadata, sink: Sink, inspector: I) -> Self {
         Self {
             payload: UnsafeCell::new(Some(Payload {
                 future: FutureStorage::new(future),
@@ -128,7 +117,7 @@ where
             })),
             wake_signal: OnceCell::new(),
             handle_slot: TaskHandleSlot::new(),
-            options,
+            metadata,
             sink,
             poll_count: Cell::new(0),
             links: TaskLinks::default(),
@@ -137,37 +126,21 @@ where
     }
 }
 
-#[cfg(feature = "inspection")]
-pub(crate) fn allocate_inspected_task<F, R, T, I>(
+pub(crate) fn allocate_task<F, T, I>(
     pool: &MultiPool,
     future: F,
-    options: TaskOptions,
+    metadata: TaskMetadata,
     sink: Sink,
     completion: T,
     inspector: I,
 ) -> Pin<PoolArc<impl TypeErasedTask + 'static>>
 where
-    F: Future<Output = R> + 'static,
-    R: 'static,
-    T: TaskCompletion<R>,
+    F: Future + 'static,
+    F::Output: 'static,
+    T: TaskCompletion<F::Output>,
     I: Inspector<F>,
 {
-    pool.alloc_arc_pin_with(|| Task::new_inspected(future, completion, options, sink, inspector))
-}
-
-pub(crate) fn allocate_task<F, R, T>(
-    pool: &MultiPool,
-    future: F,
-    options: TaskOptions,
-    sink: Sink,
-    completion: T,
-) -> Pin<PoolArc<impl TypeErasedTask + 'static>>
-where
-    F: Future<Output = R> + 'static,
-    R: 'static,
-    T: TaskCompletion<R>,
-{
-    pool.alloc_arc_pin_with(|| Task::new_with_target(future, completion, options, sink))
+    pool.alloc_arc_pin_with(|| Task::new(future, completion, metadata, sink, inspector))
 }
 
 #[cfg(test)]
@@ -192,9 +165,10 @@ pub(crate) fn allocate_test_task_in(pool: &MultiPool) -> TaskHandle {
     TaskHandle::new(allocate_task(
         pool,
         std::future::pending::<()>(),
-        TaskOptions::default(),
+        TaskMetadata::default(),
         Sink::noop(),
         TestCompletion,
+        (),
     ))
 }
 
@@ -224,11 +198,11 @@ where
 
     fn poll(self: Pin<&Self>, shared: &ExecutorShared) -> task::Poll<()> {
         self.poll_count.set(self.poll_count.get().saturating_add(1));
-        self.options.with_context(|| self.poll_in_context(shared))
+        self.metadata.with_context(|| self.poll_in_context(shared))
     }
 
     fn created_reporter(&self) -> Option<TaskCreatedReporter> {
-        self.options.created_reporter(&self.sink)
+        self.metadata.created_reporter(&self.sink)
     }
 
     fn links(&self) -> &TaskLinks {
@@ -264,7 +238,7 @@ where
         // reference to this field.
         let maybe_payload = unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
 
-        self.options
+        self.metadata
             .with_context(|| self.finish_terminal(maybe_payload, TerminalOutcome::Cancelled(cause)));
     }
 
@@ -348,7 +322,7 @@ where
         }
         let cause = shutdown.is_triggered().then(|| shutdown.cause());
         result_target.panicked(panic, cause);
-        self.options.report_panicked(&self.sink, self.poll_count.get());
+        self.metadata.report_panicked(&self.sink, self.poll_count.get());
         task::Poll::Ready(())
     }
 
@@ -373,11 +347,11 @@ where
         match outcome {
             TerminalOutcome::Succeeded(result) => {
                 result_target.completed(result);
-                self.options.report_succeeded(&self.sink, self.poll_count.get());
+                self.metadata.report_succeeded(&self.sink, self.poll_count.get());
             }
             TerminalOutcome::Cancelled(cause) => {
                 if future_panic.is_some() {
-                    self.options.report_panicked(&self.sink, self.poll_count.get());
+                    self.metadata.report_panicked(&self.sink, self.poll_count.get());
                 }
                 result_target.cancelled(cause);
                 if let Some(panic) = future_panic {
@@ -573,7 +547,14 @@ mod tests {
     use super::*;
 
     fn initialized_task<R: 'static>(pool: &MultiPool, future: impl Future<Output = R> + 'static) -> TaskHandle {
-        let handle = TaskHandle::new(allocate_task(pool, future, TaskOptions::default(), Sink::noop(), TestCompletion));
+        let handle = TaskHandle::new(allocate_task(
+            pool,
+            future,
+            TaskMetadata::default(),
+            Sink::noop(),
+            TestCompletion,
+            (),
+        ));
         let (shared, _remote_wakes) = crate::WakeShared::new(Waker::noop().clone(), std::thread::current().id());
         let signal = WakeSignal::new(shared, handle.as_ptr());
         // SAFETY: The handle owns the task on its creating thread.

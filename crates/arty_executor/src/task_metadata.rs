@@ -23,16 +23,10 @@ pub enum TaskPlacement {
     SpecificThread,
 }
 
-/// Lifecycle metadata for a task registered with [`TaskSet`](crate::TaskSet).
-///
-/// The executor applies the captured observed context during polling, cleanup,
-/// and lifecycle events. The placement value classifies how the caller selected
-/// the executor. It does not select a worker. The default has no observed context
-/// and uses [`TaskPlacement::Any`].
 #[derive(Debug, Default)]
-pub struct TaskOptions {
-    context: Option<Transfer>,
-    placement: TaskPlacement,
+pub(crate) struct TaskMetadata {
+    pub(crate) context: Option<Transfer>,
+    pub(crate) placement: TaskPlacement,
 }
 
 pub(crate) struct TaskCreatedReporter {
@@ -52,22 +46,7 @@ impl TaskCreatedReporter {
     }
 }
 
-impl TaskOptions {
-    /// Creates options with the specified placement classification.
-    #[must_use]
-    pub const fn new(placement: TaskPlacement) -> Self {
-        Self { context: None, placement }
-    }
-
-    /// Creates options that apply the observed `context` for the task lifecycle.
-    #[must_use]
-    pub fn observed(context: Transfer, placement: TaskPlacement) -> Self {
-        Self {
-            context: Some(context),
-            placement,
-        }
-    }
-
+impl TaskMetadata {
     pub(crate) fn with_context<T>(&self, f: impl FnOnce() -> T) -> T {
         let Some(context) = &self.context else {
             return f();
@@ -97,4 +76,17 @@ impl TaskOptions {
             self.with_context(|| telemetry::report_panicked(sink, polls));
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::panic::{RefUnwindSafe, UnwindSafe};
+
+    use static_assertions::assert_not_impl_any;
+
+    use super::*;
+
+    // Private metadata has no public type through which to check its unwind traits.
+    // Captured enrichment can contain user-defined interior state.
+    assert_not_impl_any!(TaskMetadata: UnwindSafe, RefUnwindSafe);
 }

@@ -7,16 +7,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::Poll;
 
-use arty_executor::{ExecutorBuilder, PanicPolicy, TaskOptions, TaskPlacement, TaskSet, discard_task_panic_payload};
+use arty_executor::{ExecutorBuilder, PanicPolicy, TaskBuilder, TaskPlacement, TaskSet, discard_task_panic_payload};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware::ThreadBuilder;
 
-use crate::support::TaskSetExt as _;
+use crate::support::TaskBuilderExt as _;
 
 assert_not_impl_any!(TaskSet: Send, Sync);
 assert_impl_all!(TaskPlacement: UnwindSafe, RefUnwindSafe);
 // Captured enrichment can contain user-defined interior state.
-assert_not_impl_any!(TaskOptions: UnwindSafe, RefUnwindSafe);
+assert_not_impl_any!(TaskBuilder<'static, std::future::Ready<()>>: UnwindSafe, RefUnwindSafe);
 
 #[test]
 fn default_builder() {
@@ -30,10 +30,10 @@ fn panic_policy_is_configurable() {
         (ExecutorBuilder::new().panic_policy(PanicPolicy::Ignore), false),
     ] {
         let mut executor = builder.build();
-        let _completion = executor.tasks().add_test(
-            poll_fn(|_| -> Poll<()> { panic!("configured panic policy") }),
-            TaskOptions::default(),
-        );
+        let _completion = executor
+            .tasks()
+            .task(poll_fn(|_| -> Poll<()> { panic!("configured panic policy") }))
+            .register_test();
 
         _ = executor.execute_cycle();
 
