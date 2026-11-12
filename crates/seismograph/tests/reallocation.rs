@@ -92,12 +92,20 @@ fn successful_resizes_keep_one_record_with_both_storage_endpoints() {
 fn assert_malformed_resize_rejected(bytes: &[u8], decoded: &DecodedSnapshot) {
     // Format 10 uses a 92-byte header, named thread rows, and 92-byte event rows.
     let threads_len: usize = decoded.events.threads.iter().map(|thread| 26 + thread.name.len()).sum();
-    let resize_start = 92 + threads_len + 92;
-    for (offset, replacement) in [(24, 14), (25, 3), (27, 1)] {
+    let allocation_start = 92 + threads_len;
+    let resize_start = allocation_start + 92;
+    for (offset, replacement) in [(24, 14), (27, 1)] {
         let mut malformed = bytes.to_vec();
         malformed[resize_start + offset] = replacement;
         seismograph::snapshot::decode(&malformed).unwrap_err();
     }
+    let mut mismatched = bytes.to_vec();
+    mismatched[resize_start + 25] = 3;
+    mismatched.copy_within(allocation_start + 28..allocation_start + 92, resize_start + 28);
+    seismograph::snapshot::decode(&mismatched).unwrap_err();
+    mismatched[resize_start + 24] = bytes[allocation_start + 24];
+    let valid = seismograph::snapshot::decode(&mismatched).unwrap();
+    assert_eq!(valid.events.events[1].allocation(), decoded.events.events[0].allocation());
     for invalid_heap_kind in [255_u64, 256, u64::MAX] {
         let mut malformed = bytes.to_vec();
         malformed[resize_start + 84..resize_start + 92].copy_from_slice(&invalid_heap_kind.to_le_bytes());
