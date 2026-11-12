@@ -23,7 +23,7 @@ impl<H: Hook> LocalHook<H> {
                 "hooks are already installed on this task worker"
             );
         });
-        let clear: fn(&'static LocalHook<H>) = |hook| {
+        let clear: fn(&'static Self) = |hook| {
             _ = hook.hooks.try_with(|hooks| {
                 let hooks = hooks.borrow_mut().take();
                 drop(hooks);
