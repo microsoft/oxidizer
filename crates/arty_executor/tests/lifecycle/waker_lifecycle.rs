@@ -115,8 +115,9 @@ fn remote_notifications_preserve_first_wake_order_and_task_ownership() {
 fn completed_task_discards_its_queued_remote_notification() {
     let mut executor = Executor::builder().build();
     let polls = Rc::new(Cell::new(0));
-    let mut handle = executor.tasks().add_test(
-        poll_fn({
+    let mut handle = executor
+        .tasks()
+        .task(poll_fn({
             let polls = Rc::clone(&polls);
             move |cx| {
                 polls.set(polls.get() + 1);
@@ -124,9 +125,8 @@ fn completed_task_discards_its_queued_remote_notification() {
                 std::thread::spawn(move || waker.wake()).join().unwrap();
                 Poll::Ready(42)
             }
-        }),
-        TaskOptions::default(),
-    );
+        }))
+        .register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Continue));
     assert!(matches!(
