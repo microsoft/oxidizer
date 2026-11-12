@@ -115,7 +115,6 @@ impl LocalWorker {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // Retaining direct registration during executor teardown can strand shutdown.
     pub(super) fn clear_scheduler() {
         let (scheduler, panic_hooks) = Self::with_current_mut(|current| {
             current

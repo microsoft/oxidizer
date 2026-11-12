@@ -103,7 +103,6 @@ impl DispatcherClient {
         self.core.register_hook(hook);
     }
 
-    #[cfg_attr(test, mutants::skip)] // Will cause tests to hang due to runtime never stopping.
     pub(crate) fn stop(&self, cause: impl Into<ShutdownCause>) -> ShutdownCause {
         self.core.stop_inner(cause.into())
     }

@@ -16,7 +16,6 @@ use crate::runtime::worker::blocking::{Pool, Worker};
 
 impl DispatcherClient {
     #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn for_test(thread: &Thread) -> Self {
         let (commands, _command_rx) = command_channel();
         let shutdown = Shutdown::default();
