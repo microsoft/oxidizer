@@ -18,8 +18,9 @@ use super::registry::PanicAction;
 /// select shutdown explicitly. The failed task returns
 /// [`JoinError`](crate::task::JoinError) with either response.
 ///
-/// The callback must not panic. Arty cannot repair application data that a
-/// task panic left in an invalid state.
+/// Arty does not catch a panic from the callback. You must make sure that the
+/// callback completes without a panic. Arty also cannot repair application
+/// data that the original task panic left in an invalid state.
 #[derive(derive_more::Debug)]
 pub struct Panic {
     pub(super) action: PanicAction,

@@ -11,7 +11,9 @@
 //! Register hooks before startup with [`RuntimeBuilder::on`]. Add hooks after
 //! startup with [`RuntimeControl::on`]. Each worker stores one collection for
 //! each event. Arty invokes callbacks in registration order.
-//! Hook callbacks must not panic.
+//!
+//! Arty does not catch a panic from a hook callback. You must make sure that
+//! every hook callback completes without a panic.
 //!
 //! ```
 //! use arty::runtime::Runtime;

@@ -65,6 +65,9 @@ impl RuntimeControl {
     /// when it processes that command. If runtime shutdown has started, Arty
     /// ignores the registration.
     ///
+    /// Arty does not catch a panic from the callback. You must make sure that
+    /// the callback completes without a panic.
+    ///
     /// # Examples
     ///
     /// ```

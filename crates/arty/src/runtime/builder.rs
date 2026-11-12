@@ -64,6 +64,9 @@ impl RuntimeBuilder {
     /// callback can run. Registering another hook of the same type appends it
     /// after earlier callbacks.
     ///
+    /// Arty does not catch a panic from the callback. You must make sure that
+    /// the callback completes without a panic.
+    ///
     /// # Examples
     ///
     /// ```
