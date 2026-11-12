@@ -2,10 +2,9 @@
 // Licensed under the MIT License.
 
 use arty_executor::TaskPanicPayload;
-use thread_aware::Thread;
 
-use super::registry::PanicAction;
-use super::typed::{HookFn, TypedHook};
+use super::hook_fn::HookFn;
+use super::registry::{HookRegistration, PanicAction};
 
 /// Reports that Arty contained a panic from user task code.
 ///
@@ -62,20 +61,11 @@ impl OnPanic {
 
 impl super::Hook for OnPanic {}
 
-#[derive(Clone, derive_more::Debug)]
-pub(crate) struct PanicHook(TypedHook<OnPanic>);
-
-impl PanicHook {
-    pub(crate) const fn new(hook: TypedHook<OnPanic>) -> Self {
-        Self(hook)
-    }
-    pub(crate) fn execute(&mut self, event: &mut OnPanic) {
-        self.0.execute(event);
-    }
-}
-
-impl thread_aware::ThreadAware for PanicHook {
-    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        self.0.relocate(source, destination);
+impl super::private::Sealed for OnPanic {
+    fn into_registration<D>(hook: HookFn<Self, D>) -> HookRegistration
+    where
+        D: thread_aware::ThreadAware + Clone + 'static,
+    {
+        HookRegistration::Panic(hook.erased())
     }
 }

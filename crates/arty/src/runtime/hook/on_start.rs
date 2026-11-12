@@ -3,7 +3,8 @@
 
 use thread_aware::Thread;
 
-use super::typed::TypedHook;
+use super::hook_fn::HookFn;
+use super::registry::HookRegistration;
 
 /// Reports that an async worker is starting.
 ///
@@ -36,20 +37,11 @@ impl OnStart {
 
 impl super::Hook for OnStart {}
 
-#[derive(Clone, derive_more::Debug)]
-pub(crate) struct StartHook(TypedHook<OnStart>);
-
-impl StartHook {
-    pub(crate) const fn new(hook: TypedHook<OnStart>) -> Self {
-        Self(hook)
-    }
-    pub(crate) fn execute(&mut self, event: &mut OnStart) {
-        self.0.execute(event);
-    }
-}
-
-impl thread_aware::ThreadAware for StartHook {
-    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        self.0.relocate(source, destination);
+impl super::private::Sealed for OnStart {
+    fn into_registration<D>(hook: HookFn<Self, D>) -> HookRegistration
+    where
+        D: thread_aware::ThreadAware + Clone + 'static,
+    {
+        HookRegistration::Start(hook.erased())
     }
 }

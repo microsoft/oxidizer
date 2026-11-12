@@ -9,8 +9,8 @@
 //! [`ThreadAware`] relocation.
 //!
 //! Register hooks before startup with [`RuntimeBuilder::on`]. Add hooks after
-//! startup with [`RuntimeControl::on`]. Each worker stores one typed collection
-//! for each event. Arty invokes callbacks in registration order.
+//! startup with [`RuntimeControl::on`]. Each worker stores one collection for
+//! each event. Arty invokes callbacks in registration order.
 //! Hook callbacks must not panic.
 //!
 //! ```
@@ -31,17 +31,30 @@
 //! [`RuntimeControl::on`]: crate::runtime::RuntimeControl::on
 //! [`ThreadAware`]: crate::core::ThreadAware
 
+mod hook_fn;
 mod on_panic;
 mod on_start;
 mod registry;
-mod typed;
 
+pub use hook_fn::HookFn;
 pub use on_panic::OnPanic;
 pub use on_start::OnStart;
 pub(crate) use registry::{HookRegistration, Hooks, PanicAction};
-pub use typed::HookFn;
 
 /// Marks an event that can be registered as a runtime hook.
 ///
 /// This trait is sealed. Only Arty can implement it.
-pub trait Hook: registry::private::Sealed + 'static {}
+pub trait Hook: private::Sealed + 'static {}
+
+mod private {
+    use thread_aware::ThreadAware;
+
+    use super::{HookFn, HookRegistration};
+
+    pub trait Sealed: Sized {
+        fn into_registration<D>(hook: HookFn<Self, D>) -> HookRegistration
+        where
+            Self: super::Hook,
+            D: ThreadAware + Clone + 'static;
+    }
+}

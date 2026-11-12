@@ -1,13 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::{Any, TypeId};
-
 use thread_aware::{Thread, ThreadAware};
 
-use super::on_panic::PanicHook;
-use super::on_start::StartHook;
-use super::typed::{HookFn, TypedHook};
+use super::hook_fn::{ErasedHookFn, HookFn};
 use super::{Hook, OnPanic, OnStart};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,16 +12,10 @@ pub(crate) enum PanicAction {
     Shutdown,
 }
 
-#[derive(Clone, Copy, Debug)]
-enum HookType {
-    Start,
-    Panic,
-}
-
 #[derive(Clone, derive_more::Debug, ThreadAware)]
-pub(crate) enum HookRegistration {
-    Start(StartHook),
-    Panic(PanicHook),
+pub enum HookRegistration {
+    Start(ErasedHookFn<OnStart>),
+    Panic(ErasedHookFn<OnPanic>),
 }
 
 impl HookRegistration {
@@ -34,28 +24,14 @@ impl HookRegistration {
         H: Hook,
         D: ThreadAware + Clone + 'static,
     {
-        let hook: Box<dyn Any + Send> = Box::new(hook.erased());
-        match hook_type::<H>() {
-            HookType::Start => {
-                let hook = *hook
-                    .downcast::<TypedHook<OnStart>>()
-                    .expect("OnStart hook type is selected by its TypeId");
-                Self::Start(StartHook::new(hook))
-            }
-            HookType::Panic => {
-                let hook = *hook
-                    .downcast::<TypedHook<OnPanic>>()
-                    .expect("OnPanic hook type is selected by its TypeId");
-                Self::Panic(PanicHook::new(hook))
-            }
-        }
+        H::into_registration(hook)
     }
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Hooks {
-    start: Vec<StartHook>,
-    panic: Vec<PanicHook>,
+    start: Vec<ErasedHookFn<OnStart>>,
+    panic: Vec<ErasedHookFn<OnPanic>>,
 }
 
 impl Hooks {
@@ -101,20 +77,4 @@ impl ThreadAware for Hooks {
             hook.relocate(source, destination);
         }
     }
-}
-
-fn hook_type<H: Hook>() -> HookType {
-    if TypeId::of::<H>() == TypeId::of::<OnStart>() {
-        HookType::Start
-    } else {
-        debug_assert_eq!(TypeId::of::<H>(), TypeId::of::<OnPanic>());
-        HookType::Panic
-    }
-}
-
-pub(super) mod private {
-    pub trait Sealed {}
-
-    impl Sealed for super::OnStart {}
-    impl Sealed for super::OnPanic {}
 }
