@@ -68,6 +68,10 @@ pub(crate) struct RequestComplete<'a> {
     pub(crate) request_headers: Headers<'a>,
     #[flatten]
     pub(crate) response_headers: Headers<'a>,
+    #[dimension(log = "http.response.body")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) response_body: Option<Text>,
 }
 
 /// Produces the event `http.server.request.error` when the handler or the response body returned an error or
@@ -123,6 +127,10 @@ pub(crate) struct RequestError<'a> {
     pub(crate) request_headers: Headers<'a>,
     #[flatten]
     pub(crate) response_headers: Headers<'a>,
+    #[dimension(log = "http.response.body")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) response_body: Option<Text>,
 }
 
 /// Produces the event `http.server.request.abandoned` when the caller dropped the request future before the
@@ -178,6 +186,10 @@ pub(crate) struct RequestAbandoned<'a> {
     pub(crate) request_headers: Headers<'a>,
     #[flatten]
     pub(crate) response_headers: Headers<'a>,
+    #[dimension(log = "http.response.body")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) response_body: Option<Text>,
 }
 
 /// Produces the event `http.server.active_requests`, with `delta` `1` when a request starts and `-1`

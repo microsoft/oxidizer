@@ -22,9 +22,12 @@ use templated_uri::BasePath;
 use tick::SimpleClock;
 
 use crate::server::{
-    ActiveRequests, HeaderField, HeaderValues, OTHER, RequestAbandoned, RequestAndResponseHeaders, RequestComplete, RequestEnd,
-    RequestError, RouteFields, RouteValues, TelemetryDropGuard, UriAuthority, emit_when_body_ends, header_fields,
+    ActiveRequests, HeaderField, HeaderValues, MediaTypeError, MediaTypes, OTHER, RequestAbandoned, RequestAndResponseHeaders,
+    RequestComplete, RequestEnd, RequestError, ResponseBody, RouteFields, RouteValues, TelemetryDropGuard, UriAuthority,
+    emit_when_body_ends, header_fields,
 };
+
+const DEFAULT_BODY_SIZE_LIMIT: usize = 32 * 1024;
 
 /// Produces telemetry about the requests that go through it, in the form of `observed` events.
 ///
@@ -51,6 +54,8 @@ impl Telemetry<()> {
             route_parameter_data_classes: BTreeMap::new(),
             request_header_data_classes: HeaderMap::default(),
             response_header_data_classes: HeaderMap::default(),
+            response_body_media_types: MediaTypes::default(),
+            body_size_limit: DEFAULT_BODY_SIZE_LIMIT,
         }
     }
 }
@@ -111,6 +116,7 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
                     response: None,
                 })
             }),
+            response_body: None,
             finished: false,
         };
         guard.add_active_request(1);
@@ -132,6 +138,9 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
                             .response_header_fields
                             .clone()
                             .map(|fields| HeaderValues::new(fields, response.headers()));
+                    }
+                    if layer.response_body_media_types.matches(response.headers()) {
+                        guard.response_body = Some(ResponseBody::new(layer.body_size_limit));
                     }
                     Ok(emit_when_body_ends(guard, response))
                 }
@@ -166,6 +175,8 @@ pub struct TelemetryLayer {
     pub(crate) route_parameter_data_classes: BTreeMap<String, DataClass>,
     pub(crate) request_header_data_classes: HeaderMap<DataClass>,
     pub(crate) response_header_data_classes: HeaderMap<DataClass>,
+    pub(crate) response_body_media_types: MediaTypes,
+    pub(crate) body_size_limit: usize,
 }
 
 impl TelemetryLayer {
@@ -238,6 +249,25 @@ impl TelemetryLayer {
         for (name, class) in data_classes {
             self.response_header_data_classes.insert(name, class.into_data_class());
         }
+        self
+    }
+
+    /// Sets the media types of the response bodies to log, such as `application/json`, `text/*` or `*/*`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an entry is not a media type.
+    pub fn response_body_media_types(mut self, types: impl IntoIterator<Item = &'static str>) -> std::result::Result<Self, MediaTypeError> {
+        self.response_body_media_types = MediaTypes::parse(types)?;
+        Ok(self)
+    }
+
+    /// Sets the number of bytes to log from each body.
+    ///
+    /// The default is 32 KiB.
+    #[must_use]
+    pub fn body_size_limit(mut self, limit: usize) -> Self {
+        self.body_size_limit = limit;
         self
     }
 }

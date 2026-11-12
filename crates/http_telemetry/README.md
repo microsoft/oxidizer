@@ -60,6 +60,7 @@ Each event has the [attributes](#metric-httpserverrequestduration) of the metric
 |`http.route.parameter.<name>`|string|The value of a [configured route parameter][__link5], percent-encoded as in the request, redacted according to its data class.|`1`|If the request matches a route that has the parameter.|
 |`http.request.header.<name>`|string|The value of a [configured request header][__link6], redacted according to its data class. The values of repeated header lines are joined with `, `, and bytes that are not valid UTF-8 become `�`.|`0f3a9c`|If the request has the header.|
 |`http.response.header.<name>`|string|The value of a [configured response header][__link7], as for a request header.|`120`|If the response has the header.|
+|`http.response.body`|string|The start of the response body, up to the [size limit][__link8], as text. Bytes that are not valid UTF-8 become `�`. Empty for a response without content. See [Response bodies](#response-bodies).|`{"book":"1"}`|If the `Content-Type` of the response matches one of the [response body media types][__link9].|
 
 ## Metrics
 
@@ -76,9 +77,9 @@ Each event has the [attributes](#metric-httpserverrequestduration) of the metric
 |`network.protocol.version`|string|Version of the HTTP protocol. `_OTHER` for a version other than 1.0, 1.1, 2 and 3.|`1.1`; `2`|Always|
 |`server.address`|string|Host of the server, from the request URI, else from the `Host` header. An IPv6 address keeps its brackets.|`example.com`; `[2001:db8::1]`|If the request URI or the `Host` header names a host.|
 |`server.port`|int|Port of the server, from the request URI, else 80 for `http` and 443 for `https`. A request URI without a host takes the port from the `Host` header.|`443`; `8080`|If the port is known.|
-|`http.route`|string|The template of the route that the request matches.|`/books/{book}`|If the layer has a [resolver][__link8] and the request matches one of its routes.|
+|`http.route`|string|The template of the route that the request matches.|`/books/{book}`|If the layer has a [resolver][__link10] and the request matches one of its routes.|
 |`http.response.status_code`|int|HTTP response status code.|`200`|If the handler returned a response.|
-|`error.type`|string|Describes a class of error the request ended with. An error of the handler or of the response body gives the labels of the error and its sources, joined with dots: the label of each [`HttpError`][__link9] and the kind of each I/O error. A panic of the handler or of the response body gives `panic`. A request future or a response body that is dropped before its end gives `abandoned`. Else, a status from 500 to 599 gives the status code.|`validation`; `io.connection_refused`; `panic`; `503`; `abandoned`|If the request ended with an error, a panic or a drop, or with a status from 500 to 599.|
+|`error.type`|string|Describes a class of error the request ended with. An error of the handler or of the response body gives the labels of the error and its sources, joined with dots: the label of each [`HttpError`][__link11] and the kind of each I/O error. A panic of the handler or of the response body gives `panic`. A request future or a response body that is dropped before its end gives `abandoned`. Else, a status from 500 to 599 gives the status code.|`validation`; `io.connection_refused`; `panic`; `503`; `abandoned`|If the request ended with an error, a panic or a drop, or with a status from 500 to 599.|
 
 `server.address` and `server.port` come from the request, so a client that sends new host names
 creates new metric series.
@@ -114,7 +115,7 @@ when one of these occurs:
 
 * A poll of the body returns no frame.
 * A poll returns trailers.
-* A poll returns data, and then [`is_end_stream`][__link10] of the body
+* A poll returns data, and then [`is_end_stream`][__link12] of the body
   returns `true`.
 * The server drops the body while `is_end_stream` returns `true`.
 * Over HTTP/1.0 or HTTP/1.1, and without a `Transfer-Encoding` header, the server drops the body
@@ -129,10 +130,18 @@ ends when the handler returns:
 * A response to `CONNECT` with a status from 200 to 299.
 * A response with a status from 100 to 199, 204 or 304.
 
+## Response bodies
+
+The middleware copies the bytes of a logged response body while the server reads the body, so
+the error and abandoned events show the bytes that the server read before the request ended.
+The middleware does not redact the body. It logs the bytes that it gets from the inner service,
+so if a layer after it in the tuple compresses the response, as the server layer of
+`http_compression` does, it logs the compressed bytes.
+
 ## When the middleware emits no event
 
 * The URI path of the request matches one of the
-  [`excluded_paths`][__link11].
+  [`excluded_paths`][__link13].
 * The request future or the response body is dropped while its thread panics.
 * There is no destination interested in processing the event further.
 
@@ -177,16 +186,18 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbChbhKYwCPQMbk1JlgSFx_acbB3TVkj4hSzsbEFr0tGgR68xhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbmBRdsmVrB8UbchEvjDOt4z0bdJVPuh0BaPYbpwXVGcorLkBhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
  [__link0]: https://crates.io/crates/observed/0.30.1
  [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
- [__link10]: https://docs.rs/http-body/1.1.0/http_body/?search=Body::is_end_stream
- [__link11]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::excluded_paths
+ [__link10]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::route_resolver
+ [__link11]: https://docs.rs/http_extensions/0.15.0/http_extensions/?search=HttpError
+ [__link12]: https://docs.rs/http-body/1.1.0/http_body/?search=Body::is_end_stream
+ [__link13]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::excluded_paths
  [__link2]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry
  [__link3]: https://docs.rs/layered/0.3.9/layered/?search=Layer
  [__link4]: https://docs.rs/observed/0.30.1/observed/?search=Sink
  [__link5]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::route_parameter_data_classes
  [__link6]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::request_header_data_classes
  [__link7]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::response_header_data_classes
- [__link8]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::route_resolver
- [__link9]: https://docs.rs/http_extensions/0.15.0/http_extensions/?search=HttpError
+ [__link8]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::body_size_limit
+ [__link9]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::response_body_media_types

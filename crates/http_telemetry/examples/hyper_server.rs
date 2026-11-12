@@ -23,6 +23,10 @@
 //! Each request has an `x-request-id` header. The layer gives the header a data class that the
 //! printer shows unchanged, so each event shows its value as `http.request.header.x-request-id`.
 //!
+//! The layer also logs the bodies of `application/json` responses. So each event of a request to
+//! a path under `/books/1` shows, as `http.response.body`, the part of the body that the server
+//! read before the request ended: the whole body, or the first chunk.
+//!
 //! The middleware also emits the `1` and the `-1` of `http.server.active_requests` for each
 //! request that it does not exclude. The client waits for that `-1` before it prints its line and
 //! sends the next request. Each event shows the host and the port of the server: from the `Host`
@@ -192,7 +196,9 @@ async fn main() {
         .excluded_paths([BasePath::from_static("/health/")])
         .route_resolver(resolver)
         .route_parameter_data_classes([("book", PUBLIC)])
-        .request_header_data_classes([(REQUEST_ID, PUBLIC)]);
+        .request_header_data_classes([(REQUEST_ID, PUBLIC)])
+        .response_body_media_types(["application/json"])
+        .expect("application/json is a media type");
     let service = Arc::new((telemetry, handler).into_service());
 
     // hyper serves each connection, and takes HTTP/1.1 and HTTP/2 on the same port.

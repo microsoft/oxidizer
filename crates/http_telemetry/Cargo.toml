@@ -31,6 +31,8 @@ allowed_external_types = [
     "http_extensions::*",
     "layered::service::Service",
     "observed::sink::core::Sink",
+    "ohno::enrichable::Enrichable",
+    "ohno::error_ext::ErrorExt",
     "routerama::route_table::RouteTable",
     "templated_uri::base_path::BasePath",
     "tick::simple_clock::SimpleClock",
