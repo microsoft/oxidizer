@@ -65,7 +65,11 @@ where
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct CustomContext<Extras = ()> {
-    /// Builds HTTP response bodies with the client memory provider.
+    /// Builds response bodies with the client memory provider and response-body defaults.
+    ///
+    /// Use this builder for bodies that must inherit the options configured with
+    /// [`HttpClientBuilder::response_body_options`](crate::HttpClientBuilder::response_body_options).
+    /// A body built independently keeps its own policies.
     pub body_builder: HttpBodyBuilder,
     /// Clock for timing operations and timeouts inside the handler.
     pub clock: Clock,
@@ -291,7 +295,6 @@ mod tests {
     use crate::fake::FakeDeps;
     use crate::pipeline::Pipeline;
 
-    #[mutants::skip]
     fn custom_deps() -> CustomDeps {
         CustomDeps {
             clock: FakeDeps::default().clock,
@@ -300,7 +303,6 @@ mod tests {
         }
     }
 
-    #[mutants::skip]
     fn ok_factory(_ctx: CustomContext) -> FakeHandler {
         FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
     }

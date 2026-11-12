@@ -54,7 +54,6 @@ tick = { workspace = true }
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 metabench = { path = "../metabench" }
-mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util"] }
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }

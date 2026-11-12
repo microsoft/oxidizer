@@ -12,13 +12,15 @@ use std::task;
 
 use observed::Sink;
 use pin_project::{pin_project, pinned_drop};
-use plurality::MultiPool;
+use plurality::{Arc as PoolArc, MultiPool};
 
+#[cfg(test)]
+use crate::TaskHandle;
 #[cfg(feature = "inspection")]
 use crate::TaskState;
 use crate::inspection::Inspector;
 use crate::{
-    ExecutorShared, ShutdownCause, TaskCreatedReporter, TaskHandle, TaskHandleSlot, TaskOptions, TaskPanicPayload, TaskPtr, WakeSignal,
+    ExecutorShared, ShutdownCause, TaskCreatedReporter, TaskHandleSlot, TaskMetadata, TaskPanicPayload, TaskPtr, WakeSignal,
     discard_task_panic_payload,
 };
 
@@ -56,7 +58,7 @@ where
 
     handle_slot: TaskHandleSlot,
 
-    options: TaskOptions,
+    metadata: TaskMetadata,
 
     sink: Sink,
 
@@ -75,6 +77,8 @@ where
 // metadata. Completion and cancellation empty the non-Send payload before the owner releases its
 // final scheduling reference, so remote final reclamation cannot drop user state.
 // The optional inspector belongs to that payload and is also retired on the owner thread.
+// The owner initializes the handle cell before publishing pointers. Remote owners read only
+// its immutable template through those pointers, never the cell's initialization state.
 unsafe impl<F, R, T, I> Send for Task<F, R, T, I>
 where
     F: Future<Output = R> + 'static,
@@ -94,17 +98,6 @@ where
 {
 }
 
-impl<F, R, T> Task<F, R, T>
-where
-    F: Future<Output = R> + 'static,
-    R: 'static,
-    T: TaskCompletion<R>,
-{
-    fn new_with_target(future: F, result_target: T, options: TaskOptions, sink: Sink) -> Self {
-        Self::new_inspected(future, result_target, options, sink, ())
-    }
-}
-
 impl<F, R, T, I> Task<F, R, T, I>
 where
     F: Future<Output = R> + 'static,
@@ -112,7 +105,7 @@ where
     T: TaskCompletion<R>,
     I: Inspector<F>,
 {
-    fn new_inspected(future: F, result_target: T, options: TaskOptions, sink: Sink, inspector: I) -> Self {
+    fn new(future: F, result_target: T, metadata: TaskMetadata, sink: Sink, inspector: I) -> Self {
         Self {
             payload: UnsafeCell::new(Some(Payload {
                 future: FutureStorage::new(future),
@@ -124,7 +117,7 @@ where
             })),
             wake_signal: OnceCell::new(),
             handle_slot: TaskHandleSlot::new(),
-            options,
+            metadata,
             sink,
             poll_count: Cell::new(0),
             links: TaskLinks::default(),
@@ -133,31 +126,21 @@ where
     }
 }
 
-#[cfg(feature = "inspection")]
-pub(crate) fn allocate_inspected_task<F, R, T, I>(
+pub(crate) fn allocate_task<F, T, I>(
     pool: &MultiPool,
     future: F,
-    options: TaskOptions,
+    metadata: TaskMetadata,
     sink: Sink,
     completion: T,
     inspector: I,
-) -> TaskHandle
+) -> Pin<PoolArc<impl TypeErasedTask + 'static>>
 where
-    F: Future<Output = R> + 'static,
-    R: 'static,
-    T: TaskCompletion<R>,
+    F: Future + 'static,
+    F::Output: 'static,
+    T: TaskCompletion<F::Output>,
     I: Inspector<F>,
 {
-    TaskHandle::new(pool.alloc_arc_pin(Task::new_inspected(future, completion, options, sink, inspector)))
-}
-
-pub(crate) fn allocate_task<F, R, T>(pool: &MultiPool, future: F, options: TaskOptions, sink: Sink, completion: T) -> TaskHandle
-where
-    F: Future<Output = R> + 'static,
-    R: 'static,
-    T: TaskCompletion<R>,
-{
-    TaskHandle::new(pool.alloc_arc_pin(Task::new_with_target(future, completion, options, sink)))
+    pool.alloc_arc_pin_with(|| Task::new(future, completion, metadata, sink, inspector))
 }
 
 #[cfg(test)]
@@ -179,13 +162,14 @@ impl<R: 'static> TaskCompletion<R> for TestCompletion {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn allocate_test_task_in(pool: &MultiPool) -> TaskHandle {
-    allocate_task(
+    TaskHandle::new(allocate_task(
         pool,
         std::future::pending::<()>(),
-        TaskOptions::default(),
+        TaskMetadata::default(),
         Sink::noop(),
         TestCompletion,
-    )
+        (),
+    ))
 }
 
 impl<F, R, T, I> TypeErasedTask for Task<F, R, T, I>
@@ -214,11 +198,11 @@ where
 
     fn poll(self: Pin<&Self>, shared: &ExecutorShared) -> task::Poll<()> {
         self.poll_count.set(self.poll_count.get().saturating_add(1));
-        self.options.with_context(|| self.poll_in_context(shared))
+        self.metadata.with_context(|| self.poll_in_context(shared))
     }
 
     fn created_reporter(&self) -> Option<TaskCreatedReporter> {
-        self.options.created_reporter(self.sink.clone())
+        self.metadata.created_reporter(&self.sink)
     }
 
     fn links(&self) -> &TaskLinks {
@@ -243,7 +227,6 @@ where
             .promote_remote_notification()
     }
 
-    #[cfg_attr(test, mutants::skip)] // Mutation causes resources not to be released, leading to executor shutdown never happening.
     fn abort(self: Pin<&Self>, cause: ShutdownCause) {
         if let Some(wake_signal) = self.wake_signal.get() {
             wake_signal.retire();
@@ -254,7 +237,7 @@ where
         // reference to this field.
         let maybe_payload = unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
 
-        self.options
+        self.metadata
             .with_context(|| self.finish_terminal(maybe_payload, TerminalOutcome::Cancelled(cause)));
     }
 
@@ -334,11 +317,11 @@ where
         Self::retire_payload(maybe_payload);
         let shutdown = shared.shutdown();
         if matches!(shared.panic_policy(), crate::PanicPolicy::Shutdown) {
-            _ = shutdown.publish(ShutdownCause::panic());
+            _ = shutdown.publish(ShutdownCause::panic(panic.as_ref()));
         }
         let cause = shutdown.is_triggered().then(|| shutdown.cause());
         result_target.panicked(panic, cause);
-        self.options.report_panicked(&self.sink, self.poll_count.get());
+        self.metadata.report_panicked(&self.sink, self.poll_count.get());
         task::Poll::Ready(())
     }
 
@@ -363,11 +346,11 @@ where
         match outcome {
             TerminalOutcome::Succeeded(result) => {
                 result_target.completed(result);
-                self.options.report_succeeded(&self.sink, self.poll_count.get());
+                self.metadata.report_succeeded(&self.sink, self.poll_count.get());
             }
             TerminalOutcome::Cancelled(cause) => {
                 if future_panic.is_some() {
-                    self.options.report_panicked(&self.sink, self.poll_count.get());
+                    self.metadata.report_panicked(&self.sink, self.poll_count.get());
                 }
                 result_target.cancelled(cause);
                 if let Some(panic) = future_panic {
@@ -390,7 +373,6 @@ where
     not(test),
     expect(clippy::needless_pass_by_value, reason = "semantically correct to consume the panic")
 )]
-#[cfg_attr(test, mutants::skip)] // Impractical to unit test process termination.
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn on_unhandled_task_panic(panic: TaskPanicPayload) -> ! {
     #[cfg(test)]
@@ -494,7 +476,6 @@ impl<F: Future> Future for FutureStorage<F> {
 #[pinned_drop]
 impl<F> PinnedDrop for FutureStorage<F> {
     #[cfg_attr(coverage_nightly, coverage(off))] // Wrapper-invariant fallback terminates in a child process.
-    #[cfg_attr(test, mutants::skip)] // A no-op differs only in the process-terminating panicking-destructor fallback.
     fn drop(self: Pin<&mut Self>) {
         if let Err(panic) = self.destroy_pinned() {
             on_unhandled_task_panic(panic);
@@ -562,7 +543,14 @@ mod tests {
     use super::*;
 
     fn initialized_task<R: 'static>(pool: &MultiPool, future: impl Future<Output = R> + 'static) -> TaskHandle {
-        let handle = allocate_task(pool, future, TaskOptions::default(), Sink::noop(), TestCompletion);
+        let handle = TaskHandle::new(allocate_task(
+            pool,
+            future,
+            TaskMetadata::default(),
+            Sink::noop(),
+            TestCompletion,
+            (),
+        ));
         let (shared, _remote_wakes) = crate::WakeShared::new(Waker::noop().clone(), std::thread::current().id());
         let signal = WakeSignal::new(shared, handle.as_ptr());
         // SAFETY: The handle owns the task on its creating thread.
@@ -615,6 +603,29 @@ mod tests {
         fn drop(&mut self) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    #[cfg(feature = "inspection")]
+    #[test]
+    fn uninitialized_task_can_be_aborted_and_has_no_description() {
+        let pool = MultiPool::new();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let handle = allocate_task(
+            &pool,
+            DropCountingFuture(Arc::clone(&drops)),
+            TaskOptions::default(),
+            Sink::noop(),
+            TestCompletion,
+        );
+        let task = handle.as_ref();
+        let mut descriptions = 0;
+
+        task.abort(ShutdownCause::default());
+        task.inspect(TaskState::Ready, &mut |_| descriptions += 1);
+        drop(handle);
+
+        assert_eq!((drops.load(Ordering::Relaxed), descriptions), (1, 0));
+        assert!(pool.is_empty());
     }
 
     #[test]

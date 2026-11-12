@@ -70,7 +70,6 @@ impl HttpClient {
     // The empty-body path and the general byte path both transmit a zero-length
     // body. Killing a mutation that forces `is_empty()` to return `false` would
     // require a test of the internal body representation, not transport behavior.
-    #[cfg_attr(test, mutants::skip)]
     fn to_fetch_body(&self, body: &Body) -> fetch::HttpBody {
         let builder: &fetch::HttpBodyBuilder = self.client.as_ref();
 
@@ -83,7 +82,7 @@ impl HttpClient {
                         .map(BytesView::from)
                         .map_err(|error| fetch::HttpError::unavailable(format!("failed to read the Azure request body: {error}")))
                 });
-                builder.stream(stream, &fetch::options::HttpBodyOptions::default())
+                builder.stream(stream)
             }
         }
     }

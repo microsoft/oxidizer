@@ -91,7 +91,7 @@
 //!
 //! - It uses [`http::Request`] and [`http::Response`] as base types.
 //! - It reuses [`http::Method`], [`http::StatusCode`], and [`http::HeaderMap`].
-//! - It implements standard traits such as [`http_body::Body`].
+//! - It implements standard traits such as [`http_body::Body`](::http_body::Body).
 //! - It works with other Rust HTTP libraries.
 //!
 //! # Examples
@@ -211,8 +211,14 @@ pub use error::{HttpError, Result};
 
 mod error_labels;
 
-mod body;
-pub use body::{HttpBody, HttpBodyBuilder, HttpBodyOptions};
+#[path = "body/mod.rs"]
+mod http_body;
+pub use http_body::{HttpBody, HttpBodyBuilder, HttpBodyOptions};
+
+/// Content types used by [`HttpBody::map`].
+pub mod body {
+    pub use crate::http_body::{Content, StreamingBody};
+}
 
 #[cfg(any(feature = "json", test))]
 mod json;

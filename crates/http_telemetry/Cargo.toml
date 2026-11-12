@@ -1,0 +1,76 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "http_telemetry"
+description = "Automatic telemetry collection for incoming HTTP requests."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "http", "telemetry", "logging", "metrics"]
+categories = ["network-programming", "development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry"
+
+# http_telemetry has no unsafe code, and it adds no path into the unsafe code of
+# a dependency. Its tests cover the events and their fields. They run
+# natively and with cargo-careful. Each dependency with unsafe code has its own
+# Miri tests.
+[package.metadata.anvil.miri]
+exclude = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "http::*",
+    "http_extensions::*",
+    "layered::service::Service",
+    "observed::sink::core::Sink",
+    "templated_uri::base_path::BasePath",
+    "tick::simple_clock::SimpleClock",
+    "tower_layer::Layer",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+bytesbuf = { workspace = true }
+futures = { workspace = true, features = ["std"] }
+http = { workspace = true }
+http-body = { workspace = true }
+http_extensions = { workspace = true }
+http_headers = { workspace = true, features = ["headers-content-length", "headers-negotiation", "http"] }
+layered = { workspace = true }
+observed = { workspace = true }
+ohno = { workspace = true }
+templated_uri = { workspace = true }
+tick = { workspace = true }
+
+[dev-dependencies]
+bytesbuf = { path = "../bytesbuf", features = ["bytes-compat"] }
+criterion = { workspace = true }
+data_privacy = { path = "../data_privacy" }
+future_assert = { path = "../future_assert" }
+futures = { workspace = true, features = ["executor"] }
+http-body-util = { workspace = true }
+http_extensions = { path = "../http_extensions", features = ["test-util"] }
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
+metabench = { path = "../metabench" }
+observed_testing = { path = "../observed_testing" }
+tick = { path = "../tick", features = ["test-util"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+
+[[bench]]
+name = "http_telemetry_server"
+harness = false
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

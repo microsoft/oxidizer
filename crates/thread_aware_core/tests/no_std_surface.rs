@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Exercises the public surface from outside the crate's own test build.
+//! Tests the public surface from outside the crate's test build.
 //!
-//! Unit tests in `src/` compile the library with `cfg(test)`, which switches on every
-//! `cfg(any(test, feature = "std"))` item whatever features are selected, so they always
-//! see the three-field `Thread`. This harness links the library as an ordinary dependency,
-//! so under `--no-default-features` the `no_std` shape is the one under test.
+//! Unit tests compile the library with `cfg(test)`, which enables each
+//! `cfg(any(test, feature = "std"))` item. They always see the three-field `Thread`. This test
+//! links the library as a normal dependency. With `--no-default-features`, it sees the `no_std`
+//! shape.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -101,10 +101,9 @@ fn numa_nodes_compare_and_hash_by_value() {
     );
 }
 
-/// Without `std` the thread id is gone, so equality and hashing cover the owner and the
-/// NUMA node alone. `Thread` cannot be constructed here, which is exactly why that
-/// narrowing is unobservable in a real program, so pin the shape by size instead: anything
-/// wider than the two remaining fields means the id came back.
+/// Without `std`, equality and hashing use only the owner and NUMA node. A consumer cannot
+/// construct `Thread` in this mode, so the test uses size to make sure that the thread id is
+/// absent.
 #[cfg(not(feature = "std"))]
 #[test]
 fn without_std_a_thread_carries_no_thread_id() {

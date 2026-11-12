@@ -1,18 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The compression handler and the layer that configures it.
+//! Defines the compression handler and its configuration layer.
 
 use std::num::NonZeroU64;
 
-use bytesbuf::mem::HasMemory as _;
+use bytesbuf::BytesView;
 use compressors::format::Format;
 use compressors::{CompressorBuilder, DecompressorBuilder, DecompressorLimits, Level, Resources};
 use futures::FutureExt as _;
 use futures::future::{Either, ready};
-use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, RANGE, VARY};
+use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, RANGE, TRANSFER_ENCODING, VARY};
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
-use http_extensions::{HttpBody, HttpBodyBuilder, HttpRequest, HttpResponse, RequestHandler, Result};
+use http_extensions::body::{Content, StreamingBody};
+use http_extensions::{HttpBody, HttpRequest, HttpResponse, RequestHandler, Result};
 use layered::{Layer, Service};
 use mime::Mime;
 use smallvec::SmallVec;
@@ -20,23 +21,28 @@ use smallvec::SmallVec;
 use crate::error::{CompressibleTypeError, invalid, too_many_content_codings, unsupported};
 use crate::{CONTENT_DIGEST_HEADER, REPR_DIGEST_HEADER, body, negotiate};
 
-/// A short list of formats: a stacked `Content-Encoding` is rare.
+/// A short format list because stacked `Content-Encoding` values are rare.
 type Formats = SmallVec<[Format; 2]>;
 
-/// Average bytes reserved per advertised format, including separators and a quality suffix.
+/// Reserved bytes per advertised format, including separators and a quality value.
 const ACCEPT_ENCODING_ENTRY_CAPACITY: usize = 12;
 
-/// Bounds decoder allocation and recursive stream depth for peer-controlled headers.
+/// Limits decoder allocation and recursive depth for peer-controlled headers.
 const MAX_CONTENT_ENCODING_LAYERS: usize = 16;
 
 /// Maximum decompressed size accepted by a layer unless the caller overrides it.
-// Written as the exact byte count so mutation testing cannot replace one multiplication while
-// leaving a different, undocumented policy value that ordinary boundary tests cannot cheaply
-// distinguish.
+// Use the exact byte count. Mutation testing can otherwise change one
+// multiplication to an undocumented value that boundary tests cannot distinguish.
 const DEFAULT_MAX_DECOMPRESSED_BODY_LEN: u64 = 67_108_864;
 
 /// Maximum compressed streams decoded by each decompression stage unless the caller overrides it.
 const DEFAULT_MAX_DECOMPRESSED_STREAMS: u64 = 1024;
+
+/// Largest input compressed synchronously before the handler returns.
+///
+/// This matches the compressor's default 64 KiB output chunk. Larger input uses
+/// the bounded streaming adapter so one handler poll cannot drain an unbounded body.
+const MAX_DIRECT_COMPRESSION_INPUT_LEN: usize = 64 * 1024;
 
 const fn default_decompressor_limits() -> DecompressorLimits {
     DecompressorLimits::new()
@@ -46,11 +52,11 @@ const fn default_decompressor_limits() -> DecompressorLimits {
         .max_streams(NonZeroU64::new(DEFAULT_MAX_DECOMPRESSED_STREAMS).expect("DEFAULT_MAX_DECOMPRESSED_STREAMS is a non-zero constant"))
 }
 
-/// How to handle a compression format that is not enabled.
+/// Policy for a compression format that is not enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum UnsupportedCompression {
-    /// Hand back the still-compressed body with its `Content-Encoding` intact.
+    /// Returns the compressed body with its `Content-Encoding` unchanged.
     ///
     /// The caller can inspect `Content-Encoding` to identify the compression
     /// format that was left in place.
@@ -59,19 +65,19 @@ pub enum UnsupportedCompression {
 
     /// Fail with the `compression_unsupported` error label.
     ///
-    /// Use this when the body is always treated as decompressed, and compressed
-    /// bytes would otherwise be parsed as though they were payload.
+    /// This policy fails for a recognized compression format that is not
+    /// enabled. Unknown or invalid content codings still pass through unchanged.
     Fail,
 }
 
-/// Metadata describing a body as it traveled on the wire, before decompression.
+/// Metadata for a body before decompression.
 ///
-/// Decompression removes `Content-Encoding` and `Content-Length`, because neither
-/// describes the body that is now held. This keeps what they said, and is
-/// attached to the message only when its body was actually decompressed.
+/// Decompression removes `Content-Encoding`. It replaces or removes
+/// `Content-Length`. This value stores the original header information when the
+/// layer sets up decompression.
 ///
-/// Servers attach it to the decompressed request's extensions; clients attach it to
-/// the decompressed response's extensions. It does not retain the compressed body bytes.
+/// Servers add it to decompressed request extensions. Clients add it to
+/// decompressed response extensions. It does not store compressed body bytes.
 #[derive(Debug, Clone)]
 pub struct OriginalBody {
     formats: Formats,
@@ -88,11 +94,11 @@ impl OriginalBody {
         &self.formats
     }
 
-    /// What `Content-Length` said, when the message carried one.
+    /// The first `Content-Length` field value, if it can be parsed as a `u64`.
     ///
     /// This measures the compressed body, not its decompressed size.
-    /// It is `None` for a message that arrived chunked. The decompressed length is
-    /// not knowable until the body has been read to the end.
+    /// It is `None` if this value is absent, unreadable, or not a `u64`. The
+    /// decompressed length is unknown until the complete body is read.
     #[must_use]
     pub const fn content_length(&self) -> Option<u64> {
         self.content_length
@@ -101,15 +107,14 @@ impl OriginalBody {
 
 /// Client-side configuration held by a [`CompressionLayer`].
 ///
-/// A client sends requests and receives responses, so it decompresses what comes
-/// back. Create its layer with [`Compression::client`].
+/// A client can decompress received responses. Create this layer with
+/// [`Compression::client`].
 ///
 /// Server-side response compression is not available on a client layer:
 ///
 /// ```compile_fail,E0599
 /// # use http_compression::Compression;
-/// # use http_extensions::HttpBodyBuilder;
-/// Compression::client(HttpBodyBuilder::new_fake()).compress_responses(&[]);
+/// Compression::client().compress_responses(&[]);
 /// ```
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -121,16 +126,15 @@ pub struct Client {
 
 /// Server-side configuration held by a [`CompressionLayer`].
 ///
-/// A server receives requests and sends responses, so it decompresses what arrives
-/// and compresses what it returns, choosing a compression format the caller accepts.
-/// Create its layer with [`Compression::server`].
+/// A server can decompress requests and compress responses. Response compression
+/// selects a format that the caller accepts. Create this layer with
+/// [`Compression::server`].
 ///
 /// Client-side response decompression is not available on a server layer:
 ///
 /// ```compile_fail,E0599
 /// # use http_compression::Compression;
-/// # use http_extensions::HttpBodyBuilder;
-/// Compression::server(HttpBodyBuilder::new_fake()).decompress_responses(&[]);
+/// Compression::server().decompress_responses(&[]);
 /// ```
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -149,9 +153,7 @@ enum Role {
 
 /// Compresses and decompresses message bodies around an inner handler.
 ///
-/// One handler covers both roles, because a client and a server want different
-/// parts of the same job. Each part is off until it is configured, and which
-/// parts exist at all is decided by the role:
+/// The selected role controls the available transformations:
 ///
 /// | Role | Configured with | Transforms |
 /// |---|---|---|
@@ -159,15 +161,14 @@ enum Role {
 /// | [`Server`] | [`decompress_requests`][CompressionLayer::decompress_requests] | the request coming in |
 /// | [`Server`] | [`compress_responses`][CompressionLayer::compress_responses] | the response going out |
 ///
-/// The role is chosen up front, with [`Compression::client`] or
-/// [`Compression::server`], and only that role's toggles exist on the layer it
-/// returns. A client therefore cannot ask to compress a response it has just
-/// received, and a server cannot advertise `Accept-Encoding` on a request that
-/// is arriving rather than leaving.
+/// Select the role with [`Compression::client`] or [`Compression::server`].
+/// Each transformation is off until you configure it.
 ///
-/// All three are lazy. Bodies are wrapped as the message passes, and the work
-/// happens as the body is polled, so a malformed or oversized body fails when
-/// it is read rather than when its headers arrive.
+/// After the inner handler returns, the layer compresses small buffered
+/// response bodies before it returns the response to the caller. A compression
+/// error for such a body fails the handler call. Larger buffered bodies,
+/// streaming bodies, and decompression run when the body is read. Their data
+/// errors fail that body read.
 ///
 /// Apply its layer with [`Layer::layer`].
 #[derive(Debug)]
@@ -177,10 +178,10 @@ pub struct Compression<T> {
     role: Role,
 }
 
-/// Layer for creating [`Compression`] instances, in the role `R`.
+/// Creates [`Compression`] instances for role `R`.
 ///
-/// Does nothing until one of the role's transformations is configured. Build
-/// one with [`Compression::client`] or [`Compression::server`].
+/// The layer does not transform bodies until you configure a transformation.
+/// Create it with [`Compression::client`] or [`Compression::server`].
 #[derive(Debug, Clone)]
 pub struct CompressionLayer<R> {
     config: Config,
@@ -188,15 +189,16 @@ pub struct CompressionLayer<R> {
 }
 
 impl Compression<()> {
-    /// Creates a client-side layer drawing output from `body_builder`.
+    /// Creates a client compression layer.
     ///
-    /// Transformed bytes are allocated from the same memory the builder uses
-    /// for every other body, and a wrapped body keeps the policies the original
-    /// carried.
+    /// The layer uses the shared process-wide [`Resources`] by default.
+    /// Use [`CompressionLayer::resources`] to select a different memory provider
+    /// and engine pool.
+    /// Streaming transformations keep the original body's policies.
     #[must_use]
-    pub fn client(body_builder: HttpBodyBuilder) -> CompressionLayer<Client> {
+    pub fn client() -> CompressionLayer<Client> {
         CompressionLayer {
-            config: Config::new(body_builder),
+            config: Config::new(),
             role: Client {
                 decompress_responses: Formats::new(),
                 advertise: true,
@@ -205,13 +207,16 @@ impl Compression<()> {
         }
     }
 
-    /// Creates a server-side layer drawing output from `body_builder`.
+    /// Creates a server compression layer.
     ///
-    /// See [`client`][Self::client] for where the bytes come from.
+    /// The layer uses the shared process-wide [`Resources`] by default.
+    /// Use [`CompressionLayer::resources`] to select a different memory provider
+    /// and engine pool. Streaming transformations keep the original body's
+    /// policies.
     #[must_use]
-    pub fn server(body_builder: HttpBodyBuilder) -> CompressionLayer<Server> {
+    pub fn server() -> CompressionLayer<Server> {
         CompressionLayer {
-            config: Config::new(body_builder),
+            config: Config::new(),
             role: Server {
                 decompress_requests: Formats::new(),
                 compress_responses: Formats::new(),
@@ -222,15 +227,13 @@ impl Compression<()> {
     }
 }
 
-/// The content types usually worth compressing.
+/// Content types that usually benefit from compression.
 ///
-/// Common text types, plus application types that are textual underneath.
-/// What is left out is the point: images, video and archives are already
-/// compressed, so compressing them again spends CPU to make the body slightly
-/// larger. Server-sent events are not included.
+/// This list contains common text and text-based application types. It excludes
+/// server-sent events and common types that are already compressed.
 ///
-/// A type with a structured suffix is covered by the type it is built on, so
-/// `application/ld+json` matches `application/json` without being listed.
+/// A base type covers its structured suffixes. For example,
+/// `application/json` covers `application/ld+json`.
 ///
 /// Pass to [`compressible_types`][CompressionLayer::compressible_types].
 pub const DEFAULT_COMPRESSIBLE_TYPES: &[&str] = &[
@@ -248,23 +251,23 @@ pub const DEFAULT_COMPRESSIBLE_TYPES: &[&str] = &[
     "image/svg+xml",
 ];
 
-/// Toggles that mean the same thing in either role.
+/// Configuration shared by client and server layers.
 impl<R> CompressionLayer<R> {
     /// Bounds the cost of decompressing a single body.
     ///
-    /// Decompressed output defaults to 64 MiB and at most 1,024 compressed streams per
-    /// decompression stage. Bounds left unset in `limits` keep the layer's defaults; explicit
-    /// bounds replace them, and
-    /// [`unbounded_output_len`][DecompressorLimits::unbounded_output_len] explicitly removes the
-    /// output cap while [`unbounded_streams`][DecompressorLimits::unbounded_streams] removes the
-    /// stream-count cap.
+    /// Each decompression stage limits output to 64 MiB and 1,024 compressed
+    /// streams by default. An unset bound keeps the default. An explicit bound
+    /// replaces it. Use
+    /// [`unbounded_output_len`][DecompressorLimits::unbounded_output_len] or
+    /// [`unbounded_streams`][DecompressorLimits::unbounded_streams] to remove a
+    /// bound.
     #[must_use]
     pub const fn limits(mut self, limits: DecompressorLimits) -> Self {
         self.config.limits = limits.with_fallbacks(default_decompressor_limits());
         self
     }
 
-    /// Draws transformed output from `resources` instead of the body builder's memory.
+    /// Uses `resources` instead of the shared process-wide resources.
     #[must_use]
     pub fn resources(mut self, resources: Resources) -> Self {
         self.config.resources = resources;
@@ -281,13 +284,16 @@ impl<R> CompressionLayer<R> {
     }
 }
 
-/// What only a client can ask for: it sends requests and reads responses.
+/// Client-only configuration.
 impl CompressionLayer<Client> {
     /// Decompresses response bodies compressed with any of `formats`.
     ///
     /// Unless [`advertise`][Self::advertise] is turned off, outgoing requests
-    /// also gain an `Accept-Encoding` naming these formats, most preferred
-    /// first.
+    /// also get an `Accept-Encoding` header. The header lists the preferred
+    /// format first.
+    ///
+    /// A response can contain at most 16 enabled compression coding layers.
+    /// This limit is fixed.
     #[must_use]
     pub fn decompress_responses(mut self, formats: &[Format]) -> Self {
         self.role.decompress_responses = http_formats(formats);
@@ -297,10 +303,10 @@ impl CompressionLayer<Client> {
 
     /// Sets whether `Accept-Encoding` is added to outgoing requests.
     ///
-    /// Only has an effect once
-    /// [`decompress_responses`][Self::decompress_responses] has named
-    /// something. Turn it off when an upstream proxy or a caller-supplied
-    /// header owns content negotiation but responses should still be decompressed.
+    /// This setting has an effect only if
+    /// [`decompress_responses`][Self::decompress_responses] names a format.
+    /// Disable it if an upstream proxy or caller-supplied header controls
+    /// negotiation, but responses still need decompression.
     #[must_use]
     pub fn advertise(mut self, enabled: bool) -> Self {
         self.role.advertise = enabled;
@@ -309,16 +315,18 @@ impl CompressionLayer<Client> {
     }
 }
 
-/// What only a server can ask for: it reads requests and sends responses.
+/// Server-only configuration.
 impl CompressionLayer<Server> {
     /// Decompresses request bodies compressed with any of `formats`.
     ///
-    /// A request whose body reports a known length of zero is passed through
-    /// unchanged, including its `Content-Encoding` metadata. This exception
-    /// avoids installing a decoder that cannot produce a compressed member.
+    /// A request with a known body length of zero stays unchanged, including its
+    /// `Content-Encoding`. An empty body cannot contain a compressed member for
+    /// the decoder to process.
     ///
-    /// Decompression rejects output beyond 64 MiB or 1,024 compressed streams per decompression
-    /// stage by default. Set [`limits`][Self::limits] when the application needs different bounds.
+    /// Each decompression stage rejects output beyond 64 MiB or 1,024 compressed
+    /// streams by default. Use [`limits`][Self::limits] to change these bounds.
+    /// A request can contain at most 16 enabled compression coding layers. This
+    /// limit is fixed.
     #[must_use]
     pub fn decompress_requests(mut self, formats: &[Format]) -> Self {
         self.role.decompress_requests = http_formats(formats);
@@ -327,19 +335,29 @@ impl CompressionLayer<Server> {
 
     /// Compresses outgoing response bodies with the best of `formats` the caller accepts.
     ///
-    /// The choice is made from the request's `Accept-Encoding`, respecting
-    /// quality values and `*`. `formats` is in preference order, which decides
-    /// between compression formats the caller rates equally. Malformed members are
-    /// skipped without discarding valid alternatives.
+    /// The request's `Accept-Encoding` controls the choice. The selection uses
+    /// quality values and `*`. `formats` lists server preference order and
+    /// resolves equal quality values. Invalid members do not remove valid ones.
     ///
-    /// Responses that already have a `Content-Encoding` are left alone, as are
-    /// server-sent events, native gRPC, images other than `image/svg+xml`, audio, video and
-    /// common compressed archive types. A content-type allowlist cannot override
-    /// these exclusions.
+    /// For an eligible successful response with a complete body that is not
+    /// known to be empty, the layer can return an empty `406 Not Acceptable`
+    /// response. It does this if the caller rejects `identity` and the layer
+    /// cannot apply an acceptable coding. A content-type exclusion can prevent
+    /// that coding. The layer also returns `406 Not Acceptable` if an existing
+    /// `Content-Encoding` is not acceptable.
+    ///
+    /// `HEAD`, successful `CONNECT`, statuses that cannot carry a body,
+    /// known-empty bodies, partial responses, and responses with `Content-Range`
+    /// bypass this negotiation.
+    ///
+    /// The method does not compress responses that already have a
+    /// `Content-Encoding`. It also skips server-sent events, native gRPC, most
+    /// images, audio, video, and common compressed archives. An allowlist cannot
+    /// override these exclusions.
     ///
     /// Compression uses [`Level::FAST`] unless [`level`][Self::level] is set.
-    /// Buffered output is flushed when the body producer pauses, so consumers can
-    /// decompress each burst without waiting for the response to end.
+    /// If the body producer pauses, the compressor flushes buffered output. A
+    /// consumer can then decompress each part before the response ends.
     #[must_use]
     pub fn compress_responses(mut self, formats: &[Format]) -> Self {
         self.role.compress_responses = http_formats(formats);
@@ -348,9 +366,9 @@ impl CompressionLayer<Server> {
 
     /// Sets the compression effort for response bodies.
     ///
-    /// Defaults to [`Level::FAST`]. Higher levels trade more CPU work for smaller
-    /// bodies. The portable level is mapped onto each negotiated format's native
-    /// range; it does not affect decompression or format preference.
+    /// The default is [`Level::FAST`]. Higher levels use more CPU to produce
+    /// smaller bodies. Each format maps the portable level to its native range.
+    /// The level does not affect decompression or format preference.
     ///
     /// # Examples
     ///
@@ -359,14 +377,10 @@ impl CompressionLayer<Server> {
     /// use compressors::Level;
     /// use compressors::format::Format;
     /// use http_compression::Compression;
-    /// use http_extensions::HttpBodyBuilder;
-    ///
-    /// # fn configure(body_builder: HttpBodyBuilder) {
-    /// let layer = Compression::server(body_builder)
+    /// let layer = Compression::server()
     ///     .compress_responses(&[Format::Gzip])
     ///     .level(Level::DEFAULT);
     /// # let _ = layer;
-    /// # }
     /// # }
     /// ```
     #[must_use]
@@ -377,17 +391,19 @@ impl CompressionLayer<Server> {
 
     /// Compresses only bodies whose `Content-Type` matches one of `types`.
     ///
-    /// An entry such as `text/*` covers every kind of text, and an entry whose
-    /// second half carries a structured suffix covers the type it is built on, so `application/ld+json` is covered by `application/json`.
+    /// `text/*` covers every text subtype. A base type covers its structured
+    /// suffixes. For example, `application/json` covers
+    /// `application/ld+json`.
     /// Parameters such as `; charset=utf-8` are ignored.
     ///
-    /// Once a list is set, a body with a missing or unreadable `Content-Type` is
-    /// left alone, since there is nothing to check it against.
+    /// An unreadable or invalid `Content-Type` prevents compression. A missing
+    /// `Content-Type` prevents compression only when a list is set.
     ///
-    /// With no list set, only the built-in exclusions described by
-    /// [`compress_responses`][Self::compress_responses] apply. A list can restrict
-    /// compression further, but cannot override those exclusions.
-    /// [`DEFAULT_COMPRESSIBLE_TYPES`] is a reasonable starting point.
+    /// Without a list, a missing `Content-Type` is permitted. The exclusions
+    /// from [`compress_responses`][Self::compress_responses] still apply to a
+    /// valid type. A list can add restrictions but cannot remove those
+    /// exclusions. Start with
+    /// [`DEFAULT_COMPRESSIBLE_TYPES`] for common compressible types.
     ///
     /// # Examples
     ///
@@ -395,14 +411,11 @@ impl CompressionLayer<Server> {
     /// # #[cfg(feature = "gzip")] {
     /// # use compressors::format::Format;
     /// # use http_compression::{Compression, DEFAULT_COMPRESSIBLE_TYPES};
-    /// # use http_extensions::HttpBodyBuilder;
-    /// # fn configure(body_builder: HttpBodyBuilder) {
-    /// let layer = Compression::server(body_builder)
+    /// let layer = Compression::server()
     ///     .compress_responses(&[Format::Gzip])
     ///     .compressible_types(DEFAULT_COMPRESSIBLE_TYPES.iter().copied())
     ///     .unwrap();
     /// # let _ = layer;
-    /// # }
     /// # }
     /// ```
     ///
@@ -475,7 +488,7 @@ impl<T: RequestHandler> Compression<T> {
                     Err(error) => return Either::Left(ready(Err(error))),
                 };
 
-                // Choose before handing off the request so its headers need not be cloned.
+                // Choose before the inner handler runs to avoid cloning all headers.
                 let chosen = server.choose_response_format(&input);
 
                 Either::Right(
@@ -513,8 +526,7 @@ fn matches_type(allowed: &Mime, actual: &Mime) -> bool {
     }
 
     match actual.suffix() {
-        // `application/ld+json` is JSON underneath, so the base type covers it
-        // without every structured-suffix variant having to be listed.
+        // A base type covers each matching structured suffix.
         Some(actual_suffix) => actual_suffix == allowed.subtype(),
         None => allowed.subtype() == actual.subtype(),
     }
@@ -562,10 +574,9 @@ fn allows_type(actual: &Mime) -> bool {
 
 /// Whether there is a body here worth compressing.
 ///
-/// The no-content statuses are defined to carry no body at all, so compressing one
-/// would invent bytes the caller must not receive. An already-empty body is
-/// skipped too: every format has a header, so compressing nothing only makes it
-/// bigger.
+/// No-content statuses cannot carry a body. Compression can create bytes that
+/// the caller must not receive. Compression also skips an empty body because a
+/// format header only makes it larger.
 fn carries_a_body(response: &HttpResponse) -> bool {
     let status = response.status();
     if status.is_informational()
@@ -576,9 +587,7 @@ fn carries_a_body(response: &HttpResponse) -> bool {
         return false;
     }
 
-    // A partial response is a byte range of the representation. Compressing it
-    // would leave `Content-Range` describing offsets into something that no
-    // longer exists.
+    // Compression makes `Content-Range` offsets invalid.
     if status == StatusCode::PARTIAL_CONTENT || response.headers().contains_key(CONTENT_RANGE) {
         return false;
     }
@@ -586,17 +595,16 @@ fn carries_a_body(response: &HttpResponse) -> bool {
     response.body().content_length() != Some(0)
 }
 
-/// The cheap test that keeps every uncompressed message off the slow path.
+/// Returns whether decompression can be necessary.
 fn wants_decompression(enabled: &[Format], headers: &HeaderMap) -> bool {
     !enabled.is_empty() && headers.contains_key(CONTENT_ENCODING)
 }
 
-/// Weakens a strong entity tag, which a compressed body may no longer claim.
+/// Weakens a strong entity tag after compression.
 ///
-/// Compression produces a different representation of the same resource, so the
-/// two must not share a strong entity tag: a cache holding both would otherwise
-/// treat them as byte-identical and could recombine ranges across them. Marking
-/// the tag weak keeps it usable for equivalence without claiming that.
+/// Compression creates different bytes for the same resource. A shared strong
+/// tag lets a cache treat both representations as byte-identical. A weak
+/// tag keeps equivalence without claiming identical bytes.
 fn weaken_etag(headers: &mut HeaderMap) {
     let Some(etag) = headers.get(ETAG) else {
         return;
@@ -625,7 +633,7 @@ fn weak_etag_value(etag: &HeaderValue) -> HeaderValue {
     }
 }
 
-/// Records that the body depends on `Accept-Encoding`, without losing what else it varies by.
+/// Adds `Accept-Encoding` to `Vary` without removing existing values.
 fn mark_varies_on_accept_encoding(headers: &mut HeaderMap) {
     let already = headers
         .get_all(VARY)
@@ -644,22 +652,20 @@ fn mark_varies_on_accept_encoding(headers: &mut HeaderMap) {
 
 /// Keeps only compression formats supported by HTTP `Content-Encoding`.
 ///
-/// Raw DEFLATE has none, so it can never appear in a header and is dropped
-/// rather than silently never matching.
+/// Raw DEFLATE has no HTTP token, so this function removes it.
 fn http_formats(formats: &[Format]) -> Formats {
     formats.iter().copied().filter(|f| f.content_encoding().is_some()).collect()
 }
 
 impl Client {
-    /// Builds the `Accept-Encoding` value, so every request just clones it.
+    /// Builds one `Accept-Encoding` value for reuse by each request.
     fn build_accept_encoding(&self) -> Option<HeaderValue> {
         if !self.advertise || self.decompress_responses.is_empty() {
             return None;
         }
 
-        // Bare tokens all rate the same, so the order would be a hint at best.
-        // Descending quality values say the preference outright, which is what
-        // a server needs to honour it.
+        // Descending quality values state the preference. Token order alone does
+        // not assign different quality values.
         let mut joined = String::with_capacity(self.decompress_responses.len() * ACCEPT_ENCODING_ENTRY_CAPACITY);
 
         for (index, format) in self.decompress_responses.iter().filter_map(|f| f.content_encoding()).enumerate() {
@@ -669,9 +675,8 @@ impl Client {
 
             joined.push_str(format);
 
-            // The first is left implicit at q=1, and the rest step down.
-            // Anything past the tenth shares the floor rather than hitting zero,
-            // which would read as a refusal.
+            // The first value uses the implicit q=1. Later values decrease to a
+            // floor of q=0.1 because q=0 rejects a format.
             if index > 0 {
                 use std::fmt::Write as _;
 
@@ -683,11 +688,11 @@ impl Client {
         HeaderValue::from_str(&joined).ok()
     }
 
-    /// Advertises what can be decompressed, unless the caller already has.
+    /// Advertises supported formats unless the caller already set the header.
     ///
-    /// A caller-supplied `Accept-Encoding` is left alone. A `Range` request is
-    /// never given one: a partial compressed stream cannot be decompressed, so
-    /// asking for one only invites a response that must be handed back still compressed.
+    /// The method preserves a caller-supplied `Accept-Encoding`. It does not add
+    /// the header to a `Range` request because a partial compressed stream
+    /// cannot be decompressed.
     fn advertise(&self, request: &mut HttpRequest) {
         let Some(value) = self.accept_encoding.as_ref() else {
             return;
@@ -702,10 +707,8 @@ impl Client {
     }
 
     fn decompress_response(&self, config: &Config, response: HttpResponse, head: bool, connect: bool) -> Result<HttpResponse> {
-        // A `HEAD` response describes a body it does not carry, and a partial
-        // one holds a byte range of the compressed representation rather than the
-        // whole of it. Neither can be decompressed, and stripping the metadata would
-        // leave the caller unable to decompress it either.
+        // These responses do not contain a complete body for decompression.
+        // Preserve their metadata so the caller can interpret it.
         if head || (connect && response.status().is_success()) || !carries_a_body(&response) {
             return Ok(response);
         }
@@ -728,10 +731,10 @@ struct ResponseNegotiation {
 }
 
 impl Server {
-    /// Picks the response's compression format before the inner handler runs.
+    /// Selects the response format before the inner handler runs.
     ///
-    /// A `HEAD` response carries no body to compress however its headers describe
-    /// one, so it is ruled out here rather than after the fact.
+    /// A `HEAD` response has no body to compress, even if its headers describe
+    /// one.
     fn choose_response_format(&self, request: &HttpRequest) -> ResponseNegotiation {
         let mut accept_encoding = HeaderMap::new();
         for value in request.headers().get_all(ACCEPT_ENCODING) {
@@ -763,16 +766,13 @@ impl Server {
             return Ok(response);
         }
 
-        // Do not hide an origin failure behind a negotiation response.
+        // Preserve an origin failure instead of replacing it with a negotiation response.
         if !response.status().is_success() {
             return Ok(response);
         }
 
-        // The body now depends on what the caller said it accepts, so any cache
-        // between here and them has to key on that. This holds even when
-        // nothing was compressed: the same request can still be answered
-        // differently, and a cache that missed it would serve a compressed body
-        // to a caller that never asked for one.
+        // Every negotiated response depends on `Accept-Encoding`, including an
+        // uncompressed response. A cache must keep these variants separate.
         mark_varies_on_accept_encoding(response.headers_mut());
 
         if !carries_a_body(&response) {
@@ -783,7 +783,7 @@ impl Server {
             return if negotiate::content_encoding_acceptable(&negotiation.accept_encoding, response.headers()) {
                 Ok(response)
             } else {
-                Ok(not_acceptable(config, response))
+                not_acceptable(response)
             };
         }
 
@@ -793,7 +793,7 @@ impl Server {
                 if negotiate::identity_acceptable(&negotiation.accept_encoding) {
                     return Ok(response);
                 }
-                return Ok(not_acceptable(config, response));
+                return not_acceptable(response);
             }
             negotiate::Selection::Identity => return Ok(response),
         };
@@ -815,7 +815,7 @@ impl Server {
         Ok(HttpRequest::from_parts(parts, body))
     }
 
-    /// Replaces `body` with one that compresses as it is read.
+    /// Compresses small buffered data directly and streams larger data.
     fn compress(&self, config: &Config, headers: &mut HeaderMap, body: HttpBody, format: Format) -> Result<HttpBody> {
         let Some(token) = format.content_encoding() else {
             return Ok(body);
@@ -827,18 +827,33 @@ impl Server {
             .map_err(invalid)?;
 
         headers.insert(CONTENT_ENCODING, HeaderValue::from_static(token));
-        // The compressed length is not known until the body has been read.
         headers.remove(CONTENT_LENGTH);
         headers.remove(CONTENT_DIGEST_HEADER);
         headers.remove(REPR_DIGEST_HEADER);
         weaken_etag(headers);
 
-        Ok(config.body_builder.rewrap(body, move |body| {
-            body::CompressionBody::new(body::CompressionChain::new(body).compress(compressor))
-        }))
+        body.map(|content| {
+            Ok(match content {
+                Content::Streaming(inner) => Content::Streaming(StreamingBody::new(body::CompressionBody::new(
+                    body::CompressionChain::new(inner).compress(compressor),
+                ))),
+                Content::Bytes(bytes) if bytes.len() <= MAX_DIRECT_COMPRESSION_INPUT_LEN => {
+                    let bytes = compressors::compress(bytes, compressor).map_err(body::to_http_error)?;
+                    headers.remove(TRANSFER_ENCODING);
+                    headers.insert(CONTENT_LENGTH, HeaderValue::from(bytes.len()));
+                    Content::Bytes(bytes)
+                }
+                Content::Bytes(bytes) => {
+                    let inner = StreamingBody::new(http_body_util::Full::new(bytes));
+                    Content::Streaming(StreamingBody::new(body::CompressionBody::new(
+                        body::CompressionChain::new(inner).compress(compressor),
+                    )))
+                }
+            })
+        })
     }
 
-    /// Applies the built-in exclusions and optional allowlist to one parsed content type.
+    /// Applies built-in exclusions and the optional allowlist.
     fn is_compressible(&self, headers: &HeaderMap) -> bool {
         let Some(value) = headers.get(CONTENT_TYPE) else {
             return self.compressible.is_none();
@@ -856,8 +871,8 @@ impl Server {
     }
 }
 
-fn not_acceptable(config: &Config, response: HttpResponse) -> HttpResponse {
-    let (mut parts, _) = response.into_parts();
+fn not_acceptable(response: HttpResponse) -> Result<HttpResponse> {
+    let (mut parts, body) = response.into_parts();
     parts.status = StatusCode::NOT_ACCEPTABLE;
     parts.headers.remove(CONTENT_ENCODING);
     parts.headers.remove(CONTENT_LENGTH);
@@ -867,29 +882,28 @@ fn not_acceptable(config: &Config, response: HttpResponse) -> HttpResponse {
     parts.headers.remove(CONTENT_DIGEST_HEADER);
     parts.headers.remove(REPR_DIGEST_HEADER);
 
-    HttpResponse::from_parts(parts, config.body_builder.empty())
+    let body = body.map(|_| Ok(Content::Bytes(BytesView::default())))?;
+    Ok(HttpResponse::from_parts(parts, body))
 }
 
-/// Settings shared by both roles.
+/// Configuration shared by both roles.
 #[derive(Debug, Clone)]
 struct Config {
     limits: DecompressorLimits,
     resources: Resources,
-    body_builder: HttpBodyBuilder,
     on_unsupported: UnsupportedCompression,
 }
 
 impl Config {
-    fn new(body_builder: HttpBodyBuilder) -> Self {
+    fn new() -> Self {
         Self {
             limits: default_decompressor_limits(),
-            resources: Resources::new(body_builder.memory()),
-            body_builder,
+            resources: Resources::default(),
             on_unsupported: UnsupportedCompression::default(),
         }
     }
 
-    /// Replaces `body` with one that decompresses as it is read.
+    /// Decompresses both buffered and streaming input through a streaming body.
     fn decompress(
         &self,
         headers: &mut HeaderMap,
@@ -898,8 +912,7 @@ impl Config {
         enabled: &[Format],
     ) -> Result<HttpBody> {
         let Some(formats) = self.resolve(headers, enabled)? else {
-            // Something here cannot be decompressed. `Content-Encoding` stays intact
-            // so the reader can still tell the body is compressed.
+            // Preserve `Content-Encoding` when decompression cannot proceed.
             return Ok(body);
         };
 
@@ -908,9 +921,7 @@ impl Config {
             return Ok(body);
         }
 
-        // Read before removing: this is the value the extension reports, and it
-        // is the sender's claim about the compressed body rather than anything the
-        // body itself knows.
+        // Record the sender's compressed length before removing the header.
         let content_length = headers
             .get(CONTENT_LENGTH)
             .and_then(|value| value.to_str().ok())
@@ -921,8 +932,7 @@ impl Config {
         headers.remove(CONTENT_DIGEST_HEADER);
         headers.remove(REPR_DIGEST_HEADER);
 
-        // Built before the body is touched, so an engine that cannot be
-        // configured fails the message rather than the body halfway through it.
+        // These formats use validated default decoder options.
         // `formats` is in header order, so decompression walks it backwards.
         let decompressors = formats
             .iter()
@@ -931,23 +941,21 @@ impl Config {
                 DecompressorBuilder::new()
                     .limits(self.limits)
                     .build_format(*format, &self.resources)
-                    .map_err(invalid)
+                    .expect("HTTP formats use validated default decoder options")
             })
-            .collect::<Result<SmallVec<[_; 2]>>>()?;
+            .collect::<SmallVec<[_; 2]>>();
 
-        // `rewrap` rather than `body`: the body already applies its own idle
-        // timeout to the frames coming off the transport, and timing the decompressed
-        // frames as well would trip on a body that decompresses many input frames
-        // into few output ones.
-        let decompressed = self.body_builder.rewrap(body, move |body| {
-            let mut chain = body::CompressionChain::new(body);
-
+        let decompressed = body.map(|content| {
+            let inner = match content {
+                Content::Streaming(inner) => inner,
+                Content::Bytes(bytes) => StreamingBody::new(http_body_util::Full::new(bytes)),
+            };
+            let mut chain = body::CompressionChain::new(inner);
             for decompressor in decompressors {
                 chain = chain.decompress(decompressor);
             }
-
-            body::CompressionBody::new(chain)
-        });
+            Ok(Content::Streaming(StreamingBody::new(body::CompressionBody::new(chain))))
+        })?;
 
         extensions.insert(OriginalBody { formats, content_length });
 
@@ -956,15 +964,14 @@ impl Config {
 
     /// Resolves `Content-Encoding` to the formats to strip, in header order.
     ///
-    /// Returns `None` when the header cannot be read, is malformed, or names a
-    /// compression format that is not enabled. In each case the body is left
-    /// exactly as it arrived, with its headers intact: a `Content-Encoding` that could not be
-    /// made sense of says nothing to act on, and is no reason to fail a message
-    /// that is otherwise fine.
+    /// Returns `None` if the header is unreadable or invalid. A disabled format
+    /// returns `None` under [`UnsupportedCompression::PassThrough`] and returns
+    /// `compression_unsupported` under [`UnsupportedCompression::Fail`]. When
+    /// this method returns `None`, the caller leaves the body and headers
+    /// unchanged.
     ///
-    /// Decompression is all-or-nothing. A partly decompressed body would need a rewritten
-    /// header to stay honest, and a stacked `Content-Encoding` is rare enough
-    /// not to be worth that.
+    /// Decompression applies every coding or none. Partial decompression can
+    /// require a rewritten `Content-Encoding`.
     fn resolve(&self, headers: &HeaderMap, enabled: &[Format]) -> Result<Option<Formats>> {
         let mut formats = Formats::new();
 
@@ -974,9 +981,8 @@ impl Config {
             };
 
             for token in value.split(',').map(str::trim) {
-                // RFC 9110 5.6.1.2 asks recipients to ignore empty members
-                // rather than reject the field: they come from headers being
-                // combined, not from the sender meaning anything by them.
+                // RFC 9110 section 5.6.1.2 requires recipients to ignore empty
+                // members that result from combined headers.
                 if token.is_empty() {
                     continue;
                 }
@@ -990,8 +996,7 @@ impl Config {
                 };
 
                 if !enabled.contains(&format) {
-                    // A recognisable compression format that is not enabled is a
-                    // different matter: the caller may have asked to hear about it.
+                    // The configured policy controls a known but disabled format.
                     return if self.on_unsupported == UnsupportedCompression::Fail {
                         Err(unsupported(token))
                     } else {
@@ -1017,9 +1022,13 @@ mod tests {
 
     #[test]
     fn raw_deflate_has_no_http_content_encoding() {
-        let layer = Compression::server(HttpBodyBuilder::new_fake());
+        let layer = Compression::server();
         let mut headers = HeaderMap::new();
-        let body = HttpBodyBuilder::new_fake().text("unchanged");
+        let body = http_extensions::HttpResponseBuilder::new_fake()
+            .text("unchanged")
+            .build()
+            .unwrap()
+            .into_body();
 
         let body = layer.role.compress(&layer.config, &mut headers, body, Format::Deflate).unwrap();
 

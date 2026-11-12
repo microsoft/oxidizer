@@ -919,9 +919,9 @@ impl<'de> Deserialize<'de> for SetCookieOwned {
         if source.values.is_empty() {
             return Ok(Self::new());
         }
-        SetCookie::owned(&source)
+        Ok(SetCookie::owned(&source)
             .map_err(D::Error::custom)?
-            .ok_or_else(|| D::Error::custom("nonempty Set-Cookie values must decode as present"))
+            .expect("SerdeSource contains a nonempty slice, so successful Set-Cookie decoding returns a value"))
     }
 }
 

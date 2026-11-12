@@ -61,7 +61,6 @@ rustls-pki-types = { workspace = true, features = ["alloc", "std"] }
 
 [dev-dependencies]
 insta = { workspace = true }
-mutants = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
 rstest = { workspace = true }
 # Tests always use both backends. This development dependency lets `cargo test`

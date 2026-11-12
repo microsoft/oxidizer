@@ -24,10 +24,12 @@ jobs:
     uses: ./.github/workflows/anvil-pr-impl.yml
     # A called workflow cannot elevate beyond its caller. The same caller handles
     # pull requests and merge groups so GitHub emits only one PR Job check.
-    # Write operations remain guarded to same-repository pull_request events in
-    # the reusable workflow; merge-group runs receive but do not use these scopes.
+    # Status/comment writes remain guarded to same-repository pull_request events;
+    # mutation groups also publish their SARIF results to code scanning.
     permissions:
       contents: read
+      actions: read
+      security-events: write
       # Publish supplemental failure commit statuses so the PR checks rollup identifies the
       # concrete failed Just recipe before the aggregate workflow job.
       statuses: write

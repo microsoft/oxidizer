@@ -59,6 +59,7 @@ fn recording_enabled_while_held_preserves_release_and_poison_events() {
     let mut recovered = write_lock.write_result().unwrap_err().into_inner();
     *recovered += 1;
     write_lock.clear_poison();
+    write_lock.clear_poison();
     drop(recovered);
     let write_events = finish_recording(write_id);
     assert_eq!(

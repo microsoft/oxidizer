@@ -15,7 +15,7 @@ use templated_uri::Uri;
 use crate::error_labels::LABEL_URI_MISSING;
 use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header};
 use crate::timeout::{BodyTimeout, ResponseTimeout};
-use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler, Result, StatusExt};
+use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler, Result, StatusExt};
 
 /// A builder for HTTP requests.
 ///
@@ -395,7 +395,7 @@ impl<R> HttpRequestBuilder<'_, R> {
     where
         B: http_body::Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        let body = self.body_builder.body(body, &HttpBodyOptions::default());
+        let body = self.body_builder.body(body);
         self.body(body)
     }
 
@@ -434,7 +434,7 @@ impl<R> HttpRequestBuilder<'_, R> {
     where
         S: Stream<Item = Result<BytesView>> + Send + 'static,
     {
-        let body = self.body_builder.stream(stream, &HttpBodyOptions::default());
+        let body = self.body_builder.stream(stream);
         self.body(body)
     }
 }
@@ -964,7 +964,7 @@ mod tests {
     use super::*;
     use crate::http_request_builder_ext::HttpRequestBuilderExt;
     use crate::testing::{SingleChunkBody, create_stream_body_from_chunks};
-    use crate::{FakeHandler, HeaderMapExt, HttpResponseBuilder, RequestExt};
+    use crate::{FakeHandler, HeaderMapExt, HttpBodyOptions, HttpResponseBuilder, RequestExt};
 
     #[test]
     fn new_with_borrowed_builder() {

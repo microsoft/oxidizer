@@ -31,7 +31,6 @@ struct ProbeProcessor {
     flushed: AtomicUsize,
 }
 
-#[mutants::skip]
 impl ProbeProcessor {
     fn new(initial_interest: bool) -> Self {
         Self {
@@ -48,7 +47,6 @@ impl ProbeProcessor {
     }
 }
 
-#[mutants::skip]
 impl EventProcessor for ProbeProcessor {
     fn is_interested(&self, description: &EventDescription) -> bool {
         description.name() == AcceptedEvent::DESCRIPTION.name() && *self.initialized_interest.get().unwrap_or(&self.initial_interest)
@@ -70,7 +68,6 @@ struct DropSampler {
     sampled: Arc<AtomicUsize>,
 }
 
-#[mutants::skip]
 impl EventSampler for DropSampler {
     fn sample(&self, _event: &EventSamplingContext<'_>) -> EventSamplingDecision {
         self.sampled.fetch_add(1, Ordering::Relaxed);
@@ -78,7 +75,6 @@ impl EventSampler for DropSampler {
     }
 }
 
-#[mutants::skip]
 fn leaf(processor: &Arc<ProbeProcessor>) -> Sink {
     Sink::builder("interest")
         .processors(vec![Arc::clone(processor) as Arc<dyn EventProcessor>])

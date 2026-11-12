@@ -37,7 +37,6 @@ const MAX_REFCOUNT: u32 = i32::MAX as u32;
 /// Aborts before the refcount exceeds [`MAX_REFCOUNT`].
 #[inline]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)] // Overflow branch needs `old >= i32::MAX`, which a test cannot produce.
 pub(crate) fn check_refcount_overflow(old: u32) {
     if old >= MAX_REFCOUNT {
         abort();
@@ -52,7 +51,6 @@ pub(crate) fn check_refcount_overflow(old: u32) {
 fn abort() -> ! {
     struct Bomb;
     impl Drop for Bomb {
-        #[cfg_attr(test, mutants::skip)] // Unreachable without a `> i32::MAX` refcount; aborts the process, so a test can neither trigger nor catch it.
         fn drop(&mut self) {
             panic!("plurality: refcount overflow");
         }

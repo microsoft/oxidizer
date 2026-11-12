@@ -413,7 +413,6 @@ mod tests {
     /// Collects attributes in a stable form for snapshots.
     ///
     /// The key sort removes differences in insertion order.
-    #[mutants::skip]
     fn sorted_attrs(attributes: &[KeyValue]) -> Vec<(String, String)> {
         let mut pairs: Vec<(String, String)> = attributes
             .iter()

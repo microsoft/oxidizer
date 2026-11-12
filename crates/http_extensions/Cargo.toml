@@ -64,6 +64,7 @@ test-util = ["tick/test-util"]
 [dependencies]
 bytes = { workspace = true, features = ["std"] }
 bytesbuf = { workspace = true, features = ["bytes-compat", "std"] }
+derive_more = { workspace = true, features = ["debug"] }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
@@ -88,7 +89,6 @@ futures = { workspace = true, features = ["std", "executor"] }
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
 layered = { path = "../layered", features = ["intercept", "dynamic-service"] }
-mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util", "app-err"] }
 serde = { workspace = true, features = ["derive"] }
 serde_core = { workspace = true }

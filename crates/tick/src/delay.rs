@@ -97,7 +97,6 @@ impl Delay {
 impl Future for Delay {
     type Output = ();
 
-    #[cfg_attr(test, mutants::skip)] // some mutations never finish and cause timeouts
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 

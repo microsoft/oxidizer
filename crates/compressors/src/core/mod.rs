@@ -231,13 +231,11 @@ mod tests {
             // No caller on the tested path asks for the byte counters. They exist only because
             // the trait requires them.
             #[cfg_attr(coverage_nightly, coverage(off))]
-            #[cfg_attr(test, mutants::skip)]
             fn total_in(&self) -> u64 {
                 0
             }
 
             #[cfg_attr(coverage_nightly, coverage(off))]
-            #[cfg_attr(test, mutants::skip)]
             fn total_out(&self) -> u64 {
                 0
             }
@@ -269,13 +267,11 @@ mod tests {
             // No caller on the tested path asks for the byte counters. They exist only because
             // the trait requires them.
             #[cfg_attr(coverage_nightly, coverage(off))]
-            #[cfg_attr(test, mutants::skip)]
             fn total_in(&self) -> u64 {
                 0
             }
 
             #[cfg_attr(coverage_nightly, coverage(off))]
-            #[cfg_attr(test, mutants::skip)]
             fn total_out(&self) -> u64 {
                 0
             }

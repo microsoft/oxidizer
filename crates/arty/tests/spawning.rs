@@ -106,6 +106,115 @@ async fn spawn_some_tasks(cx: Context) {
 }
 
 #[test]
+fn local_factory_runs_once_and_preserves_future_borrows() {
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let factory_calls = Arc::clone(&calls);
+            let owner = cx.thread().id();
+            let child = cx.scheduler().spawn(move |child| {
+                assert_eq!(factory_calls.fetch_add(1, Ordering::Relaxed), 0);
+                assert_eq!(child.thread().id(), owner);
+                async move {
+                    let value = Rc::new(42);
+                    let mut polls = 0;
+                    poll_fn(|cx| {
+                        polls += 1;
+                        if polls == 1 {
+                            cx.waker().wake_by_ref();
+                            Poll::Pending
+                        } else {
+                            Poll::Ready(())
+                        }
+                    })
+                    .await;
+                    (*value, polls, thread::current().id())
+                }
+            });
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+            assert_eq!(child.await.unwrap(), (42, 2, owner));
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn relocating_factories_remain_deferred_and_preserve_future_borrows() {
+    struct Probe {
+        relocations: Arc<AtomicUsize>,
+        factories: Arc<AtomicUsize>,
+        owner: thread::ThreadId,
+    }
+
+    impl ThreadAware for Probe {
+        fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+            assert_eq!(source.unwrap().id(), self.owner);
+            assert_eq!(destination.id(), self.owner);
+            assert_eq!(thread::current().id(), self.owner);
+            assert_eq!(self.relocations.fetch_add(1, Ordering::Relaxed), 0);
+        }
+    }
+
+    let create = |probe: Probe| {
+        assert_eq!(probe.relocations.load(Ordering::Relaxed), 1);
+        assert_eq!(probe.factories.fetch_add(1, Ordering::Relaxed), 0);
+        let owner = Rc::new(thread::current().id());
+        async move {
+            let mut polls = 0;
+            poll_fn(|cx| {
+                polls += 1;
+                if polls == 1 {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            })
+            .await;
+            drop(probe);
+            (polls, *owner)
+        }
+    };
+
+    let runtime = Runtime::builder()
+        .workers(arty::runtime::WorkersPolicy::exactly(1))
+        .build()
+        .unwrap();
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            for specific in [false, true] {
+                let relocations = Arc::new(AtomicUsize::new(0));
+                let factories = Arc::new(AtomicUsize::new(0));
+                let owner = cx.thread().id();
+                let probe = Probe {
+                    relocations: Arc::clone(&relocations),
+                    factories: Arc::clone(&factories),
+                    owner,
+                };
+                let child = if specific {
+                    cx.scheduler().spawn_at(cx.thread(), probe, create)
+                } else {
+                    cx.scheduler().spawn_anywhere(probe, create)
+                };
+                assert_eq!(relocations.load(Ordering::Relaxed), 0);
+                assert_eq!(factories.load(Ordering::Relaxed), 0);
+                assert_eq!(child.await.unwrap(), (2, owner));
+                assert_eq!(relocations.load(Ordering::Relaxed), 1);
+                assert_eq!(factories.load(Ordering::Relaxed), 1);
+            }
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+}
+
+#[test]
 #[cfg(not(miri))]
 fn test_worker_affinity() {
     if SystemHardware::current().processors().len() < 6 {
@@ -400,6 +509,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
     assert!(error.is_invalid_destination());
     assert!(!error.is_panic());
     assert!(!error.is_shutdown());
+    assert_eq!(error.shutdown_cause(), None);
     assert_eq!(error.to_string(), "target thread is not a worker of this runtime");
     assert!(error.into_panic().is_none());
     assert_eq!((relocations.load(Ordering::SeqCst), invocations.load(Ordering::SeqCst)), (0, 0));

@@ -797,7 +797,7 @@ maximize coverage percentages.
 | `cargo careful` | UB that a hardened `std` catches at runtime, on real threads that Miri does not execute |
 | Loom | Memory-ordering bugs in the refcount and cache protocols, by exhaustively permuting legal interleavings |
 | Bolero | Lifecycle invariant violations reachable only through long, unplanned operation sequences |
-| `cargo mutants` | Assertions that never actually constrain behavior — a test suite that passes with the logic removed |
+| `cargo gamma` | Assertions that never actually constrain behavior — a test suite that passes with the logic removed |
 | `alloc_tracker` | Silent regressions to global-allocator traffic, which no functional test would notice |
 
 **Miri** runs over the library and integration tests with all features in
@@ -831,11 +831,11 @@ forces the oversized-chunk route. Dedicated variants force LIFO drop
 ordering and interleave a `reset` between every operation, which is the
 cheapest way to reach the eviction-and-cache-pop orderings.
 
-**Mutation testing** runs diff-scoped on pull requests and in full on a
-nightly schedule. Paths where a mutant would turn a fallible reservation
-into an infinite refill spin carry explicit `mutants::skip` annotations with
-the reason recorded at the site, so surviving mutants indicate real gaps
-rather than known-unkillable ones.
+**Mutation testing** uses Gamma on changed lines in pull requests and across the
+workspace on the scheduled exhaustive tier. A mutant can turn a fallible
+reservation into an infinite refill loop. Review actual Gamma findings before
+adding narrow, compiler-checked source suppressions with a reason.
+Do not suppress a whole function or file to silence one finding.
 
 **Allocation tracking** pins the property the whole design exists to
 deliver. Using a counting global allocator, it warms an arena until the

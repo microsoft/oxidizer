@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::{Debug, Formatter};
-
 use http::{HeaderName, HeaderValue};
 
 #[cfg(any(feature = "json", test))]
@@ -29,7 +27,6 @@ impl HeadersBuilder for http::response::Builder {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // One match arm is for optimization, so mutation has no testable effect.
 pub(crate) fn try_content_length_header(builder: &mut impl HeadersBuilder, content_length: u64) -> bool {
     if content_length == 0 {
         try_header(builder, http::header::CONTENT_LENGTH, CONTENT_LENGTH_ZERO)
@@ -55,14 +52,10 @@ pub(crate) fn try_header(builder: &mut impl HeadersBuilder, key: HeaderName, val
 ///
 /// This works because the inner T can never be accessed from the holder. The
 /// only way to get the inner T is to consume the `SyncHolder<T>` itself.
+#[derive(derive_more::Debug)]
+#[debug("SyncHolder {{ type: {:?} }}", std::any::type_name::<T>())]
 pub(crate) struct SyncHolder<T> {
     value: T,
-}
-
-impl<T> Debug for SyncHolder<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SyncHolder").field("type", &std::any::type_name::<T>()).finish()
-    }
 }
 
 // Do not add methods that expose &T or &mut T references.

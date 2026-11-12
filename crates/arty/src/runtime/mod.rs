@@ -34,6 +34,9 @@
 //!
 //! [`Runtime::new`] and an unchanged [`RuntimeBuilder`] use these defaults:
 //!
+//! - The runtime name is `arty`. Async threads use `arty-async-<index>`.
+//!   Shared blocking pools use `arty-blocking-<thread index>`. Per-worker pools
+//!   also include the async worker index before the thread index.
 //! - [`WorkersPolicy::default`] starts one async worker.
 //! - Each async worker uses a 2 MiB stack. A larger `RUST_MIN_STACK` value
 //!   overrides this default.
@@ -58,6 +61,7 @@
 //! - [`MonitorPolicy`] selects the monitoring configuration.
 //!
 //! [`RuntimeBuilder::stack_size`] sets the async worker stack size.
+//! [`RuntimeBuilder::name`] sets the name used in async and blocking thread names.
 //! [`RuntimeBuilder::clock`] selects the runtime clock. See each linked API for
 //! configuration requirements, resource limits, and examples.
 //!
@@ -85,7 +89,7 @@
 //! the worker count, monitoring, and response to task panics. See [`main`](crate::main)
 //! and [`test`](crate::test) for the supported syntax and defaults.
 //!
-//! Use [`RuntimeBuilder`] for custom clocks, blocking pools, stack sizes,
+//! Use [`RuntimeBuilder`] for custom names, clocks, blocking pools, stack sizes,
 //! or [`WorkersPolicy::at_most`].
 //! Use the builder to receive configuration errors and choose when to stop the runtime.
 //!
@@ -131,6 +135,7 @@ pub(crate) mod dispatch;
 mod error;
 mod handle;
 mod shutdown;
+mod shutdown_cause;
 pub(crate) mod worker;
 mod workers;
 
@@ -145,6 +150,8 @@ pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
 pub(crate) use shutdown::{Shutdown, ShutdownStart, ShutdownState};
+#[doc(inline)]
+pub use shutdown_cause::ShutdownCause;
 #[doc(inline)]
 pub use workers::Workers;
 

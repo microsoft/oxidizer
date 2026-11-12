@@ -82,6 +82,16 @@ fn test_detailed_enrich() {
 }
 
 #[test]
+fn enrichment_preserves_successful_results() {
+    #[derive(ohno::Error)]
+    struct Error {
+        inner: OhnoCore,
+    }
+    let result: Result<String, Error> = Ok("value".to_owned());
+    assert_eq!(result.enrich("error context").unwrap(), "value");
+}
+
+#[test]
 fn test_with_enrich() {
     let error = OhnoCore::from("base").enrich_with(|| format!("computed: {}", 42));
 

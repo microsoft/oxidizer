@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Transport security behaviour over localhost.
+//! Tests transport security behavior over localhost.
 //!
-//! Covers how the configured certificate and hostname validation relaxations reach the live TLS
-//! handshake.
+//! Covers certificate and host-name validation in a live TLS handshake.
 
 #![cfg(windows)]
 

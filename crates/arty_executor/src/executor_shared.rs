@@ -6,20 +6,22 @@ use std::collections::VecDeque;
 use std::mem;
 #[cfg(feature = "inspection")]
 use std::ops::ControlFlow;
-#[cfg(feature = "inspection")]
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
 use std::rc::Rc;
 use std::task::Waker;
 use std::thread::ThreadId;
 
 use observed::Sink;
 use performables::sync::channel;
-use plurality::MultiPool;
+use plurality::{Arc as PoolArc, MultiPool};
 
-#[cfg(feature = "inspection")]
-use crate::discard_task_panic_payload;
+use crate::inspection::Inspector;
 use crate::wake::RemoteWake;
-use crate::{PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskOptions, WakeShared, WakeSignal, allocate_task};
+use crate::{
+    PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskMetadata, TypeErasedTask, WakeShared, WakeSignal, allocate_task,
+    discard_task_panic_payload,
+};
 
 /// Cloneable handle to state used by reentrant task submissions.
 #[derive(Clone, Debug)]
@@ -41,31 +43,6 @@ struct ExecutorSharedInner {
 }
 
 impl ExecutorShared {
-    #[cfg(feature = "inspection")]
-    pub(crate) fn add_inspected_task<F, R, T, I>(&self, future: F, options: TaskOptions, completion: T, inspector: I)
-    where
-        F: Future<Output = R> + 'static,
-        R: 'static,
-        T: TaskCompletion<R>,
-        I: crate::inspection::Inspector<F>,
-    {
-        if self.shutdown().is_triggered() {
-            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(inspector))) {
-                discard_task_panic_payload(panic);
-            }
-            completion.cancelled(self.shutdown().cause());
-            return;
-        }
-        self.register_task(crate::task::allocate_inspected_task(
-            &self.inner.task_storage,
-            future,
-            options,
-            self.inner.sink.clone(),
-            completion,
-            inspector,
-        ));
-    }
-
     #[cfg(feature = "inspection")]
     pub(crate) fn inspect_new_tasks(&self, mut visit: impl FnMut(&TaskHandle) -> ControlFlow<()>) -> Result<(), crate::InspectionError> {
         let tasks = self.inner.new_tasks.try_borrow().map_err(|_borrow| crate::InspectionError::Busy)?;
@@ -144,31 +121,42 @@ impl ExecutorShared {
         self.shutdown().is_triggered() && self.inner.task_count.get() == 0
     }
 
-    pub(crate) fn add_task<F, R, T>(&self, future: F, options: TaskOptions, completion: T)
+    pub(crate) fn add_task<F, T, I>(&self, future: F, metadata: TaskMetadata, completion: T, inspector: I)
     where
-        F: IntoFuture<Output = R> + 'static,
-        R: 'static,
-        T: TaskCompletion<R>,
+        F: IntoFuture + 'static,
+        F::Output: 'static,
+        T: TaskCompletion<F::Output>,
+        I: Inspector<F::IntoFuture>,
     {
         if self.shutdown().is_triggered() {
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(inspector))) {
+                discard_task_panic_payload(panic);
+            }
             completion.cancelled(self.shutdown().cause());
             return;
         }
         let future = future.into_future();
         if self.shutdown().is_triggered() {
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(inspector))) {
+                discard_task_panic_payload(panic);
+            }
             completion.cancelled(self.shutdown().cause());
             return;
         }
         self.register_task(allocate_task(
             &self.inner.task_storage,
             future,
-            options,
+            metadata,
             self.inner.sink.clone(),
             completion,
+            inspector,
         ));
     }
 
-    fn register_task(&self, task_handle: TaskHandle) {
+    #[inline]
+    fn register_task<T: TypeErasedTask + 'static>(&self, task: Pin<PoolArc<T>>) {
+        // Keep the concrete type at this boundary so task setup can use direct calls.
+        let task_handle = TaskHandle::new(task);
         let wake_signal = WakeSignal::new(self.inner.wake.clone(), task_handle.as_ptr());
 
         // SAFETY: The new pinned task has one live owner and no aliases have been exposed.

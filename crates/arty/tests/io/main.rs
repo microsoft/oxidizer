@@ -147,6 +147,7 @@ markers!(
     ReservedSecondary,
     ShutdownWhileWaiting,
     ShutdownTaskCleanup,
+    SystemBeforeSpawn,
 );
 
 #[derive(Clone, Copy)]
@@ -402,7 +403,7 @@ impl<M: Marker> IoContext for TestContext<M> {
     type ContextOptions = ScenarioOptions;
     type Driver = TestDriver<M>;
 
-    fn context(options: Self::ContextOptions) -> Self {
+    fn new(options: Self::ContextOptions) -> Self {
         options.context_constructions.fetch_add(1, Ordering::SeqCst);
         let action = options.context_action.lock().unwrap().take();
         match action {

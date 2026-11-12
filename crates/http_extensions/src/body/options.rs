@@ -7,9 +7,8 @@ use thread_aware::ThreadAware;
 
 /// Options for body behavior.
 ///
-/// Pass this value to [`HttpBodyBuilder::body`][super::HttpBodyBuilder::body]
-/// or [`HttpBodyBuilder::stream`][super::HttpBodyBuilder::stream].
-/// The builder applies body policies such as an idle timeout.
+/// Pass this value to [`HttpBodyBuilder::with_options`][super::HttpBodyBuilder::with_options].
+/// Bodies created by that builder use the merged policies.
 ///
 /// Use [`Default::default()`] when no special behavior is needed.
 ///
@@ -43,6 +42,9 @@ impl HttpBodyOptions {
     /// The timeout limits how long the consumer will wait between frames while
     /// polling the body. The timer resets every time the body yields a frame, so
     /// only idle periods (no progress) count toward the timeout.
+    /// After [`HttpBody::map`][super::HttpBody::map], source frames reset the
+    /// timer for a streaming source. Buffered bodies do not activate a timeout,
+    /// including when mapping converts them to streaming content.
     #[must_use]
     pub const fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
@@ -52,7 +54,8 @@ impl HttpBodyOptions {
     /// Sets the maximum buffered payload size.
     ///
     /// [`HttpBody::into_buffered`][super::HttpBody::into_buffered] returns an error
-    /// if the body contains more bytes than this limit.
+    /// if streaming content contains more bytes than this limit.
+    /// Buffered bodies keep this limit for later streaming transformations.
     #[must_use]
     pub const fn buffer_limit(mut self, limit: usize) -> Self {
         self.buffer_limit = Some(limit);
@@ -62,7 +65,6 @@ impl HttpBodyOptions {
     /// Merges `self` with `other`.
     ///
     /// A value from `self` takes precedence.
-    #[cfg_attr(test, mutants::skip)] // causes test timeouts
     pub(crate) fn merge(&self, other: &Self) -> Self {
         Self {
             timeout: self.timeout.or(other.timeout),

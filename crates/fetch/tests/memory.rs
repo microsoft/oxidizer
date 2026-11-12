@@ -78,9 +78,7 @@ impl Service<HttpRequest> for InMemoryTransport {
     async fn execute(&self, input: HttpRequest) -> Self::Out {
         assert_eq!(BytesView::try_from(input.into_body()).unwrap(), b"request payload");
         let frames = [b"reply " as &[u8], b"payload"].map(|data| Ok(BytesView::copied_from_slice(data, &self.body_builder)));
-        Ok(HttpResponse::new(
-            self.body_builder.stream(futures::stream::iter(frames), &HttpBodyOptions::default()),
-        ))
+        Ok(HttpResponse::new(self.body_builder.stream(futures::stream::iter(frames))))
     }
 }
 

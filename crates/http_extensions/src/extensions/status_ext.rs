@@ -139,7 +139,6 @@ impl StatusExt for StatusCode {
         if self.is_success() { Ok(self) } else { Err(factory(self)) }
     }
 
-    #[cfg_attr(test, mutants::skip)] // This mutation causes test timeouts. Other tests cover this function.
     fn recovery(&self) -> RecoveryInfo {
         match self {
             s if s >= &Self::INTERNAL_SERVER_ERROR => RecoveryInfo::retry(),

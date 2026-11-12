@@ -7,7 +7,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::thread;
 
-use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, discard_task_panic_payload};
+use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskPanicPayload, discard_task_panic_payload};
 
 /// Supplies completion callbacks without a result receiver.
 ///
@@ -33,8 +33,8 @@ fn main() {
     // The task sets this signal when the application can start shutdown.
     let shutdown_signal = Rc::new(Cell::new(false));
 
-    tasks.add(
-        {
+    tasks
+        .task({
             let shutdown_signal = Rc::clone(&shutdown_signal);
 
             async move {
@@ -42,10 +42,8 @@ fn main() {
 
                 shutdown_signal.set(true);
             }
-        },
-        TaskOptions::default(),
-        DiscardCompletion,
-    );
+        })
+        .register(DiscardCompletion);
 
     let mut shutdown_started = false;
 

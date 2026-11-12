@@ -9,7 +9,7 @@ use http::header::CONTENT_TYPE;
 use http::{HeaderName, HeaderValue, Version};
 
 use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header};
-use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpResponse, Result};
+use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpResponse, Result};
 
 /// A builder for HTTP responses.
 ///
@@ -476,7 +476,7 @@ impl HttpResponseBuilder<'_> {
     where
         B: http_body::Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        let body = self.body_builder.body(body, &HttpBodyOptions::default());
+        let body = self.body_builder.body(body);
         self.body(body)
     }
 
@@ -515,7 +515,7 @@ impl HttpResponseBuilder<'_> {
     where
         S: Stream<Item = Result<BytesView>> + Send + 'static,
     {
-        let body = self.body_builder.stream(stream, &HttpBodyOptions::default());
+        let body = self.body_builder.stream(stream);
         self.body(body)
     }
 }
@@ -529,8 +529,8 @@ mod tests {
     use serde::Serialize;
 
     use super::*;
-    use crate::HeaderMapExt;
     use crate::testing::{SingleChunkBody, create_stream_body_from_chunks};
+    use crate::{HeaderMapExt, HttpBodyOptions};
 
     #[test]
     fn new_with_borrowed_builder() {
