@@ -86,11 +86,12 @@ mod tests {
 
         assert_eq!(
             (
+                decoded.session_id(),
                 decoded.native.as_deref(),
                 decoded.mimalloc,
                 decoded.metadata.telemetry_schema_version
             ),
-            (Some(&native), None, snapshot::SCHEMA_VERSION)
+            (native.session_id, Some(&native), None, snapshot::SCHEMA_VERSION)
         );
     }
 

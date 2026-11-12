@@ -376,6 +376,38 @@ mod tests {
     }
 
     #[test]
+    fn handed_off_successor_executes_its_action_and_releases_the_value_lease() {
+        unsafe fn increment(_node: *mut Node<usize>, value: *mut usize) {
+            // SAFETY: The handed-off head holds the fixture's exclusive value lease.
+            unsafe { *value += 1 };
+        }
+
+        let shared = Combining::new(0_usize);
+        let mut predecessor = Node {
+            status: AtomicU32::new(DONE),
+            next: AtomicPtr::new(std::ptr::null_mut()),
+            invoke: increment,
+        };
+        let mut successor = Node {
+            status: AtomicU32::new(HEAD),
+            next: AtomicPtr::new(std::ptr::null_mut()),
+            invoke: increment,
+        };
+        shared.last.store(&raw mut predecessor, Ordering::Release);
+        shared.flag.store(true, Ordering::Release);
+
+        // SAFETY: Both stationary nodes stay live throughout attach. HEAD
+        // transfers the held flag's value lease to this single-threaded caller.
+        unsafe { shared.attach(&raw mut successor) };
+
+        assert_eq!(predecessor.next.load(Ordering::Acquire), &raw mut successor);
+        assert_eq!(successor.status.load(Ordering::Acquire), DONE);
+        assert!(shared.last.load(Ordering::Acquire).is_null());
+        assert!(!shared.flag.load(Ordering::Acquire));
+        assert_eq!(shared.with(|value| *value), 1);
+    }
+
+    #[test]
     fn contended_combining_executes_every_action_once() {
         let shared = Arc::new(Combining::new(0usize));
         let barrier = Arc::new(Barrier::new(16));
