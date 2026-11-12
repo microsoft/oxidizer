@@ -8,7 +8,7 @@ use thread_aware::Thread;
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, Panic, PanicAction};
+use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, LocalHookGuard, Panic, PanicAction};
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
@@ -19,13 +19,14 @@ thread_local! {
     static PANIC_HOOKS: RefCell<Option<Vec<ErasedHookFn<Panic>>>> = const { RefCell::new(None) };
 }
 
-const LOCAL_PANIC_HOOK: LocalHook<Panic> = LocalHook { hooks: &PANIC_HOOKS };
+static LOCAL_PANIC_HOOK: LocalHook<Panic> = LocalHook { hooks: &PANIC_HOOKS };
 
 /// Asynchronous worker state that remains attached throughout thread teardown.
 #[derive(Debug)]
 pub(crate) struct LocalWorker {
     scheduler: Option<SchedulerContext>,
     driver_host: Option<RuntimeDriverHost>,
+    panic_hooks: Option<LocalHookGuard<Panic>>,
 }
 
 impl LocalWorker {
@@ -33,6 +34,7 @@ impl LocalWorker {
         Self {
             scheduler: None,
             driver_host: None,
+            panic_hooks: None,
         }
     }
 
@@ -58,11 +60,12 @@ impl LocalWorker {
             executor_shutdown,
             results,
         };
-        LOCAL_PANIC_HOOK.initialize();
+        let panic_hooks = LOCAL_PANIC_HOOK.initialize();
         Self::with_current_mut(|current| {
             let current = current.expect("task worker startup attaches its local worker before installing the scheduler");
             assert!(current.scheduler.is_none(), "a scheduler is already installed on this task worker");
             current.scheduler = Some(scheduler);
+            current.panic_hooks = Some(panic_hooks);
         });
         for hook in hook_registrations {
             Self::install_hook(hook, None);
@@ -114,9 +117,13 @@ impl LocalWorker {
 
     #[cfg_attr(test, mutants::skip)] // Retaining direct registration during executor teardown can strand shutdown.
     pub(super) fn clear_scheduler() {
-        let scheduler = Self::with_current_mut(|current| current.and_then(|current| current.scheduler.take()));
+        let (scheduler, panic_hooks) = Self::with_current_mut(|current| {
+            current
+                .map(|current| (current.scheduler.take(), current.panic_hooks.take()))
+                .unwrap_or_default()
+        });
         drop(scheduler);
-        LOCAL_PANIC_HOOK.clear();
+        drop(panic_hooks);
     }
 
     pub(crate) fn install_driver_host(driver_host: RuntimeDriverHost) {
