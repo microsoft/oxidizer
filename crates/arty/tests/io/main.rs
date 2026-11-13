@@ -565,7 +565,7 @@ fn runtime(workers: usize) -> Runtime {
 #[test]
 #[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
 fn io_debug_snapshot() {
-    let runtime = runtime(1);
+    let runtime = runtime(2);
     let io = runtime
         .scheduler()
         .spawn_anywhere((), |cx, ()| async move { cx.io().clone() })
@@ -573,18 +573,13 @@ fn io_debug_snapshot() {
         .unwrap();
     runtime.stop().unwrap();
 
-    let snapshot = if cfg!(debug_assertions) {
-        "io_debug_snapshot"
-    } else {
-        "io_debug_snapshot_release"
-    };
     insta::with_settings!({filters => [
         (r"0x[0-9a-fA-F]+", "[address]"),
         (r"ThreadId\(\s*\d+,?\s*\)", "ThreadId([id])"),
         (r"Owner \{\s*id: \d+,\s*\}", "Owner { id: [id] }"),
         (r"NumaNode\(\s*\d+,?\s*\)", "NumaNode([node])"),
     ]}, {
-        insta::assert_debug_snapshot!(snapshot, io);
+        insta::assert_debug_snapshot!("io_debug_snapshot", io);
     });
 }
 

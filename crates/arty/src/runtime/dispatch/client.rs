@@ -3,6 +3,7 @@
 
 //! Runtime submission and control capabilities.
 
+use std::fmt;
 use std::thread::ThreadId;
 
 use arty_executor::ShutdownCause;
@@ -17,7 +18,7 @@ use crate::task::Context;
 use crate::task::handle::JoinHandle;
 
 /// Cheap shared access to one runtime's routing and shutdown state.
-#[derive(Clone, derive_more::Debug)]
+#[derive(Clone)]
 pub(crate) struct DispatcherClient {
     core: Arc<DispatcherCore>,
 }
@@ -98,6 +99,14 @@ impl DispatcherClient {
 
     pub(crate) fn stop(&self, cause: impl Into<ShutdownCause>) -> ShutdownCause {
         self.core.stop_inner(cause.into())
+    }
+}
+
+impl fmt::Debug for DispatcherClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DispatcherClient")
+            .field("worker_count", &self.workers().into_iter().len())
+            .finish_non_exhaustive()
     }
 }
 
