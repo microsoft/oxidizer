@@ -3,7 +3,7 @@
 
 //! Authoritative container allocation projection regressions.
 
-use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
+use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind, Reallocation};
 use seismograph::recorder::event::{Address, Event, EventKind, EventPayload, EventSequence, EventTimestamp, Events};
 use seismograph::recorder::thread::{ThreadId, ThreadLog};
 
@@ -30,8 +30,187 @@ fn event(kind: EventKind, id: u64, thread: u64, actor: u64) -> Event {
 fn ordered(mut events: Vec<Event>) -> Vec<Event> {
     for (index, event) in events.iter_mut().enumerate() {
         event.timestamp = EventTimestamp::from_ticks(index as u64);
+        event.sequence = EventSequence::new(index as u64 + 1);
     }
     events
+}
+
+fn resize(old: u64, new: u64, old_size: u64, new_size: u64, thread: u64) -> Event {
+    Event {
+        kind: EventKind::Reallocation,
+        payload: EventPayload::Reallocation(Reallocation {
+            allocation_id: AllocationId::new(old),
+            heap_id: HeapId::new(19),
+            heap_kind: HeapKind::General,
+            old_address: Address::new(old),
+            new_address: Address::new(new),
+            old_size,
+            new_size,
+            alignment: 8,
+        }),
+        ..event(EventKind::Allocation, old, thread, 0)
+    }
+}
+
+#[test]
+fn moving_resize_preserves_its_origin_without_consuming_a_reused_old_address() {
+    let old = 0x1234;
+    let new = 0x2000;
+    let mut moved_free = event(EventKind::Deallocation, new, 9, 0);
+    if let EventPayload::Allocation(allocation) = &mut moved_free.payload {
+        allocation.address = Address::new(new);
+        allocation.size = 4096;
+    }
+    let input = Events {
+        events: ordered(vec![
+            event(EventKind::Allocation, old, 7, 0),
+            resize(old, new, 17, 4096, 9),
+            event(EventKind::Allocation, old, 7, 0),
+            moved_free,
+            event(EventKind::Deallocation, old, 7, 0),
+        ]),
+        ..Events::default()
+    };
+
+    let projected = seismograph_rallocator::events::callers(&input);
+    let events = &projected.events;
+
+    assert_eq!(
+        (
+            events[0].allocation_id,
+            events[1].allocation_id,
+            events[3].allocation_id,
+            events[1].thread_log_id,
+            events[1].event_thread_id,
+            events[0].resized_size,
+        ),
+        (
+            events[0].allocation_id,
+            events[0].allocation_id,
+            events[0].allocation_id,
+            7,
+            9,
+            Some(4096),
+        )
+    );
+    assert_eq!(events[2].allocation_id, events[4].allocation_id);
+    assert_ne!(events[0].allocation_id, events[2].allocation_id);
+    assert_eq!(events[1].kind, seismograph_rallocator::callers::EventKind::Reallocated);
+    assert_eq!(
+        events[1].reallocation,
+        Some(seismograph_rallocator::callers::Resize {
+            old_address: old,
+            old_size: 17,
+        })
+    );
+}
+
+#[test]
+fn in_place_resizes_update_retained_size_without_inventing_allocation_counts() {
+    let input = Events {
+        events: ordered(vec![
+            event(EventKind::Allocation, 0x1234, 7, 0),
+            resize(0x1234, 0x1234, 17, 128, 9),
+            resize(0x1234, 0x1234, 128, 64, 9),
+        ]),
+        threads: vec![ThreadLog {
+            thread_id: ThreadId::new(7),
+            name: "origin".into(),
+            total_events: 1,
+            lost_events: 0,
+        }],
+        ..Events::default()
+    };
+
+    let projected = seismograph_rallocator::events::callers(&input);
+
+    assert_eq!(
+        (
+            projected.threads[0].allocated_histogram.iter().sum::<u64>(),
+            projected.threads[0].live_histogram[7],
+            projected.events[0].resized_size,
+        ),
+        (1, 1, Some(64))
+    );
+    assert!(
+        projected
+            .events
+            .iter()
+            .all(|event| event.allocation_id == projected.events[0].allocation_id)
+    );
+}
+
+#[test]
+fn orphan_resize_keeps_an_unknown_origin_when_its_new_storage_is_freed() {
+    let mut free = event(EventKind::Deallocation, 0x2000, 9, 0);
+    if let EventPayload::Allocation(allocation) = &mut free.payload {
+        allocation.address = Address::new(0x2000);
+        allocation.size = 4096;
+    }
+    let input = Events {
+        events: ordered(vec![resize(0x1234, 0x2000, 17, 4096, 7), free]),
+        ..Events::default()
+    };
+
+    let projected = seismograph_rallocator::events::callers(&input);
+
+    assert_eq!(projected.events[0].allocation_id, projected.events[1].allocation_id);
+    assert!(projected.events.iter().all(|event| !event.allocation_recorded));
+}
+#[test]
+fn stable_ids_follow_chronological_moves_while_preserving_input_and_recorder_identity() {
+    let mut first_resize = resize(0x1234, 0x2000, 17, 32, 9);
+    let mut second_resize = resize(0x2000, 0x3000, 32, 80, 9);
+    for event in [&mut first_resize, &mut second_resize] {
+        let EventPayload::Reallocation(resize) = &mut event.payload else {
+            unreachable!();
+        };
+        resize.allocation_id = AllocationId::new(55);
+    }
+    let mut free = event(EventKind::Deallocation, 55, 9, 90);
+    if let EventPayload::Allocation(allocation) = &mut free.payload {
+        allocation.address = Address::new(0x3000);
+        allocation.size = 80;
+    }
+    let mut stale_free = event(EventKind::Deallocation, 55, 9, 90);
+    if let EventPayload::Allocation(allocation) = &mut stale_free.payload {
+        allocation.address = Address::new(0x2000);
+        allocation.size = 32;
+    }
+    let chronological = ordered(vec![
+        event(EventKind::Allocation, 55, 7, 70),
+        first_resize,
+        second_resize,
+        free,
+        stale_free,
+    ]);
+    let input = Events {
+        events: [3, 2, 0, 1, 4].map(|index| chronological[index].clone()).into(),
+        ..Events::default()
+    };
+
+    let projected = seismograph_rallocator::events::callers(&input);
+    let events = &projected.events;
+
+    assert_eq!(
+        events.iter().map(|event| event.kind).collect::<Vec<_>>(),
+        [
+            seismograph_rallocator::callers::EventKind::Deallocated,
+            seismograph_rallocator::callers::EventKind::Reallocated,
+            seismograph_rallocator::callers::EventKind::Allocated,
+            seismograph_rallocator::callers::EventKind::Reallocated,
+            seismograph_rallocator::callers::EventKind::Deallocated,
+        ]
+    );
+    assert!(events[..4].iter().all(|event| {
+        event.allocation_id == events[2].allocation_id
+            && event.thread_log_id == 7
+            && event.allocation_recorded
+            && event.resized_size == Some(80)
+    }));
+    assert_eq!((events[0].recorder_thread_id, events[0].event_thread_id), (9, 90));
+    assert_ne!(events[0].allocation_id, events[4].allocation_id);
+    assert!(!events[4].allocation_recorded);
 }
 
 #[test]

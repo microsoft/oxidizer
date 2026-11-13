@@ -30,6 +30,7 @@ min-lines-percent = 0
 [[bin]]
 name = "seismograph"
 path = "src/main.rs"
+doc = false
 
 [dependencies]
 chrono = { workspace = true, features = ["clock"] }
@@ -37,15 +38,14 @@ clap = { workspace = true, features = ["color", "derive", "error-context", "help
 crossterm.workspace = true
 performables = { workspace = true, features = ["seismograph"] }
 ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
-same-file.workspace = true
 seismograph.workspace = true
 seismograph_protocol.workspace = true
 seismograph_rallocator.workspace = true
 seismograph_runtime.workspace = true
 
 [dev-dependencies]
-seismograph = { path = "../seismograph", features = ["test-util"] }
 seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
+tempfile.workspace = true
 
 # >>> anvil-managed: anvil-lints
 [lints]

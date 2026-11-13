@@ -144,7 +144,7 @@ impl Family {
     fn of(kind: ThreadOperationKind) -> Self {
         use ThreadOperationKind as K;
         match kind {
-            K::Allocation | K::Deallocation => Self::Allocation,
+            K::Allocation | K::Reallocation | K::Deallocation => Self::Allocation,
             K::ArcCreate | K::ArcClone | K::ArcDeref | K::ArcDrop | K::ArcRelocate => Self::Arc,
             K::MutexAccess | K::MutexContention | K::MutexRelease => Self::Mutex,
             K::RwLockReadAccess
@@ -169,7 +169,9 @@ impl Family {
 
     const fn identity_note(self) -> &'static str {
         match self {
-            Self::Allocation => "Stable allocation ID and matching heap/address/layout; freeing actor is not allocation ownership",
+            Self::Allocation => {
+                "Retained allocation lifetimes include resizes. Gaps can hide endpoints. The freeing actor is not the allocation owner."
+            }
             Self::Arc => "Arc address observations split at retained create/drop boundaries; missing lifetimes may hide address reuse",
             Self::UnknownLock => "Lock address observations; lock family and object lifetime are not recorded",
             _ => "Same-family address observations, not a guaranteed single object lifetime; address reuse may be present",
@@ -186,7 +188,18 @@ struct ObjectKey {
 }
 
 impl TaskEventsSnapshot {
+    #[cfg(test)]
     pub(super) fn from_events(events: &Events, addresses: &[AddressLookup], source: Option<&Snapshot>) -> Self {
+        let identities = crate::allocation_identities::for_capture(events);
+        Self::from_events_with_identities(events, addresses, source, identities.as_ref())
+    }
+
+    pub(super) fn from_events_with_identities(
+        events: &Events,
+        addresses: &[AddressLookup],
+        source: Option<&Snapshot>,
+        identities: Option<&crate::allocation_identities::Identities>,
+    ) -> Self {
         static OPERATIONS: LazyLock<HashMap<EventKind, ThreadOperationKind>> =
             LazyLock::new(|| ThreadOperationKind::ALL.into_iter().map(|kind| (kind.event_kind(), kind)).collect());
         let evidence = attribution::infer(events, source);
@@ -203,10 +216,13 @@ impl TaskEventsSnapshot {
             let actor = evidence[index];
             let boundary = actor.boundary.map_or(&[][..], |boundary| boundary.stack(&events.events));
             let frames = stacks.get(&event.call_stack, boundary, operation, actor.task.is_some());
+            let allocation_identity = identities
+                .and_then(|identities| identities.get(&(event.thread_id.get(), event.sequence.get())))
+                .copied();
             let key = ObjectKey {
                 family: Family::of(operation),
-                id: id.get(),
-                allocation: event.allocation().map(|allocation| {
+                id: allocation_identity.unwrap_or_else(|| id.get()),
+                allocation: event.allocation().filter(|_| allocation_identity.is_none()).map(|allocation| {
                     (
                         allocation.heap_id.get(),
                         allocation.address.get(),
@@ -328,6 +344,20 @@ impl TaskEventsSnapshot {
 
 fn detail(event: &Event) -> String {
     match event.payload {
+        EventPayload::Reallocation(resize) => format!(
+            "resize 0x{:x} / {} B -> 0x{:x} / {} B align={} heap={} ({})",
+            resize.old_address.get(),
+            resize.old_size,
+            resize.new_address.get(),
+            resize.new_size,
+            resize.alignment,
+            resize.heap_id.get(),
+            if resize.old_address == resize.new_address {
+                "in place"
+            } else {
+                "moved"
+            },
+        ),
         EventPayload::Allocation(allocation) => format!(
             "requested={} B align={} address=0x{:x} heap={} allocator-thread={}{}",
             allocation.size,

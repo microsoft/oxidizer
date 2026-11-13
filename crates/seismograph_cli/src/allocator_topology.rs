@@ -3,6 +3,10 @@
 
 //! Private presentation regression fixtures, never decoded from native sources.
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "These kinds are constructed only by terminal presentation fixtures")
+)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum SliceKind {
     #[default]

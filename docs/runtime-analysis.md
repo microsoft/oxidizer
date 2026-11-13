@@ -95,18 +95,22 @@ The following package-level exclusions are intentional:
 - `rest_over_grpc` keeps its runtime transcoding tests under Miri, but omits
   build-time descriptor and code-generation unit tests. The build half is safe
   Rust and remains covered by native tests and `cargo careful`.
-- `rallocator` uses v4 backends for Windows x64/ARM64 MSVC, Linux
+- `rallocator` provides Rust snmalloc and mimalloc backends for Windows x64/ARM64 MSVC, Linux
   x64/AArch64 with 4-KiB kernel pages, and macOS 14.4+ on x64/native ARM64
-  with 4/16-KiB pages respectively. Darwin reclamation is lazy; zeroed
-  allocations are explicitly cleared rather than relying on recommit.
+  with 4/16-KiB pages respectively. Darwin reclamation is lazy.
+  The backends clear dirty reused blocks for zeroed requests rather than relying on recommit.
   Its native allocator and event-bridge suites run on all three platforms,
   including Linux
   runtime analysis through `cargo careful`. Its manifest explicitly excludes
   Miri because native VM reservations and CPU prefetch instructions have no
-  interpreter backend. Miri is not a supported allocator backend; the old v1
-  Miri backend and telemetry test binaries are removed.
+  interpreter backend. The portable mimalloc bitmap, publication-copy, and shared
+  resize-ordering tests can run directly under Miri. Run the cached-TLS lifetime
+  test under Linux Miri. Its Windows path reads native thread information through
+  assembly, which Miri cannot interpret. Native VM scenarios retain explicit
+  ignores and run natively and under `cargo careful`.
+  Miri is not a supported allocator backend.
   `seismograph` retains its independent portable runtime-analysis coverage,
-  and the schema-3 native owner/backend inventory codec in
+  and the current native owner/backend inventory codec in
   `seismograph_rallocator` is platform-independent, as is its separate
   allocation-event projection. Neither requires the native allocator backend
   to run under Miri.

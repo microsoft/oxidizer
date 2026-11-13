@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 mod app;
+#[cfg(test)]
+mod backend_tests;
 mod client;
 mod data;
 mod filter;
@@ -10,6 +12,7 @@ mod filter_ui;
 mod help;
 mod help_content;
 mod live_activity;
+mod mimalloc_ui;
 mod mouse;
 mod native_ui;
 mod offline;

@@ -5,9 +5,9 @@
 
 #![cfg(test)]
 
-use std::alloc::{GlobalAlloc, Layout};
+use std::alloc::{Layout, alloc, alloc_zeroed, dealloc, realloc};
 
-use rallocator::Rallocator;
+rallocator::rallocator!();
 
 struct GammaSurvivorAllocation {
     pointer: *mut u8,
@@ -19,10 +19,10 @@ impl GammaSurvivorAllocation {
         let layout = Layout::from_size_align(size, alignment).expect("test callers provide nonzero sizes and power-of-two alignments");
         let pointer = if zeroed {
             // SAFETY: The layout is valid and nonzero; this handle owns the resulting allocation.
-            unsafe { Rallocator.alloc_zeroed(layout) }
+            unsafe { alloc_zeroed(layout) }
         } else {
             // SAFETY: The layout is valid and nonzero; this handle owns the resulting allocation.
-            unsafe { Rallocator.alloc(layout) }
+            unsafe { alloc(layout) }
         };
         assert!(!pointer.is_null());
         assert_eq!(pointer.addr() % alignment, 0);
@@ -42,7 +42,7 @@ impl GammaSurvivorAllocation {
     fn resize(&mut self, size: usize) {
         let layout = Layout::from_size_align(size, self.layout.align()).expect("test resize sizes fit the handle's valid alignment");
         // SAFETY: This handle owns the live pointer for its exact old layout; the new layout is valid and nonzero.
-        let pointer = unsafe { Rallocator.realloc(self.pointer, self.layout, size) };
+        let pointer = unsafe { realloc(self.pointer, self.layout, size) };
         assert!(!pointer.is_null());
         self.pointer = pointer;
         self.layout = layout;
@@ -52,7 +52,7 @@ impl GammaSurvivorAllocation {
 impl Drop for GammaSurvivorAllocation {
     fn drop(&mut self) {
         // SAFETY: The handle returns its unique live allocation once with its current exact layout.
-        unsafe { Rallocator.dealloc(self.pointer, self.layout) };
+        unsafe { dealloc(self.pointer, self.layout) };
     }
 }
 
@@ -121,7 +121,7 @@ fn gamma_survivor_cross_thread_ownership_returns_keep_live_peers_intact() {
                     let bytes = unsafe { std::slice::from_raw_parts(pointer, layout.size()) };
                     assert!(bytes.iter().all(|&byte| byte == expected));
                     // SAFETY: This worker owns this unique live allocation and its exact layout.
-                    unsafe { Rallocator.dealloc(pointer, layout) };
+                    unsafe { dealloc(pointer, layout) };
                 }
             });
         }

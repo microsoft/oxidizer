@@ -7,7 +7,7 @@ use seismograph_protocol::message::{RecorderStatistics, RecordingConfiguration, 
 use seismograph_protocol::{Error, read_request, read_response, write_request, write_response};
 
 #[test]
-fn cache_recording_preserves_each_byte_and_does_not_use_the_legacy_configuration() {
+fn cache_recording_preserves_each_byte_independently_of_the_full_configuration() {
     let policy = RecordingPolicy {
         enabled: false,
         capture_backtraces: true,
@@ -18,7 +18,7 @@ fn cache_recording_preserves_each_byte_and_does_not_use_the_legacy_configuration
     write_request(&mut request, 0x0807_0605_0403_0201, &Request::SetCacheRecording(policy)).unwrap();
     assert_eq!(
         request,
-        [b"SGMP".as_slice(), &[8, 0, 5, 0, 1, 2, 3, 4, 5, 6, 7, 8, 6, 0, 0, 0], &payload,].concat()
+        [b"SGMP".as_slice(), &[9, 0, 5, 0, 1, 2, 3, 4, 5, 6, 7, 8, 6, 0, 0, 0], &payload,].concat()
     );
     assert_eq!(
         read_request(&mut request.as_slice()).unwrap(),
@@ -61,7 +61,7 @@ fn recorder_statistics_use_all_eight_bytes_of_each_counter_in_order() {
     };
     let mut bytes = Vec::new();
     write_response(&mut bytes, 17, &Response::RecorderStatistics(statistics)).unwrap();
-    assert_eq!(&bytes[..20], b"SGMP\x08\0\x68\0\x11\0\0\0\0\0\0\0\x52\0\0\0");
+    assert_eq!(&bytes[..20], b"SGMP\x09\0\x68\0\x11\0\0\0\0\0\0\0\x58\0\0\0");
     let expected = [
         1, 2, 3, 4, 5, 6, 7, 8, 17, 18, 19, 20, 21, 22, 23, 24, 33, 34, 35, 36, 37, 38, 39, 40, 49, 50, 51, 52, 53, 54, 55, 56, 65, 66, 67,
         68, 69, 70, 71, 72, 81, 82, 83, 84, 85, 86, 87, 88,

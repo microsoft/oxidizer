@@ -8,7 +8,8 @@ use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders};
 
 use super::app::{
-    App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, TaskEventsFocus, TaskHistogram, ThreadFocus,
+    AllocatorBackend, App, CacheFocus, HeapFocus, IoFocus, MonitorTab, PrimitiveFocus, RuntimeFocus, Screen, TaskEventsFocus,
+    TaskHistogram, ThreadFocus,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -152,10 +153,18 @@ impl App {
             target,
             ListTarget::HeapBuckets | ListTarget::NativeSubsystems | ListTarget::NativeClasses | ListTarget::NativeMemory
         ) {
-            self.heap_view.native.click(target, index);
-            self.heap_view
-                .native
-                .reconcile(snapshot.and_then(|snapshot| snapshot.native.as_deref()));
+            if self.heap_view.backend(snapshot) == AllocatorBackend::Mimalloc
+                && let Some((_, state)) = snapshot
+                    .and_then(|capture| capture.mimalloc.as_deref())
+                    .and_then(crate::mimalloc_view::parts)
+            {
+                self.heap_view.mimalloc.click(target, index, state);
+            } else {
+                self.heap_view.native.click(target, index);
+                self.heap_view
+                    .native
+                    .reconcile(snapshot.and_then(|snapshot| snapshot.native.as_deref()));
+            }
             return;
         }
         if target == ListTarget::RuntimeActivity {

@@ -24,7 +24,7 @@ const VALIDATION_CHUNK: usize = 1024;
 pub enum ErrorKind {
     /// The payload magic does not identify native v4 observations.
     InvalidMagic,
-    /// A schema other than 3 or 4 was supplied.
+    /// The schema is not supported by the selected decoder.
     UnsupportedSchema(u16),
     /// The payload ended before all fields were available.
     Truncated,
@@ -36,6 +36,8 @@ pub enum ErrorKind {
     Malformed,
     /// An endpoint appears more than once.
     DuplicateOwner,
+    /// A backend tag is not supported by this decoder.
+    UnsupportedBackend(u8),
 }
 
 /// A native inventory encoding or decoding failure.
@@ -57,18 +59,19 @@ impl core::fmt::Display for Error {
         f.write_str("native allocator payload: ")?;
         match self.kind {
             ErrorKind::InvalidMagic => f.write_str("the magic bytes are invalid"),
-            ErrorKind::UnsupportedSchema(schema) => write!(f, "schema {schema} is unsupported; expected schema 3 or 4"),
+            ErrorKind::UnsupportedSchema(schema) => write!(f, "schema {schema} is unsupported by this decoder"),
             ErrorKind::Truncated => f.write_str("the payload ended before all fields were available"),
             ErrorKind::LengthMismatch => f.write_str("the buffer length does not match the encoded payload"),
             ErrorKind::LengthOverflow => f.write_str("the inventory count or payload length exceeds the supported limit"),
             ErrorKind::Malformed => f.write_str("a field or inventory invariant is invalid"),
             ErrorKind::DuplicateOwner => f.write_str("owner identifiers must be nonzero and unique"),
+            ErrorKind::UnsupportedBackend(backend) => write!(f, "backend tag {backend} is unsupported"),
         }
     }
 }
 impl core::error::Error for Error {}
 
-const fn error(kind: ErrorKind) -> Error {
+pub(crate) const fn error(kind: ErrorKind) -> Error {
     Error { kind }
 }
 
@@ -115,7 +118,7 @@ fn validate_owner(owner: &Owner) -> Result<(), Error> {
     }
 }
 
-/// Exact schema-4 output length.
+/// Exact current-schema snmalloc output length.
 ///
 /// # Errors
 /// Rejects inventories beyond the bound and invalid owner metadata.
@@ -123,7 +126,7 @@ pub fn encoded_len(snapshot: &Snapshot) -> Result<usize, Error> {
     encoded_len_with_owners(snapshot, &snapshot.owners)
 }
 
-/// Exact schema-4 length using borrowed inventory rows instead of `snapshot.owners`.
+/// Exact snmalloc length using borrowed inventory rows instead of `snapshot.owners`.
 ///
 /// Does not allocate or deallocate through any allocator. Duplicate validation
 /// sorts fixed 8 KiB stack chunks without modifying the supplied inventory.
@@ -173,9 +176,9 @@ pub fn encode_with_owners(snapshot: &Snapshot, owners: &[Owner], output: &mut [u
     // #[gamma::skip(try.propagate_to_unwrap, reason = "encoded_len_with_owners validated the inventory and the exact output length before these fixed-size writes")]
     writer.bytes(MAGIC)?;
     // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length accounts for this schema field")]
-    writer.bytes(&4_u16.to_le_bytes())?;
-    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length accounts for this reserved field")]
-    writer.bytes(&0_u16.to_le_bytes())?;
+    writer.bytes(&crate::snapshot::SCHEMA_VERSION.to_le_bytes())?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length accounts for this backend field")]
+    writer.bytes(&[1, 0])?;
     for value in [snapshot.captured_nanos, snapshot.session_id, snapshot.round, snapshot.owner_count] {
         // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length accounts for every fixed header counter")]
         writer.u64(value)?;
@@ -216,9 +219,9 @@ pub fn encode_with_owners(snapshot: &Snapshot, owners: &[Owner], output: &mut [u
     writer.finish(len)
 }
 
-struct Writer<'a> {
-    output: &'a mut [u8],
-    position: usize,
+pub(crate) struct Writer<'a> {
+    pub(crate) output: &'a mut [u8],
+    pub(crate) position: usize,
 }
 impl Writer<'_> {
     fn owner_count(&mut self, count: usize) -> Result<(), Error> {
@@ -241,7 +244,7 @@ impl Writer<'_> {
         }
         Ok(())
     }
-    fn bytes(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    pub(crate) fn bytes(&mut self, bytes: &[u8]) -> Result<(), Error> {
         let end = self.position.checked_add(bytes.len()).ok_or(error(ErrorKind::LengthOverflow))?;
         self.output
             .get_mut(self.position..end)
@@ -250,10 +253,10 @@ impl Writer<'_> {
         self.position = end;
         Ok(())
     }
-    fn u64(&mut self, value: u64) -> Result<(), Error> {
+    pub(crate) fn u64(&mut self, value: u64) -> Result<(), Error> {
         self.bytes(&value.to_le_bytes())
     }
-    fn flag(&mut self, value: bool) -> Result<(), Error> {
+    pub(crate) fn flag(&mut self, value: bool) -> Result<(), Error> {
         self.bytes(&[u8::from(value)])
     }
     fn ranges(&mut self, ranges: &Ranges) -> Result<(), Error> {
@@ -308,25 +311,25 @@ impl Writer<'_> {
     }
 }
 
-struct Reader<'a> {
-    input: &'a [u8],
-    position: usize,
+pub(crate) struct Reader<'a> {
+    pub(crate) input: &'a [u8],
+    pub(crate) position: usize,
 }
 impl<'a> Reader<'a> {
-    fn bytes(&mut self, len: usize) -> Result<&'a [u8], Error> {
+    pub(crate) fn bytes(&mut self, len: usize) -> Result<&'a [u8], Error> {
         let end = self.position.checked_add(len).ok_or(error(ErrorKind::LengthOverflow))?;
         let result = self.input.get(self.position..end).ok_or(error(ErrorKind::Truncated))?;
         self.position = end;
         Ok(result)
     }
-    fn u64(&mut self) -> Result<u64, Error> {
+    pub(crate) fn u64(&mut self) -> Result<u64, Error> {
         let bytes = self.bytes(8)?;
         Ok(u64::from_le_bytes(
             // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding bytes(8) either returns an exact eight-byte slice or propagates its truncation error before this conversion")]
             bytes.try_into().map_err(|_length| error(ErrorKind::Truncated))?,
         ))
     }
-    fn flag(&mut self) -> Result<bool, Error> {
+    pub(crate) fn flag(&mut self) -> Result<bool, Error> {
         match self.bytes(1)?[0] {
             0 => Ok(false),
             1 => Ok(true),
@@ -384,7 +387,7 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Decodes a bounded native inventory from schema 3 or 4.
+/// Decodes a bounded snmalloc inventory from the current schema.
 ///
 /// # Errors
 /// Reports malformed, truncated, duplicate, oversized and trailing input.
@@ -396,10 +399,10 @@ pub fn decode(input: &[u8]) -> Result<Snapshot, Error> {
     let schema_bytes = reader.bytes(2)?;
     // #[gamma::skip(try.propagate_to_unwrap, reason = "Reader::bytes(2) returned an exact two-byte slice; its independently fallible read is not guarded")]
     let schema = u16::from_le_bytes(schema_bytes.try_into().map_err(|_length| error(ErrorKind::Truncated))?);
-    if !matches!(schema, 3 | 4) {
+    if schema != crate::snapshot::SCHEMA_VERSION {
         return Err(error(ErrorKind::UnsupportedSchema(schema)));
     }
-    if reader.bytes(2)? != [0, 0] {
+    if reader.bytes(2)? != [1, 0] {
         return Err(error(ErrorKind::Malformed));
     }
     let mut snapshot = Snapshot {

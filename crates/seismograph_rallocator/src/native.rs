@@ -3,111 +3,9 @@
 
 //! Native v4 owner observations, separate from application allocation events.
 
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
-
-static PUBLICATION_ENABLED: AtomicBool = AtomicBool::new(true);
-static OBSERVATION_ROUND: AtomicU64 = AtomicU64::new(1);
-static EPOCH: OnceLock<Instant> = OnceLock::new();
-
-/// Whether allocation/free operations with an enabled policy can publish observations.
-///
-/// Event sampling does not control native-state publication.
-#[must_use]
-pub fn publication_enabled() -> bool {
-    PUBLICATION_ENABLED.load(Ordering::Relaxed)
-}
-
-/// Enables or disables publication; this does not enable event recording.
-pub fn set_publication_enabled(enabled: bool) {
-    PUBLICATION_ENABLED.store(enabled, Ordering::Relaxed);
-}
-
-/// Round requested by the most recent collector or explicit app-side request.
-#[must_use]
-pub fn observation_round() -> u64 {
-    OBSERVATION_ROUND.load(Ordering::Relaxed)
-}
-
-/// Requests another observation on the next allocation/free with an enabled policy.
-///
-/// Collectors request the next round only after collection. Monitor polling
-/// drives successive rounds; applications can also schedule requests explicitly.
-/// No timer or background worker is started. Saturates instead of wrapping.
-pub fn request_observation() -> u64 {
-    let previous = OBSERVATION_ROUND.try_update(Ordering::Relaxed, Ordering::Relaxed, |round| Some(round.saturating_add(1)));
-    match previous {
-        Ok(round) | Err(round) => round.saturating_add(1),
-    }
-}
-
-/// Process-relative monotonic time, saturated to the wire representation.
-#[must_use]
-pub fn captured_nanos() -> u64 {
-    captured_nanos_from_elapsed(native_elapsed_nanos())
-}
-
-fn native_elapsed_nanos() -> u128 {
-    native_elapsed().as_nanos()
-}
-
-fn native_elapsed() -> Duration {
-    #[cfg(test)]
-    if let Some(nanos) = TEST_NATIVE_NANOS.get() {
-        return Duration::new(
-            u64::try_from(nanos / 1_000_000_000).unwrap(),
-            u32::try_from(nanos % 1_000_000_000).unwrap(),
-        );
-    }
-    EPOCH.get_or_init(Instant::now).elapsed()
-}
-
-#[cfg(test)]
-thread_local! {
-    static TEST_NATIVE_NANOS: std::cell::Cell<Option<u128>> = const { std::cell::Cell::new(None) };
-}
-
-fn captured_nanos_from_elapsed(nanos: u128) -> u64 {
-    u64::try_from(nanos).unwrap_or(u64::MAX)
-}
-
-#[cfg(test)]
-mod gamma_round2_tests {
-    use super::*;
-
-    #[test]
-    fn nov6_actual_native_timestamp_preserves_zero_exact_values_and_saturation_without_observing_a_clock() {
-        struct Restore(Option<u128>);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                TEST_NATIVE_NANOS.set(self.0);
-            }
-        }
-        let _restore = Restore(TEST_NATIVE_NANOS.get());
-        for (input, expected) in [
-            (0, 0),
-            (37, 37),
-            (u128::from(u64::MAX), u64::MAX),
-            (u128::from(u64::MAX) + 1, u64::MAX),
-        ] {
-            TEST_NATIVE_NANOS.set(Some(input));
-            assert_eq!(captured_nanos(), expected);
-        }
-    }
-
-    #[test]
-    fn gamma_round2_native_timestamp_conversion_preserves_exact_values_and_saturation() {
-        for (input, expected) in [
-            (0, 0),
-            (37, 37),
-            (u128::from(u64::MAX), u64::MAX),
-            (u128::from(u64::MAX) + 1, u64::MAX),
-        ] {
-            assert_eq!(captured_nanos_from_elapsed(input), expected);
-        }
-    }
-}
+// Preserve existing snmalloc control paths. New code uses the backend-neutral
+// snapshot module; both paths refer to the same process-wide controls.
+pub use crate::observation::{captured_nanos, observation_round, publication_enabled, request_observation, set_publication_enabled};
 
 /// Number of native small-object size classes.
 pub const CLASS_COUNT: usize = 44;
@@ -268,7 +166,9 @@ pub enum ObservationSource {
     /// No safely readable observation exists.
     #[default]
     Unobserved,
-    /// A thread published after an accepted recorded allocation/free completed.
+    /// A thread published after a completed allocation, resize, or free.
+    ///
+    /// Allocation recording was enabled. Event sampling does not control publication.
     Published,
     /// The collector inspected a returned owner under the pool lock.
     IdleInspection,

@@ -3,9 +3,13 @@
 
 //! Process snapshot capture, source registration, and encoding.
 //!
-//! Format version 8 adds independently configurable cache recording.
-//! [`crate::snapshot::decode()`] continues to accept versions 1 through 7.
-//! Unknown future format versions are rejected.
+//! Format version 10 stores typed events and symbols for captured backtraces.
+//! The decoder accepts only this format. Other versions are rejected.
+
+mod symbols;
+/// Controlled snapshot construction for tests.
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_util;
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -13,8 +17,10 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::time::{Duration, Instant};
 use std::{fmt, ptr};
 
+pub use symbols::Symbol;
+
 use crate::Error;
-use crate::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
+use crate::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind, Reallocation};
 use crate::recorder::event::{
     Address, Event, EventClock, EventKind, EventPayload, EventSequence, EventTimestamp, Events, NumericEvent, ObjectId,
 };
@@ -25,14 +31,12 @@ use crate::recorder::{self, EventSampling, MAX_EVENT_SAMPLING_ONE_IN, MAX_STACK_
 use crate::system::SystemSlice;
 
 const MAGIC: [u8; 8] = *b"SEISMOG\0";
-const FORMAT_VERSION: u16 = 8;
+const FORMAT_VERSION: u16 = 10;
 const HEADER_LEN: usize = 92;
 const SOURCE_HEADER_LEN: usize = 24;
 const EVENT_FIXED_LEN: usize = 92;
-const LEGACY_EVENT_V1_FIXED_LEN: usize = 28;
-const LEGACY_EVENT_V2_FIXED_LEN: usize = 76;
-const THREAD_FIXED_LEN: usize = 24;
-const THREAD_NAMED_FIXED_LEN: usize = 26;
+const THREAD_FIXED_LEN: usize = 26;
+
 static SOURCES: AtomicPtr<Source> = AtomicPtr::new(ptr::null_mut());
 
 fn write_snapshot_count(value: usize, write: impl FnOnce(u32) -> Result<(), Error>) -> Result<(), Error> {
@@ -238,13 +242,17 @@ pub struct DecodedSnapshot {
     /// This partial duration ends before final container sizing, encoding and
     /// destruction of intermediate data. It excludes file I/O and any caller-side
     /// prewarming before collection starts; work inside source callbacks is included.
-    /// It is not an end-to-end capture duration. Older format versions carry the
-    /// same partial measurement.
+    /// It is not an end-to-end capture duration.
     pub capture_duration_nanos: u64,
     /// Retained general-purpose runtime events.
     pub events: Events,
     /// Point-in-time data contributed by registered sources.
     pub sources: Vec<SourceSnapshot>,
+    /// Symbols resolved in the producing process for captured event frames.
+    ///
+    /// Entries have distinct, ascending addresses. Unresolved addresses retain
+    /// an entry with missing fields.
+    pub symbols: Vec<Symbol>,
 }
 
 /// An opaque encoded seismograph snapshot.
@@ -324,11 +332,25 @@ fn prepare_snapshot_with(
     let mut events = events.unwrap_or_default();
     events.clock = EventClock::CURRENT;
     let sources = sources(SnapshotContext { events: &events })?;
-    Ok(DecodedSnapshot {
-        capture_duration_nanos: snapshot_duration(elapsed),
-        events,
-        sources,
-    })
+    #[cfg(not(miri))]
+    let resolve = symbols::resolve_native;
+    #[cfg(miri)]
+    let resolve = |_lookup: &mut Symbol| {};
+    let mut snapshot = with_symbols(
+        DecodedSnapshot {
+            events,
+            sources,
+            ..DecodedSnapshot::default()
+        },
+        resolve,
+    );
+    snapshot.capture_duration_nanos = snapshot_duration(elapsed);
+    Ok(snapshot)
+}
+
+fn with_symbols(mut snapshot: DecodedSnapshot, resolve: impl FnMut(&mut Symbol)) -> DecodedSnapshot {
+    snapshot.symbols = symbols::capture(&snapshot.events, resolve);
+    snapshot
 }
 
 fn snapshot_duration(elapsed: impl FnOnce() -> Duration) -> u64 {
@@ -349,29 +371,29 @@ fn decode_reader(reader: &mut Reader<'_>) -> Result<DecodedSnapshot, Error> {
         return Err(Error::invalid_format());
     }
     let format_version = reader.u16()?;
-    if !(1..=FORMAT_VERSION).contains(&format_version) || reader.u16()? != 0 {
+    if format_version != FORMAT_VERSION || reader.u16()? != 0 {
         return Err(Error::invalid_format());
     }
     let capture_duration_nanos = reader.u64()?;
     let thread_count = reader.u32()? as usize;
     let event_count = reader.u32()? as usize;
     let source_count = reader.u32()? as usize;
-    let recording = decode_recording_policies(reader, format_version)?;
-    let clock = decode_clock(reader, format_version)?;
+    let recording = decode_recording_policies(reader)?;
+    let clock = decode_clock(reader)?;
 
-    validate_count_fits(thread_count, reader.remaining().len(), thread_fixed_len(format_version))?;
-    let threads = decode_threads(reader, thread_count, format_version)?;
+    // This bounds allocation; fixed-field reads also reject truncated rows.
+    // #[gamma::skip(expr.decrement)]
+    validate_count_fits(thread_count, reader.remaining().len(), THREAD_FIXED_LEN)?;
+    let threads = decode_threads(reader, thread_count)?;
 
-    validate_count_fits(event_count, reader.remaining().len(), event_fixed_len(format_version))?;
+    // This bounds allocation; fixed-field reads also reject truncated rows.
+    // #[gamma::skip(expr.decrement)]
+    validate_count_fits(event_count, reader.remaining().len(), EVENT_FIXED_LEN)?;
     let mut events = Vec::with_capacity(event_count);
     for _ in 0..event_count {
         let thread_id = ThreadId::new(reader.u64()?);
         let sequence = EventSequence::new(reader.u64()?);
-        let (timestamp, kind, payload, frame_count) = if format_version >= 4 {
-            decode_event_v4(reader)?
-        } else {
-            decode_legacy_event(reader, format_version)?
-        };
+        let (timestamp, kind, payload, frame_count) = decode_event(reader)?;
         let mut call_stack = Vec::with_capacity(frame_count);
         for _ in 0..frame_count {
             call_stack.push(Address::new(reader.u64()?));
@@ -414,6 +436,7 @@ fn decode_reader(reader: &mut Reader<'_>) -> Result<DecodedSnapshot, Error> {
             data,
         });
     }
+    let symbols = symbols::decode(reader)?;
     if !reader.remaining().is_empty() {
         return Err(Error::invalid_format());
     }
@@ -435,6 +458,7 @@ fn decode_reader(reader: &mut Reader<'_>) -> Result<DecodedSnapshot, Error> {
             events,
         },
         sources,
+        symbols,
     })
 }
 
@@ -451,78 +475,14 @@ fn validate_count_fits(count: usize, remaining_bytes: usize, minimum_item_bytes:
     Ok(())
 }
 
-const fn thread_fixed_len(format_version: u16) -> usize {
-    if format_version >= 2 {
-        THREAD_NAMED_FIXED_LEN
-    } else {
-        THREAD_FIXED_LEN
-    }
-}
-
-const fn event_fixed_len(format_version: u16) -> usize {
-    if format_version >= 4 {
-        EVENT_FIXED_LEN
-    } else if format_version >= 2 {
-        LEGACY_EVENT_V2_FIXED_LEN
-    } else {
-        LEGACY_EVENT_V1_FIXED_LEN
-    }
-}
-
-fn decode_sampling(reader: &mut Reader<'_>, format_version: u16) -> Result<u64, Error> {
-    if format_version < 3 {
-        return Ok(1);
-    }
-    let sampling = reader.u32()?;
-    validated_sampling(u64::from(sampling)).map(u64::from)
-}
-
-fn decode_recording_policies(reader: &mut Reader<'_>, format_version: u16) -> Result<Policies, Error> {
-    if format_version < 5 {
-        let sampling = decode_sampling(reader, format_version)?;
-        // #[gamma::skip(try.propagate_to_unwrap, reason = "decode_sampling returns 1 for legacy data or a validated value at most 1048576, fitting usize on the supported 32/64-bit targets")]
-        let sampling = usize::try_from(sampling).map_err(|_error| Error::invalid_format())?;
-        // #[gamma::skip(try.propagate_to_unwrap, reason = "decode_sampling already validated the identical nonzero EventSampling bound")]
-        let sampling = EventSampling::one_in(sampling).ok_or_else(Error::invalid_format)?;
-        let policy = Policy {
-            enabled: true,
-            capture_backtraces: false,
-            event_sampling: sampling,
-        };
-        return Ok(Policies {
-            allocations: policy,
-            general_events: policy,
-            arc_dereferences: policy,
-            runtime_tasks: policy,
-            io: Policy::default(),
-            cache: Policy::default(),
-        });
-    }
-    let allocations = decode_recording_policy(reader)?;
-    let general_events = decode_recording_policy(reader)?;
-    let arc_dereferences = decode_recording_policy(reader)?;
-    let runtime_tasks = if format_version >= 6 {
-        decode_recording_policy(reader)?
-    } else {
-        general_events
-    };
-    let io = if format_version >= 7 {
-        decode_recording_policy(reader)?
-    } else {
-        Policy::default()
-    };
-    let cache = if format_version >= 8 {
-        decode_recording_policy(reader)?
-    } else {
-        Policy::default()
-    };
+fn decode_recording_policies(reader: &mut Reader<'_>) -> Result<Policies, Error> {
     Ok(Policies {
-        allocations,
-        general_events,
-        arc_dereferences,
-        runtime_tasks,
-        io,
-        cache,
+        allocations: decode_recording_policy(reader)?,
+        general_events: decode_recording_policy(reader)?,
+        arc_dereferences: decode_recording_policy(reader)?,
+        runtime_tasks: decode_recording_policy(reader)?,
+        io: decode_recording_policy(reader)?,
+        cache: decode_recording_policy(reader)?,
     })
 }
 
@@ -543,10 +503,7 @@ fn decode_recording_policy(reader: &mut Reader<'_>) -> Result<Policy, Error> {
     })
 }
 
-fn decode_clock(reader: &mut Reader<'_>, format_version: u16) -> Result<EventClock, Error> {
-    if format_version < 4 {
-        return Ok(EventClock::Unspecified);
-    }
+fn decode_clock(reader: &mut Reader<'_>) -> Result<EventClock, Error> {
     let clock = EventClock::from_wire_value(reader.u16()?).ok_or_else(Error::invalid_format)?;
     if reader.u16()? != 0 || clock != EventClock::ProcessMonotonic || reader.u64()? != 1_000_000_000 {
         return Err(Error::invalid_format());
@@ -554,7 +511,7 @@ fn decode_clock(reader: &mut Reader<'_>, format_version: u16) -> Result<EventClo
     Ok(clock)
 }
 
-fn decode_event_v4(reader: &mut Reader<'_>) -> Result<(EventTimestamp, EventKind, EventPayload, usize), Error> {
+fn decode_event(reader: &mut Reader<'_>) -> Result<(EventTimestamp, EventKind, EventPayload, usize), Error> {
     let timestamp = EventTimestamp::from_ticks(reader.u64()?);
     let kind = event_kind(reader.u8()?)?;
     let payload_tag = reader.u8()?;
@@ -570,51 +527,6 @@ fn decode_event_v4(reader: &mut Reader<'_>) -> Result<(EventTimestamp, EventKind
     let payload = decode_payload(payload_tag, fields)?;
     validate_payload(kind, payload)?;
     Ok((timestamp, kind, payload, frame_count))
-}
-
-fn decode_legacy_event(reader: &mut Reader<'_>, format_version: u16) -> Result<(EventTimestamp, EventKind, EventPayload, usize), Error> {
-    let object_id = ObjectId::new(reader.u64()?);
-    let kind = event_kind(reader.u8()?)?;
-    let frame_count = usize::from(reader.u8()?);
-    if reader.u16()? != 0 || frame_count > MAX_STACK_FRAMES {
-        return Err(Error::invalid_format());
-    }
-    let payload = if format_version >= 2 {
-        let event_thread_id_or_measurement = reader.u64()?;
-        let heap_id = reader.u64()?;
-        let address = reader.u64()?;
-        let size = reader.u64()?;
-        let alignment = reader.u64()?;
-        let flags = reader.u64()?;
-        if matches!(kind, EventKind::Allocation | EventKind::Deallocation) {
-            EventPayload::Allocation(Allocation {
-                allocation_id: AllocationId::new(object_id.get()),
-                event_thread_id: EventThreadId::new(event_thread_id_or_measurement),
-                heap_id: HeapId::new(heap_id),
-                heap_kind: decode_heap_kind(flags.to_le_bytes()[0])?,
-                freed_after_heap_release: flags & (1 << 8) != 0,
-                address: Address::new(address),
-                size,
-                alignment,
-            })
-        } else if kind == EventKind::ChannelHighWatermark {
-            if heap_id != 0 || address != 0 || size != 0 || alignment != 0 || flags != 0 {
-                return Err(Error::invalid_format());
-            }
-            EventPayload::Numeric(NumericEvent {
-                object_id,
-                value: event_thread_id_or_measurement,
-            })
-        } else {
-            if event_thread_id_or_measurement != 0 || heap_id != 0 || address != 0 || size != 0 || alignment != 0 || flags != 0 {
-                return Err(Error::invalid_format());
-            }
-            EventPayload::Object(object_id)
-        }
-    } else {
-        EventPayload::Object(object_id)
-    };
-    Ok((EventTimestamp::from_ticks(0), kind, payload, frame_count))
 }
 
 fn decode_payload(tag: u8, fields: [u64; 8]) -> Result<EventPayload, Error> {
@@ -633,6 +545,16 @@ fn decode_payload(tag: u8, fields: [u64; 8]) -> Result<EventPayload, Error> {
             address: Address::new(fields[3]),
             size: fields[4],
             alignment: fields[5],
+        })),
+        6 => Ok(EventPayload::Reallocation(Reallocation {
+            allocation_id: AllocationId::new(fields[0]),
+            heap_id: HeapId::new(fields[1]),
+            old_address: Address::new(fields[2]),
+            new_address: Address::new(fields[3]),
+            old_size: fields[4],
+            new_size: fields[5],
+            alignment: fields[6],
+            heap_kind: decode_heap_kind(u8::try_from(fields[7]).map_err(|_error| Error::invalid_format())?)?,
         })),
         4 if fields[6] == 0 && fields[7] == 0 => {
             let runtime_id = RuntimeId::from_raw(fields[0]).ok_or_else(Error::invalid_format)?;
@@ -688,7 +610,9 @@ fn decode_payload(tag: u8, fields: [u64; 8]) -> Result<EventPayload, Error> {
 }
 
 fn validate_payload(kind: EventKind, payload: EventPayload) -> Result<(), Error> {
-    let valid = if matches!(kind, EventKind::Allocation | EventKind::Deallocation) {
+    let valid = if kind == EventKind::Reallocation {
+        matches!(payload, EventPayload::Reallocation(_))
+    } else if matches!(kind, EventKind::Allocation | EventKind::Deallocation) {
         matches!(payload, EventPayload::Allocation(_))
     } else if kind == EventKind::ChannelHighWatermark || kind.class() == crate::recorder::event::EventClass::Cache {
         matches!(payload, EventPayload::Numeric(_))
@@ -708,18 +632,16 @@ fn validated_sampling(value: u64) -> Result<u32, Error> {
     u32::try_from(sampling.get()).map_err(|_error| Error::invalid_format())
 }
 
-fn decode_threads(reader: &mut Reader<'_>, count: usize, format_version: u16) -> Result<Vec<ThreadLog>, Error> {
+fn decode_threads(reader: &mut Reader<'_>, count: usize) -> Result<Vec<ThreadLog>, Error> {
     let mut threads = Vec::with_capacity(count);
     for _ in 0..count {
         threads.push(ThreadLog {
             thread_id: ThreadId::new(reader.u64()?),
             total_events: reader.u64()?,
             lost_events: reader.u64()?,
-            name: if format_version >= 2 {
+            name: {
                 let len = usize::from(reader.u16()?);
                 String::from_utf8(reader.read(len)?.to_vec()).map_err(|_error| Error::invalid_format())?
-            } else {
-                String::new()
             },
         });
     }
@@ -757,6 +679,7 @@ fn snapshot_encoded_len(
     event_frame_counts: impl IntoIterator<Item = usize>,
     source_sizes: impl IntoIterator<Item = (usize, usize)>,
     thread_name_lengths: impl IntoIterator<Item = usize>,
+    symbol_bytes: usize,
 ) -> Result<usize, Error> {
     let events_len = event_frame_counts.into_iter().try_fold(0usize, |total, frame_count| {
         EVENT_FIXED_LEN
@@ -774,6 +697,7 @@ fn snapshot_encoded_len(
         .checked_add(threads_len.ok_or_else(Error::allocation_failed)?)
         .and_then(|len| len.checked_add(events_len?))
         .and_then(|len| len.checked_add(sources_len?))
+        .and_then(|len| len.checked_add(symbol_bytes))
         .ok_or_else(Error::allocation_failed)
 }
 
@@ -792,10 +716,14 @@ fn encode_snapshot(snapshot: &DecodedSnapshot) -> Result<Snapshot, Error> {
     encode_snapshot_with(
         snapshot,
         |snapshot| {
+            // Owned symbol rows and strings already fit the address space.
+            // #[gamma::skip(try.propagate_to_unwrap)]
+            let symbol_bytes = symbols::encoded_len(&snapshot.symbols).ok_or_else(Error::allocation_failed)?;
             snapshot_encoded_len(
                 snapshot.events.events.iter().map(|event| event.call_stack.len()),
                 snapshot.sources.iter().map(|source| (source.name.len(), source.data.len())),
                 snapshot.events.threads.iter().map(|thread| thread.name.len()),
+                symbol_bytes,
             )
         },
         Snapshot::zeroed,
@@ -910,6 +838,7 @@ fn encode_snapshot_with_counts(
         // #[gamma::skip(try.propagate_to_unwrap, reason = "snapshot_encoded_len includes this exact source data length")]
         writer.write(&source.data)?;
     }
+    symbols::encode(&snapshot.symbols, &mut writer)?;
     debug_assert!(writer.remaining().is_empty(), "encoded length accounts for every written field");
     Ok(encoded)
 }
@@ -936,6 +865,7 @@ const fn payload_tag(payload: EventPayload) -> u8 {
         EventPayload::Object(_) => 1,
         EventPayload::Numeric(_) => 2,
         EventPayload::Allocation(_) => 3,
+        EventPayload::Reallocation(_) => 6,
         EventPayload::Runtime(_) => 4,
         EventPayload::Io(_) => 5,
     }
@@ -954,6 +884,16 @@ const fn encode_payload(payload: EventPayload) -> [u64; 8] {
             allocation.alignment,
             encode_heap_kind(allocation.heap_kind) + if allocation.freed_after_heap_release { 1 << 8 } else { 0 },
             0,
+        ],
+        EventPayload::Reallocation(resize) => [
+            resize.allocation_id.get(),
+            resize.heap_id.get(),
+            resize.old_address.get(),
+            resize.new_address.get(),
+            resize.old_size,
+            resize.new_size,
+            resize.alignment,
+            encode_heap_kind(resize.heap_kind),
         ],
         EventPayload::Runtime(runtime) => [
             runtime.runtime_id.get(),
@@ -1314,65 +1254,42 @@ mod tests {
         assert_eq!(copied.as_slice(), b"ABC");
     }
 
-    fn snapshot_count_header(version: u16) -> Vec<u8> {
+    fn snapshot_count_header() -> Vec<u8> {
         let mut bytes = MAGIC.to_vec();
-        bytes.extend_from_slice(&version.to_le_bytes());
+        bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
         bytes.extend_from_slice(&0_u16.to_le_bytes());
         bytes.extend_from_slice(&0_u64.to_le_bytes());
         bytes.extend_from_slice(&[0; 12]);
-        if version >= 5 {
-            let policies = match version {
-                5 => 3,
-                6 => 4,
-                7 => 5,
-                _ => 6,
-            };
-            for _ in 0..policies {
-                bytes.extend_from_slice(&[0, 0, 0, 0, 1, 0, 0, 0]);
-            }
-        } else if version >= 3 {
-            bytes.extend_from_slice(&1_u32.to_le_bytes());
+        for _ in 0..6 {
+            bytes.extend_from_slice(&[0, 0, 0, 0, 1, 0, 0, 0]);
         }
-        if version >= 4 {
-            bytes.extend_from_slice(&EventClock::ProcessMonotonic.wire_value().to_le_bytes());
-            bytes.extend_from_slice(&0_u16.to_le_bytes());
-            bytes.extend_from_slice(&1_000_000_000_u64.to_le_bytes());
-        }
+        bytes.extend_from_slice(&EventClock::ProcessMonotonic.wire_value().to_le_bytes());
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_000_000_000_u64.to_le_bytes());
         bytes
     }
 
     #[test]
-    fn november_snapshot_count_admission_uses_exact_versioned_lengths_before_any_row_reads() {
-        for (version, header_len, thread_len, event_len) in [
-            (1, 32, 24, 28),
-            (2, 32, 26, 76),
-            (3, 36, 26, 76),
-            (4, 48, 26, 92),
-            (5, 68, 26, 92),
-            (6, 76, 26, 92),
-            (7, 84, 26, 92),
-            (8, 92, 26, 92),
-        ] {
-            for (offset, record_len) in [(20, thread_len), (24, event_len), (28, 24)] {
-                let mut bytes = snapshot_count_header(version);
-                assert_eq!(bytes.len(), header_len);
-                bytes[offset..offset + 4].copy_from_slice(&1_u32.to_le_bytes());
-                bytes.resize(header_len + record_len - 1, 0);
-                let mut reader = Reader::new(&bytes);
-                assert!(matches!(
-                    decode_reader(&mut reader).unwrap_err().kind,
-                    crate::ErrorKind::InvalidFormat
-                ));
-                assert_eq!(reader.requested_bytes, header_len, "version {version}, count offset {offset}");
-                assert_eq!(reader.remaining().len(), record_len - 1);
-                bytes.push(0);
-                let mut reader = Reader::new(&bytes);
-                let _ = decode_reader(&mut reader);
-                assert!(
-                    reader.requested_bytes > header_len,
-                    "an exactly fitting row must pass count admission"
-                );
-            }
+    fn snapshot_count_admission_uses_current_lengths_before_any_row_reads() {
+        for (offset, record_len) in [(20, 26), (24, 92), (28, 24)] {
+            let mut bytes = snapshot_count_header();
+            assert_eq!(bytes.len(), HEADER_LEN);
+            bytes[offset..offset + 4].copy_from_slice(&1_u32.to_le_bytes());
+            bytes.resize(HEADER_LEN + record_len - 1, 0);
+            let mut reader = Reader::new(&bytes);
+            assert!(matches!(
+                decode_reader(&mut reader).unwrap_err().kind,
+                crate::ErrorKind::InvalidFormat
+            ));
+            assert_eq!(reader.requested_bytes, HEADER_LEN, "count offset {offset}");
+            assert_eq!(reader.remaining().len(), record_len - 1);
+            bytes.push(0);
+            let mut reader = Reader::new(&bytes);
+            let _ = decode_reader(&mut reader);
+            assert!(
+                reader.requested_bytes > HEADER_LEN,
+                "an exactly fitting row must pass count admission"
+            );
         }
     }
 
@@ -1587,9 +1504,10 @@ mod tests {
                 schema_version: 0x201,
                 data: vec![1, 3, 5],
             }],
+            symbols: Vec::new(),
         };
         let mut expected = b"SEISMOG\0".to_vec();
-        expected.extend_from_slice(&[8, 0, 0, 0]);
+        expected.extend_from_slice(&[10, 0, 0, 0]);
         expected.extend_from_slice(&0x0807_0605_0403_0201_u64.to_le_bytes());
         for count in [1_u32, 5, 1] {
             expected.extend_from_slice(&count.to_le_bytes());
@@ -1620,6 +1538,7 @@ mod tests {
         expected.extend_from_slice(&[0; 4]);
         expected.extend_from_slice("α".as_bytes());
         expected.extend_from_slice(&[1, 3, 5]);
+        expected.extend_from_slice(&0_u32.to_le_bytes());
         let encoded = encode_snapshot(&model).unwrap();
         assert_eq!(encoded.as_bytes(), expected);
         assert_eq!(decode(&expected).unwrap(), model);
@@ -1729,6 +1648,7 @@ mod tests {
                 ..Events::default()
             },
             sources: Vec::new(),
+            symbols: Vec::new(),
         })
         .unwrap();
 
@@ -1782,6 +1702,7 @@ mod tests {
                 events: vec![event.clone(), ready.clone()],
             },
             sources: Vec::new(),
+            symbols: Vec::new(),
         })
         .unwrap();
 
@@ -1813,70 +1734,11 @@ mod tests {
                 ..Events::default()
             },
             sources: Vec::new(),
+            symbols: Vec::new(),
         })
         .unwrap();
 
         assert_eq!(decode(snapshot.as_bytes()).unwrap().events.events, events);
-    }
-
-    #[test]
-    fn version_one_events_decode_without_names_or_allocation_fields() {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&MAGIC);
-        bytes.extend_from_slice(&1_u16.to_le_bytes());
-        bytes.extend_from_slice(&0_u16.to_le_bytes());
-        bytes.extend_from_slice(&0_u64.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.extend_from_slice(&1_u32.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.extend_from_slice(&7_u64.to_le_bytes());
-        bytes.extend_from_slice(&1_u64.to_le_bytes());
-        bytes.extend_from_slice(&42_u64.to_le_bytes());
-        bytes.push(EventKind::ArcDeref.wire_value());
-        bytes.push(0);
-        bytes.extend_from_slice(&0_u16.to_le_bytes());
-
-        let decoded = decode(&bytes).unwrap();
-        assert_eq!(
-            (
-                decoded.events.clock,
-                decoded.events.events[0].timestamp,
-                decoded.events.events[0].object_id(),
-            ),
-            (EventClock::Unspecified, EventTimestamp::from_ticks(0), Some(ObjectId::new(42)),)
-        );
-    }
-
-    #[test]
-    fn version_three_measurements_decode_into_numeric_payloads() {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&MAGIC);
-        bytes.extend_from_slice(&3_u16.to_le_bytes());
-        bytes.extend_from_slice(&0_u16.to_le_bytes());
-        bytes.extend_from_slice(&0_u64.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.extend_from_slice(&1_u32.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
-        bytes.extend_from_slice(&1_u32.to_le_bytes());
-        bytes.extend_from_slice(&7_u64.to_le_bytes());
-        bytes.extend_from_slice(&1_u64.to_le_bytes());
-        bytes.extend_from_slice(&42_u64.to_le_bytes());
-        bytes.push(EventKind::ChannelHighWatermark.wire_value());
-        bytes.push(0);
-        bytes.extend_from_slice(&0_u16.to_le_bytes());
-        bytes.extend_from_slice(&9_u64.to_le_bytes());
-        bytes.extend_from_slice(&[0; 5 * 8]);
-
-        let decoded = decode(&bytes).unwrap();
-
-        assert_eq!(
-            (
-                decoded.events.clock,
-                decoded.events.events[0].object_id(),
-                decoded.events.events[0].measurement(),
-            ),
-            (EventClock::Unspecified, Some(ObjectId::new(42)), Some(9))
-        );
     }
 
     #[test]
@@ -1907,9 +1769,20 @@ mod tests {
                 ..Events::default()
             },
             sources: Vec::new(),
+            symbols: Vec::new(),
         })
         .unwrap();
         assert!(format!("{snapshot:?}").contains("bytes"));
+    }
+
+    #[test]
+    fn encoded_capture_duration_keeps_the_measurement_and_saturates_at_the_wire_limit() {
+        for (elapsed, expected) in [(std::time::Duration::from_nanos(42), 42), (std::time::Duration::MAX, u64::MAX)] {
+            let decoded = prepare_snapshot_with(SnapshotOptions::default(), |_| Ok(None), || elapsed, |_| Ok(Vec::new())).unwrap();
+            let snapshot = encode_snapshot(&decoded).unwrap();
+
+            assert_eq!(decode(snapshot.as_bytes()).unwrap().capture_duration_nanos, expected);
+        }
     }
 
     #[test]
@@ -1973,6 +1846,7 @@ mod tests {
                 ..Events::default()
             },
             sources: Vec::new(),
+            symbols: Vec::new(),
         };
         let encoded = encode_snapshot(&decoded).unwrap();
         assert_eq!(decode(encoded.as_bytes()).unwrap(), decoded);
@@ -2047,6 +1921,7 @@ mod tests {
                 ..Events::default()
             },
             sources: Vec::new(),
+            symbols: Vec::new(),
         })
         .unwrap();
         let mut trailing = valid.as_bytes().to_vec();
@@ -2054,6 +1929,7 @@ mod tests {
         assert!(decode(&trailing).is_err());
 
         let duplicate_sources = encode_snapshot(&DecodedSnapshot {
+            symbols: Vec::new(),
             capture_duration_nanos: 0,
             events: Events {
                 clock: EventClock::CURRENT,
@@ -2079,7 +1955,7 @@ mod tests {
 
         let mut invalid_source = valid.as_bytes().to_vec();
         invalid_source[28..32].copy_from_slice(&1_u32.to_le_bytes());
-        invalid_source.extend_from_slice(&[0; SOURCE_HEADER_LEN]);
+        invalid_source.splice(HEADER_LEN..HEADER_LEN, [0; SOURCE_HEADER_LEN]);
         assert!(decode(&invalid_source).is_err());
         invalid_source[HEADER_LEN..HEADER_LEN + 8].copy_from_slice(&1_u64.to_le_bytes());
         invalid_source[HEADER_LEN + 20] = 1;
@@ -2087,6 +1963,7 @@ mod tests {
 
         for (total_events, lost_events) in [(u64::MAX, 0), (0, u64::MAX)] {
             let overflowing = encode_snapshot(&DecodedSnapshot {
+                symbols: Vec::new(),
                 capture_duration_nanos: 0,
                 events: Events {
                     clock: EventClock::CURRENT,
@@ -2126,7 +2003,7 @@ mod tests {
         assert!(decode_heap_kind(0).is_err());
 
         let invalid_clock_metadata = [1, 0, 1, 0, 0, 202, 154, 59, 0, 0, 0, 0];
-        assert!(decode_clock(&mut Reader::new(&invalid_clock_metadata), FORMAT_VERSION).is_err());
+        assert!(decode_clock(&mut Reader::new(&invalid_clock_metadata)).is_err());
     }
 
     #[test]
@@ -2138,6 +2015,7 @@ mod tests {
                 ..Events::default()
             },
             sources: Vec::new(),
+            symbols: Vec::new(),
         })
         .unwrap();
 
@@ -2149,93 +2027,45 @@ mod tests {
 
         assert!(validate_count_fits(3, 24, 8).is_ok());
         assert!(validate_count_fits(4, 24, 8).is_err());
-        assert_eq!(
-            (
-                thread_fixed_len(1),
-                thread_fixed_len(2),
-                event_fixed_len(1),
-                event_fixed_len(2),
-                event_fixed_len(4),
-            ),
-            (
-                THREAD_FIXED_LEN,
-                THREAD_NAMED_FIXED_LEN,
-                LEGACY_EVENT_V1_FIXED_LEN,
-                LEGACY_EVENT_V2_FIXED_LEN,
-                EVENT_FIXED_LEN,
-            )
-        );
     }
 
     #[test]
-    fn legacy_allocation_and_object_validation_paths_are_decoded() {
-        fn legacy_event(kind: EventKind, fields: [u64; 6]) -> Vec<u8> {
-            let mut bytes = Vec::new();
-            bytes.extend_from_slice(&1_u64.to_le_bytes());
-            bytes.push(kind.wire_value());
-            bytes.push(0);
-            bytes.extend_from_slice(&0_u16.to_le_bytes());
-            for field in fields {
-                bytes.extend_from_slice(&field.to_le_bytes());
-            }
-            bytes
-        }
+    fn symbol_tables_round_trip_through_the_complete_container() {
+        let decoded = DecodedSnapshot {
+            events: Events {
+                clock: EventClock::CURRENT,
+                ..Events::default()
+            },
+            symbols: vec![Symbol {
+                address: Address::new(16),
+                name: Some("application::allocate".into()),
+                filename: Some("main.rs".into()),
+                line: Some(7),
+                column: None,
+            }],
+            ..DecodedSnapshot::default()
+        };
 
-        let allocation = decode_legacy_event(
-            &mut Reader::new(&legacy_event(EventKind::Allocation, [2, 3, 4, 5, 8, 2 | (1 << 8)])),
-            3,
-        )
+        let encoded = encode_snapshot(&decoded).unwrap();
+
+        assert_eq!(decode(encoded.as_bytes()).unwrap(), decoded);
+    }
+
+    #[test]
+    fn other_container_versions_are_rejected() {
+        let encoded = encode_snapshot(&DecodedSnapshot {
+            events: Events {
+                clock: EventClock::CURRENT,
+                ..Events::default()
+            },
+            ..DecodedSnapshot::default()
+        })
         .unwrap();
-        assert!(matches!(
-            allocation.2,
-            EventPayload::Allocation(Allocation {
-                heap_kind: HeapKind::Bump,
-                freed_after_heap_release: true,
-                ..
-            })
-        ));
-
-        assert!(
-            decode_legacy_event(
-                &mut Reader::new(&legacy_event(EventKind::ChannelHighWatermark, [7, 1, 0, 0, 0, 0])),
-                3,
-            )
-            .is_err()
-        );
-        assert!(decode_legacy_event(&mut Reader::new(&legacy_event(EventKind::MutexAccess, [1, 0, 0, 0, 0, 0])), 3,).is_err());
-        assert_eq!(
-            decode_legacy_event(&mut Reader::new(&legacy_event(EventKind::MutexAccess, [0; 6])), 3,)
-                .unwrap()
-                .2,
-            EventPayload::Object(ObjectId::new(1))
-        );
-
-        for index in 0..6 {
-            let mut fields = [0; 6];
-            fields[index] = 1;
-            assert!(
-                decode_legacy_event(&mut Reader::new(&legacy_event(EventKind::MutexAccess, fields)), 3).is_err(),
-                "legacy object field {index} must be reserved"
-            );
+        let mut bytes = encoded.as_bytes().to_vec();
+        for version in (0..FORMAT_VERSION).chain([FORMAT_VERSION + 1, u16::MAX]) {
+            bytes[8..10].copy_from_slice(&version.to_le_bytes());
+            decode(&bytes).unwrap_err();
         }
-        for index in 1..6 {
-            let mut fields = [0; 6];
-            fields[index] = 1;
-            assert!(
-                decode_legacy_event(&mut Reader::new(&legacy_event(EventKind::ChannelHighWatermark, fields)), 3,).is_err(),
-                "legacy numeric field {index} must be reserved"
-            );
-        }
-
-        let not_released = decode_legacy_event(&mut Reader::new(&legacy_event(EventKind::Allocation, [2, 3, 4, 5, 8, 2])), 3).unwrap();
-        assert!(matches!(
-            not_released.2,
-            EventPayload::Allocation(Allocation {
-                heap_kind: HeapKind::Bump,
-                freed_after_heap_release: false,
-                ..
-            })
-        ));
     }
 
     #[test]
@@ -2243,13 +2073,13 @@ mod tests {
         for bytes in [[2, 0, 0, 0, 1, 0, 0, 0], [0, 2, 0, 0, 1, 0, 0, 0], [0, 0, 1, 0, 1, 0, 0, 0]] {
             assert!(decode_recording_policy(&mut Reader::new(&bytes)).is_err());
         }
-        assert_eq!(decode_clock(&mut Reader::new(&[]), 3).unwrap(), EventClock::Unspecified);
+        assert!(decode_clock(&mut Reader::new(&[])).is_err());
 
         let mut clock = Vec::new();
         clock.extend_from_slice(&EventClock::CURRENT.wire_value().to_le_bytes());
         clock.extend_from_slice(&0_u16.to_le_bytes());
         clock.extend_from_slice(&1_000_000_000_u64.to_le_bytes());
-        assert_eq!(decode_clock(&mut Reader::new(&clock), 4).unwrap(), EventClock::CURRENT);
+        assert_eq!(decode_clock(&mut Reader::new(&clock)).unwrap(), EventClock::CURRENT);
 
         let mut event = Vec::new();
         event.extend_from_slice(&1_u64.to_le_bytes());
@@ -2259,14 +2089,7 @@ mod tests {
         event.push(0);
         event.extend_from_slice(&1_u64.to_le_bytes());
         event.extend_from_slice(&[0; 7 * 8]);
-        assert_eq!(decode_event_v4(&mut Reader::new(&event)).unwrap().3, MAX_STACK_FRAMES);
-
-        let mut legacy = Vec::new();
-        legacy.extend_from_slice(&1_u64.to_le_bytes());
-        legacy.push(EventKind::MutexAccess.wire_value());
-        legacy.push(u8::try_from(MAX_STACK_FRAMES).unwrap());
-        legacy.extend_from_slice(&0_u16.to_le_bytes());
-        assert_eq!(decode_legacy_event(&mut Reader::new(&legacy), 1).unwrap().3, MAX_STACK_FRAMES);
+        assert_eq!(decode_event(&mut Reader::new(&event)).unwrap().3, MAX_STACK_FRAMES);
     }
 
     #[test]
@@ -2353,6 +2176,7 @@ mod tests {
                 capture_duration_nanos: 0,
                 events: Events::default(),
                 sources: Vec::new(),
+                symbols: Vec::new(),
             })
             .is_err()
         );
@@ -2376,7 +2200,7 @@ mod tests {
     }
 
     #[test]
-    fn version_five_policies_and_legacy_thread_names_are_compatible() {
+    fn every_recording_policy_and_thread_name_is_required() {
         let policies = [
             Policy {
                 enabled: true,
@@ -2401,44 +2225,13 @@ mod tests {
             bytes.extend_from_slice(&0_u16.to_le_bytes());
             bytes.extend_from_slice(&u32::try_from(value.event_sampling.get()).unwrap().to_le_bytes());
         }
-        let decoded = decode_recording_policies(&mut Reader::new(&bytes), 5).unwrap();
-        assert_eq!(
-            decoded,
-            Policies {
-                allocations: policies[0],
-                general_events: policies[1],
-                arc_dereferences: policies[2],
-                runtime_tasks: policies[1],
-                io: Policy::default(),
-                cache: Policy::default(),
-            }
-        );
+        assert!(decode_recording_policies(&mut Reader::new(&bytes)).is_err());
 
         let mut thread = Vec::new();
         thread.extend_from_slice(&1_u64.to_le_bytes());
         thread.extend_from_slice(&2_u64.to_le_bytes());
         thread.extend_from_slice(&3_u64.to_le_bytes());
-        assert_eq!(decode_threads(&mut Reader::new(&thread), 1, 1).unwrap()[0].name, "");
-    }
-
-    #[test]
-    fn version_seven_policies_default_cache_recording_to_disabled() {
-        let policy = Policy {
-            enabled: true,
-            capture_backtraces: true,
-            event_sampling: EventSampling::one_in(7).unwrap(),
-        };
-        let mut bytes = Vec::new();
-        for value in [policy; 5] {
-            bytes.push(u8::from(value.enabled));
-            bytes.push(u8::from(value.capture_backtraces));
-            bytes.extend_from_slice(&0_u16.to_le_bytes());
-            bytes.extend_from_slice(&u32::try_from(value.event_sampling.get()).unwrap().to_le_bytes());
-        }
-
-        let decoded = decode_recording_policies(&mut Reader::new(&bytes), 7).unwrap();
-
-        assert_eq!(decoded.cache, Policy::default());
+        assert!(decode_threads(&mut Reader::new(&thread), 1).is_err());
     }
 
     #[test]
@@ -2450,19 +2243,12 @@ mod tests {
         current.push(0);
         current.push(1);
         current.extend_from_slice(&[0; 64]);
-        assert!(decode_event_v4(&mut Reader::new(&current)).is_err());
+        assert!(decode_event(&mut Reader::new(&current)).is_err());
 
         let mut oversized_frames = current;
         oversized_frames[10] = u8::try_from(MAX_STACK_FRAMES + 1).unwrap();
         oversized_frames[11] = 0;
-        assert!(decode_event_v4(&mut Reader::new(&oversized_frames)).is_err());
-
-        let mut legacy = Vec::new();
-        legacy.extend_from_slice(&1_u64.to_le_bytes());
-        legacy.push(EventKind::MutexAccess.wire_value());
-        legacy.push(0);
-        legacy.extend_from_slice(&1_u16.to_le_bytes());
-        assert!(decode_legacy_event(&mut Reader::new(&legacy), 1).is_err());
+        assert!(decode_event(&mut Reader::new(&oversized_frames)).is_err());
     }
 
     #[test]
@@ -2566,14 +2352,15 @@ mod tests {
     }
     #[test]
     fn gamma_round2_snapshot_lengths_preserve_all_scripted_overflow_errors() {
-        assert_eq!(snapshot_encoded_len([], [], []).unwrap(), HEADER_LEN);
+        assert_eq!(snapshot_encoded_len([], [], [], 4).unwrap(), HEADER_LEN + 4);
         for result in [
-            snapshot_encoded_len([usize::MAX], [], []),
-            snapshot_encoded_len([], [(usize::MAX, 0)], []),
-            snapshot_encoded_len([], [(0, usize::MAX)], []),
-            snapshot_encoded_len([], [], [usize::MAX]),
-            snapshot_encoded_len([], [], [usize::MAX - 26, 0]),
-            snapshot_encoded_len([], [], [usize::MAX - 26]),
+            snapshot_encoded_len([usize::MAX], [], [], 4),
+            snapshot_encoded_len([], [(usize::MAX, 0)], [], 4),
+            snapshot_encoded_len([], [(0, usize::MAX)], [], 4),
+            snapshot_encoded_len([], [], [usize::MAX], 4),
+            snapshot_encoded_len([], [], [usize::MAX - 26, 0], 4),
+            snapshot_encoded_len([], [], [usize::MAX - 26], 4),
+            snapshot_encoded_len([], [], [], usize::MAX),
         ] {
             assert_eq!(result.unwrap_err().to_string(), Error::allocation_failed().to_string());
         }

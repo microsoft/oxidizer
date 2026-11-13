@@ -6,15 +6,14 @@
 use std::alloc::{GlobalAlloc, Layout};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
-use rallocator::Rallocator;
-use seismograph::recorder::alloc::Allocation;
-use seismograph::recorder::event::EventKind;
+use GLOBAL as Rallocator;
+use seismograph::recorder::event::{Event, EventKind};
 use seismograph::recorder::{Configuration, Policy, thread_id, without_recording};
 use seismograph_rallocator::native::{ObservationSource, Snapshot};
 
 rallocator::rallocator!();
 
-fn capture() -> (Snapshot, Vec<(EventKind, Allocation)>) {
+fn capture() -> (Snapshot, Vec<Event>) {
     let round = seismograph_rallocator::native::observation_round();
     let recording = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default())
         .expect("the registered native allocator source must capture successfully");
@@ -31,13 +30,13 @@ fn capture() -> (Snapshot, Vec<(EventKind, Allocation)>) {
         assert_eq!(state.round, round);
         assert!(state.owners_complete);
         assert_eq!(state.owner_count, state.owners.len() as u64);
-        let events: Vec<_> = decoded
-            .events
-            .events
-            .iter()
-            .filter_map(|event| event.allocation().map(|allocation| (event.kind, allocation)))
-            .collect();
-        assert!(events.iter().all(|(_, allocation)| allocation.address.get() != 0));
+        let events = decoded.events.events;
+        assert!(
+            events
+                .iter()
+                .filter_map(Event::allocation)
+                .all(|allocation| allocation.address.get() != 0)
+        );
         (state, events)
     })
 }
@@ -109,24 +108,40 @@ fn recorded_worker(commands: &Receiver<()>, ready: &SyncSender<(u64, usize)>) {
     unsafe { Rallocator.dealloc(held, held_layout) };
 }
 
-fn assert_resize_events(events: &[(EventKind, Allocation)], original: usize, replacement: usize) {
-    let expected = [
-        (original, EventKind::Deallocation, 33, 16),
-        (replacement, EventKind::Allocation, 4097, 16),
-    ];
-    for (address, kind, size, alignment) in expected {
-        let records = events
-            .iter()
-            .filter(|(event_kind, allocation)| *event_kind == kind && allocation.address.get() == address as u64)
-            .collect::<Vec<_>>();
-        assert_eq!(records.len(), 1);
-        let allocation = records[0].1;
-        assert_eq!((allocation.size, allocation.alignment), (size, alignment));
-        assert_eq!(allocation.allocation_id.get(), address as u64);
-        assert_eq!(allocation.heap_id.get(), 0);
-        assert_eq!(allocation.event_thread_id.get(), 0);
-        assert!(!allocation.freed_after_heap_release);
-    }
+fn assert_resize_events(events: &[Event], original: usize, replacement: usize) {
+    let records = events
+        .iter()
+        .filter_map(Event::reallocation)
+        .filter(|resize| resize.old_address.get() == original as u64)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    let resize = records[0];
+    assert_eq!(resize.new_address.get(), replacement as u64);
+    assert_eq!((resize.old_size, resize.new_size, resize.alignment), (33, 4097, 16));
+    assert_eq!(resize.allocation_id.get(), original as u64);
+    assert_eq!(resize.heap_id.get(), 0);
+    assert!(!events.iter().any(|event| {
+        event.allocation().is_some_and(|allocation| {
+            (event.kind == EventKind::Deallocation && allocation.address.get() == original as u64)
+                || (event.kind == EventKind::Allocation && allocation.address.get() == replacement as u64)
+        })
+    }));
+}
+
+fn assert_free_event(events: &[Event], replacement: usize) {
+    let records = events
+        .iter()
+        .filter_map(|event| event.allocation().map(|allocation| (event.kind, allocation)))
+        .filter(|(_, allocation)| allocation.address.get() == replacement as u64)
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].0, EventKind::Deallocation);
+    let allocation = records[0].1;
+    assert_eq!((allocation.size, allocation.alignment), (4097, 16));
+    assert_eq!(allocation.allocation_id.get(), replacement as u64);
+    assert_eq!(allocation.heap_id.get(), 0);
+    assert_eq!(allocation.event_thread_id.get(), 0);
+    assert!(!allocation.freed_after_heap_release);
 }
 
 #[test]
@@ -177,14 +192,8 @@ fn gamma_round2_recorded_resize_free_and_restart_publish_current_non_time_state(
         (state.generation, state.session_id, state.thread_id),
         (generation, freed.session_id, thread)
     );
-    let records = events
-        .iter()
-        .filter(|(_, allocation)| allocation.address.get() == replacement as u64)
-        .collect::<Vec<_>>();
-    assert_eq!(records.len(), 2);
-    assert_eq!(records[0].0, EventKind::Allocation);
-    assert_eq!(records[1].0, EventKind::Deallocation);
-    assert_eq!(records[0].1, records[1].1);
+    assert_free_event(&events, replacement);
+    assert_resize_events(&events, original, replacement);
 
     seismograph_rallocator::native::set_publication_enabled(false);
     command
@@ -202,8 +211,11 @@ fn gamma_round2_recorded_resize_free_and_restart_publish_current_non_time_state(
         retained.observation.expect("the last publication remains readable").round,
         state.round
     );
-    assert!(events.iter().any(|(kind, allocation)| {
-        *kind == EventKind::Allocation && allocation.address.get() == zeroed as u64 && allocation.size == 73 && allocation.alignment == 64
+    assert!(events.iter().any(|event| {
+        event.kind == EventKind::Allocation
+            && event
+                .allocation()
+                .is_some_and(|allocation| allocation.address.get() == zeroed as u64 && allocation.size == 73 && allocation.alignment == 64)
     }));
 
     seismograph::recorder(Configuration::default());

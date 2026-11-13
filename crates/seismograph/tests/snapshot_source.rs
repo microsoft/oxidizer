@@ -53,19 +53,30 @@ fn snapshot_file_persistence_uses_the_caller_path() {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn invalid_utf8_source_name_is_rejected() {
-    // Version 1 uses a 32-byte snapshot header and a 24-byte source header.
-    let mut bytes = vec![0; 56];
-    bytes[..8].copy_from_slice(b"SEISMOG\0");
-    bytes[8..10].copy_from_slice(&1_u16.to_le_bytes());
-    bytes[28..32].copy_from_slice(&1_u32.to_le_bytes());
-    bytes[32..40].copy_from_slice(&1_u64.to_le_bytes());
-    bytes[40..42].copy_from_slice(&1_u16.to_le_bytes());
-    bytes[42..44].copy_from_slice(&1_u16.to_le_bytes());
-    bytes.push(b'a');
-    assert_eq!(snapshot::decode(&bytes).unwrap().sources[0].name, "a");
+    use seismograph::recorder::event::{EventClock, Events};
+    use seismograph::snapshot::{DecodedSnapshot, test_util};
 
-    *bytes.last_mut().unwrap() = 0xff;
+    let fixture = DecodedSnapshot {
+        events: Events {
+            clock: EventClock::CURRENT,
+            ..Events::default()
+        },
+        sources: vec![SourceSnapshot {
+            id: SourceId::new(1),
+            name: "source".to_owned(),
+            schema_version: 1,
+            data: b"captured".to_vec(),
+        }],
+        ..DecodedSnapshot::default()
+    };
+    let encoded = test_util::encode(&fixture).unwrap();
+    let mut bytes = encoded.as_bytes().to_vec();
+    assert_eq!(snapshot::decode(&bytes).unwrap().sources, fixture.sources);
+
+    let name_offset = bytes.windows(b"source".len()).rposition(|value| value == b"source").unwrap();
+    bytes[name_offset] = 0xff;
 
     assert_eq!(
         snapshot::decode(&bytes).unwrap_err().to_string(),

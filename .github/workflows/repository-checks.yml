@@ -138,11 +138,11 @@ jobs:
           group: none
       - name: Install Rust
         run: just anvil-toolchain-stable-install
-      - name: Check native macOS allocator and telemetry
+      - name: Check native macOS allocator, snapshots, and viewer
         run: |
           rustup component add --toolchain 1.95 clippy
-          cargo +1.95 clippy --package rallocator --package seismograph --package seismograph_rallocator --all-targets --all-features --locked -- -D warnings
-          cargo +1.95 test --package rallocator --package seismograph --package seismograph_rallocator --all-features --locked
+          cargo +1.95 clippy --package rallocator --package seismograph --package seismograph_rallocator --package seismograph_cli --all-targets --all-features --locked -- -D warnings
+          cargo +1.95 test --package rallocator --package seismograph --package seismograph_rallocator --package seismograph_cli --all-features --locked
           cargo +1.95 test --package rallocator --release --all-features --locked
 
   metabench-native-contracts:
