@@ -170,7 +170,7 @@ pub mod __private {
     ///
     /// Resumes a captured root-task panic.
     ///
-    /// For another runtime failure, starts an unwind that carries the failure.
+    /// For another runtime failure, starts an unwind with a diagnostic message.
     pub fn resume_error(error: super::Error) -> ! {
         match error.into_source().downcast::<crate::task::JoinError>() {
             Ok(error) if error.is_panic() => {
