@@ -84,6 +84,7 @@ impl RangeMasks {
 #[expect(clippy::inline_always, reason = "the padded path pays for the call and the masks it cannot fold")]
 #[inline(always)]
 pub(super) fn accepts(window: &[u8; WINDOW], masks: &RangeMasks, len: usize) -> bool {
+    // #[gamma::skip(logical.or_remove_left, literal.int_increment, tag = "equivalent", reason = "A zero-lane payload is independently rejected by the zero-member mask, and every one-byte payload lacks a complete digit-hyphen specification and is rejected by the unchanged grammar masks")]
     if len == 0 || len > WINDOW {
         return false;
     }
@@ -118,7 +119,9 @@ pub(super) fn accepts(window: &[u8; WINDOW], masks: &RangeMasks, len: usize) -> 
         // shorter number than it is, so leave those to the general parser.
         | (u64::from(masks.zeros) & payload & before_digit & !after_digit)
         // A line of nothing but separators holds no member at all.
-        | (starts.wrapping_sub(1) >> (u64::BITS - 1));
+        | (starts.wrapping_sub(1) >>
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "starts uses at most 16 bits; shifting starts minus one by 62 or 63 is nonzero exactly when starts is zero")]
+            (u64::BITS - 1));
     if rejected != 0 {
         return false;
     }
@@ -130,7 +133,13 @@ pub(super) fn accepts(window: &[u8; WINDOW], masks: &RangeMasks, len: usize) -> 
         if !ordered(window, !digits, compare.trailing_zeros()) {
             return false;
         }
-        compare &= compare - 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        compare &=
+        // #[gamma::skip(arith.sub_to_add, arith.sub_to_div, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        compare -
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "compare is intersected with after_digit, whose bit zero is clear; for an even mask x, x & (x - 1) equals x & (x - 2)")]
+        1;
     }
     true
 }
@@ -147,6 +156,7 @@ fn ordered(window: &[u8; WINDOW], gaps: u64, dash: u32) -> bool {
     let first_len = (gaps << (u64::BITS - dash)).leading_zeros();
     let last_len = (gaps >> (dash + 1)).trailing_zeros();
     if first_len != last_len {
+        // #[gamma::skip(relational.lt_to_le, tag = "equivalent", reason = "The enclosing branch already established that first_len and last_len are unequal")]
         return first_len < last_len;
     }
     same_length_ordered(window, dash, first_len)
@@ -166,6 +176,7 @@ fn same_length_ordered(window: &[u8; WINDOW], dash: u32, len: u32) -> bool {
         let left = window[first + step];
         let right = window[last + step];
         if left != right {
+            // #[gamma::skip(relational.lt_to_le, tag = "equivalent", reason = "The enclosing branch already established that these first differing digit bytes are unequal")]
             return left < right;
         }
     }
@@ -297,9 +308,32 @@ pub(super) fn oracle(payload: &[u8]) -> bool {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_nov6_one_member_can_start_at_the_lowest_window_lane() {
+        assert!(scan(b"123456789012345-"));
+        assert!(!scan(b"123456789012345x"));
+    }
+
+    #[test]
+    fn gamma_survivor_range_window_padding_and_callback_bounds() {
+        for len in 8..=16 {
+            let input: Vec<u8> = (0..len).map(|index| u8::try_from(index).unwrap()).collect();
+            let mut window = [super::FILLER; 16];
+            assert!(super::fill_window(&input, &mut window));
+            assert_eq!(&window[16 - len..], input);
+            assert_eq!(&window[..16 - len], vec![super::FILLER; 16 - len]);
+        }
+        assert!(!super::with_window(b"bytes=ignored", 13, |_, _| true));
+        assert!(super::with_window(b"1234567890123456", 15, |_, len| len == 1));
+        assert!(!super::with_window(b"bytes=1-2", 10, |_, _| true));
+        assert!(!super::with_window(b"bytes=12345678-12345678", 6, |_, _| true));
+        assert!(super::with_window(b"bytes=-123456789012345", 6, |_, len| len == 16));
+        assert!(super::with_window(b"bytes=1-2", 6, |window, len| len == 3 && window[13..] == *b"1-2"));
+    }
+
     use std::ops::RangeInclusive;
     #[cfg(not(feature = "std"))]
-    use std::vec::Vec;
+    use std::{vec, vec::Vec};
 
     use super::*;
 

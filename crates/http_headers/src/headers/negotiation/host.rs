@@ -153,23 +153,19 @@ impl HostOwned {
             if name.as_str().is_empty() {
                 return Err(invalid_syntax(&FieldName::Host));
             }
+            // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "An unchanged validated registered name contains neither brackets nor a port delimiter, so the additional normalized-host validation also succeeds")]
             if name.normalized() != name.as_str() {
-                let normalized = name.normalized();
-                if normalized.starts_with('[') {
-                    if !normalized.ends_with(']') {
-                        return Err(invalid(&FieldName::Host, DecodeErrorKind::InvalidNumber));
-                    }
-                } else if normalized.contains(':') {
-                    return Err(invalid_syntax(&FieldName::Host));
-                }
+                validate_normalized_port_host(name.normalized())?;
             }
         }
+        // #[gamma::skip(literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "Only String preallocation uses these host-size estimates; serialization writes the complete validated host independently")]
         let host_capacity = match host {
             HostKind::RegisteredName(name) => name.as_str().len(),
             HostKind::Ipv4(_) => 15,
             HostKind::Ipv6(_) => 41,
             HostKind::IpvFuture(address) => address.version().len().saturating_add(address.address().len()).saturating_add(4),
         };
+        // #[gamma::skip(literal.int_decrement, literal.int_increment, tag = "equivalent", reason = "This estimate changes only String capacity, not whether or how the port is serialized")]
         let port_capacity = port.map_or(0, |port| port.as_str().len().saturating_add(1));
         let mut wire = String::with_capacity(host_capacity.saturating_add(port_capacity));
         let mut normalized = None;
@@ -356,17 +352,21 @@ impl HostOwned {
         if host.is_empty() {
             return Err(invalid_syntax(&FieldName::Host));
         }
+        // #[gamma::skip(literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "String grows on writes; this host-plus-port capacity estimate is not the encoded length")]
         let mut wire = String::with_capacity(host.len().saturating_add(6));
         wire.push_str(host);
         wire.push(':');
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Formatting the standard u16 decimal Display into String cannot return fmt::Error")]
         write!(&mut wire, "{port}").map_err(|_invalid| invalid_syntax(&FieldName::Host))?;
         let mut parsed = match parse_host(host.as_bytes()) {
+            // #[gamma::skip(match_guard.always_false, tag = "equivalent", reason = "The fallback reparses the complete host-plus-decimal-port wire and returns the same validated host metadata and field value")]
             Ok(parsed) if parsed.port_start.is_none() => parsed,
             _ => return Self::try_from(wire),
         };
         parsed.port_start = Some(host.len() + 1);
         parsed.numeric_port = Some(Ok(port));
         Ok(Self {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "parse_host already validated every host byte and formatting u16 adds only a colon and decimal digits, all valid field-value bytes")]
             value: FieldValue::try_from(wire).map_err(|_invalid| invalid_syntax(&FieldName::Host))?,
             parsed,
         })
@@ -714,15 +714,24 @@ fn parse_host(bytes: &[u8]) -> Result<ParsedHost, DecodeError> {
         // ahead of the load would cost several compares.
         match HOST_CLASS[usize::from(bytes[index])] {
             HOST_REG_NAME => {
+                // #[gamma::skip(stmt.delete_assign, logical.and_remove_left, logical.and_remove_right, logical.and_to_or, tag = "equivalent", reason = "These changes only attempt IPv4 parsing on additional registered names; a genuine IPv4 remains a candidate and the standard IPv4 parser rejects every additional non-IPv4 name")]
                 ipv4_candidate = ipv4_candidate && (bytes[index].is_ascii_digit() || bytes[index] == b'.');
-                index += 1;
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                index +=
+                // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                1;
             }
             HOST_PERCENT => {
                 if !bytes.get(index + 1).is_some_and(u8::is_ascii_hexdigit) || !bytes.get(index + 2).is_some_and(u8::is_ascii_hexdigit) {
                     return Err(invalid_syntax(&FieldName::Host));
                 }
+                // #[gamma::skip(stmt.delete_assign, literal.bool_flip, tag = "equivalent", reason = "Leaving a percent-encoded name eligible for an IPv4 parse only adds a failed standard-parser attempt; IPv4 syntax contains no percent escape")]
                 ipv4_candidate = false;
-                index += 3;
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                index +=
+                // #[gamma::skip(literal.int_to_zero, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                // #[gamma::skip(literal.int_decrement, literal.int_to_one, tag = "equivalent", reason = "Both escape digits were checked above and are ordinary registered-name bytes; advancing one or two revalidates them before reaching the same next byte")]
+                3;
             }
             HOST_COLON => {
                 if index == 0 {
@@ -750,7 +759,9 @@ fn parse_host(bytes: &[u8]) -> Result<ParsedHost, DecodeError> {
 }
 
 fn registered_host_kind(bytes: &[u8], ipv4_candidate: bool) -> ParsedHostKind {
-    if ipv4_candidate {
+    if
+    // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "The standard IPv4 parser rejects every noncandidate registered name; genuine IPv4 addresses already have ipv4_candidate true")]
+    ipv4_candidate {
         let text = str::from_utf8(bytes).expect("the registered-name scan accepts only ASCII");
         if let Ok(address) = text.parse() {
             return ParsedHostKind::Ipv4(address);
@@ -769,15 +780,29 @@ fn parse_host_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<ParsedHost, 
     parse_international_host(bytes)
 }
 
+fn validate_normalized_port_host(normalized: &str) -> Result<(), DecodeError> {
+    if normalized.starts_with('[') {
+        if !normalized.ends_with(']') {
+            return Err(invalid(&FieldName::Host, DecodeErrorKind::InvalidNumber));
+        }
+    } else if normalized.contains(':') {
+        return Err(invalid_syntax(&FieldName::Host));
+    }
+    Ok(())
+}
+
 fn parse_international_host(bytes: &[u8]) -> Result<ParsedHost, DecodeError> {
     let authority = str::from_utf8(bytes).map_err(|_invalid| invalid(&FieldName::Host, DecodeErrorKind::InvalidUtf8))?;
-    if authority.is_ascii() || authority.contains('@') || authority.starts_with('[') {
+    // #[gamma::skip(logical.or_remove_right, literal.char_to_nul, tag = "equivalent", reason = "IDNA preserves literal ASCII at-signs, and the final authority parser independently rejects userinfo; declining this prefilter reports the identical Host InvalidSyntax")]
+    let ascii_or_userinfo = authority.is_ascii() || authority.contains('@');
+    if ascii_or_userinfo || authority.starts_with('[') {
         return Err(invalid_syntax(&FieldName::Host));
     }
     let (host, port, port_start) = match authority.rsplit_once(':') {
         Some((host, port)) if !host.contains(':') && port.bytes().all(|byte| byte.is_ascii_digit()) => {
             (host, Some(port), Some(host.len() + 1))
         }
+        // #[gamma::skip(match_guard.always_true, tag = "equivalent", reason = "Some from rsplit_once on colon already proves the authority contains a colon")]
         Some(_) if authority.contains(':') => return Err(invalid_syntax(&FieldName::Host)),
         _ => (authority, None, None),
     };
@@ -821,6 +846,7 @@ fn validate_port(bytes: &[u8]) -> Result<Result<u16, PortConversionError>, Decod
         if !byte.is_ascii() {
             return Err(invalid_syntax(&FieldName::Host));
         }
+        // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
         decimal = false;
     }
     if decimal {
@@ -950,6 +976,28 @@ fn component(bytes: &[u8], range: Range<usize>) -> Result<&str, DecodeError> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_international_authority_guard_and_port_syntax() {
+        for bytes in [
+            b"ascii.example".as_slice(),
+            "user@é.example".as_bytes(),
+            "[é.example".as_bytes(),
+            "é.example:1x".as_bytes(),
+            "é.example:x1".as_bytes(),
+            "é:example:1".as_bytes(),
+            "é.example: 1".as_bytes(),
+            "é.example:1 ".as_bytes(),
+        ] {
+            assert!(super::parse_international_host(bytes).err().is_some(), "{bytes:?}");
+        }
+        let parsed = super::parse_international_host("é.example:42".as_bytes()).unwrap();
+        assert_eq!(parsed.numeric_port.unwrap().unwrap(), 42);
+        assert_eq!(parsed.normalized.as_deref(), Some("xn--9ca.example"));
+        assert_eq!(
+            super::validate_port(b" ").unwrap_err().kind(),
+            crate::DecodeErrorKind::InvalidNumber
+        );
+    }
     use super::{
         Host, HostOwned, HostView, component, parse_host, parse_host_with, parse_international_host, valid_ip_literal, validate_port,
     };

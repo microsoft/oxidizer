@@ -199,6 +199,7 @@ fn extract_option_inner(ty: &syn::Type) -> Option<&syn::Type> {
     let syn::Type::Path(type_path) = ty else {
         return None;
     };
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "This type comes from a parsed template field; Syn requires parsed type paths to contain at least one segment.")]
     let last_segment = type_path.path.segments.last()?;
     if last_segment.ident != "Option" {
         return None;

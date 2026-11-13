@@ -75,7 +75,9 @@ impl Queue {
         }
     }
 
+    // #[gamma::skip(fn_value.bool_true, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     pub(crate) fn can_dequeue(&self) -> bool {
+        // #[gamma::skip(bool_expr.negate, relational.ne_to_eq, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         self.front.0.load(Ordering::Relaxed) != self.back.0.load(Ordering::Relaxed)
     }
 
@@ -105,10 +107,9 @@ impl Queue {
     /// The caller is the only consumer. Callback accepts ownership of each
     /// dequeued message and must not recursively consume this queue.
     pub(crate) unsafe fn drain(&self, mut consume: impl FnMut(usize) -> bool) {
-        let mut current = self.front.0.load(Ordering::Acquire);
-        if current == 0 {
+        let Some(mut current) = initial_drain_front(self.front.0.load(Ordering::Acquire)) else {
             return;
-        }
+        };
         let bound = self.back.0.load(Ordering::Relaxed);
         // SAFETY: A node is only relinquished after its successor link is
         // acquired. In particular, the observed tail is NEVER passed to consume:
@@ -117,8 +118,10 @@ impl Queue {
             while current != bound {
                 let successor = next(current).load(Ordering::Acquire);
                 if successor == 0 {
+                    // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                     break;
                 }
+                // #[gamma::skip(stmt.delete_call, reason = "The non-faulting prefetch is a cache hint and does not participate in queue publication")]
                 crate::backend::snmalloc::hal::prefetch(successor);
                 let keep_going = consume(current);
                 current = successor;
@@ -129,6 +132,10 @@ impl Queue {
         }
         self.front.0.store(current, Ordering::Release);
     }
+}
+
+fn initial_drain_front(front: usize) -> Option<usize> {
+    if front == 0 { None } else { Some(front) }
 }
 
 #[derive(Clone, Copy)]
@@ -209,6 +216,26 @@ pub(crate) struct Cache {
 }
 
 impl Cache {
+    #[cfg(test)]
+    pub(crate) fn assert_cached_metadata_and_initial_routing(&self, map: Map) {
+        for ring in &self.rings {
+            if ring.meta != 0 {
+                // SAFETY: every open ring retains its live slab and exclusively owns its first object.
+                assert_eq!(ring.meta, unsafe { map.lookup(ring.first) }.0);
+            }
+        }
+        for (index, list) in self.lists.iter().enumerate() {
+            let mut message = list.first;
+            while message != 0 {
+                // SAFETY: unpublished messages retain their stable slab routing metadata.
+                let (_, encoded) = unsafe { map.lookup(message) };
+                assert_eq!(index, Self::slot(encoded & !255, 0));
+                // SAFETY: this cache exclusively owns the initialized unpublished message.
+                message = unsafe { next(message) }.load(Ordering::Relaxed);
+            }
+        }
+    }
+
     pub(crate) fn observe(&self, map: Map, budget: &mut usize) -> seismograph_rallocator::native::RemoteState {
         let mut result = seismograph_rallocator::native::RemoteState {
             complete: true,
@@ -229,6 +256,7 @@ impl Cache {
             while message != 0 {
                 if *budget == 0 {
                     result.complete = false;
+                    // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                     break;
                 }
                 *budget -= 1;
@@ -277,8 +305,17 @@ impl Cache {
     /// frontend-owned and its pagemap owner is a persistent Owner endpoint.
     pub(crate) unsafe fn forward(&mut self, map: Map, message: usize, round: usize) {
         // SAFETY: Pending messages retain their frontend slabs and owner metadata.
-        let (_, encoded) = unsafe { map.lookup(message) };
-        let slot = Self::slot(encoded & !255, round);
+        let (_, encoded) = unsafe {
+            map.lookup(
+                // #[gamma::skip(expr.increment, reason = "Messages occupy at least sixteen-byte-aligned live allocation starts, so adding one stays within the identical pagemap chunk")]
+                message,
+            )
+        };
+        let slot = Self::slot(
+            // #[gamma::skip(literal.int_to_one, literal.int_to_zero, literal.int_decrement, literal.int_increment, reason = "Slot selection discards Owner::ALLOC_BITS low bits; owner addresses are aligned to ALLOC_SIZE, so every changed low-byte mask is discarded")]
+            encoded & !255,
+            round,
+        );
         // SAFETY: Message ownership is transferred into the selected list.
         unsafe { self.lists[slot].push(message) };
     }
@@ -298,7 +335,11 @@ impl Cache {
     pub(crate) unsafe fn deallocate(&mut self, map: Map, meta: usize, ptr: usize) {
         // Match the pinned source's exact ring_set()+way indexing (including
         // overlapping sets), not a conventional set*associativity rewrite.
-        let set = Self::ring_set(meta);
+        let set = Self::ring_set(
+            // #[gamma::skip(expr.increment, reason = "Slab metadata is aligned to Slab::ALIGN; adding one before division preserves the hash input")]
+            meta,
+        );
+        // #[gamma::skip(range.exclusive_to_inclusive, expr.increment, literal.int_increment, reason = "The extra third way cannot hold this metadata: insertion of this same slab is restricted to its first two ways")]
         for index in set..set + 2 {
             if self.rings[index].meta == meta {
                 // SAFETY: Live slab metadata is nonzero, so a match also
@@ -319,7 +360,10 @@ impl Cache {
     // the small hash here rather than adding a fifth Win64 stack argument.
     #[inline(never)]
     unsafe fn deallocate_miss(&mut self, map: Map, meta: usize, ptr: usize) {
-        let set = Self::ring_set(meta);
+        let set = Self::ring_set(
+            // #[gamma::skip(expr.increment, reason = "Slab metadata is aligned to Slab::ALIGN; adding one before division preserves the hash input")]
+            meta,
+        );
         let mut victim = set;
         for index in set..set + 2 {
             if self.rings[index].meta == 0 {
@@ -349,7 +393,10 @@ impl Cache {
         }
         let mut round = 0;
         loop {
-            let own_slot = Self::slot(owner, round);
+            let own_slot = Self::slot(
+                // #[gamma::skip(expr.increment, reason = "Owner endpoints are ALLOC_SIZE-aligned and slot selection discards all ALLOC_BITS low address bits")]
+                owner, round,
+            );
             for i in 0..256 {
                 if i == own_slot || self.lists[i].first == 0 {
                     continue;
@@ -364,15 +411,20 @@ impl Cache {
             }
             let list = std::mem::replace(&mut self.lists[own_slot], List::EMPTY);
             if list.first == 0 {
+                // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 break;
             }
-            round += 1;
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            round +=
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
             let mut message = list.first;
             while message != 0 {
                 // SAFETY: This unpublished list exclusively owns the initialized message.
                 let successor = unsafe { next(message) }.load(Ordering::Relaxed);
                 // SAFETY: Save the successor before relinking this retained message.
                 unsafe { self.forward(map, message, round) };
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 message = successor;
             }
         }
@@ -390,6 +442,425 @@ mod tests {
     use std::sync::{Arc, Barrier};
 
     use super::*;
+
+    #[test]
+    fn gamma_round2_colliding_owner_slots_are_rerouted_before_publication() {
+        let map = crate::backend::snmalloc::ranges::map().unwrap();
+        // SAFETY: this private allocator uses the unique registered backend map.
+        let mut backend = unsafe { crate::backend::snmalloc::ranges::Local::new(map) };
+        let envelope = backend.alloc_meta(1 << 24);
+        assert_ne!(envelope, 0);
+        let addresses = [
+            envelope + Owner::ALLOC_SIZE,
+            envelope + (1 << 22) + Owner::ALLOC_SIZE,
+            envelope + (2 << 22) + Owner::ALLOC_SIZE,
+        ];
+        for &address in &addresses {
+            // SAFETY: each aligned committed envelope is disjoint, initialized once,
+            // and withheld permanently from the larger backend allocation.
+            unsafe { Owner::initialize(map, address) };
+        }
+        let [left, right, sender] = addresses;
+        assert_eq!(Cache::slot(left, 0), Cache::slot(right, 0));
+        assert_eq!(Cache::slot(left, 0), Cache::slot(sender, 0));
+        assert_ne!(Cache::slot(left, 1), Cache::slot(right, 1));
+        assert_ne!(Cache::slot(left, 1), Cache::slot(sender, 1));
+        assert_ne!(Cache::slot(right, 1), Cache::slot(sender, 1));
+        let request = crate::backend::snmalloc::classes::Request::new(std::alloc::Layout::from_size_align(32, 16).unwrap()).unwrap();
+        let mut cache = Cache::new();
+        let mut messages = Vec::new();
+        for address in [left, right] {
+            // SAFETY: the initialized endpoint is persistent and exclusively leased here.
+            let owner = unsafe { &*(address as *const Owner) };
+            // SAFETY: no other reference borrows this owner's core.
+            let core = unsafe { &mut *owner.core_ptr() };
+            let pointer = core.allocate(request);
+            assert!(!pointer.is_null());
+            // SAFETY: this live allocation retains its registered slab metadata.
+            let (meta, _) = unsafe { map.lookup(pointer.addr()) };
+            // SAFETY: each allocation transfers exactly once into the private remote cache.
+            unsafe { cache.deallocate(map, meta, pointer.addr()) };
+            messages.push(pointer.addr());
+        }
+        // SAFETY: both messages target other persistent owners, not the sender.
+        unsafe { cache.post(map, sender) };
+        assert!(cache.is_empty());
+        for (address, message) in [left, right].into_iter().zip(messages) {
+            // SAFETY: the endpoint remains initialized and persistent.
+            let owner = unsafe { &*(address as *const Owner) };
+            assert_eq!(owner.queue().observe(), (message as u64, message as u64));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_forwarded_list_keeps_the_exact_message_address() {
+        let (map, target, sender) = gamma_survivor_remote_endpoints();
+        // SAFETY: the fixture initialized a persistent endpoint exclusively leased here.
+        let owner = unsafe { &*(target as *const Owner) };
+        // SAFETY: this test is the only core borrower.
+        let core = unsafe { &mut *owner.core_ptr() };
+        let request = crate::backend::snmalloc::classes::Request::new(std::alloc::Layout::from_size_align(32, 16).unwrap()).unwrap();
+        let pointer = core.allocate(request);
+        assert!(!pointer.is_null());
+        // SAFETY: the live allocation retains its slab metadata.
+        let (meta, _) = unsafe { map.lookup(pointer.addr()) };
+        // SAFETY: the single object is exclusively retired into this ring.
+        let message = unsafe { Ring::single(meta, pointer.addr()).close() };
+        let mut cache = Cache::new();
+        // SAFETY: the initialized message is owned by this test and is not published.
+        unsafe { cache.forward(map, message, 0) };
+        let slot = Cache::slot(target, 0);
+        assert_eq!((cache.lists[slot].first, cache.lists[slot].last), (message, message));
+        // SAFETY: the retained message targets the other persistent endpoint.
+        unsafe { cache.post(map, sender) };
+        assert_eq!(owner.queue().observe(), (message as u64, message as u64));
+    }
+
+    #[test]
+    fn gamma_round2_drain_front_plan_rejects_empty_before_reading_any_successor() {
+        assert_eq!(initial_drain_front(0), None);
+        assert_eq!(initial_drain_front(1), Some(1));
+        assert_eq!(initial_drain_front(16), Some(16));
+    }
+
+    #[test]
+    fn gamma_round2_second_way_hit_and_larger_second_way_victim() {
+        let (map, target, sender) = gamma_survivor_remote_endpoints();
+        // SAFETY: The fixture initializes a persistent private target endpoint.
+        let owner = unsafe { &*(target as *const Owner) };
+        // SAFETY: No other caller leases this endpoint's core.
+        let core = unsafe { &mut *owner.core_ptr() };
+        let mut groups: [Vec<_>; 8] = std::array::from_fn(|_| Vec::new());
+        for class in crate::backend::snmalloc::classes::CLASSES {
+            let request =
+                crate::backend::snmalloc::classes::Request::new(std::alloc::Layout::from_size_align(class.size, 16).unwrap()).unwrap();
+            let pointer = core.allocate(request).addr();
+            assert_ne!(pointer, 0);
+            // SAFETY: The allocated object's slab is live with immutable routing metadata.
+            let meta = unsafe { map.lookup(pointer) }.0;
+            groups[Cache::ring_set(meta)].push((meta, pointer, request));
+        }
+        let group = groups.iter().find(|group| group.len() >= 3).unwrap();
+        let (first, second, third) = (group[0], group[1], group[2]);
+        let extra = core.allocate(second.2).addr();
+        assert_ne!(extra, 0);
+        // SAFETY: The second class has ample space in its one still-live slab.
+        assert_eq!(unsafe { map.lookup(extra) }.0, second.0);
+        let set = Cache::ring_set(first.0);
+        let mut cache = Cache::new();
+        // SAFETY: Transfer each distinct, uniquely owned frontend object exactly once.
+        unsafe { cache.deallocate(map, first.0, first.1) };
+        // SAFETY: The second object's still-live metadata collides with the first object's set.
+        unsafe { cache.deallocate(map, second.0, second.1) };
+        // SAFETY: This separate second-slab object must hit the second cache way.
+        unsafe { cache.deallocate(map, second.0, extra) };
+        assert_eq!((cache.rings[set].meta, cache.rings[set].count), (first.0, 1));
+        assert_eq!((cache.rings[set + 1].meta, cache.rings[set + 1].count), (second.0, 2));
+        // SAFETY: This distinct object transfers once and forces eviction from the full colliding set.
+        unsafe { cache.deallocate(map, third.0, third.1) };
+        assert_eq!((cache.rings[set].meta, cache.rings[set].count), (first.0, 1));
+        assert_eq!((cache.rings[set + 1].meta, cache.rings[set + 1].count), (third.0, 1));
+        // SAFETY: All cached objects target the other persistent endpoint.
+        unsafe { cache.post(map, sender) };
+        assert!(cache.is_empty());
+        assert_eq!(cache.remaining, BUDGET);
+        for &(meta, pointer, _) in groups.iter().flatten() {
+            if ![first.0, second.0, third.0].contains(&meta) {
+                // SAFETY: Each unselected live object remains uniquely owned and returns once.
+                unsafe { core.deallocate(pointer) };
+            }
+        }
+        core.flush();
+    }
+
+    #[test]
+    fn gamma_survivor_queue_retains_tail_and_stops_after_callback() {
+        let queue = Queue::new();
+        let messages: Vec<_> = (0..5)
+            .map(|_| {
+                Box::new(Message {
+                    ring: 1,
+                    next: AtomicUsize::new(0),
+                })
+            })
+            .collect();
+        let addresses: Vec<_> = messages.iter().map(|message| (&raw const **message).addr()).collect();
+        assert!(!queue.can_dequeue());
+        // SAFETY: Empty queue, exclusively held by this sole consumer.
+        unsafe { queue.drain(|_| panic!("empty queue must not call consume")) };
+        for pair in addresses.windows(2).take(3) {
+            // SAFETY: Before publication, the test owns both initialized message nodes.
+            unsafe { next(pair[0]) }.store(pair[1], Ordering::Relaxed);
+        }
+        // A stale end link must be reset by enqueue rather than becoming a successor.
+        // SAFETY: Last is an unpublished initialized message.
+        unsafe { next(addresses[3]) }.store(addresses[4], Ordering::Relaxed);
+        // SAFETY: Stable initialized segment transfers once to this stationary queue.
+        unsafe { queue.enqueue(addresses[0], addresses[3]) };
+        assert!(queue.can_dequeue());
+        // SAFETY: The queued initialized tail remains retained by the single consumer.
+        assert_eq!(unsafe { next(addresses[3]) }.load(Ordering::Relaxed), 0);
+        let mut seen = Vec::new();
+        // SAFETY: Callback only records ownership transfers and does not recursively consume.
+        unsafe {
+            queue.drain(|address| {
+                seen.push(address);
+                false
+            });
+        };
+        assert_eq!(seen, [addresses[0]]);
+        assert_eq!(queue.observe(), (addresses[1] as u64, addresses[3] as u64));
+        // SAFETY: Same sole consumer with all backing still live.
+        unsafe {
+            queue.drain(|address| {
+                seen.push(address);
+                true
+            });
+        };
+        assert_eq!(seen, addresses[..3]);
+        assert!(!queue.can_dequeue());
+        // SAFETY: The new stable message is exclusively held and not previously published.
+        unsafe { queue.enqueue(addresses[4], addresses[4]) };
+        // SAFETY: This remains the sole consumer.
+        unsafe {
+            queue.drain(|address| {
+                seen.push(address);
+                true
+            });
+        };
+        assert_eq!(seen, addresses[..4]);
+        assert_eq!(queue.retained_message(), Some(addresses[4]));
+        assert!(!queue.can_dequeue());
+    }
+
+    #[test]
+    fn gamma_survivor_remote_budget_requires_strictly_more_bytes() {
+        let mut cache = Cache::new();
+        assert!(!cache.reserve(BUDGET));
+        assert_eq!(cache.remaining, BUDGET);
+        assert!(cache.reserve(BUDGET - 1));
+        assert_eq!(cache.remaining, 1);
+        assert!(!cache.reserve(1));
+        assert_eq!(cache.remaining, 1);
+        assert!(cache.reserve(0));
+        cache.clear_budget();
+        assert!(!cache.reserve(0));
+        assert_eq!(cache.remaining, 0);
+        for (address, round, expected) in [(0x1234_5600usize, 0, 209), (0x1234_5600, 1, 72), (0x1234_5600, 2, 0)] {
+            assert_eq!(Cache::slot(address, round), expected);
+        }
+        for (meta, expected) in [
+            (8, 3),
+            (16, 6),
+            (24, 1),
+            (32, 4),
+            (0x1000, 2),
+            (0x8000, 2),
+            (0x1234_5678, 0),
+            (0x1234_5678_9ab8, 4),
+            (0x007f_ffff_ffff_fff8, 4),
+        ] {
+            assert_eq!(Cache::ring_set(meta), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_ring_close_links_and_list_order() {
+        let mut objects = [0usize; 32];
+        let base = objects.as_mut_ptr().addr();
+        for order in [[0, 32, 64], [64, 32, 0]] {
+            let mut ring = Ring::single(8, base + order[0]);
+            for offset in &order[1..] {
+                // SAFETY: Every 32-byte object is distinct and exclusively writable.
+                unsafe { ring.push_nonempty(base + offset) };
+            }
+            // SAFETY: The nonempty ring owns all its object storage.
+            let message = unsafe { ring.close() };
+            // SAFETY: Closing initialized the message and its next atomic.
+            assert_eq!(unsafe { next(message) }.load(Ordering::Relaxed), 0);
+            // SAFETY: The ring word remains initialized and immutable.
+            assert_eq!(unsafe { open(message) }, (base + order[0], 3));
+        }
+        let a = Box::new(Message {
+            ring: 1,
+            next: AtomicUsize::new(0),
+        });
+        let b = Box::new(Message {
+            ring: 1,
+            next: AtomicUsize::new(0),
+        });
+        let mut list = List::EMPTY;
+        let a = (&raw const *a).addr();
+        let b = (&raw const *b).addr();
+        // SAFETY: This initialized message is exclusively test-owned and not published.
+        unsafe { list.push(a) };
+        // SAFETY: The other initialized message is distinct and not yet published.
+        unsafe { list.push(b) };
+        assert_eq!((list.first, list.last), (a, b));
+        // SAFETY: The list exclusively owns its initialized links.
+        assert_eq!(unsafe { next(a) }.load(Ordering::Relaxed), b);
+        // SAFETY: The list tail is initialized and exclusively held.
+        assert_eq!(unsafe { next(b) }.load(Ordering::Relaxed), 0);
+    }
+
+    fn gamma_survivor_remote_endpoints() -> (Map, usize, usize) {
+        let map = crate::backend::snmalloc::ranges::map().unwrap();
+        // SAFETY: This private metadata allocator uses the backend's unique registered map.
+        let mut backend = unsafe { crate::backend::snmalloc::ranges::Local::new(map) };
+        let target = backend.alloc_meta(Owner::ALLOC_SIZE);
+        let sender = backend.alloc_meta(Owner::ALLOC_SIZE);
+        assert_ne!(target, 0);
+        assert_ne!(sender, 0);
+        // SAFETY: This fresh committed envelope is initialized once and remains persistent.
+        unsafe { Owner::initialize(map, target) };
+        // SAFETY: The other envelope is disjoint, committed, and initialized once.
+        unsafe { Owner::initialize(map, sender) };
+        (map, target, sender)
+    }
+
+    #[test]
+    fn gamma_survivor_two_way_ring_hits_victims_and_routing_rounds() {
+        let (map, target, sender) = gamma_survivor_remote_endpoints();
+        // SAFETY: The fixture initialized this persistent endpoint.
+        let owner = unsafe { &*(target as *const Owner) };
+        // SAFETY: The test holds the target's unique core lease for all allocations and returns.
+        let core = unsafe { &mut *owner.core_ptr() };
+        let mut groups = [
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ];
+        for class in crate::backend::snmalloc::classes::CLASSES {
+            let request =
+                crate::backend::snmalloc::classes::Request::new(std::alloc::Layout::from_size_align(class.size, 16).unwrap()).unwrap();
+            let pointer = core.allocate(request).addr();
+            assert_ne!(pointer, 0);
+            // SAFETY: The just-allocated frontend object keeps its slab metadata live.
+            let (meta, _) = unsafe { map.lookup(pointer) };
+            groups[Cache::ring_set(meta)].push((meta, pointer, request));
+        }
+        let group = groups.iter().find(|group| group.len() >= 3).unwrap();
+        let (first, second, third) = (group[0], group[1], group[2]);
+        let extra = core.allocate(first.2).addr();
+        assert_ne!(extra, 0);
+        // SAFETY: The same class's first slab has many unused objects and remains live.
+        assert_eq!(unsafe { map.lookup(extra) }.0, first.0);
+        let mut tied = Cache::new();
+        let tied_first = core.allocate(first.2).addr();
+        let tied_second = core.allocate(second.2).addr();
+        let tied_third = core.allocate(third.2).addr();
+        assert!(tied_first != 0 && tied_second != 0 && tied_third != 0);
+        // SAFETY: Each new allocation is live in its existing target slab.
+        assert_eq!(unsafe { map.lookup(tied_first) }.0, first.0);
+        // SAFETY: The second target allocation remains live and immutable.
+        assert_eq!(unsafe { map.lookup(tied_second) }.0, second.0);
+        // SAFETY: The third target allocation remains live and immutable.
+        assert_eq!(unsafe { map.lookup(tied_third) }.0, third.0);
+        // SAFETY: This live object transfers once to the independent cache.
+        unsafe { tied.deallocate(map, first.0, tied_first) };
+        // SAFETY: The second live object is distinct and transferred once.
+        unsafe { tied.deallocate(map, second.0, tied_second) };
+        // SAFETY: The third live object is also distinct and transferred once.
+        unsafe { tied.deallocate(map, third.0, tied_third) };
+        let set = Cache::ring_set(first.0);
+        assert_eq!(tied.rings[set].meta, third.0);
+        assert_eq!(tied.rings[set + 1].meta, second.0);
+        // SAFETY: The tie-case cache owns all pending messages for the different stable target.
+        unsafe { tied.post(map, sender) };
+        let mut cache = Cache::new();
+        // SAFETY: This live object belongs to the target's still-live frontend slab.
+        unsafe { cache.deallocate(map, first.0, first.1) };
+        // SAFETY: The extra live object is distinct and belongs to the same slab.
+        unsafe { cache.deallocate(map, first.0, extra) };
+        // SAFETY: This other live object transfers once from its own still-live slab.
+        unsafe { cache.deallocate(map, second.0, second.1) };
+        assert_eq!((cache.rings[set].meta, cache.rings[set].count), (first.0, 2));
+        assert_eq!((cache.rings[set + 1].meta, cache.rings[set + 1].count), (second.0, 1));
+        // SAFETY: This third distinct retired object's metadata collides with the full two-way set.
+        unsafe { cache.deallocate(map, third.0, third.1) };
+        assert_eq!((cache.rings[set].meta, cache.rings[set].count), (third.0, 1));
+        assert_eq!(cache.rings[set + 1].meta, second.0);
+        let routed = (target >> 14) & 255;
+        assert_ne!(cache.lists[routed].first, 0);
+        // SAFETY: The only closed list is still unpublished and exclusively held.
+        let (_, count) = unsafe { open(cache.lists[routed].first) };
+        assert_eq!(count, 2);
+        let mut budget = usize::MAX;
+        let observed = cache.observe(map, &mut budget);
+        assert_eq!(
+            (
+                observed.open_rings,
+                observed.open_objects,
+                observed.messages,
+                observed.message_objects
+            ),
+            (2, 2, 1, 2)
+        );
+        assert_eq!(observed.message_bytes, first.2.size() as u64 * 2);
+        let message = std::mem::replace(&mut cache.lists[routed], List::EMPTY).first;
+        for round in 0..=5 {
+            // SAFETY: This initialized message is unpublished, with live target metadata.
+            unsafe { cache.forward(map, message, round) };
+            let slot = (target >> (14 + round * 8)) & 255;
+            assert_eq!((cache.lists[slot].first, cache.lists[slot].last), (message, message));
+            cache.lists[slot] = List::EMPTY;
+        }
+        // SAFETY: Restore normal round-zero routing before handing the cache to post.
+        unsafe { cache.forward(map, message, 0) };
+        assert!(cache.reserve(32));
+        assert_eq!(cache.remaining, BUDGET - 32);
+        // SAFETY: post transfers all cache-owned messages to the different persistent target endpoint.
+        unsafe { cache.post(map, sender) };
+        assert!(cache.is_empty());
+        assert_eq!(cache.remaining, BUDGET);
+        for &(meta, pointer, _) in groups.iter().flatten() {
+            if [first.0, second.0, third.0].contains(&meta) {
+                continue;
+            }
+            // SAFETY: All unselected objects remained live; each is retired once by its owning core.
+            unsafe { core.deallocate(pointer) };
+        }
+        core.flush();
+    }
+
+    #[test]
+    fn gamma_survivor_closed_ring_observation_budget() {
+        let (map, target, sender) = gamma_survivor_remote_endpoints();
+        // SAFETY: The fixture initialized this persistent endpoint.
+        let owner = unsafe { &*(target as *const Owner) };
+        // SAFETY: The test holds this fresh endpoint's unique core lease.
+        let core = unsafe { &mut *owner.core_ptr() };
+        let mut cache = Cache::new();
+        let request = crate::backend::snmalloc::classes::Request::new(std::alloc::Layout::from_size_align(32, 16).unwrap()).unwrap();
+        let first = core.allocate(request).addr();
+        let second = core.allocate(request).addr();
+        assert_ne!(first, 0);
+        assert_ne!(second, 0);
+        // SAFETY: Both new live frontend objects retain their metadata.
+        let meta = unsafe { map.lookup(first) }.0;
+        // SAFETY: Transfer this live object once into the empty cache.
+        unsafe { cache.deallocate(map, meta, first) };
+        // SAFETY: The second live object is distinct and transferred once.
+        unsafe { cache.deallocate(map, meta, second) };
+        // SAFETY: The known nonempty ring exclusively owns both retired objects.
+        unsafe { cache.close_ring(map, Cache::ring_set(meta)) };
+        let mut budget = 1;
+        let observed = cache.observe(map, &mut budget);
+        assert_eq!((observed.messages, observed.message_objects, observed.message_bytes), (1, 2, 64));
+        assert_eq!(budget, 0);
+        let mut exhausted = 0;
+        let observed = cache.observe(map, &mut exhausted);
+        assert!(!observed.complete);
+        assert_eq!(observed.messages, 0);
+        // SAFETY: Post these cache-owned messages once to their distinct stable endpoint.
+        unsafe { cache.post(map, sender) };
+        core.flush();
+    }
 
     #[test]
     fn routing_rounds_use_logical_owner_envelope() {

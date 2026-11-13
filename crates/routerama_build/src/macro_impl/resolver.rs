@@ -35,7 +35,11 @@ struct TypedField {
 }
 
 pub(crate) fn runtime_path() -> TokenStream2 {
-    runtime_path_for(crate_name("routerama").ok())
+    runtime_path_with(|name| crate_name(name).ok())
+}
+
+fn runtime_path_with(lookup: impl FnOnce(&str) -> Option<FoundCrate>) -> TokenStream2 {
+    runtime_path_for(lookup("routerama"))
 }
 
 fn runtime_path_for(found: Option<FoundCrate>) -> TokenStream2 {
@@ -62,12 +66,19 @@ pub(crate) fn expand(item: ItemEnum) -> syn::Result<TokenStream2> {
     expand_named(item, None)
 }
 
+pub(crate) fn expand_named(item: ItemEnum, explicit_resolver_name: Option<Ident>) -> syn::Result<TokenStream2> {
+    expand_named_with_runtime(item, explicit_resolver_name, &runtime_path())
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "the codegen assembles many independent token fragments in one place; splitting it would obscure the static/dynamic branching it orchestrates"
 )]
-pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Ident>) -> syn::Result<TokenStream2> {
-    let runtime = runtime_path();
+fn expand_named_with_runtime(
+    mut item: ItemEnum,
+    explicit_resolver_name: Option<Ident>,
+    runtime: &TokenStream2,
+) -> syn::Result<TokenStream2> {
     let has_lifetime = has_capture_lifetime(&item.generics)?;
     if item.ident.to_string().starts_with("r#") {
         return Err(Error::new(
@@ -207,7 +218,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
         };
         let arms = static_variants
             .iter()
-            .map(|variant| convert_arm(variant, &raw_enum, &enum_name, &runtime));
+            .map(|variant| convert_arm(variant, &raw_enum, &enum_name, runtime));
         quote! {
             #raw_impls
 
@@ -230,7 +241,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
 
     let add_methods: Vec<TokenStream2> = dynamic_variants
         .iter()
-        .map(|variant| add_method(variant, &enum_name, &schema_ty, &extractor_ty, &visibility, &runtime))
+        .map(|variant| add_method(variant, &enum_name, &schema_ty, &extractor_ty, &visibility, runtime))
         .collect();
     let dynamic_conversion_arms: Vec<TokenStream2> = dynamic_variants
         .iter()
@@ -693,6 +704,7 @@ fn unraw_ident(ident: &Ident) -> String {
 
 /// Converts an `UpperCamelCase` variant name into `snake_case`.
 fn to_snake_case(name: &str) -> String {
+    // #[gamma::skip(arith.add_to_mul, literal.int_decrement, literal.int_increment, literal.int_to_one, literal.int_to_zero, reason = "This private helper's allocation capacity is discarded when constructing generated identifiers; every output character is still pushed in the same order")]
     let mut out = String::with_capacity(name.len() + 4);
     for (index, ch) in name.chars().enumerate() {
         if ch.is_ascii_uppercase() {
@@ -709,6 +721,46 @@ fn to_snake_case(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_static_generator_uses_the_supplied_runtime_alias_everywhere() {
+        let item: ItemEnum = parse_quote! {
+            enum Routes<'p> {
+                #[route(GET, "/{value}")]
+                Value { value: &'p str },
+            }
+        };
+        let output = expand_named_with_runtime(item, None, &quote!(::renamed_runtime))
+            .unwrap()
+            .to_string()
+            .split_whitespace()
+            .collect::<String>();
+        assert!(output.contains("::renamed_runtime::codegen_helpers::"), "{output}");
+        assert!(!output.contains("::routerama::codegen_helpers::"), "{output}");
+    }
+
+    #[test]
+    fn gamma_round2_runtime_alias_paths_normalize_all_hyphens_and_reserved_identifiers() {
+        use super::{FoundCrate, runtime_path_for, runtime_path_with};
+
+        assert_eq!(
+            runtime_path_with(|name| {
+                assert_eq!(name, "routerama");
+                Some(FoundCrate::Name("ox-router".to_owned()))
+            })
+            .to_string(),
+            ":: ox_router"
+        );
+
+        for (alias, expected) in [
+            ("ox-router", ":: ox_router"),
+            ("ox-route-runtime", ":: ox_route_runtime"),
+            ("type", ":: r#type"),
+            ("plain", ":: plain"),
+        ] {
+            assert_eq!(runtime_path_for(Some(FoundCrate::Name(alias.to_owned()))).to_string(), expected);
+        }
+    }
+
     use alloc::borrow::ToOwned as _;
 
     use syn::parse_quote;

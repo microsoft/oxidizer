@@ -198,6 +198,52 @@ unsafe impl Sync for Span {}
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_nov4_inclusive_span_end_before_start_returns_none() {
+        use core::ops::Bound::{Included, Unbounded};
+
+        use crate::BytesView;
+
+        let view = BytesView::from(b"abcde".to_vec());
+        let span = &view.spans_reversed[0];
+        assert!(span.slice_checked((Included(3), Included(1))).is_none());
+        assert!(span.slice_checked((Included(5), Included(3))).is_none());
+        assert_eq!(&*span.slice_checked((Included(2), Included(3))).unwrap(), b"cd");
+        assert_eq!(&*span.slice_checked((Included(2), Unbounded)).unwrap(), b"cde");
+        assert_eq!(view.to_vec(), b"abcde");
+    }
+
+    #[test]
+    fn gamma_survivor_span_checked_overflow_and_debug_prefix() {
+        use core::ops::Bound::{Excluded, Included, Unbounded};
+
+        use crate::BytesView;
+        use crate::mem::BlockSize;
+
+        let view = BytesView::from(vec![0x12, 0x34, 0x56, 0x78, 0x9a]);
+        let span = &view.spans_reversed[0];
+        for bounds in [
+            (Excluded(BlockSize::MAX), Unbounded),
+            (Included(0), Included(BlockSize::MAX)),
+            (Included(3), Excluded(2)),
+            (Included(6), Unbounded),
+        ] {
+            assert!(span.slice_checked(bounds).is_none());
+        }
+        for length in 0..=5 {
+            let range = span.slice(0..length);
+            let debug = format!("{range:?}");
+            assert!(debug.starts_with("Span { start: "));
+            assert!(debug.contains(&format!(", len: {length}")));
+            assert!(debug.contains(", block_ref: "));
+            if length >= 4 {
+                assert!(debug.contains("first_four_bytes: \"12345678\""));
+            } else {
+                assert!(!debug.contains("first_four_bytes"));
+            }
+        }
+    }
+
     use std::num::NonZero;
 
     use new_zealand::nz;

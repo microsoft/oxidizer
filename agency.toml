@@ -1,0 +1,7 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[[plugins.default]]
+plugin = "market:rust-dev@playground"
+cache_policy = "auto"
+cache_ttl_secs = 28800

@@ -235,6 +235,38 @@ mod tests {
     use crate::enrichable::Enrichable;
 
     #[test]
+    fn gamma_round2_empty_core_displays_no_fallback_text() {
+        let core = OhnoCore {
+            data: Box::new(Inner {
+                source: Source::None,
+                backtrace: Backtrace::disabled(),
+                enrichment: Vec::new(),
+            }),
+        };
+        assert_eq!(core.to_string(), "");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "native tests cover standard-library backtrace capture and writer errors")]
+    fn gamma_round2_backtrace_sink_failure_is_returned() {
+        struct BacktraceSink;
+        impl fmt::Write for BacktraceSink {
+            fn write_str(&mut self, s: &str) -> fmt::Result {
+                if s.contains("Backtrace:") { Err(fmt::Error) } else { Ok(()) }
+            }
+        }
+        let core = OhnoCore {
+            data: Box::new(Inner {
+                source: Source::None,
+                backtrace: Backtrace::force_capture(),
+                enrichment: Vec::new(),
+            }),
+        };
+        assert!(core.has_backtrace());
+        assert!(fmt::write(&mut BacktraceSink, format_args!("{core}")).is_err());
+    }
+
+    #[test]
     fn test_default() {
         let error = OhnoCore::default();
         assert!(matches!(error.data.source, Source::None));

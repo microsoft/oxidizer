@@ -15,6 +15,20 @@ use crate::strings::string_common::impl_arena_string_common;
 use crate::vec::{FromIteratorIn, Vec};
 use crate::{AllocError, Arc, Arena, Box, FromIn, Rc};
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_string_character_lower_bound_reserves_exact_target() {
+        let arena = Arena::new();
+        let mut text = arena.alloc_string();
+        text.extend(['a', 'b', 'c', 'd', 'e']);
+        assert_eq!(text.inner.capacity(), 5);
+        assert_eq!(text.as_str(), "abcde");
+    }
+}
+
 /// A growable, mutable UTF-8 string that lives in an [`Arena`].
 ///
 /// # Example
@@ -104,6 +118,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Fallible variant of [`Self::from_str_in`].
     pub(crate) fn try_from_str_in(s: &str, arena: &'a Arena<A>) -> Result<Self, AllocError> {
         let mut out = Self::try_with_capacity_in(s.len(), arena)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "The successful preceding capacity reservation covers all s.len bytes, so this push cannot allocate or fail")]
         out.try_push_str(s)?;
         Ok(out)
     }
@@ -145,6 +160,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// assert_eq!(value.as_str(), "rust");
     /// ```
     pub fn truncate(&mut self, new_len: usize) {
+        // #[gamma::skip(relational.ge_to_gt, reason = "At equal lengths the end is a character boundary and the inner truncation is a no-op")]
         if new_len >= self.len() {
             return;
         }
@@ -198,6 +214,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// # }
     /// ```
     pub fn try_insert(&mut self, idx: usize, ch: char) -> Result<(), AllocError> {
+        // #[gamma::skip(literal.int_increment, reason = "encode_utf8 overwrites the entire returned prefix and no uninitialized suffix is used")]
         let mut buf = [0u8; 4];
         let s = ch.encode_utf8(&mut buf);
         self.try_insert_str(idx, s)
@@ -254,6 +271,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
         let s = s.as_ref();
         let bytes = s.as_bytes();
         let added = bytes.len();
+        // #[gamma::skip(cond.always_false, reason = "Reserving zero, appending an empty slice, and rotating by zero leave the string and its capacity unchanged")]
         if added == 0 {
             return Ok(());
         }
@@ -345,6 +363,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
                 .expect("idx < len guarantees a remaining char");
             let ch_len = ch.len_utf8();
             if f(ch) {
+                // #[gamma::skip(cond.always_true, relational.gt_to_ge, reason = "With no deleted bytes, copy_within copies the character onto the identical range")]
                 if guard.del_bytes > 0 {
                     let dst = guard.idx - guard.del_bytes;
                     guard.inner.as_mut_slice().copy_within(guard.idx..guard.idx + ch_len, dst);
@@ -352,6 +371,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
             } else {
                 guard.del_bytes += ch_len;
             }
+            // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             guard.idx += ch_len;
         }
         // Normal completion: `idx == len`; the guard truncates to
@@ -442,6 +462,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// assert_eq!(value.as_str(), "🦀");
     /// ```
     pub fn push(&mut self, ch: char) {
+        // #[gamma::skip(literal.int_increment, reason = "encode_utf8 overwrites the entire returned prefix and no uninitialized suffix is used")]
         let mut buf = [0u8; 4];
         let s = ch.encode_utf8(&mut buf);
         self.push_str(&*s);
@@ -468,6 +489,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// # }
     /// ```
     pub fn try_push(&mut self, ch: char) -> Result<(), AllocError> {
+        // #[gamma::skip(literal.int_increment, reason = "encode_utf8 overwrites the entire returned prefix and no uninitialized suffix is used")]
         let mut buf = [0u8; 4];
         let s = ch.encode_utf8(&mut buf);
         self.try_push_str(&*s)
@@ -609,6 +631,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     pub fn try_split_off(&mut self, at: usize) -> Result<Self, AllocError> {
         assert!(self.as_str().is_char_boundary(at), "String::split_off: `at` is not a char boundary");
         Ok(Self {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "Vec splitting shares existing nonempty storage; an empty tail reserves zero capacity and cannot allocate")]
             inner: self.inner.try_split_off(at)?,
         })
     }
@@ -956,6 +979,7 @@ impl<A: Allocator + Clone> Iterator for Drain<'_, '_, A> {
     fn next(&mut self) -> Option<char> {
         let b0 = self.inner.next()?;
         let len = utf8_seq_len(b0);
+        // #[gamma::skip(literal.int_increment, reason = "The loop overwrites every continuation byte in buf[..len]; bytes beyond len are not decoded")]
         let mut buf = [b0, 0, 0, 0];
         for slot in buf.iter_mut().take(len).skip(1) {
             *slot = self.inner.next().expect("Drain holds valid UTF-8");
@@ -976,6 +1000,7 @@ impl<A: Allocator + Clone> Iterator for Drain<'_, '_, A> {
 impl<A: Allocator + Clone> DoubleEndedIterator for Drain<'_, '_, A> {
     fn next_back(&mut self) -> Option<char> {
         let last = self.inner.next_back()?;
+        // #[gamma::skip(literal.int_increment, reason = "The backward scan overwrites every byte in the suffix selected for UTF-8 decoding")]
         let mut buf = [0_u8; 4];
         buf[3] = last;
         let mut n = 1;
@@ -1148,6 +1173,7 @@ impl<A: Allocator + Clone> Extend<char> for String<'_, A> {
         let (lo, _) = iter.size_hint();
         self.reserve(lo);
         for ch in iter {
+            // #[gamma::skip(literal.int_increment, reason = "encode_utf8 overwrites the entire returned prefix and no uninitialized suffix is used")]
             let mut buf = [0u8; 4];
             let s = ch.encode_utf8(&mut buf);
             self.push_str(s);

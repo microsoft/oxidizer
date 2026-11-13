@@ -290,8 +290,12 @@ impl<T: ?Sized> RwLock<T, Async> {
             return self.acquired_read();
         }
 
+        self.wait_read_with_recorded_contention(block_on)
+    }
+
+    fn wait_read_with_recorded_contention<'a, R>(&'a self, wait: impl FnOnce(RwLockReadFuture<'a, T>) -> R) -> R {
         self.record(EventKind::RwLockReadContention);
-        block_on(RwLockReadFuture {
+        wait(RwLockReadFuture {
             lock: self,
             waiter: None,
             contention_recorded: true,
@@ -312,8 +316,12 @@ impl<T: ?Sized> RwLock<T, Async> {
             return self.acquired_write();
         }
 
+        self.wait_write_with_recorded_contention(block_on)
+    }
+
+    fn wait_write_with_recorded_contention<'a, R>(&'a self, wait: impl FnOnce(RwLockWriteFuture<'a, T>) -> R) -> R {
         self.record(EventKind::RwLockWriteContention);
-        block_on(RwLockWriteFuture {
+        wait(RwLockWriteFuture {
             lock: self,
             waiter: None,
             contention_recorded: true,
@@ -794,10 +802,69 @@ impl<T: ?Sized + fmt::Display, M: Mode> fmt::Display for RwLockWriteGuard<'_, T,
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    #[cfg(feature = "seismograph")]
+    fn gamma_round2_blocking_async_rwlock_pre_records_each_contention_once_before_waiting() {
+        use seismograph::recorder::event::EventKind as RecordedKind;
+
+        crate::gamma_round2_telemetry::enable_recording();
+        let lock = super::RwLock::<_, crate::sync::Async>::new(11);
+        let held = lock.write();
+        let before_read = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::RwLockReadContention);
+        lock.wait_read_with_recorded_contention(|mut future| {
+            assert!(future.contention_recorded);
+            let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(std::pin::Pin::new(&mut future).poll(&mut context).is_pending());
+            assert!(std::pin::Pin::new(&mut future).poll(&mut context).is_pending());
+        });
+        drop(held);
+        assert_eq!(
+            crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::RwLockReadContention),
+            before_read + 1
+        );
+        let held = lock.read();
+        let before_write = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::RwLockWriteContention);
+        lock.wait_write_with_recorded_contention(|mut future| {
+            assert!(future.contention_recorded);
+            let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(std::pin::Pin::new(&mut future).poll(&mut context).is_pending());
+            assert!(std::pin::Pin::new(&mut future).poll(&mut context).is_pending());
+        });
+        drop(held);
+        assert_eq!(
+            crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::RwLockWriteContention),
+            before_write + 1
+        );
+    }
+
     use std::sync::Arc as StdArc;
     use std::task::{Wake, Waker};
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_rwlock_ready_completion_drops_private_waiters_before_future_drop() {
+        let lock = RwLock::<u32, Async>::new(7);
+        let held = lock.write();
+        let mut read = lock.read_async();
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(Pin::new(&mut read).poll(&mut cx).is_pending());
+        assert!(read.result.waiter.is_some());
+        drop(held);
+        let Poll::Ready(reader) = Pin::new(&mut read).poll(&mut cx) else {
+            panic!("released writer must complete the queued read");
+        };
+        assert!(read.result.waiter.is_none());
+        let mut write = lock.write_async();
+        assert!(Pin::new(&mut write).poll(&mut cx).is_pending());
+        assert!(write.result.waiter.is_some());
+        drop(reader);
+        let Poll::Ready(writer) = Pin::new(&mut write).poll(&mut cx) else {
+            panic!("released reader must complete the queued write");
+        };
+        assert!(write.result.waiter.is_none());
+        drop(writer);
+    }
 
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
@@ -907,6 +974,27 @@ mod tests {
         };
         assert_eq!(lock.raw.state.load(Ordering::Relaxed), WRITER);
         drop(write_guard);
+    }
+
+    #[test]
+    fn gamma_round2_registration_success_releases_both_private_waiter_handles() {
+        let lock = RwLock::<_, Async>::new(19);
+        let context = Context::from_waker(Waker::noop());
+        let mut read = RwLockReadFuture::new(&lock);
+        let Poll::Ready(Ok(guard)) = read.poll_registered(&context) else {
+            panic!("registration must acquire an unlocked read guard");
+        };
+        assert_eq!(*guard, 19);
+        assert!(read.waiter.is_none());
+        drop(guard);
+        let mut write = RwLockWriteFuture::new(&lock);
+        let Poll::Ready(Ok(guard)) = write.poll_registered(&context) else {
+            panic!("registration must acquire an unlocked write guard");
+        };
+        assert_eq!(*guard, 19);
+        assert!(write.waiter.is_none());
+        drop(guard);
+        assert_eq!(lock.raw.state.load(Ordering::Acquire), 0);
     }
 
     #[test]

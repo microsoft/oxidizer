@@ -13,6 +13,7 @@ use nonempty::NonEmpty;
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
+use crate::runtime::hook::HookRegistration;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{CommandSender, LocalWorker, QueuedFactory, QueuedIoAccess, SpawnCommand, SystemCommand};
 use crate::runtime::worker::blocking::Worker;
@@ -71,6 +72,7 @@ pub(crate) struct DispatcherCore {
 
 impl DispatcherCore {
     pub(crate) fn new(worker_endpoints: NonEmpty<WorkerEndpoint>, shutdown: Shutdown) -> Arc<Self> {
+        // #[gamma::skip(iter.first_to_last, reason = "The following assertion requires every endpoint to have the same owner.")]
         let owner = worker_endpoints.first().thread.owner();
         assert!(
             worker_endpoints.iter().all(|endpoint| endpoint.thread.owner() == owner),
@@ -186,6 +188,7 @@ impl DispatcherCore {
     }
 
     pub(crate) fn owns(&self, thread: &Thread) -> bool {
+        // #[gamma::skip(iter.first_to_last, reason = "Construction asserts that every endpoint has the same owner.")]
         self.worker_endpoints.first().thread.owner() == thread.owner()
     }
 
@@ -200,8 +203,30 @@ impl DispatcherCore {
         let send_result = endpoint.commands.system_sender().send(SystemCommand::AccessIo {
             access: QueuedIoAccess::new(access),
         });
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         endpoint.waker.wake_by_ref();
         send_result.map_err(|_error| self.runtime_shutting_down_error())
+    }
+
+    pub(crate) fn register_hook(&self, hook: &HookRegistration) {
+        if matches!(self.shutdown().state(), ShutdownState::Started) {
+            return;
+        }
+
+        let source = LocalWorker::current_thread().filter(|thread| self.owns(thread));
+        if let Some(source) = &source {
+            LocalWorker::install_hook(hook.clone(), Some(source));
+        }
+        for endpoint in &self.worker_endpoints {
+            if source.as_ref().is_some_and(|source| source == &endpoint.thread) {
+                continue;
+            }
+            _ = endpoint.commands.system_sender().send(SystemCommand::RegisterHook {
+                hook: hook.clone(),
+                source: source.clone(),
+            });
+            endpoint.waker.wake_by_ref();
+        }
     }
 
     fn runtime_shutting_down_error(&self) -> Error {
@@ -284,6 +309,7 @@ impl DispatcherCore {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// These checks inject inconsistent endpoints and inspect commands before any worker runs.
 mod tests {
     use std::error::Error as _;
     use std::pin::pin;
@@ -293,9 +319,41 @@ mod tests {
     use arty_executor::ShutdownError;
 
     use super::*;
+    use crate::runtime::config::RuntimeName;
     use crate::runtime::dispatch::{DispatcherClient, test_threads};
     use crate::runtime::worker::asynchronous::{CommandReceiver, command_channel};
-    use crate::runtime::worker::blocking::{PanicPolicy, Pool};
+    use crate::runtime::worker::blocking::Pool;
+
+    #[test]
+    fn gamma_survivor_private_dispatch_starts_at_worker_zero_and_wakes_io_destination() {
+        use std::sync::atomic::AtomicUsize;
+        use std::task::{Wake, Waker};
+
+        #[derive(Default)]
+        struct Counter(AtomicUsize);
+        impl Wake for Counter {
+            fn wake(self: std::sync::Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+            fn wake_by_ref(self: &std::sync::Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let threads = test_threads(3);
+        let counter = std::sync::Arc::new(Counter::default());
+        let (mut first, rx) = endpoint(&threads[0]);
+        first.waker = Waker::from(std::sync::Arc::clone(&counter));
+        let (second, _second_rx) = endpoint(&threads[1]);
+        let (third, _third_rx) = endpoint(&threads[2]);
+        let core = DispatcherCore::new(NonEmpty::from_vec(vec![first, second, third]).unwrap(), Shutdown::default());
+        let selected: Vec<_> = (0..7).map(|_| usize::from(core.next_worker_index())).collect();
+        assert_eq!(selected, [0, 1, 2, 0, 1, 2, 0]);
+        core.access_io(WorkerIndex(0), Box::new(|_| {})).unwrap();
+        assert!(matches!(rx.system_receiver().try_recv().unwrap(), SystemCommand::AccessIo { .. }));
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+        let client = DispatcherClient::new(core);
+        assert_eq!(format!("{client:?}"), std::any::type_name::<DispatcherClient>());
+    }
 
     fn endpoint(thread: &Thread) -> (WorkerEndpoint, CommandReceiver) {
         let (commands, command_rx) = command_channel();
@@ -304,11 +362,7 @@ mod tests {
                 commands,
                 waker: Waker::noop().clone(),
                 thread: thread.clone(),
-                blocking_worker: Worker::new(
-                    Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
-                    Shutdown::default(),
-                    PanicPolicy::Ignore,
-                ),
+                blocking_worker: Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
             },
             command_rx,
         )

@@ -153,12 +153,14 @@ pub(super) type OwnedValuesDecoder = fn(&'static FieldName, &FieldLines<'_>, Ite
 fn validate_custom_values(values: &FieldLines<'_>, name: &'static FieldName, validator: ItemValidator) -> Result<(), DecodeError> {
     values.validate_custom_source_bounds()?;
 
+    let source_limit_error = DecodeError::new(name, DecodeErrorKind::SourceLimitExceeded);
     let mut item_count = 0_usize;
     for value in values.repeated() {
         for item in QuotedItems::comma(value.as_bytes(), name) {
-            item_count = item_count.saturating_add(1);
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The immediately following 1024-item limit returns before another iteration can overflow usize")]
+            item_count = item_count.checked_add(1).ok_or(source_limit_error)?;
             if item_count > MAX_CUSTOM_LIST_ITEMS {
-                return Err(invalid(name, DecodeErrorKind::SourceLimitExceeded));
+                return Err(source_limit_error);
             }
             validator(item?)?;
         }
@@ -537,6 +539,7 @@ pub(super) fn check_quoted_values<'a>(
 #[cold]
 #[inline(never)]
 fn check_repeated_quoted_values(name: &'static FieldName, values: &FieldLines<'_>, validator: ItemValidator) -> Result<(), DecodeError> {
+    // #[gamma::skip(literal.int_decrement, tag = "equivalent", reason = "The first line already passed this same pure validator before repeated-line validation; rechecking it cannot change the result")]
     for line in values.repeated().skip(1) {
         check_quoted_value(name, line, validator)?;
     }
@@ -549,13 +552,19 @@ fn check_repeated_quoted_values(name: &'static FieldName, values: &FieldLines<'_
 )]
 #[cfg_attr(not(coverage_nightly), inline(always))]
 pub(super) fn check_quoted_value(name: &'static FieldName, value: FieldValueRef<'_>, validator: ItemValidator) -> Result<(), DecodeError> {
-    if is_well_known_negotiation_line(name, value.as_bytes()) {
+    if
+    // #[gamma::skip(cond.always_false, call.replace_with_default, call_result.default, tag = "equivalent", reason = "Declining a recognized valid literal leaves the complete whole-line, plain-member, and quoted-member validators to recognize the same grammar")]
+    is_well_known_negotiation_line(name, value.as_bytes()) {
         return Ok(());
     }
-    if recognizes_whole_line(name, value.as_bytes()) {
+    if
+    // #[gamma::skip(cond.always_false, call.replace_with_default, call_result.default, tag = "equivalent", reason = "Declining the whole-line shortcut leaves the complete plain-member and quoted-member validators over the same bytes")]
+    recognizes_whole_line(name, value.as_bytes()) {
         return Ok(());
     }
-    if try_plain_items(value.as_bytes(), b',', true, validator)? {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The fallible plain scan still executes; declining its successful answer only repeats the same pure validation with QuotedItems")]
+    try_plain_items(value.as_bytes(), b',', true, validator)? {
         return Ok(());
     }
     check_quoted_members(name, value.as_bytes(), validator)
@@ -609,7 +618,9 @@ pub(super) const WELL_KNOWN_ACCEPT_LANGUAGE: &[&[u8]] = &[b"en", b"en-US", b"*"]
 /// Every recognized line also satisfies the grammar it skips, which the tests
 /// beside each header's validator check.
 fn is_well_known_negotiation_line(name: &'static FieldName, bytes: &[u8]) -> bool {
-    let recognized = if name == &FieldName::Accept {
+    let recognized = if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "An Accept name cannot match the subsequent Accept-Encoding or Accept-Language branches; this only declines the optional recognized-literal shortcut")]
+    name == &FieldName::Accept {
         WELL_KNOWN_ACCEPT
     } else if name == &FieldName::AcceptEncoding {
         WELL_KNOWN_ACCEPT_ENCODING
@@ -671,7 +682,9 @@ pub(super) fn check_token_values<'a>(
     let mut lines = values.repeated();
     let first = lines.next().expect("untyped values always contain a field line");
     let single = lines.next().is_none();
-    if !is_well_known_token_list(first.as_bytes()) {
+    if
+    // #[gamma::skip(cond.always_true, call.replace_with_default, call_result.default, tag = "equivalent", reason = "Every well-known list also passes the complete token-list grammar; declining literal recognition runs that grammar and preserves the single/repeated line result")]
+    !is_well_known_token_list(first.as_bytes()) {
         return check_unusual_token_values(name, values, first, single, validator);
     }
     if single {
@@ -709,6 +722,7 @@ fn check_unusual_token_values<'a>(
 #[cold]
 #[inline(never)]
 fn check_repeated_token_values(name: &'static FieldName, values: &FieldLines<'_>, validator: ItemValidator) -> Result<(), DecodeError> {
+    // #[gamma::skip(literal.int_decrement, tag = "equivalent", reason = "The first line already passed the same token-list grammar; rescanning it cannot add an error or change a later line's enumerated index")]
     for (offset, line) in values.repeated().enumerate().skip(1) {
         if !scan_token_list(line.as_bytes()) {
             return Err(token_list_error(name, line.as_bytes(), validator, Some(offset)));
@@ -754,17 +768,28 @@ fn equals_word_at_a_time(bytes: &[u8], expected: &[u8]) -> bool {
     if bytes.len() != expected.len() {
         return false;
     }
-    if bytes.len() < 8 {
+    if
+    // #[gamma::skip(cond.always_true, relational.lt_to_le, literal.int_increment, tag = "equivalent", reason = "Direct slice equality and the bounded overlapping-word comparison recognize exactly the same bytes at these cutoffs")]
+    bytes.len() < 8 {
         return bytes == expected;
     }
     let mut offset = 0;
-    while offset + 8 < bytes.len() {
+    while
+    // #[gamma::skip(relational.lt_to_le, literal.int_decrement, tag = "equivalent", reason = "Allowing one extra full-word comparison only repeats bytes already covered by the final overlapping word")]
+    offset + 8 < bytes.len() {
         if word(bytes, offset) != word(expected, offset) {
             return false;
         }
-        offset += 8;
+        // #[gamma::skip(assign.add_to_mul, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        offset +=
+        // #[gamma::skip(literal.int_to_zero, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // #[gamma::skip(literal.int_decrement, literal.int_to_one, tag = "equivalent", reason = "Positive strides at most eight overlap comparison windows without skipping bytes; the final word still covers the remaining suffix")]
+        8;
     }
-    match bytes.len() - offset {
+    // #[gamma::skip(match_arm.never_matches, tag = "equivalent", reason = "Both non-wildcard arms only shorten an already checked prefix comparison; the wildcard compares the full final eight-byte window and covers either remaining tail")]
+    match
+    // #[gamma::skip(arith.sub_to_add, tag = "equivalent", reason = "Changing the tail-size selector can only select the complete final overlapping eight-byte comparison instead of the one/two-byte shortcut")]
+    bytes.len() - offset {
         // One or two trailing bytes are cheaper read on their own than as a
         // word overlapping the one before them.
         1 => bytes.get(offset) == expected.get(offset),
@@ -831,7 +856,9 @@ const LONG_WELL_KNOWN_TOKEN_LISTS: &[&[u8]] = &[
 )]
 #[cfg_attr(not(coverage_nightly), inline(always))]
 fn is_well_known_token_list(bytes: &[u8]) -> bool {
-    if bytes.len() < 8 {
+    if
+    // #[gamma::skip(relational.lt_to_le, literal.int_increment, tag = "equivalent", reason = "Neither the short literal table nor the following long table contains an eight-byte entry")]
+    bytes.len() < 8 {
         return matches!(
             bytes,
             b"*" | b"GET" | b"PUT" | b"HEAD" | b"POST" | b"PATCH" | b"DELETE" | b"OPTIONS" | b"accept" | b"cookie" | b"origin"
@@ -872,7 +899,10 @@ fn is_well_known_token_list(bytes: &[u8]) -> bool {
 /// lines are re-scanned by [`token_list_error`] to describe the failure.
 #[inline]
 pub(super) fn scan_token_list(bytes: &[u8]) -> bool {
-    is_well_known_token_list(bytes) || scan_token_list_general(bytes)
+    // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "Every recognized literal is accepted by the complete token-list grammar on the right")]
+    let known = is_well_known_token_list(bytes);
+    // #[gamma::skip(logical.or_remove_left, tag = "equivalent", reason = "Every recognized literal is accepted by the complete token-list grammar on the right")]
+    known || scan_token_list_general(bytes)
 }
 
 /// Returns whether a field line is a comma-delimited list of bare tokens.
@@ -921,16 +951,21 @@ pub(super) fn validate_weighted_token(
 ) -> Result<(), DecodeError> {
     // A member without a parameter or quoting is just its own token, so the
     // segment walk below would find one segment and validate exactly this.
-    if !carries_parameter_syntax(bytes) {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "Without parameter syntax the following segment walk validates exactly the same single trimmed item")]
+    !carries_parameter_syntax(bytes) {
         return if item_validator(validate::trim_ows(bytes)) {
             Ok(())
         } else {
             Err(invalid(name, DecodeErrorKind::InvalidToken))
         };
     }
-    if validate_weighted_token_plain(bytes, name, item_validator, relaxed)? {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The fallible plain validator still executes; declining success only repeats the same weighted-token grammar with the quote-aware validator")]
+    validate_weighted_token_plain(bytes, name, item_validator, relaxed)? {
         return Ok(());
     }
+    // #[gamma::skip(bool_expr.negate, tag = "equivalent", reason = "This fallback is reached only after a quote or backslash prevented the plain scan; neither weighted-token names nor numeric quality values permit those bytes in either mode, and both quality validators report InvalidSyntax")]
     validate_weighted_token_quoted(bytes, name, item_validator, relaxed)
 }
 
@@ -957,12 +992,27 @@ fn validate_weighted_token_plain(
         match segment {
             1 if item_validator(bytes) => Ok(()),
             1 => Err(invalid(name, DecodeErrorKind::InvalidToken)),
-            2 if bytes.len() >= 2 && bytes[0].eq_ignore_ascii_case(&b'q') && bytes[1] == b'=' => {
+            2 if
+                // #[gamma::skip(match_guard.always_false, relational.ge_to_gt, literal.byte_to_nul, tag = "equivalent", reason = "Declining this compact q= shortcut reaches parse_parameter and the same quality validator; NUL cannot occur in admitted field bytes")]
+                bytes.len() >=
+                    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Raising the two-byte minimum only declines an empty q= value, which the parameter parser also rejects")]
+                    2
+                    && bytes[
+                        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "A shifted name index sees equals rather than q for compact q=, declining to the complete parameter parser")]
+                        0
+                    ].eq_ignore_ascii_case(&b'q')
+                    && bytes[
+                        // #[gamma::skip(literal.int_decrement, tag = "equivalent", reason = "An earlier equals index compares the same byte against q and equals, so the shortcut declines to complete parsing")]
+                        1
+                    ] == b'=' =>
+            {
                 validate_quality(&bytes[2..], name, relaxed)
             }
             2 => {
                 let (parameter, value, compact) = parse_parameter(bytes, false, name)?;
-                if (!relaxed && !compact) || !validate::eq_ignore_ascii_case(parameter, b"q") {
+                if
+                // #[gamma::skip(logical.and_remove_right, tag = "equivalent", reason = "Any strict compact q= parameter was consumed by the preceding match guard; the remaining strict parameters are already invalid and relaxed mode leaves this conjunction false")]
+                (!relaxed && !compact) || !validate::eq_ignore_ascii_case(parameter, b"q") {
                     return Err(invalid_syntax(name));
                 }
                 validate_quality(value.expect("required parameters always contain a value"), name, relaxed)
@@ -1042,6 +1092,7 @@ fn valid_quoted_string(bytes: &[u8]) -> bool {
             if !matches!(byte, b'\t' | b' '..=b'~' | 0x80..=0xff) {
                 return false;
             }
+            // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
             escaped = false;
         } else if byte == b'\\' {
             escaped = true;
@@ -1125,34 +1176,48 @@ impl<'a> Iterator for QuotedItems<'a> {
             return None;
         }
         let remaining = &self.bytes[self.position..];
-        if remaining.len() <= 1 && !remaining.first().is_some_and(|byte| *byte == self.delimiter || *byte == b'"') {
+        if
+        // #[gamma::skip(cond.always_false, relational.le_to_lt, literal.int_decrement, iter.first_to_last, tag = "equivalent", reason = "At most one remaining byte has identical first/last positions; declining this shortcut leaves the complete delimiter-and-quote state machine")]
+        remaining.len() <= 1 && !remaining.first().is_some_and(|byte| *byte == self.delimiter || *byte == b'"') {
             self.position = self.bytes.len();
             self.finished = true;
             let item = validate::trim_ows(&self.bytes[self.start..]);
             return (!self.skip_empty || !item.is_empty()).then_some(Ok(item));
         }
         loop {
-            if self.finished {
+            if
+            // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.finished {
                 return None;
             }
             let mut quoted = false;
             let mut escaped = false;
             while self.position < self.bytes.len() {
-                if !quoted {
+                if
+                // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "Declining the unquoted delimiter search leaves the per-byte quote/escape/delimiter state machine to visit every byte")]
+                !quoted {
                     let Some(skip) = http_headers_simd::find_either(&self.bytes[self.position..], self.delimiter, b'"') else {
                         self.position = self.bytes.len();
+                        // #[gamma::skip(loop.break_to_continue, tag = "equivalent", reason = "position was just set to bytes.len(), so continue immediately fails the while condition and reaches the same terminal processing")]
                         break;
                     };
+                    // #[gamma::skip(assign.add_to_mul, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    // #[gamma::skip(stmt.delete_assign, tag = "equivalent", reason = "Removing the fast skip merely visits ordinary unquoted bytes one at a time; the per-byte state machine still finds the same next quote or delimiter")]
                     self.position += skip;
                 }
                 let byte = self.bytes[self.position];
                 if escaped {
+                    // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
                     escaped = false;
-                } else if quoted && byte == b'\\' {
+                } else if
+                // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "When unquoted the fast search lands only on a delimiter or quote, never a backslash; removing this redundant quoted check cannot begin an unquoted escape")]
+                quoted && byte == b'\\' {
                     escaped = true;
                 } else if byte == b'"' {
                     quoted = !quoted;
-                } else if !quoted && byte == self.delimiter {
+                } else if
+                // #[gamma::skip(logical.and_remove_right, tag = "equivalent", reason = "After the earlier quote branch, an unquoted fast-search hit can only be the delimiter")]
+                !quoted && byte == self.delimiter {
                     let item = validate::trim_ows(&self.bytes[self.start..self.position]);
                     self.position += 1;
                     self.start = self.position;
@@ -1161,10 +1226,15 @@ impl<'a> Iterator for QuotedItems<'a> {
                     }
                     return Some(Ok(item));
                 }
-                self.position += 1;
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                self.position +=
+                // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                1;
             }
             self.finished = true;
-            if quoted || escaped {
+            if
+            // #[gamma::skip(logical.or_remove_right, tag = "equivalent", reason = "escaped becomes true only within a quoted string, and an escaped quote cannot close that string")]
+            quoted || escaped {
                 return Some(Err(invalid(self.header, DecodeErrorKind::UnterminatedQuote)));
             }
             let item = validate::trim_ows(&self.bytes[self.start..]);
@@ -1186,6 +1256,199 @@ pub(super) fn invalid(header: &'static FieldName, kind: DecodeErrorKind) -> Deco
 
 pub(super) fn invalid_syntax(header: &'static FieldName) -> DecodeError {
     invalid(header, DecodeErrorKind::InvalidSyntax)
+}
+
+#[cfg(test)]
+mod gamma_round2_tests {
+    #[test]
+    fn gamma_nov6_plain_quoted_validation_skips_empty_comma_members() {
+        fn nonempty(bytes: &[u8]) -> Result<(), crate::DecodeError> {
+            if bytes.is_empty() {
+                Err(super::invalid(&crate::FieldName::Accept, crate::DecodeErrorKind::MissingValue))
+            } else {
+                Ok(())
+            }
+        }
+        assert_eq!(
+            super::check_quoted_value(&crate::FieldName::Accept, crate::FieldValueRef::new(b"alpha,,beta,"), nonempty),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn gamma_nov6_single_token_error_has_no_field_line_index() {
+        let error =
+            super::check_token_value(&crate::FieldName::Vary, crate::FieldValueRef::new(b"\"unterminated"), |_| Ok(())).unwrap_err();
+        assert_eq!(error.kind(), crate::DecodeErrorKind::UnterminatedQuote);
+        assert_eq!(error.value_index(), None);
+    }
+
+    #[test]
+    fn gamma_nov6_semicolon_iterator_preserves_an_empty_final_item() {
+        let mut items = super::QuotedItems::semicolon(b"alpha;", &crate::FieldName::Accept);
+        assert_eq!(items.next().transpose().unwrap(), Some(b"alpha".as_slice()));
+        assert_eq!(items.next().transpose().unwrap(), Some(b"".as_slice()));
+        assert!(items.next().is_none());
+    }
+
+    #[test]
+    fn semicolon_iterator_preserves_whitespace_only_terminal_items_outside_the_shortcut() {
+        for wire in [b" \t".as_slice(), b"alpha; \t", b"alpha;\t  "] {
+            let actual = super::QuotedItems::semicolon(wire, &crate::FieldName::Accept)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            let expected: Vec<_> = wire.split(|byte| *byte == b';').map(crate::validate::trim_ows).collect();
+            assert_eq!(actual, expected, "{wire:?}");
+        }
+    }
+
+    #[test]
+    fn clone_checked_values_gamma_afternoon_propagates_raw_source_admission_errors() {
+        let lines = crate::source::FieldLines::single(&crate::FieldName::Accept, b"text/plain\0");
+        let error = super::clone_checked_values(&lines, |_, _| Ok(())).err().unwrap();
+        assert_eq!(error.header(), &crate::FieldName::Accept);
+        assert_eq!(error.kind(), crate::DecodeErrorKind::InvalidSyntax);
+    }
+
+    #[test]
+    fn quoted_items_gamma_afternoon_preserves_required_empty_segments() {
+        for (wire, expected) in [
+            ("", vec![""]),
+            (";", vec!["", ""]),
+            ("a;", vec!["a", ""]),
+            ("a;;b;", vec!["a", "", "b", ""]),
+            ("a;\"b;c\";", vec!["a", "\"b;c\"", ""]),
+        ] {
+            let actual = super::QuotedItems::semicolon(wire.as_bytes(), &crate::FieldName::AcceptEncoding)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(actual, expected.iter().map(|value| value.as_bytes()).collect::<Vec<_>>(), "{wire}");
+        }
+    }
+
+    #[test]
+    fn weighted_token_quoted_gamma_afternoon_preserves_strict_compactness_and_parameter_names() {
+        let name = &crate::FieldName::AcceptEncoding;
+        for wire in [b"gzip;q = 0.5".as_slice(), b"gzip; q = 0.5"] {
+            assert_eq!(
+                super::validate_weighted_token_quoted(wire, name, crate::validate::token, false)
+                    .unwrap_err()
+                    .kind(),
+                crate::DecodeErrorKind::InvalidSyntax
+            );
+            super::validate_weighted_token_quoted(wire, name, crate::validate::token, true).unwrap();
+        }
+        for relaxed in [false, true] {
+            for wire in [b"gzip;x=0.5".as_slice(), b"gzip;q", b"gzip;q=2", b"gzip;q=0.5;extra=1"] {
+                assert!(super::validate_weighted_token_quoted(wire, name, crate::validate::token, relaxed).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_negotiation_internal_recognition_survives_without_caller_fallback() {
+        let lines = crate::source::FieldLines::single(&crate::FieldName::Vary, b"accept");
+        let first = super::check_token_values(&crate::FieldName::Vary, &lines, |_| Ok(())).unwrap();
+        assert_eq!(first, Some(crate::FieldValueRef::new(b"accept")));
+        assert!(!super::is_well_known_negotiation_line(&crate::FieldName::Vary, b"en"));
+        for (wire, expected) in [
+            (b"".as_slice(), false),
+            (b"gzip", false),
+            (b"gzip;q=1", true),
+            (b"\"", true),
+            (b"\\", true),
+        ] {
+            assert_eq!(super::carries_parameter_syntax(wire), expected);
+        }
+    }
+
+    use super::{QuotedItems, equals_word_at_a_time, parse_parameter, valid_quoted_string, validate_weighted_token_quoted};
+    use crate::{DecodeErrorKind, FieldName};
+
+    #[test]
+    fn gamma_round2_quoted_items_keep_empty_semicolon_slots_and_terminal_position() {
+        for wire in [
+            b"".as_slice(),
+            b"x",
+            b"xx",
+            b";",
+            b"x;",
+            b";x",
+            b"x;;y",
+            b"\"a;b\";c",
+            b"\"a\\\";b\";c",
+        ] {
+            let mut items = QuotedItems::semicolon(wire, &FieldName::Accept);
+            let expected: Vec<_> = match wire {
+                b"\"a;b\";c" => vec![b"\"a;b\"".as_slice(), b"c"],
+                b"\"a\\\";b\";c" => vec![b"\"a\\\";b\"".as_slice(), b"c"],
+                _ => wire.split(|byte| *byte == b';').collect(),
+            };
+            for expected in expected {
+                assert_eq!(items.next().unwrap().unwrap(), expected, "{wire:?}");
+            }
+            assert!(items.next().is_none(), "{wire:?}");
+            assert_eq!(items.position, wire.len(), "{wire:?}");
+        }
+        for wire in [b"\"".as_slice(), b"\"a\\", b"x;\"a"] {
+            let mut items = QuotedItems::semicolon(wire, &FieldName::Accept);
+            let mut last = None;
+            for result in items.by_ref() {
+                last = Some(result);
+            }
+            assert_eq!(last.unwrap().unwrap_err().kind(), DecodeErrorKind::UnterminatedQuote);
+            assert!(items.next().is_none());
+            assert_eq!(items.position, wire.len());
+        }
+    }
+
+    #[test]
+    fn gamma_round2_weighted_fallback_honors_relaxed_spacing_and_precision() {
+        for wire in [b"gzip;q=0.1234".as_slice(), b"gzip; q = .5", b"gzip;q= .5"] {
+            assert!(validate_weighted_token_quoted(wire, &FieldName::AcceptEncoding, crate::validate::token, false).is_err());
+            validate_weighted_token_quoted(wire, &FieldName::AcceptEncoding, crate::validate::token, true).unwrap();
+        }
+        let (_, _, compact) = parse_parameter(b"q= 0.5", false, &FieldName::Accept).unwrap();
+        assert!(!compact);
+        for bytes in [b"".as_slice(), b"\"", b"a\"", b"1\"", b"\"a"] {
+            assert!(!valid_quoted_string(bytes), "{bytes:?}");
+        }
+        assert!(valid_quoted_string(b"\"\""));
+    }
+
+    #[test]
+    fn gamma_round2_plain_weighted_path_accepts_compact_weights_and_respects_mode() {
+        for (wire, strict, relaxed) in [
+            (b"gzip;q=0.5".as_slice(), true, true),
+            (b"gzip;q = 0.5", false, true),
+            (b"gzip;q= 0.5", false, true),
+            (b"gzip;q=.5", false, true),
+            (b"gzip;qx0.5", false, false),
+        ] {
+            for (mode, accepted) in [(false, strict), (true, relaxed)] {
+                let result = super::validate_weighted_token_plain(wire, &FieldName::AcceptEncoding, crate::validate::token, mode);
+                if accepted {
+                    assert!(result.unwrap(), "{wire:?}");
+                } else {
+                    assert_eq!(result.unwrap_err().kind(), DecodeErrorKind::InvalidSyntax, "{wire:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_word_comparisons_cover_misaligned_tails_and_unequal_lengths() {
+        for length in 0..=48 {
+            let expected = vec![b'a'; length];
+            assert!(equals_word_at_a_time(&expected, &expected));
+            for position in 0..length {
+                let mut actual = expected.clone();
+                actual[position] = b'b';
+                assert!(!equals_word_at_a_time(&actual, &expected), "{length}, {position}");
+            }
+            assert!(!equals_word_at_a_time(&expected, &[vec![b'a'; length], vec![b'a']].concat()));
+        }
+    }
 }
 
 pub(super) use borrowed_list_items;
@@ -1856,16 +2119,14 @@ mod token_list_tests {
             );
             let invalid_unusual = FieldLines::single(&FieldName::Allow, b"bad method");
             assert!(check_token_values(&FieldName::Allow, &invalid_unusual, validate_token).is_err());
-            assert_eq!(
-                check_token_value(
-                    &FieldName::Allow,
-                    FieldValue::from_static("bad method").as_field_value_ref(),
-                    validate_token,
-                )
-                .expect_err("single invalid token line")
-                .kind(),
-                DecodeErrorKind::InvalidToken
-            );
+            let error = check_token_value(
+                &FieldName::Allow,
+                FieldValue::from_static("bad method").as_field_value_ref(),
+                validate_token,
+            )
+            .expect_err("single invalid token line");
+            assert_eq!(error.kind(), DecodeErrorKind::InvalidToken);
+            assert_eq!(error.value_index(), None);
             assert!(
                 check_token_value(
                     &FieldName::Allow,

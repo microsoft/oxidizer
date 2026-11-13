@@ -291,6 +291,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn gamma_survivor_duplicate_native_sources_keep_exact_error_and_decode_progress() {
+        let source = || allocator_source(&seismograph_rallocator::native::Snapshot::default());
+        let mut phases = Vec::new();
+        let result = super::prepare_with_progress(
+            DecodedSnapshot {
+                sources: vec![source(), source()],
+                ..DecodedSnapshot::default()
+            },
+            &mut |phase| {
+                phases.push(format!("{phase:?}"));
+            },
+        );
+        assert_eq!(
+            result.err().unwrap(),
+            "multiple native allocator sources make the inventory ambiguous"
+        );
+        assert_eq!(phases, ["DecodeAllocator"]);
+    }
+
     fn allocator_source(snapshot: &seismograph_rallocator::native::Snapshot) -> SourceSnapshot {
         let mut data = vec![0; seismograph_rallocator::encoded_len(snapshot).unwrap()];
         seismograph_rallocator::encode(snapshot, &mut data).unwrap();

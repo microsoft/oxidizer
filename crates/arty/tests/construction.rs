@@ -7,9 +7,100 @@
 // Under Miri, `test-util` supplies a processor model for the same selection logic.
 
 use std::error::Error as StdError;
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 
-use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, WorkersPolicy};
+use arty::runtime::hook::Panic;
+use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
+use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
+
+#[cfg(test)]
+fn indexed_worker_names(builder: RuntimeBuilder, policy: BlockingPoolPolicy) -> (String, Vec<String>) {
+    let runtime = builder
+        .workers(WorkersPolicy::exactly(3))
+        .blocking_pool(policy.max(4))
+        .build()
+        .unwrap();
+    let names = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let worker = cx.control().workers().into_iter().nth(2).unwrap();
+            cx.scheduler()
+                .spawn_at(worker, cx.scheduler().clone(), |scheduler| async move {
+                    let async_name = thread::current().name().unwrap().to_owned();
+                    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+                    let release = scopeguard::guard(Arc::clone(&gate), |gate| {
+                        *gate.0.lock().unwrap() = true;
+                        gate.1.notify_all();
+                    });
+                    let (started, received) = mpsc::channel();
+                    // Extra queued callbacks cover counter snapshots taken while workers start.
+                    let tasks: Vec<_> = (0..20)
+                        .map(|_| {
+                            let gate = Arc::clone(&gate);
+                            let started = started.clone();
+                            scheduler.spawn_blocking(move || {
+                                started.send(thread::current().name().unwrap().to_owned()).unwrap();
+                                let mut released = gate.0.lock().unwrap();
+                                while !*released {
+                                    released = gate.1.wait(released).unwrap();
+                                }
+                            })
+                        })
+                        .collect();
+                    let mut names: Vec<_> = (0..4)
+                        .map(|_| {
+                            if is_mutation_testing() {
+                                received.recv().unwrap()
+                            } else {
+                                received.recv_timeout(TEST_TIMEOUT).unwrap()
+                            }
+                        })
+                        .collect();
+                    names.sort();
+                    drop(release);
+                    for task in tasks {
+                        task.await.unwrap();
+                    }
+                    (async_name, names)
+                })
+                .await
+                .unwrap()
+        })
+        .unwrap();
+    runtime.stop().unwrap();
+    names
+}
+
+#[test]
+fn default_uses_arty() {
+    for (policy, blocking_name) in [
+        (BlockingPoolPolicy::shared(), "arty-blocking-3"),
+        (BlockingPoolPolicy::per_worker(), "arty-blocking-2-3"),
+    ] {
+        let (async_name, blocking_names) = indexed_worker_names(Runtime::builder(), policy);
+
+        assert_eq!(async_name, "arty-async-2");
+        assert_eq!(blocking_names[3], blocking_name);
+    }
+}
+
+#[test]
+fn custom_name_is_copied() {
+    for (policy, blocking_name) in [
+        (BlockingPoolPolicy::shared(), "requests-blocking-3"),
+        (BlockingPoolPolicy::per_worker(), "requests-blocking-2-3"),
+    ] {
+        let source = String::from("requests");
+        let builder = Runtime::builder().name(&source);
+        drop(source);
+
+        let (async_name, blocking_names) = indexed_worker_names(builder, policy);
+
+        assert_eq!(async_name, "requests-async-2");
+        assert_eq!(blocking_names[3], blocking_name);
+    }
+}
 
 fn worker_names(runtime: &Runtime) -> Vec<(String, String)> {
     runtime
@@ -55,6 +146,15 @@ fn default_worker_names_use_arty() {
             ("arty-async-1".to_owned(), "arty-blocking-0".to_owned()),
         ]
     );
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn default_runtime_shares_blocking_pool() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+
+    let names = worker_names(&runtime);
+    assert_eq!(names[0].1, names[1].1);
     runtime.stop().unwrap();
 }
 
@@ -165,8 +265,11 @@ fn default_runtime_construction_uses_one_worker() {
 
 #[test]
 fn explicit_panic_policies_preserve_runtime_construction() {
-    for policy in [PanicPolicy::shutdown(), PanicPolicy::ignore()] {
-        let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).panic(policy).build().unwrap();
+    for builder in [
+        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::SHUTDOWN),
+        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::IGNORE),
+    ] {
+        let runtime = builder.build().unwrap();
 
         assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
         runtime.stop().unwrap();

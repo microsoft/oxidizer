@@ -151,6 +151,7 @@ impl Conversion {
         for (key, _) in overrides {
             if !shape.data().any(|field| member_name(&field.member) == member_name(key)) {
                 errors.add(key, unknown_key(shape, key));
+                // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "The assigned bool is already false, which is bool::default().")]
                 usable = false;
             }
         }
@@ -184,4 +185,52 @@ fn unknown_key(shape: &Shape, key: &Member) -> String {
         .join(", ");
 
     format!("unknown field `{name}` in `#[from(...)]`, available fields: {available}")
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use syn::parse_quote;
+
+    use super::Conversion;
+    use crate::derive_error::parse::parse;
+    use crate::derive_error::validate::validate;
+    use crate::diagnostics::Errors;
+
+    #[test]
+    fn gamma_survivor_invalid_conversion_never_builds_initializers() {
+        let mut errors = Errors::default();
+        let ast = parse(
+            parse_quote!(
+                struct Example {
+                    core: OhnoCore,
+                    a: u32,
+                    b: u32,
+                }
+            ),
+            &mut errors,
+        )
+        .unwrap();
+        let model = validate(ast, &mut errors).unwrap();
+        assert!(
+            Conversion::new(
+                &model.shape,
+                parse_quote!(Source),
+                &[(parse_quote!(missing), parse_quote!(7))],
+                &mut errors
+            )
+            .is_none()
+        );
+        let mut errors = Errors::default();
+        let conversion = Conversion::new(
+            &model.shape,
+            parse_quote!(Source),
+            &[(parse_quote!(b), parse_quote!(7))],
+            &mut errors,
+        )
+        .unwrap();
+        let initializers = conversion.initializers();
+        assert_eq!(initializers.len(), 2);
+        assert_eq!(initializers[0], parse_quote!(::core::default::Default::default()));
+        assert_eq!(initializers[1], parse_quote!(7));
+    }
 }

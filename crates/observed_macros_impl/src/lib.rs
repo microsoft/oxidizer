@@ -22,6 +22,9 @@ mod enrichment;
 mod event;
 mod field_attrs;
 
+#[cfg(test)]
+mod gamma_round2;
+
 use proc_macro2::TokenStream;
 use syn::{DeriveInput, Result};
 

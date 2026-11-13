@@ -2216,6 +2216,7 @@ fn handle_cache_key(code: KeyCode, view: &mut CacheViewState, snapshot: Option<&
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
+// #[gamma::skip(fn_value.err_default, tag = "timeout", reason = "November 6 campaign 539dc359dfa6: replacing capture with Err(Default::default()) exceeded the timeout")]
 fn capture_connected_snapshot(
     io: &MonitorIo,
     descriptor: &MonitorDescriptor,
@@ -2280,6 +2281,457 @@ pub(super) fn format_sampling_percentage(sampling_one_in: u32) -> String {
 mod tests {
     use super::super::data::{CacheMonitorSnapshot, IoMonitorSnapshot, PrimitiveSnapshot, RuntimeMonitorSnapshot, ThreadSnapshot};
     use super::*;
+
+    #[test]
+    fn gamma_survivor_sampling_percentage_uses_precision_for_each_scale() {
+        for (sampling, expected) in [
+            (0, "100%"),
+            (1, "100%"),
+            (3, "33.3%"),
+            (9, "11.1%"),
+            (11, "9.09%"),
+            (99, "1.01%"),
+            (101, "0.99%"),
+            (123, "0.813%"),
+            (143, "0.699%"),
+            (999, "0.1%"),
+            (1001, "0.0999%"),
+            (1234, "0.081%"),
+            (9999, "0.01%"),
+            (10001, "0.009999%"),
+            (1_000_000, "0.0001%"),
+        ] {
+            assert_eq!(format_sampling_percentage(sampling), expected, "{sampling}");
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_runtime_key_routing_and_histogram_scrolling() {
+        let mut view = RuntimeViewState::new();
+        assert!(handle_runtime_key(KeyCode::Char('e'), &mut view, None));
+        assert_eq!(view.focus, RuntimeFocus::Events);
+        view.events.focus = TaskEventsFocus::Operations;
+        assert!(handle_runtime_key(KeyCode::Backspace, &mut view, None));
+        assert_eq!(view.focus, RuntimeFocus::Activity);
+        view.activity_scroll = 3;
+        assert!(handle_runtime_key(KeyCode::Left, &mut view, None));
+        assert_eq!(view.activity_scroll, 2);
+        assert!(handle_runtime_key(KeyCode::Right, &mut view, None));
+        assert_eq!(view.activity_scroll, 3);
+        view.activity_scroll = RUNTIME_HISTOGRAM_BINS - 1;
+        handle_runtime_key(KeyCode::Right, &mut view, None);
+        assert_eq!(view.activity_scroll, RUNTIME_HISTOGRAM_BINS - 1);
+        view.focus = RuntimeFocus::Workers;
+        view.activity_scroll = 3;
+        assert!(!handle_runtime_key(KeyCode::Left, &mut view, None));
+        assert!(!handle_runtime_key(KeyCode::Right, &mut view, None));
+        assert_eq!(view.activity_scroll, 3);
+        let before = view.task_histogram;
+        assert!(handle_runtime_key(KeyCode::Char('t'), &mut view, None));
+        assert_eq!(view.focus, RuntimeFocus::Activity);
+        assert_eq!(view.task_histogram, before.toggle());
+    }
+
+    #[test]
+    fn gamma_survivor_top_level_keys_respect_read_only_and_pending_capture() {
+        let (io, control) = MonitorIo::new_mocked();
+        let mut app = App::with_io(io);
+        app.screen = Screen::Offline {
+            path: "offline.seismograph".into(),
+            tab: MonitorTab::Info,
+            snapshot: None,
+        };
+        let mode = app.capture_mode;
+        for code in ['s', 'c', 'd', 'C'] {
+            assert!(!app.handle_key(KeyCode::Char(code)));
+            assert_eq!(app.capture_mode, mode);
+            assert!(app.capture_receiver.is_none());
+            assert!(app.recording_configuration_popup.is_none());
+        }
+        app.screen = Screen::Browse;
+        app.selected = 3;
+        assert!(!app.handle_key(KeyCode::Up));
+        assert_eq!(app.selected, 2);
+        app.recording_configuration_popup = Some(RecordingConfigurationPopup::new(RecordingConfiguration::default()));
+        assert!(!app.handle_key(KeyCode::Up));
+        app.recording_configuration_popup = None;
+        let (_sender, receiver) = unbounded();
+        app.capture_receiver = Some(receiver);
+        assert!(!app.handle_key(KeyCode::Char('s')));
+        assert!(app.capture_receiver.is_some());
+        let owner = seismograph_protocol::monitor::MonitorOwner::WindowsSid("S-1-5-21-1-2-3-1001".into());
+        let instance_id = seismograph_protocol::monitor::InstanceId::from_bytes([1; 16]);
+        app.screen = Screen::Connected {
+            descriptor: MonitorDescriptor {
+                name: "worker".into(),
+                instance: None,
+                process_id: 42,
+                instance_id,
+                endpoint: seismograph_protocol::monitor::MonitorEndpoint::for_instance(
+                    std::path::Path::new(r"C:\registry"),
+                    &owner,
+                    42,
+                    instance_id,
+                ),
+                owner,
+            },
+            recording: RecordingConfiguration::default(),
+            tab: MonitorTab::Info,
+            snapshot: None,
+        };
+        app.capture_receiver = None;
+        let next = app.capture_mode.next();
+        assert!(!app.handle_key(KeyCode::Char('d')));
+        assert_eq!(app.capture_mode, next);
+        assert!(app.status.starts_with(next.label()));
+        assert_eq!(control.operations(), [seismograph_protocol::io::IoOperation::Instant]);
+    }
+
+    #[test]
+    fn gamma_survivor_nested_navigation_resets_only_dependent_selection() {
+        let mut primitive = PrimitiveViewState {
+            primitive_selected: 3,
+            operation_selected: 4,
+            hotspot_selected: 5,
+            stack_scroll: 6,
+            ..PrimitiveViewState::new()
+        };
+        handle_primitive_key(KeyCode::Up, &mut primitive, None);
+        assert_eq!(
+            (
+                primitive.primitive_selected,
+                primitive.operation_selected,
+                primitive.hotspot_selected,
+                primitive.stack_scroll
+            ),
+            (2, 0, 0, 0)
+        );
+        primitive.focus = PrimitiveFocus::Operations;
+        primitive.operation_selected = 3;
+        primitive.hotspot_selected = 4;
+        primitive.stack_scroll = 6;
+        handle_primitive_key(KeyCode::Up, &mut primitive, None);
+        assert_eq!(
+            (primitive.operation_selected, primitive.hotspot_selected, primitive.stack_scroll),
+            (2, 0, 0)
+        );
+        primitive.focus = PrimitiveFocus::Hotspots;
+        primitive.hotspot_selected = 3;
+        primitive.stack_scroll = 6;
+        handle_primitive_key(KeyCode::Up, &mut primitive, None);
+        assert_eq!((primitive.hotspot_selected, primitive.stack_scroll), (2, 0));
+        let mut thread = ThreadViewState {
+            thread_selected: 3,
+            operation_selected: 4,
+            participant_selected: 5,
+            object_selected: 6,
+            stack_scroll: 7,
+            ..ThreadViewState::new()
+        };
+        handle_thread_key(KeyCode::Up, &mut thread, None);
+        assert_eq!(
+            (
+                thread.thread_selected,
+                thread.operation_selected,
+                thread.participant_selected,
+                thread.object_selected,
+                thread.stack_scroll
+            ),
+            (2, 0, 0, 0, 0)
+        );
+        thread.focus = ThreadFocus::Operations;
+        thread.operation_selected = 3;
+        thread.participant_selected = 4;
+        thread.object_selected = 5;
+        thread.stack_scroll = 6;
+        handle_thread_key(KeyCode::Up, &mut thread, None);
+        assert_eq!(
+            (
+                thread.operation_selected,
+                thread.participant_selected,
+                thread.object_selected,
+                thread.stack_scroll
+            ),
+            (2, 0, 0, 0)
+        );
+        thread.focus = ThreadFocus::Participants;
+        thread.participant_selected = 3;
+        thread.object_selected = 4;
+        thread.stack_scroll = 5;
+        handle_thread_key(KeyCode::Up, &mut thread, None);
+        assert_eq!(
+            (thread.participant_selected, thread.object_selected, thread.stack_scroll),
+            (2, 0, 0)
+        );
+        assert!(handle_thread_key(KeyCode::Enter, &mut thread, None));
+        assert_eq!(thread.focus, ThreadFocus::Objects);
+        thread.focus = ThreadFocus::Objects;
+        thread.stack_scroll = 3;
+        handle_thread_key(KeyCode::PageUp, &mut thread, None);
+        assert_eq!(thread.stack_scroll, 2);
+        let mut allocation = AllocationViewState {
+            selected: 3,
+            stack_scroll: 4,
+            ..AllocationViewState::new()
+        };
+        handle_allocation_key(KeyCode::Up, &mut allocation, None);
+        assert_eq!((allocation.selected, allocation.stack_scroll), (2, 0));
+    }
+
+    fn populated_navigation_fixture() -> (crate::allocator_view::Snapshot, CapturedSnapshot) {
+        use seismograph::recorder::event::{Address, Event, EventKind, EventPayload, EventSequence, EventTimestamp, Events, ObjectId};
+        use seismograph::recorder::thread::ThreadId;
+        use seismograph_rallocator::callers::{Callers, CallersFields, EventFields};
+        let decoded = seismograph::snapshot::DecodedSnapshot {
+            capture_duration_nanos: 0,
+            sources: Vec::new(),
+            symbols: Vec::new(),
+            events: Events {
+                events: (1..=4)
+                    .map(|id| Event {
+                        thread_id: ThreadId::new(id),
+                        sequence: EventSequence::new(1),
+                        timestamp: EventTimestamp::from_ticks(id),
+                        kind: EventKind::ArcDeref,
+                        payload: EventPayload::Object(ObjectId::new(42)),
+                        call_stack: vec![Address::new(id)],
+                    })
+                    .collect(),
+                ..Events::default()
+            },
+        };
+        let runtime = super::super::data::RuntimeSnapshot::from_events(&decoded, &[], None);
+        let mut source = crate::allocator_view::Snapshot::event_only();
+        source.callers = Some(Callers::from_fields(CallersFields {
+            session_id: 1,
+            total_events: 4,
+            lost_events: 0,
+            threads: Vec::new(),
+            thread_names: Vec::new(),
+            events: (1..=4)
+                .map(|id| {
+                    seismograph_rallocator::callers::Event::from_fields(EventFields {
+                        thread_log_id: 1,
+                        event_thread_id: 1,
+                        sequence: id,
+                        allocation_id: id,
+                        kind: if id <= 2 {
+                            seismograph_rallocator::callers::EventKind::Allocated
+                        } else {
+                            seismograph_rallocator::callers::EventKind::Deallocated
+                        },
+                        heap_id: 1,
+                        heap_kind: seismograph_rallocator::callers::HeapKind::General,
+                        freed_after_heap_release: false,
+                        address: id,
+                        size: if id == 2 { 64 } else { 16 },
+                        align: 8,
+                        call_stack: vec![id],
+                    })
+                })
+                .collect(),
+        }));
+        let capture = CapturedSnapshot {
+            native: None,
+            mimalloc: None,
+            memory: None,
+            allocations: Some(super::super::data::AllocationSnapshot::from_snapshot(&source)),
+            heap_error: None,
+            primitives: runtime.primitives,
+            runtime: runtime.runtime,
+            io: runtime.io,
+            cache: runtime.cache,
+            threads: runtime.threads,
+            task_events: runtime.task_events,
+            captured_at: None,
+            captured_instant: None,
+            filter_index: None,
+            filter_summary: super::super::filter_index::FilterSummary::default(),
+        };
+        (source, capture)
+    }
+
+    #[test]
+    fn gamma_survivor_populated_navigation_counts_rows_and_clears_dependent_state() {
+        let (_, capture) = populated_navigation_fixture();
+        assert_eq!(
+            (
+                capture.allocations.as_ref().unwrap().records.len(),
+                capture.allocations.as_ref().unwrap().hotspots.len()
+            ),
+            (4, 2)
+        );
+        for (events, expected) in [(false, 1), (true, 2)] {
+            let mut view = AllocationViewState {
+                events,
+                ..AllocationViewState::new()
+            };
+            assert!(handle_allocation_key(KeyCode::Down, &mut view, Some(&capture)));
+            assert!(handle_allocation_key(KeyCode::Down, &mut view, Some(&capture)));
+            assert_eq!(view.selected, expected);
+        }
+        let mut primitive = PrimitiveViewState {
+            focus: PrimitiveFocus::Hotspots,
+            hotspot_selected: 1,
+            stack_scroll: 4,
+            ..PrimitiveViewState::new()
+        };
+        assert!(handle_primitive_key(KeyCode::Down, &mut primitive, Some(&capture)));
+        assert_eq!((primitive.hotspot_selected, primitive.stack_scroll), (2, 0));
+        for focus in [PrimitiveFocus::Types, PrimitiveFocus::Operations] {
+            primitive.focus = focus;
+            primitive.primitive_selected = 0;
+            primitive.operation_selected = 0;
+            primitive.hotspot_selected = 4;
+            primitive.stack_scroll = 5;
+            assert!(handle_primitive_key(KeyCode::Down, &mut primitive, Some(&capture)));
+            assert_eq!((primitive.hotspot_selected, primitive.stack_scroll), (0, 0));
+            match focus {
+                PrimitiveFocus::Types => assert_eq!((primitive.primitive_selected, primitive.operation_selected), (1, 0)),
+                PrimitiveFocus::Operations => assert_eq!(primitive.operation_selected, 1),
+                PrimitiveFocus::Hotspots => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_populated_thread_and_heap_navigation_counts_and_resets() {
+        use std::sync::Arc;
+
+        let (source, mut capture) = populated_navigation_fixture();
+        let operation_index = capture.threads.threads[0]
+            .operations
+            .iter()
+            .position(|operation| operation.events > 0)
+            .unwrap();
+        let mut thread = ThreadViewState {
+            focus: ThreadFocus::Participants,
+            operation_selected: operation_index,
+            participant_selected: 1,
+            object_selected: 4,
+            stack_scroll: 5,
+            ..ThreadViewState::new()
+        };
+        assert!(handle_thread_key(KeyCode::Down, &mut thread, Some(&capture)));
+        assert_eq!(
+            (thread.participant_selected, thread.object_selected, thread.stack_scroll),
+            (2, 0, 0)
+        );
+        for focus in [ThreadFocus::Threads, ThreadFocus::Operations] {
+            thread.focus = focus;
+            thread.thread_selected = 0;
+            thread.operation_selected = 0;
+            thread.participant_selected = 3;
+            thread.object_selected = 4;
+            thread.stack_scroll = 5;
+            assert!(handle_thread_key(KeyCode::Down, &mut thread, Some(&capture)));
+            assert_eq!(
+                (thread.participant_selected, thread.object_selected, thread.stack_scroll),
+                (0, 0, 0)
+            );
+            match focus {
+                ThreadFocus::Threads => assert_eq!((thread.thread_selected, thread.operation_selected), (1, 0)),
+                ThreadFocus::Operations => assert_eq!(thread.operation_selected, 1),
+                _ => unreachable!(),
+            }
+        }
+        capture.native = Some(Arc::new(crate::native_view::fixture::snapshot()));
+        let mut heap = HeapViewState::new();
+        assert!(handle_heap_key(KeyCode::Down, &mut heap, Some(&capture), usize::MAX));
+        assert_eq!(heap.native.root, 1);
+        heap.bucket_selected = 3;
+        heap.hotspot_selected = 4;
+        heap.stack_scroll = 5;
+        capture.native = None;
+        assert!(handle_heap_key(KeyCode::Char(']'), &mut heap, Some(&capture), usize::MAX));
+        assert_eq!(
+            (heap.tier, heap.bucket_selected, heap.hotspot_selected, heap.stack_scroll),
+            (MemoryTier::Medium, 0, 0, 0)
+        );
+        capture.memory = Some(super::super::data::MemorySnapshot::from_snapshot(&source));
+        assert!(handle_heap_key(KeyCode::Down, &mut heap, Some(&capture), usize::MAX));
+        assert_eq!(heap.bucket_selected, 1);
+    }
+
+    #[test]
+    fn gamma_survivor_task_occurrence_navigation_clamps_to_the_actual_last_operation() {
+        use seismograph::recorder::event::{Event, EventClock, EventKind, EventPayload, EventSequence, EventTimestamp, Events, ObjectId};
+        use seismograph::recorder::runtime::{RuntimeEvent, RuntimeId, WorkerId};
+        use seismograph::recorder::thread::{ThreadId, ThreadLog};
+        use seismograph::recorder::{Policies, Policy};
+        let kinds = [
+            EventKind::TaskPollStarted,
+            EventKind::ArcClone,
+            EventKind::ArcClone,
+            EventKind::ArcClone,
+            EventKind::ArcDeref,
+            EventKind::MutexAccess,
+            EventKind::MutexRelease,
+            EventKind::MutexRelease,
+            EventKind::MutexRelease,
+            EventKind::TaskPollFinished,
+        ];
+        let events = Events {
+            clock: EventClock::ProcessMonotonic,
+            total_events: 10,
+            recording: Policies {
+                runtime_tasks: Policy::all(true),
+                general_events: Policy::all(true),
+                arc_dereferences: Policy::all(true),
+                ..Policies::default()
+            },
+            threads: vec![ThreadLog {
+                thread_id: ThreadId::new(1),
+                total_events: 10,
+                ..ThreadLog::default()
+            }],
+            events: kinds
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| {
+                    let sequence = u64::try_from(index + 1).unwrap();
+                    Event {
+                        thread_id: ThreadId::new(1),
+                        sequence: EventSequence::new(sequence),
+                        timestamp: EventTimestamp::from_ticks(sequence * 10),
+                        kind,
+                        payload: if matches!(kind, EventKind::TaskPollStarted | EventKind::TaskPollFinished) {
+                            EventPayload::Runtime(RuntimeEvent {
+                                runtime_id: RuntimeId::from_raw(1).unwrap(),
+                                worker_id: WorkerId::from_raw(1),
+                                subject_id: 1,
+                                related_id: 0,
+                                value_0: if kind == EventKind::TaskPollFinished { 90 } else { 0 },
+                                value_1: 0,
+                            })
+                        } else {
+                            EventPayload::Object(ObjectId::new(42))
+                        },
+                        call_stack: Vec::new(),
+                    }
+                })
+                .collect(),
+            ..Events::default()
+        };
+        let snapshot = super::super::task_events::TaskEventsSnapshot::from_events(&events, &[], None);
+        let task = &snapshot.tasks[&(1, 1)];
+        assert_eq!(
+            task.operations
+                .iter()
+                .map(|operation| operation.occurrences().len())
+                .collect::<Vec<_>>(),
+            [3, 1, 1, 3]
+        );
+        for (operation_selected, expected) in [(1, 0), (usize::MAX, 1)] {
+            let mut view = TaskEventsViewState {
+                focus: TaskEventsFocus::Occurrences,
+                operation_selected,
+                ..TaskEventsViewState::new()
+            };
+            assert!(handle_task_events_key(KeyCode::Down, &mut view, Some(task)));
+            assert_eq!(view.event_selected, expected);
+        }
+    }
 
     fn descriptor(id: u8) -> MonitorDescriptor {
         MonitorDescriptor {

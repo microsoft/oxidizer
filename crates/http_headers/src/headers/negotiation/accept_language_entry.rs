@@ -59,6 +59,7 @@ impl<'a> AcceptLanguageEntry<'a> {
     }
 
     pub(super) fn encoded_len(&self) -> Result<usize, DecodeError> {
+        // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "The components are nonnegative checked summands with one shared overflow error, so their order cannot change success or the total")]
         checked_len([self.range.as_str().len(), weight_len(self.quality)], &FieldName::AcceptLanguage)
     }
 

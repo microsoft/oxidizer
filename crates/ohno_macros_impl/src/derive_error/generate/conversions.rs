@@ -38,6 +38,7 @@ fn from_type(model: &Model, conversion: &crate::derive_error::model::Conversion)
     let core_member = &model.shape.core().member;
     let values = conversion.initializers();
 
+    // #[gamma::skip(range.exclusive_to_inclusive, tag = "equivalent", reason = "Exactly one index is consumed per non-core field; the extra trailing index is never requested.")]
     let mut data = (0..values.len()).map(syn::Index::from);
     let initializers: Vec<TokenStream> = model
         .shape

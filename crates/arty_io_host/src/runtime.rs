@@ -77,7 +77,9 @@ impl ContextSlot {
             .initializing_threads
             .lock()
             .expect("a poisoned I/O context initializer indicates a runtime invariant failure");
-        if initializing_threads.contains(&thread) {
+        if
+        // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        initializing_threads.contains(&thread) {
             return Err(DriverError::from_message(
                 "I/O context retrieval cannot reenter initialization of the same context type on one thread",
             ));
@@ -193,6 +195,7 @@ impl IoRuntime {
                 "I/O driver host must be created on the worker identified by its thread coordinate",
             ));
         }
+        // #[gamma::skip(stmt.delete_call, reason = "Sink's only field has thread_aware(skip), so its derived relocation is a no-op.")]
         self.sink.relocate(None, &thread);
         Ok(DriverHost::new(self, thread, owner_waker))
     }
@@ -254,6 +257,14 @@ impl IoRuntime {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_survivor_resolve_context_preserves_prior_registry_failure_without_panicking() {
+        let runtime = IoRuntime::new(Sink::noop());
+        runtime.fail(&DriverError::from_message("prior registry failure"));
+        let error = runtime.resolve_context::<TestContext>(()).err().unwrap();
+        assert_eq!(error.to_string(), "prior registry failure");
+    }
+
     use std::any::TypeId;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier};

@@ -11,6 +11,36 @@ use crate::AllocError;
 use crate::arena::{ExpectAlloc, panic_alloc};
 use crate::internal::arena_buf::ArenaBuf;
 
+#[cfg(test)]
+#[test]
+fn gamma_nov4_tail_reclaim_policy_never_dispatches_a_zst_and_preserves_failed_reservations() {
+    let arena = crate::Arena::new();
+    let mut zst = arena.alloc_vec::<()>();
+    let mut calls = 0;
+    assert!(!zst.reclaim_capacity_tail_with(7, |_, _| {
+        calls += 1;
+        true
+    }));
+    assert_eq!(calls, 0);
+    assert_eq!(zst.buf.cap(), usize::MAX);
+    for reclaimed in [false, true] {
+        let mut values = arena.alloc_vec_with_capacity::<u16>(8);
+        values.extend([11, 23, 37]);
+        let pointer = values.as_ptr().addr();
+        let mut requests = alloc::vec::Vec::new();
+        assert_eq!(
+            values.reclaim_capacity_tail_with(3, |end, bytes| {
+                requests.push((end, bytes));
+                reclaimed
+            }),
+            reclaimed
+        );
+        assert_eq!(requests, [(pointer + 16, 10)]);
+        assert_eq!(values.capacity(), if reclaimed { 3 } else { 8 });
+        assert_eq!(&*values, &[11, 23, 37]);
+    }
+}
+
 /// Rollback guard for `resize`/`resize_with`.
 /// On panic, truncates to `old_len`; success disarms it via [`mem::forget`].
 struct ResizeGuard<'b, 'a, T> {
@@ -38,6 +68,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         let gap = end - start;
         let repl_len = repl.len();
         let old_len = self.buf.len();
+        // #[gamma::skip(relational.ge_to_gt, reason = "At equal replacement length both branches copy the same replacement; the extra-zero extension, self-copy, and unchanged-length truncate are no-ops")]
         if repl_len >= gap {
             let extra = repl_len - gap;
             // Grow by `extra`, initializing the new trailing slots with filler
@@ -98,7 +129,9 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     pub fn try_insert(&mut self, idx: usize, value: T) -> Result<(), AllocError> {
         let len = self.buf.len();
         assert!(idx <= len, "insertion index (is {idx}) should be <= len (is {len})");
+        // #[gamma::skip(cond.always_true, reason = "try_reserve(1) immediately succeeds without allocation when at least one slot is already free")]
         if self.buf.remaining_cap() == 0 {
+            // #[gamma::skip(literal.int_increment, reason = "The min-four doubled growth target is identical for a full vector needing one or two additional slots")]
             self.try_reserve(1)?;
         }
         self.buf.insert_within_cap(idx, value);
@@ -228,6 +261,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// assert!(values.capacity() >= 4);
     /// ```
     pub fn shrink_to(&mut self, min_capacity: usize) {
+        // #[gamma::skip(cond.always_false, reason = "For a zero-sized element the delegated reclaim_capacity_tail immediately returns false without changing the buffer, so bypassing this early return remains a no-op")]
         if const { mem::size_of::<T>() == 0 } {
             return;
         }
@@ -242,10 +276,12 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// Callers must ensure `[target_cap, cap)` contains no live elements
     /// because the next arena allocation may overwrite it.
     #[inline]
-    // At the exact normal-allocation boundary, the refill hint routes the
-    // buffer through the oversized path, so either comparison is observable
-    // as the same failed reclaim.
     pub(super) fn reclaim_capacity_tail(&mut self, target_cap: usize) -> bool {
+        let arena = self.arena;
+        self.reclaim_capacity_tail_with(target_cap, |end_addr, bytes| arena.current().try_reclaim_tail(end_addr, bytes))
+    }
+
+    fn reclaim_capacity_tail_with(&mut self, target_cap: usize, reclaim: impl FnOnce(usize, usize) -> bool) -> bool {
         if const { mem::size_of::<T>() == 0 } {
             return false;
         }
@@ -263,7 +299,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         }
         let end_addr = data_addr + total_bytes;
         let reclaim_bytes = (cap - target_cap) * elem;
-        if self.arena.current().try_reclaim_tail(end_addr, reclaim_bytes) {
+        if reclaim(end_addr, reclaim_bytes) {
             // SAFETY: the chunk reclaimed `[target_cap*elem, cap*elem)`, so
             // this buffer no longer owns that span; the retained prefix
             // `[0, target_cap)` is untouched and the caller guarantees no
@@ -384,6 +420,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         for read in 0..len {
             let keep = f(&mut slice[read]);
             if keep {
+                // #[gamma::skip(cond.always_true, reason = "Swapping an element with itself is a no-op")]
                 if write != read {
                     slice.swap(write, read);
                 }
@@ -422,6 +459,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// ```
     pub fn dedup_by<F: FnMut(&mut T, &mut T) -> bool>(&mut self, mut same_bucket: F) {
         let len = self.buf.len();
+        // #[gamma::skip(cond.always_false, literal.int_decrement, literal.int_to_zero, reason = "For lengths zero and one the following loop is empty and truncate(1) is a no-op")]
         if len < 2 {
             return;
         }
@@ -434,6 +472,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
             let prev = &mut left[write - 1];
             let cur = &mut right[0];
             if !same_bucket(cur, prev) {
+                // #[gamma::skip(cond.always_true, reason = "Swapping an element with itself is a no-op")]
                 if write != read {
                     slice.swap(write, read);
                 }
@@ -625,6 +664,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         T: Clone,
     {
         let len = self.buf.len();
+        // #[gamma::skip(relational.le_to_lt, reason = "At equal lengths the growth path reserves zero and initializes no elements; the initializer is not called")]
         if new_len <= len {
             self.buf.truncate(new_len);
             return Ok(());
@@ -689,6 +729,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// ```
     pub fn try_resize_with<F: FnMut() -> T>(&mut self, new_len: usize, mut f: F) -> Result<(), AllocError> {
         let len = self.buf.len();
+        // #[gamma::skip(relational.le_to_lt, reason = "At equal lengths truncate is a no-op; the other branch reserves zero, executes no generator calls, forgets its untouched guard, and returns the identical Ok result")]
         if new_len <= len {
             self.buf.truncate(new_len);
             return Ok(());
@@ -756,7 +797,11 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         let tail_len = len - at;
         // ZST, unallocated-head, and empty-tail cases produce an independent
         // tail and leave the head's storage intact.
-        if const { mem::size_of::<T>() == 0 } || self.buf.cap() == 0 || tail_len == 0 {
+        // #[gamma::skip(logical.or_remove_left, logical.or_remove_right, logical.or_to_and, tag = "equivalent", reason = "A zero-capacity non-ZST has an empty tail, handled separately; ZSTs sent to split_off_buf retain the same dangling pointers, lengths and unlimited capacities")]
+        let no_backing = const { mem::size_of::<T>() == 0 } || self.buf.cap() == 0;
+        // #[gamma::skip(logical.or_remove_left, reason = "An unallocated non-ZST head already has an empty tail; ArenaBuf also splits ZSTs by length with the identical dangling pointer and unlimited capacities")]
+        if no_backing || tail_len == 0 {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "A nonempty tail in this branch is zero-sized, and every other tail is empty; neither reservation allocates")]
             let mut tail = Self::try_with_capacity_in(tail_len, self.arena)?;
             // Only ZSTs reach here with `tail_len > 0`; reversing them while
             // popping is unobservable.

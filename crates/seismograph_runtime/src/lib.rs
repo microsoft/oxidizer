@@ -224,17 +224,7 @@ impl RuntimeHandle {
 
     /// Marks the runtime as stopping and records the transition once.
     pub fn stopping(&self) {
-        if self
-            .control
-            .state
-            .compare_exchange(
-                RuntimeState::Running.wire_value(),
-                RuntimeState::Stopping.wire_value(),
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            )
-            .is_ok()
-        {
+        stopping_with(&self.control.state, || {
             record_now(
                 &self.control,
                 None,
@@ -245,21 +235,15 @@ impl RuntimeHandle {
                 0,
                 self.control.lifecycle_backtraces,
             );
-        }
+        });
     }
 
     /// Retires providers and records the runtime's stop once.
     pub fn stopped(&self) {
         let at = EventTimestamp::now();
-        if self
-            .control
-            .retired_at
-            .compare_exchange(0, at.ticks().max(1), Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
+        if !self.retire_at(at) {
             return;
         }
-        self.control.state.store(RuntimeState::Stopped.wire_value(), Ordering::Release);
         let workers = lock(&self.control.workers).clone();
         // Detach every callback before user-owned captures can run destructors.
         let providers = workers
@@ -278,6 +262,19 @@ impl RuntimeHandle {
             self.control.lifecycle_backtraces,
         );
         drop(providers);
+    }
+
+    fn retire_at(&self, retired_at: EventTimestamp) -> bool {
+        if self
+            .control
+            .retired_at
+            .compare_exchange(0, retired_at.ticks().max(1), Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return false;
+        }
+        self.control.state.store(RuntimeState::Stopped.wire_value(), Ordering::Release);
+        true
     }
 }
 
@@ -408,9 +405,23 @@ fn capture_source(_context: seismograph::snapshot::SnapshotContext<'_>) -> Resul
             .collect(),
         addresses: Vec::new(),
     };
-    let len = snapshot::encoded_len(&snapshot).ok_or_else(|| seismograph::Error::new("runtime source payload length overflow"))?;
-    let mut data = seismograph::snapshot::SourceData::zeroed(len)?;
-    snapshot::encode(&snapshot, data.as_mut_bytes()).map_err(|()| seismograph::Error::new("runtime source payload encoding failed"))?;
+    encode_source_with(
+        &snapshot,
+        snapshot::encoded_len,
+        seismograph::snapshot::SourceData::zeroed,
+        snapshot::encode,
+    )
+}
+
+fn encode_source_with(
+    snapshot: &Snapshot,
+    length: impl FnOnce(&Snapshot) -> Option<usize>,
+    allocate: impl FnOnce(usize) -> Result<seismograph::snapshot::SourceData, seismograph::Error>,
+    encode: impl FnOnce(&Snapshot, &mut [u8]) -> Result<(), ()>,
+) -> Result<seismograph::snapshot::SourceData, seismograph::Error> {
+    let len = length(snapshot).ok_or_else(|| seismograph::Error::new("runtime source payload length overflow"))?;
+    let mut data = allocate(len)?;
+    encode(snapshot, data.as_mut_bytes()).map_err(|()| seismograph::Error::new("runtime source payload encoding failed"))?;
     Ok(data)
 }
 
@@ -483,12 +494,29 @@ fn next_id(counter: &AtomicU64) -> NonZeroU64 {
     NonZeroU64::new(value).expect("identity counters start at one")
 }
 
+fn stopping_with(state: &AtomicU8, record: impl FnOnce()) {
+    if state
+        .compare_exchange(
+            RuntimeState::Running.wire_value(),
+            RuntimeState::Stopping.wire_value(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
+        .is_ok()
+    {
+        record();
+    }
+}
+
 pub(crate) fn next_transfer_id() -> TransferId {
     TransferId::from_raw(next_id(&NEXT_TRANSFER_ID).get()).expect("transfer identity counters start at one")
 }
 
 pub(crate) fn duration_nanos(end: EventTimestamp, start: EventTimestamp) -> u64 {
-    u64::try_from(end.duration_since(start).as_nanos()).unwrap_or(u64::MAX)
+    u64::try_from(end.duration_since(start).as_nanos()).unwrap_or(
+        // #[gamma::skip(expr.decrement, reason = "EventTimestamp::duration_since constructs Duration::from_nanos from a saturating u64 subtraction, so as_nanos always fits u64 and this fallback is unreachable")]
+        u64::MAX,
+    )
 }
 
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -498,6 +526,145 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::worker::WorkerRole;
+
+    #[test]
+    fn november_duration_nanos_preserves_the_full_timestamp_range_without_a_clock() {
+        for (finished, started, expected) in [(0, 0, 0), (0, u64::MAX, 0), (u64::MAX, 0, u64::MAX), (u64::MAX, 1, u64::MAX - 1)] {
+            assert_eq!(
+                duration_nanos(EventTimestamp::from_ticks(finished), EventTimestamp::from_ticks(started)),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn november_stopping_records_the_successful_transition_not_a_later_repeated_call() {
+        let state = AtomicU8::new(RuntimeState::Running.wire_value());
+        let recorded = std::cell::Cell::new(0);
+        stopping_with(&state, || {
+            assert_eq!(state.load(Ordering::Acquire), RuntimeState::Stopping.wire_value());
+            recorded.set(recorded.get() + 1);
+        });
+        assert_eq!(recorded.get(), 1);
+        stopping_with(&state, || panic!("a repeated stopping request must not record"));
+        assert_eq!(recorded.get(), 1);
+        state.store(RuntimeState::Stopped.wire_value(), Ordering::Release);
+        stopping_with(&state, || panic!("a stopped runtime must not record or restart"));
+        assert_eq!(state.load(Ordering::Acquire), RuntimeState::Stopped.wire_value());
+    }
+
+    #[test]
+    fn gamma_round2_source_encoding_preserves_exact_length_allocation_and_encoder_errors() {
+        let snapshot = Snapshot::default();
+        let error = encode_source_with(
+            &snapshot,
+            |_| None,
+            |_| panic!("overflow must not allocate"),
+            |_, _| panic!("overflow must not encode"),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.to_string(), "runtime source payload length overflow");
+        let error = encode_source_with(
+            &snapshot,
+            |_| Some(3),
+            |length| {
+                assert_eq!(length, 3);
+                Err(seismograph::Error::new("scripted allocation failure"))
+            },
+            |_, _| panic!("failed allocation must not encode"),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.to_string(), "scripted allocation failure");
+        let error = encode_source_with(
+            &snapshot,
+            |_| Some(3),
+            seismograph::snapshot::SourceData::zeroed,
+            |_, output| {
+                assert_eq!(output, [0, 0, 0]);
+                Err(())
+            },
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.to_string(), "runtime source payload encoding failed");
+        let mut data = encode_source_with(
+            &snapshot,
+            |_| Some(3),
+            seismograph::snapshot::SourceData::zeroed,
+            |value, output| {
+                assert!(std::ptr::eq(value, &raw const snapshot));
+                output.copy_from_slice(&[17, 23, 31]);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(data.as_mut_bytes(), [17, 23, 31]);
+    }
+
+    #[test]
+    fn gamma_survivor_worker_snapshot_preserves_absent_and_present_thread_identity() {
+        let worker = WorkerControl {
+            id: WorkerId::from_raw(13).unwrap(),
+            role: WorkerRole::Core,
+            processor_index: Some(17),
+            state: AtomicU8::new(1),
+            thread_id: AtomicU64::new(0),
+            current_task: AtomicU64::new(0),
+            provider: Mutex::new(None),
+            request_pending: std::sync::atomic::AtomicBool::new(false),
+            measurements: Mutex::new(collection::Measurements::default()),
+        };
+        assert_eq!(
+            format!("{worker:?}"),
+            format!("{} {{ id: WorkerId(13), role: Core, .. }}", std::any::type_name::<WorkerControl>())
+        );
+        assert_eq!(worker.snapshot(snapshot::TaskCollection::Unavailable).thread_id, None);
+        assert_eq!(worker.snapshot(snapshot::TaskCollection::Unavailable).current_task, None);
+        worker.thread_id.store(19, Ordering::Relaxed);
+        worker.current_task.store(23, Ordering::Relaxed);
+        let captured = worker.snapshot(snapshot::TaskCollection::Complete);
+        assert_eq!(captured.thread_id.unwrap().get(), 19);
+        assert_eq!(captured.current_task.unwrap().get(), 23);
+    }
+
+    #[test]
+    fn gamma_survivor_identity_counter_advances_once_without_wrapping() {
+        let counter = AtomicU64::new(13);
+        assert_eq!(next_id(&counter).get(), 13);
+        assert_eq!(next_id(&counter).get(), 14);
+        assert_eq!(counter.load(Ordering::Relaxed), 15);
+        let boundary = AtomicU64::new(u64::MAX - 1);
+        assert_eq!(next_id(&boundary).get(), u64::MAX - 1);
+        std::panic::catch_unwind(|| next_id(&boundary)).unwrap_err();
+        assert_eq!(boundary.load(Ordering::Relaxed), u64::MAX);
+        assert_eq!(
+            duration_nanos(EventTimestamp::from_ticks(u64::MAX), EventTimestamp::from_ticks(0)),
+            u64::MAX
+        );
+        assert_eq!(duration_nanos(EventTimestamp::from_ticks(1), EventTimestamp::from_ticks(2)), 0);
+    }
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn gamma_round2_retirement_uses_exact_frozen_boundaries_and_is_idempotent() {
+        let _test = test_lock();
+        for (at, expected) in [(0, 1), (1, 1), (37, 37)] {
+            let runtime = crate::worker::gamma_round2_tests::runtime();
+            assert!(runtime.retire_at(EventTimestamp::from_ticks(at)));
+            assert_eq!(runtime.control.retired_at.load(Ordering::Acquire), expected);
+            assert_eq!(runtime.control.state.load(Ordering::Acquire), RuntimeState::Stopped.wire_value());
+            assert!(!runtime.retire_at(EventTimestamp::from_ticks(99)));
+            assert_eq!(runtime.control.retired_at.load(Ordering::Acquire), expected);
+        }
+    }
+
+    pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+        TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 
     #[test]
     fn event_durations_preserve_nanoseconds_and_saturate_backwards_time() {

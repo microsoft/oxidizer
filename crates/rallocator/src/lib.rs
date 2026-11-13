@@ -68,6 +68,7 @@ mod allocator;
 #[doc(hidden)]
 pub mod backend;
 mod recording;
+mod sync_fence;
 
 pub use allocator::Rallocator;
 

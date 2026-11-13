@@ -69,6 +69,7 @@ impl<'a> Serializer for FieldSerializer<'a> {
     type SerializeStruct = FieldStruct<'a>;
     type SerializeStructVariant = Impossible<(), FieldSerError>;
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Struct name and field-count hints are unused; extraction matches the requested field key")]
     fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeStruct, Self::Error> {
         Ok(FieldStruct {
             field: self.field,
@@ -85,10 +86,12 @@ impl<'a> Serializer for FieldSerializer<'a> {
         value.serialize(self)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every map is rejected independently of its unused length hint")]
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every newtype variant is rejected without inspecting its metadata or payload")]
     fn serialize_newtype_variant<T: Serialize + ?Sized>(
         self,
         _name: &'static str,
@@ -99,6 +102,7 @@ impl<'a> Serializer for FieldSerializer<'a> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every tuple variant is rejected without inspecting its metadata")]
     fn serialize_tuple_variant(
         self,
         _name: &'static str,
@@ -109,6 +113,7 @@ impl<'a> Serializer for FieldSerializer<'a> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every struct variant is rejected without inspecting its metadata")]
     fn serialize_struct_variant(
         self,
         _name: &'static str,
@@ -119,54 +124,67 @@ impl<'a> Serializer for FieldSerializer<'a> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every boolean is rejected without inspecting its value")]
     fn serialize_bool(self, _value: bool) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_i8(self, _value: i8) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_i16(self, _value: i16) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_i32(self, _value: i32) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_i64(self, _value: i64) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_i128(self, _value: i128) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_u8(self, _value: u8) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_u16(self, _value: u16) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_u32(self, _value: u32) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_u64(self, _value: u64) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_u128(self, _value: u128) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_f32(self, _value: f32) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every scalar is rejected without inspecting its value")]
     fn serialize_f64(self, _value: f64) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
@@ -195,18 +213,22 @@ impl<'a> Serializer for FieldSerializer<'a> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every unit variant is rejected without inspecting its metadata")]
     fn serialize_unit_variant(self, _name: &'static str, _index: u32, _variant: &'static str) -> Result<Self::Ok, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every sequence is rejected independently of its unused length hint")]
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every tuple is rejected independently of its unused length hint")]
     fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
         Err(FieldSerError::Unsupported)
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Every tuple struct is rejected independently of its unused metadata")]
     fn serialize_tuple_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeTupleStruct, Self::Error> {
         Err(FieldSerError::Unsupported)
     }

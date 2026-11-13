@@ -51,7 +51,8 @@ static INVARIANT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 assert_impl_all!(Io: Clone, Send, ThreadAware);
 assert_not_impl_any!(Io: UnwindSafe, RefUnwindSafe);
-assert_impl_all!(RuntimeBuilder: Send, Sync);
+assert_impl_all!(RuntimeBuilder: Send);
+assert_not_impl_any!(RuntimeBuilder: Sync);
 
 #[derive(Debug)]
 struct IoError(String);

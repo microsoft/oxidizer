@@ -13,6 +13,11 @@ use crate::alpn::map_to_alpn;
 use crate::backend::{BackendError, server_name_override_key};
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
 
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[path = "native_tls_calls.rs"]
+mod calls;
+
 /// Configuration for the platform native TLS backend.
 #[derive(Clone, Default)]
 #[non_exhaustive]
@@ -31,6 +36,7 @@ impl std::fmt::Debug for NativeTlsOptions {
 }
 
 impl NativeTlsOptions {
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "Self::default() and inferred Default::default() call the same NativeTlsOptions implementation")]
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -41,7 +47,10 @@ impl NativeTlsOptions {
         defaults: &TlsBackendBuilder,
         shared: &SharedOptions,
     ) -> Result<(TlsConnector, HashMap<String, String>), BackendError> {
+        #[cfg(not(test))]
         let mut builder = native_tls::TlsConnector::builder();
+        #[cfg(test)]
+        let mut builder = calls::Builder::new();
         builder
             .request_alpns(map_to_alpn(shared.resolved_supported_http_versions(defaults)))
             .min_protocol_version(Some(native_tls::Protocol::Tlsv12));
@@ -175,6 +184,37 @@ mod tests {
     use crate::client_identity::ClientIdentity;
 
     #[test]
+    #[cfg_attr(miri, ignore = "native tests cover certificate parsing and platform TLS FFI")]
+    fn november4_native_roots_are_applied_to_the_materialized_connector() {
+        let certificate = native_tls::Certificate::from_pem(TEST_CERT_PEM).unwrap();
+        let expected = certificate.to_der().unwrap();
+        let options = NativeTlsOptions {
+            root_certificates: vec![certificate.clone(), certificate],
+            server_name_overrides: HashMap::new(),
+        };
+        let (result, observed) = calls::record(false, || options.build(&TlsBackendBuilder::new(), &SharedOptions::default()));
+        result.unwrap();
+        assert_eq!(observed.roots, vec![expected.clone(), expected]);
+        assert_eq!(observed.build_calls, 1);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "native tests cover connector construction and platform TLS FFI")]
+    fn november4_native_connector_build_failure_is_returned_without_panicking() {
+        let (result, observed) = calls::record(true, || {
+            NativeTlsOptions::new().build(&TlsBackendBuilder::new(), &SharedOptions::default())
+        });
+        let error = result.unwrap_err();
+        assert_eq!(observed.build_calls, 1);
+        assert_eq!(observed.roots, Vec::<Vec<u8>>::new());
+        assert!(
+            error
+                .to_string()
+                .contains(&native_tls::Certificate::from_der(&[]).err().unwrap().to_string())
+        );
+    }
+
+    #[test]
     fn builder_native_tls_starts_empty() {
         let builder = TlsOptions::builder_native_tls();
         assert!(builder.shared.client_identity.is_none());
@@ -275,6 +315,54 @@ GBldds0S5PhDN2Q0XE//HYhJcny4Vh/Ll4zDrMnWVBVcLgIA6o2IG8nO3507f0YH\n\
 T2R0y4+MiNZVtrHHlN46dUu27rSsZ11CExcqrzcyczaG7TmEGc5R1+iSnc5fjnes\n\
 BqPhJRu3mmiSimquZzZdlYs=\n\
 -----END PRIVATE KEY-----\n";
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
+    fn november4_native_identity_reencodes_each_certificate_with_its_required_label() {
+        let mut certificates = TEST_CERT_PEM.to_vec();
+        certificates.extend_from_slice(TEST_CERT_PEM);
+        let identity = ClientIdentity::from_pem(&certificates, TEST_KEY_PEM).unwrap();
+        assert_eq!(identity.cert_chain().len(), 2);
+        let cloned = identity.clone();
+        drop(identity);
+        cloned.build_native_identity().unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
+    fn gamma_round2_native_identity_accepts_the_existing_certificate_and_key_fixture() {
+        let identity = ClientIdentity::from_pem(TEST_CERT_PEM, TEST_KEY_PEM).unwrap();
+        identity.build_native_identity().unwrap();
+    }
+
+    #[test]
+    #[cfg(windows)]
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
+    fn gamma_round2_windows_connector_retains_protocol_alpn_and_identity() {
+        let identity = ClientIdentity::from_pem(TEST_CERT_PEM, TEST_KEY_PEM).unwrap();
+        let tls = TlsOptions::builder_native_tls()
+            .client_identity(identity)
+            .supported_http_versions(&[http::Version::HTTP_11])
+            .build();
+        let backend = crate::TlsBackendBuilder::new().build_backend(tls).unwrap();
+        let crate::TlsBackend::NativeTls(backend) = backend else {
+            panic!("explicit native options must produce a native connector");
+        };
+        let state = format!("{:?}", backend.connector());
+        assert!(state.contains("min_protocol: Some(Tlsv12)"), "{state}");
+        assert!(state.contains("cert: Some("), "{state}");
+        assert!(state.contains("alpn: [\"http/1.1\"]"), "{state}");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI
+    fn gamma_round2_root_certificate_setter_retains_the_exact_certificate() {
+        let certificate = native_tls::Certificate::from_pem(TEST_CERT_PEM).unwrap();
+        let expected = certificate.to_der().unwrap();
+        let builder = TlsOptions::builder_native_tls().root_certificate(certificate);
+        assert_eq!(builder.backend.root_certificates.len(), 1);
+        assert_eq!(builder.backend.root_certificates[0].to_der().unwrap(), expected);
+    }
 
     #[test]
     #[cfg_attr(miri, ignore)] // native-tls uses platform TLS FFI

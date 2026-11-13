@@ -72,6 +72,15 @@ after two seconds during automated runs. Fetch streaming uses an unnamed
 temporary file. Snapshot examples write their named artifacts to the current
 directory.
 
+The handwritten `repository-checks.yml` runs
+`just test-feature-regressions --package PACKAGE` for
+`compressors` with only `deflate` enabled and for `fetch` with only `tokio,native-tls`
+enabled. These package-isolated runs cover raw-deflate pool resets without `zlib`
+and automatic native TLS selection without `rustls`. Neither Anvil's all-features
+run nor its no-default-features run selects these combinations. The recipe checks
+that each required regression test is present before it runs the tests.
+Both jobs participate in `Required repository checks`.
+
 The handwritten `repository-checks.yml` also verifies the
 `http_headers_simd` `no_std` contract with package-isolated unit and integration
 tests on AArch64 and x86-family Linux. The generated Anvil test groups can select the

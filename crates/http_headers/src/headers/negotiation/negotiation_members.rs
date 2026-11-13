@@ -14,6 +14,7 @@ pub(super) fn weighted_parts(bytes: &[u8]) -> (&[u8], Option<QualityView<'_>>) {
     let Some(semicolon) = bytes.iter().position(|byte| *byte == b';') else {
         return (bytes, None);
     };
+    // #[gamma::skip(arith.add_to_mul, arith.add_to_sub, literal.int_decrement, literal.int_increment, tag = "equivalent", reason = "Validated weighted members have a nonempty item before the semicolon and at least q before equals; starting one byte earlier or later still finds the same first equals and unchanged quality suffix")]
     let parameter = &bytes[semicolon + 1..];
     let equals = parameter
         .iter()
@@ -59,7 +60,9 @@ pub(super) fn collect_members<T>(
             return Err(DecodeError::new(name, DecodeErrorKind::SourceLimitExceeded));
         }
         let separator = usize::from(index != 0) * 2;
+        // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "Every length is nonnegative, so reordering this bounded checked sum preserves the total and the identical SourceLimitExceeded error")]
         let len = checked_len([bytes.len(), separator, length(&entry)?], name)?;
+        // #[gamma::skip(stmt.delete_call, arith.sub_to_add, tag = "equivalent", reason = "This only preallocates Vec capacity; the checked 64-KiB byte budget bounds either reservation and every serialized byte is appended independently")]
         bytes.reserve(len - bytes.len());
         if separator != 0 {
             bytes.extend_from_slice(b", ");
@@ -75,6 +78,15 @@ pub(super) fn collect_members<T>(
 mod tests {
     use super::checked_len;
     use crate::{DecodeError, DecodeErrorKind, FieldName};
+
+    #[test]
+    fn gamma_afternoon_collected_members_propagate_invalid_serialized_bytes() {
+        let error = super::collect_members([()], &FieldName::Accept, |()| Ok(1), |(), bytes| bytes.push(0))
+            .expect_err("an invalid serialized field value must not be retained");
+        assert_eq!(error.header(), &FieldName::Accept);
+        assert_eq!(error.kind(), DecodeErrorKind::InvalidSyntax);
+        assert_eq!(error.value_index(), None);
+    }
 
     #[test]
     fn member_length_bounds_and_arithmetic_overflow_are_admission_errors() {

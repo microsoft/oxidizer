@@ -179,6 +179,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_survivor_expired_counts_subtract_failures_and_abandonment_with_saturation() {
+        let mut counts = ExecutionInfo::new(5, 7, 11);
+        counts.subtract(ExecutionInfo::new(2, 3, 5));
+        assert_eq!(counts, ExecutionInfo::new(3, 4, 6));
+        counts.subtract(ExecutionInfo::new(9, 10, 12));
+        assert_eq!(counts, ExecutionInfo::new(0, 0, 0));
+    }
+
+    #[test]
     fn factory_ok() {
         let builder = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 5, AbandonedPolicy::default());
         let metrics = builder.build();

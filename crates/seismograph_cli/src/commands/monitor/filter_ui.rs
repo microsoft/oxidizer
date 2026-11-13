@@ -421,6 +421,67 @@ fn visible_tail(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_survivor_filter_popup_width_is_exactly_one_hundred_columns() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let mut app = super::App::with_io(io);
+        app.filters.popup = Some(super::FilterPopup::new(&super::FilterSpec::default()));
+        let mut terminal = Terminal::new(TestBackend::new(120, 25)).unwrap();
+        terminal.draw(|frame| app.draw_filter_popup(frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(10, 4)].symbol(), "┌");
+        assert_eq!(buffer[(109, 4)].symbol(), "┐");
+        assert_eq!(buffer[(9, 4)].symbol(), " ");
+        assert_eq!(buffer[(110, 4)].symbol(), " ");
+    }
+
+    #[test]
+    fn gamma_survivor_popup_editing_respects_field_boundaries_and_clears_errors() {
+        use super::{FilterPopup, FilterSpec, KeyCode, RuntimeStackMode};
+        let mut popup = FilterPopup::new(&FilterSpec::default());
+        popup.error = Some("bad rule".into());
+        popup.edit(KeyCode::Char('a'));
+        assert_eq!(
+            (&popup.includes, &popup.excludes, &popup.error),
+            (&"a".to_owned(), &String::new(), &None)
+        );
+        popup.edit(KeyCode::Char(' '));
+        assert_eq!(popup.includes, "a ");
+        assert!(!popup.show_unknown);
+        popup.edit(KeyCode::Down);
+        popup.edit(KeyCode::Char('b'));
+        popup.error = Some("bad rule".into());
+        popup.edit(KeyCode::Backspace);
+        assert_eq!(
+            (&popup.includes, &popup.excludes, &popup.error),
+            (&"a ".to_owned(), &String::new(), &None)
+        );
+        popup.edit(KeyCode::Tab);
+        popup.error = Some("keep".into());
+        popup.edit(KeyCode::Char('x'));
+        popup.edit(KeyCode::Delete);
+        assert_eq!(
+            (popup.selected, &popup.excludes, &popup.error),
+            (2, &String::new(), &Some("keep".into()))
+        );
+        popup.edit(KeyCode::Char(' '));
+        assert!(popup.show_unknown);
+        popup.edit(KeyCode::Right);
+        assert!(!popup.show_unknown);
+        popup.edit(KeyCode::Tab);
+        popup.edit(KeyCode::Char(' '));
+        assert_eq!(popup.runtime_stack, RuntimeStackMode::Spawn);
+        popup.edit(KeyCode::Char('x'));
+        popup.edit(KeyCode::Backspace);
+        assert_eq!((&popup.includes, &popup.excludes), (&"a ".to_owned(), &String::new()));
+        popup.edit(KeyCode::Tab);
+        assert_eq!(popup.selected, 0);
+        popup.edit(KeyCode::BackTab);
+        assert_eq!(popup.selected, 3);
+    }
+
     use std::collections::HashSet;
     use std::time::{Duration, SystemTime};
 

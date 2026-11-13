@@ -8,7 +8,9 @@ use std::time::Duration;
 
 use crate::io::{IoOperation, MonitorIo};
 use crate::monitor::MonitorDescriptor;
-use crate::platform;
+mod native;
+
+use self::native::{Connection as NativeConnection, Listener as NativeListener};
 
 /// Local monitor listener. Dropping it removes its own Unix socket, or closes
 /// the pending Windows pipe instance.
@@ -23,7 +25,7 @@ pub struct Listener {
 
 #[derive(Debug)]
 enum ListenerInner {
-    Native(platform::Listener),
+    Native(NativeListener),
     #[cfg(any(test, feature = "test-util"))]
     Mocked(crate::io::mock::Listener),
 }
@@ -43,13 +45,7 @@ impl Listener {
             ));
         }
         io.checkpoint(IoOperation::Bind)?;
-        #[cfg(any(test, feature = "test-util"))]
-        let inner = match io.mocked() {
-            Some(runtime) => ListenerInner::Mocked(crate::io::mock::Listener::bind(runtime, descriptor)?),
-            None => ListenerInner::Native(platform::Listener::bind(descriptor)?),
-        };
-        #[cfg(not(any(test, feature = "test-util")))]
-        let inner = ListenerInner::Native(platform::Listener::bind(descriptor)?);
+        let inner = select_listener(io, descriptor)?;
         Ok(Self {
             inner,
             io: io.clone(),
@@ -65,6 +61,7 @@ impl Listener {
         &self.descriptor
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// Controls whether accepting waits for a client.
     ///
     /// # Errors
@@ -120,7 +117,7 @@ struct ConnectionObservations {
 
 #[derive(Debug)]
 enum ConnectionInner {
-    Native(platform::Connection),
+    Native(NativeConnection),
     #[cfg(any(test, feature = "test-util"))]
     Mocked(crate::io::mock::Connection),
 }
@@ -171,13 +168,7 @@ impl Connection {
             ));
         }
         io.checkpoint(IoOperation::Connect)?;
-        #[cfg(any(test, feature = "test-util"))]
-        let inner = match io.mocked() {
-            Some(runtime) => ConnectionInner::Mocked(crate::io::mock::Connection::connect(runtime, descriptor)?),
-            None => ConnectionInner::Native(platform::Connection::connect(descriptor, timeout)?),
-        };
-        #[cfg(not(any(test, feature = "test-util")))]
-        let inner = ConnectionInner::Native(platform::Connection::connect(descriptor, timeout)?);
+        let inner = select_connection(io, descriptor, timeout)?;
         Ok(Self {
             inner,
             io: io.clone(),
@@ -319,10 +310,147 @@ impl Write for Connection {
     }
 }
 
+fn select_listener(io: &MonitorIo, descriptor: &MonitorDescriptor) -> io::Result<ListenerInner> {
+    let _ = io;
+    #[cfg(any(test, feature = "test-util"))]
+    if let Some(runtime) = io.mocked()
+        && native::use_mocked_io()
+    {
+        return crate::io::mock::Listener::bind(runtime, descriptor).map(ListenerInner::Mocked);
+    }
+    bind_native(descriptor)
+}
+
+fn select_connection(io: &MonitorIo, descriptor: &MonitorDescriptor, timeout: Duration) -> io::Result<ConnectionInner> {
+    let _ = io;
+    #[cfg(any(test, feature = "test-util"))]
+    if let Some(runtime) = io.mocked()
+        && native::use_mocked_io()
+    {
+        return crate::io::mock::Connection::connect(runtime, descriptor).map(ConnectionInner::Mocked);
+    }
+    connect_native(descriptor, timeout)
+}
+
+fn bind_native(descriptor: &MonitorDescriptor) -> io::Result<ListenerInner> {
+    Ok(ListenerInner::Native(NativeListener::bind(descriptor)?))
+}
+
+fn connect_native(descriptor: &MonitorDescriptor, timeout: Duration) -> io::Result<ConnectionInner> {
+    Ok(ConnectionInner::Native(NativeConnection::connect(descriptor, timeout)?))
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nov6_native_transport_forwards_configuration_peek_and_closed_flush_without_native_io() {
+        let (io, _) = MonitorIo::new_mocked();
+        let directory = crate::discovery::Directory::current(&io).unwrap();
+        let instance_id = crate::monitor::InstanceId::from_bytes([27; 16]);
+        let owner = directory.owner().clone();
+        let descriptor = MonitorDescriptor {
+            name: "native-forwarding".into(),
+            instance: None,
+            process_id: io.process_id(),
+            instance_id,
+            endpoint: crate::monitor::MonitorEndpoint::for_instance(directory.path(), &owner, io.process_id(), instance_id),
+            owner,
+        };
+        native::with_in_memory_native_backend(io.mocked().unwrap(), || {
+            let listener = native::Listener::bind(&descriptor).unwrap();
+            let native::Listener::Injected(inner) = &listener else {
+                panic!("this test must not open a native listener");
+            };
+            for enabled in [true, false] {
+                listener.set_nonblocking(enabled).unwrap();
+                assert_eq!(inner.is_nonblocking(), enabled);
+            }
+            let mut client = native::Connection::connect(&descriptor, Duration::from_secs(2)).unwrap();
+            let mut server = listener.accept().unwrap();
+            assert_eq!(client.write(b"\x12\x34\x56").unwrap(), 3);
+            let mut bytes = [0; 5];
+            assert_eq!(server.peek(&mut bytes).unwrap(), 3);
+            assert_eq!(bytes, [0x12, 0x34, 0x56, 0, 0]);
+            assert_eq!(server.peek(&mut bytes).unwrap(), 3);
+            server.read_exact(&mut bytes[..3]).unwrap();
+            assert_eq!(&bytes[..3], b"\x12\x34\x56");
+            client.flush().unwrap();
+            client.close().unwrap();
+            assert_eq!(client.flush().unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
+        });
+    }
+
+    #[test]
+    fn november_public_native_transport_branches_preserve_each_backend_error_and_connection_ownership_without_native_resources() {
+        let (outer_io, _) = MonitorIo::new_mocked();
+        let (backend_io, backend_control) = MonitorIo::new_mocked();
+        let directory = crate::discovery::Directory::current(&backend_io).unwrap();
+        let owner = directory.owner().clone();
+        let process_id = backend_io.process_id();
+        let instance_id = crate::monitor::InstanceId::from_bytes([17; 16]);
+        let descriptor = MonitorDescriptor {
+            name: "in-memory-native".into(),
+            instance: None,
+            process_id,
+            instance_id,
+            endpoint: crate::monitor::MonitorEndpoint::for_instance(directory.path(), &owner, process_id, instance_id),
+            owner,
+        };
+        native::with_in_memory_native_backend(backend_io.mocked().unwrap(), || {
+            backend_control.fail_next(IoOperation::Bind, io::Error::from_raw_os_error(5));
+            assert_eq!(Listener::bind(&outer_io, &descriptor).unwrap_err().raw_os_error(), Some(5));
+            let listener = Listener::bind(&outer_io, &descriptor).unwrap();
+            let ListenerInner::Native(owner @ native::Listener::Injected(inner)) = &listener.inner else {
+                panic!("the native branch must own the injected listener");
+            };
+            assert_eq!(
+                format!("{owner:?}"),
+                format!("{inner:?}"),
+                "the private native owner must keep existing Debug output"
+            );
+            backend_control.fail_next(IoOperation::Accept, io::Error::from_raw_os_error(6));
+            assert_eq!(listener.accept().unwrap_err().raw_os_error(), Some(6));
+            backend_control.fail_next(IoOperation::Connect, io::Error::from_raw_os_error(7));
+            assert_eq!(
+                Connection::connect(&outer_io, &descriptor, Duration::from_secs(2))
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(7),
+            );
+            let client = Connection::connect(&outer_io, &descriptor, Duration::from_secs(2)).unwrap();
+            let mut server = listener.accept().unwrap();
+            assert!(matches!(server.inner, ConnectionInner::Native(_)));
+            let ConnectionInner::Native(owner @ native::Connection::Injected(inner)) = &client.inner else {
+                panic!("the native branch must own the injected connection");
+            };
+            assert_eq!(
+                format!("{owner:?}"),
+                format!("{inner:?}"),
+                "the private native owner must keep existing Debug output"
+            );
+            backend_control.fail_next(IoOperation::Duplicate, io::Error::from_raw_os_error(8));
+            assert_eq!(client.try_clone().unwrap_err().raw_os_error(), Some(8));
+            let mut clone = client.try_clone().unwrap();
+            clone.write_all(b"native-memory").unwrap();
+            let mut bytes = [0; 13];
+            server.read_exact(&mut bytes).unwrap();
+            assert_eq!(&bytes, b"native-memory");
+            clone.close().unwrap();
+            assert_eq!(server.read(&mut bytes).unwrap(), 0);
+        });
+    }
+
+    #[test]
+    fn gamma_survivor_mocked_connection_pending_read_error_is_explicit() {
+        let (_io, control) = MonitorIo::new_mocked();
+        let (connection, _peer) = control.connected_pair();
+        let error = connection.read_is_pending().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert_eq!(error.to_string(), "pending native reads require a native connection");
+    }
 
     #[test]
     fn configuration_and_write_calls_preserve_injected_failures() {

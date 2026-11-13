@@ -2717,6 +2717,274 @@ mod tests {
     }
 
     #[test]
+    fn gamma_survivor_allocation_tiers_check_alignment_and_rounded_slice_budget() {
+        for (size, align, small, small_align, slice, region, expected) in [
+            (0, 0, 1, 4096, 64, 128, MemoryTier::Small),
+            (64, 8, 64, 4096, 64, 128, MemoryTier::Small),
+            (1, 4096, 4096, 4096, 8192, 16384, MemoryTier::Small),
+            (1, 4097, 8192, 4096, 8192, 16384, MemoryTier::Medium),
+            (65, 8, 64, 4096, 64, 128, MemoryTier::Medium),
+            (128, 8, 64, 4096, 64, 128, MemoryTier::Medium),
+            (129, 8, 64, 4096, 64, 128, MemoryTier::Direct),
+            (64, 8, 0, 4096, 64, 63, MemoryTier::Direct),
+            (65, 8, 0, 4096, 64, 127, MemoryTier::Direct),
+            (1, 129, 64, 4096, 128, 256, MemoryTier::Direct),
+            (0, 0, 0, 0, 64, 0, MemoryTier::Direct),
+        ] {
+            assert_eq!(
+                allocation_tier(size, align, small, small_align, slice, region),
+                expected,
+                "{size}/{align}"
+            );
+        }
+        assert_eq!(histogram_bounds(0), (0, 0));
+        assert_eq!(histogram_bounds(u64::MAX), (1 << 63, u64::MAX));
+    }
+
+    #[test]
+    fn gamma_survivor_windows_stack_paths_are_normalized_before_classification() {
+        for (filename, primitive, allocation) in [
+            (r"C:\SRC\PERFORMABLES\src\sync.rs", true, false),
+            (r"C:\SRC\RALLOCATOR\src\alloc.rs", false, true),
+            (r"C:\SRC\SEISMOGRAPH\src\lib.rs", true, true),
+            (r"C:\RUST\LIBRARY\STD\SRC\thread.rs", true, true),
+            (r"C:\SRC\APPLICATION\src\main.rs", false, false),
+        ] {
+            let lookup = AddressLookup::from_fields(AddressLookupFields {
+                address: 1,
+                symbol: None,
+                filename: Some(filename.into()),
+                line: None,
+                column: None,
+            });
+            assert_eq!(is_internal_primitive_frame(Some(&lookup)), primitive, "{filename}");
+            assert_eq!(is_internal_allocation_frame(Some(&lookup)), allocation, "{filename}");
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_retained_hotspots_count_only_allocations_and_live_identity_pairs() {
+        let snapshot = crate::allocator_view::Snapshot::event_only();
+        let classes = [MemorySizeClass {
+            block_bytes: 64,
+            live_allocations: 0,
+            capacity_blocks: 0,
+            requested_bytes: 0,
+            usable_bytes: 0,
+        }];
+        let event = |id, kind, size, align| {
+            Event::from_fields(EventFields {
+                thread_log_id: 1,
+                event_thread_id: 2,
+                sequence: id,
+                allocation_id: id,
+                kind,
+                heap_id: 1,
+                heap_kind: HeapKind::General,
+                freed_after_heap_release: false,
+                address: 16,
+                size,
+                align,
+                call_stack: vec![42],
+            })
+        };
+        let events = [
+            event(1, EventKind::Allocated, 64, 8),
+            event(2, EventKind::Allocated, 16, 64),
+            event(1, EventKind::Deallocated, 64, 8),
+        ];
+        let totals = retained_memory_totals(&snapshot, &classes, &HashSet::from([(1, 1)]), &events);
+        let bucket = &totals[&MemoryTier::Small][&64];
+        assert_eq!(
+            (
+                bucket.allocations,
+                bucket.allocated_bytes,
+                bucket.live_allocations,
+                bucket.live_bytes
+            ),
+            (2, 80, 1, 16)
+        );
+        let hotspot = bucket.hotspots.get(&[42][..]).unwrap();
+        assert_eq!(
+            (
+                hotspot.allocations,
+                hotspot.allocated_bytes,
+                hotspot.live_allocations,
+                hotspot.live_bytes
+            ),
+            (2, 80, 1, 16)
+        );
+        assert_eq!(totals.len(), 1);
+    }
+
+    #[test]
+    fn gamma_survivor_retained_routing_uses_first_topology_and_exact_default_thresholds() {
+        let event = |size, align| {
+            Event::from_fields(EventFields {
+                thread_log_id: 1,
+                event_thread_id: 1,
+                sequence: 1,
+                allocation_id: 1,
+                kind: EventKind::Allocated,
+                heap_id: 1,
+                heap_kind: HeapKind::General,
+                freed_after_heap_release: false,
+                address: 16,
+                size,
+                align,
+                call_stack: Vec::new(),
+            })
+        };
+        let tier = |snapshot: &crate::allocator_view::Snapshot, classes: &[MemorySizeClass], size, align| {
+            let events = [event(size, align)];
+            let totals = retained_memory_totals(snapshot, classes, &HashSet::new(), &events);
+            assert_eq!(totals.len(), 1);
+            *totals.keys().next().unwrap()
+        };
+        let mut snapshot = crate::allocator_view::Snapshot::event_only();
+        for (size, align, expected) in [
+            (1, 1, MemoryTier::Medium),
+            (1, 65_536, MemoryTier::Medium),
+            (1, 65_537, MemoryTier::Direct),
+            (1_073_741_824, 8, MemoryTier::Medium),
+            (1_073_741_825, 8, MemoryTier::Direct),
+        ] {
+            assert_eq!(tier(&snapshot, &[], size, align), expected, "{size}/{align}");
+        }
+        let classes = [MemorySizeClass {
+            block_bytes: 8192,
+            live_allocations: 0,
+            capacity_blocks: 0,
+            requested_bytes: 0,
+            usable_bytes: 0,
+        }];
+        assert_eq!(tier(&snapshot, &classes, 4096, 4096), MemoryTier::Small);
+        assert_eq!(tier(&snapshot, &classes, 4096, 4097), MemoryTier::Medium);
+        snapshot.topology = vec![
+            crate::allocator_topology::TopologyRegion {
+                region_index: 0,
+                base_address: 0,
+                region_bytes: 1_073_741_824,
+                slice_bytes: 65_536,
+                used_bitmap: Vec::new(),
+                slices: Vec::new(),
+            },
+            crate::allocator_topology::TopologyRegion {
+                region_index: 1,
+                base_address: 0,
+                region_bytes: 32_768,
+                slice_bytes: 8192,
+                used_bitmap: Vec::new(),
+                slices: Vec::new(),
+            },
+        ];
+        assert_eq!(tier(&snapshot, &[], 65_536, 65_536), MemoryTier::Medium);
+    }
+
+    #[test]
+    fn gamma_survivor_io_summary_retains_read_write_kind_counts_and_order() {
+        let event = |sequence, timestamp, kind, resource, operation, requested, completed, outcome| RuntimeEvent {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(sequence),
+            timestamp: EventTimestamp::from_ticks(timestamp),
+            kind,
+            payload: EventPayload::Io(IoEvent {
+                operation_id: IoOperationId::from_raw(operation).unwrap(),
+                resource_id: IoResourceId::from_raw(resource).unwrap(),
+                buffer_id: None,
+                requested_bytes: requested,
+                completed_bytes: completed,
+                buffer_len: requested,
+                buffer_span_count: 1,
+                resource_kind: IoResourceKind::File,
+                outcome,
+            }),
+            call_stack: Vec::new(),
+        };
+        let summary = IoMonitorSnapshot::from_events(&Events {
+            total_events: 6,
+            events: vec![
+                event(1, 1, RuntimeEventKind::IoReadStarted, 1, 1, 10, 0, IoOutcome::Pending),
+                event(2, 2, RuntimeEventKind::IoWriteStarted, 1, 2, 20, 0, IoOutcome::Pending),
+                event(3, 3, RuntimeEventKind::IoReadFinished, 1, 1, 10, 7, IoOutcome::Success),
+                event(4, 4, RuntimeEventKind::IoWriteFinished, 1, 2, 20, 3, IoOutcome::Canceled),
+                event(5, 5, RuntimeEventKind::IoWriteFinished, 2, 3, 30, 30, IoOutcome::Success),
+                event(6, 6, RuntimeEventKind::IoReadFinished, 2, 4, 5, 5, IoOutcome::Success),
+            ],
+            ..Events::default()
+        });
+        assert_eq!(
+            summary.resources.iter().map(|resource| resource.resource_id).collect::<Vec<_>>(),
+            [2, 1]
+        );
+        let resource = &summary.resources[1];
+        assert_eq!(
+            (
+                resource.events,
+                resource.reads,
+                resource.writes,
+                resource.requested_bytes,
+                resource.completed_bytes,
+                resource.canceled
+            ),
+            (4, 1, 1, 30, 10, 1)
+        );
+        assert_eq!(
+            resource
+                .operations
+                .iter()
+                .map(|operation| (operation.operation_id, operation.kind))
+                .collect::<Vec<_>>(),
+            [(2, IoOperationKind::Write), (1, IoOperationKind::Read)]
+        );
+        assert_eq!(
+            summary.resources[0]
+                .operations
+                .iter()
+                .map(|operation| operation.kind)
+                .collect::<Vec<_>>(),
+            [IoOperationKind::Read, IoOperationKind::Write]
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_unclassified_io_operation_does_not_drop_later_classified_operations() {
+        let event = |operation, kind| RuntimeEvent {
+            thread_id: ThreadId::new(1),
+            sequence: EventSequence::new(operation),
+            timestamp: EventTimestamp::from_ticks(operation),
+            kind,
+            payload: EventPayload::Io(IoEvent {
+                operation_id: IoOperationId::from_raw(operation).unwrap(),
+                resource_id: IoResourceId::from_raw(operation).unwrap(),
+                buffer_id: None,
+                requested_bytes: 12,
+                completed_bytes: 0,
+                buffer_len: 12,
+                buffer_span_count: 1,
+                resource_kind: IoResourceKind::File,
+                outcome: IoOutcome::Pending,
+            }),
+            call_stack: Vec::new(),
+        };
+        let summary = IoMonitorSnapshot::from_events(&Events {
+            events: vec![event(1, RuntimeEventKind::ArcClone), event(2, RuntimeEventKind::IoWriteStarted)],
+            ..Events::default()
+        });
+        let first = summary.resources.iter().find(|resource| resource.resource_id == 1).unwrap();
+        let second = summary.resources.iter().find(|resource| resource.resource_id == 2).unwrap();
+        assert!(first.operations.is_empty());
+        assert_eq!(
+            second
+                .operations
+                .iter()
+                .map(|operation| (operation.operation_id, operation.kind))
+                .collect::<Vec<_>>(),
+            [(2, IoOperationKind::Write)]
+        );
+    }
+
+    #[test]
     fn model_enum_navigation_and_labels_cover_every_variant() {
         assert_eq!(
             PrimitiveKind::ALL.map(|kind| (kind.label(), kind.operations().len())),

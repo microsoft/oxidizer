@@ -92,6 +92,7 @@ impl<'a> AcceptEntry<'a> {
                 .expect("validated media parameters before quality require values");
             if validate::trim_ows(&segment[..equals]).eq_ignore_ascii_case(b"q") {
                 let start = segment.as_ptr().addr() - bytes.as_ptr().addr();
+                // #[gamma::skip(range.exclusive_to_inclusive, tag = "equivalent", reason = "start points at the nonempty quality parameter name q or Q, so including that byte cannot change the preceding semicolon's rposition")]
                 parameter_end = bytes[..start]
                     .iter()
                     .rposition(|byte| *byte == b';')
@@ -104,6 +105,7 @@ impl<'a> AcceptEntry<'a> {
                 break;
             }
         }
+        // #[gamma::skip(relational.lt_to_le, tag = "equivalent", reason = "At equality both branches produce the empty parameter slice; trimming an empty slice remains empty")]
         let parameters = if parameter_end < parameter_start {
             &bytes[0..0]
         } else {
@@ -151,6 +153,7 @@ impl<'a> AcceptEntry<'a> {
     }
 
     pub(super) fn encoded_len(&self) -> Result<usize, DecodeError> {
+        // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "The components are nonnegative checked summands with one shared overflow error, so their order cannot change success or the total")]
         let components = [
             self.range.type_().as_str().len(),
             1,

@@ -275,7 +275,7 @@ pub trait SingleValueField: Sized + 'static {
     /// # Errors
     ///
     /// Returns an error when `value` violates the selected policy.
-    fn decode_view_with(value: FieldValueRef<'_>, _mode: DecodeMode) -> Result<Self::View<'_>, DecodeError> {
+    fn decode_view_with(value: FieldValueRef<'_>, _: DecodeMode) -> Result<Self::View<'_>, DecodeError> {
         Self::decode_view(value)
     }
 
@@ -313,7 +313,7 @@ pub trait SingleValueField: Sized + 'static {
     /// # Errors
     ///
     /// Returns an error when `value` violates the selected policy.
-    fn decode_owned_with(value: FieldValue, _mode: DecodeMode) -> Result<Self::Owned, DecodeError> {
+    fn decode_owned_with(value: FieldValue, _: DecodeMode) -> Result<Self::Owned, DecodeError> {
         Self::decode_owned(value)
     }
 

@@ -83,6 +83,7 @@ fn validate(snapshot: &Snapshot, owners: &[Owner]) -> Result<(), Error> {
         return Err(error(ErrorKind::Malformed));
     }
     for (index, chunk) in owners.chunks(VALIDATION_CHUNK).enumerate() {
+        // #[gamma::skip(literal.int_increment, reason = "the used scratch prefix is overwritten by owner IDs before sorting; the unused suffix is never read")]
         let mut scratch = [0_u64; VALIDATION_CHUNK];
         let ids = &mut scratch[..chunk.len()];
         for (id, owner) in ids.iter_mut().zip(chunk) {
@@ -137,6 +138,7 @@ pub fn encoded_len(snapshot: &Snapshot) -> Result<usize, Error> {
 pub fn encoded_len_with_owners(snapshot: &Snapshot, owners: &[Owner]) -> Result<usize, Error> {
     validate(snapshot, owners)?;
     let observations = owners.iter().filter(|owner| owner.observation.is_some()).count();
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "validate bounds owners by MAX_OWNERS and observations cannot exceed owners; their fixed record sizes fit usize even on 32-bit targets")]
     FIXED_LEN
         .checked_add(owners.len().checked_mul(OWNER_LEN).ok_or(error(ErrorKind::LengthOverflow))?)
         .and_then(|len| len.checked_add(observations.checked_mul(OBSERVATION_LEN)?))
@@ -171,14 +173,21 @@ pub fn encode_with_owners(snapshot: &Snapshot, owners: &[Owner], output: &mut [u
         return Err(error(ErrorKind::LengthMismatch));
     }
     let mut writer = Writer { output, position: 0 };
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "encoded_len_with_owners validated the inventory and the exact output length before these fixed-size writes")]
     writer.bytes(MAGIC)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length accounts for this schema field")]
     writer.bytes(&crate::snapshot::SCHEMA_VERSION.to_le_bytes())?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length accounts for this backend field")]
     writer.bytes(&[1, 0])?;
     for value in [snapshot.captured_nanos, snapshot.session_id, snapshot.round, snapshot.owner_count] {
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length accounts for every fixed header counter")]
         writer.u64(value)?;
     }
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length accounts for this flag")]
     writer.flag(snapshot.owners_complete)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length accounts for this flag")]
     writer.flag(snapshot.publication_enabled)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "validate bounds the count below u32::MAX and the exact output length accounts for its field")]
     writer.owner_count(owners.len())?;
     for value in [
         snapshot.global.reserved_bytes,
@@ -186,16 +195,24 @@ pub fn encode_with_owners(snapshot: &Snapshot, owners: &[Owner], output: &mut [u
         snapshot.global.local_limit_bytes,
         snapshot.global.global_refill_bytes,
     ] {
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length accounts for every fixed global counter")]
         writer.u64(value)?;
     }
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length includes the fixed range histogram")]
     writer.ranges(&snapshot.global.ranges)?;
     for owner in owners {
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length includes each fixed owner record")]
         writer.u64(owner.id)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length includes each fixed owner record")]
         writer.u64(owner.generation)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length includes each fixed owner record")]
         writer.flag(owner.leased)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length includes each fixed owner record")]
         writer.source(owner.source)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact encoded output length includes each fixed owner record")]
         writer.flag(owner.observation.is_some())?;
         if let Some(observation) = &owner.observation {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "encoded_len_with_owners counted exactly the observations serialized by this loop")]
             writer.observation(observation)?;
         }
     }
@@ -307,7 +324,10 @@ impl<'a> Reader<'a> {
     }
     pub(crate) fn u64(&mut self) -> Result<u64, Error> {
         let bytes = self.bytes(8)?;
-        Ok(u64::from_le_bytes(bytes.try_into().map_err(|_length| error(ErrorKind::Truncated))?))
+        Ok(u64::from_le_bytes(
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding bytes(8) either returns an exact eight-byte slice or propagates its truncation error before this conversion")]
+            bytes.try_into().map_err(|_length| error(ErrorKind::Truncated))?,
+        ))
     }
     pub(crate) fn flag(&mut self) -> Result<bool, Error> {
         match self.bytes(1)?[0] {
@@ -376,7 +396,9 @@ pub fn decode(input: &[u8]) -> Result<Snapshot, Error> {
     if reader.bytes(8)? != MAGIC {
         return Err(error(ErrorKind::InvalidMagic));
     }
-    let schema = u16::from_le_bytes(reader.bytes(2)?.try_into().map_err(|_length| error(ErrorKind::Truncated))?);
+    let schema_bytes = reader.bytes(2)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "Reader::bytes(2) returned an exact two-byte slice; its independently fallible read is not guarded")]
+    let schema = u16::from_le_bytes(schema_bytes.try_into().map_err(|_length| error(ErrorKind::Truncated))?);
     if schema != crate::snapshot::SCHEMA_VERSION {
         return Err(error(ErrorKind::UnsupportedSchema(schema)));
     }
@@ -392,7 +414,9 @@ pub fn decode(input: &[u8]) -> Result<Snapshot, Error> {
         publication_enabled: reader.flag()?,
         ..Snapshot::default()
     };
-    let count = u32::from_le_bytes(reader.bytes(4)?.try_into().map_err(|_length| error(ErrorKind::Truncated))?) as usize;
+    let count_bytes = reader.bytes(4)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "Reader::bytes(4) returned an exact four-byte slice; its independently fallible read is not guarded")]
+    let count = u32::from_le_bytes(count_bytes.try_into().map_err(|_length| error(ErrorKind::Truncated))?) as usize;
     if count > MAX_OWNERS {
         return Err(error(ErrorKind::LengthOverflow));
     }
@@ -444,6 +468,43 @@ pub fn decode(input: &[u8]) -> Result<Snapshot, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gamma_round2_observation_writers_return_truncation_at_each_field() {
+        for length in 0..OBSERVATION_LEN {
+            let mut output = vec![0xa5; length];
+            let mut writer = Writer {
+                output: &mut output,
+                position: 0,
+            };
+            assert_eq!(
+                writer.observation(&Observation::EMPTY).unwrap_err().kind(),
+                ErrorKind::Truncated,
+                "observation {length}"
+            );
+        }
+        for length in 0..RANGES_LEN {
+            let mut output = vec![0xa5; length];
+            let mut writer = Writer {
+                output: &mut output,
+                position: 0,
+            };
+            assert_eq!(
+                writer.ranges(&Ranges::EMPTY).unwrap_err().kind(),
+                ErrorKind::Truncated,
+                "ranges {length}"
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_round2_reader_length_overflow_is_an_error_not_a_panic() {
+        let mut reader = Reader { input: &[1], position: 1 };
+        assert_eq!(reader.bytes(usize::MAX).unwrap_err().kind(), ErrorKind::LengthOverflow);
+        assert_eq!(reader.position, 1);
+        assert_eq!(reader.bytes(1).unwrap_err().kind(), ErrorKind::Truncated);
+        assert_eq!(reader.position, 1);
+    }
 
     #[test]
     fn inventory_fields_reject_overflow_and_truncation_without_advancing() {

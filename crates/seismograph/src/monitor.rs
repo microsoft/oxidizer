@@ -54,10 +54,26 @@ pub struct Monitor {
     stop: Arc<AtomicBool>,
     active_clients: Arc<ActiveClients>,
     last_error: Arc<Mutex<Option<String>>>,
-    thread: Option<JoinHandle<()>>,
+    thread: Option<ListenerThread>,
     _directory: Directory,
     #[cfg(any(test, feature = "test-util"))]
     _fixture: Option<seismograph_protocol::testing::Directory>,
+}
+
+enum ListenerThread {
+    Native(JoinHandle<()>),
+    #[cfg(test)]
+    Injected(fn() -> thread::Result<()>),
+}
+
+impl ListenerThread {
+    fn join(self) -> thread::Result<()> {
+        match self {
+            Self::Native(thread) => thread.join(),
+            #[cfg(test)]
+            Self::Injected(join) => join(),
+        }
+    }
 }
 
 impl Monitor {
@@ -120,14 +136,24 @@ impl Drop for Monitor {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         self.active_clients.shutdown_all();
-        if let Some(thread) = self.thread.take()
-            && thread.join().is_err()
-        {
+        finish_listener_thread(self.thread.take(), ListenerThread::join, || {
             eprintln!("seismograph: monitor listener thread panicked");
-        }
+        });
         if let Err(error) = self.io.remove_descriptor(&self.descriptor_path) {
             eprintln!("seismograph: failed to remove monitor descriptor: {error}");
         }
+    }
+}
+
+fn listener_join_failed(result: &thread::Result<()>) -> bool {
+    result.is_err()
+}
+
+fn finish_listener_thread<T>(thread: Option<T>, join: impl FnOnce(T) -> thread::Result<()>, report: impl FnOnce()) {
+    if let Some(thread) = thread
+        && listener_join_failed(&join(thread))
+    {
+        report();
     }
 }
 
@@ -236,13 +262,11 @@ impl Builder {
         let instance_id = io.instance_id().map_err(StartupFailure::Protocol)?;
         #[cfg(any(test, feature = "test-util"))]
         let fixture = self.isolated.then(seismograph_protocol::testing::Directory::new);
-        #[cfg(any(test, feature = "test-util"))]
-        let directory = match &fixture {
-            Some(fixture) => fixture.open(),
-            None => Directory::current(&io).map_err(StartupFailure::Protocol)?,
-        };
-        #[cfg(not(any(test, feature = "test-util")))]
-        let directory = Directory::current(&io).map_err(StartupFailure::Protocol)?;
+        let directory = monitor_directory(
+            &io,
+            #[cfg(any(test, feature = "test-util"))]
+            fixture.as_ref(),
+        )?;
         let process_id = io.process_id();
         let owner = directory.owner().clone();
         let descriptor = MonitorDescriptor {
@@ -285,12 +309,24 @@ impl Builder {
             stop,
             active_clients,
             last_error,
-            thread: Some(thread),
+            thread: Some(ListenerThread::Native(thread)),
             _directory: directory,
             #[cfg(any(test, feature = "test-util"))]
             _fixture: fixture,
         })
     }
+}
+
+// #[gamma::skip(parameter.default_shadow, reason = "native fixture adapter: a present fixture owns a real protected directory and can only be constructed with filesystem I/O; mocked MonitorIo cannot represent this native fixture")]
+fn monitor_directory(
+    io: &MonitorIo,
+    #[cfg(any(test, feature = "test-util"))] fixture: Option<&seismograph_protocol::testing::Directory>,
+) -> Result<Directory, StartupFailure> {
+    #[cfg(any(test, feature = "test-util"))]
+    if let Some(fixture) = fixture {
+        return Ok(fixture.open());
+    }
+    Directory::current(io).map_err(StartupFailure::Protocol)
 }
 
 fn default_application_name(io: &MonitorIo) -> Result<String, StartupFailure> {
@@ -489,7 +525,7 @@ fn handle_client_with_timeouts(
     handshake_timeout: Duration,
     idle_timeout: Duration,
 ) -> Result<(), ClientError> {
-    stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(ClientError::Io)?;
+    configure_client_stream(&stream)?;
 
     let (request_id, request) = read_request_with_timeout(io, &mut stream, stop, handshake_timeout, ReadTimeout::Handshake)?;
     let Request::Hello = request else {
@@ -516,6 +552,7 @@ fn handle_client_with_timeouts(
 
     loop {
         if stop.load(Ordering::Acquire) {
+            // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         }
         let (request_id, request) = match read_request_with_timeout(io, &mut stream, stop, idle_timeout, ReadTimeout::Idle) {
@@ -528,6 +565,11 @@ fn handle_client_with_timeouts(
         seismograph_protocol::write_response(&mut writer, request_id, &response.response).map_err(ClientError::Protocol)?;
     }
     Ok(())
+}
+
+// #[gamma::skip(fn_value.ok, tag = "timeout", reason = "November 4 SARIF mutant 4e1d496201c5 timed out after removing the client stream deadlines")]
+fn configure_client_stream(stream: &Connection) -> Result<(), ClientError> {
+    stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).map_err(ClientError::Io)
 }
 
 struct DeadlineWriter<'a> {
@@ -747,6 +789,7 @@ fn protocol_recorder_statistics(statistics: crate::recorder::Statistics) -> Reco
             statistics.recording.runtime_tasks,
             statistics.recording.io,
             statistics.recording.cache,
+            // #[gamma::skip(expr.decrement, reason = "recorder statistics derive capacity from EventBufferCapacity, whose maximum 1048576 fits every supported usize; the fallback is unreachable")]
             usize::try_from(statistics.event_capacity_per_thread).unwrap_or(usize::MAX),
         ),
     }
@@ -793,7 +836,10 @@ fn protocol_recording_policy(policy: crate::recorder::Policy) -> seismograph_pro
     seismograph_protocol::message::RecordingPolicy {
         enabled: policy.enabled,
         capture_backtraces: policy.capture_backtraces,
-        sampling_one_in: u32::try_from(policy.event_sampling.get()).unwrap_or(u32::MAX),
+        sampling_one_in: u32::try_from(policy.event_sampling.get()).unwrap_or(
+            // #[gamma::skip(expr.decrement, tag = "unreachable", reason = "EventSampling bounds the denominator to 1048576, so conversion to u32 always succeeds and never uses this fallback")]
+            u32::MAX,
+        ),
     }
 }
 
@@ -827,7 +873,10 @@ impl io::Read for DeadlineReader<'_> {
         if remaining.is_zero() {
             return Err(io::Error::new(io::ErrorKind::TimedOut, "monitor frame read timed out"));
         }
-        self.stream.set_read_timeout(Some(remaining))?;
+        self.stream.set_read_timeout(
+            // #[gamma::skip(option.some_to_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            Some(remaining),
+        )?;
         io::Read::read(self.stream, buf)
     }
 }
@@ -956,6 +1005,90 @@ mod io_tests;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn nov6_monitor_drop_joins_its_listener_once_before_removing_the_descriptor() {
+        thread_local! {
+            static JOINS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+        }
+        let (io, control) = MonitorIo::new_mocked();
+        let directory = Directory::current(&io).unwrap();
+        let instance_id = InstanceId::from_bytes([29; 16]);
+        let owner = directory.owner().clone();
+        let descriptor = MonitorDescriptor {
+            name: "drop-without-thread".into(),
+            instance: None,
+            process_id: io.process_id(),
+            instance_id,
+            endpoint: MonitorEndpoint::for_instance(directory.path(), &owner, io.process_id(), instance_id),
+            owner,
+        };
+        let descriptor_path = io.publish_descriptor(&directory, &descriptor).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        JOINS.set(0);
+        drop(Monitor {
+            descriptor,
+            descriptor_path,
+            io,
+            stop: Arc::clone(&stop),
+            active_clients: Arc::new(ActiveClients::new()),
+            last_error: Arc::new(Mutex::new(None)),
+            thread: Some(ListenerThread::Injected(|| {
+                JOINS.set(JOINS.get() + 1);
+                Ok(())
+            })),
+            _directory: directory,
+            _fixture: None,
+        });
+        assert_eq!(JOINS.get(), 1);
+        assert!(stop.load(Ordering::Acquire));
+        assert!(
+            control
+                .operations()
+                .contains(&seismograph_protocol::io::IoOperation::RemoveDescriptor)
+        );
+    }
+
+    #[test]
+    fn november_listener_join_policy_consumes_each_owner_once_and_reports_only_an_actual_join_failure_without_threads() {
+        for failed in [false, true] {
+            let events = std::cell::RefCell::new(Vec::new());
+            finish_listener_thread(
+                Some(17),
+                |owner| {
+                    assert_eq!(owner, 17);
+                    events.borrow_mut().push("join");
+                    if failed { Err(Box::new("listener panic")) } else { Ok(()) }
+                },
+                || events.borrow_mut().push("report"),
+            );
+            assert_eq!(*events.borrow(), if failed { vec!["join", "report"] } else { vec!["join"] });
+        }
+        finish_listener_thread(
+            None::<()>,
+            |()| panic!("no owner may be joined"),
+            || panic!("no missing owner may be reported"),
+        );
+    }
+
+    #[test]
+    fn november_public_monitor_start_preserves_directory_failure_before_any_listener_or_thread_is_created() {
+        let (io, control) = MonitorIo::new_mocked();
+        control.fail_next(
+            seismograph_protocol::io::IoOperation::CreateDirectory,
+            std::io::Error::from_raw_os_error(5),
+        );
+        let error = Monitor::builder().name("deterministic").io(io).start().unwrap_err();
+        let mut source: &(dyn std::error::Error + 'static) = &error;
+        loop {
+            if let Some(error) = source.downcast_ref::<std::io::Error>() {
+                assert_eq!(error.raw_os_error(), Some(5));
+                break;
+            }
+            source = source.source().expect("public startup error must preserve the injected I/O source");
+        }
+        assert!(!control.operations().contains(&seismograph_protocol::io::IoOperation::Bind));
+    }
+
     use std::io::{Read as _, Write as _};
 
     use super::*;

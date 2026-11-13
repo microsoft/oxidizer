@@ -42,6 +42,8 @@ exclude-trait-impls = [
 # Keep the existing intentional-abort and real-time stress filters.
 # Type-system contracts run in the native and careful suites.
 cargo-test-args = [
+    # Mutation instrumentation changes future layouts.
+    "--skip", "hedging::service::tests::execute_future_size_is_bounded",
     "--skip", "abort::tests::subprocess_oracle_rejects_normal_return",
     "--skip", "abort::tests::subprocess_oracle_accepts_genuine_abort",
     "--skip", "backend::tests::missing_initialization_aborts_before_reading_range_metadata",
@@ -52,4 +54,30 @@ cargo-test-args = [
     "--skip", "thread::tests::poisoned_pool_aborts_before_lending_an_owner",
     "--skip", "runner::tests::captured_logs_bound_sustained_output_and_timeout_cleanup",
     "--skip", "type_system_contracts",
+    # metabench's spawned_benchmark tests compile and run benchmark examples.
+    "--skip", "fresh_consumer_resolves_and_compiles_without_the_workspace_lockfile",
+    "--skip", "perf_measures_exact_workload_and_writes_metrics",
+    "--skip", "vtune_measures_exact_workload_and_writes_metrics",
+    "--skip", "vtune_suppresses_report_output_without_show_engine_output",
+    "--skip", "vtune_command_failure_surfaces_vtune_control_error",
+    "--skip", "vtune_pause_failure_surfaces_vtune_control_error",
+    "--skip", "help_reaches_metabench_parent",
+    "--skip", "criterion_native_listing_is_forwarded",
+    "--skip", "gungraun_listing_is_forwarded",
+    "--skip", "gungraun_measurements_write_report",
+    "--skip", "setup_calls_do_not_steal_filtered_allocation_measurements",
+    "--skip", "criterion_worker_bypasses_allocation_tracking",
+    "--skip", "shared_case_registration_keeps_gungraun_unavailable_on_unsupported_hosts",
+    "--skip", "native_probe_cases_reuse_iterators_conditionals_and_lifecycle_hooks",
+    "--skip", "native_vtune_orders_collection_and_teardown_on_success_and_unwind",
+    "--skip", "native_allocations_include_prestarted_threads_only_inside_the_window",
+    "--skip", "native_workers_ignore_foreign_collector_environment",
+    "--skip", "native_perf_control_failures_are_bounded_and_preserve_reports",
+    "--skip", "probe_listing_uses_native_cases_without_criterion_registration",
+    "--skip", "smoke_and_empty_measurements_preserve_existing_reports",
+    "--skip", "failed_native_setup_retains_worker_diagnostics",
+    "--skip", "exact_filter_and_const_workload_support_allocation_probes",
+    "--skip", "timed_out_worker_reports_captured_diagnostics_and_preserves_baseline",
+    "--skip", "default_engine_smoke_checks_do_not_publish_measurements",
+    "--skip", "criterion_and_allocations_write_parameterized_report",
 ]

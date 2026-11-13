@@ -39,7 +39,7 @@ const DEFAULT_EVENT_CAPACITY_PER_THREAD: usize = 65_536;
 const MIN_EVENT_CAPACITY_PER_THREAD: usize = 64;
 const MAX_EVENT_CAPACITY_PER_THREAD: usize = 1_048_576;
 const INVALID_EVENT_BUFFER_CAPACITY: &str = "event buffer capacity must be a power of two between 64 and 1048576";
-const MAX_EVENT_SAMPLING_ONE_IN: usize = 1_048_576;
+pub(crate) const MAX_EVENT_SAMPLING_ONE_IN: usize = 1_048_576;
 #[cfg(not(miri))]
 const RECORDER_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(miri)]
@@ -142,6 +142,7 @@ impl EventSampling {
         mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
         mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         mixed ^= mixed >> 31;
+        // #[gamma::skip(expr.decrement, reason = "EventSampling validates its private denominator to at most 1048576, so conversion to u64 cannot use this fallback")]
         let denominator = u64::try_from(self.0).unwrap_or(u64::MAX);
         if denominator.is_power_of_two() {
             mixed & (denominator - 1) == 0
@@ -373,6 +374,7 @@ type Generation = NonZeroU64;
 /// Configures runtime event recording for the process.
 pub(crate) fn configure(configuration: Configuration) {
     let _lock = ConfigurationLock::acquire();
+    // #[gamma::skip(call_result.default, reason = "configure_locked returns unit and default_after preserves all configuration stores")]
     configure_locked(configuration);
 }
 
@@ -408,7 +410,9 @@ fn configure_locked(configuration: Configuration) {
         || IO_POLICY.load(Ordering::Acquire) != io_policy
         || CACHE_POLICY.load(Ordering::Acquire) != cache_policy;
     if !changed {
+        // #[gamma::skip(cond.always_false, reason = "ConfigurationLock excludes transitions, and unchanged disabled policies imply ACTIVE_SESSION was already cleared; the only nonzero publishers require enabled policies")]
         if !enabled {
+            // #[gamma::skip(stmt.delete_call, reason = "unchanged disabled policies under ConfigurationLock already imply ACTIVE_SESSION is zero; no observer proceeds past a zero session")]
             ACTIVE_SESSION.store(0, Ordering::SeqCst);
         }
         return;
@@ -463,7 +467,12 @@ pub(crate) fn statistics() -> Statistics {
 
 #[cfg(any(test, feature = "monitor"))]
 pub(crate) fn try_statistics() -> Result<Statistics, crate::Error> {
-    read_activity(false).map(|activity| activity.statistics)
+    statistics_with(read_activity)
+}
+
+#[cfg(any(test, feature = "monitor"))]
+fn statistics_with(read: impl FnOnce(bool) -> Result<Activity, crate::Error>) -> Result<Statistics, crate::Error> {
+    read(false).map(|activity| activity.statistics)
 }
 
 /// Reads counters without copying ring payloads or invoking snapshot sources.
@@ -488,6 +497,7 @@ fn read_activity_until(include_threads: bool, deadline: Instant) -> Result<Activ
     let capacity = configuration().event_capacity_per_thread;
     let mut activity = Activity {
         statistics: Statistics {
+            // #[gamma::skip(expr.decrement, reason = "validated event capacities are at most 1048576, so conversion to u64 cannot use this fallback")]
             event_capacity_per_thread: u64::try_from(capacity.get()).unwrap_or(u64::MAX),
             recording: last_recording_policies(),
             ..Statistics::default()
@@ -505,10 +515,13 @@ fn read_activity_until(include_threads: bool, deadline: Instant) -> Result<Activ
             .ok_or_else(|| crate::Error::new("seismograph recorder statistics timed out waiting for an event ring"))?;
         let ring_capacity = current.ring().map_or(0, Ring::capacity);
         activity.statistics.allocated_bytes = activity.statistics.allocated_bytes.saturating_add(
+            // #[gamma::skip(expr.decrement, reason = "the source is a usize and all supported targets have at most 64-bit pointers, so conversion to u64 cannot use this fallback")]
             u64::try_from(std::mem::size_of::<ThreadRecorder>() + ring_capacity * std::mem::size_of::<Slot>()).unwrap_or(u64::MAX),
         );
         if session != 0 && current.session.load(Ordering::Acquire) == session {
+            // #[gamma::skip(expr.decrement, reason = "write_index is usize on supported 32-bit and 64-bit targets and therefore always fits u64")]
             let total_events = u64::try_from(current.write_index.load(Ordering::Acquire)).unwrap_or(u64::MAX);
+            // #[gamma::skip(expr.decrement, reason = "ring_capacity is usize on supported 32-bit and 64-bit targets and therefore always fits u64")]
             let retained_events = total_events.min(u64::try_from(ring_capacity).unwrap_or(u64::MAX));
             let lost_events = total_events.saturating_sub(retained_events);
             activity.statistics.thread_count = activity.statistics.thread_count.saturating_add(1);
@@ -523,6 +536,7 @@ fn read_activity_until(include_threads: bool, deadline: Instant) -> Result<Activ
                 *total = total.saturating_add(count);
                 total_events = total_events.saturating_add(count);
             }
+            // #[gamma::skip(expr.decrement, reason = "ring_capacity is usize on supported 32-bit and 64-bit targets and therefore always fits u64")]
             let event_capacity = u64::try_from(ring_capacity).unwrap_or(u64::MAX);
             let retained_events = total_events.min(event_capacity);
             activity.threads.push(ThreadStatistics {
@@ -555,6 +569,7 @@ fn try_record_enabled(class: EventClass, event: impl FnOnce() -> Option<Record>,
     if record.class() != class {
         return None;
     }
+    // #[gamma::skip(expr.decrement, expr.increment, reason = "this policy was checked enabled, so its low byte is 1 or 3; adding or subtracting one cannot change the denominator stored above bit 7, and decode_sampling ignores the low byte")]
     if !decode_sampling(policy).includes(record.sampling_object_id()) {
         return None;
     }
@@ -582,26 +597,51 @@ fn record_enabled_with_recorder(
     // SAFETY: recorders are allocated through System, published once, and
     // intentionally retained for process lifetime.
     let recorder = unsafe { &*recorder };
-    recorder.writer_active.store(true, Ordering::SeqCst);
-    let _writer = WriterActiveGuard { recorder };
+    let _writer = activate_writer(recorder);
     if policy_atomic(class).load(Ordering::SeqCst) != policy
         || EVENT_CAPACITY.load(Ordering::SeqCst) != capacity
         || ACTIVE_SESSION.load(Ordering::SeqCst) != session
     {
         return false;
     }
-    let capture_backtrace = match record.backtrace {
-        BacktraceCapture::Configured => policy_backtraces(policy),
-        BacktraceCapture::Never => false,
-        BacktraceCapture::Always => true,
-    };
-    let (frames, frame_count) = if capture_backtrace {
-        let _suppression = SuppressionGuard::enter();
-        capture_stack()
-    } else {
-        ([0; MAX_STACK_FRAMES], 0)
-    };
+    let (frames, frame_count) = capture_frames_with(record.backtrace, policy, capture_stack);
     recorder.record(session, decode_capacity(capacity), record, frames, frame_count)
+}
+
+fn backtrace_capture_enabled(policy: BacktraceCapture, runtime_policy: u64) -> bool {
+    policy_enabled(runtime_policy)
+        && match policy {
+            // #[gamma::skip(expr.decrement, reason = "the preceding policy_enabled guard proves bit 0 is set; subtracting one clears only that bit and cannot change the backtrace flag at bit 1")]
+            BacktraceCapture::Configured => policy_backtraces(runtime_policy),
+            BacktraceCapture::Never => false,
+            BacktraceCapture::Always => true,
+        }
+}
+
+fn capture_frames_with(
+    policy: BacktraceCapture,
+    runtime_policy: u64,
+    capture: impl FnOnce() -> ([u64; MAX_STACK_FRAMES], u8),
+) -> ([u64; MAX_STACK_FRAMES], u8) {
+    if backtrace_capture_enabled(policy, runtime_policy) {
+        let _suppression = SuppressionGuard::enter();
+        capture()
+    } else {
+        (
+            // #[gamma::skip(literal.int_increment, reason = "the paired frame count is zero and ThreadRecorder::record only exposes the prefix selected by that count")]
+            [0; MAX_STACK_FRAMES],
+            0,
+        )
+    }
+}
+
+fn captured_addresses(frames: [u64; MAX_STACK_FRAMES], frame_count: u8) -> Vec<Address> {
+    frames[..usize::from(frame_count)].iter().copied().map(Address::new).collect()
+}
+
+fn activate_writer(recorder: &ThreadRecorder) -> WriterActiveGuard<'_> {
+    recorder.writer_active.store(true, Ordering::SeqCst);
+    WriterActiveGuard { recorder }
 }
 
 /// Captures all currently retained runtime events.
@@ -612,8 +652,15 @@ pub(crate) fn snapshot(disposition: crate::snapshot::EventBufferDisposition) -> 
 }
 
 pub(crate) fn try_snapshot(disposition: crate::snapshot::EventBufferDisposition) -> Result<Option<Events>, crate::Error> {
+    try_snapshot_until(disposition, wait_deadline)
+}
+
+fn try_snapshot_until(
+    disposition: crate::snapshot::EventBufferDisposition,
+    mut deadline: impl FnMut() -> Instant,
+) -> Result<Option<Events>, crate::Error> {
     let _suppression = SuppressionGuard::enter();
-    try_snapshot_with_configuration_deadline(disposition, wait_deadline())
+    try_snapshot_with_configuration_deadline(disposition, deadline())
 }
 
 fn try_snapshot_with_configuration_deadline(
@@ -628,7 +675,7 @@ fn try_snapshot_with_configuration_deadline(
     if session == 0 {
         return Ok(None);
     }
-    snapshot_from_recorders_until(session, RECORDERS.load(Ordering::Acquire), wait_deadline())
+    snapshot_from_recorders_until(session, RECORDERS.load(Ordering::Acquire), deadline)
 }
 
 #[cfg(test)]
@@ -661,6 +708,7 @@ fn snapshot_from_recorders_until(
             snapshot.threads.push(thread.log);
             snapshot.events.extend(thread.events);
         }
+        // #[gamma::skip(stmt.delete_assign, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
         recorder = current.next.load(Ordering::Acquire);
     }
     Ok(Some(snapshot))
@@ -669,7 +717,11 @@ fn snapshot_from_recorders_until(
 /// Returns whether telemetry-internal work is suppressed on this thread.
 #[must_use]
 fn is_suppressed() -> bool {
-    SUPPRESSION_DEPTH.try_with(|depth| depth.get() != 0).unwrap_or(true)
+    suppression_active_with(|| SUPPRESSION_DEPTH.try_with(|depth| depth.get() != 0))
+}
+
+fn suppression_active_with<E>(read: impl FnOnce() -> Result<bool, E>) -> bool {
+    read().unwrap_or(true)
 }
 
 /// Returns the current thread's process-unique recorder identity.
@@ -678,6 +730,7 @@ fn is_suppressed() -> bool {
 /// The identity remains available after the thread's event recorder retires.
 #[must_use]
 pub fn thread_id() -> ThreadId {
+    // #[gamma::skip(call_result.default, reason = "default_after still initializes the recorder; ThreadRecorder::new takes its identity from cached_thread_id, so the fallback returns that same identity")]
     if let Some(recorder) = try_local_recorder() {
         // SAFETY: Published recorders remain allocated for the process lifetime.
         return unsafe { &*recorder }.thread_id;
@@ -685,13 +738,48 @@ pub fn thread_id() -> ThreadId {
     cached_thread_id()
 }
 
+/// Returns this thread's retained events for test assertions without reading other recorders or snapshot sources.
+///
+/// The events remain in the recorder after this call.
+///
+/// # Errors
+///
+/// Returns an error if this thread's recorder cannot be captured before the recorder deadline.
+///
+/// # Panics
+///
+/// Panics if the thread-local recorder is being destroyed.
+#[cfg(feature = "test-util")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+pub fn current_thread_events() -> Result<Vec<Event>, crate::Error> {
+    current_thread_events_until(wait_deadline())
+}
+
+#[cfg(feature = "test-util")]
+fn current_thread_events_until(deadline: Instant) -> Result<Vec<Event>, crate::Error> {
+    let _suppression = SuppressionGuard::enter();
+    LOCAL_RECORDER.with(|local| {
+        let recorder = initialize_local_recorder(local);
+        // SAFETY: published recorders remain allocated for the process lifetime.
+        let recorder = unsafe { &*recorder };
+        recorder
+            .snapshot_until(deadline)
+            .map(|snapshot| snapshot.events)
+            .ok_or_else(|| crate::Error::new("seismograph snapshot timed out waiting for the current thread's event recorder"))
+    })
+}
+
 fn cached_thread_id() -> ThreadId {
+    cached_thread_id_with(&NEXT_THREAD_ID)
+}
+
+fn cached_thread_id_with(next_thread_id: &AtomicU64) -> ThreadId {
     let cached = RECORDER_THREAD_ID.get();
     if cached != 0 {
         return ThreadId::new(cached);
     }
     // This counter allocates identities only. It publishes no associated data.
-    let id = NEXT_THREAD_ID.fetch_add(1, Ordering::Relaxed);
+    let id = next_thread_id.fetch_add(1, Ordering::Relaxed);
     RECORDER_THREAD_ID.set(id);
     ThreadId::new(id)
 }
@@ -863,6 +951,29 @@ impl ThreadRecorder {
             });
         };
         let first = total_events.saturating_sub(ring.capacity());
+        let events = self.snapshot_events_until(ring, first, total_events, deadline)?;
+        let snapshot = ThreadSnapshot {
+            log: ThreadLog {
+                thread_id: self.thread_id,
+                total_events: total_events as u64,
+                lost_events: first as u64,
+                name: String::from_utf8_lossy(&self.thread_name[..self.thread_name_len]).into_owned(),
+            },
+            events,
+        };
+        self.schedule_retired_snapshot_release();
+        Some(snapshot)
+    }
+
+    fn schedule_retired_snapshot_release(&self) {
+        if self.retired.load(Ordering::Acquire) {
+            self.release_on_unlock.store(true, Ordering::Release);
+            // #[gamma::skip(call_result.default, reason = "forget_retired_ring returns unit and default_after preserves its ring accounting update")]
+            forget_retired_ring(self);
+        }
+    }
+
+    fn snapshot_events_until(&self, ring: &Ring, first: usize, total_events: usize, deadline: Instant) -> Option<Vec<Event>> {
         let mut events = Vec::with_capacity(total_events - first);
         for index in first..total_events {
             let slot = &ring.slots[index & ring.mask];
@@ -877,28 +988,11 @@ impl ThreadRecorder {
                     timestamp: data.timestamp,
                     kind: data.kind,
                     payload: data.payload,
-                    call_stack: data.frames[..usize::from(data.frame_count)]
-                        .iter()
-                        .copied()
-                        .map(Address::new)
-                        .collect(),
+                    call_stack: captured_addresses(data.frames, data.frame_count),
                 });
             }
         }
-        let snapshot = ThreadSnapshot {
-            log: ThreadLog {
-                thread_id: self.thread_id,
-                total_events: total_events as u64,
-                lost_events: first as u64,
-                name: String::from_utf8_lossy(&self.thread_name[..self.thread_name_len]).into_owned(),
-            },
-            events,
-        };
-        if self.retired.load(Ordering::Acquire) {
-            self.release_on_unlock.store(true, Ordering::Release);
-            forget_retired_ring(self);
-        }
-        Some(snapshot)
+        Some(events)
     }
 
     #[cfg(test)]
@@ -917,6 +1011,7 @@ impl ThreadRecorder {
             self.reset_counts();
             self.activity_session.store(session, Ordering::Release);
             self.session.store(session, Ordering::Release);
+            // #[gamma::skip(stmt.delete_call, reason = "ring_lock excludes replacement/release and the reuse predicate proves this capacity was already published; retirement, its only production reader, runs on the owning writer thread")]
             self.ring_capacity.store(capacity.get(), Ordering::Release);
             return true;
         }
@@ -951,6 +1046,7 @@ impl ThreadRecorder {
             .load(Ordering::Acquire)
             .saturating_mul(std::mem::size_of::<Slot>());
         if ring_bytes != 0 {
+            // #[gamma::skip(call_result.default, reason = "register_retired_ring returns unit and default_after preserves its registration and budget enforcement")]
             register_retired_ring(self, ring_bytes);
         }
     }
@@ -962,15 +1058,22 @@ impl ThreadRecorder {
     }
 
     fn ring_lock_until(&self, deadline: Instant) -> Option<RingLock<'_>> {
+        self.ring_lock_until_with(deadline, wait_expired)
+    }
+
+    fn ring_lock_until_with(&self, deadline: Instant, mut expired: impl FnMut(Instant) -> bool) -> Option<RingLock<'_>> {
         while self
             .ring_locked
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
-            if wait_expired(deadline) {
+            if
+            // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            expired(deadline) {
                 return None;
             }
-            std::hint::spin_loop();
+            // #[gamma::skip(call_result.default, reason = "recorder_spin returns unit; default_after still executes the pause")]
+            recorder_spin();
         }
         Some(RingLock { recorder: self })
     }
@@ -982,6 +1085,7 @@ impl ThreadRecorder {
     }
 
     fn release_ring_locked(&self) {
+        // #[gamma::skip(call_result.default, reason = "forget_retired_ring returns unit and default_after preserves its ring accounting update")]
         forget_retired_ring(self);
         // Natural retirement releases only the ring. Activity counts and their
         // session identity remain in process-lifetime metadata for stable rates.
@@ -1003,9 +1107,14 @@ impl ThreadRecorder {
     }
 
     fn release_retired_ring(&self) {
+        self.release_retired_ring_with(|recorder| recorder.ring_lock_until(wait_deadline()));
+    }
+
+    fn release_retired_ring_with(&self, acquire: impl FnOnce(&Self) -> Option<RingLock<'_>>) {
         self.release_on_unlock.store(true, Ordering::Release);
+        // #[gamma::skip(call_result.default, reason = "forget_retired_ring returns unit and default_after preserves its ring accounting update")]
         forget_retired_ring(self);
-        let _ring = self.ring_lock_until(wait_deadline());
+        let _ring = acquire(self);
     }
 }
 
@@ -1030,6 +1139,7 @@ fn retired_rings() -> std::sync::MutexGuard<'static, RetiredRings> {
 }
 
 fn register_retired_ring(recorder: &'static ThreadRecorder, ring_bytes: usize) {
+    // #[gamma::skip(expr.increment, reason = "when ring_bytes exceeds the budget, both ring_bytes and every allocated total are multiples of size_of::<Slot> times the minimum capacity 64; adding one to the limit cannot admit another ring or overflow for a valid capacity")]
     let limit = RETIRED_RING_BUDGET_BYTES.max(ring_bytes);
     {
         let mut retired = retired_rings();
@@ -1050,6 +1160,7 @@ fn register_retired_ring(recorder: &'static ThreadRecorder, ring_bytes: usize) {
             }
         };
         let Some(evicted) = evicted else {
+            // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         };
         evicted.release_retired_ring();
@@ -1133,15 +1244,23 @@ impl Slot {
     }
 
     fn lock_until(&self, deadline: Instant) -> Option<SlotLock<'_>> {
+        self.lock_until_with(deadline, wait_expired)
+    }
+
+    fn lock_until_with(&self, deadline: Instant, mut expired: impl FnMut(Instant) -> bool) -> Option<SlotLock<'_>> {
         while self
             .locked
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
-            if wait_expired(deadline) {
+            if
+            // #[gamma::skip(cond.negate, tag = "timeout", reason = "November 6 campaign 73dae0a0e8e4: negating slot-lock expiration exceeded the timeout")]
+            // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            expired(deadline) {
                 return None;
             }
-            std::hint::spin_loop();
+            // #[gamma::skip(call_result.default, reason = "recorder_spin returns unit; default_after still executes the pause")]
+            recorder_spin();
         }
         Some(SlotLock { slot: self })
     }
@@ -1219,14 +1338,21 @@ impl ConfigurationLock {
     }
 
     fn acquire_until(deadline: Instant) -> Option<Self> {
+        Self::acquire_until_with(deadline, wait_expired)
+    }
+
+    fn acquire_until_with(deadline: Instant, mut expired: impl FnMut(Instant) -> bool) -> Option<Self> {
         while CONFIGURATION_LOCKED
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
-            if wait_expired(deadline) {
+            if
+            // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_false, cond.negate, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            expired(deadline) {
                 return None;
             }
-            std::hint::spin_loop();
+            // #[gamma::skip(call_result.default, reason = "recorder_spin returns unit; default_after still executes the pause")]
+            recorder_spin();
         }
         Some(Self)
     }
@@ -1358,6 +1484,7 @@ fn reset_event_buffers_until(
     CACHE_POLICY.store(disabled_policy(cache_policy), Ordering::SeqCst);
 
     if !wait_for_writers_until(deadline, writer_wait_expired) {
+        // #[gamma::skip(call_result.default, reason = "restore_recording_policies returns unit and default_after preserves every restored policy")]
         restore_recording_policies(
             allocation_policy,
             general_policy,
@@ -1377,6 +1504,7 @@ fn reset_event_buffers_until(
     let snapshot = match captured {
         Ok(snapshot) => snapshot,
         Err(error) => {
+            // #[gamma::skip(call_result.default, reason = "restore_recording_policies returns unit and default_after preserves every restored policy")]
             restore_recording_policies(
                 allocation_policy,
                 general_policy,
@@ -1400,6 +1528,7 @@ fn reset_event_buffers_until(
         let current = unsafe { &*recorder };
         if !current.clear(release || current.retired.load(Ordering::Acquire), deadline) {
             if !stop {
+                // #[gamma::skip(call_result.default, reason = "restore_recording_policies returns unit and default_after preserves every restored policy")]
                 restore_recording_policies(
                     allocation_policy,
                     general_policy,
@@ -1444,18 +1573,27 @@ fn wait_for_writers() {
     );
 }
 
-fn wait_for_writers_until(deadline: Instant, mut expired: impl FnMut(Instant) -> bool) -> bool {
-    let mut recorder = RECORDERS.load(Ordering::Acquire);
-    while !recorder.is_null() {
-        // SAFETY: recorders remain registered for process lifetime.
-        let current = unsafe { &*recorder };
-        while current.writer_active.load(Ordering::SeqCst) {
-            if expired(deadline) {
+fn wait_for_writers_until(deadline: Instant, expired: impl FnMut(Instant) -> bool) -> bool {
+    let recorder = RECORDERS.load(Ordering::Acquire);
+    // SAFETY: registry entries remain allocated for process lifetime.
+    let current = unsafe { recorder.as_ref() };
+    wait_for_recorders_until(current, deadline, expired)
+}
+
+fn wait_for_recorders_until(mut current: Option<&ThreadRecorder>, deadline: Instant, mut expired: impl FnMut(Instant) -> bool) -> bool {
+    while let Some(recorder) = current {
+        while recorder.writer_active.load(Ordering::SeqCst) {
+            if
+            // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            expired(deadline) {
                 return false;
             }
-            std::hint::spin_loop();
+            // #[gamma::skip(call_result.default, reason = "recorder_spin returns unit; default_after still executes the pause")]
+            recorder_spin();
         }
-        recorder = current.next.load(Ordering::Acquire);
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        // SAFETY: next contains only process-lifetime registry entries or null.
+        current = unsafe { recorder.next.load(Ordering::Acquire).as_ref() };
     }
     true
 }
@@ -1494,13 +1632,54 @@ fn wait_deadline() -> Instant {
     Instant::now().checked_add(RECORDER_WAIT_TIMEOUT).unwrap_or_else(Instant::now)
 }
 
+// #[gamma::skip(fn_value.bool_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
 fn wait_expired(deadline: Instant) -> bool {
-    if Instant::now() < deadline {
-        std::thread::yield_now();
+    // #[gamma::skip(call.replace_with_default, call_result.default, tag = "timeout", reason = "November 4 SARIF mutants 3c5b5a64be46 and 0fab59a42414 timed out after disabling recorder deadline expiration")]
+    wait_expired_at(Instant::now(), deadline)
+}
+
+// #[gamma::skip(fn_value.bool_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+fn wait_expired_at(now: Instant, deadline: Instant) -> bool {
+    if
+    // #[gamma::skip(cond.always_true, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+    now < deadline {
+        // #[gamma::skip(call_result.default, reason = "recorder_yield returns unit; default_after still executes the scheduling hint")]
+        recorder_yield();
         false
     } else {
+        // #[gamma::skip(literal.bool_flip, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         true
     }
+}
+
+fn recorder_spin() {
+    #[cfg(test)]
+    if let Some(hooks) = TEST_RECORDER_PAUSE.get() {
+        return (hooks.spin)();
+    }
+    // #[gamma::skip(stmt.delete_call, reason = "spin_loop is a processor hint with no memory synchronization or recorder-state effects")]
+    std::hint::spin_loop();
+}
+
+fn recorder_yield() {
+    #[cfg(test)]
+    if let Some(hooks) = TEST_RECORDER_PAUSE.get() {
+        return (hooks.yield_now)();
+    }
+    // #[gamma::skip(stmt.delete_call, reason = "yield_now is only a scheduling hint; deadline checks and all recorder state transitions remain unchanged")]
+    std::thread::yield_now();
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct TestRecorderPause {
+    spin: fn(),
+    yield_now: fn(),
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_RECORDER_PAUSE: std::cell::Cell<Option<TestRecorderPause>> = const { std::cell::Cell::new(None) };
 }
 
 #[cfg(test)]
@@ -1544,11 +1723,25 @@ fn initialize_local_recorder(local: &LocalRecorder) -> *const ThreadRecorder {
     reason = "System allocation uses Layout::new::<ThreadRecorder>(), which guarantees the target alignment"
 )]
 fn allocate_thread_recorder(layout: Layout) -> *mut ThreadRecorder {
-    // SAFETY: layout describes one ThreadRecorder and System bypasses the
-    // process global allocator.
-    let allocated = unsafe { System.alloc(layout) }.cast::<ThreadRecorder>();
+    allocate_thread_recorder_with(
+        layout,
+        |layout| {
+            // SAFETY: layout describes one ThreadRecorder and System bypasses
+            // the process global allocator.
+            unsafe { System.alloc(layout) }.cast::<ThreadRecorder>()
+        },
+        |layout| handle_alloc_error(layout),
+    )
+}
+
+fn allocate_thread_recorder_with(
+    layout: Layout,
+    allocate: impl FnOnce(Layout) -> *mut ThreadRecorder,
+    allocation_error: impl FnOnce(Layout),
+) -> *mut ThreadRecorder {
+    let allocated = allocate(layout);
     if allocated.is_null() {
-        handle_alloc_error(layout);
+        allocation_error(layout);
     }
     allocated
 }
@@ -1562,55 +1755,1074 @@ fn capture_stack() -> ([u64; MAX_STACK_FRAMES], u8) {
     )
 }
 
+#[cfg(all(target_os = "windows", not(miri)))]
 fn capture_platform_stack(frames: &mut [u64]) -> usize {
-    #[cfg(all(target_os = "windows", not(miri)))]
-    {
-        use windows_sys::Win32::System::Diagnostics::Debug::RtlCaptureStackBackTrace;
+    use windows_sys::Win32::System::Diagnostics::Debug::RtlCaptureStackBackTrace;
 
-        let mut addresses = [0usize; MAX_STACK_FRAMES];
+    capture_windows_stack_with(frames, |skip, capacity, addresses| {
         // SAFETY: addresses is writable for the requested number of entries.
-        let count = unsafe {
-            RtlCaptureStackBackTrace(
-                4,
-                u32::try_from(addresses.len()).expect("the fixed frame buffer fits in u32"),
-                addresses.as_mut_ptr().cast(),
-                std::ptr::null_mut(),
-            )
-        } as usize;
-        for (destination, address) in frames.iter_mut().zip(addresses).take(count) {
-            *destination = address as u64;
-        }
-        count
-    }
+        (unsafe { RtlCaptureStackBackTrace(skip, capacity, addresses.as_mut_ptr().cast(), std::ptr::null_mut()) }) as usize
+    })
+}
 
-    #[cfg(all(any(target_os = "linux", target_os = "macos"), not(miri)))]
-    {
-        const SKIPPED_FRAMES: usize = 4;
-        const CAPACITY: usize = 28;
-        let mut addresses = [0usize; CAPACITY];
-        let capacity = i32::try_from(CAPACITY).expect("the fixed frame buffer fits in i32");
-        // SAFETY: addresses is writable for CAPACITY pointers.
-        let count = unsafe { libc::backtrace(addresses.as_mut_ptr().cast(), capacity) }.max(0);
-        let count = usize::try_from(count).expect("the nonnegative frame count fits in usize");
-        let retained = count.saturating_sub(SKIPPED_FRAMES).min(frames.len());
-        for (destination, address) in frames.iter_mut().zip(addresses.into_iter().skip(SKIPPED_FRAMES)).take(retained) {
-            *destination = address as u64;
-        }
-        retained
+#[cfg(all(any(target_os = "linux", target_os = "macos"), not(miri)))]
+fn capture_platform_stack(frames: &mut [u64]) -> usize {
+    const SKIPPED_FRAMES: usize = 4;
+    const CAPACITY: usize = 28;
+    let mut addresses = [0usize; CAPACITY];
+    let capacity = i32::try_from(CAPACITY).expect("the fixed frame buffer fits in i32");
+    // SAFETY: addresses is writable for CAPACITY pointers.
+    let count = unsafe { libc::backtrace(addresses.as_mut_ptr().cast(), capacity) }.max(0);
+    let count = usize::try_from(count).expect("the nonnegative frame count fits in usize");
+    let retained = count.saturating_sub(SKIPPED_FRAMES).min(frames.len());
+    for (destination, address) in frames.iter_mut().zip(addresses.into_iter().skip(SKIPPED_FRAMES)).take(retained) {
+        *destination = address as u64;
     }
+    retained
+}
 
-    #[cfg(any(miri, not(any(target_os = "windows", target_os = "linux", target_os = "macos"))))]
-    {
-        let _ = frames;
-        0
+#[cfg(any(miri, not(any(target_os = "windows", target_os = "linux", target_os = "macos"))))]
+use self::capture_unsupported_stack as capture_platform_stack;
+
+#[cfg(all(target_os = "windows", not(miri)))]
+fn capture_windows_stack_with(frames: &mut [u64], capture: impl FnOnce(u32, u32, &mut [usize; MAX_STACK_FRAMES]) -> usize) -> usize {
+    // #[gamma::skip(literal.int_increment, reason = "RtlCaptureStackBackTrace overwrites every address in its returned count and copy_captured_addresses never reads the unreported suffix")]
+    let mut addresses = [0usize; MAX_STACK_FRAMES];
+    let (skip, capacity) = windows_stack_capture_parameters(addresses.len());
+    let count = capture(skip, capacity, &mut addresses);
+    copy_captured_addresses(frames, addresses, count)
+}
+
+// #[gamma::skip(fn_value.zero, reason = "the unsupported-target fallback already returns exactly zero and does not write frames")]
+#[cfg(any(test, miri, not(any(target_os = "windows", target_os = "linux", target_os = "macos"))))]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "the selected stack-capture function takes a mutable destination on every architecture, but the fallback leaves it unchanged"
+)]
+fn capture_unsupported_stack(frames: &mut [u64]) -> usize {
+    let _ = frames;
+    0
+}
+
+#[cfg(all(target_os = "windows", not(miri)))]
+fn windows_stack_capture_parameters(capacity: usize) -> (u32, u32) {
+    (4, u32::try_from(capacity).expect("the fixed frame buffer fits in u32"))
+}
+
+#[cfg(all(target_os = "windows", not(miri)))]
+fn copy_captured_addresses(frames: &mut [u64], addresses: [usize; MAX_STACK_FRAMES], count: usize) -> usize {
+    for (destination, address) in frames.iter_mut().zip(addresses).take(count) {
+        *destination = address as u64;
     }
+    count
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::ptr::NonNull;
+
+    use super::{Policies as RecordingPolicies, Policy as RecordingPolicy, *};
     use crate::record;
     use crate::recorder::event::EventTimestamp;
+
+    #[cfg(feature = "test-util")]
+    #[test]
+    fn current_thread_events_ignores_the_configuration_lock_and_reports_only_local_contention() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let _configuration = ConfigurationLock::acquire();
+        let deadline = seismograph_protocol::io::MonitorIo::new_mocked().0.instant();
+        assert!(current_thread_events_until(deadline).unwrap().is_empty());
+
+        // SAFETY: published recorders remain allocated for the process lifetime.
+        let recorder = unsafe { &*local_recorder() };
+        let _ring = recorder.ring_lock();
+        assert_eq!(
+            current_thread_events_until(deadline).unwrap_err().to_string(),
+            "seismograph snapshot timed out waiting for the current thread's event recorder"
+        );
+    }
+
+    #[test]
+    fn nov6_writer_quiescence_checks_the_next_recorder_after_an_inactive_head() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let deadline = io.instant();
+        let head = ThreadRecorder::new();
+        let mut next = Box::new(ThreadRecorder::new());
+        next.writer_active.store(true, Ordering::SeqCst);
+        head.next.store(&raw mut *next, Ordering::Release);
+        let mut checks = 0;
+        assert!(!wait_for_recorders_until(Some(&head), deadline, |actual| {
+            assert_eq!(actual, deadline);
+            checks += 1;
+            true
+        }));
+        assert_eq!(checks, 1);
+        next.writer_active.store(false, Ordering::SeqCst);
+        assert!(wait_for_recorders_until(Some(&head), deadline, |_| panic!(
+            "neither recorder has an active writer"
+        )));
+        head.next.store(std::ptr::null_mut(), Ordering::Release);
+    }
+
+    #[test]
+    fn november_each_contended_recorder_policy_spins_once_then_reacquires_or_returns_the_exact_deadline_failure() {
+        thread_local! {
+            static PAUSES: std::cell::Cell<[usize; 2]> = const { std::cell::Cell::new([0, 0]) };
+        }
+        struct Restore(Option<TestRecorderPause>, [usize; 2], bool);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_RECORDER_PAUSE.set(self.0);
+                PAUSES.set(self.1);
+                CONFIGURATION_LOCKED.store(self.2, Ordering::Release);
+            }
+        }
+        fn acquired<T>(guard: Option<T>) -> bool {
+            let result = guard.is_some();
+            drop(guard);
+            result
+        }
+        let _test = TEST_LOCK.lock().unwrap();
+        let previous_lock = CONFIGURATION_LOCKED.load(Ordering::Acquire);
+        let previous_hooks = TEST_RECORDER_PAUSE.replace(Some(TestRecorderPause {
+            spin: || {
+                let [spins, yields] = PAUSES.get();
+                PAUSES.set([spins + 1, yields]);
+            },
+            yield_now: || panic!("injected deadline checks must not observe a scheduler"),
+        }));
+        let _restore = Restore(previous_hooks, PAUSES.replace([0, 0]), previous_lock);
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let deadline = io.instant();
+        for kind in 0..4 {
+            for release in [false, true] {
+                let recorder = ThreadRecorder::new();
+                let slot = Slot::new();
+                recorder.ring_locked.store(true, Ordering::Release);
+                recorder.writer_active.store(true, Ordering::Release);
+                slot.locked.store(true, Ordering::Release);
+                CONFIGURATION_LOCKED.store(kind == 2, Ordering::Release);
+                PAUSES.set([0, 0]);
+                let mut checks = 0;
+                let expired = |requested| {
+                    assert_eq!(requested, deadline);
+                    checks += 1;
+                    if release {
+                        match kind {
+                            0 => recorder.ring_locked.store(false, Ordering::Release),
+                            1 => slot.locked.store(false, Ordering::Release),
+                            2 => CONFIGURATION_LOCKED.store(false, Ordering::Release),
+                            3 => recorder.writer_active.store(false, Ordering::Release),
+                            _ => unreachable!(),
+                        }
+                        false
+                    } else {
+                        checks == 2
+                    }
+                };
+                let completed = match kind {
+                    0 => acquired(recorder.ring_lock_until_with(deadline, expired)),
+                    1 => acquired(slot.lock_until_with(deadline, expired)),
+                    2 => acquired(ConfigurationLock::acquire_until_with(deadline, expired)),
+                    3 => wait_for_recorders_until(Some(&recorder), deadline, expired),
+                    _ => unreachable!(),
+                };
+                assert_eq!(completed, release);
+                assert_eq!(checks, if release { 1 } else { 2 });
+                assert_eq!(PAUSES.get(), [1, 0], "each failed acquisition must retain its CPU-hint handoff");
+            }
+        }
+    }
+
+    #[test]
+    fn november_wait_expiration_yields_only_before_the_exact_deadline_without_scheduler_or_clock_observation() {
+        thread_local! {
+            static YIELDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        }
+        struct Restore(Option<TestRecorderPause>, usize);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_RECORDER_PAUSE.set(self.0);
+                YIELDS.set(self.1);
+            }
+        }
+        let hooks = TestRecorderPause {
+            spin: || panic!("expiry checks must not spin"),
+            yield_now: || YIELDS.set(YIELDS.get() + 1),
+        };
+        let _restore = Restore(TEST_RECORDER_PAUSE.replace(Some(hooks)), YIELDS.replace(0));
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let now = io.instant();
+        let deadline = now.checked_add(Duration::from_secs(1)).unwrap();
+        assert!(!wait_expired_at(now, deadline));
+        assert_eq!(YIELDS.get(), 1);
+        assert!(wait_expired_at(deadline, deadline));
+        assert!(wait_expired_at(deadline.checked_add(Duration::from_nanos(1)).unwrap(), deadline));
+        assert_eq!(YIELDS.get(), 1);
+    }
+
+    #[test]
+    fn november_statistics_requests_only_counters_and_preserves_every_result_without_observing_a_clock() {
+        let expected = Statistics {
+            thread_count: 7,
+            total_events: 13,
+            retained_events: 11,
+            lost_events: 2,
+            event_capacity_per_thread: 64,
+            allocated_bytes: 4096,
+            recording: RecordingPolicies::default(),
+        };
+        assert_eq!(
+            statistics_with(|include_threads| {
+                assert!(!include_threads, "statistics must not allocate per-thread detail");
+                Ok(Activity {
+                    statistics: expected,
+                    session_id: 17,
+                    class_events: [1, 2, 3, 4, 5, 6],
+                    threads: Vec::new(),
+                })
+            })
+            .unwrap(),
+            expected
+        );
+        let error = statistics_with(|include_threads| {
+            assert!(!include_threads);
+            Err(crate::Error::new("injected recorder contention"))
+        })
+        .unwrap_err();
+        assert_eq!(error.to_string(), "injected recorder contention");
+    }
+
+    #[test]
+    fn november_backtrace_capture_preserves_zero_partial_and_full_reported_prefix_including_zero_addresses() {
+        let enabled = encode_policy(RecordingPolicy::all(true));
+        for count in [0, 1, 2, MAX_STACK_FRAMES] {
+            let mut frames = [0; MAX_STACK_FRAMES];
+            frames[0] = 17;
+            let expected: Vec<_> = frames[..count].iter().copied().map(Address::new).collect();
+            assert_eq!(
+                {
+                    let (frames, count) = capture_frames_with(BacktraceCapture::Always, enabled, || (frames, u8::try_from(count).unwrap()));
+                    captured_addresses(frames, count)
+                },
+                expected
+            );
+        }
+        for (capture, policy) in [
+            (BacktraceCapture::Never, enabled),
+            (BacktraceCapture::Configured, encode_policy(RecordingPolicy::all(false))),
+            (BacktraceCapture::Always, disabled_policy(enabled)),
+        ] {
+            assert_eq!(
+                capture_frames_with(capture, policy, || panic!("disabled capture must not call its native source")).1,
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn november_thread_recorder_allocation_preserves_layout_pointer_and_null_failure_before_initialization() {
+        let layout = Layout::new::<ThreadRecorder>();
+        let pointer = NonNull::<ThreadRecorder>::dangling().as_ptr();
+        assert_eq!(
+            allocate_thread_recorder_with(
+                layout,
+                |requested| {
+                    assert_eq!(requested, layout);
+                    pointer
+                },
+                |_| panic!("successful allocation must not enter the OOM path"),
+            ),
+            pointer
+        );
+        let error = std::panic::catch_unwind(|| {
+            allocate_thread_recorder_with(
+                layout,
+                |requested| {
+                    assert_eq!(requested, layout);
+                    ptr::null_mut()
+                },
+                |requested| {
+                    assert_eq!(requested, layout);
+                    panic!("injected allocation failure");
+                },
+            )
+        })
+        .unwrap_err();
+        assert_eq!(error.downcast_ref::<&str>(), Some(&"injected allocation failure"));
+    }
+
+    #[test]
+    #[cfg(all(target_os = "windows", not(miri)))]
+    fn november_windows_stack_capture_forwards_exact_skip_capacity_and_reported_count_without_native_capture() {
+        for count in [0, 1, MAX_STACK_FRAMES] {
+            let mut frames = [u64::MAX; MAX_STACK_FRAMES];
+            let reported = capture_windows_stack_with(&mut frames, |skip, capacity, addresses| {
+                assert_eq!(skip, 4);
+                assert_eq!(capacity, u32::try_from(MAX_STACK_FRAMES).unwrap());
+                for (index, address) in addresses.iter_mut().take(count).enumerate() {
+                    *address = 17 + index;
+                }
+                count
+            });
+            assert_eq!(reported, count);
+            let expected: Vec<_> = (0..count).map(|index| u64::try_from(17 + index).unwrap()).collect();
+            assert_eq!(&frames[..count], expected);
+            assert!(frames[count..].iter().all(|address| *address == u64::MAX));
+        }
+    }
+
+    #[test]
+    fn nov6_shared_unsupported_stack_capture_returns_exact_zero_without_touching_destination() {
+        for length in [0, 1, MAX_STACK_FRAMES] {
+            let mut frames = vec![17; length];
+            assert_eq!(capture_unsupported_stack(&mut frames), 0);
+            assert_eq!(frames, vec![17; length]);
+        }
+    }
+
+    #[test]
+    fn november_suppression_tls_failure_is_conservatively_suppressed_without_native_tls_teardown() {
+        for (result, expected) in [(Err(()), true), (Ok(false), false), (Ok(true), true)] {
+            assert_eq!(suppression_active_with(|| result), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_snapshot_events_keep_the_frozen_limit_when_the_ring_has_newer_entries() {
+        let recorder = ThreadRecorder::new();
+        let capacity = EventBufferCapacity::new(64);
+        for id in [17, 23, 31] {
+            assert!(recorder.record(
+                1,
+                capacity,
+                Record::object(EventKind::ArcCreate, ObjectId::new(id)),
+                [0; MAX_STACK_FRAMES],
+                0
+            ));
+        }
+        let deadline = seismograph_protocol::io::MonitorIo::new_mocked().0.instant();
+        let events = recorder.snapshot_events_until(recorder.ring().unwrap(), 0, 2, deadline).unwrap();
+        assert_eq!(events.iter().map(|event| event.sequence.get()).collect::<Vec<_>>(), [1, 2]);
+        let retained = recorder.snapshot_events_until(recorder.ring().unwrap(), 1, 2, deadline).unwrap();
+        assert_eq!(retained.capacity(), 1);
+        assert_eq!(retained.iter().map(|event| event.sequence.get()).collect::<Vec<_>>(), [2]);
+        assert_eq!(retained[0].object_id().unwrap().get(), 23);
+        assert_eq!(recorder.write_index.load(Ordering::Acquire), 3);
+        let snapshot = recorder.snapshot_until(deadline).unwrap();
+        assert_eq!(
+            snapshot.events.iter().map(|event| event.sequence.get()).collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        assert_eq!(snapshot.events.capacity(), 3);
+        assert_eq!((snapshot.log.total_events, snapshot.log.lost_events), (3, 0));
+        let empty = ThreadRecorder::new().snapshot_until(deadline).unwrap();
+        assert_eq!((empty.log.total_events, empty.log.lost_events), (0, 0));
+        assert!(empty.events.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_configuration_retries_after_a_scripted_release_before_expiration() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let mut held = Some(ConfigurationLock::acquire());
+        let deadline = seismograph_protocol::io::MonitorIo::new_mocked().0.instant();
+        let mut checks = 0;
+        let acquired = ConfigurationLock::acquire_until_with(deadline, |requested| {
+            assert_eq!(requested, deadline);
+            checks += 1;
+            drop(held.take());
+            false
+        });
+        assert!(acquired.is_some());
+        assert_eq!(checks, 1);
+        drop(acquired);
+    }
+
+    #[test]
+    fn gamma_round2_selection_rejects_a_session_changed_during_revalidation() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let _restore = RecorderPolicyRestore::capture();
+        ACTIVE_SESSION.store(13, Ordering::Release);
+        GENERAL_POLICY.store(encode_policy(RecordingPolicy::all(false)), Ordering::Release);
+        let selected = try_record(EventClass::General, || {
+            ACTIVE_SESSION.store(14, Ordering::Release);
+            Some(Record::object(EventKind::ArcCreate, ObjectId::new(17)))
+        });
+        assert_eq!(selected, None);
+    }
+
+    #[test]
+    fn gamma_round2_writer_activation_is_visible_until_its_guard_drops() {
+        let recorder = ThreadRecorder::new();
+        assert!(!recorder.writer_active.load(Ordering::Acquire));
+        let guard = activate_writer(&recorder);
+        assert!(recorder.writer_active.load(Ordering::Acquire));
+        drop(guard);
+        assert!(!recorder.writer_active.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn gamma_round2_backtrace_policy_and_frame_projection_use_exact_scripted_values() {
+        let enabled = encode_policy(RecordingPolicy::all(false));
+        let with_backtraces = encode_policy(RecordingPolicy::all(true));
+        assert!(backtrace_capture_enabled(BacktraceCapture::Always, enabled));
+        assert!(backtrace_capture_enabled(BacktraceCapture::Configured, with_backtraces));
+        assert!(!backtrace_capture_enabled(BacktraceCapture::Configured, enabled));
+        assert!(!backtrace_capture_enabled(BacktraceCapture::Never, with_backtraces));
+        for policy in [BacktraceCapture::Always, BacktraceCapture::Configured, BacktraceCapture::Never] {
+            assert!(!backtrace_capture_enabled(policy, disabled_policy(with_backtraces)));
+        }
+        let mut frames = [99; MAX_STACK_FRAMES];
+        frames[..3].copy_from_slice(&[17, 23, 31]);
+        assert!(captured_addresses(frames, 0).is_empty());
+        assert_eq!(captured_addresses(frames, 2), [Address::new(17), Address::new(23)]);
+    }
+
+    #[cfg(all(target_os = "windows", not(miri)))]
+    #[test]
+    fn gamma_round2_windows_stack_arguments_and_copy_count_are_exact_without_unwinding() {
+        assert_eq!(windows_stack_capture_parameters(MAX_STACK_FRAMES), (4, 24));
+        let mut addresses = [99; MAX_STACK_FRAMES];
+        addresses[..3].copy_from_slice(&[17, 23, 31]);
+        let mut frames = [71; MAX_STACK_FRAMES];
+        assert_eq!(copy_captured_addresses(&mut frames, addresses, 2), 2);
+        assert_eq!(&frames[..4], &[17, 23, 71, 71]);
+    }
+
+    struct OwnedRecorder {
+        allocation: *mut ThreadRecorder,
+        recorder: &'static ThreadRecorder,
+    }
+
+    impl OwnedRecorder {
+        fn new() -> Self {
+            let allocation = Box::into_raw(Box::new(ThreadRecorder::new()));
+            // SAFETY: this fixture owns the allocation until its Drop, after all
+            // test-local uses and global-list guards have finished.
+            let recorder = unsafe { &*allocation };
+            Self { allocation, recorder }
+        }
+    }
+
+    impl Drop for OwnedRecorder {
+        fn drop(&mut self) {
+            let ring = self.recorder.ring_lock_until(wait_deadline()).unwrap();
+            self.recorder.release_ring_locked();
+            drop(ring);
+            // SAFETY: head guards have restored the global list, retired-ring
+            // references were removed above, and this fixture owns the allocation.
+            unsafe { drop(Box::from_raw(self.allocation)) };
+        }
+    }
+
+    struct RecorderHeadRestore(*mut ThreadRecorder);
+
+    impl RecorderHeadRestore {
+        fn install(recorder: &'static ThreadRecorder) -> Self {
+            Self(RECORDERS.swap(ptr::from_ref(recorder).cast_mut(), Ordering::AcqRel))
+        }
+    }
+
+    impl Drop for RecorderHeadRestore {
+        fn drop(&mut self) {
+            RECORDERS.store(self.0, Ordering::Release);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_activity_aggregation_respects_zero_sessions_and_detail_selection() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let _suppression = SuppressionGuard::enter();
+        let _restore = RecorderPolicyRestore::capture();
+        let owner = OwnedRecorder::new();
+        let recorder = owner.recorder;
+        let _head = RecorderHeadRestore::install(recorder);
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        LAST_SESSION.store(0, Ordering::Release);
+        ACTIVITY_GENERATION.store(53, Ordering::Release);
+        EVENT_CAPACITY.store(u64::from(EventBufferCapacity::new(64).exponent()), Ordering::Release);
+        for include_threads in [false, true] {
+            let empty = read_activity_until(include_threads, io.instant()).unwrap();
+            assert_eq!(empty.statistics.thread_count, 0);
+            assert_eq!(empty.class_events, [0; 6]);
+            assert!(empty.threads.is_empty());
+        }
+        LAST_SESSION.store(1, Ordering::Release);
+        assert!(recorder.begin_session_until(1, EventBufferCapacity::new(64), io.instant()));
+        recorder.write_index.store(70, Ordering::Release);
+        recorder.class_events[1].store(70, Ordering::Release);
+        for include_threads in [false, true] {
+            let activity = read_activity_until(include_threads, io.instant()).unwrap();
+            let statistics = activity.statistics;
+            assert_eq!(
+                (
+                    statistics.thread_count,
+                    statistics.total_events,
+                    statistics.retained_events,
+                    statistics.lost_events
+                ),
+                (1, 70, 64, 6)
+            );
+            assert_eq!(statistics.event_capacity_per_thread, 64);
+            assert_eq!(activity.session_id, 53);
+            if include_threads {
+                assert_eq!(activity.class_events, [0, 70, 0, 0, 0, 0]);
+                assert_eq!(activity.threads.len(), 1);
+                let thread = &activity.threads[0];
+                assert_eq!(thread.thread_id, recorder.thread_id);
+                assert_eq!(
+                    (
+                        thread.total_events,
+                        thread.retained_events,
+                        thread.lost_events,
+                        thread.event_capacity
+                    ),
+                    (70, 64, 6, 64)
+                );
+                assert!(!thread.retired);
+            } else {
+                assert_eq!(activity.class_events, [0; 6]);
+                assert!(activity.threads.is_empty());
+            }
+        }
+        assert!(recorder.clear(true, io.instant()));
+    }
+
+    #[test]
+    fn gamma_round2_busy_configuration_returns_exact_snapshot_reset_and_activity_errors() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let _configuration = ConfigurationLock::acquire_until(io.instant()).unwrap();
+        assert_eq!(
+            reset_event_buffers_until(crate::snapshot::EventBufferDisposition::Clear, false, wait_expired, io.instant())
+                .unwrap_err()
+                .to_string(),
+            "seismograph recorder timed out waiting for configuration"
+        );
+        assert_eq!(
+            try_snapshot_until(crate::snapshot::EventBufferDisposition::Retain, || io.instant())
+                .unwrap_err()
+                .to_string(),
+            "seismograph snapshot timed out waiting for configuration"
+        );
+        assert_eq!(
+            read_activity_until(false, io.instant()).err().unwrap().to_string(),
+            "seismograph recorder statistics timed out waiting for configuration"
+        );
+    }
+
+    #[test]
+    fn gamma_round2_retain_snapshot_distinguishes_absent_and_first_session_observations() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let _restore = RecorderPolicyRestore::capture();
+        let owner = OwnedRecorder::new();
+        let recorder = owner.recorder;
+        let _head = RecorderHeadRestore::install(recorder);
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        LAST_SESSION.store(0, Ordering::Release);
+        let events = try_snapshot_until(crate::snapshot::EventBufferDisposition::Retain, || io.instant()).unwrap();
+        assert!(events.is_none());
+        LAST_SESSION.store(1, Ordering::Release);
+        recorder.session.store(1, Ordering::Release);
+        let events = try_snapshot_until(crate::snapshot::EventBufferDisposition::Retain, || io.instant()).unwrap();
+        assert!(events.is_some());
+    }
+
+    #[test]
+    fn gamma_round2_configuration_retires_the_active_epoch_without_a_clock() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let _restore = RecorderPolicyRestore::capture();
+        for active in [0, 1] {
+            ACTIVE_SESSION.store(active, Ordering::Release);
+            EVENT_CAPACITY.store(u64::from(EventBufferCapacity::new(64).exponent()), Ordering::Release);
+            configure_locked(Configuration {
+                event_capacity_per_thread: EventBufferCapacity::new(128),
+                ..Configuration::default()
+            });
+            assert_eq!(ACTIVE_SESSION.load(Ordering::Acquire), 0);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_wait_expiration_includes_the_exact_frozen_deadline() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let now = io.instant();
+        assert!(!wait_expired_at(now, now + Duration::from_secs(1)));
+        assert!(wait_expired_at(now, now));
+        assert!(wait_expired_at(now + Duration::from_secs(1), now));
+    }
+
+    #[test]
+    fn gamma_round2_reset_freezes_stops_and_restores_all_policy_words() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let _suppression = SuppressionGuard::enter();
+        let _restore = RecorderPolicyRestore::capture();
+        let owner = OwnedRecorder::new();
+        let recorder = owner.recorder;
+        let _head = RecorderHeadRestore::install(recorder);
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let policies = [
+            &ALLOCATION_POLICY,
+            &GENERAL_POLICY,
+            &ARC_DEREFERENCE_POLICY,
+            &RUNTIME_TASK_POLICY,
+            &IO_POLICY,
+            &CACHE_POLICY,
+        ];
+        let words = [2, 3, 5, 7, 11, 13].map(|sampling| {
+            encode_policy(RecordingPolicy {
+                enabled: true,
+                capture_backtraces: false,
+                event_sampling: EventSampling::one_in(sampling).unwrap(),
+            })
+        });
+        for (disposition, active) in [
+            (crate::snapshot::EventBufferDisposition::Stop, 0),
+            (crate::snapshot::EventBufferDisposition::Stop, 1),
+            (crate::snapshot::EventBufferDisposition::Clear, 1),
+            (crate::snapshot::EventBufferDisposition::Release, 1),
+            (crate::snapshot::EventBufferDisposition::Clear, 0),
+        ] {
+            for (policy, word) in policies.into_iter().zip(words) {
+                policy.store(if active == 0 { disabled_policy(word) } else { word }, Ordering::Release);
+            }
+            ACTIVE_SESSION.store(active, Ordering::Release);
+            LAST_SESSION.store(1, Ordering::Release);
+            NEXT_SESSION.store(71, Ordering::Release);
+            ACTIVITY_GENERATION.store(53, Ordering::Release);
+            let events = reset_event_buffers_until(disposition, false, wait_expired, io.instant()).unwrap();
+            assert!(events.is_none());
+            assert_eq!(NEXT_SESSION.load(Ordering::Acquire), 72);
+            assert_eq!(ACTIVITY_GENERATION.load(Ordering::Acquire), 71);
+            let stopped = disposition == crate::snapshot::EventBufferDisposition::Stop;
+            assert_eq!(ACTIVE_SESSION.load(Ordering::Acquire), if stopped || active == 0 { 0 } else { 71 });
+            for (policy, word) in policies.into_iter().zip(words) {
+                assert_eq!(
+                    policy.load(Ordering::Acquire),
+                    if stopped || active == 0 { disabled_policy(word) } else { word }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_reset_failures_restore_the_previous_stop_boundary_and_policies() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let _suppression = SuppressionGuard::enter();
+        let _restore = RecorderPolicyRestore::capture();
+        let owner = OwnedRecorder::new();
+        let recorder = owner.recorder;
+        let _head = RecorderHeadRestore::install(recorder);
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        assert!(recorder.begin_session_until(13, EventBufferCapacity::new(64), io.instant()));
+        for (writer_busy, capture, message) in [
+            (true, false, "seismograph snapshot timed out waiting for active event writers"),
+            (false, true, "seismograph snapshot timed out waiting for an event recorder"),
+            (false, false, "seismograph snapshot timed out clearing an event recorder"),
+        ] {
+            ACTIVE_SESSION.store(13, Ordering::Release);
+            LAST_SESSION.store(13, Ordering::Release);
+            GENERAL_POLICY.store(encode_policy(RecordingPolicy::all(false)), Ordering::Release);
+            recorder.writer_active.store(writer_busy, Ordering::Release);
+            let ring = (!writer_busy).then(|| recorder.ring_lock_until(io.instant()).unwrap());
+            let error =
+                reset_event_buffers_until(crate::snapshot::EventBufferDisposition::Clear, capture, wait_expired, io.instant()).unwrap_err();
+            assert_eq!(error.to_string(), message);
+            assert_eq!(ACTIVE_SESSION.load(Ordering::Acquire), 13);
+            assert_eq!(GENERAL_POLICY.load(Ordering::Acquire), encode_policy(RecordingPolicy::all(false)));
+            drop(ring);
+            recorder.writer_active.store(false, Ordering::Release);
+        }
+        assert!(recorder.clear(true, io.instant()));
+    }
+
+    struct RecorderPolicyRestore(Vec<(&'static AtomicU64, u64)>);
+
+    impl RecorderPolicyRestore {
+        fn capture() -> Self {
+            Self(
+                [
+                    &EVENT_CAPACITY,
+                    &ALLOCATION_POLICY,
+                    &GENERAL_POLICY,
+                    &ARC_DEREFERENCE_POLICY,
+                    &RUNTIME_TASK_POLICY,
+                    &IO_POLICY,
+                    &CACHE_POLICY,
+                    &ACTIVE_SESSION,
+                    &LAST_SESSION,
+                    &NEXT_SESSION,
+                    &ACTIVITY_GENERATION,
+                    &LAST_ALLOCATION_POLICY,
+                    &LAST_GENERAL_POLICY,
+                    &LAST_ARC_DEREFERENCE_POLICY,
+                    &LAST_RUNTIME_TASK_POLICY,
+                    &LAST_IO_POLICY,
+                    &LAST_CACHE_POLICY,
+                ]
+                .into_iter()
+                .map(|atomic| (atomic, atomic.load(Ordering::Acquire)))
+                .collect(),
+            )
+        }
+    }
+
+    impl Drop for RecorderPolicyRestore {
+        fn drop(&mut self) {
+            for (atomic, value) in &self.0 {
+                atomic.store(*value, Ordering::Release);
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_initial_configuration_advances_one_generation_and_publishes_it() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let _suppression = SuppressionGuard::enter();
+        let _restore = RecorderPolicyRestore::capture();
+        ACTIVE_SESSION.store(0, Ordering::Release);
+        NEXT_SESSION.store(71, Ordering::Release);
+        LAST_SESSION.store(43, Ordering::Release);
+        ACTIVITY_GENERATION.store(43, Ordering::Release);
+        for policy in [
+            &ALLOCATION_POLICY,
+            &GENERAL_POLICY,
+            &ARC_DEREFERENCE_POLICY,
+            &RUNTIME_TASK_POLICY,
+            &IO_POLICY,
+            &CACHE_POLICY,
+        ] {
+            policy.store(0, Ordering::Release);
+        }
+        let configuration = Configuration {
+            runtime_tasks: RecordingPolicy::all(false),
+            event_capacity_per_thread: EventBufferCapacity::new(64),
+            ..Configuration::default()
+        };
+        configure_locked(configuration);
+        assert_eq!(NEXT_SESSION.load(Ordering::Acquire), 72);
+        assert_eq!(ACTIVE_SESSION.load(Ordering::Acquire), 71);
+        assert_eq!(LAST_SESSION.load(Ordering::Acquire), 71);
+        assert_eq!(ACTIVITY_GENERATION.load(Ordering::Acquire), 71);
+        assert_eq!(self::configuration(), configuration);
+        assert_eq!(last_recording_policies().runtime_tasks, configuration.runtime_tasks);
+    }
+
+    #[test]
+    fn gamma_round2_policy_restoration_keeps_disabled_session_zero() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let _suppression = SuppressionGuard::enter();
+        let _restore = RecorderPolicyRestore::capture();
+        let policies = [
+            &ALLOCATION_POLICY,
+            &GENERAL_POLICY,
+            &ARC_DEREFERENCE_POLICY,
+            &RUNTIME_TASK_POLICY,
+            &IO_POLICY,
+            &CACHE_POLICY,
+        ];
+        for session in [None, Some(27)] {
+            ACTIVE_SESSION.store(91, Ordering::Release);
+            restore_recording_policies(0x103, 0x203, 0x303, 0x403, 0x503, 0x603, session);
+            assert_eq!(ACTIVE_SESSION.load(Ordering::Acquire), session.unwrap_or(0));
+            assert_eq!(
+                policies.map(|policy| policy.load(Ordering::Acquire)),
+                [0x103, 0x203, 0x303, 0x403, 0x503, 0x603]
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_round2_disabled_runtime_policy_prevents_even_explicit_backtrace_capture() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let _restore = RecorderPolicyRestore::capture();
+        RUNTIME_TASK_POLICY.store(
+            encode_policy(RecordingPolicy {
+                enabled: false,
+                capture_backtraces: true,
+                event_sampling: EventSampling::ALL,
+            }),
+            Ordering::Release,
+        );
+        for policy in [BacktraceCapture::Always, BacktraceCapture::Configured, BacktraceCapture::Never] {
+            assert_eq!(
+                capture_frames_with(policy, RUNTIME_TASK_POLICY.load(Ordering::Relaxed), || panic!("disabled capture")).1,
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_round2_local_ring_reset_reuse_and_release_preserve_activity() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let deadline = io.instant();
+        let recorder = ThreadRecorder::new();
+        assert_eq!(recorder.session.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            recorder.thread_name[recorder.thread_name_len..],
+            vec![0; MAX_THREAD_NAME_LEN - recorder.thread_name_len]
+        );
+        let capacity = EventBufferCapacity::new(64);
+        assert!(recorder.begin_session_until(13, capacity, deadline));
+        let slots = recorder.ring().unwrap().slots.as_ptr();
+        recorder.write_index.store(71, Ordering::Relaxed);
+        for (index, count) in recorder.class_events.iter().enumerate() {
+            count.store(index as u64 + 2, Ordering::Relaxed);
+        }
+        assert!(recorder.begin_session_until(17, capacity, deadline));
+        assert_eq!(recorder.ring().unwrap().slots.as_ptr(), slots);
+        assert_eq!(recorder.ring_capacity.load(Ordering::Relaxed), 64);
+        assert_eq!(recorder.session.load(Ordering::Relaxed), 17);
+        assert_eq!(recorder.activity_session.load(Ordering::Relaxed), 17);
+        assert_eq!(recorder.write_index.load(Ordering::Relaxed), 0);
+        assert!(recorder.class_events.iter().all(|count| count.load(Ordering::Relaxed) == 0));
+        recorder.write_index.store(9, Ordering::Relaxed);
+        recorder.class_events[3].store(9, Ordering::Relaxed);
+        assert!(recorder.clear(false, deadline));
+        assert_eq!(recorder.session.load(Ordering::Relaxed), 0);
+        assert_eq!(recorder.activity_session.load(Ordering::Relaxed), 0);
+        assert_eq!(recorder.class_events[3].load(Ordering::Relaxed), 0);
+        recorder.write_index.store(5, Ordering::Relaxed);
+        recorder.class_events[2].store(5, Ordering::Relaxed);
+        assert!(recorder.begin_session_until(19, EventBufferCapacity::new(128), deadline));
+        assert_eq!(recorder.ring_capacity.load(Ordering::Relaxed), 128);
+        assert_eq!(recorder.session.load(Ordering::Relaxed), 19);
+        assert_eq!(recorder.write_index.load(Ordering::Relaxed), 0);
+        assert!(recorder.class_events.iter().all(|count| count.load(Ordering::Relaxed) == 0));
+        recorder.write_index.store(3, Ordering::Relaxed);
+        recorder.class_events[3].store(3, Ordering::Relaxed);
+        {
+            let _guard = recorder.ring_lock_until(deadline).unwrap();
+            recorder.release_ring_locked();
+        }
+        assert!(recorder.ring().is_none());
+        assert_eq!(recorder.write_index.load(Ordering::Relaxed), 0);
+        assert_eq!(recorder.session.load(Ordering::Relaxed), 0);
+        assert_eq!(recorder.ring_capacity.load(Ordering::Relaxed), 0);
+        assert_eq!(recorder.activity_session.load(Ordering::Relaxed), 19);
+        assert_eq!(recorder.class_events[3].load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn gamma_round2_wrapped_ring_snapshot_has_exact_retained_sequence_and_loss() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let deadline = io.instant();
+        let recorder = ThreadRecorder::new();
+        assert_eq!(recorder.snapshot_until(deadline).unwrap().log.total_events, 0);
+        assert!(recorder.begin_session_until(13, EventBufferCapacity::new(64), deadline));
+        for index in 0..70 {
+            let slot = &recorder.ring().unwrap().slots[index & 63];
+            let _guard = slot.lock_until(deadline).unwrap();
+            // SAFETY: this test is the sole writer and holds the slot lock.
+            unsafe {
+                slot.data.get().write(EventData {
+                    sequence: index as u64 + 1,
+                    timestamp: EventTimestamp::from_ticks(index as u64 + 100),
+                    kind: EventKind::MutexAccess,
+                    payload: EventPayload::Object(ObjectId::new(index as u64 + 200)),
+                    ..EventData::EMPTY
+                });
+            }
+        }
+        recorder.write_index.store(70, Ordering::Relaxed);
+        let snapshot = recorder.snapshot_until(deadline).unwrap();
+        assert_eq!((snapshot.log.total_events, snapshot.log.lost_events), (70, 6));
+        assert_eq!(
+            snapshot
+                .events
+                .iter()
+                .map(|event| (event.sequence.get(), event.timestamp.ticks(), event.object_id().unwrap().get()))
+                .collect::<Vec<_>>(),
+            (6_u64..70).map(|index| (index + 1, index + 100, index + 200)).collect::<Vec<_>>()
+        );
+        assert!(recorder.clear(true, deadline));
+        assert!(recorder.ring().is_none());
+    }
+
+    #[test]
+    fn gamma_round2_retired_budget_retains_exact_boundary_and_forgets_on_release() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let owner = OwnedRecorder::new();
+        let recorder = owner.recorder;
+        let saved = {
+            let mut retired = retired_rings();
+            std::mem::replace(
+                &mut *retired,
+                RetiredRings {
+                    rings: VecDeque::new(),
+                    allocated_bytes: 0,
+                },
+            )
+        };
+        let bytes = RETIRED_RING_BUDGET_BYTES + std::mem::size_of::<Slot>();
+        register_retired_ring(recorder, bytes);
+        assert_eq!(retired_rings().allocated_bytes, bytes);
+        assert_eq!(retired_rings().rings.len(), 1);
+        assert!(!recorder.release_on_unlock.load(Ordering::Relaxed));
+        recorder.release_ring_locked();
+        assert_eq!(retired_rings().allocated_bytes, 0);
+        assert!(retired_rings().rings.is_empty());
+        *retired_rings() = saved;
+    }
+
+    #[test]
+    fn gamma_round2_retirement_registers_only_live_ring_bytes() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let saved = {
+            let mut retired = retired_rings();
+            std::mem::replace(
+                &mut *retired,
+                RetiredRings {
+                    rings: VecDeque::new(),
+                    allocated_bytes: 0,
+                },
+            )
+        };
+        let empty_owner = OwnedRecorder::new();
+        let empty = empty_owner.recorder;
+        empty.retire();
+        assert!(empty.retired.load(Ordering::Acquire));
+        assert!(retired_rings().rings.is_empty());
+        assert_eq!(retired_rings().allocated_bytes, 0);
+        let owner = OwnedRecorder::new();
+        let recorder = owner.recorder;
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        assert!(recorder.begin_session_until(13, EventBufferCapacity::new(64), io.instant()));
+        recorder.retire();
+        assert!(recorder.retired.load(Ordering::Acquire));
+        assert_eq!(retired_rings().allocated_bytes, 64 * std::mem::size_of::<Slot>());
+        assert_eq!(retired_rings().rings.len(), 1);
+        recorder.schedule_retired_snapshot_release();
+        assert!(recorder.release_on_unlock.load(Ordering::Acquire));
+        assert_eq!(retired_rings().allocated_bytes, 0);
+        assert!(retired_rings().rings.is_empty());
+        assert!(
+            recorder.ring().is_some(),
+            "accounting must be removed before the held snapshot reader releases storage"
+        );
+        recorder.release_on_unlock.store(false, Ordering::Release);
+        register_retired_ring(recorder, 64 * std::mem::size_of::<Slot>());
+        recorder.release_retired_ring_with(|current| {
+            assert!(ptr::eq(current, recorder));
+            assert!(current.release_on_unlock.load(Ordering::Acquire));
+            assert_eq!(retired_rings().allocated_bytes, 0);
+            assert!(
+                retired_rings().rings.is_empty(),
+                "eviction must remove accounting before attempting a possibly contended ring lock"
+            );
+            None
+        });
+        assert!(recorder.ring().is_some());
+        recorder.release_ring_locked();
+        assert!(retired_rings().rings.is_empty());
+        *retired_rings() = saved;
+    }
+
+    #[test]
+    fn gamma_round2_thread_name_uses_the_entire_fixed_capacity() {
+        let name = "n".repeat(MAX_THREAD_NAME_LEN + 1);
+        std::thread::Builder::new()
+            .name(name)
+            .spawn(|| {
+                let recorder = ThreadRecorder::new();
+                assert_eq!(recorder.thread_name_len, MAX_THREAD_NAME_LEN);
+                assert_eq!(recorder.thread_name, [b'n'; MAX_THREAD_NAME_LEN]);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        std::thread::spawn(|| {
+            let recorder = ThreadRecorder::new();
+            assert_eq!(recorder.thread_name_len, 0);
+            assert_eq!(recorder.thread_name, [0; MAX_THREAD_NAME_LEN]);
+        })
+        .join()
+        .unwrap();
+    }
+
+    fn gamma_unmix(mut value: u64) -> ObjectId {
+        value ^= (value >> 31) ^ (value >> 62);
+        value = value.wrapping_mul(0x3196_42b2_d24d_8ec3);
+        value ^= (value >> 27) ^ (value >> 54);
+        value = value.wrapping_mul(0x96de_1b17_3f11_9089);
+        value ^= (value >> 30) ^ (value >> 60);
+        ObjectId::new(value.wrapping_sub(0x9e37_79b9_7f4a_7c15))
+    }
+
+    #[test]
+    fn gamma_survivor_empty_recorder_state_and_retired_pointer_identity() {
+        let first = ThreadRecorder::new();
+        let second = ThreadRecorder::new();
+        assert!(retired_ring_matches(&first, &first));
+        assert!(!retired_ring_matches(&first, &second));
+        assert_eq!(first.activity_session.load(Ordering::Relaxed), 0);
+        assert_eq!(first.ring_capacity.load(Ordering::Relaxed), 0);
+        assert_eq!(first.write_index.load(Ordering::Relaxed), 0);
+        assert!(first.ring().is_none());
+        assert!(first.class_events.iter().all(|count| count.load(Ordering::Relaxed) == 0));
+        assert!(!first.writer_active.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn gamma_survivor_never_backtrace_has_exactly_zero_frames() {
+        struct Restore(u64);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                RUNTIME_TASK_POLICY.store(self.0, Ordering::SeqCst);
+            }
+        }
+        let _test = TEST_LOCK.lock().unwrap();
+        let _restore = Restore(RUNTIME_TASK_POLICY.swap(encode_policy(RecordingPolicy::all(true)), Ordering::SeqCst));
+        assert_eq!(
+            capture_frames_with(BacktraceCapture::Never, RUNTIME_TASK_POLICY.load(Ordering::Relaxed), || panic!(
+                "never capture"
+            ))
+            .1,
+            0
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_sampling_includes_exact_nonpower_threshold() {
+        for denominator in [3, 5, 7, 999_999] {
+            let sampling = EventSampling::one_in(denominator).unwrap();
+            let threshold = u64::MAX / denominator as u64;
+            assert!(sampling.includes(gamma_unmix(threshold - 1)));
+            assert!(sampling.includes(gamma_unmix(threshold)));
+            assert!(!sampling.includes(gamma_unmix(threshold + 1)));
+        }
+        for denominator in [2, 4, 64] {
+            let sampling = EventSampling::one_in(denominator).unwrap();
+            assert!(sampling.includes(gamma_unmix(denominator as u64)));
+            assert!(!sampling.includes(gamma_unmix(denominator as u64 + 1)));
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_selection_revalidates_without_reading_clock_or_recording() {
+        struct Restore(u64, u64);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                ACTIVE_SESSION.store(self.0, Ordering::SeqCst);
+                GENERAL_POLICY.store(self.1, Ordering::SeqCst);
+            }
+        }
+        let _test = TEST_LOCK.lock().unwrap();
+        let policy = encode_policy(RecordingPolicy::all(false));
+        let _restore = Restore(
+            ACTIVE_SESSION.swap(13, Ordering::SeqCst),
+            GENERAL_POLICY.swap(policy, Ordering::SeqCst),
+        );
+        ACTIVE_SESSION.store(0, Ordering::SeqCst);
+        assert_eq!(try_record(EventClass::General, || panic!("inactive builder")), None);
+        ACTIVE_SESSION.store(13, Ordering::SeqCst);
+        {
+            let _suppression = SuppressionGuard::enter();
+            assert_eq!(try_record(EventClass::General, || panic!("suppressed builder")), None);
+        }
+        GENERAL_POLICY.store(disabled_policy(policy), Ordering::SeqCst);
+        assert_eq!(try_record(EventClass::General, || panic!("disabled builder")), None);
+    }
 
     const ACTIVITY_CLASSES: [(EventClass, EventKind); 6] = [
         (EventClass::Allocation, EventKind::Allocation),
@@ -2786,6 +3998,22 @@ mod tests {
         let (first, second) = std::thread::spawn(|| (cached_thread_id(), cached_thread_id())).join().unwrap();
 
         assert_eq!((first, first != thread_id(), first.get() != 0), (second, true, true));
+    }
+
+    #[test]
+    fn uncached_identity_consumes_one_counter_value_and_cached_reads_consume_none() {
+        let previous = RECORDER_THREAD_ID.replace(0);
+        let counter = AtomicU64::new(37);
+        let first = cached_thread_id_with(&counter);
+        let repeated = cached_thread_id_with(&counter);
+        let after_repeated = counter.load(Ordering::Relaxed);
+        RECORDER_THREAD_ID.set(0);
+        let second = cached_thread_id_with(&counter);
+        let after_second = counter.load(Ordering::Relaxed);
+        RECORDER_THREAD_ID.set(previous);
+
+        assert_eq!((first.get(), repeated.get(), after_repeated), (37, 37, 38));
+        assert_eq!((second.get(), after_second), (38, 39));
     }
 
     #[test]

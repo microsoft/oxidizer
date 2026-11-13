@@ -170,6 +170,7 @@ impl OwnerBuffer {
     )]
     pub(crate) fn new(capacity: usize) -> Result<Self, seismograph::Error> {
         let capacity = capacity.clamp(1, OWNER_LIMIT);
+        // #[gamma::skip(try.propagate_to_unwrap, literal.str_to_empty, literal.str_to_xyzzy, reason = "Capacity is clamped to at most 1024 fixed-size native Owner records, so this layout cannot overflow on the supported 64-bit targets")]
         let layout = Layout::array::<seismograph_rallocator::native::Owner>(capacity)
             .expect("capacity is clamped to OWNER_LIMIT, whose owner array fits within isize::MAX");
         // SAFETY: System bypasses GlobalAlloc; layout describes an array of owner rows.
@@ -216,6 +217,18 @@ struct Slot {
     value: Mutex<Option<Observation>>,
 }
 
+fn already_published(slot: &Slot, round: u64, generation: u64) -> bool {
+    slot.round.load(Ordering::Relaxed) == round && slot.generation.load(Ordering::Relaxed) == generation
+}
+
+fn stamp_observation(observation: &mut Observation, generation: u64, session: u64, round: u64, thread_id: u64, captured_nanos: u64) {
+    observation.generation = generation;
+    observation.session_id = session;
+    observation.round = round;
+    observation.thread_id = thread_id;
+    observation.captured_nanos = captured_nanos;
+}
+
 /// Publishes at most once per lease and requested round after a native operation.
 pub(crate) fn publish() {
     if !seismograph_rallocator::native::publication_enabled() || !is_enabled(EventClass::Allocation) {
@@ -228,7 +241,7 @@ pub(crate) fn publish() {
         let generation = unsafe { metadata.generation() };
         // SAFETY: No native core borrow is retained across slot initialization.
         let Some(slot) = (unsafe { metadata.slot() }) else { return };
-        if slot.round.load(Ordering::Relaxed) == round && slot.generation.load(Ordering::Relaxed) == generation {
+        if already_published(slot, round, generation) {
             return;
         }
         without_recording(|| {
@@ -239,11 +252,7 @@ pub(crate) fn publish() {
             // SAFETY: The current thread holds the sole core lease; copying ends
             // before publishing, locking, serializing, or invoking any callback.
             let mut observation = unsafe { (&*owner.core_ptr()).observe(&mut budget) };
-            observation.generation = generation;
-            observation.session_id = 0;
-            observation.round = round;
-            observation.thread_id = thread_id;
-            observation.captured_nanos = captured_nanos;
+            stamp_observation(&mut observation, generation, 0, round, thread_id, captured_nanos);
             match slot.value.try_lock() {
                 Ok(mut value) => {
                     *value = Some(observation);
@@ -259,6 +268,113 @@ pub(crate) fn publish() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_publication_guards_compare_generation_and_round_independently() {
+        use super::*;
+
+        let slot = Slot {
+            round: AtomicU64::new(13),
+            generation: AtomicU64::new(19),
+            value: Mutex::new(None),
+        };
+        for (round, generation, expected) in [(13, 19, true), (23, 19, false), (13, 23, false), (23, 31, false)] {
+            assert_eq!(already_published(&slot, round, generation), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_observation_context_uses_supplied_values_without_changing_payload() {
+        use super::*;
+
+        for captured in [0, 123] {
+            let mut observation = Observation::EMPTY;
+            observation.large.counts[9] = 37;
+            observation.remote.budget_remaining = 41;
+            observation.classes[1].capacity = 43;
+            stamp_observation(&mut observation, 3, 7, 11, 13, captured);
+            assert_eq!(
+                (
+                    observation.generation,
+                    observation.session_id,
+                    observation.round,
+                    observation.thread_id,
+                    observation.captured_nanos
+                ),
+                (3, 7, 11, 13, captured)
+            );
+            assert_eq!(observation.large.counts[9], 37);
+            assert_eq!(observation.remote.budget_remaining, 41);
+            assert_eq!(observation.classes[1].capacity, 43);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_metadata_generations_and_owner_buffer_capacity() {
+        use seismograph_rallocator::native::ObservationSource;
+
+        use super::*;
+
+        let metadata = Metadata::new();
+        assert_eq!(metadata.published(), (ObservationSource::Unobserved, None));
+        // SAFETY: This standalone metadata is exclusively test-owned; it is never published.
+        unsafe { metadata.register(0x4000) };
+        // SAFETY: The standalone metadata's next field has no concurrent access.
+        assert_eq!(unsafe { metadata.next() }, 0x4000);
+        // SAFETY: The standalone metadata has no concurrent lease changes.
+        assert_eq!(unsafe { metadata.generation() }, 0);
+        // SAFETY: The exclusively held metadata starts inactive.
+        unsafe { metadata.end_lease() };
+        // SAFETY: No other lease holder can change this standalone generation.
+        assert_eq!(unsafe { metadata.generation() }, 0);
+        // SAFETY: This test is the metadata's sole lease holder.
+        unsafe { metadata.begin_lease() };
+        // SAFETY: The generation is read only by its sole lease holder.
+        assert_eq!(unsafe { metadata.generation() }, 1);
+        // SAFETY: The test ends the lease it just began.
+        unsafe { metadata.end_lease() };
+        // SAFETY: The standalone metadata cannot be concurrently reused.
+        assert_eq!(unsafe { metadata.generation() }, 2);
+        // SAFETY: No other thread can acquire this standalone metadata.
+        unsafe { metadata.begin_lease() };
+        // SAFETY: This is the metadata's sole active lease.
+        assert_eq!(unsafe { metadata.generation() }, 3);
+        // SAFETY: This test ends its final standalone lease.
+        unsafe { metadata.end_lease() };
+        for capacity in [0, 1, 3, OWNER_LIMIT, OWNER_LIMIT + 1, usize::MAX] {
+            let mut buffer = OwnerBuffer::new(capacity).unwrap();
+            let expected = capacity.clamp(1, OWNER_LIMIT);
+            assert_eq!(
+                buffer.layout.size(),
+                expected * std::mem::size_of::<seismograph_rallocator::native::Owner>()
+            );
+            assert!(buffer.as_slice().is_empty());
+            assert!(!buffer.full());
+            for index in 0..expected {
+                let row = seismograph_rallocator::native::Owner {
+                    id: index as u64,
+                    generation: 2,
+                    leased: false,
+                    source: ObservationSource::Unobserved,
+                    observation: None,
+                };
+                buffer.push(&row);
+                assert_eq!(buffer.as_slice().last().unwrap(), &row);
+                assert_eq!(buffer.full(), index + 1 == expected);
+            }
+            assert_eq!(buffer.as_slice().len(), expected);
+        }
+        // SAFETY: The standalone metadata is exclusively owned and no other thread accesses its slot.
+        let slot = unsafe { metadata.slot() }.unwrap();
+        assert_eq!(slot.round.load(Ordering::Relaxed), 0);
+        assert_eq!(slot.generation.load(Ordering::Relaxed), 0);
+        assert!(slot.value.lock().unwrap().is_none());
+        let pointer = metadata.slot.swap(std::ptr::null_mut(), Ordering::AcqRel);
+        // SAFETY: The slot borrow ended and no publication readers exist.
+        unsafe { pointer.drop_in_place() };
+        // SAFETY: The original System allocation layout is preserved after its value was dropped.
+        unsafe { System.dealloc(pointer.cast(), Layout::new::<Slot>()) };
+    }
+
     use super::*;
 
     // SAFETY: These tests keep every block within this linked snmalloc instance.

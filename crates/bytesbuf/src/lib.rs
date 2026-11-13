@@ -647,6 +647,7 @@ mod constants;
 mod memory_guard;
 mod span;
 mod span_builder;
+mod sync_fence;
 mod telemetry;
 mod vec;
 mod view;

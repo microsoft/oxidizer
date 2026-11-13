@@ -172,6 +172,7 @@ pub trait FieldEncodeOutput {
     ///
     /// Returns an error when the destination cannot retain the value.
     fn push_u64(&mut self, mut value: u64) -> Result<(), InsertError> {
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Every returned digit is overwritten before reading; changing the fill byte or adding an unused leading storage slot cannot change serialization")]
         let mut storage = [0_u8; 20];
         let mut start = storage.len();
         loop {

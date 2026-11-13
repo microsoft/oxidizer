@@ -276,6 +276,7 @@ impl std::error::Error for StreamingError {}
 #[cfg(any(feature = "serving", feature = "axum"))]
 pub(crate) fn apply_stream_headers(dst: &mut HeaderMap, content_type: HeaderValue, mut headers: HeaderMap) {
     strip_uncontrolled_response_headers(&mut headers);
+    // #[gamma::skip(stmt.delete_call, reason = "The unconditional HeaderMap::insert below replaces every appended CONTENT_TYPE value; both production callers supply freshly empty response headers")]
     headers.remove(header::CONTENT_TYPE);
     append_headers(dst, headers);
     let _ = dst.insert(header::CONTENT_TYPE, content_type);
@@ -286,6 +287,49 @@ mod tests {
     use futures_util::stream;
 
     use super::*;
+
+    #[cfg(any(feature = "serving", feature = "axum"))]
+    #[test]
+    fn gamma_round2_stream_headers_strip_hop_by_hop_and_replace_content_type() {
+        let mut destination = HeaderMap::new();
+        destination.insert(header::CONTENT_TYPE, HeaderValue::from_static("old"));
+        let mut custom = HeaderMap::new();
+        for name in [
+            "connection",
+            "keep-alive",
+            "proxy-connection",
+            "transfer-encoding",
+            "content-length",
+        ] {
+            custom.insert(http::header::HeaderName::from_static(name), HeaderValue::from_static("close"));
+        }
+        custom.append(header::CONTENT_TYPE, HeaderValue::from_static("wrong1"));
+        custom.append(header::CONTENT_TYPE, HeaderValue::from_static("wrong2"));
+        custom.append("x-custom", HeaderValue::from_static("first"));
+        custom.append("x-custom", HeaderValue::from_static("second"));
+        apply_stream_headers(&mut destination, HeaderValue::from_static("text/event-stream"), custom);
+        assert_eq!(
+            destination.get_all(header::CONTENT_TYPE).iter().collect::<Vec<_>>(),
+            [HeaderValue::from_static("text/event-stream")]
+        );
+        for name in [
+            "connection",
+            "keep-alive",
+            "proxy-connection",
+            "transfer-encoding",
+            "content-length",
+        ] {
+            assert!(!destination.contains_key(name), "{name}");
+        }
+        assert_eq!(
+            destination
+                .get_all("x-custom")
+                .iter()
+                .map(|value| value.to_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+    }
 
     #[test]
     fn streaming_response_debug_is_non_exhaustive() {

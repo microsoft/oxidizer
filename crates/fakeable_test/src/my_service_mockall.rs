@@ -34,7 +34,9 @@ impl MyService {
 
     #[allow(clippy::missing_const_for_fn, reason = "Used by mockall")]
     pub fn get_other_value(&self) -> i32 {
+        // #[gamma::skip(stmt.delete_call, literal.str_to_empty, literal.str_to_xyzzy, tag = "equivalent", reason = "This real fixture helper ignores its argument and only borrows its immutable value field without side effects.")]
         self.unsupported("aa");
+        // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "The fixture helper has an empty const body and returns unit.")]
         Self::unsupported2();
         self.other_value
     }
@@ -58,6 +60,7 @@ impl MyService {
     )]
     pub async fn async_function_unit(&self) {}
 
+    // #[gamma::skip(fn_value.unit, tag = "equivalent", reason = "This helper only borrows the real fixture's value field and discards the reference; it has no side effects.")]
     fn unsupported(&self, _input: &str) {
         let _ = self.get_value();
     }

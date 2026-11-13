@@ -344,6 +344,94 @@ mod fetch_and_promote_tests {
     use crate::telemetry::attributes;
     use crate::wrapper::CacheWrapper;
 
+    #[test]
+    fn refresh_completion_follows_the_outcome_for_hits_misses_and_errors() {
+        struct Handler(Arc<Mutex<Vec<String>>>);
+        impl crate::CacheEventHandler for Handler {
+            fn on_tier_event(&self, event: &crate::CacheTierEvent<'_>) {
+                assert_eq!(event.request_id, 71);
+                assert_eq!(event.tier_name, "manual-refresh");
+                assert!(event.fallback);
+                self.0.lock().push(event.outcome.to_owned());
+            }
+
+            fn on_operation_complete(&self, event: &crate::CacheOperationEvent<'_>) {
+                assert_eq!(event.request_id, 71);
+                assert_eq!(event.cache_name, "manual-refresh");
+                assert_eq!(event.duration, Duration::ZERO);
+                assert!(!event.coalesced);
+                self.0.lock().push(event.operation.to_owned());
+            }
+        }
+
+        for outcome in ["hit", "miss", "error"] {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let fallback = MockCache::<String, i32>::new();
+            let key = "refresh-key".to_owned();
+            if outcome == "hit" {
+                block_on(fallback.insert(key.clone(), CacheEntry::new(42))).unwrap();
+            } else if outcome == "error" {
+                fallback.fail_when(|_| true);
+            }
+            let telemetry = CacheTelemetry::new().with_handler(Arc::new(Handler(Arc::clone(&events))));
+            let cache = FallbackCache::new(
+                "manual-refresh",
+                MockCache::<String, i32>::new(),
+                fallback,
+                Clock::new_frozen(),
+                None,
+                telemetry,
+            );
+
+            block_on(cache.inner.fetch_and_promote(key).with_request_id(71));
+
+            assert_eq!(*events.lock(), [format!("cache.refresh_{outcome}"), "cache.refresh".to_owned()]);
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_round2_duplicate_refresh_records_each_suppression_without_starting_a_background_task() {
+        use seismograph::recorder::event::EventKind;
+
+        seismograph::recorder(seismograph::recorder::Configuration {
+            cache: seismograph::recorder::Policy::all(false),
+            event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(1024),
+            ..Default::default()
+        });
+        let count = || {
+            let owner = seismograph::recorder::thread_id();
+            seismograph::snapshot::decode(
+                seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default())
+                    .unwrap()
+                    .as_bytes(),
+            )
+            .unwrap()
+            .events
+            .events
+            .iter()
+            .filter(|event| event.thread_id == owner && event.kind == EventKind::CacheRefreshSuppressed)
+            .count()
+        };
+        let refresh = TimeToRefresh::new(Duration::from_secs(47), Spawner::new_tokio(None));
+        let key = "already-in-flight".to_owned();
+        assert!(refresh.try_start_refresh(&key));
+        let cache = FallbackCache::new(
+            "round2-suppressed",
+            MockCache::<String, i32>::new(),
+            MockCache::<String, i32>::new(),
+            Clock::new_frozen(),
+            Some(refresh),
+            CacheTelemetry::new(),
+        );
+        let before = count();
+        for expected in 1..=2 {
+            cache.do_refresh(&key);
+            assert_eq!(count(), before + expected);
+            assert!(!cache.inner.refresh.as_ref().unwrap().try_start_refresh(&key));
+        }
+    }
+
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
         futures::executor::block_on(f)
     }

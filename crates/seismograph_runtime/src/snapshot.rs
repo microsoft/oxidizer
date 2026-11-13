@@ -469,7 +469,10 @@ impl std::error::Error for Error {}
 /// Returns an error for malformed bytes or an unsupported wire or schema
 /// version. Only the current wire and schema versions are accepted.
 pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
-    let mut reader = Reader::new(bytes);
+    decode_reader(&mut Reader::new(bytes))
+}
+
+fn decode_reader(reader: &mut Reader<'_>) -> Result<Snapshot, Error> {
     if reader.read(MAGIC.len())? != MAGIC {
         return Err(Error::new(ErrorKind::Malformed));
     }
@@ -483,19 +486,21 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
     }
     let runtime_count = reader.u32()? as usize;
     let address_count = reader.u32()? as usize;
-    if !count_fits(runtime_count, RUNTIME_FIXED_LEN, reader.remaining().len()) {
+    if
+    // #[gamma::skip(cond.always_false, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+    !count_fits(runtime_count, RUNTIME_FIXED_LEN, reader.remaining().len()) {
         return Err(Error::new(ErrorKind::Malformed));
     }
 
     let mut runtimes = Vec::with_capacity(runtime_count);
     for _ in 0..runtime_count {
-        runtimes.push(read_runtime(&mut reader)?);
+        runtimes.push(read_runtime(reader)?);
     }
     if !count_fits(address_count, ADDRESS_LOOKUP_FIXED_LEN, reader.remaining().len()) {
         return Err(Error::new(ErrorKind::Malformed));
     }
     let addresses = (0..address_count)
-        .map(|_| read_address_lookup(&mut reader))
+        .map(|_| read_address_lookup(reader))
         .collect::<Result<Vec<_>, _>>()?;
     if !reader.remaining().is_empty() {
         return Err(Error::new(ErrorKind::Malformed));
@@ -504,40 +509,93 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
 }
 
 pub(crate) fn encoded_len(snapshot: &Snapshot) -> Option<usize> {
-    let runtimes_len = snapshot.runtimes.iter().try_fold(HEADER_LEN, |total, runtime| {
-        let workers = runtime.workers.len().checked_mul(WORKER_FIXED_LEN)?;
-        let tasks = runtime.tasks.len().checked_mul(TASK_FIXED_LEN)?;
-        total
-            .checked_add(RUNTIME_FIXED_LEN)?
-            .checked_add(runtime.name.len())?
-            .checked_add(workers)
-            .and_then(|total| total.checked_add(tasks))
-    })?;
-    snapshot.addresses.iter().try_fold(runtimes_len, |total, lookup| {
+    encoded_len_from_counts(
+        snapshot
+            .runtimes
+            .iter()
+            .map(|runtime| (runtime.name.len(), runtime.workers.len(), runtime.tasks.len())),
+        snapshot.addresses.iter().map(|lookup| {
+            (
+                lookup.symbol.as_ref().map_or(0, String::len),
+                lookup.filename.as_ref().map_or(0, String::len),
+            )
+        }),
+    )
+}
+
+fn encoded_len_from_counts(
+    runtimes: impl IntoIterator<Item = (usize, usize, usize)>,
+    addresses: impl IntoIterator<Item = (usize, usize)>,
+) -> Option<usize> {
+    let runtimes_len = runtimes
+        .into_iter()
+        .try_fold(HEADER_LEN, |total, (name_len, worker_count, task_count)| {
+            let workers = worker_count.checked_mul(WORKER_FIXED_LEN)?;
+            let tasks = task_count.checked_mul(TASK_FIXED_LEN)?;
+            total
+                .checked_add(RUNTIME_FIXED_LEN)?
+                .checked_add(name_len)?
+                .checked_add(workers)
+                .and_then(|total| total.checked_add(tasks))
+        })?;
+    addresses.into_iter().try_fold(runtimes_len, |total, (symbol_len, filename_len)| {
         total
             .checked_add(ADDRESS_LOOKUP_FIXED_LEN)?
-            .checked_add(lookup.symbol.as_ref().map_or(0, String::len))?
-            .checked_add(lookup.filename.as_ref().map_or(0, String::len))
+            .checked_add(symbol_len)?
+            .checked_add(filename_len)
     })
 }
 
+fn wire_count(value: usize) -> Result<u32, ()> {
+    u32::try_from(value).map_err(|_| ())
+}
+
+fn header_counts(runtime_count: usize, address_count: usize) -> Result<(u32, u32), ()> {
+    Ok((wire_count(runtime_count)?, wire_count(address_count)?))
+}
+
 pub(crate) fn encode(snapshot: &Snapshot, output: &mut [u8]) -> Result<(), ()> {
+    encode_with(snapshot, output, header_counts, write_address_lookup)
+}
+
+fn encode_with(
+    snapshot: &Snapshot,
+    output: &mut [u8],
+    counts: impl FnOnce(usize, usize) -> Result<(u32, u32), ()>,
+    address: impl FnMut(&mut Writer<'_>, &AddressLookup) -> Result<(), ()>,
+) -> Result<(), ()> {
     if encoded_len(snapshot) != Some(output.len()) {
         return Err(());
     }
     let mut writer = Writer::new(output);
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding encoded_len equality guarantees space for this fixed magic field")]
     writer.write(&MAGIC)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding encoded_len equality guarantees space for this fixed wire version")]
     writer.u16(WIRE_VERSION)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding encoded_len equality guarantees space for this fixed schema version")]
     writer.u16(SCHEMA_VERSION)?;
-    writer.u32(u32::try_from(snapshot.runtimes.len()).map_err(|_| ())?)?;
-    writer.u32(u32::try_from(snapshot.addresses.len()).map_err(|_| ())?)?;
+    let (runtime_count, address_count) = counts(snapshot.runtimes.len(), snapshot.addresses.len())?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "encoded_len proved exact buffer size for this fixed count; wire-count failure is outside the guard")]
+    writer.u32(runtime_count)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "encoded_len proved exact buffer size for this fixed count; wire-count failure is outside the guard")]
+    writer.u32(address_count)?;
     for runtime in &snapshot.runtimes {
         write_runtime(&mut writer, runtime)?;
     }
-    for lookup in &snapshot.addresses {
-        write_address_lookup(&mut writer, lookup)?;
-    }
+    write_records(&mut writer, &snapshot.addresses, address)?;
+    // #[gamma::skip(cond.always_true, result.err_to_ok, reason = "encoded_len checks exact output length and counts the same fields and variable lengths written above; successful writes consume the entire buffer")]
     if writer.remaining.is_empty() { Ok(()) } else { Err(()) }
+}
+
+fn write_records<T>(
+    writer: &mut Writer<'_>,
+    records: &[T],
+    mut write: impl FnMut(&mut Writer<'_>, &T) -> Result<(), ()>,
+) -> Result<(), ()> {
+    for record in records {
+        write(writer, record)?;
+    }
+    Ok(())
 }
 
 fn write_runtime(writer: &mut Writer<'_>, runtime: &Runtime) -> Result<(), ()> {
@@ -551,9 +609,9 @@ fn write_runtime(writer: &mut Writer<'_>, runtime: &Runtime) -> Result<(), ()> {
     writer.u32(runtime.configured_workers)?;
     writer.u64(runtime.created_at.ticks())?;
     writer.u64(runtime.retired_at.map_or(0, EventTimestamp::ticks))?;
-    writer.u32(u32::try_from(runtime.name.len()).map_err(|_| ())?)?;
-    writer.u32(u32::try_from(runtime.workers.len()).map_err(|_| ())?)?;
-    writer.u32(u32::try_from(runtime.tasks.len()).map_err(|_| ())?)?;
+    writer.count(runtime.name.len())?;
+    writer.count(runtime.workers.len())?;
+    writer.count(runtime.tasks.len())?;
     writer.u32(runtime.counters_scope as u32)?;
     write_counters(writer, runtime.counters)?;
     writer.write(runtime.name.as_bytes())?;
@@ -647,6 +705,7 @@ fn read_worker(reader: &mut Reader<'_>) -> Result<Worker, Error> {
     };
     let current_task = match reader.u64()? {
         0 => None,
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the zero arm was excluded and TaskId::from_raw accepts every nonzero u64")]
         value => Some(TaskId::from_raw(value).ok_or_else(malformed)?),
     };
     Ok(Worker {
@@ -706,6 +765,7 @@ fn read_task(reader: &mut Reader<'_>) -> Result<Task, Error> {
     let id = TaskId::from_raw(reader.u64()?).ok_or_else(malformed)?;
     let parent = match reader.u64()? {
         0 => None,
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the zero arm was excluded and TaskId::from_raw accepts every nonzero u64")]
         value => Some(TaskId::from_raw(value).ok_or_else(malformed)?),
     };
     let type_descriptor = TypeDescriptorId::from_raw(reader.u64()?).ok_or_else(malformed)?;
@@ -785,6 +845,7 @@ fn write_activity(writer: &mut Writer<'_>, activity: Option<TaskActivity>) -> Re
 }
 
 fn valid_activity(activity: TaskActivity) -> bool {
+    // #[gamma::skip(collection.reverse_array, reason = "all applies a pure timestamp validity predicate; reordering these optional timestamps cannot change the boolean")]
     let times_valid = [activity.ready_since, activity.poll_started_at, activity.queued_since]
         .into_iter()
         .flatten()
@@ -844,6 +905,7 @@ fn read_activity(reader: &mut Reader<'_>) -> Result<Option<TaskActivity>, Error>
         }
         _ => return Err(malformed()),
     };
+    // #[gamma::skip(collection.reverse_array, reason = "any applies the same pure upper-bound predicate to each timestamp")]
     if [ready, poll, queued].into_iter().any(|timestamp| timestamp > observed) {
         return Err(malformed());
     }
@@ -865,8 +927,8 @@ fn write_address_lookup(writer: &mut Writer<'_>, lookup: &AddressLookup) -> Resu
     let symbol = lookup.symbol.as_deref().unwrap_or_default().as_bytes();
     let filename = lookup.filename.as_deref().unwrap_or_default().as_bytes();
     writer.u64(lookup.address)?;
-    writer.u32(u32::try_from(symbol.len()).map_err(|_| ())?)?;
-    writer.u32(u32::try_from(filename.len()).map_err(|_| ())?)?;
+    writer.count(symbol.len())?;
+    writer.count(filename.len())?;
     writer.u32(lookup.line.unwrap_or(u32::MAX))?;
     writer.u32(lookup.column.unwrap_or(u32::MAX))?;
     writer.write(symbol)?;
@@ -963,6 +1025,10 @@ impl<'a> Writer<'a> {
         Self { remaining: bytes }
     }
 
+    fn count(&mut self, value: usize) -> Result<(), ()> {
+        self.u32(wire_count(value)?)
+    }
+
     fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
         let remaining = std::mem::take(&mut self.remaining);
         let Some((destination, tail)) = remaining.split_at_mut_checked(bytes.len()) else {
@@ -992,11 +1058,17 @@ impl<'a> Writer<'a> {
 
 struct Reader<'a> {
     remaining: &'a [u8],
+    #[cfg(test)]
+    requested_bytes: usize,
 }
 
 impl<'a> Reader<'a> {
     const fn new(bytes: &'a [u8]) -> Self {
-        Self { remaining: bytes }
+        Self {
+            remaining: bytes,
+            #[cfg(test)]
+            requested_bytes: 0,
+        }
     }
 
     const fn remaining(&self) -> &'a [u8] {
@@ -1004,6 +1076,10 @@ impl<'a> Reader<'a> {
     }
 
     fn read(&mut self, len: usize) -> Result<&'a [u8], Error> {
+        #[cfg(test)]
+        {
+            self.requested_bytes = self.requested_bytes.saturating_add(len);
+        }
         let Some((value, remaining)) = self.remaining.split_at_checked(len) else {
             return Err(malformed());
         };
@@ -1036,6 +1112,420 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nov6_encoder_propagates_header_admission_and_address_writer_errors() {
+        let snapshot = Snapshot {
+            addresses: vec![AddressLookup {
+                address: 17,
+                ..AddressLookup::default()
+            }],
+            ..Snapshot::default()
+        };
+        let mut bytes = vec![0; encoded_len(&snapshot).unwrap()];
+        assert_eq!(
+            encode_with(
+                &snapshot,
+                &mut bytes,
+                |runtimes, addresses| {
+                    assert_eq!((runtimes, addresses), (0, 1));
+                    Err(())
+                },
+                |_, _| panic!("header rejection must stop before address writing")
+            ),
+            Err(())
+        );
+        assert_eq!(
+            encode_with(&snapshot, &mut bytes, header_counts, |_, address| {
+                assert_eq!(address.address, 17);
+                Err(())
+            }),
+            Err(())
+        );
+        encode(&snapshot, &mut bytes).unwrap();
+        assert_eq!(decode(&bytes).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn november_serialized_counts_admit_exact_u32_boundaries_without_allocating_large_records() {
+        for count in [0_u32, 1, 0x1234_5678, u32::MAX] {
+            assert_eq!(header_counts(count as usize, 17), Ok((count, 17)));
+            assert_eq!(header_counts(17, count as usize), Ok((17, count)));
+            let mut output = [0xa5; 5];
+            let mut writer = Writer::new(&mut output);
+            assert_eq!(writer.count(count as usize), Ok(()));
+            assert_eq!(writer.remaining, [0xa5]);
+            assert_eq!(output[..4], count.to_le_bytes());
+        }
+        let mut too_short = [0xa5; 3];
+        assert_eq!(Writer::new(&mut too_short).count(17), Err(()));
+        assert_eq!(too_short, [0xa5; 3]);
+        #[cfg(target_pointer_width = "64")]
+        {
+            let too_large = u32::MAX as usize + 1;
+            assert_eq!(header_counts(too_large, 0), Err(()));
+            assert_eq!(header_counts(0, too_large), Err(()));
+            let mut output = [0xa5; 4];
+            let mut writer = Writer::new(&mut output);
+            assert_eq!(writer.count(too_large), Err(()));
+            assert_eq!(writer.remaining, [0xa5; 4]);
+            assert_eq!(output, [0xa5; 4]);
+        }
+    }
+
+    #[test]
+    fn november_address_record_batch_propagates_each_failure_without_writing_later_records() {
+        for failed in [None, Some(0), Some(1), Some(2)] {
+            let mut output = [0xa5; 4];
+            let mut calls = Vec::new();
+            let result = write_records(&mut Writer::new(&mut output), &[0, 1, 2], |writer, &record| {
+                calls.push(record);
+                if failed == Some(record) { Err(()) } else { writer.u8(record) }
+            });
+            let written = failed.unwrap_or(3) as usize;
+            assert_eq!(result, failed.map_or(Ok(()), |_| Err(())));
+            assert_eq!(calls, (0..failed.map_or(3, |index| index + 1)).collect::<Vec<_>>());
+            assert_eq!(&output[..written], &(0..u8::try_from(written).unwrap()).collect::<Vec<_>>());
+            assert_eq!(&output[written..], &vec![0xa5; 4 - written]);
+        }
+    }
+
+    #[test]
+    fn november_top_level_count_preflight_rejects_before_requesting_record_bytes() {
+        for (runtimes, addresses, record_size) in [(1_u32, 0_u32, RUNTIME_FIXED_LEN), (0, 1, ADDRESS_LOOKUP_FIXED_LEN)] {
+            let mut bytes = MAGIC.to_vec();
+            bytes.extend_from_slice(&WIRE_VERSION.to_le_bytes());
+            bytes.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
+            bytes.extend_from_slice(&runtimes.to_le_bytes());
+            bytes.extend_from_slice(&addresses.to_le_bytes());
+            bytes.resize(HEADER_LEN + record_size - 1, 0);
+            let mut reader = Reader::new(&bytes);
+            assert_eq!(decode_reader(&mut reader).unwrap_err().kind, ErrorKind::Malformed);
+            assert_eq!(
+                reader.requested_bytes, HEADER_LEN,
+                "invalid advertised count must not begin parsing its first row"
+            );
+            assert_eq!(reader.remaining().len(), record_size - 1);
+        }
+    }
+
+    #[test]
+    fn november_nested_count_preflight_checks_workers_and_tasks_before_reading_them() {
+        let mut runtime = fixture().runtimes.remove(0);
+        runtime.workers.clear();
+        runtime.tasks.clear();
+        let prefix_len = RUNTIME_FIXED_LEN + runtime.name.len();
+        for (count_offset, record_size) in [(36, WORKER_FIXED_LEN), (40, TASK_FIXED_LEN)] {
+            let mut bytes = vec![0; prefix_len + record_size - 1];
+            write_runtime(&mut Writer::new(&mut bytes), &runtime).unwrap();
+            bytes[count_offset..count_offset + 4].copy_from_slice(&1_u32.to_le_bytes());
+            let mut reader = Reader::new(&bytes);
+            assert_eq!(read_runtime(&mut reader).unwrap_err().kind, ErrorKind::Malformed);
+            assert_eq!(reader.requested_bytes, prefix_len, "count admission must precede all row reads");
+            assert_eq!(reader.remaining().len(), record_size - 1);
+        }
+    }
+
+    #[test]
+    fn nonzero_reserved_frame_counts_are_rejected_before_task_metrics() {
+        let task = fixture().runtimes.remove(0).tasks.remove(0);
+        let mut bytes = vec![0; TASK_FIXED_LEN + 8];
+        write_task(&mut Writer::new(&mut bytes), &task).unwrap();
+        bytes.pop();
+        for frames in [20_u32, 1] {
+            bytes[24..28].copy_from_slice(&frames.to_le_bytes());
+            let mut reader = Reader::new(&bytes);
+            assert_eq!(read_task(&mut reader).unwrap_err().kind, ErrorKind::Malformed);
+            assert_eq!(reader.requested_bytes, 28);
+            assert_eq!(reader.remaining().len(), bytes.len() - 28);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_wire_counts_reject_the_first_unrepresentable_length_without_allocating() {
+        assert_eq!(wire_count(0), Ok(0));
+        assert_eq!(wire_count(37), Ok(37));
+        assert_eq!(wire_count(u32::MAX as usize), Ok(u32::MAX));
+        if usize::BITS > u32::BITS {
+            assert_eq!(wire_count(u32::MAX as usize + 1), Err(()));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_encoded_lengths_reject_each_scripted_overflow_without_large_buffers() {
+        assert_eq!(
+            encoded_len_from_counts([(3, 2, 1)], [(5, 7)]),
+            Some(HEADER_LEN + RUNTIME_FIXED_LEN + 3 + 2 * WORKER_FIXED_LEN + TASK_FIXED_LEN + ADDRESS_LOOKUP_FIXED_LEN + 12)
+        );
+        for runtimes in [
+            vec![(usize::MAX, 0, 0)],
+            vec![(0, usize::MAX, 0)],
+            vec![(0, 0, usize::MAX)],
+            vec![(usize::MAX - HEADER_LEN - RUNTIME_FIXED_LEN, 0, 0), (0, 0, 0)],
+        ] {
+            assert_eq!(encoded_len_from_counts(runtimes, []), None);
+        }
+        assert_eq!(
+            encoded_len_from_counts([(usize::MAX - HEADER_LEN - RUNTIME_FIXED_LEN, 0, 0)], [(0, 0)]),
+            None
+        );
+        assert_eq!(encoded_len_from_counts([], [(usize::MAX, 0)]), None);
+        assert_eq!(encoded_len_from_counts([], [(0, usize::MAX)]), None);
+    }
+
+    #[test]
+    fn gamma_round2_field_writers_return_errors_at_every_short_buffer() {
+        let snapshot = fixture();
+        let runtime = &snapshot.runtimes[0];
+        let task = &runtime.tasks[0];
+        let activity = Some(TaskActivity {
+            observed_at: EventTimestamp::from_ticks(100),
+            state: TaskActivityState::Ready,
+            ready_since: Some(EventTimestamp::from_ticks(70)),
+            poll_started_at: None,
+            poll_worker_id: None,
+            queued_since: Some(EventTimestamp::from_ticks(90)),
+        });
+        let runtime_len = RUNTIME_FIXED_LEN + runtime.name.len() + WORKER_FIXED_LEN + TASK_FIXED_LEN;
+        for length in 0..runtime_len {
+            let mut output = vec![0xa5; length];
+            assert_eq!(write_runtime(&mut Writer::new(&mut output), runtime), Err(()), "runtime {length}");
+        }
+        for length in 0..WORKER_FIXED_LEN {
+            let mut output = vec![0xa5; length];
+            assert_eq!(
+                write_worker(&mut Writer::new(&mut output), &runtime.workers[0]),
+                Err(()),
+                "worker {length}"
+            );
+        }
+        for length in 0..TASK_FIXED_LEN {
+            let mut output = vec![0xa5; length];
+            assert_eq!(write_task(&mut Writer::new(&mut output), task), Err(()), "task {length}");
+        }
+        for length in 0..48 {
+            let mut output = vec![0xa5; length];
+            assert_eq!(
+                write_activity(&mut Writer::new(&mut output), activity),
+                Err(()),
+                "activity {length}"
+            );
+        }
+        let lookup = &snapshot.addresses[0];
+        let lookup_len = 24 + lookup.symbol.as_ref().unwrap().len() + lookup.filename.as_ref().unwrap().len();
+        for length in 0..lookup_len {
+            let mut output = vec![0xa5; length];
+            assert_eq!(
+                write_address_lookup(&mut Writer::new(&mut output), lookup),
+                Err(()),
+                "address {length}"
+            );
+        }
+        for length in 0..56 {
+            let mut output = vec![0xa5; length];
+            assert_eq!(
+                write_counters(&mut Writer::new(&mut output), runtime.counters),
+                Err(()),
+                "counters {length}"
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_round2_private_readers_return_errors_before_fixed_records_are_complete() {
+        let mut snapshot = fixture();
+        snapshot.runtimes[0].tasks[0].activity = None;
+        let mut output = vec![0; encoded_len(&snapshot).unwrap()];
+        encode(&snapshot, &mut output).unwrap();
+        let worker_start = HEADER_LEN + RUNTIME_FIXED_LEN + snapshot.runtimes[0].name.len();
+        for length in 0..WORKER_FIXED_LEN {
+            let mut reader = Reader::new(&output[worker_start..worker_start + length]);
+            assert_eq!(
+                read_worker(&mut reader).unwrap_err().kind(),
+                ErrorKind::Malformed,
+                "worker {length}"
+            );
+        }
+        let task_start = worker_start + WORKER_FIXED_LEN;
+        for length in 0..TASK_FIXED_LEN {
+            let mut reader = Reader::new(&output[task_start..task_start + length]);
+            assert_eq!(read_task(&mut reader).unwrap_err().kind(), ErrorKind::Malformed, "task {length}");
+        }
+    }
+
+    #[test]
+    fn gamma_round2_encoder_rejects_wrong_lengths_without_touching_output() {
+        let snapshot = fixture();
+        let length = encoded_len(&snapshot).unwrap();
+        for size in [HEADER_LEN + 1, length - 1, length + 1] {
+            let mut output = vec![0xa5; size];
+            assert_eq!(encode(&snapshot, &mut output), Err(()));
+            assert_eq!(output, vec![0xa5; size]);
+        }
+    }
+
+    mod gamma_wire {
+        include!("../tests/support/gamma_wire.rs");
+    }
+
+    #[test]
+    fn gamma_survivor_runtime_encoder_overwrites_poison_with_exact_wire_image() {
+        let mut snapshot = fixture();
+        snapshot.runtimes[0].counters = Counters {
+            spawned_tasks: 7,
+            live_tasks: 2,
+            completed_tasks: 21,
+            canceled_tasks: 22,
+            panicked_tasks: 23,
+            poll_count: 24,
+            poll_duration_nanos: 25,
+        };
+        snapshot.runtimes[0].tasks[0].future_size_bytes = Some(417);
+        snapshot.runtimes[0].tasks[0].activity = Some(TaskActivity {
+            observed_at: EventTimestamp::from_ticks(100),
+            state: TaskActivityState::Running,
+            ready_since: Some(EventTimestamp::from_ticks(90)),
+            poll_started_at: Some(EventTimestamp::from_ticks(80)),
+            poll_worker_id: Some(WorkerId::from_raw(2).unwrap()),
+            queued_since: None,
+        });
+        let expected = gamma_wire::image([4, 100, 90, 80, 0, 2]);
+        assert_eq!(encoded_len(&snapshot), Some(expected.len()));
+        let mut output = vec![0xa5; expected.len()];
+        encode(&snapshot, &mut output).unwrap();
+        assert_eq!(output, expected);
+        for length in [expected.len() - 1, expected.len() + 1] {
+            assert_eq!(encode(&snapshot, &mut vec![0; length]), Err(()));
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_runtime_encoder_rejects_each_incoherent_activity() {
+        for activity in [
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Unknown,
+                ready_since: Some(EventTimestamp::from_ticks(1)),
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: None,
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Waiting,
+                ready_since: None,
+                poll_started_at: None,
+                poll_worker_id: Some(WorkerId::from_raw(2).unwrap()),
+                queued_since: None,
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Ready,
+                ready_since: Some(EventTimestamp::from_ticks(90)),
+                poll_started_at: None,
+                poll_worker_id: None,
+                queued_since: Some(EventTimestamp::from_ticks(80)),
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Running,
+                ready_since: Some(EventTimestamp::from_ticks(70)),
+                poll_started_at: Some(EventTimestamp::from_ticks(80)),
+                poll_worker_id: None,
+                queued_since: None,
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Running,
+                ready_since: None,
+                poll_started_at: Some(EventTimestamp::from_ticks(101)),
+                poll_worker_id: None,
+                queued_since: None,
+            },
+            TaskActivity {
+                observed_at: EventTimestamp::from_ticks(100),
+                state: TaskActivityState::Running,
+                ready_since: None,
+                poll_started_at: Some(EventTimestamp::from_ticks(0)),
+                poll_worker_id: None,
+                queued_since: None,
+            },
+        ] {
+            let mut snapshot = fixture();
+            snapshot.runtimes[0].tasks[0].activity = Some(activity);
+            assert_eq!(encode(&snapshot, &mut vec![0; encoded_len(&snapshot).unwrap()]), Err(()));
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_runtime_encoder_writes_all_optional_sentinels() {
+        let mut snapshot = fixture();
+        let runtime = &mut snapshot.runtimes[0];
+        runtime.counters = Counters {
+            spawned_tasks: 7,
+            live_tasks: 2,
+            completed_tasks: 21,
+            canceled_tasks: 22,
+            panicked_tasks: 23,
+            poll_count: 24,
+            poll_duration_nanos: 25,
+        };
+        runtime.state = RuntimeState::Stopped;
+        runtime.retired_at = Some(EventTimestamp::from_ticks(101));
+        runtime.lifecycle_backtraces = BacktraceCapture::Always;
+        let worker = &mut runtime.workers[0];
+        worker.role = WorkerRole::Io;
+        worker.state = WorkerState::Stopped;
+        worker.processor_index = None;
+        worker.thread_id = None;
+        worker.current_task = None;
+        runtime.tasks[0].parent = None;
+        runtime.tasks[0].last_worker_id = None;
+        snapshot.addresses[0].line = None;
+        snapshot.addresses[0].column = None;
+        let mut expected = gamma_wire::image([0; 6]);
+        expected[28] = 3;
+        expected[29] = 3;
+        expected[44..52].copy_from_slice(&101_u64.to_le_bytes());
+        expected[139] = 3;
+        expected[140] = 3;
+        expected[143..147].fill(255);
+        expected[147..163].fill(0);
+        expected[171..179].fill(0);
+        expected[203..211].fill(0);
+        expected[331..339].fill(0);
+        expected[363..371].fill(255);
+        let mut output = vec![0xa5; expected.len()];
+        encode(&snapshot, &mut output).unwrap();
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn gamma_survivor_activity_snapshot_uses_only_coherent_frozen_evidence() {
+        let mut activity = TaskActivity {
+            observed_at: EventTimestamp::from_ticks(100),
+            state: TaskActivityState::Waiting,
+            ready_since: None,
+            poll_started_at: None,
+            poll_worker_id: None,
+            queued_since: None,
+        };
+        assert!(valid_activity(activity));
+        activity.state = TaskActivityState::Running;
+        activity.ready_since = Some(EventTimestamp::from_ticks(90));
+        activity.poll_started_at = Some(EventTimestamp::from_ticks(80));
+        activity.poll_worker_id = Some(WorkerId::from_raw(19).unwrap());
+        assert!(valid_activity(activity));
+        let mut newer = activity;
+        newer.poll_started_at = Some(EventTimestamp::from_ticks(101));
+        assert!(!valid_activity(newer));
+        activity.state = TaskActivityState::Unknown;
+        assert!(!valid_activity(activity));
+        activity.ready_since = None;
+        activity.poll_started_at = None;
+        activity.poll_worker_id = None;
+        assert!(valid_activity(activity));
+    }
 
     fn fixture() -> Snapshot {
         Snapshot {
@@ -1730,6 +2220,32 @@ mod tests {
         encode(&expected, &mut bytes).unwrap();
 
         assert_eq!(decode(&bytes).unwrap(), expected);
+    }
+
+    #[test]
+    fn task_creation_timestamp_encoding_preserves_the_largest_representable_time_and_rejects_overflow() {
+        let mut task = fixture().runtimes.remove(0).tasks.remove(0);
+        let mut bytes = [0; TASK_FIXED_LEN];
+        task.spawned_at = Some(EventTimestamp::from_ticks(u64::MAX - 1));
+        write_task(&mut Writer::new(&mut bytes), &task).unwrap();
+        assert_eq!(read_task(&mut Reader::new(&bytes)).unwrap().spawned_at, task.spawned_at);
+        task.spawned_at = Some(EventTimestamp::from_ticks(u64::MAX));
+        assert_eq!(write_task(&mut Writer::new(&mut bytes), &task), Err(()));
+    }
+
+    #[test]
+    fn record_writers_reject_uncollected_numeric_evidence_before_emitting_any_bytes() {
+        let mut runtime = fixture().runtimes.remove(0);
+        runtime.counters_scope = CountersScope::Uncollected;
+        let mut bytes = [0xa5; RUNTIME_FIXED_LEN];
+        assert_eq!(write_runtime(&mut Writer::new(&mut bytes), &runtime), Err(()));
+        assert_eq!(bytes, [0xa5; RUNTIME_FIXED_LEN]);
+
+        let mut task = runtime.tasks.remove(0);
+        task.metrics_scope = TaskMetricsScope::Uncollected;
+        let mut bytes = [0xa5; TASK_FIXED_LEN];
+        assert_eq!(write_task(&mut Writer::new(&mut bytes), &task), Err(()));
+        assert_eq!(bytes, [0xa5; TASK_FIXED_LEN]);
     }
 
     #[test]
