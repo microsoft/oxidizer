@@ -124,7 +124,6 @@ where
     S: Read + Debug,
 {
     #[cfg_attr(coverage_nightly, coverage(off))] // No API contract to test.
-    #[cfg_attr(test, mutants::skip)] // We have no contract to test.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(type_name::<Self>())
             .field("inner", &self.inner)

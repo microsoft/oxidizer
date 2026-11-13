@@ -64,7 +64,6 @@ impl FakeRead {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // Mutations easily lead to infinite loops, not worth the effort.
     #[expect(
         clippy::unused_async,
         clippy::unused_async_trait_impl,
@@ -108,7 +107,6 @@ impl FakeRead {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // Mutations easily lead to infinite loops, not worth the effort.
     pub async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         let previous_len = into.len();
 
@@ -177,17 +175,14 @@ impl FakeRead {
 impl Read for FakeRead {
     type Error = Infallible;
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_at_most_into(&mut self, len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_at_most_into(len, into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_more_into(into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_any(&mut self) -> Result<BytesBuf, Infallible> {
         self.read_any().await
     }
@@ -195,7 +190,6 @@ impl Read for FakeRead {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Memory for FakeRead {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         self.reserve(min_bytes)
     }
@@ -203,7 +197,6 @@ impl Memory for FakeRead {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl HasMemory for FakeRead {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn memory(&self) -> impl MemoryShared {
         self.memory()
     }

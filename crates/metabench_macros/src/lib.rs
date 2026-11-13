@@ -188,7 +188,6 @@ use proc_macro::TokenStream;
 /// benchmark functions declared with `const fn`.
 #[proc_macro_attribute]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 pub fn benchmark(arguments: TokenStream, item: TokenStream) -> TokenStream {
     match metabench_macros_impl::benchmark(arguments.into(), item.into()) {
         Ok(output) => output,
@@ -342,7 +341,6 @@ pub fn benchmark(arguments: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 pub fn main(input: TokenStream) -> TokenStream {
     match metabench_macros_impl::main(input.into()) {
         Ok(output) => output,

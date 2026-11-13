@@ -38,7 +38,6 @@ macro_rules! bail {
 pub(crate) use bail;
 
 #[must_use]
-#[cfg_attr(test, mutants::skip)] // not relevant for auto-generated proc macros
 pub fn templated_paq_impl(attr: &TokenStream, item: TokenStream) -> TokenStream {
     // Parse the item (struct/enum definition)
     let mut input: DeriveInput = match parse2(item) {
@@ -74,7 +73,6 @@ pub fn templated_paq_impl(attr: &TokenStream, item: TokenStream) -> TokenStream 
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // not relevant for auto-generated proc macros
 fn filter_original(input: &DeriveInput) -> TokenStream {
     // Generate the original item definition WITHOUT the templated attribute
     let vis = &input.vis;
@@ -172,7 +170,6 @@ fn filter_attributes(f: &Field) -> Vec<&Attribute> {
 }
 
 #[must_use]
-#[cfg_attr(test, mutants::skip)] // just emits compile error otherwise
 pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {
         Ok(input) => input,

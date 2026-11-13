@@ -236,12 +236,10 @@ impl<T: BlockRefDynamic> BlockRefVTable<T> {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Mutations can violate memory safety and cause UB.
 fn wrap_clone<T: BlockRefDynamic>(state_ptr: OpaqueStatePtr) -> OpaqueStatePtr {
     T::clone(state_ptr.cast()).cast()
 }
 
-#[cfg_attr(test, mutants::skip)] // Mutations can violate memory safety and cause UB.
 fn wrap_drop<T: BlockRefDynamic>(state_ptr: OpaqueStatePtr) {
     T::drop(state_ptr.cast());
 }

@@ -167,7 +167,6 @@ impl Family {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // Explanatory wording does not affect event identity or attribution.
     const fn identity_note(self) -> &'static str {
         match self {
             Self::Allocation => "Stable allocation ID and matching heap/address/layout; freeing actor is not allocation ownership",

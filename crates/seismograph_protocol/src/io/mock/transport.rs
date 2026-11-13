@@ -167,11 +167,15 @@ impl Connection {
             .ok_or_else(|| io::ErrorKind::ConnectionAborted.into())
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "mock connections match the fallible clone interface of native transports"
+    )]
     pub(crate) fn try_clone(&self) -> io::Result<Self> {
         let mut state = self.channel.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         state.handles[self.side] = state.handles[self.side]
             .checked_add(1)
-            .ok_or_else(|| io::Error::other("mock connection clone count exhausted"))?;
+            .expect("live connection handles are bounded by Arc's reference-count limit");
         Ok(Self {
             runtime: Weak::clone(&self.runtime),
             channel: Arc::clone(&self.channel),
@@ -194,15 +198,19 @@ impl Connection {
     }
 
     fn check_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        if timeout.is_some_and(|timeout| {
-            timeout.is_zero() || self.runtime().is_ok_and(|runtime| runtime.instant().checked_add(timeout).is_none())
-        }) {
+        if timeout
+            .is_some_and(|timeout| timeout.is_zero() || self.runtime().is_ok_and(|runtime| Self::deadline(&runtime, timeout).is_err()))
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "mock timeout must be positive and bounded",
             ));
         }
         Ok(())
+    }
+
+    fn deadline(runtime: &Runtime, timeout: Duration) -> Result<Instant, io::ErrorKind> {
+        runtime.instant().checked_add(timeout).ok_or(io::ErrorKind::InvalidInput)
     }
 
     fn wait<'a>(
@@ -225,9 +233,7 @@ impl Connection {
         let runtime = self.runtime()?;
         let max_chunk = runtime.state().max_chunk;
         let timeout = *self.read_timeout.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let deadline = timeout
-            .map(|timeout| runtime.instant().checked_add(timeout).ok_or(io::ErrorKind::InvalidInput))
-            .transpose()?;
+        let deadline = timeout.map(|timeout| Self::deadline(&runtime, timeout)).transpose()?;
         let mut state = self.channel.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         loop {
             if state.closed[self.side] {
@@ -286,9 +292,7 @@ impl Write for Connection {
         let runtime = self.runtime()?;
         let max_chunk = runtime.state().max_chunk;
         let timeout = *self.write_timeout.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let deadline = timeout
-            .map(|timeout| runtime.instant().checked_add(timeout).ok_or(io::ErrorKind::InvalidInput))
-            .transpose()?;
+        let deadline = timeout.map(|timeout| Self::deadline(&runtime, timeout)).transpose()?;
         let mut state = self.channel.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         loop {
             if state.closed[self.side] {

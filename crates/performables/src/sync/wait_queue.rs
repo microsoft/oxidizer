@@ -544,6 +544,30 @@ mod tests {
     }
 
     #[test]
+    fn wake_all_skips_inactive_waiters_without_losing_active_wakes() {
+        let queue = WaitQueue::new();
+        let inactive = Arc::new(Waiter::new());
+        let skipped = Arc::new(WakeCounter::default());
+        inactive.register(&Waker::from(Arc::clone(&skipped)));
+        assert!(!queue.enqueue_if_needed(&inactive, || false));
+        inactive.deactivate();
+        let active = Arc::new(Waiter::new());
+        let notified = Arc::new(WakeCounter::default());
+        active.register(&Waker::from(Arc::clone(&notified)));
+        assert!(!queue.enqueue_if_needed(&active, || false));
+
+        queue.wake_all();
+
+        assert_eq!((skipped.0.load(Ordering::Relaxed), notified.0.load(Ordering::Relaxed)), (0, 1));
+        assert!(!queue.state().has_waiters.load(Ordering::Acquire));
+        assert!(queue.state().waiters.lock().is_empty());
+        for waiter in [&inactive, &active] {
+            assert!(!waiter.queued.load(Ordering::Acquire));
+            assert_eq!(waiter.position.load(Ordering::Relaxed), usize::MAX);
+        }
+    }
+
+    #[test]
     fn idle_unmarked_operations_do_not_allocate_queue_storage() {
         let queue = WaitQueue::new();
         let waiter = Arc::new(Waiter::new());

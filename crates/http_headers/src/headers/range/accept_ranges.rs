@@ -412,7 +412,7 @@ fn accept_ranges_owned(values: Option<FieldLines<'_>>) -> Result<Option<AcceptRa
         validate_none_cardinality(units, none)?;
         let first_owned = first
             .try_to_field_value()
-            .map_err(|_invalid| invalid_syntax(&FieldName::AcceptRanges))?;
+            .expect("scan_units accepts only token bytes, commas, spaces, and tabs, all valid in a field value");
         return Ok(Some(AcceptRangesOwned {
             values: Some(FieldLinesIter::one(first_owned)),
             none,

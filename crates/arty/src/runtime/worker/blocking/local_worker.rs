@@ -19,7 +19,6 @@ pub(crate) struct LocalWorker {
 }
 
 impl LocalWorker {
-    #[cfg_attr(test, mutants::skip)] // Missing pool identity disables the same-pool join deadlock guard.
     pub(crate) fn attach(pool: PoolIdentity) {
         worker::WorkerMarker::attach();
         CURRENT.with_borrow_mut(|current| {

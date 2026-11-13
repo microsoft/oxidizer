@@ -23,16 +23,10 @@ pub enum TaskPlacement {
     SpecificThread,
 }
 
-/// Lifecycle metadata for a task registered with [`TaskSet`](crate::TaskSet).
-///
-/// The executor applies the captured observed context during polling, cleanup,
-/// and lifecycle events. The placement value classifies how the caller selected
-/// the executor. It does not select a worker. The default has no observed context
-/// and uses [`TaskPlacement::Any`].
 #[derive(Debug, Default)]
-pub struct TaskOptions {
-    context: Option<Transfer>,
-    placement: TaskPlacement,
+pub(crate) struct TaskMetadata {
+    pub(crate) context: Option<Transfer>,
+    pub(crate) placement: TaskPlacement,
 }
 
 pub(crate) struct TaskCreatedReporter {
@@ -52,22 +46,7 @@ impl TaskCreatedReporter {
     }
 }
 
-impl TaskOptions {
-    /// Creates options with the specified placement classification.
-    #[must_use]
-    pub const fn new(placement: TaskPlacement) -> Self {
-        Self { context: None, placement }
-    }
-
-    /// Creates options that apply the observed `context` for the task lifecycle.
-    #[must_use]
-    pub fn observed(context: Transfer, placement: TaskPlacement) -> Self {
-        Self {
-            context: Some(context),
-            placement,
-        }
-    }
-
+impl TaskMetadata {
     pub(crate) fn with_context<T>(&self, f: impl FnOnce() -> T) -> T {
         let Some(context) = &self.context else {
             return f();
@@ -108,23 +87,7 @@ mod tests {
     use super::*;
 
     assert_impl_all!(TaskPlacement: UnwindSafe, RefUnwindSafe);
-    // Captured enrichment can contain user-defined interior state. Options do
-    // not promise that they can cross a caught-unwind boundary.
-    assert_not_impl_any!(TaskOptions: UnwindSafe, RefUnwindSafe);
-
-    #[test]
-    fn observed_options_keep_context_and_placement() {
-        let options = TaskOptions::observed(Sink::noop().transfer_context(), TaskPlacement::SameThread);
-
-        assert!(options.context.is_some());
-        assert_eq!(options.placement, TaskPlacement::SameThread);
-    }
-
-    #[test]
-    fn new_options_keep_placement_without_context() {
-        let options = TaskOptions::new(TaskPlacement::SpecificThread);
-
-        assert!(options.context.is_none());
-        assert_eq!(options.placement, TaskPlacement::SpecificThread);
-    }
+    // Captured enrichment can contain user-defined interior state. Metadata does
+    // not promise that it can cross a caught-unwind boundary.
+    assert_not_impl_any!(TaskMetadata: UnwindSafe, RefUnwindSafe);
 }

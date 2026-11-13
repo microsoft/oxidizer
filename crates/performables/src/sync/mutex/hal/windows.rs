@@ -10,7 +10,6 @@ use windows_sys::Win32::System::Threading::{INFINITE, WaitOnAddress, WakeByAddre
 pub(super) type AtomicLockWord = AtomicU8;
 pub(super) type LockWord = u8;
 
-#[cfg_attr(test, mutants::skip)] // OS waits may wake spuriously; deleting one changes parking cost, not state-loop behavior.
 pub(super) fn wait_lock(state: &AtomicLockWord, expected: LockWord) {
     // SAFETY: both byte values are alive for the wait; Windows compares and
     // parks atomically, so a release before registration cannot be lost.

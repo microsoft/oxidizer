@@ -76,7 +76,6 @@ impl Generator {
     #[must_use]
     // `GeneratorBuilder::default()` and `Default::default()` are the same value
     // here (the return type is `GeneratorBuilder`), so that mutant is equivalent.
-    #[cfg_attr(test, mutants::skip)]
     pub fn builder() -> GeneratorBuilder {
         GeneratorBuilder::default()
     }
@@ -558,5 +557,19 @@ mod tests {
         assert_eq!(omissions.len(), 2);
         assert_eq!(omissions[0]["path"], "/a/{p=**}");
         assert_eq!(omissions[1]["path"], "/b/{p=**}");
+    }
+
+    #[cfg(feature = "build-openapi")]
+    #[test]
+    fn merge_openapi_docs_adds_omissions_absent_from_the_first_service() {
+        let first = r#"{"paths":{"/x":{"get":{}}}}"#.to_owned();
+        let second = r#"{"paths":{},"x-rest-over-grpc-omitted-operations":[{"path":"/b/{p=**}"}]}"#.to_owned();
+
+        let merged: serde_json::Value = serde_json::from_str(&merge_openapi_docs(&[first, second]).unwrap()).unwrap();
+
+        assert!(merged["paths"].get("/x").is_some());
+        let omissions = merged["x-rest-over-grpc-omitted-operations"].as_array().unwrap();
+        assert_eq!(omissions.len(), 1);
+        assert_eq!(omissions[0]["path"], "/b/{p=**}");
     }
 }

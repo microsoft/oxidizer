@@ -237,11 +237,7 @@ impl WorkerHandle {
         if poll.window != 0 && self.runtime.control.timing_window.load(Ordering::Acquire) == poll.window {
             without_recording(|| {
                 let mut measurements = lock(&self.worker.measurements);
-                // The last observer publishes zero before clearing under this lock.
-                // Recheck here so a concurrent finish cannot refill a retired window.
-                if self.runtime.control.timing_window.load(Ordering::Acquire) == poll.window {
-                    measurements.add(poll.window, poll.task, started_at, elapsed);
-                }
+                measurements.add(poll.window, &self.runtime.control.timing_window, poll.task, started_at, elapsed);
             });
         }
         self.record_at(

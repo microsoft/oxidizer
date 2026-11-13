@@ -152,11 +152,11 @@ impl WinHttpBodyReader {
         );
         let completion = read
             .await
-            .map_err(|_disconnected| callback_protocol_error("the read completion channel disconnected"))?;
+            .expect("an armed operation retains its request handle and every claimed completion is sent");
         let (read, mut into) = read_completion(completion)?;
 
         if read == 0 {
-            let trailers = query_raw_trailers(&self.bindings, self.guard_ref()?.raw())
+            let trailers = query_raw_trailers(&self.bindings, self.guard_ref().raw())
                 .map_err(query_error)?
                 .map(|raw| parse_response_trailers(&raw).map_err(invalid_response))
                 .transpose()?;
@@ -186,10 +186,10 @@ impl WinHttpBodyReader {
         Ok((read, into))
     }
 
-    fn guard_ref(&self) -> Result<&RequestGuard, HttpError> {
+    fn guard_ref(&self) -> &RequestGuard {
         self.guard
             .as_ref()
-            .ok_or_else(|| callback_protocol_error("the response body request handle is already closed"))
+            .expect("a successful read restores its live request guard before trailer queries")
     }
 
     fn guard_mut(&mut self) -> Result<&mut RequestGuard, HttpError> {
@@ -344,7 +344,6 @@ impl Body for WinHttpResponseBody {
         matches!(self.state, BodyState::Done)
     }
 
-    #[cfg_attr(test, mutants::skip)] // Intentionally unbounded; WinHTTP does not expose a remaining length.
     fn size_hint(&self) -> SizeHint {
         SizeHint::default()
     }
@@ -967,6 +966,9 @@ mod tests {
             let mut harness = reader([step], TrailerBehavior::None);
             let error = drive(harness.reader.read_into(BytesBuf::new())).unwrap_err();
             assert_eq!(error.label(), "request_winhttp");
+            assert_eq!(harness.record.request_closes.load(Ordering::SeqCst), 1);
+            let retry = drive(harness.reader.read_into(BytesBuf::new())).unwrap_err();
+            assert_eq!(retry.label(), "request_winhttp");
             assert_eq!(harness.record.request_closes.load(Ordering::SeqCst), 1);
             harness.finish();
         }

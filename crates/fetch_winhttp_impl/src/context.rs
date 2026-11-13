@@ -434,7 +434,6 @@ impl Drop for CallbackOperationSlot {
     // that sender is stored inline here, so no receiver can outlive the slot to
     // witness the missing disconnect, and no assertion can reach the leak; Miri
     // owns that guarantee.
-    #[cfg_attr(test, mutants::skip)]
     fn drop(&mut self) {
         let state = *self.state.get_mut();
 
@@ -544,7 +543,6 @@ impl SecureFailureDiagnostics {
     /// The presence marker and the flags occupy disjoint bits, so `|` and `^`
     /// compute the same value and a mutation between them is equivalent rather
     /// than a defect.
-    #[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
     fn pack(flags: u32) -> u64 {
         Self::PRESENT | u64::from(flags)
     }

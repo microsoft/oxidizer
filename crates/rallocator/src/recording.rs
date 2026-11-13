@@ -173,10 +173,10 @@ fn capture(_context: seismograph::snapshot::SnapshotContext<'_>) -> Result<seism
             global,
         };
         let len = seismograph_rallocator::encoded_len_with_owners(&snapshot, owners.as_slice())
-            .map_err(|_error| seismograph::Error::new("rallocator source sizing failed"))?;
+            .expect("pool inventory emits unique nonzero owners and valid observations, capped at OWNER_LIMIT");
         let mut data = seismograph::snapshot::SourceData::zeroed(len)?;
         seismograph_rallocator::encode_with_owners(&snapshot, owners.as_slice(), data.as_mut_bytes())
-            .map_err(|_error| seismograph::Error::new("rallocator source encoding failed"))?;
+            .expect("output length was computed from the same immutable snapshot and owner rows");
         // Existing monitor/snapshot polling supplies the next cooperative round.
         seismograph_rallocator::native::request_observation();
         Ok(data)

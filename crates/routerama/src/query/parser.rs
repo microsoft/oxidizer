@@ -52,7 +52,6 @@ impl<'q, const WIDE: bool> Parser<'q, WIDE> {
     #[inline(always)]
     // Arithmetic mutations of cursor advancement create non-terminating loops;
     // boundary and malformed-input behavior is pinned by unit tests below.
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn next_pair(&mut self) -> Result<Option<Pair<'q>>, Error> {
         if !WIDE {
             return self.next_pair_scalar();
@@ -178,7 +177,6 @@ fn scan_pair(bytes: &[u8]) -> PairScan {
 )]
 #[inline(always)]
 // Arithmetic mutations of the byte cursor create non-terminating loops.
-#[cfg_attr(test, mutants::skip)]
 fn decode<'q, const WIDE: bool>(
     input: &'q str,
     offset: usize,
@@ -302,7 +300,6 @@ fn decode_encoded_bytes<'q>(
 #[inline]
 // Cursor arithmetic is tested directly; mutating it can only make parser loops
 // stop progressing and time out the mutation job.
-#[cfg_attr(test, mutants::skip)]
 fn advance(index: usize, amount: usize) -> usize {
     index
         .checked_add(amount)

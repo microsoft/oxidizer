@@ -1270,10 +1270,20 @@ mod tests {
                   repeated string additional_bindings = 2;
                 }
 
+                message CustomPattern {
+                  optional string kind = 1;
+                  optional string path = 2;
+                }
+
+                message CustomRule {
+                  optional CustomPattern custom = 1;
+                }
+
                 extend google.protobuf.MethodOptions {
                   optional BadGet bad_get = 50003;
                   optional BadCustom bad_custom = 50004;
                   optional BadAdditional bad_additional = 50005;
+                  optional CustomRule custom_rule = 50006;
                 }
             "#,
             false,
@@ -1310,6 +1320,31 @@ mod tests {
         let err = read_http_rule("BadCustom", &bad_custom_options, Some(&bad_custom_ext), &msg, &msg)
             .expect_err("custom pattern type is rejected");
         assert!(err.to_string().contains("custom pattern is not a message"));
+
+        let custom_ext = pool.get_extension_by_name("malformed_fields.custom_rule").unwrap();
+        for (present, value, expected) in [
+            (
+                "path",
+                "/v1/custom",
+                "RPC `Custom` has a malformed http annotation: custom pattern has no kind",
+            ),
+            (
+                "kind",
+                "REPORT",
+                "RPC `Custom` has a malformed http annotation: custom pattern has no path",
+            ),
+        ] {
+            let mut custom = DynamicMessage::new(pool.get_message_by_name("malformed_fields.CustomPattern").unwrap());
+            custom.set_field_by_name(present, Value::String(value.into()));
+            let mut rule = DynamicMessage::new(pool.get_message_by_name("malformed_fields.CustomRule").unwrap());
+            rule.set_field_by_name("custom", Value::Message(custom));
+            let mut options = DynamicMessage::new(options_desc.clone());
+            options.set_extension(&custom_ext, Value::Message(rule));
+
+            let error = read_http_rule("Custom", &options, Some(&custom_ext), &msg, &msg).unwrap_err();
+            assert!(error.is_malformed());
+            assert_eq!(error.to_string(), expected);
+        }
 
         let bad_additional_ext = pool
             .get_extension_by_name("malformed_fields.bad_additional")
