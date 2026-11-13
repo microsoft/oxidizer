@@ -110,6 +110,37 @@ fn a_failed_handshake_connection_preserves_the_io_error() {
 }
 
 #[test]
+fn truncated_handshake_is_not_mistaken_for_an_optional_capability() {
+    let (io, _) = MonitorIo::new_mocked();
+    let (_, descriptor) = descriptor(&io);
+    let listener = Listener::bind(&io, &descriptor).unwrap();
+    listener.set_nonblocking(true).unwrap();
+
+    thread::scope(|scope| {
+        let worker = scope.spawn(|| handshake(&io, &descriptor));
+        let mut stream = loop {
+            match listener.accept() {
+                Ok(stream) => break stream,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    assert!(!worker.is_finished(), "handshake returned without connecting");
+                    thread::yield_now();
+                }
+                Err(error) => panic!("scripted accept failed: {error}"),
+            }
+        };
+        assert_eq!(read_request(&stream).unwrap(), (1, Request::Hello));
+        stream.write_all(b"SGMP").unwrap();
+        drop(stream);
+        let result = worker.join().unwrap();
+
+        assert!(matches!(
+            result,
+            Err(Error::Protocol(seismograph_protocol::Error::Io(error))) if error.kind() == io::ErrorKind::UnexpectedEof
+        ));
+    });
+}
+
+#[test]
 fn complete_client_commands_use_the_selected_io_instance() {
     let (io, control) = MonitorIo::new_mocked();
     control.set_max_chunk(3);

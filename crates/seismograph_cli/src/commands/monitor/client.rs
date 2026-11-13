@@ -928,27 +928,6 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "requires native local IPC")]
-    fn truncated_handshake_is_not_mistaken_for_an_optional_capability() {
-        let listener = seismograph_protocol::testing::listener();
-        let descriptor = listener.descriptor().clone();
-        let worker = thread::spawn(move || {
-            let mut stream = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-            read_request(&mut stream).unwrap();
-            stream.write_all(b"SGMP").unwrap();
-        });
-
-        let result = handshake(&MonitorIo::new_native(), &descriptor);
-        worker.join().unwrap();
-
-        assert!(matches!(
-            result,
-            Err(Error::Protocol(seismograph_protocol::Error::Io(error))) if error.kind() == io::ErrorKind::UnexpectedEof
-        ));
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore = "requires native local IPC")]
     fn successful_write_requires_complete_configuration_readback() {
         let configuration = RecordingConfiguration::default();
         let (descriptor, requests, worker) = serve(vec![
