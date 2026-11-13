@@ -622,6 +622,7 @@ mod tests {
         let task = handle.as_ref();
         let mut descriptions = 0;
 
+        task.inspect(TaskState::Ready, &mut |_| descriptions += 1);
         task.abort(ShutdownCause::default());
         task.inspect(TaskState::Ready, &mut |_| descriptions += 1);
         drop(handle);

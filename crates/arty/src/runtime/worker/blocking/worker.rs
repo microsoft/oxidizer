@@ -609,6 +609,27 @@ mod tests {
         pool.shutdown_and_join();
     }
 
+    #[cfg(feature = "monitor")]
+    #[test]
+    fn a_closed_pool_does_not_register_workers_when_monitoring_is_enabled() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let pool = Pool::new(RuntimeName::default(), None, Some(limit(1)));
+        pool.join();
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("closed-pool", 1));
+
+        pool.enable_monitoring(&runtime.handle());
+
+        assert!(
+            runtime
+                .handle()
+                .capture(seismograph_runtime::snapshot::CaptureOptions::default())
+                .unwrap()
+                .workers
+                .is_empty()
+        );
+        assert!(!pool.execute(|| panic!("a closed pool must not accept work")));
+    }
+
     #[test]
     fn joinable_pool_contains_job_panics() {
         let pool = joinable_pool(1);

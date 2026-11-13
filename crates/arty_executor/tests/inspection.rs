@@ -108,6 +108,30 @@ fn ordinary_cycles_do_not_inspect_the_completion_target() {
     assert_eq!(outcome.get(), Some(("completed", 0)));
 }
 
+#[test]
+fn completion_inspection_can_decline_without_losing_the_result() {
+    let mut executor = Executor::builder().build();
+    let outcome = Rc::new(Cell::new(None));
+    executor.tasks().task(std::future::ready(())).register_with_inspection(
+        InspectedCompletion {
+            inspections: Cell::new(0),
+            outcome: Rc::clone(&outcome),
+        },
+        |_, completion, _| {
+            completion.inspections.set(completion.inspections.get() + 1);
+            None::<u32>
+        },
+    );
+    let mut descriptions = Vec::new();
+    assert_eq!(
+        executor.inspect(1, |value: &u32| descriptions.push(*value)).unwrap(),
+        InspectionStatus::Complete
+    );
+    assert!(descriptions.is_empty());
+    let _ = executor.execute_cycle();
+    assert_eq!(outcome.get(), Some(("completed", 1)));
+}
+
 struct InspectionInput {
     converted: Rc<Cell<bool>>,
     shutdown: Option<Shutdown>,

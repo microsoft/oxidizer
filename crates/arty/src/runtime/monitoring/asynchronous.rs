@@ -197,6 +197,14 @@ mod tests {
         diagnostics.poll_finished(false);
         assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Failed);
 
+        let (_handle, sender) = completion.handle();
+        executor
+            .tasks()
+            .task(std::future::pending::<()>())
+            .inspect(|_, _| Some(Description::Poll(seismograph_runtime::allocate_task_id())))
+            .register(sender);
+        assert_eq!(capture(&mut executor).tasks.len(), 1);
+
         let task = seismograph_runtime::allocate_task_id();
         diagnostics.poll_started(&Description::Poll(task));
         assert_eq!(current_task(), Some(task));

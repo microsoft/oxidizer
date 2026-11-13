@@ -842,6 +842,48 @@ mod tests {
         assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE + 1);
     }
 
+    #[cfg(feature = "monitor")]
+    #[test]
+    fn inspection_without_worker_diagnostics_reports_failure() {
+        use seismograph_runtime::snapshot::{CaptureOptions, TaskCollection};
+        use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let (commands, command_rx) = command_channel();
+        let mut worker = test_worker(
+            (commands.clone(), command_rx),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::new(Signal::default()),
+        );
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("missing-worker-diagnostics", 1));
+        let registration = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        registration
+            .handle()
+            .register_task_provider(move |request| sender.send(request).unwrap())
+            .unwrap();
+
+        let snapshot = std::thread::scope(|scope| {
+            let handle = runtime.handle();
+            let captured = scope.spawn(move || {
+                handle
+                    .capture(CaptureOptions {
+                        timeout: Duration::from_secs(5),
+                        ..CaptureOptions::default()
+                    })
+                    .unwrap()
+            });
+            let request = receiver.recv_timeout(TEST_TIMEOUT).unwrap();
+            commands.system_sender().send(SystemCommand::Inspect { request }).unwrap();
+            assert_eq!(worker.process_system_commands(), Some(false));
+            captured.join().unwrap()
+        });
+
+        assert!(snapshot.tasks.is_empty());
+        assert_eq!(snapshot.workers[0].task_collection, TaskCollection::Failed);
+    }
+
     #[test]
     fn system_commands_arriving_during_processing_run_in_the_same_cycle() {
         let (commands, command_rx) = command_channel();

@@ -561,6 +561,26 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "monitor")]
+    #[test]
+    fn a_closed_worker_command_channel_reports_collection_failure() {
+        use seismograph_runtime::snapshot::{CaptureOptions, TaskCollection};
+        use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("closed-worker-channel", 1));
+        let threads = test_threads(1);
+        let (endpoint, receiver) = endpoint(&threads[0]);
+        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint), Shutdown::default());
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        dispatcher.register_task_provider(threads[0].id(), &worker.handle());
+        drop(receiver);
+
+        let snapshot = runtime.handle().capture(CaptureOptions::default()).unwrap();
+        assert!(snapshot.tasks.is_empty());
+        assert_eq!(snapshot.workers[0].task_collection, TaskCollection::Failed);
+    }
+
     #[test]
     fn spawn_after_command_channel_closed_returns_disconnected_join_handle() {
         // After a worker closes its command channel during shutdown, later

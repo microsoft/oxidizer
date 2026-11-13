@@ -101,6 +101,20 @@ mod tests {
         assert_eq!(complete.tasks[0].activity.unwrap().state, TaskActivityState::Ready);
         assert_eq!(complete.workers[0].task_collection, TaskCollection::Complete);
     }
+
+    #[test]
+    fn a_dropped_blocking_queue_reports_collection_failure() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("dropped-blocking-queue", 1));
+        let queue = Arc::new(Queue::default());
+        let worker = queue.register_worker(&runtime.handle(), 0);
+        drop(queue);
+
+        let snapshot = runtime.handle().capture(CaptureOptions::default()).unwrap();
+        assert!(snapshot.tasks.is_empty());
+        assert_eq!(snapshot.workers[0].task_collection, TaskCollection::Failed);
+        drop(worker);
+    }
 }
 
 #[derive(Default)]

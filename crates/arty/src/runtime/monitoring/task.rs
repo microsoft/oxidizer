@@ -332,6 +332,22 @@ mod tests {
     }
 
     #[test]
+    fn unobserved_blocking_outcomes_do_not_allocate_task_identities() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("idle-outcomes", 1));
+        let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
+            seismograph_runtime::worker::WorkerRole::Blocking,
+        ));
+        seismograph::recorder::without_recording(|| {
+            let info = TaskInfo::new::<()>(worker.handle().task_events());
+            info.completed();
+            info.panicked();
+            info.canceled();
+            assert!(info.identity.get().is_none());
+        });
+    }
+
+    #[test]
     fn absent_worker_events_preserve_plain_task_execution() {
         super::set_events(None);
         let mut executor = arty_executor::Executor::builder().build();
