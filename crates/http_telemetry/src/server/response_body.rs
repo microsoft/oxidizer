@@ -1,12 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The response body wrapper, which emits the event of a request when its response body ends, and the start of the
-//! response body that the events log.
+//! The response body wrapper, which emits the event of a request when its response body ends.
 
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use bytesbuf::BytesView;
@@ -16,7 +14,6 @@ use http_body::{Body, Frame, SizeHint};
 use http_extensions::body::{Content, StreamingBody};
 use http_extensions::{HttpError, HttpResponse};
 use http_headers::headers::{ContentLength, ContentLengthOwned};
-use observed::Text;
 
 use super::drop_guard::{RequestEnd, TelemetryDropGuard};
 
@@ -64,7 +61,7 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
                 bytes_read: 0,
             })))
         })
-        .expect("the response body was confirmed above to not be at its end")
+        .expect("map fails only for a consumed body, which is at its end, so the check above rules it out")
     })
 }
 
@@ -105,9 +102,8 @@ impl Body for TelemetryBody {
             Poll::Ready(Some(Ok(frame))) => {
                 if let Some(data) = frame.data_ref() {
                     this.bytes_read += data.len() as u64;
-                    let remaining = this.size_hint().upper();
-                    if let Some(response_body) = &mut this.guard.response_body {
-                        response_body.push(data, remaining);
+                    if let Some(buffer) = &mut this.guard.response_body_buffer {
+                        buffer.push(data);
                     }
                 }
                 if ended || frame.is_trailers() {
@@ -145,43 +141,5 @@ impl Drop for TelemetryBody {
         } else {
             self.guard.emit(RequestEnd::Abandoned(Some(self.status_code)));
         }
-    }
-}
-
-pub(crate) struct ResponseBody {
-    bytes: Vec<u8>,
-    limit: usize,
-}
-
-impl ResponseBody {
-    pub(crate) const fn new(limit: usize) -> Self {
-        Self { bytes: Vec::new(), limit }
-    }
-
-    /// Copies the bytes of `data` that fit under the limit. `remaining` is the upper size hint of the body after
-    /// `data`.
-    pub(crate) fn push(&mut self, data: &BytesView, remaining: Option<u64>) {
-        // The first push reserves room for the rest of the body, or the limit when its length is unknown.
-        if self.bytes.is_empty() {
-            let remaining = remaining.and_then(|remaining| usize::try_from(remaining).ok());
-            self.bytes.reserve_exact(remaining.unwrap_or(self.limit).min(self.limit));
-        }
-        for (slice, _) in data.slices() {
-            let room = self.limit - self.bytes.len();
-            self.bytes.extend_from_slice(&slice[..slice.len().min(room)]);
-        }
-    }
-
-    /// Convert bytes into lossy UTF-8 text.
-    pub(crate) fn text(&self) -> Text {
-        if self.bytes.is_empty() {
-            return Text::from("");
-        }
-
-        let text = match str::from_utf8(&self.bytes) {
-            Ok(text) => Arc::from(text),
-            Err(_) => Arc::from(String::from_utf8_lossy(&self.bytes)),
-        };
-        Text::from(text)
     }
 }

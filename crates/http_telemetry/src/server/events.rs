@@ -68,14 +68,18 @@ pub(crate) struct RequestComplete<'a> {
     pub(crate) request_headers: Headers<'a>,
     #[flatten]
     pub(crate) response_headers: Headers<'a>,
+    #[dimension(log = "http.request.body")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) request_body: Option<Text>,
     #[dimension(log = "http.response.body")]
     #[unredacted]
     #[if_none(drop)]
     pub(crate) response_body: Option<Text>,
 }
 
-/// Produces the event `http.server.request.error` when the handler or the response body returned an error or
-/// panicked.
+/// Produces the event `http.server.request.error` when the handler or the response body returned an error, or when
+/// the handler, the request body during its read or the response body panicked.
 #[event("http.server.request.error")]
 #[error("HTTP server request failed")]
 #[histogram(
@@ -127,6 +131,10 @@ pub(crate) struct RequestError<'a> {
     pub(crate) request_headers: Headers<'a>,
     #[flatten]
     pub(crate) response_headers: Headers<'a>,
+    #[dimension(log = "http.request.body")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) request_body: Option<Text>,
     #[dimension(log = "http.response.body")]
     #[unredacted]
     #[if_none(drop)]
@@ -186,6 +194,10 @@ pub(crate) struct RequestAbandoned<'a> {
     pub(crate) request_headers: Headers<'a>,
     #[flatten]
     pub(crate) response_headers: Headers<'a>,
+    #[dimension(log = "http.request.body")]
+    #[unredacted]
+    #[if_none(drop)]
+    pub(crate) request_body: Option<Text>,
     #[dimension(log = "http.response.body")]
     #[unredacted]
     #[if_none(drop)]

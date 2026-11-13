@@ -86,35 +86,39 @@ fn matching_body_is_log_only_field() {
 }
 
 #[test]
-fn body_is_logged_only_when_content_type_matches() {
+fn body_is_logged_when_media_types_cover_content_type() {
     let logged = |types: &[&'static str], content_type: Option<&'static str>| {
         let mut request = common::get().map(|_| HttpBodyBuilder::new_fake().text("chunk"));
         if let Some(content_type) = content_type {
-            request.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
+            request
+                .headers_mut()
+                .insert(CONTENT_TYPE, HeaderValue::from_str(content_type).unwrap());
         }
         let (body, capture) = respond(logging(types), request);
         read_to_end(body);
         capture.single().log(BODY).is_some()
     };
-    let rows: [(&[&'static str], Option<&'static str>, bool); 18] = [
+    let rows: [(&[&'static str], Option<&'static str>, bool); 20] = [
         (&["application/json"], Some("application/json"), true),
-        (&["application/json"], Some("text/plain"), false),
+        (&["image/png", "application/json"], Some("application/json"), true),
+        (&["application/json"], Some("image/png"), false),
+        (&["video/ogg"], Some("audio/ogg"), false),
         (&["application/json"], None, false),
-        (&[], Some("application/json"), false),
-        (&["text/*"], Some("text/csv"), true),
-        (&["text/*"], Some("application/json"), false),
-        (&["*/*"], Some("image/png"), true),
-        (&["application/json"], Some("application/ld+json"), true),
-        (&["application/xml"], Some("application/soap+xml"), true),
-        (&["application/soap"], Some("application/soap+xml"), false),
-        (&["application/ld+json"], Some("application/ld+json"), true),
-        (&["application/ld+json"], Some("application/ld+xml"), false),
-        (&["application/ld+json"], Some("application/foo+ld"), false),
-        (&["application/*+json"], Some("application/pdf"), false),
+        (&[], Some("text/plain"), false),
+        (&["application/json"], Some("text/csv"), true),
+        (&["application/json"], Some("application/xml"), false),
+        (&["application/json"], Some("application/problem+json"), true),
+        (&["application/json"], Some("application/soap+xml"), true),
+        (&["application/json"], Some("application/foo+ld"), false),
+        (&["application/json"], Some("image/svg+xml"), false),
         (&["application/json"], Some("Application/JSON ; charset=utf-8"), true),
+        (&["application/json"], Some("application/json\t; charset=utf-8"), true),
         (&["APPLICATION/JSON"], Some("application/json"), true),
-        (&["text/plain; charset=utf-8"], Some("text/plain"), true),
+        (&["image/png"], Some("TEXT/csv"), true),
+        (&["image/png"], Some("Application/Problem+JSON"), true),
+        (&["application/json; charset=utf-8"], Some("application/json"), true),
         (&["application/json"], Some("not a media type"), false),
+        (&["application/json"], Some("application/jsön"), false),
     ];
 
     assert_eq!(
@@ -177,6 +181,17 @@ fn default_limit_is_32_kib() {
 }
 
 #[test]
+fn limit_above_maximum_becomes_1_5_mib() {
+    let (body, capture) = respond(
+        |layer| logging(&["text/plain"])(layer).body_size_limit(1_572_865),
+        request(Method::GET, "text/plain", HttpBodyBuilder::new_fake().text("a".repeat(1_572_865))),
+    );
+    read_to_end(body);
+
+    assert_eq!(capture.single().log(BODY).cloned(), Some(Value::from("a".repeat(1_572_864))));
+}
+
+#[test]
 fn client_receives_every_frame_of_logged_body() {
     let (body, capture) = respond(
         |layer| logging(&["text/plain"])(layer).body_size_limit(5),
@@ -214,9 +229,19 @@ fn failed_and_abandoned_bodies_log_bytes_read_before_end() {
 
 #[test]
 fn invalid_media_type_returns_error() {
-    let error = Telemetry::server(Sink::noop())
-        .response_body_media_types(["application/json", "json"])
-        .unwrap_err();
+    let message = |entry: &'static str| {
+        Telemetry::server(Sink::noop())
+            .response_body_media_types(["application/json", entry])
+            .unwrap_err()
+            .message()
+    };
 
-    assert_eq!(error.message(), "'json' is not a media type");
+    assert_eq!(
+        ["json", "text/*", "*/*"].map(message),
+        [
+            "'json' is not a media type",
+            "'text/*' is not a media type",
+            "'*/*' is not a media type"
+        ]
+    );
 }
