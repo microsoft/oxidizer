@@ -86,5 +86,5 @@
 mod driver_host;
 mod handle;
 
-pub(crate) use driver_host::RuntimeDriverHost;
+pub(crate) use driver_host::{InstalledDriverHost, RuntimeDriverHost};
 pub use handle::Io;

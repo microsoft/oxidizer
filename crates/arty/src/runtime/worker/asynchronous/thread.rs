@@ -163,8 +163,8 @@ impl ThreadEntry {
             .expect("RuntimeBuilder failed between initializing and activating a worker")
             .dispatcher;
         let io = Io::new(io_runtime.clone(), dispatcher.clone(), current.clone());
-        let driver_waker = RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &current, asynchronous::Signal::waker(&signal));
-        signal.set_driver_waker(driver_waker);
+        let driver_host = RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &current, asynchronous::Signal::waker(&signal));
+        signal.set_driver_waker(driver_host.waker());
 
         let mut worker = asynchronous::Worker::new(
             command_rx,
@@ -175,6 +175,7 @@ impl ThreadEntry {
             signal,
             monitor_options,
             panic_policy,
+            driver_host,
         );
 
         _ = ready_tx.send(());

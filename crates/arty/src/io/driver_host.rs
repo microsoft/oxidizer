@@ -27,7 +27,7 @@ pub(crate) struct RuntimeDriverHost {
 }
 
 impl RuntimeDriverHost {
-    pub(crate) fn install(runtime: &IoRuntime, dispatcher: DispatcherClient, thread: &Thread, owner_waker: Waker) -> Waker {
+    pub(crate) fn install(runtime: &IoRuntime, dispatcher: DispatcherClient, thread: &Thread, owner_waker: Waker) -> InstalledDriverHost {
         let driver_host = runtime
             .clone()
             .driver_host(thread.clone(), owner_waker)
@@ -40,11 +40,7 @@ impl RuntimeDriverHost {
             host: driver_host,
         };
         LocalWorker::install_driver_host(host);
-        waker
-    }
-
-    pub(crate) fn uninstall() -> Self {
-        LocalWorker::uninstall_driver_host()
+        InstalledDriverHost { waker }
     }
 
     pub(crate) fn has_primary_current() -> bool {
@@ -77,6 +73,23 @@ impl RuntimeDriverHost {
                 .execute_cycle(max_wait)
                 .map_err(|error| fail_runtime(&current.dispatcher, error))
         })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct InstalledDriverHost {
+    waker: Waker,
+}
+
+impl InstalledDriverHost {
+    pub(crate) fn waker(&self) -> Waker {
+        self.waker.clone()
+    }
+}
+
+impl Drop for InstalledDriverHost {
+    fn drop(&mut self) {
+        drop(LocalWorker::take_driver_host());
     }
 }
 
@@ -135,25 +148,13 @@ mod tests {
         }
     }
 
-    struct InstalledHost {
-        installed: bool,
-    }
-
-    impl Drop for InstalledHost {
-        fn drop(&mut self) {
-            if self.installed {
-                drop(RuntimeDriverHost::uninstall());
-            }
-        }
-    }
-
-    fn host() -> (IoRuntime, Thread, InstalledHost) {
+    fn host() -> (IoRuntime, Thread, InstalledDriverHost) {
         LocalWorker::attach();
         let thread = ThreadBuilder::default().build(std::thread::current().id());
         let runtime = IoRuntime::new(observed::Sink::noop());
         let dispatcher = DispatcherClient::for_test(&thread);
-        let _ = RuntimeDriverHost::install(&runtime, dispatcher, &thread, Waker::noop().clone());
-        (runtime, thread, InstalledHost { installed: true })
+        let installed = RuntimeDriverHost::install(&runtime, dispatcher, &thread, Waker::noop().clone());
+        (runtime, thread, installed)
     }
 
     #[test]
@@ -170,14 +171,24 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_removes_current_host() {
-        let (runtime, thread, mut host) = host();
+    fn guard_drop_removes_current_host() {
+        let (runtime, thread, host) = host();
 
-        let uninstalled = RuntimeDriverHost::uninstall();
-        host.installed = false;
-
+        drop(host);
         assert!(RuntimeDriverHost::with_current(&runtime, &thread, |_| ()).is_none());
-        drop(uninstalled);
+    }
+
+    #[test]
+    fn unwinding_removes_current_host() {
+        let (runtime, thread, host) = host();
+
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _host = host;
+            panic!("test unwind");
+        }));
+
+        assert!(outcome.is_err());
+        assert!(RuntimeDriverHost::with_current(&runtime, &thread, |_| ()).is_none());
     }
 
     #[test]
