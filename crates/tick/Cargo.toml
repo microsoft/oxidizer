@@ -70,7 +70,7 @@ criterion = { workspace = true, features = ["html_reports"] }
 futures = { workspace = true, features = ["default", "executor", "futures-executor"] }
 jiff = { workspace = true, default-features = true }
 metabench = { path = "../metabench", default-features = false }
-ohno = { path = "../ohno", features = ["app-err"] }
+ohno = { workspace = true, features = ["app-err"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_core = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
