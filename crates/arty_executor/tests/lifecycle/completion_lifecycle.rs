@@ -23,9 +23,8 @@ use observed::enrichment::{Enrichment, EnrichmentEntry};
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
 use observed_testing::{TEST_ID, test_emitter};
-use thread_aware::ThreadBuilder;
 
-use crate::support::{CompletionHandle, TaskBuilderExt as _, TaskOutcome};
+use super::support::{CompletionHandle, TaskBuilderExt as _, TaskOutcome};
 
 thread_local! {
     static THREAD_LOCAL_EXECUTOR: RefCell<Option<Executor>> = const { RefCell::new(None) };
@@ -261,7 +260,11 @@ fn failed_construction_preserves_existing_executor_notifications() {
 
 #[test]
 fn configured_current_thread_executes_tasks() {
-    let thread = ThreadBuilder::default().build(std::thread::current().id());
+    let thread = thread_aware_core::__private::v1::new_thread(
+        thread_aware_core::__private::v1::new_owner(),
+        std::thread::current().id(),
+        thread_aware_core::__private::v1::new_numa_node(0),
+    );
     let mut executor = Executor::builder().thread(thread).build();
     let mut handle = executor.tasks().task(async { 42 }).register_test();
 
@@ -290,6 +293,51 @@ fn noop_executor_applies_task_context_and_restores_caller_context() {
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     assert_eq!(poll_completed(&mut handle), [String::from("task.context")]);
     assert_eq!(enrichment_keys(&sink), ["caller.context"]);
+}
+
+#[test]
+fn task_builder_keeps_context_and_placement() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let context = sink.transfer_context().with_enrichment(TaskContext);
+    let mut executor = Executor::builder().sink(sink.clone()).build();
+    let task_sink = sink;
+    let mut handle = executor
+        .tasks()
+        .task(async move { enrichment_keys(&task_sink) })
+        .context(context)
+        .placement(TaskPlacement::SameThread)
+        .register_test();
+
+    _ = executor.execute_cycle();
+
+    assert_eq!(poll_completed(&mut handle), [String::from("task.context")]);
+    assert_eq!(
+        processor.events()[0].dimensions()[0],
+        ("placement".to_owned(), "same_thread".into())
+    );
+}
+
+#[test]
+fn task_builder_keeps_placement_without_context() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let caller = sink.transfer_context().with_enrichment(CallerContext);
+    let _guard = caller.apply_current_thread();
+    let mut executor = Executor::builder().sink(sink.clone()).build();
+    let task_sink = sink;
+    let mut handle = executor
+        .tasks()
+        .task(async move { enrichment_keys(&task_sink) })
+        .placement(TaskPlacement::SpecificThread)
+        .register_test();
+
+    _ = executor.execute_cycle();
+
+    assert_eq!(poll_completed(&mut handle), [String::from("caller.context")]);
+    assert!(
+        processor.events()[0]
+            .dimensions()
+            .contains(&("placement".to_owned(), "specific_thread".into()))
+    );
 }
 
 #[test]
@@ -454,9 +502,9 @@ fn tasks_submitted_during_poll_wait_for_the_next_cycle_in_registration_order() {
                             polls.borrow_mut().push(index + 2);
                         }
                     })
-                    .register(crate::support::DiscardCompletion);
+                    .register(super::support::DiscardCompletion);
             })
-            .register(crate::support::DiscardCompletion);
+            .register(super::support::DiscardCompletion);
     }
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Continue));
@@ -487,7 +535,7 @@ fn newly_submitted_tasks_run_before_awakened_tasks() {
                 }
             }
         }))
-        .register(crate::support::DiscardCompletion);
+        .register(super::support::DiscardCompletion);
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     polls.borrow_mut().clear();
     ready.set(true);
@@ -500,7 +548,7 @@ fn newly_submitted_tasks_run_before_awakened_tasks() {
                     polls.borrow_mut().push(index);
                 }
             })
-            .register(crate::support::DiscardCompletion);
+            .register(super::support::DiscardCompletion);
     }
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));

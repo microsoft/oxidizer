@@ -306,6 +306,7 @@ impl DispatcherCore {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// These checks inject inconsistent endpoints and inspect commands before any worker runs.
 mod tests {
     use std::error::Error as _;
     use std::pin::pin;

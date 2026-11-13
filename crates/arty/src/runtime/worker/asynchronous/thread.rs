@@ -218,6 +218,7 @@ fn combine_outcomes(run: std::thread::Result<()>, teardown: std::thread::Result<
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// Public runtime construction cannot inject independent run and teardown outcomes.
 mod tests {
     use std::sync::{Arc as StdArc, Mutex as StdMutex};
 

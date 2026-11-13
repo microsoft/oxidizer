@@ -117,6 +117,7 @@ impl Debug for DispatcherClient {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public schedulers cannot fabricate endpoints or expose command queues and pool identity.
 mod tests {
     use std::task::Waker;
 

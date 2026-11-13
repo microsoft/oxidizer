@@ -48,6 +48,7 @@ impl WorkerJoiner {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// Runtime owns its joins and cannot expose injected thread failures or repeated joins.
 mod tests {
     use std::sync::mpsc;
 

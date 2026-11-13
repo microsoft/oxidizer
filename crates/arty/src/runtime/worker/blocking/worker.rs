@@ -301,6 +301,7 @@ impl Pool {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public schedulers cannot inject channel failures or inspect pool counters and ownership.
 mod tests {
     use std::num::NonZeroUsize;
     use std::sync::atomic::{AtomicBool, Ordering};

@@ -192,6 +192,7 @@ pub mod __private {
 
     #[cfg(test)]
     #[cfg_attr(coverage_nightly, coverage(off))]
+    // Public macro calls cannot inject the private errors used by these panic-boundary checks.
     mod tests {
         use std::fmt;
 

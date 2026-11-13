@@ -84,6 +84,7 @@ impl Wake for Signal {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// The internal notification and parking protocol has no standalone public API.
 mod tests {
     use std::sync::mpsc;
     use std::thread;

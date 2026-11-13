@@ -342,6 +342,7 @@ enum CycleAction {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// These checks directly drive worker cycles, inject commands, and inspect private task state.
 mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
     #[cfg(not(miri))]

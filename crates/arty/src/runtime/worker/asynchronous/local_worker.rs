@@ -212,6 +212,7 @@ impl SchedulerContext {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// Public tasks cannot install partial TLS registrations or inspect local queue routing.
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::task::{Poll, Wake, Waker};

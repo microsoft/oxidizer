@@ -176,6 +176,7 @@ fn panic_context(error: &Error) -> ! {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// This teardown check installs a private worker marker on an otherwise external thread.
 mod tests {
     use std::cell::RefCell;
     use std::error::Error as _;

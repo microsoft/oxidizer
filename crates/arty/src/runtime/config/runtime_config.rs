@@ -31,14 +31,3 @@ impl Default for RuntimeConfig {
         }
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_runtime_shares_blocking_pool() {
-        assert_eq!(RuntimeConfig::default().blocking_pool_policy, BlockingPoolPolicy::shared());
-    }
-}

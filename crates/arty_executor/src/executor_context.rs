@@ -116,6 +116,7 @@ impl Drop for CycleGuard {
 }
 
 #[cfg(test)]
+// Public cycles cannot inject foreign owner registrations or invalid TLS transitions.
 mod tests {
     use plurality::MultiPool;
 

@@ -173,6 +173,7 @@ enum WorkersPolicyKind {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public runtime construction cannot inject processor sets or inspect unused placements.
 mod tests {
     use many_cpus::SystemHardware;
     use many_cpus::fake::HardwareBuilder;

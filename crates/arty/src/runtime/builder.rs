@@ -249,25 +249,9 @@ impl RuntimeBuilder {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Stack size, stored monitor configuration, and unbuilt processor policies have no public getters.
 mod tests {
-    use std::time::Duration;
-
-    use tick::ClockControl;
-
     use super::*;
-
-    #[test]
-    fn custom_clock_ok() {
-        let clock_control = ClockControl::new();
-        let builder = Runtime::builder().clock(clock_control.clone());
-
-        let (clock, _) = builder.clock.activate(std::task::Waker::noop().clone());
-        let now = clock.system_time();
-
-        clock_control.advance(Duration::from_secs(1));
-
-        assert_eq!(clock.system_time().duration_since(now).unwrap(), Duration::from_secs(1));
-    }
 
     #[test]
     fn resource_limits_preserve_independent_settings() {
@@ -282,36 +266,9 @@ mod tests {
     }
 
     #[test]
-    fn maximum_worker_count_replaces_exact_count() {
-        let builder = Runtime::builder()
-            .workers(WorkersPolicy::exactly(2))
-            .workers(WorkersPolicy::at_most(1));
-        assert_eq!(builder.config.workers_policy, WorkersPolicy::at_most(1),);
-    }
-
-    #[test]
-    fn zero_worker_policies_can_be_replaced_before_building() {
-        for policy in [WorkersPolicy::exactly(0), WorkersPolicy::at_most(0)] {
-            let builder = Runtime::builder().workers(policy);
-            assert_eq!(builder.config.workers_policy, policy);
-
-            let builder = builder.workers(WorkersPolicy::at_most(1));
-            assert_eq!(builder.config.workers_policy, WorkersPolicy::at_most(1));
-        }
-    }
-
-    #[test]
     fn all_workers_policy_replaces_maximum_count() {
         let builder = Runtime::builder().workers(WorkersPolicy::at_most(1)).workers(WorkersPolicy::all());
         assert_eq!(builder.config.workers_policy, WorkersPolicy::all(),);
-    }
-
-    #[test]
-    fn automatic_worker_selection_replaces_exact_count() {
-        let builder = Runtime::builder()
-            .workers(WorkersPolicy::exactly(2))
-            .workers(WorkersPolicy::default());
-        assert_eq!(builder.config.workers_policy, WorkersPolicy::default());
     }
 
     #[test]
@@ -332,22 +289,5 @@ mod tests {
         let builder = Runtime::builder().monitor(MonitorPolicy::disabled());
 
         assert!(!builder.config.monitor_options.policy().is_enabled());
-    }
-
-    #[test]
-    fn build_and_stop_inside_futures_executor() {
-        futures::executor::block_on(async {
-            let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-
-            let (value, scheduler) = runtime
-                .scheduler()
-                .spawn_anywhere((), |cx, ()| async move { (42, cx.scheduler().clone()) })
-                .await
-                .unwrap();
-            assert_eq!(value, 42);
-
-            runtime.stop().unwrap();
-            assert!(scheduler.spawn(async |_| ()).await.unwrap_err().is_shutdown());
-        });
     }
 }
