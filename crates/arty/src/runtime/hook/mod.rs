@@ -16,9 +16,8 @@
 //! [`ThreadAware`] relocation.
 //!
 //! Register hooks before startup with [`RuntimeBuilder::on`]. Add hooks after
-//! startup with [`RuntimeControl::on`]. Arty invokes callbacks in registration
-//! order. Before startup completes, each initial worker runs its [`WorkerInit`]
-//! callbacks from the builder.
+//! startup with [`RuntimeControl::on`]. Before startup completes, each initial
+//! worker runs its [`WorkerInit`] callbacks from the builder.
 //!
 //! Arty does not catch a panic from a hook callback. You must make sure that
 //! every hook callback completes without a panic.
