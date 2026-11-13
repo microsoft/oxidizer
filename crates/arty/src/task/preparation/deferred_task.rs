@@ -65,7 +65,7 @@ where
     type Output = F::Output;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut PollContext<'_>) -> Poll<Self::Output> {
-        // Inspect unpinned state without borrowing a self-referential future again.
+        // Inspect unpinned state without reborrowing a future that can hold self-references.
         if let DeferredTaskProj::Factory { factory } = self.as_mut().project() {
             if matches!(
                 factory
