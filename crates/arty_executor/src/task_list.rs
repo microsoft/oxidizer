@@ -11,7 +11,10 @@ use crate::{TaskHandle, TaskPtr};
 /// Intrusive owner-thread inventory of all pending tasks.
 #[derive(Default, derive_more::Debug)]
 pub(crate) struct TaskList {
+    // Keep task-allocation addresses out of Debug output.
+    #[debug(skip)]
     head: Option<TaskPtr>,
+    #[debug(skip)]
     tail: Option<TaskPtr>,
     _owner_thread: PhantomData<Rc<()>>,
 }

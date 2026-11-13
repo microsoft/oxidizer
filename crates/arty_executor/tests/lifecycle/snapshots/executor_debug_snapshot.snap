@@ -49,9 +49,8 @@ Executor {
     },
     active: [],
     pending: TaskList {
-        head: None,
-        tail: None,
         _owner_thread: PhantomData<alloc::rc::Rc<()>>,
+        ..
     },
     clock: SimpleClock(
         SystemFast,
