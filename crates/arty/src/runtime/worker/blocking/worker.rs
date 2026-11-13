@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Blocking worker admission and pool execution implementation.
+//! Admission and pool execution for blocking workers.
 
 use std::num::NonZeroUsize;
 use std::sync::atomic::Ordering;
@@ -159,7 +159,9 @@ impl Worker {
         })
     }
 
-    /// Submits a blocking task to the worker. If the worker is shutting down, the task will be ignored.
+    /// Submits a blocking task to the worker.
+    ///
+    /// If the worker is shutting down, the worker ignores the task.
     pub(crate) fn spawn_blocking<F, R>(&self, body: F) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
@@ -220,7 +222,7 @@ impl Pool {
     /// The pool starts with one thread and grows when the queue is overloaded.
     const INITIAL_THREAD_COUNT: usize = 1;
 
-    /// Queue-growth heuristic following the [`blocking`](https://github.com/smol-rs/blocking/blob/master/src/lib.rs) pool.
+    /// Queue-growth rule adapted from the [`blocking`](https://github.com/smol-rs/blocking/blob/master/src/lib.rs) pool.
     const MAX_TASKS_PER_THREAD: usize = 5;
 
     /// Default per-pool thread limit for blocking tasks.
@@ -478,15 +480,15 @@ mod tests {
     fn blocking_pool_grow_to_maximum() {
         let blocking_pool = Pool::new(RuntimeName::default(), None, Some(limit(5)));
 
-        // It says "max" but it is effectively the "current" count because growth is async.
+        // Despite its name, max_count reports the current worker count.
         assert_eq!(blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 1);
         assert!(blocking_pool.grow()); // 2
         assert!(blocking_pool.grow()); // 3
         assert!(blocking_pool.grow()); // 4
         assert!(blocking_pool.grow()); // 5
-        assert!(!blocking_pool.grow()); // 5 - should not grow further
+        assert!(!blocking_pool.grow()); // The pool reached its configured limit of five threads.
 
-        // It says "max" but it is effectively the "current" count because growth is async.
+        // Despite its name, max_count reports the current worker count.
         assert_eq!(blocking_pool.inner.lock_result().unwrap().as_ref().unwrap().max_count(), 5);
     }
 
