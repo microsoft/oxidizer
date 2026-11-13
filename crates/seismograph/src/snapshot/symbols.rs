@@ -306,18 +306,17 @@ mod tests {
     #[cfg(all(not(miri), any(windows, target_os = "linux", target_os = "macos")))]
     #[test]
     fn native_bridge_preserves_the_backends_available_metadata_without_guessing_names() {
-        fn probe() {
-            std::hint::black_box(42);
-        }
+        let mut pointers = Vec::new();
+        backtrace::trace(|frame| {
+            pointers.push(frame.ip());
+            true
+        });
+        assert!(!pointers.is_empty());
 
-        #[cfg(windows)]
-        let platform = windows_sys::Win32::System::Diagnostics::Debug::SymGetOptions as *const ();
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        let platform = libc::malloc as *const ();
-        for pointer in [probe as *const (), platform] {
+        for pointer in pointers {
             let recorded = Address::new(Address::from_ptr(pointer).get() + u64::from(cfg!(windows)));
             let mut expected = unresolved(recorded.get());
-            backtrace::resolve(pointer.cast_mut().cast(), |symbol| {
+            backtrace::resolve(pointer, |symbol| {
                 expected.name = expected.name.take().or_else(|| symbol.name().map(|name| name.to_string()));
                 expected.filename = expected
                     .filename
