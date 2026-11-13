@@ -1498,6 +1498,17 @@ mod tests {
         use seismograph_protocol::io::IoOperation;
 
         let (io, control) = MonitorIo::new_mocked();
+        let owner = io.current_owner().unwrap();
+        let process_id = io.process_id();
+        let instance_id = io.instance_id().unwrap();
+        let descriptor = MonitorDescriptor {
+            name: "test".into(),
+            instance: None,
+            process_id,
+            instance_id,
+            endpoint: MonitorEndpoint::for_instance(Path::new("mock-registry"), &owner, process_id, instance_id),
+            owner,
+        };
         let (mut client, server) = control.connected_pair();
         seismograph_protocol::write_request(&mut client, 1, &Request::Hello).unwrap();
         control.fail_next(
@@ -1505,7 +1516,7 @@ mod tests {
             io::Error::new(io::ErrorKind::PermissionDenied, "scripted hello write failure"),
         );
 
-        let result = handle_client(&io, server, &test_descriptor(), &AtomicBool::new(true));
+        let result = handle_client(&io, server, &descriptor, &AtomicBool::new(true));
 
         assert!(matches!(
             result,

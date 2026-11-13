@@ -91,6 +91,25 @@ fn serve_discoverable(io: &MonitorIo, descriptor: &MonitorDescriptor) -> JoinHan
 }
 
 #[test]
+fn a_failed_handshake_connection_preserves_the_io_error() {
+    let (io, control) = MonitorIo::new_mocked();
+    let (_, descriptor) = descriptor(&io);
+    control.fail_next(
+        IoOperation::Connect,
+        io::Error::new(io::ErrorKind::PermissionDenied, "scripted handshake connection failure"),
+    );
+
+    let Error::Io(error) = handshake(&io, &descriptor).unwrap_err() else {
+        panic!("expected the connection error");
+    };
+
+    assert_eq!(
+        (error.kind(), error.to_string()),
+        (io::ErrorKind::PermissionDenied, "scripted handshake connection failure".into())
+    );
+}
+
+#[test]
 fn complete_client_commands_use_the_selected_io_instance() {
     let (io, control) = MonitorIo::new_mocked();
     control.set_max_chunk(3);
