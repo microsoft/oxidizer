@@ -153,6 +153,8 @@ impl Wake for DriverInterrupt {
 pub struct DriverHost {
     runtime: IoRuntime,
     thread: Thread,
+    // Keep the waker's data and vtable addresses out of Debug output.
+    #[debug(skip)]
     owner_waker: Waker,
     #[debug(skip)]
     interrupt: Arc<DriverInterrupt>,

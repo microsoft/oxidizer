@@ -16,10 +16,6 @@ DriverHost {
             0,
         ),
     },
-    owner_waker: Waker {
-        data: [address],
-        vtable: [address],
-    },
     initializing: Cell {
         value: false,
     },
