@@ -12,7 +12,7 @@ use std::thread;
 
 use arty::runtime::hook::Panic;
 use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
-use testing_aids::TEST_TIMEOUT;
+use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 
 #[cfg(test)]
 fn indexed_worker_names(builder: RuntimeBuilder, policy: BlockingPoolPolicy) -> (String, Vec<String>) {
@@ -48,7 +48,15 @@ fn indexed_worker_names(builder: RuntimeBuilder, policy: BlockingPoolPolicy) -> 
                             })
                         })
                         .collect();
-                    let mut names: Vec<_> = (0..4).map(|_| received.recv_timeout(TEST_TIMEOUT).unwrap()).collect();
+                    let mut names: Vec<_> = (0..4)
+                        .map(|_| {
+                            if is_mutation_testing() {
+                                received.recv().unwrap()
+                            } else {
+                                received.recv_timeout(TEST_TIMEOUT).unwrap()
+                            }
+                        })
+                        .collect();
                     names.sort();
                     drop(release);
                     for task in tasks {
