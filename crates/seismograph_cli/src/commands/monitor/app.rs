@@ -3483,20 +3483,46 @@ mod tests {
     #[test]
     fn stop_worker_reconciles_server_policy_after_a_capture_error() {
         use seismograph_protocol::message::{Request, Response};
+        use seismograph_protocol::monitor::MonitorEndpoint;
+        use seismograph_protocol::transport::Listener;
         use seismograph_protocol::{read_request, write_response};
-        let listener = seismograph_protocol::testing::listener();
-        let descriptor = listener.descriptor().clone();
-        let id = descriptor.instance_id;
-        let worker = thread::spawn(move || {
+
+        let (io, _) = MonitorIo::new_mocked();
+        let directory = seismograph_protocol::discovery::Directory::current(&io).unwrap();
+        let owner = io.current_owner().unwrap();
+        let process_id = io.process_id();
+        let instance_id = io.instance_id().unwrap();
+        let descriptor = MonitorDescriptor {
+            name: "worker".into(),
+            instance: None,
+            process_id,
+            instance_id,
+            endpoint: MonitorEndpoint::for_instance(directory.path(), &owner, process_id, instance_id),
+            owner,
+        };
+        let listener = Listener::bind(&io, &descriptor).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let (sender, receiver) = unbounded();
+
+        thread::scope(|scope| {
+            let worker = scope.spawn(|| capture_connected_snapshot(&io, &descriptor, CaptureMode::Stop, &sender));
             for stop in [true, false] {
-                let mut stream = listener.accept().unwrap();
-                stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
-                assert!(matches!(read_request(&mut stream).unwrap(), (1, Request::Hello)));
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok(stream) => break stream,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(!worker.is_finished(), "capture returned before completing policy reconciliation");
+                            thread::yield_now();
+                        }
+                        Err(error) => panic!("scripted accept failed: {error}"),
+                    }
+                };
+                assert_eq!(read_request(&mut stream).unwrap(), (1, Request::Hello));
                 write_response(
                     &mut stream,
                     1,
                     &Response::Hello {
-                        instance_id: id,
+                        instance_id,
                         recording: RecordingConfiguration::default(),
                     },
                 )
@@ -3507,20 +3533,17 @@ mod tests {
                     write_response(&mut stream, 2, &Response::Error("source failed after recorder cleanup".into())).unwrap();
                 }
             }
+            let error = worker.join().unwrap().err().unwrap();
+
+            assert_eq!(error, "monitor rejected the request: source failed after recorder cleanup");
+            assert!(matches!(
+                receiver.try_recv().unwrap(),
+                CaptureMessage::Progress(CaptureStep::Capture)
+            ));
+            assert!(matches!(receiver.try_recv().unwrap(), CaptureMessage::Recording(Ok(configuration))
+                if configuration == RecordingConfiguration::default()));
+            assert!(receiver.try_recv().err().unwrap().is_empty());
         });
-        let (sender, receiver) = unbounded();
-        let error = capture_connected_snapshot(&MonitorIo::new_native(), &descriptor, CaptureMode::Stop, &sender)
-            .err()
-            .unwrap();
-        worker.join().unwrap();
-        assert!(error.contains("source failed after recorder cleanup"));
-        assert!(matches!(
-            receiver.try_recv().unwrap(),
-            CaptureMessage::Progress(CaptureStep::Capture)
-        ));
-        assert!(matches!(receiver.try_recv().unwrap(), CaptureMessage::Recording(Ok(configuration))
-            if configuration == RecordingConfiguration::default()));
-        receiver.try_recv().err().unwrap();
     }
 
     #[test]
