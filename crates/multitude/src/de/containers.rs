@@ -45,7 +45,6 @@ impl<'de, T: ?Sized, A: Allocator + Clone> DeserializeIn<'de, A> for PhantomData
                 formatter.write_str("unit")
             }
 
-            #[cfg_attr(test, mutants::skip)] // `PhantomData<T>::default()` is also `PhantomData`
             fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
                 Ok(PhantomData)
             }

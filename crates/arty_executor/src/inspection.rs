@@ -70,8 +70,10 @@ pub trait PollObserver: std::fmt::Debug {
 }
 
 /// Builds a temporary description while the native future is borrowed on its owner.
-pub(crate) trait Inspector<F>: 'static {
+// The private module seals this trait. Public visibility permits opaque builder returns.
+pub trait Inspector<F>: 'static {
     #[cfg(feature = "inspection")]
+    /// Visits the description of a live future.
     fn inspect(&self, future: &F, state: TaskState, visitor: &mut dyn FnMut(&dyn Any));
 }
 

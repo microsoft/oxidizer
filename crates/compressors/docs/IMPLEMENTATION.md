@@ -85,10 +85,9 @@ invariant that is invisible until it is wrong:
   means that the engine is stuck. It is the only guard against an engine that can
   never finish.
 
-Both are excluded from mutation testing, because a mutant of either produces a
-program that hangs rather than fails, and the harness records a timeout instead
-of a verdict. The exclusion is attached to the attribute rather than the doc
-comment, so the item's documentation stays about behavior.
+Mutations of these guards can make a program hang rather than fail.
+Gamma reports timeouts as undetected mutants, not successful assertions.
+Review actual findings before adding narrow source suppressions with a reason.
 
 ## Bounding cumulative output
 

@@ -367,7 +367,6 @@ impl BytesBuf {
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
-    #[cfg_attr(test, mutants::skip)] // Mutating the bounds check makes copy_nonoverlapping write past the destination, causing UB.
     pub(crate) fn put_small(&mut self, src: &[u8]) -> bool {
         assert!(self.remaining_capacity() >= src.len());
 
@@ -592,7 +591,6 @@ impl BytesBuf {
     /// # }
     /// # }
     /// ```
-    #[cfg_attr(test, mutants::skip)] // Lying about buffer sizes is an easy way to infinite loops.
     pub fn remaining_capacity(&self) -> usize {
         // The remaining capacity is the sum of the remaining capacity of all span builders.
         debug_assert_eq!(
@@ -652,7 +650,6 @@ impl BytesBuf {
     ///
     /// The consumed bytes and the memory capacity that backs them are removed from the buffer.
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
-    #[cfg_attr(test, mutants::skip)] // Mutating the bounds check causes UB via unwrap_unchecked in consume_all or infinite loops in prepare_consume.
     pub fn consume_checked(&mut self, len: usize) -> Option<BytesView> {
         if len > self.len() {
             return None;
@@ -826,7 +823,6 @@ impl BytesBuf {
     /// [`remaining_capacity()`]: Self::remaining_capacity
     #[must_use]
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
-    #[cfg_attr(test, mutants::skip)] // Mutating the bounds check produces invalid SpanBuilders.
     pub fn split_off_remaining_checked(&mut self, count: usize) -> Option<Self> {
         if count > self.remaining_capacity() {
             return None;
@@ -1256,7 +1252,6 @@ impl BytesBuf {
     reason = "telemetry identity is intentionally excluded from logical buffer formatting"
 )]
 impl core::fmt::Debug for BytesBuf {
-    #[cfg_attr(test, mutants::skip)] // We have no API contract here.
     #[cfg_attr(coverage_nightly, coverage(off))] // We have no API contract here.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let frozen_spans = self.frozen_spans.iter().map(|x| x.len().to_string()).collect::<Vec<_>>().join(", ");
@@ -1418,7 +1413,6 @@ pub struct BytesBufRemaining<'a> {
 impl<'a> Iterator for BytesBufRemaining<'a> {
     type Item = (&'a mut [MaybeUninit<u8>], Option<&'a dyn BlockMeta>);
 
-    #[cfg_attr(test, mutants::skip)] // This gets mutated into an infinite loop which is not very helpful.
     fn next(&mut self) -> Option<Self::Item> {
         let next_span_builder_index = self.next_span_builder_index?;
 

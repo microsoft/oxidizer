@@ -54,7 +54,6 @@ trait DeserializeLexicon: Lexicon {
 }
 
 impl DeserializeLexicon for LocalLexicon {
-    #[cfg_attr(test, mutants::skip)] // Capacity hints affect allocation behavior, not observable values.
     fn with_entry_capacity(entries: usize) -> Self {
         Self::with_capacity(entries, 0)
     }
@@ -62,7 +61,6 @@ impl DeserializeLexicon for LocalLexicon {
 
 #[cfg(feature = "std")]
 impl DeserializeLexicon for crate::ThreadedLexicon {
-    #[cfg_attr(test, mutants::skip)] // Capacity hints affect allocation behavior, not observable values.
     fn with_entry_capacity(entries: usize) -> Self {
         Self::with_capacity_for_size_hint(entries)
     }

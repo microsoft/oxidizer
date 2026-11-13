@@ -184,6 +184,30 @@ mod tests {
     }
 
     #[test]
+    fn zero_sized_initialization_panic_drops_only_the_initialized_prefix() {
+        thread_local! {
+            static DROPPED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        }
+        struct ZeroSized;
+        impl Drop for ZeroSized {
+            fn drop(&mut self) {
+                DROPPED.with(|dropped| dropped.set(dropped.get() + 1));
+            }
+        }
+
+        DROPPED.with(|dropped| dropped.set(0));
+        let result = std::panic::catch_unwind(|| {
+            let _storage = SystemSlice::from_fn(4, |index| {
+                assert_ne!(index, 2, "injected initializer failure");
+                ZeroSized
+            });
+        });
+
+        assert!(result.is_err());
+        assert_eq!(DROPPED.with(std::cell::Cell::get), 2);
+    }
+
+    #[test]
     fn empty_storage_and_mutable_access_are_supported() {
         let empty = SystemSlice::<u32>::from_fn(0, |_| unreachable!());
         assert_eq!(&*empty, &[]);

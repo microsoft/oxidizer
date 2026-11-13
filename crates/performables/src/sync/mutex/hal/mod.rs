@@ -18,7 +18,6 @@ pub(in crate::sync) use portable::{Condvar, Guard, Mutex};
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 #[cfg_attr(coverage_nightly, coverage(off))] // OS parking cost is benchmarked; native tests cover the state/wake protocols.
-#[cfg_attr(test, mutants::skip)] // A removed park becomes a spurious wake; native contention benchmarks cover its cost.
 pub(in crate::sync) fn wait_on_address(state: &std::sync::atomic::AtomicU32, expected: u32) {
     #[cfg(target_os = "linux")]
     linux::wait_condition(state, expected, None);

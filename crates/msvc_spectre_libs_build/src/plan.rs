@@ -62,7 +62,6 @@ impl EnvValue {
     /// This is the only part of this module that touches the environment; it
     /// exists so that the adapter does not have to repeat the three-way match.
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Reads the process environment; the three-way outcome is exercised through `BuildEnvironment`.
     #[cfg_attr(coverage_nightly, coverage(off))] // Pure I/O; the decisions it feeds are covered through `plan`.
     pub fn read(name: &str) -> Self {
         match env::var(name) {
@@ -122,7 +121,6 @@ impl BuildEnvironment {
     /// valid Unicode. Cargo sets all four for every build script, so their
     /// absence means this is not running as one and no useful decision can be
     /// made.
-    #[cfg_attr(test, mutants::skip)] // Pure capture of the process environment; the decisions it feeds are tested directly.
     #[cfg_attr(coverage_nightly, coverage(off))] // Pure I/O; the decisions it feeds are covered through `plan`.
     pub fn from_env() -> Result<Self, AppError> {
         let target = required_cargo_var("TARGET")?;
@@ -147,7 +145,6 @@ impl BuildEnvironment {
 /// # Errors
 ///
 /// Returns an error when the variable is missing or not valid Unicode.
-#[cfg_attr(test, mutants::skip)] // Reads the process environment, which the tests deliberately do not depend on.
 #[cfg_attr(coverage_nightly, coverage(off))] // Pure I/O; the decisions it feeds are covered through `plan`.
 fn required_cargo_var(name: &str) -> Result<String, AppError> {
     env::var(name).map_err(|error| match error {

@@ -595,6 +595,8 @@ fn rw_lock_result_acquisitions_recover_without_clearing_poison() {
     assert!(lock.is_poisoned());
 
     lock.clear_poison();
+    lock.clear_poison();
+    assert!(!lock.is_poisoned());
     assert_eq!(*lock.read(), 3);
 }
 

@@ -5,7 +5,7 @@
 // not inline in the macro body, so this module-level `coverage(off)` actually
 // suppresses it. A macro body is re-instrumented at every expansion site and
 // attributed back to this file, so `coverage(off)` here never reached it.
-#![cfg_attr(coverage_nightly, coverage(off))]
+#![cfg_attr(ohno_has_coverage_attribute, coverage(off))]
 
 //! Test utilities for the ohno crate.
 //!

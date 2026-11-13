@@ -9,7 +9,7 @@ mod support;
 
 use std::error::Error as _;
 use std::future::{poll_fn, ready};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
@@ -393,6 +393,77 @@ fn partial_conflict_rolls_back_and_allows_retry() {
     );
     assert!(futures::executor::block_on(retry).unwrap());
 
+    stop_bounded(runtime);
+    drop(tokio);
+}
+
+#[test]
+fn conflict_before_another_installer_starts_rolls_back_and_allows_retry() {
+    struct StartupWake(AtomicBool);
+
+    impl std::task::Wake for StartupWake {
+        fn wake(self: Arc<Self>) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
+    let runtime = runtime(2);
+    let (context, scheduler, workers) = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let workers = cx.control().workers().into_iter().cloned().collect::<Vec<_>>();
+            (cx.clone(), cx.scheduler().clone(), workers)
+        })
+        .unwrap();
+    let (context_ready, context_started) = oneshot();
+    let (context_release, context_gate) = oneshot();
+    let holder = scheduler.spawn_at(
+        &workers[0],
+        ExistingContext {
+            handle: tokio.handle().clone(),
+            ready: context_ready,
+            release: context_gate,
+        },
+        hold_existing_context,
+    );
+    futures::executor::block_on(context_started).unwrap();
+
+    let block = |worker: &Thread| {
+        let (started, ready) = mpsc::sync_channel(1);
+        let (release, gate) = mpsc::sync_channel(1);
+        let blocker = scheduler.spawn_at(worker, WorkerBlocker { started, release: gate }, block_worker);
+        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        (release, blocker)
+    };
+    let (conflict_release, conflict_blocker) = block(&workers[0]);
+    let (deferred_release, deferred_blocker) = block(&workers[1]);
+    let startup_wake = Arc::new(StartupWake(AtomicBool::new(false)));
+    let waker = std::task::Waker::from(Arc::clone(&startup_wake));
+    let mut task_context = std::task::Context::from_waker(&waker);
+    let mut initialization = std::pin::pin!(arty_tokio::init(&context, tokio.handle().clone()));
+    assert!(initialization.as_mut().poll(&mut task_context).is_pending());
+
+    conflict_release.send(()).unwrap();
+    futures::executor::block_on(conflict_blocker).unwrap();
+    let deadline = Instant::now() + TEST_TIMEOUT;
+    while !startup_wake.0.load(Ordering::Acquire) {
+        assert!(Instant::now() < deadline, "conflicting installer did not report its startup result");
+        std::thread::yield_now();
+    }
+    assert!(initialization.as_mut().poll(&mut task_context).is_pending());
+
+    deferred_release.send(()).unwrap();
+    futures::executor::block_on(deferred_blocker).unwrap();
+    let error = futures::executor::block_on(initialization).unwrap_err();
+    assert_eq!(error.to_string(), "an Arty worker already has a Tokio runtime context");
+    assert!(worker_has_context(&scheduler, &workers[0]));
+    assert!(!worker_has_context(&scheduler, &workers[1]));
+
+    context_release.send(()).unwrap();
+    futures::executor::block_on(holder).unwrap();
+    futures::executor::block_on(arty_tokio::init(&context, tokio.handle())).unwrap();
+    assert_eq!(futures::executor::block_on(worker_contexts(&context)), vec![true, true]);
     stop_bounded(runtime);
     drop(tokio);
 }

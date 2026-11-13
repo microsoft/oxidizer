@@ -92,7 +92,6 @@ http = { workspace = true }
 httpdate = { workspace = true }
 idna = { workspace = true, features = ["compiled_data", "std"] }
 metabench = { workspace = true }
-mutants = { workspace = true }
 paste = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }

@@ -159,7 +159,7 @@ impl Builder {
             let field_path: Vec<_> = variable.field_path().split('.').map(str::to_owned).collect();
             let schema = self
                 .resolve_field(input, &field_path)
-                .unwrap_or_else(|| Schema::scalar("string", None));
+                .expect("descriptor ingestion validates every path variable against the input message");
             let prefix = parts[..position].iter().filter_map(capture_literal).collect::<Vec<_>>().join("/");
             let suffix = parts[position..].iter().filter_map(capture_literal).collect::<Vec<_>>().join("/");
             parameters.push(Parameter {

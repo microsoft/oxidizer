@@ -103,7 +103,6 @@ impl DispatcherCore {
         })
     }
 
-    #[cfg_attr(test, mutants::skip)] // Tests hang if mutation removes the shutdown signal or worker notifications.
     pub(crate) fn stop_inner(&self, cause: ShutdownCause) -> ShutdownCause {
         self.shutdown().begin(cause);
         let cause = self.shutdown().cause().unwrap_or_default();
@@ -213,7 +212,6 @@ impl DispatcherCore {
         self.remote_results.shutdown()
     }
 
-    #[cfg_attr(test, mutants::skip)] // Removing this wait guard deadlocks runtime-owner teardown.
     pub(crate) fn next_blocking_worker(&self) -> Arc<Worker> {
         self.blocking_worker(self.next_worker_index())
     }
@@ -299,7 +297,6 @@ mod tests {
     use crate::runtime::worker::asynchronous::{CommandReceiver, command_channel};
     use crate::runtime::worker::blocking::{PanicPolicy, Pool};
 
-    #[cfg_attr(test, mutants::skip)]
     fn endpoint(thread: &Thread) -> (WorkerEndpoint, CommandReceiver) {
         let (commands, command_rx) = command_channel();
         (
@@ -540,7 +537,6 @@ mod tests {
         assert_eq!(shutdown.state(), ShutdownState::Started);
     }
 
-    #[cfg_attr(test, mutants::skip)]
     fn drain_system(worker_rx: &CommandReceiver) -> Vec<SystemCommand> {
         let mut commands = Vec::new();
         commands.extend(std::iter::from_fn(|| worker_rx.system_receiver().try_recv().ok()));
