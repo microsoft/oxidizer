@@ -40,7 +40,7 @@ impl LocalWorker {
         });
     }
 
-    pub(super) fn register_scheduler(context: Context, tasks: TaskSet, executor_shutdown: ExecutorShutdown) {
+    pub(super) fn register_scheduler(context: Context, tasks: TaskSet, executor_shutdown: ExecutorShutdown) -> SchedulerGuard {
         let results = JoinHandlePool::new(context.dispatcher().shutdown().clone());
         let scheduler = SchedulerContext {
             thread: context.thread().clone(),
@@ -54,6 +54,7 @@ impl LocalWorker {
             assert!(current.scheduler.is_none(), "a scheduler is already registered on this task worker");
             current.scheduler = Some(scheduler);
         });
+        SchedulerGuard
     }
 
     pub(crate) fn is_current() -> bool {
@@ -80,8 +81,11 @@ impl LocalWorker {
         });
     }
 
-    pub(super) fn clear_scheduler() {
-        let scheduler = Self::with_current_mut(|current| current.and_then(|current| current.scheduler.take()));
+    fn clear_scheduler() {
+        let scheduler = CURRENT
+            .try_with(|current| current.borrow_mut().as_mut().and_then(|current| current.scheduler.take()))
+            .ok()
+            .flatten();
         drop(scheduler);
     }
 
@@ -96,14 +100,11 @@ impl LocalWorker {
         });
     }
 
-    pub(crate) fn uninstall_driver_host() -> RuntimeDriverHost {
-        Self::with_current_mut(|current| {
-            let current = current.expect("task worker teardown retains its local worker while uninstalling the I/O driver host");
-            current
-                .driver_host
-                .take()
-                .expect("the task worker must uninstall the I/O driver host that it installed")
-        })
+    pub(crate) fn take_driver_host() -> Option<RuntimeDriverHost> {
+        CURRENT
+            .try_with(|current| current.borrow_mut().as_mut().and_then(|current| current.driver_host.take()))
+            .ok()
+            .flatten()
     }
 
     pub(crate) fn with_driver_host<R>(f: impl FnOnce(&RuntimeDriverHost) -> R) -> R {
@@ -135,6 +136,15 @@ impl LocalWorker {
 
     fn with_current_mut<R>(f: impl FnOnce(Option<&mut Self>) -> R) -> R {
         CURRENT.with_borrow_mut(|current| f(current.as_mut()))
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct SchedulerGuard;
+
+impl Drop for SchedulerGuard {
+    fn drop(&mut self) {
+        LocalWorker::clear_scheduler();
     }
 }
 
@@ -231,7 +241,7 @@ mod tests {
             let context = Context::new(dispatcher, clock, io, thread.clone());
             let mut executor = Executor::builder().thread(thread.clone()).build();
             LocalWorker::attach();
-            LocalWorker::register_scheduler(context, executor.tasks(), executor.shutdown());
+            let scheduler_guard = LocalWorker::register_scheduler(context, executor.tasks(), executor.shutdown());
 
             let mut join = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 42 }));
             let registered_locally = command_rx.spawn_receiver().try_recv().is_err() && executor.has_tasks();
@@ -288,7 +298,7 @@ mod tests {
             );
             let rejection_not_queued = command_rx.spawn_receiver().try_recv().is_err();
             let rejection_not_woken = wakes.0.load(Ordering::Relaxed) == before;
-            LocalWorker::clear_scheduler();
+            drop(scheduler_guard);
             [
                 ("same-owner registration stays local", registered_locally),
                 ("idle worker is woken", idle_worker_woken),
@@ -326,6 +336,34 @@ mod tests {
         std::thread::spawn(|| {
             EXTERNAL_OWNER.with(|_| {});
             LocalWorker::with_scheduler(|_| ());
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn unwinding_clears_scheduler_context() {
+        std::thread::spawn(|| {
+            LocalWorker::attach();
+            let thread = ThreadBuilder::default().build(std::thread::current().id());
+            let dispatcher = DispatcherClient::for_test(&thread);
+            let io = crate::io::Io::new(
+                arty_io_host::IoRuntime::new(observed::Sink::noop()),
+                dispatcher.clone(),
+                thread.clone(),
+            );
+            let (clock, _clock_driver) = InactiveClock::new_isolated().activate(Waker::noop().clone());
+            let context = Context::new(dispatcher, clock, io, thread.clone());
+            let executor = Executor::builder().thread(thread).build();
+
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _scheduler = LocalWorker::register_scheduler(context, executor.tasks(), executor.shutdown());
+                assert!(LocalWorker::has_scheduler_context());
+                panic!("test unwind");
+            }));
+
+            assert!(outcome.is_err());
+            assert!(!LocalWorker::has_scheduler_context());
         })
         .join()
         .unwrap();

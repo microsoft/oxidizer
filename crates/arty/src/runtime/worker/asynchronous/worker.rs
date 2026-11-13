@@ -14,10 +14,11 @@ use thread_aware::Thread;
 use tick::SimpleClock;
 use tick::runtime::{ClockDriver, InactiveClock};
 
-use crate::io::{Io, RuntimeDriverHost};
+use crate::io::{InstalledDriverHost, Io, RuntimeDriverHost};
 use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::DispatcherClient;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
+use crate::runtime::worker::asynchronous::local_worker::SchedulerGuard;
 use crate::runtime::worker::asynchronous::{CommandReceiver, LocalWorker, Signal, SpawnCommand, SystemCommand};
 #[cfg(test)]
 use crate::runtime::worker::asynchronous::{CommandSender, command_channel};
@@ -90,9 +91,11 @@ pub(crate) struct Worker {
 
 #[derive(Debug)]
 struct ReadyWorkerState {
+    scheduler_guard: Option<SchedulerGuard>,
     commands: CommandReceiver,
     context: Context,
     executor: Executor,
+    driver_host_guard: InstalledDriverHost,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -115,6 +118,7 @@ impl Worker {
         signal: Arc<Signal>,
         monitor_options: MonitorOptions,
         panic_policy: crate::runtime::PanicPolicy,
+        driver_host_guard: InstalledDriverHost,
     ) -> Self {
         let worker_waker = Signal::waker(&signal);
         let shutdown = dispatcher.shutdown().clone();
@@ -130,13 +134,15 @@ impl Worker {
         let executor_shutdown = executor.shutdown();
 
         let context = Context::new(dispatcher, clock, io, thread);
-        LocalWorker::register_scheduler(context.clone(), tasks.clone(), executor_shutdown);
+        let scheduler_guard = LocalWorker::register_scheduler(context.clone(), tasks.clone(), executor_shutdown);
 
         Self {
             state: Some(ReadyWorkerState {
+                scheduler_guard: Some(scheduler_guard),
                 commands,
                 context,
                 executor,
+                driver_host_guard,
             }),
             shutdown,
             tasks,
@@ -287,18 +293,20 @@ impl Worker {
     }
 
     fn begin_shutdown(&mut self) {
-        let Some(ReadyWorkerState {
-            commands,
-            context,
-            executor,
-        }) = self.state.take()
-        else {
+        let Some(mut state) = self.state.take() else {
             return;
         };
 
-        let cause = context.dispatcher().stop(self.shutdown.cause().unwrap_or_default());
+        let cause = state.context.dispatcher().stop(self.shutdown.cause().unwrap_or_default());
 
-        LocalWorker::clear_scheduler();
+        drop(state.scheduler_guard.take());
+        let ReadyWorkerState {
+            scheduler_guard: _,
+            commands,
+            context,
+            executor,
+            driver_host_guard,
+        } = state;
         // Both command channels are now closed. No more commands can arrive.
         drop(commands);
         // Drop worker-local services before the executor. Their futures and
@@ -308,8 +316,7 @@ impl Worker {
         // Safe executor shutdown synchronously cancels and releases all remaining task storage.
         executor.shutdown().trigger(cause);
         drop(executor);
-        let driver_host = RuntimeDriverHost::uninstall();
-        drop(driver_host);
+        drop(driver_host_guard);
     }
 }
 
@@ -494,8 +501,8 @@ mod tests {
         if !LocalWorker::is_current() {
             LocalWorker::attach();
         }
-        let driver_waker = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, Signal::waker(&signal));
-        signal.set_driver_waker(driver_waker);
+        let driver_host_guard = crate::io::RuntimeDriverHost::install(&io_runtime, dispatcher.clone(), &thread, Signal::waker(&signal));
+        signal.set_driver_waker(driver_host_guard.waker());
 
         Worker::new(
             command_rx,
@@ -506,6 +513,7 @@ mod tests {
             signal,
             monitor_options,
             crate::runtime::PanicPolicy::default(),
+            driver_host_guard,
         )
     }
 
