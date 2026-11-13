@@ -24,7 +24,7 @@ use observed::processing::{EventProcessor, EventView};
 use observed_testing::{TEST_ID, test_emitter};
 use thread_aware::ThreadBuilder;
 
-use crate::support::{CompletionHandle, TaskBuilderExt as _, TaskOutcome};
+use super::support::{CompletionHandle, TaskBuilderExt as _, TaskOutcome};
 
 thread_local! {
     static THREAD_LOCAL_EXECUTOR: RefCell<Option<Executor>> = const { RefCell::new(None) };
@@ -498,9 +498,9 @@ fn tasks_submitted_during_poll_wait_for_the_next_cycle_in_registration_order() {
                             polls.borrow_mut().push(index + 2);
                         }
                     })
-                    .register(crate::support::DiscardCompletion);
+                    .register(super::support::DiscardCompletion);
             })
-            .register(crate::support::DiscardCompletion);
+            .register(super::support::DiscardCompletion);
     }
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Continue));
@@ -531,7 +531,7 @@ fn newly_submitted_tasks_run_before_awakened_tasks() {
                 }
             }
         }))
-        .register(crate::support::DiscardCompletion);
+        .register(super::support::DiscardCompletion);
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     polls.borrow_mut().clear();
     ready.set(true);
@@ -544,7 +544,7 @@ fn newly_submitted_tasks_run_before_awakened_tasks() {
                     polls.borrow_mut().push(index);
                 }
             })
-            .register(crate::support::DiscardCompletion);
+            .register(super::support::DiscardCompletion);
     }
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));

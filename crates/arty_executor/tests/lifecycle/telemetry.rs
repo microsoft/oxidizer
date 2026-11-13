@@ -7,7 +7,7 @@ use std::task::Poll;
 use arty_executor::{Executor, TaskPlacement};
 use observed_testing::{TEST_ID, test_emitter};
 
-use crate::support::TaskBuilderExt as _;
+use super::support::TaskBuilderExt as _;
 
 #[test]
 fn lifecycle_events_include_placement_and_poll_count() {

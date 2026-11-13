@@ -3,15 +3,11 @@
 
 //! Public task-completion, executor-lifecycle, and retained-waker contracts.
 
-#[path = "lifecycle/completion_lifecycle.rs"]
-mod completion_lifecycle;
-#[path = "lifecycle/configuration.rs"]
-mod configuration;
-#[path = "lifecycle/shutdown.rs"]
-mod shutdown;
-#[path = "lifecycle/support.rs"]
-mod support;
-#[path = "lifecycle/telemetry.rs"]
-mod telemetry;
-#[path = "lifecycle/waker_lifecycle.rs"]
-mod waker_lifecycle;
+mod lifecycle {
+    mod completion_lifecycle;
+    mod configuration;
+    mod shutdown;
+    mod support;
+    mod telemetry;
+    mod waker_lifecycle;
+}

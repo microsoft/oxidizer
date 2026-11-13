@@ -11,7 +11,7 @@ use arty_executor::{ExecutorBuilder, PanicPolicy, TaskBuilder, TaskPlacement, Ta
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use thread_aware::ThreadBuilder;
 
-use crate::support::TaskBuilderExt as _;
+use super::support::TaskBuilderExt as _;
 
 assert_not_impl_any!(TaskSet: Send, Sync);
 assert_impl_all!(TaskPlacement: UnwindSafe, RefUnwindSafe);
