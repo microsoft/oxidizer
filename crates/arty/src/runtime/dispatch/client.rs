@@ -25,6 +25,16 @@ pub(crate) struct DispatcherClient {
 }
 
 impl DispatcherClient {
+    #[cfg(feature = "monitor")]
+    pub(crate) fn set_diagnostics(&self, runtime: Option<seismograph_runtime::RuntimeHandle>) {
+        self.core.set_diagnostics(runtime);
+    }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn register_task_provider(&self, thread: ThreadId, handle: &seismograph_runtime::worker::WorkerHandle) {
+        self.core.register_task_provider(thread, handle);
+    }
+
     pub(crate) const fn new(core: Arc<DispatcherCore>) -> Self {
         Self { core }
     }
@@ -74,6 +84,16 @@ impl DispatcherClient {
         R: Send + 'static,
     {
         self.core.spawn(future_factory)
+    }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn spawn_with_size<FF, F, R>(&self, future_factory: FF, body_size: usize) -> JoinHandle<R>
+    where
+        FF: FnOnce(Context) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.core.spawn_with_size(future_factory, body_size)
     }
 
     pub(crate) fn spawn_relocating<FF, F, R>(&self, source: &thread_aware::Thread, future_factory: FF) -> JoinHandle<R>

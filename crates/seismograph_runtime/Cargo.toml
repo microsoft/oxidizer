@@ -25,6 +25,9 @@ exclude = true
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["seismograph::*"]
 
+[features]
+test-util = ["tick/test-util"]
+
 [dependencies]
 seismograph.workspace = true
 tick.workspace = true

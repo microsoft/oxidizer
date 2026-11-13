@@ -10,6 +10,7 @@
 mod local_worker;
 mod panic_policy;
 mod pools;
+mod queue;
 mod worker;
 
 pub(crate) use local_worker::LocalWorker;

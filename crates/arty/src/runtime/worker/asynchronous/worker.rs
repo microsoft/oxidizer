@@ -85,6 +85,8 @@ pub(crate) struct Worker {
     cycle_clock: SimpleClock,
     signal: Arc<Signal>,
     monitor_options: MonitorOptions,
+    #[cfg(feature = "monitor")]
+    diagnostics: Option<crate::runtime::monitoring::WorkerDiagnostics>,
     _single_threaded: PhantomData<*const ()>,
 }
 
@@ -129,6 +131,10 @@ impl Worker {
         let tasks = executor.tasks();
         let executor_shutdown = executor.shutdown();
 
+        #[cfg(feature = "monitor")]
+        let diagnostics = monitor_options
+            .runtime()
+            .map(|runtime| crate::runtime::monitoring::WorkerDiagnostics::new(runtime, &dispatcher, &thread));
         let context = Context::new(dispatcher, clock, io, thread);
         LocalWorker::register_scheduler(context.clone(), tasks.clone(), executor_shutdown);
 
@@ -144,6 +150,8 @@ impl Worker {
             cycle_clock,
             signal,
             monitor_options,
+            #[cfg(feature = "monitor")]
+            diagnostics,
             _single_threaded: PhantomData,
         }
     }
@@ -152,9 +160,7 @@ impl Worker {
     /// The configuration-facing `RuntimeBuilder` delegates construction to bootstrap.
     /// After this method returns, the thread will end.
     pub(crate) fn run(&mut self) {
-        // Keep the worker-owned policy available at the boundary where monitoring
-        // will be attached in a later stage.
-        let _monitor_policy = self.monitor_options.policy();
+        let _monitoring_enabled = self.monitor_options.policy().is_enabled();
         self.execute_phase();
     }
 
@@ -170,6 +176,13 @@ impl Worker {
             CycleAction::Poll | CycleAction::WaitForSignal(_) => Duration::ZERO,
         };
 
+        #[cfg(feature = "monitor")]
+        if !matches!(action, CycleAction::Poll)
+            && let Some(diagnostics) = &self.diagnostics
+        {
+            diagnostics.parked();
+        }
+
         if RuntimeDriverHost::execute_cycle_current(max_wait).is_err() {
             return self.finish_shutdown();
         }
@@ -179,6 +192,13 @@ impl Worker {
                 Some(deadline) => self.signal.wait(self.wait_until(deadline)),
                 None => self.signal.wait_for_notification(),
             }
+        }
+
+        #[cfg(feature = "monitor")]
+        if !matches!(action, CycleAction::Poll)
+            && let Some(diagnostics) = &self.diagnostics
+        {
+            diagnostics.unparked();
         }
 
         ControlFlow::Continue(())
@@ -202,6 +222,12 @@ impl Worker {
             .expect("system command processing only succeeds while the worker is ready")
             .executor;
 
+        #[cfg(feature = "monitor")]
+        let cycle_outcome = match &self.diagnostics {
+            Some(diagnostics) if diagnostics.is_observed() => executor.execute_cycle_observed(diagnostics),
+            _ => executor.execute_cycle(),
+        };
+        #[cfg(not(feature = "monitor"))]
         let cycle_outcome = executor.execute_cycle();
 
         if let CycleOutcome::Shutdown(cause) = cycle_outcome {
@@ -244,19 +270,25 @@ impl Worker {
         ControlFlow::Break(())
     }
 
-    fn process_system_commands(&self) -> Option<bool> {
-        let Some(ReadyWorkerState { commands, context, .. }) = &self.state else {
+    fn process_system_commands(&mut self) -> Option<bool> {
+        let Some(state) = &mut self.state else {
             return None;
         };
 
         let mut processed = 0_usize;
-        for command in std::iter::from_fn(|| commands.system_receiver().try_recv().ok()).take(COMMANDS_PER_CYCLE) {
+        for command in std::iter::from_fn(|| state.commands.system_receiver().try_recv().ok()).take(COMMANDS_PER_CYCLE) {
             if matches!(self.shutdown.state(), ShutdownState::Started) {
                 return None;
             }
             match command {
                 SystemCommand::AccessIo { access } => {
-                    access.into_inner()(context);
+                    access.into_inner()(&state.context);
+                }
+                #[cfg(feature = "monitor")]
+                SystemCommand::Inspect { request } => {
+                    if let Some(diagnostics) = &self.diagnostics {
+                        diagnostics.collect(&mut state.executor, request);
+                    }
                 }
                 SystemCommand::Shutdown => {
                     return None;
@@ -308,6 +340,8 @@ impl Worker {
         // Safe executor shutdown synchronously cancels and releases all remaining task storage.
         executor.shutdown().trigger(cause);
         drop(executor);
+        #[cfg(feature = "monitor")]
+        drop(self.diagnostics.take());
         let driver_host = RuntimeDriverHost::uninstall();
         drop(driver_host);
     }
@@ -808,6 +842,48 @@ mod tests {
         assert_eq!(processed.load(Ordering::Relaxed), COMMANDS_PER_CYCLE + 1);
     }
 
+    #[cfg(feature = "monitor")]
+    #[test]
+    fn inspection_without_worker_diagnostics_reports_failure() {
+        use seismograph_runtime::snapshot::{CaptureOptions, TaskCollection};
+        use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let (commands, command_rx) = command_channel();
+        let mut worker = test_worker(
+            (commands.clone(), command_rx),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::new(Signal::default()),
+        );
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("missing-worker-diagnostics", 1));
+        let registration = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        registration
+            .handle()
+            .register_task_provider(move |request| sender.send(request).unwrap())
+            .unwrap();
+
+        let snapshot = std::thread::scope(|scope| {
+            let handle = runtime.handle();
+            let captured = scope.spawn(move || {
+                handle
+                    .capture(CaptureOptions {
+                        timeout: Duration::from_secs(5),
+                        ..CaptureOptions::default()
+                    })
+                    .unwrap()
+            });
+            let request = receiver.recv_timeout(TEST_TIMEOUT).unwrap();
+            commands.system_sender().send(SystemCommand::Inspect { request }).unwrap();
+            assert_eq!(worker.process_system_commands(), Some(false));
+            captured.join().unwrap()
+        });
+
+        assert!(snapshot.tasks.is_empty());
+        assert_eq!(snapshot.workers[0].task_collection, TaskCollection::Failed);
+    }
+
     #[test]
     fn system_commands_arriving_during_processing_run_in_the_same_cycle() {
         let (commands, command_rx) = command_channel();
@@ -919,6 +995,95 @@ mod tests {
         );
 
         assert!(!worker.monitor_options.policy().is_enabled());
+    }
+
+    #[cfg(all(feature = "monitor", feature = "test-util", not(miri)))]
+    #[test]
+    fn monitoring_cycles_only_park_when_waiting_and_leave_idle_polls_unobserved() {
+        use seismograph_runtime::RuntimeHandle;
+        use seismograph_runtime::snapshot::{CaptureOptions, WorkerState};
+
+        #[derive(Clone)]
+        struct ProbeContext(RuntimeHandle, Arc<std::sync::Mutex<Vec<WorkerState>>>);
+
+        impl ThreadAware for ProbeContext {
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+        }
+
+        impl IoContext for ProbeContext {
+            type ContextOptions = Self;
+            type Driver = Self;
+
+            fn new(options: Self) -> Self {
+                options
+            }
+
+            fn driver(&mut self, _options: DriverOptions) -> Result<Self, DriverError> {
+                Ok(self.clone())
+            }
+        }
+
+        impl Driver for ProbeContext {
+            fn waker(&self) -> Waker {
+                Waker::noop().clone()
+            }
+
+            fn execute_cycle(&mut self, _cycle: &mut Cycle) -> Result<(), DriverError> {
+                let snapshot = self.0.capture_with_timeout(CaptureOptions::default()).unwrap();
+                self.1.lock().unwrap().push(snapshot.workers[0].state);
+                Ok(())
+            }
+
+            fn shutdown(self) -> Result<(), DriverError> {
+                Ok(())
+            }
+        }
+
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("cycle-observation", 1));
+        let mut options = MonitorOptions::default();
+        options.set_runtime(Some(runtime.handle()));
+        let (commands, command_rx) = command_channel();
+        let mut worker = test_worker_with_monitor_options(
+            (commands.clone(), command_rx),
+            test_blocking_worker(),
+            InactiveClock::new_isolated(),
+            Arc::new(Signal::default()),
+            options,
+        );
+        let polled = std::rc::Rc::new(std::cell::Cell::new(false));
+        let completed = std::rc::Rc::clone(&polled);
+        crate::runtime::monitoring::add_task::<(), _, _, _>(
+            &worker.tasks,
+            async move {
+                assert_eq!(crate::runtime::monitoring::current_task(), None);
+                completed.set(true);
+            },
+            arty_executor::TaskPlacement::Any,
+            DiscardCompletion,
+        );
+        seismograph::recorder::without_recording(|| {
+            worker.prepare_cycle();
+        });
+        assert!(polled.get());
+
+        let states = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let _io = worker_context(&worker)
+            .io()
+            .context::<ProbeContext>(&ProbeContext(runtime.handle(), Arc::clone(&states)));
+        assert!(worker.execute_step().is_continue());
+        assert_eq!(
+            runtime.handle().capture_with_timeout(CaptureOptions::default()).unwrap().workers[0].state,
+            WorkerState::Running
+        );
+        for _ in 0..COMMANDS_PER_CYCLE {
+            commands.spawn_sender().send(enqueue(RemoteFutureFactory::new(|_, _| {}))).unwrap();
+        }
+        assert!(worker.execute_step().is_continue());
+
+        assert_eq!(*states.lock().unwrap(), vec![WorkerState::Parked, WorkerState::Running]);
+        commands.system_sender().send(SystemCommand::Shutdown).unwrap();
+        worker.run();
     }
 
     #[cfg(not(miri))]

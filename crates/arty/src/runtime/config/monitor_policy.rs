@@ -8,11 +8,13 @@
 /// The enabled policy is the default.
 ///
 /// The `monitor` Cargo feature enables the Seismograph dependencies that
-/// monitoring needs. This choice does not start a monitor or add task measurements.
+/// monitoring needs. Building an enabled runtime starts a local monitor.
+/// Task collection and poll timing run only when requested. This policy does
+/// not enable event recording or install an allocator.
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use arty::runtime::{MonitorPolicy, Runtime};
 ///
 /// let runtime = Runtime::builder()
@@ -21,28 +23,44 @@
 /// runtime.stop()?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[repr(transparent)]
 #[derive(Debug, Clone)]
 pub struct MonitorPolicy {
     enabled: bool,
+    name: Option<String>,
 }
 
 impl MonitorPolicy {
     /// Creates a policy with monitoring enabled in the runtime configuration.
     #[must_use]
     pub const fn enabled() -> Self {
-        Self { enabled: true }
+        Self { enabled: true, name: None }
     }
 
     /// Creates a policy with monitoring disabled in the runtime configuration.
     #[must_use]
     pub const fn disabled() -> Self {
-        Self { enabled: false }
+        Self {
+            enabled: false,
+            name: None,
+        }
     }
 
-    #[cfg(test)]
+    /// Sets the runtime name shown by the Seismograph CLI.
+    ///
+    /// The default name is `arty`. Each runtime has a separate local endpoint.
+    #[must_use]
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
     pub(crate) const fn is_enabled(&self) -> bool {
         self.enabled
+    }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn runtime_name(&self) -> &str {
+        self.name.as_deref().unwrap_or("arty")
     }
 }
 

@@ -19,7 +19,10 @@
 /// ```
 /// use arty::runtime::{PanicPolicy, Runtime};
 ///
-/// let runtime = Runtime::builder().panic(PanicPolicy::ignore()).build()?;
+/// let runtime = Runtime::builder()
+///     .monitor(arty::runtime::MonitorPolicy::disabled())
+///     .panic(PanicPolicy::ignore())
+///     .build()?;
 /// runtime.stop()?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```

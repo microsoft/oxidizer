@@ -26,6 +26,7 @@ use thread_aware::Unaware;
 #[cfg(test)]
 fn runtime_builder() -> RuntimeBuilder {
     Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
 }
@@ -57,6 +58,7 @@ async fn async_and_blocking_panics_are_join_errors(cx: Context) {
 #[test]
 fn blocking_callback_cannot_wait_for_blocking_work() {
     let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(2))
         .build()

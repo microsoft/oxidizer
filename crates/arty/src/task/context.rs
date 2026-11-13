@@ -33,7 +33,7 @@ use crate::task::scheduler::Scheduler;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// # #[arty::main]
+/// # #[arty::main(monitor = disabled)]
 /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 /// let answer = cx
 ///     .scheduler()
@@ -75,7 +75,7 @@ impl Context {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main]
+    /// # #[arty::main(monitor = disabled)]
     /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// let parent_thread = cx.thread().id();
     /// let child_thread = cx
@@ -114,7 +114,7 @@ impl Context {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main]
+    /// # #[arty::main(monitor = disabled)]
     /// # async fn main(cx: arty::task::Context) {
     /// assert_eq!(cx.thread().id(), std::thread::current().id());
     /// # }
@@ -137,7 +137,7 @@ impl Context {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main]
+    /// # #[arty::main(monitor = disabled)]
     /// # async fn main(cx: arty::task::Context) {
     /// let duration = std::time::Duration::from_millis(1);
     /// let watch = cx.clock().stopwatch();

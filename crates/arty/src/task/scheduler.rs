@@ -38,7 +38,7 @@ use crate::task::handle::JoinHandle;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// # #[arty::main]
+/// # #[arty::main(monitor = disabled)]
 /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 /// let scheduler = cx.scheduler().clone();
 /// let task = scheduler.spawn(async |_| 42);
@@ -112,7 +112,7 @@ impl Scheduler {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main]
+    /// # #[arty::main(monitor = disabled)]
     /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// use std::rc::Rc;
     /// use std::time::Duration;
@@ -186,7 +186,7 @@ impl Scheduler {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main]
+    /// # #[arty::main(monitor = disabled)]
     /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// let answer = cx
     ///     .scheduler()
@@ -243,7 +243,7 @@ impl Scheduler {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main]
+    /// # #[arty::main(monitor = disabled)]
     /// # async fn main(
     /// #     cx: arty::task::Context,
     /// # ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -411,6 +411,7 @@ mod tests {
     #[test]
     fn worker_execution_registers_the_current_scheduler() {
         let runtime = crate::runtime::Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
@@ -429,6 +430,7 @@ mod tests {
     #[test]
     fn dispatcher_shutdown_rejects_direct_submissions_immediately() {
         let runtime = crate::runtime::Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
@@ -465,6 +467,7 @@ mod tests {
         }
 
         let runtime = crate::runtime::Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
@@ -491,6 +494,7 @@ mod tests {
     #[test]
     fn external_spawn_survives_scheduler_slot_teardown() {
         let runtime = crate::runtime::Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();

@@ -19,7 +19,7 @@ use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-use crate::task::preparation::prepare_remote;
+use crate::task::preparation::prepare_remote_with_size;
 
 #[derive(Clone, Debug)]
 pub(crate) struct WorkerEndpoint {
@@ -67,6 +67,8 @@ pub(crate) struct DispatcherCore {
     next_async_worker_index: AtomicUsize,
 
     remote_results: JoinHandlePool,
+    #[cfg(feature = "monitor")]
+    diagnostics: std::sync::OnceLock<seismograph_runtime::RuntimeHandle>,
 }
 
 impl DispatcherCore {
@@ -100,11 +102,44 @@ impl DispatcherCore {
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
             remote_results: JoinHandlePool::new(shutdown),
+            #[cfg(feature = "monitor")]
+            diagnostics: std::sync::OnceLock::new(),
         })
+    }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn set_diagnostics(&self, runtime: Option<seismograph_runtime::RuntimeHandle>) {
+        if let Some(runtime) = runtime {
+            self.diagnostics
+                .set(runtime)
+                .expect("bootstrap sets runtime diagnostics exactly once");
+        }
+    }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn register_task_provider(&self, thread: ThreadId, handle: &seismograph_runtime::worker::WorkerHandle) {
+        let index = self
+            .worker_index(thread)
+            .expect("worker diagnostics use a registered runtime thread");
+        let endpoint = &self.worker_endpoints[usize::from(index)];
+        let commands = endpoint.commands.system_sender().clone();
+        let waker = endpoint.waker.clone();
+        handle
+            .register_task_provider(move |request| {
+                if commands.send(SystemCommand::Inspect { request }).is_ok() {
+                    waker.wake_by_ref();
+                }
+                // A failed send drops the request and reports collection failure.
+            })
+            .expect("bootstrap registers providers before their workers can stop");
     }
 
     pub(crate) fn stop_inner(&self, cause: ShutdownCause) -> ShutdownCause {
         self.shutdown().begin(cause);
+        #[cfg(feature = "monitor")]
+        if let Some(runtime) = self.diagnostics.get() {
+            runtime.stopping();
+        }
         let cause = self.shutdown().cause().unwrap_or_default();
         // Shutdown stores the cause independently. This atomic only elects the
         // broadcaster. Observing `true` does not mean notification is complete.
@@ -133,6 +168,16 @@ impl DispatcherCore {
         R: Send + 'static,
     {
         self.enqueue(self.next_worker_index(), TaskPlacement::Any, future_factory)
+    }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn spawn_with_size<FF, F, R>(&self, future_factory: FF, body_size: usize) -> JoinHandle<R>
+    where
+        FF: FnOnce(Context) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+    {
+        self.enqueue_with_size(self.next_worker_index(), TaskPlacement::Any, future_factory, move || body_size)
     }
 
     pub(crate) fn spawn_relocating<FF, F, R>(&self, source: &Thread, future_factory: FF) -> JoinHandle<R>
@@ -260,6 +305,22 @@ impl DispatcherCore {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
+        self.enqueue_with_size(worker_index, placement, future_factory, size_of::<F>)
+    }
+
+    fn enqueue_with_size<FF, F, R, S>(
+        &self,
+        worker_index: WorkerIndex,
+        placement: TaskPlacement,
+        future_factory: FF,
+        body_size: S,
+    ) -> JoinHandle<R>
+    where
+        FF: FnOnce(Context) -> F + Send + 'static,
+        F: Future<Output = R> + 'static,
+        R: Send + 'static,
+        S: Fn() -> usize + Send + 'static,
+    {
         if let Some(join_handle) = JoinHandle::try_from_shutdown(self.shutdown()) {
             drop(future_factory);
             return join_handle;
@@ -268,7 +329,7 @@ impl DispatcherCore {
             .worker_endpoints
             .get(usize::from(worker_index))
             .expect("worker index must identify a registered runtime worker");
-        let (future_factory, join_handle) = prepare_remote(&self.remote_results, future_factory, placement);
+        let (future_factory, join_handle) = prepare_remote_with_size(&self.remote_results, future_factory, placement, body_size);
 
         // A worker can close its channel before this send if shutdown already
         // reached that worker. The join handle detects the disconnection.
@@ -476,6 +537,48 @@ mod tests {
 
         assert_eq!(drain_system(&worker1_rx).len(), 0);
         assert_eq!(drain_system(&worker2_rx).len(), 0);
+    }
+
+    #[cfg(feature = "monitor")]
+    #[test]
+    fn dispatcher_stop_updates_its_registered_runtime() {
+        use seismograph_runtime::snapshot::{CaptureOptions, RuntimeState};
+
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("dispatcher-stop", 1));
+        let threads = test_threads(1);
+        let (worker, _worker_rx) = endpoint(&threads[0]);
+        let core = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default());
+        let client = DispatcherClient::new(core);
+        client.set_diagnostics(None);
+        client.set_diagnostics(Some(runtime.handle()));
+
+        client.stop(ShutdownCause::default());
+
+        assert_eq!(
+            runtime.handle().capture(CaptureOptions::default()).unwrap().state,
+            RuntimeState::Stopping
+        );
+    }
+
+    #[cfg(feature = "monitor")]
+    #[test]
+    fn a_closed_worker_command_channel_reports_collection_failure() {
+        use seismograph_runtime::snapshot::{CaptureOptions, TaskCollection};
+        use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("closed-worker-channel", 1));
+        let threads = test_threads(1);
+        let (endpoint, receiver) = endpoint(&threads[0]);
+        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint), Shutdown::default());
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        dispatcher.register_task_provider(threads[0].id(), &worker.handle());
+        drop(receiver);
+
+        let snapshot = runtime.handle().capture(CaptureOptions::default()).unwrap();
+        assert!(snapshot.tasks.is_empty());
+        assert_eq!(snapshot.workers[0].task_collection, TaskCollection::Failed);
     }
 
     #[test]

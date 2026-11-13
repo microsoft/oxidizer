@@ -45,7 +45,9 @@ use crate::task::RuntimeScheduler;
 /// ```
 /// use arty::runtime::Runtime;
 ///
-/// let runtime = Runtime::new()?;
+/// let runtime = Runtime::builder()
+///     .monitor(arty::runtime::MonitorPolicy::disabled())
+///     .build()?;
 /// let task = runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 });
 /// assert_eq!(futures::executor::block_on(task)?, 42);
 /// runtime.stop()?;
@@ -56,6 +58,8 @@ pub struct Runtime {
     scheduler: RuntimeScheduler,
     worker_joiner: WorkerJoiner,
     shutdown_on_drop: bool,
+    #[cfg(feature = "monitor")]
+    diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>,
 }
 
 impl Runtime {
@@ -76,7 +80,7 @@ impl Runtime {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use arty::runtime::Runtime;
     ///
     /// let runtime = Runtime::new()?;
@@ -118,7 +122,9 @@ impl Runtime {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let scheduler = runtime.scheduler();
     /// let first = scheduler.spawn_anywhere((), |_, ()| async { 20 });
     /// let second = scheduler.spawn_anywhere((), |_, ()| async { 22 });
@@ -132,6 +138,19 @@ impl Runtime {
     #[inline]
     pub fn scheduler(&self) -> &RuntimeScheduler {
         &self.scheduler
+    }
+
+    /// Returns the runtime's diagnostic handle for collection tests.
+    ///
+    /// Returns `None` when monitoring is disabled. Capture from a diagnostic
+    /// thread, not from an Arty worker that must answer the collection request.
+    /// This does not change the process-wide recorder.
+    #[cfg(all(feature = "monitor", test, not(miri)))]
+    #[must_use]
+    pub(crate) fn diagnostics(&self) -> Option<seismograph_runtime::RuntimeHandle> {
+        self.diagnostics
+            .as_ref()
+            .map(crate::runtime::monitoring::RuntimeDiagnostics::handle)
     }
 
     /// Takes ownership of this runtime, requests shutdown, and waits for its workers to stop.
@@ -149,6 +168,8 @@ impl Runtime {
     /// Returns an error if a worker panicked or an I/O driver failed during
     /// startup or normal operation. It does not return I/O driver shutdown
     /// failures. It waits for all workers to stop before it reports a failure.
+    /// With monitoring enabled, also reports a stored monitor failure unless a
+    /// worker or runtime failure takes precedence.
     /// To receive a task failure, await its [`JoinHandle`](crate::task::JoinHandle).
     ///
     /// # Panics
@@ -162,7 +183,9 @@ impl Runtime {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
     ///     cx.control().request_stop();
     ///     cx.scheduler()
@@ -186,12 +209,31 @@ impl Runtime {
         self.wait()
     }
 
-    fn wait(&self) -> Result<(), Error> {
+    #[cfg_attr(
+        not(feature = "monitor"),
+        expect(
+            clippy::needless_pass_by_ref_mut,
+            reason = "monitoring consumes the diagnostic registration after workers stop"
+        )
+    )]
+    fn wait(&mut self) -> Result<(), Error> {
         let wait_error = self.worker_joiner.join().err();
+        #[cfg(feature = "monitor")]
+        let monitor_error = self.diagnostics.take().and_then(|diagnostics| diagnostics.finish().err());
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
             return Err(Error::shutdown_failure(error));
         }
+        #[cfg(feature = "monitor")]
+        {
+            monitor_result(wait_error, monitor_error)
+        }
+        #[cfg(not(feature = "monitor"))]
         wait_error.map_or(Ok(()), Err)
+    }
+
+    #[cfg(feature = "monitor")]
+    pub(crate) fn set_diagnostics(&mut self, diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>) {
+        self.diagnostics = diagnostics;
     }
 
     pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient, worker_joiner: WorkerJoiner) -> Self {
@@ -199,6 +241,8 @@ impl Runtime {
             scheduler: RuntimeScheduler::new(dispatcher),
             worker_joiner,
             shutdown_on_drop: true,
+            #[cfg(feature = "monitor")]
+            diagnostics: None,
         }
     }
 }
@@ -219,6 +263,12 @@ impl Drop for Runtime {
         }
         let _ = self.wait();
     }
+}
+
+#[cfg(feature = "monitor")]
+#[cfg_attr(coverage_nightly, coverage(off))] // Native monitor error forwarding does not justify a fault-injection fixture.
+fn monitor_result(worker_error: Option<Error>, monitor_error: Option<Error>) -> Result<(), Error> {
+    worker_error.or(monitor_error).map_or(Ok(()), Err)
 }
 
 #[cold]
@@ -317,6 +367,7 @@ mod tests {
     #[test]
     fn ignored_task_worker_stop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .panic(crate::runtime::PanicPolicy::ignore())
             .build()
@@ -370,6 +421,7 @@ mod tests {
     #[test]
     fn ignored_task_worker_drop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .panic(crate::runtime::PanicPolicy::ignore())
             .build()
@@ -496,6 +548,7 @@ mod tests {
 
     fn single_worker_runtime() -> Runtime {
         Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .blocking_pool(crate::runtime::BlockingPoolPolicy::shared().max(1))
             .build()

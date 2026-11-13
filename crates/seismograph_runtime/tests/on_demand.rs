@@ -74,6 +74,63 @@ fn all_native_constructor_states_survive_process_snapshot_encoding() {
 }
 
 #[test]
+fn captures_keep_one_running_row_when_a_task_also_appears_in_a_queue() {
+    let _lock = RECORDING.lock().unwrap();
+    for running_first in [false, true] {
+        let runtime = register_runtime(RuntimeMetadata::new("shared-queue-transition", 2));
+        let first = runtime.register_worker(WorkerMetadata::new(WorkerRole::Blocking));
+        let second = runtime.register_worker(WorkerMetadata::new(WorkerRole::Blocking));
+        let task = allocate_task_id();
+        let other_task = allocate_task_id();
+        let descriptor = allocate_type_descriptor_id();
+        let (running, ready) = if running_first { (&first, &second) } else { (&second, &first) };
+        running
+            .handle()
+            .register_task_provider(move |request| {
+                request.respond(
+                    vec![Task::new(task, descriptor, TaskActivityState::Running)],
+                    TaskCollection::Complete,
+                );
+            })
+            .unwrap();
+        ready
+            .handle()
+            .register_task_provider(move |request| {
+                request.respond(
+                    vec![
+                        Task::new(task, descriptor, TaskActivityState::Ready),
+                        Task::new(other_task, descriptor, TaskActivityState::Ready),
+                    ],
+                    TaskCollection::Truncated,
+                );
+            })
+            .unwrap();
+
+        let captured = runtime.handle().capture(CaptureOptions::default()).unwrap();
+
+        assert_eq!(captured.tasks.len(), 2);
+        assert_eq!(
+            (
+                captured.tasks[0].id,
+                captured.tasks[0].last_worker_id,
+                captured.tasks[0].activity.unwrap().state
+            ),
+            (task, Some(running.id()), TaskActivityState::Running)
+        );
+        assert_eq!(captured.tasks[1].id, other_task);
+        assert_eq!(
+            captured
+                .workers
+                .iter()
+                .find(|worker| worker.id == ready.id())
+                .unwrap()
+                .task_collection,
+            TaskCollection::Truncated
+        );
+    }
+}
+
+#[test]
 fn worker_metadata_transitions_and_runtime_retirement_remain_visible() {
     use seismograph_runtime::snapshot::{RuntimeState, WorkerState};
     let _lock = RECORDING.lock().unwrap();
@@ -377,6 +434,8 @@ fn event_and_capture_values_preserve_copy_and_unwind_contracts() {
     fn copied<T: Copy>() {}
     value::<seismograph_runtime::task::EventContext>();
     copied::<seismograph_runtime::task::EventContext>();
+    value::<seismograph_runtime::task::TaskSpawn>();
+    copied::<seismograph_runtime::task::TaskSpawn>();
     value::<CaptureOptions>();
     value::<TaskCollection>();
     value::<CountersScope>();
@@ -707,4 +766,78 @@ fn disabled_task_event_context_does_not_initialize_event_buffers() {
     .unwrap();
 
     assert_eq!((created, events.events.len(), events.threads.len()), (None, 0, 0));
+}
+
+#[test]
+fn lazy_spawn_metadata_matches_the_recorded_event() {
+    let _lock = RECORDING.lock().unwrap();
+    seismograph::recorder(Configuration::default());
+    let runtime = register_runtime(RuntimeMetadata::new("lazy-spawn-metadata", 1));
+    let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+    let context = worker.handle().task_events();
+    let descriptor = allocate_type_descriptor_id();
+    let parent = allocate_task_id();
+    let calls = std::cell::Cell::new(0);
+    seismograph::recorder(Configuration {
+        runtime_tasks: Policy::all(false),
+        ..Configuration::default()
+    });
+
+    let spawned = context
+        .spawned_with(
+            || {
+                calls.set(calls.get() + 1);
+                descriptor
+            },
+            Some(parent),
+            64,
+        )
+        .unwrap();
+    let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
+    let snapshot = seismograph::snapshot::decode(encoded.as_bytes()).unwrap();
+    seismograph::recorder(Configuration::default());
+    let event = snapshot
+        .events
+        .events
+        .iter()
+        .find(|event| {
+            event.kind == EventKind::TaskSpawned
+                && event
+                    .runtime()
+                    .is_some_and(|payload| payload.runtime_id == runtime.id() && payload.subject_id == spawned.id.get())
+        })
+        .unwrap();
+    let payload = event.runtime().unwrap();
+
+    assert_eq!(
+        (
+            calls.get(),
+            spawned.descriptor,
+            spawned.timestamp,
+            payload.related_id,
+            payload.value_0,
+            payload.value_1
+        ),
+        (1, descriptor, event.timestamp, parent.get(), descriptor.get(), 65)
+    );
+}
+
+#[test]
+fn disabled_and_suppressed_spawns_do_not_build_type_metadata() {
+    let _lock = RECORDING.lock().unwrap();
+    seismograph::recorder(Configuration::default());
+    let runtime = register_runtime(RuntimeMetadata::new("lazy-disabled-spawn", 1));
+    let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+    let context = worker.handle().task_events();
+    let descriptor = || panic!("disabled or suppressed recording must not build task type metadata");
+
+    let disabled = context.spawned_with(descriptor, None, 0);
+    seismograph::recorder(Configuration {
+        runtime_tasks: Policy::all(false),
+        ..Configuration::default()
+    });
+    let suppressed = without_recording(|| context.spawned_with(descriptor, None, 0));
+    seismograph::recorder(Configuration::default());
+
+    assert_eq!((disabled, suppressed), (None, None));
 }

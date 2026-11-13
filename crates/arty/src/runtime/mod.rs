@@ -44,13 +44,36 @@
 //!   default thread limits can change. Use [`BlockingPoolPolicy::max`] to set
 //!   a maximum.
 //! - The clock follows real time.
-//! - [`MonitorPolicy::default`] enables monitoring in the runtime configuration.
-//!   This choice does not start a monitor or add task measurements.
+//! - [`MonitorPolicy::default`] starts a local Seismograph monitor when the
+//!   `monitor` feature is present. Task collection runs on request. This does
+//!   not enable event recording.
 //! - [`PanicPolicy::default`] stops the runtime after Arty catches a panic
 //!   while it creates or polls a task, or runs a blocking function.
 //!
 //! The [`test`](crate::test) attribute disables monitoring by default.
 //! See [`main`](crate::main) and [`test`](crate::test) for their other defaults.
+//!
+//! ## Monitoring
+//!
+//! A monitor is a local connection through which the Seismograph CLI can
+//! collect diagnostics. Each enabled runtime owns one connection and removes it
+//! after its workers stop. [`MonitorPolicy::name`] sets the displayed runtime name.
+//! Use [`MonitorPolicy::disabled`] to run without this connection or task inspection.
+//!
+//! Collection reads live async tasks and queued or running blocking functions
+//! from their native storage. Each request limits the number of tasks per worker.
+//! A blocked async worker can time out. The result reports incomplete collection
+//! rather than treating missing tasks as an empty worker.
+//!
+//! Poll timing runs only during a requested measurement interval or event recording.
+//! Completed tasks are not kept in a second task registry.
+//! History that was not recorded stays unknown. A blocking function that started
+//! before observation has no measured start time for that call.
+//!
+//! Monitor connections are separate, but the recorder and diagnostic sources are
+//! process-wide. Recording, clearing event buffers, and snapshot capture through
+//! one connection can affect or include other runtimes in the same process.
+//! Monitor startup does not change recorder configuration or install an allocator.
 //!
 //! ## Policy types
 //!
@@ -73,6 +96,7 @@
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let runtime = Runtime::builder()
+//!         .monitor(arty::runtime::MonitorPolicy::disabled())
 //!         .workers(WorkersPolicy::at_most(2))
 //!         .blocking_pool(BlockingPoolPolicy::shared().max(4))
 //!         .build()?;
@@ -134,6 +158,8 @@ mod control;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
+#[cfg(feature = "monitor")]
+pub(crate) mod monitoring;
 mod shutdown;
 mod shutdown_cause;
 pub(crate) mod worker;

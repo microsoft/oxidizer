@@ -120,6 +120,17 @@ pub(crate) fn capture(runtime: &Arc<RuntimeControl>, options: CaptureOptions) ->
     )
 }
 
+#[cfg(feature = "test-util")]
+pub(crate) fn capture_with_timeout(runtime: &Arc<RuntimeControl>, options: CaptureOptions) -> Runtime {
+    capture_with(
+        runtime,
+        options,
+        &SimpleClock::new_frozen(),
+        |_| {},
+        |_, _| Err(mpsc::RecvTimeoutError::Timeout),
+    )
+}
+
 fn capture_with(
     runtime: &Arc<RuntimeControl>,
     options: CaptureOptions,
@@ -182,7 +193,16 @@ fn capture_with(
             worker.snapshot(batch.collection)
         })
         .collect();
-    tasks.sort_unstable_by_key(|task| task.id);
+    // A shared-queue task can start between two workers' responses. Keep its
+    // executing observation rather than also reporting its earlier queue entry.
+    tasks.sort_unstable_by_key(|task| {
+        (
+            task.id,
+            task.activity
+                .is_none_or(|activity| activity.state != crate::snapshot::TaskActivityState::Running),
+        )
+    });
+    tasks.dedup_by_key(|task| task.id);
     let state = RuntimeState::from_wire_value(runtime.state.load(Ordering::Acquire)).expect("runtime state stores enum values");
     Runtime {
         id: runtime.id,
@@ -308,6 +328,31 @@ mod tests {
             |_| panic!("untimed capture"),
             ready,
         )
+    }
+
+    #[cfg(feature = "test-util")]
+    #[test]
+    fn forced_timeout_marks_an_unanswered_worker_without_waiting() {
+        let runtime = register_runtime(RuntimeMetadata::new("forced-timeout", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let (sender, receiver) = mpsc::channel();
+        worker
+            .handle()
+            .register_task_provider(move |request| sender.send(request).unwrap())
+            .unwrap();
+
+        let captured = runtime
+            .handle()
+            .capture_with_timeout(CaptureOptions {
+                measure_for: Duration::from_secs(1),
+                ..CaptureOptions::default()
+            })
+            .unwrap();
+        let request = receiver.try_recv().unwrap();
+
+        assert_eq!(captured.workers[0].task_collection, TaskCollection::TimedOut);
+        assert!(request.is_canceled());
+        assert!(!worker.handle().is_observed());
     }
 
     #[test]

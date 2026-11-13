@@ -165,6 +165,9 @@ impl SchedulerContext {
     {
         let (handle, result_tx) = self.results.handle();
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
+        #[cfg(feature = "monitor")]
+        crate::runtime::monitoring::add_task::<F, _, _, _>(&self.tasks, inner, placement, result_tx);
+        #[cfg(not(feature = "monitor"))]
         self.tasks.task(inner).placement(placement).register(result_tx);
         handle
     }

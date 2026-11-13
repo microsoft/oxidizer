@@ -69,6 +69,11 @@ pub(crate) enum SystemCommand {
     #[debug("AccessIo")]
     AccessIo { access: QueuedIoAccess },
 
+    /// Copies task descriptions from native executor storage between cycles.
+    #[cfg(feature = "monitor")]
+    #[debug("Inspect")]
+    Inspect { request: seismograph_runtime::task::TaskRequest },
+
     /// Starts shutdown on this worker.
     ///
     /// The worker stops accepting new tasks and discards all queued submissions,
@@ -158,6 +163,7 @@ mod tests {
     #[test]
     fn queued_factory_into_inner_returns_the_factory() {
         let runtime = crate::runtime::Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();

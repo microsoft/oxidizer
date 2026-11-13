@@ -44,6 +44,7 @@ impl Drop for SelfWakePanic {
 fn every_worker_retires_self_waking_panics_before_reusing_task_storage() {
     let repetitions = if cfg!(miri) { 2 } else { 32 };
     let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .panic(PanicPolicy::ignore())

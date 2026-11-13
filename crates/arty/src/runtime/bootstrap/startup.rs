@@ -29,7 +29,8 @@ fn build_with_processors(
     name.validate()?;
     let processors = processor_config.workers_policy.select(available)?;
 
-    let mut workers = Vec::with_capacity(processors.len());
+    let worker_count = processors.len();
+    let mut workers = Vec::with_capacity(worker_count);
 
     // Respect the RUST_MIN_STACK environment variable if set and larger than the configured stack size.
     let stack_size = processor_config
@@ -42,6 +43,13 @@ fn build_with_processors(
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
+    #[cfg(feature = "monitor")]
+    let (diagnostics, monitor_options) = {
+        let diagnostics = crate::runtime::monitoring::RuntimeDiagnostics::start(monitor_options.policy(), worker_count)?;
+        let mut monitor_options = monitor_options;
+        monitor_options.set_runtime(diagnostics.as_ref().map(crate::runtime::monitoring::RuntimeDiagnostics::handle));
+        (diagnostics, monitor_options)
+    };
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         workers.push(asynchronous::start(asynchronous::StartOptions {
@@ -66,6 +74,8 @@ fn build_with_processors(
     );
 
     let dispatcher_client = DispatcherClient::new(dispatcher);
+    #[cfg(feature = "monitor")]
+    dispatcher_client.set_diagnostics(monitor_options.runtime().cloned());
 
     let mut join_handles = Vec::with_capacity(workers.len());
     for worker in workers {
@@ -73,7 +83,14 @@ fn build_with_processors(
     }
     let worker_joiner = WorkerJoiner::new(join_handles);
 
-    Ok(Runtime::with_dispatcher(dispatcher_client, worker_joiner))
+    let runtime = Runtime::with_dispatcher(dispatcher_client, worker_joiner);
+    #[cfg(feature = "monitor")]
+    let runtime = {
+        let mut runtime = runtime;
+        runtime.set_diagnostics(diagnostics);
+        runtime
+    };
+    Ok(runtime)
 }
 
 fn available_processors() -> ProcessorSet {
@@ -185,7 +202,7 @@ mod tests {
         let hardware = fake_hardware(PROCESSORS);
         let runtime = runtime_with_processors(
             WorkersPolicy::exactly(WORKERS),
-            MonitorPolicy::enabled().into(),
+            MonitorPolicy::disabled().into(),
             &hardware.processors(),
         );
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();

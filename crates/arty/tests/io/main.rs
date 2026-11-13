@@ -559,7 +559,11 @@ impl<M: Marker> Driver for TestDriver<M> {
 }
 
 fn runtime(workers: usize) -> Runtime {
-    Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
+    Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(workers))
+        .build()
+        .unwrap()
 }
 
 fn worker_schedulers(runtime: &Runtime, workers: usize) -> Vec<Scheduler> {

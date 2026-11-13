@@ -32,7 +32,7 @@ impl RuntimeControl {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main]
+    /// # #[arty::main(monitor = disabled)]
     /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// let tasks: Vec<_> = cx
     ///     .control()
@@ -69,7 +69,9 @@ impl RuntimeControl {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let control = runtime
     ///     .scheduler()
     ///     .block_on(async |cx| cx.control().clone())?;

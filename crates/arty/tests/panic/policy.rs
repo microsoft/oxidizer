@@ -21,6 +21,7 @@ use crate::support::JoinHandleExt as _;
 
 fn runtime_builder(workers: usize, policy: PanicPolicy) -> RuntimeBuilder {
     Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(workers))
         // Two threads keep blocking-panic scenarios bounded without serializing
         // the callback whose completion or cancellation the test observes.

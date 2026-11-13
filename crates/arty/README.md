@@ -34,7 +34,7 @@ cargo add arty
 ```rust
 use arty::task::{Context, JoinError};
 
-#[arty::main]
+#[arty::main(monitor = disabled)]
 async fn main(cx: Context) -> Result<(), JoinError> {
     let answer = cx.scheduler().spawn(async |_| 6 * 7).await?;
     println!("{answer}");
@@ -65,11 +65,13 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 
 * `rt`: Enables the runtime, task, and I/O APIs.
 * `macros`: Enables [`main`][__link13] and [`test`][__link14]. It also enables `rt`.
-* `monitor`: Enables the Seismograph monitor dependency. It forwards
-  monitoring support for `performables` when `performables` is enabled. It does
-  not start monitoring or emit new telemetry.
+* `monitor`: Connects runtime workers and tasks to Seismograph. An enabled
+  [`MonitorPolicy`][__link15] starts a local connection for
+  the Seismograph CLI. Task collection runs on request. Event recording stays
+  off until an application or the CLI enables it. This feature also forwards
+  monitoring support for `performables` when `performables` is enabled.
 * `test-util`: Enables testing utilities, including
-  [`ClockControl`][__link15].
+  [`ClockControl`][__link16].
   Enable it in dev-dependencies, not production dependencies.
 
 
@@ -78,7 +80,7 @@ The default feature set enables `rt`, `macros`, and `monitor`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQL336xbftBwb3WEJKMJ3SngbyR3bGBAhBb0b0RYBQT1d6EhhZIKCZGFydHllMC42LjGCa2FydHlfbWFjcm9zZTAuNi4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb94geMR9_5x8bD0NI7vWvQU8bjBeZnbfaMTgbnBA2qp7TcJRhZIKCZGFydHllMC42LjGCa2FydHlfbWFjcm9zZTAuNi4x
  [__link0]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link1]: https://docs.rs/arty/0.6.1/arty/?search=core::ThreadAware
  [__link10]: https://docs.rs/arty/0.6.1/arty/core/index.html
@@ -86,7 +88,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link12]: https://docs.rs/arty_macros/0.6.1/arty_macros/?search=test
  [__link13]: https://docs.rs/arty_macros/0.6.1/arty_macros/?search=main
  [__link14]: https://docs.rs/arty_macros/0.6.1/arty_macros/?search=test
- [__link15]: https://docs.rs/arty/0.6.1/arty/?search=time::ClockControl
+ [__link15]: https://docs.rs/arty/0.6.1/arty/?search=runtime::MonitorPolicy
+ [__link16]: https://docs.rs/arty/0.6.1/arty/?search=time::ClockControl
  [__link2]: https://docs.rs/arty_macros/0.6.1/arty_macros/?search=main
  [__link3]: https://docs.rs/arty/0.6.1/arty/?search=task::JoinError
  [__link4]: https://docs.rs/arty/0.6.1/arty/?search=task::Scheduler::spawn

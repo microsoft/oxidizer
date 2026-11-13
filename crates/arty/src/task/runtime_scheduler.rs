@@ -105,7 +105,9 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let mut message = String::from("Hello");
     /// runtime
     ///     .scheduler()
@@ -135,7 +137,11 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        futures::executor::block_on(self.dispatcher.spawn(factory)).map_err(Error::new)
+        #[cfg(feature = "monitor")]
+        let task = self.dispatcher.spawn_with_size(factory, size_of::<F>());
+        #[cfg(not(feature = "monitor"))]
+        let task = self.dispatcher.spawn(factory);
+        futures::executor::block_on(task).map_err(Error::new)
     }
 
     /// Lets the runtime choose a worker for an async task and relocates its data.
@@ -160,7 +166,9 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let task = runtime
     ///     .scheduler()
     ///     .spawn_anywhere(String::from("Arty"), |_, name| async move { name.len() });
@@ -175,7 +183,9 @@ impl RuntimeScheduler {
     /// use arty::runtime::Runtime;
     ///
     /// struct SendOnly(u32);
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let task = runtime
     ///     .scheduler()
     ///     .spawn_anywhere((), |_, ()| async { SendOnly(42) });
@@ -217,7 +227,9 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder()
+    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
+    ///     .build()?;
     /// let task = runtime.scheduler().spawn_blocking(|| 6 * 7);
     /// assert_eq!(futures::executor::block_on(task)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -412,6 +424,7 @@ mod tests {
     #[cfg(not(miri))]
     fn check_borrowed_future_completion(panics: bool) {
         let runtime = Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .panic(crate::runtime::PanicPolicy::ignore())
             .build()

@@ -149,7 +149,12 @@ impl ThreadEntry {
             arty_executor::PanicPolicy::Ignore => blocking::PanicPolicy::Ignore,
             arty_executor::PanicPolicy::Shutdown => blocking::PanicPolicy::Shutdown(worker_waker.clone()),
         };
-        let blocking_worker = blocking::Worker::new(blocking_pools.pool_for_worker(worker_index), shutdown, blocking_panic_policy);
+        let blocking_pool = blocking_pools.pool_for_worker(worker_index);
+        #[cfg(feature = "monitor")]
+        if let Some(runtime) = monitor_options.runtime() {
+            blocking_pool.enable_monitoring(runtime);
+        }
+        let blocking_worker = blocking::Worker::new(blocking_pool, shutdown, blocking_panic_policy);
 
         endpoint_tx
             .send(Endpoint {

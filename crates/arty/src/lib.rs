@@ -37,7 +37,7 @@
 //! use arty::task::{Context, JoinError};
 //!
 //! # #[cfg(all(feature = "macros", feature = "rt"))]
-//! #[arty::main]
+//! #[arty::main(monitor = disabled)]
 //! async fn main(cx: Context) -> Result<(), JoinError> {
 //!     let answer = cx.scheduler().spawn(async |_| 6 * 7).await?;
 //! #   assert_eq!(answer, 42);
@@ -70,9 +70,11 @@
 //!
 //! - `rt`: Enables the runtime, task, and I/O APIs.
 //! - `macros`: Enables [`main`] and [`test`]. It also enables `rt`.
-//! - `monitor`: Enables the Seismograph monitor dependency. It forwards
-//!   monitoring support for `performables` when `performables` is enabled. It does
-//!   not start monitoring or emit new telemetry.
+//! - `monitor`: Connects runtime workers and tasks to Seismograph. An enabled
+//!   [`MonitorPolicy`](crate::runtime::MonitorPolicy) starts a local connection for
+//!   the Seismograph CLI. Task collection runs on request. Event recording stays
+//!   off until an application or the CLI enables it. This feature also forwards
+//!   monitoring support for `performables` when `performables` is enabled.
 //! - `test-util`: Enables testing utilities, including
 //!   [`ClockControl`](crate::time::ClockControl).
 //!   Enable it in dev-dependencies, not production dependencies.
@@ -103,7 +105,8 @@ use arty_io_core as _;
 ///   causes runtime construction to fail.
 /// - `workers = all` starts one async worker per available processor.
 /// - `monitor = enabled` or `monitor = disabled` selects whether the runtime
-///   is prepared for monitoring. The default is `enabled`.
+///   starts a local Seismograph monitor when the `monitor` feature is present.
+///   The default is `enabled`.
 /// - `panic = shutdown` or `panic = ignore` selects whether the runtime stops
 ///   after Arty catches a task panic. The default is `shutdown`.
 ///
@@ -139,7 +142,7 @@ use arty_io_core as _;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// # #[arty::main]
+/// # #[arty::main(monitor = disabled)]
 /// # async fn main(cx: arty::task::Context) {
 /// cx.clock().delay(std::time::Duration::from_millis(1)).await;
 /// println!("Hello from Arty!");
@@ -160,7 +163,7 @@ use arty_io_core as _;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main(panic = ignore)]
+/// #[arty::main(panic = ignore, monitor = disabled)]
 /// async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 ///     assert!(
 ///         cx.scheduler()
@@ -179,7 +182,7 @@ use arty_io_core as _;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// #[arty::main(workers = 4)]
+/// #[arty::main(workers = 4, monitor = disabled)]
 /// async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 ///     let answer = cx.scheduler().spawn(async |_| 42).await?;
 ///     assert_eq!(answer, 42);
@@ -259,7 +262,7 @@ pub use arty_macros::main;
 ///
 /// Enable monitoring for a test that exercises monitoring behavior:
 ///
-/// ```test_harness
+/// ```no_run,test_harness
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
 /// #[arty::test(monitor = enabled)]
 /// async fn monitored(_cx: arty::task::Context) {}
@@ -323,7 +326,7 @@ pub mod task;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// # #[arty::main]
+/// # #[arty::main(monitor = disabled)]
 /// # async fn main(cx: arty::task::Context) {
 /// let worker: &arty::core::Thread = cx.thread();
 /// assert_eq!(worker.id(), std::thread::current().id());
@@ -355,7 +358,7 @@ pub mod core {
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// # #[arty::main]
+/// # #[arty::main(monitor = disabled)]
 /// # async fn main(cx: arty::task::Context) {
 /// use std::future::pending;
 /// use std::time::Duration;

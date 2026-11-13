@@ -273,7 +273,10 @@ mod tests {
 
     #[test]
     fn blocking_marker_io_lookup_survives_scheduler_slot_teardown() {
-        let runtime = crate::runtime::Runtime::new().unwrap();
+        let runtime = crate::runtime::Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
+            .build()
+            .unwrap();
         let context = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let scheduler = context.scheduler().clone();
         let io = context.io().clone();
