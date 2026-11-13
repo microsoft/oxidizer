@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(test)]
+
 //! Context retrieval during provider callbacks.
 
 use std::cell::RefCell;
