@@ -71,7 +71,7 @@ pub(crate) enum SystemCommand {
     #[debug("AccessIo")]
     AccessIo { access: QueuedIoAccess },
 
-    /// Replaces one worker-local runtime hook.
+    /// Appends one worker-local runtime hook.
     #[debug("RegisterHook")]
     RegisterHook { hook: HookRegistration, source: Option<Thread> },
 
