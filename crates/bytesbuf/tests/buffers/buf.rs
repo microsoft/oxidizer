@@ -1017,12 +1017,16 @@ fn first_unfilled_slice_meta_with_meta() {
     let block = pin!(block);
 
     // SAFETY: We guarantee exclusive access to the memory capacity.
-    let block = unsafe { block.as_ref().to_block() };
+    let memory_block = unsafe { block.as_ref().to_block() };
 
-    let buf = BytesBuf::from_blocks([block]);
+    let buf = BytesBuf::from_blocks([memory_block]);
+    assert_eq!(block.ref_count(), 1);
     let meta = buf.first_unfilled_slice_meta().expect("should have metadata");
     assert!(meta.is::<CustomMeta>());
     assert!(!meta.is::<u8>());
+
+    drop(buf);
+    assert_eq!(block.ref_count(), 0);
 }
 
 #[test]

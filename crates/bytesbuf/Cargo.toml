@@ -84,7 +84,19 @@ windows-sys = { workspace = true, features = [
 ] }
 
 [[test]]
-name = "public_api"
+name = "buffers"
+required-features = ["test-util"]
+
+[[test]]
+name = "views"
+required-features = ["test-util"]
+
+[[test]]
+name = "conversions"
+required-features = ["test-util"]
+
+[[test]]
+name = "memory_providers"
 required-features = ["test-util"]
 
 [[bench]]
