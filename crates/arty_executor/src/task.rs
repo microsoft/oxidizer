@@ -613,9 +613,10 @@ mod tests {
         let handle = allocate_task(
             &pool,
             DropCountingFuture(Arc::clone(&drops)),
-            TaskOptions::default(),
+            TaskMetadata::default(),
             Sink::noop(),
             TestCompletion,
+            (),
         );
         let task = handle.as_ref();
         let mut descriptions = 0;
