@@ -1,6 +1,6 @@
 ---
 source: crates/observed_macros_impl/tests/expansion.rs
-expression: "expand_event(r#\"\"raw\"\"#,\nr\"\n            #[info]\n            struct Raw {\n                r#type: ClassifiedString,\n                #[dimension(metric)]\n                #[unredacted]\n                r#match: i64,\n            }\n            \",)"
+expression: "expand_event(r#\"\"raw\"\"#,\nr\"\n        #[info]\n        struct Raw {\n            r#type: ClassifiedString,\n            #[dimension(metric)]\n            #[unredacted]\n            r#match: i64,\n        }\n        \",)"
 ---
 struct Raw {
     r#type: ClassifiedString,
@@ -8,11 +8,11 @@ struct Raw {
 }
 const _: () = {
     impl ::observed::Event for Raw {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "raw",
             ::core::option::Option::Some(::core::any::TypeId::of::<Raw>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "raw",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -20,37 +20,41 @@ const _: () = {
             ),
             ::core::option::Option::None,
             false,
-            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "type",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("type"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "match",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("match"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::observed::__private::metric_field(
+                            "match",
+                            ::core::option::Option::None,
+                        ),
+                    ),
+                ),
+            ]),
         );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "type",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("type"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
                     &|engine| ::observed::Value::from_redacted(&self.r#type, engine),
                 )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "match",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("match"),
-                    ),
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("match"),
-                    ),
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
                     &|_| ::observed::Value::from(self.r#match.clone()),
                 )?;
             }

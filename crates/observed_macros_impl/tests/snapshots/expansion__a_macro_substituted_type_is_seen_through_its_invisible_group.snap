@@ -9,69 +9,76 @@ struct FromMacro<'a> {
 }
 const _: () = {
     impl<'a> ::observed::Event for FromMacro<'a> {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "macro.built",
             ::core::option::Option::Some(
                 ::core::any::TypeId::of::<FromMacro<'static>>(),
             ),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "macro.built",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
                 ),
             ),
             ::core::option::Option::None,
-            true,
             false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "hits",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("hits"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::observed::__private::metric_field(
+                            "hits",
+                            ::core::option::Option::Some(
+                                ::observed::__private::metric_description(
+                                    "macro.built",
+                                    ::observed::metadata::InstrumentKind::Counter,
+                                    "",
+                                    "",
+                                    ::observed::metadata::MetricValueKind::U64,
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                ::observed::__private::field_descriptor(
+                    "maybe",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("maybe"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "label",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("label"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+            ]),
         );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "hits",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("hits"),
-                    ),
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::instrument(
-                            "hits",
-                            ::observed::metadata::MetricDescription::new(
-                                "macro.built",
-                                ::observed::metadata::InstrumentKind::Counter,
-                                "",
-                                "",
-                            ),
-                        ),
-                    ),
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.hits.clone()))?;
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
+                    &|_| ::observed::Value::from(self.hits.clone()),
+                )?;
             }
             if let ::core::option::Option::Some(__val) = self.maybe.as_ref() {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "maybe",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("maybe"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
                     &|_engine| ::observed::Value::from_redacted(__val, _engine),
                 )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "label",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("label"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
                     &|_| ::observed::Value::from(
                         ::std::sync::Arc::<str>::from(self.label),
                     ),

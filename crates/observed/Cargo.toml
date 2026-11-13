@@ -51,6 +51,7 @@ thread_local = { workspace = true }
 tick = { workspace = true }
 
 [dev-dependencies]
+alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 metabench = { path = "../metabench" }
 ohno = { path = "../ohno", features = ["test-util"] }
@@ -70,6 +71,10 @@ required-features = ["test-util"]
 name = "observed_benchmarks"
 harness = false
 required-features = ["test-util"]
+
+[[bench]]
+name = "observed_counters"
+harness = false
 
 # >>> anvil-managed: anvil-lints
 [lints]

@@ -5,14 +5,15 @@
 
 use std::any::TypeId;
 
+use crate::metadata::FieldDescriptor;
 use crate::metadata::log::LogDescription;
 use crate::metadata::metric::MetricDescription;
 
 /// Description of a telemetry event type.
 ///
 /// Available as a `const` on every type that implements [`crate::Event`],
-/// providing compile-time metadata about the event's shape. A dynamic adaptor
-/// constructs the same description at runtime and may omit Rust type identity.
+/// providing read-only metadata about the event's shape. Adapters can reuse an
+/// existing event description; construction belongs to the event macros.
 ///
 /// The event name is shared across all signals; per-signal metadata lives
 /// in `log` / `metric`.
@@ -24,12 +25,16 @@ pub struct EventDescription {
     metric: Option<MetricDescription>,
     has_field_metrics: bool,
     disabled: bool,
+    fields: &'static [FieldDescriptor],
 }
 
 impl EventDescription {
-    /// Creates a new event description.
     #[must_use]
-    pub const fn new(
+    pub(crate) const fn new(name: &'static str) -> Self {
+        Self::from_parts(name, None, None, None, false, false)
+    }
+
+    pub(crate) const fn from_parts(
         name: &'static str,
         type_id: Option<TypeId>,
         log: Option<LogDescription>,
@@ -44,7 +49,30 @@ impl EventDescription {
             metric,
             has_field_metrics,
             disabled,
+            fields: &[],
         }
+    }
+
+    #[must_use]
+    pub(crate) const fn with_fields(mut self, fields: &'static [FieldDescriptor]) -> Self {
+        self.fields = fields;
+        self.has_field_metrics = false;
+        let mut remaining = fields;
+        while let [field, tail @ ..] = remaining {
+            if let Some(entry) = field.metric()
+                && entry.instrument_description().is_some()
+            {
+                self.has_field_metrics = true;
+            }
+            remaining = tail;
+        }
+        self
+    }
+
+    /// Returns routed field metadata without constructing an event.
+    #[must_use]
+    pub const fn fields(&self) -> &'static [FieldDescriptor] {
+        self.fields
     }
 
     /// Returns the event name (from `#[event("...")]`).
@@ -114,15 +142,15 @@ impl EventDescription {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metadata::metric::InstrumentKind;
+    use crate::metadata::metric::{InstrumentKind, MetricValueKind};
     use crate::severity::Severity;
 
     #[test]
     fn event_description_type_id_roundtrips() {
-        let with = EventDescription::new("e", Some(TypeId::of::<u32>()), None, None, false, false);
+        let with = EventDescription::from_parts("e", Some(TypeId::of::<u32>()), None, None, false, false);
         assert_eq!(with.type_id(), Some(TypeId::of::<u32>()));
 
-        let without = EventDescription::new("e", None, None, None, false, false);
+        let without = EventDescription::new("e");
         assert_eq!(without.type_id(), None);
     }
 
@@ -131,14 +159,14 @@ mod tests {
         // A description is what a processor selects on, so every accessor must
         // report its own field: a signal answered from the wrong field (or from
         // a constant) silently mis-routes the event.
-        let plain = EventDescription::new("plain", None, None, None, false, false);
+        let plain = EventDescription::new("plain");
         assert_eq!(plain.name(), "plain");
         assert!(plain.metric().is_none());
         assert!(!plain.is_log());
         assert!(!plain.is_disabled());
         assert!(!plain.contains_metrics());
 
-        let logged = EventDescription::new(
+        let logged = EventDescription::from_parts(
             "logged",
             None,
             Some(LogDescription::new("logged", Severity::Info, None)),
@@ -148,25 +176,25 @@ mod tests {
         );
         assert!(logged.is_log());
 
-        assert!(EventDescription::new("off", None, None, None, false, true).is_disabled());
+        assert!(EventDescription::from_parts("off", None, None, None, false, true).is_disabled());
     }
 
     #[test]
     fn an_event_level_or_field_level_metric_alone_makes_the_event_metric_producing() {
         // The two metric sources are alternatives, not requirements: an event
         // carrying only one of them still produces metric data points.
-        let event_metric = EventDescription::new(
+        let event_metric = EventDescription::from_parts(
             "event.metric",
             None,
             None,
-            Some(MetricDescription::new("m", InstrumentKind::Counter, "", "")),
+            Some(MetricDescription::new("m", InstrumentKind::Counter, "", "", MetricValueKind::U64)),
             false,
             false,
         );
         assert_eq!(event_metric.metric().expect("metric is set").instrument_name(), "m");
         assert!(event_metric.contains_metrics());
 
-        let field_metric = EventDescription::new("field.metric", None, None, None, true, false);
+        let field_metric = EventDescription::from_parts("field.metric", None, None, None, true, false);
         assert!(field_metric.metric().is_none());
         assert!(field_metric.contains_metrics());
     }

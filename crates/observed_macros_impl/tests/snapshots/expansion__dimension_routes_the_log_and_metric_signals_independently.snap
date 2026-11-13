@@ -1,6 +1,6 @@
 ---
 source: crates/observed_macros_impl/tests/expansion.rs
-expression: "expand_event(r#\"\"request\"\"#,\nr#\"\n            #[info]\n            struct Request {\n                #[dimension]\n                explicit_default: ClassifiedString,\n                #[dimension(log = \"renamed\")]\n                renamed: ClassifiedString,\n                #[dimension(log = exclude)]\n                hidden: ClassifiedString,\n                #[dimension(metric)]\n                #[unredacted]\n                shard: i64,\n                #[dimension(metric = \"region.key\")]\n                #[unredacted]\n                region: i64,\n                #[dimension(log = \"http.status\", metric = \"status\")]\n                #[unredacted]\n                status: i64,\n                #[dimension(log = exclude, metric)]\n                #[unredacted]\n                internal: i64,\n            }\n            \"#,)"
+expression: "expand_event(r#\"\"request\"\"#,\nr#\"\n        #[info]\n        struct Request {\n            #[dimension]\n            explicit_default: ClassifiedString,\n            #[dimension(log = \"renamed\")]\n            renamed: ClassifiedString,\n            #[dimension(log = exclude)]\n            hidden: ClassifiedString,\n            #[dimension(metric)]\n            #[unredacted]\n            shard: i64,\n            #[dimension(metric = \"region.key\")]\n            #[unredacted]\n            region: i64,\n            #[dimension(log = \"http.status\", metric = \"status\")]\n            #[unredacted]\n            status: i64,\n            #[dimension(log = exclude, metric)]\n            #[unredacted]\n            internal: i64,\n        }\n        \"#,)"
 ---
 struct Request {
     explicit_default: ClassifiedString,
@@ -13,11 +13,11 @@ struct Request {
 }
 const _: () = {
     impl ::observed::Event for Request {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::__private::event_description(
             "request",
             ::core::option::Option::Some(::core::any::TypeId::of::<Request>()),
             ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
+                ::observed::__private::log_description(
                     "request",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
@@ -25,22 +25,76 @@ const _: () = {
             ),
             ::core::option::Option::None,
             false,
-            false,
+            &::observed::__private::event_fields([
+                ::observed::__private::field_descriptor(
+                    "explicit_default",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("explicit_default"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "renamed",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("renamed"),
+                    ),
+                    ::core::option::Option::None,
+                ),
+                ::observed::__private::field_descriptor(
+                    "shard",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("shard"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::observed::__private::metric_field(
+                            "shard",
+                            ::core::option::Option::None,
+                        ),
+                    ),
+                ),
+                ::observed::__private::field_descriptor(
+                    "region",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("region"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::observed::__private::metric_field(
+                            "region.key",
+                            ::core::option::Option::None,
+                        ),
+                    ),
+                ),
+                ::observed::__private::field_descriptor(
+                    "status",
+                    ::core::option::Option::Some(
+                        ::observed::__private::log_field("http.status"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::observed::__private::metric_field(
+                            "status",
+                            ::core::option::Option::None,
+                        ),
+                    ),
+                ),
+                ::observed::__private::field_descriptor(
+                    "internal",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::__private::metric_field(
+                            "internal",
+                            ::core::option::Option::None,
+                        ),
+                    ),
+                ),
+            ]),
         );
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "explicit_default",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("explicit_default"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[0usize],
                     &|engine| ::observed::Value::from_redacted(
                         &self.explicit_default,
                         engine,
@@ -48,64 +102,32 @@ const _: () = {
                 )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "renamed",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("renamed"),
-                    ),
-                    ::core::option::Option::None,
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[1usize],
                     &|engine| ::observed::Value::from_redacted(&self.renamed, engine),
                 )?;
             }
             {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "shard",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("shard"),
-                    ),
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("shard"),
-                    ),
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.shard.clone()))?;
-            }
-            {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "region",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("region"),
-                    ),
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("region.key"),
-                    ),
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.region.clone()))?;
-            }
-            {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "status",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("http.status"),
-                    ),
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("status"),
-                    ),
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.status.clone()))?;
-            }
-            {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "internal",
-                    ::core::option::Option::None,
-                    ::core::option::Option::Some(
-                        ::observed::metadata::MetricFieldEntry::dimension("internal"),
-                    ),
-                );
                 visitor(
-                    &FIELD_DESC,
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[2usize],
+                    &|_| ::observed::Value::from(self.shard.clone()),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[3usize],
+                    &|_| ::observed::Value::from(self.region.clone()),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[4usize],
+                    &|_| ::observed::Value::from(self.status.clone()),
+                )?;
+            }
+            {
+                visitor(
+                    &<Self as ::observed::Event>::DESCRIPTION.fields()[5usize],
                     &|_| ::observed::Value::from(self.internal.clone()),
                 )?;
             }
