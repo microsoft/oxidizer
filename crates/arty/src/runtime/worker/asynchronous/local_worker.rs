@@ -4,11 +4,11 @@
 use std::cell::RefCell;
 
 use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskPlacement, TaskSet};
-use thread_aware::Thread;
+use thread_aware::{Thread, ThreadAware};
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, LocalHookGuard, Panic};
+use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, LocalHookGuard, Panic, WorkerInit};
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
@@ -106,12 +106,22 @@ impl LocalWorker {
     }
 
     pub(crate) fn install_hook(hook: HookRegistration, source: Option<&Thread>) {
-        let destination = Self::with_scheduler(|current| {
-            let current = current.expect("a running worker retains its scheduler while processing hook registration");
-            current.thread.clone()
-        });
         match hook {
-            HookRegistration::Panic(hook) => LOCAL_PANIC_HOOK.install(hook, source, &destination),
+            HookRegistration::Panic(hook) => {
+                let destination = Self::with_scheduler(|current| {
+                    let current = current.expect("a running worker retains its scheduler while processing hook registration");
+                    current.thread.clone()
+                });
+                LOCAL_PANIC_HOOK.install(hook, source, &destination);
+            }
+            HookRegistration::WorkerInit(mut hook) => {
+                let (destination, mut event) = Self::with_scheduler(|current| {
+                    let current = current.expect("a running worker retains its scheduler while processing hook registration");
+                    (current.thread.clone(), WorkerInit::new(current.thread.clone()))
+                });
+                hook.relocate(source, &destination);
+                hook.execute(&mut event);
+            }
         }
     }
 
@@ -267,6 +277,7 @@ mod tests {
                     Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
                 )),
                 shutdown.clone(),
+                Vec::new(),
             );
             let dispatcher = DispatcherClient::new(Arc::clone(&core));
             let io = crate::io::Io::new(
@@ -317,6 +328,7 @@ mod tests {
                     Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
                 )),
                 Shutdown::default(),
+                Vec::new(),
             );
             let _remote = other_core.spawn_relocating(&other_thread, |_| async { 9 });
             let other_owner_queued = matches!(other_rx.spawn_receiver().try_recv(), Ok(SpawnCommand { .. }));

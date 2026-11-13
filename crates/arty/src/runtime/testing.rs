@@ -25,7 +25,7 @@ impl DispatcherClient {
             thread.clone(),
             Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
         );
-        Self::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown))
+        Self::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown, Vec::new()))
     }
 }
 

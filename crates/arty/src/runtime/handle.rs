@@ -262,6 +262,7 @@ mod tests {
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
+            Vec::new(),
         ));
         let runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(vec![worker]));
         assert!(runtime.stop().unwrap_err().to_string().contains("panicked"));
@@ -283,6 +284,7 @@ mod tests {
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
+            Vec::new(),
         ));
         let runtime = Runtime::with_dispatcher(dispatcher.clone(), WorkerJoiner::new(vec![worker]));
         dispatcher.stop(Error::new(std::io::Error::other("first runtime failure")).into_shutdown_cause());

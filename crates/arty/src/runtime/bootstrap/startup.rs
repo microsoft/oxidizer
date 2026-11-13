@@ -62,14 +62,16 @@ fn build_with_processors(
         NonEmpty::from_vec(workers.iter().map(|worker| worker.endpoint().clone()).collect())
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
         shutdown,
+        hook_registrations,
     );
 
-    let dispatcher_client = DispatcherClient::new(dispatcher);
+    let dispatcher_client = DispatcherClient::new(dispatcher.clone());
 
     let mut join_handles = Vec::with_capacity(workers.len());
     for worker in workers {
         join_handles.push(worker.activate(dispatcher_client.clone()));
     }
+
     let worker_joiner = WorkerJoiner::new(join_handles);
 
     Ok(Runtime::with_dispatcher(dispatcher_client, worker_joiner))
