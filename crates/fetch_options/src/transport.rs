@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Transport-level HTTP client configuration.
+//! HTTP client transport configuration.
 
 use std::time::Duration;
 
@@ -9,15 +9,12 @@ use http::{Extensions, Version};
 
 use crate::{ConnectionKeepAlive, ConnectionPoolOptions, DEFAULT_CONNECT_TIMEOUT, Http2Options, RequestFilter};
 
-/// Public, transport-relevant subset of an HTTP client's configuration.
+/// HTTP client configuration that a transport uses.
 ///
-/// This is the view of the client configuration handed to custom transport handlers.
-/// It deliberately excludes plumbing that is the pipeline's concern rather than
-/// the transport's (base URI rewriting, redaction, `TLS` backend selection, I/O
-/// model overrides, etc.).
+/// A client passes this value to a custom transport. It excludes pipeline behavior,
+/// such as base URI rewriting, redaction, `TLS` backend selection, and I/O model overrides.
 ///
-/// Values on this struct are typically configured by mutating the fields directly; a custom transport reads
-/// them to size its own resources (pool limits, keep-alive timers, supported protocol versions, ...).
+/// Set the fields directly. A custom transport reads them to configure its resources.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct TransportOptions {
@@ -27,14 +24,15 @@ pub struct TransportOptions {
     pub connection_keep_alive: ConnectionKeepAlive,
     /// Whether plain `http://` requests are allowed alongside `https://`.
     pub request_filter: RequestFilter,
-    /// HTTP versions the client is willing to negotiate. An empty `Vec` is
-    /// treated as "no preference" by the bundled transports.
+    /// HTTP versions that the client can negotiate.
+    ///
+    /// The bundled transports treat an empty `Vec` as no preference.
     pub supported_http_versions: Vec<Version>,
     /// Connection pool sizing and lifetime configuration.
     pub connection_pool: ConnectionPoolOptions,
-    /// HTTP/2-specific tuning knobs.
+    /// HTTP/2 configuration.
     pub http_2: Http2Options,
-    /// Extra extensions to be applied to the underlying transport.
+    /// Extra extensions for the underlying transport.
     pub extra: Extensions,
 }
 

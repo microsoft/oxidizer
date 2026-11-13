@@ -5,11 +5,11 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_options/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_options/favicon.ico")]
 
-//! Configuration options for HTTP client transport behavior.
+//! HTTP client transport configuration.
 //!
-//! This crate provides types for configuring various aspects of HTTP connections,
-//! including connection keep-alive behavior, connection pooling, HTTP version support,
-//! HTTP/2 flow control, and socket-level tuning.
+//! This crate defines connect timeouts, request filtering, connection information,
+//! keep-alive, connection pools, idle timeouts, pool selection, connection lifetime,
+//! HTTP versions, HTTP/2 stream limits and flow control, and socket configuration.
 //!
 //! # Example
 //!
@@ -55,12 +55,11 @@ pub use transport::TransportOptions;
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
-// Matches `SocketsHttpHandler.KeepAlivePingTimeout` in .NET (20 seconds).
+// This matches the 20-second value of `SocketsHttpHandler.KeepAlivePingTimeout` in .NET.
 const DEFAULT_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 
-// .NET has no opt-in default for the keep-alive ping interval (`KeepAlivePingDelay`
-// defaults to `Timeout.InfiniteTimeSpan`, i.e. disabled). 20 seconds is used here
-// only when the caller explicitly enables keep-alive without specifying an interval.
+// .NET disables `KeepAlivePingDelay` by default with `Timeout.InfiniteTimeSpan`.
+// This crate uses 20 seconds only when the caller enables keep-alive without an interval.
 const DEFAULT_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(20);
 
 #[cfg(test)]
