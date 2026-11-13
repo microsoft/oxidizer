@@ -206,6 +206,7 @@ nonempty = { version = "0.12.0", default-features = false }
 object-pool = { version = "0.6.0", default-features = false }
 observed = { path = "crates/observed", default-features = false, version = "0.30.1" }
 observed_destination_core = { path = "crates/observed_destination_core", default-features = false, version = "0.29.2" }
+observed_destination_otlp = { path = "crates/observed_destination_otlp", default-features = false, version = "0.1.0" }
 observed_destination_stdout = { path = "crates/observed_destination_stdout", default-features = false, version = "0.1.1" }
 observed_macros = { path = "crates/observed_macros", default-features = false, version = "=0.30.1" }
 observed_macros_impl = { path = "crates/observed_macros_impl", default-features = false, version = "=0.30.1" }
@@ -216,6 +217,8 @@ ohno_macros = { path = "crates/ohno_macros", default-features = false, version =
 ohno_macros_impl = { path = "crates/ohno_macros_impl", default-features = false, version = "=0.5.4" }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.33.0", default-features = false }
+opentelemetry-otlp = { version = "0.33.0", default-features = false }
+opentelemetry-proto = { version = "0.33.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.33.0", default-features = false }
 opentelemetry-stdout = { version = "0.33.0", default-features = false }
 opentelemetry_sdk = { version = "0.33.0", default-features = false }
@@ -247,6 +250,7 @@ ratatui = { version = "0.30.2", default-features = false, features = ["crossterm
 rcgen = { version = "0.14.5", default-features = false }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.3.1" }
 regex = { version = "1.12.2", default-features = false }
+reqwest = { version = "0.13.4", default-features = false }
 rest_over_grpc = { path = "crates/rest_over_grpc", default-features = false, version = "0.3.1" }
 route-recognizer = { version = "0.3.1", default-features = false }
 routerama = { path = "crates/routerama", default-features = false, version = "0.3.1" }
