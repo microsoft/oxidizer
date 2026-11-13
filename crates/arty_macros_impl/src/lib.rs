@@ -97,10 +97,8 @@ impl Args {
             MonitorSetting::Disabled => quote!(.monitor(#runtime_path::runtime::MonitorPolicy::disabled())),
         });
         let panic = self.panic.map(|panic| match panic {
-            PanicSetting::Shutdown => {
-                quote!(.panic(#runtime_path::runtime::PanicPolicy::shutdown()))
-            }
-            PanicSetting::Ignore => quote!(.panic(#runtime_path::runtime::PanicPolicy::ignore())),
+            PanicSetting::Shutdown => quote!(.on(#runtime_path::runtime::hook::Panic::SHUTDOWN)),
+            PanicSetting::Ignore => quote!(.on(#runtime_path::runtime::hook::Panic::IGNORE)),
         });
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
         Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #monitor #panic #clock .build()))
@@ -629,7 +627,7 @@ mod tests {
 
     #[test]
     fn main_panic_settings_are_forwarded_exactly() {
-        for policy in [quote!(shutdown), quote!(ignore)] {
+        for (policy, constant) in [(quote!(shutdown), quote!(SHUTDOWN)), (quote!(ignore), quote!(IGNORE))] {
             let expansion = main(
                 quote!(panic = #policy),
                 quote! {
@@ -639,7 +637,7 @@ mod tests {
             let expected = quote! {
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
-                        .panic(::arty::runtime::PanicPolicy::#policy())
+                        .on(::arty::runtime::hook::Panic::#constant)
                         .build()
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
@@ -658,7 +656,7 @@ mod tests {
 
     #[test]
     fn test_panic_settings_are_forwarded_exactly() {
-        for policy in [quote!(shutdown), quote!(ignore)] {
+        for (policy, constant) in [(quote!(shutdown), quote!(SHUTDOWN)), (quote!(ignore), quote!(IGNORE))] {
             let expansion = test(
                 quote!(panic = #policy),
                 quote! {
@@ -670,7 +668,7 @@ mod tests {
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
                         .monitor(::arty::runtime::MonitorPolicy::disabled())
-                        .panic(::arty::runtime::PanicPolicy::#policy())
+                        .on(::arty::runtime::hook::Panic::#constant)
                         .build()
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
@@ -842,7 +840,7 @@ mod tests {
             quote!("ignore"),
             quote!(continue),
             quote!(abort),
-            quote!(PanicPolicy::shutdown()),
+            quote!(Panic::shutdown()),
             quote!(::shutdown),
         ] {
             for expand in [main, test] {
