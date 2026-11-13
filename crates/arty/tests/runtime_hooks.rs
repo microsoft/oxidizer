@@ -7,13 +7,17 @@
 
 mod support;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
+use std::collections::HashSet;
+use std::future::poll_fn;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
-use std::thread::ThreadId;
+use std::task::Poll;
+use std::thread::{self, ThreadId};
 use std::time::Duration;
 
 use arty::core::{Thread, ThreadAware};
-use arty::runtime::hook::{HookFn, Panic, WorkerInit};
+use arty::runtime::hook::{HookFn, Panic, Spawn, TaskPoll, WorkerInit};
 use arty::runtime::{Runtime, WorkersPolicy};
 use arty::task::Context;
 use support::JoinHandleExt as _;
@@ -101,6 +105,410 @@ impl SharedLog {
 
 impl ThreadAware for SharedLog {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+struct PollRecorder {
+    before: &'static str,
+    after: &'static str,
+    destination: Option<ThreadId>,
+    log: SharedLog,
+}
+
+impl ThreadAware for PollRecorder {
+    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
+        self.destination = Some(destination.id());
+    }
+}
+
+impl TaskPoll for PollRecorder {
+    fn begin(&mut self) {
+        assert_eq!(self.destination, Some(thread::current().id()));
+        self.log.push(self.before);
+    }
+
+    fn end(&mut self) {
+        self.log.push(self.after);
+    }
+}
+
+#[test]
+fn spawn_hook_brackets_the_complete_task_poll_in_registration_order() {
+    let log = SharedLog(Arc::new(Mutex::new(Vec::new())));
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .on(HookFn::<Spawn, _>::new(log.clone(), |event, log| {
+            log.push("outer spawn");
+            event.register(PollRecorder {
+                before: "outer before",
+                after: "outer after",
+                destination: None,
+                log: log.clone(),
+            });
+        }))
+        .on(HookFn::<Spawn, _>::new(log.clone(), |event, log| {
+            log.push("inner spawn");
+            event.register(PollRecorder {
+                before: "inner before",
+                after: "inner after",
+                destination: None,
+                log: log.clone(),
+            });
+        }))
+        .build()
+        .unwrap();
+
+    runtime
+        .scheduler()
+        .spawn_anywhere(log.clone(), |_, task_log| async move {
+            task_log.push("task");
+        })
+        .join()
+        .unwrap();
+
+    assert_eq!(
+        log.take(),
+        [
+            "outer spawn",
+            "inner spawn",
+            "outer before",
+            "inner before",
+            "task",
+            "inner after",
+            "outer after",
+        ]
+    );
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn poll_hook_scope_completes_when_the_task_panics() {
+    let log = SharedLog(Arc::new(Mutex::new(Vec::new())));
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .on(Panic::IGNORE)
+        .on(HookFn::<Spawn, _>::new(log.clone(), |event, log| {
+            event.register(PollRecorder {
+                before: "before",
+                after: "after",
+                destination: None,
+                log: log.clone(),
+            });
+        }))
+        .build()
+        .unwrap();
+
+    let task = runtime.scheduler().spawn_anywhere((), |_, ()| async move {
+        panic!("task panic");
+    });
+
+    assert!(task.join().unwrap_err().is_panic());
+    assert_eq!(log.take(), ["before", "after"]);
+    assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap(), 42);
+    runtime.stop().unwrap();
+}
+
+struct PanickingPoll;
+
+impl ThreadAware for PanickingPoll {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+impl TaskPoll for PanickingPoll {
+    fn begin(&mut self) {
+        panic!("poll hook panic");
+    }
+
+    fn end(&mut self) {}
+}
+
+#[test]
+fn poll_hook_panic_fails_the_worker_instead_of_the_task() {
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .on(HookFn::<Spawn, _>::new((), |event, ()| event.register(PanickingPoll)))
+        .build()
+        .unwrap();
+
+    let error = runtime.scheduler().spawn_anywhere((), |_, ()| async {}).join().unwrap_err();
+
+    assert!(error.is_shutdown());
+    assert!(!error.is_panic());
+    assert!(runtime.stop().is_err());
+}
+
+thread_local! {
+    static POLL_SCOPE_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
+
+struct ScopedPoll;
+
+impl ThreadAware for ScopedPoll {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+impl TaskPoll for ScopedPoll {
+    fn begin(&mut self) {
+        POLL_SCOPE_DEPTH.with(|depth| {
+            assert_eq!(depth.replace(1), 0);
+        });
+    }
+
+    fn end(&mut self) {
+        POLL_SCOPE_DEPTH.set(0);
+    }
+}
+
+#[test]
+fn poll_hook_scope_is_removed_before_the_next_poll() {
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .on(HookFn::<Spawn, _>::new((), |event, ()| event.register(ScopedPoll)))
+        .build()
+        .unwrap();
+
+    let task = runtime.scheduler().spawn_anywhere((), |_, ()| async {
+        let mut first = true;
+        poll_fn(move |cx| {
+            POLL_SCOPE_DEPTH.with(|depth| assert_eq!(depth.get(), 1));
+            if first {
+                first = false;
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })
+        .await;
+    });
+
+    task.join().unwrap();
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn spawn_hook_covers_runtime_local_relocating_and_specific_worker_submissions() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(2))
+        .on(HookFn::<Spawn, _>::new(PanicCount(Arc::clone(&calls)), |event, count| {
+            assert!(event.thread().is_none());
+            count.0.fetch_add(1, Ordering::SeqCst);
+        }))
+        .build()
+        .unwrap();
+    runtime.scheduler().spawn_anywhere((), |_, ()| async {}).join().unwrap();
+    let (control, scheduler) = runtime
+        .scheduler()
+        .block_on(async |cx| (cx.control().clone(), cx.scheduler().clone()))
+        .unwrap();
+    let baseline = calls.load(Ordering::SeqCst);
+    let destination = control.workers().into_iter().next().unwrap();
+
+    scheduler.spawn(async |_| {}).join().unwrap();
+    scheduler.spawn_anywhere((), |()| async {}).join().unwrap();
+    scheduler.spawn_at(destination, (), |()| async {}).join().unwrap();
+
+    assert_eq!(calls.load(Ordering::SeqCst) - baseline, 3);
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn spawn_hook_runs_for_a_detached_scheduler() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(1))
+        .on(HookFn::<Spawn, _>::new(PanicCount(Arc::clone(&calls)), |_, count| {
+            count.0.fetch_add(1, Ordering::SeqCst);
+        }))
+        .build()
+        .unwrap();
+    let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
+    let baseline = calls.load(Ordering::SeqCst);
+
+    let observed = scheduler
+        .spawn({
+            let calls = Arc::clone(&calls);
+            move |_| async move { calls.load(Ordering::SeqCst) }
+        })
+        .join()
+        .unwrap();
+
+    assert_eq!(observed, baseline + 1);
+    assert_eq!(calls.load(Ordering::SeqCst), baseline + 1);
+    runtime.stop().unwrap();
+}
+
+#[derive(Clone)]
+struct NeutralSpawnProbe {
+    factory_created: Arc<AtomicBool>,
+    relocation: Arc<Mutex<Option<(Option<ThreadId>, ThreadId)>>>,
+    began: Arc<AtomicBool>,
+}
+
+impl ThreadAware for NeutralSpawnProbe {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+struct RelocatedPoll {
+    factory_created: Arc<AtomicBool>,
+    relocation: Arc<Mutex<Option<(Option<ThreadId>, ThreadId)>>>,
+    began: Arc<AtomicBool>,
+}
+
+impl ThreadAware for RelocatedPoll {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        assert!(self.factory_created.load(Ordering::Acquire));
+        self.relocation.lock().unwrap().replace((source.map(Thread::id), destination.id()));
+    }
+}
+
+impl TaskPoll for RelocatedPoll {
+    fn begin(&mut self) {
+        assert!(self.factory_created.load(Ordering::Acquire));
+        let destination = self.relocation.lock().unwrap().unwrap().1;
+        assert_eq!(destination, thread::current().id());
+        self.began.store(true, Ordering::Release);
+    }
+
+    fn end(&mut self) {}
+}
+
+#[derive(Clone)]
+struct TargetTaskData {
+    factory_created: Arc<AtomicBool>,
+    began: Arc<AtomicBool>,
+}
+
+impl ThreadAware for TargetTaskData {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+#[test]
+fn detached_scheduler_runs_neutral_spawn_then_relocates_poll_after_factory() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let factory_created = Arc::new(AtomicBool::new(false));
+    let relocation = Arc::new(Mutex::new(None));
+    let began = Arc::new(AtomicBool::new(false));
+    let (scheduler, destination) = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let source = cx.thread().id();
+            let destination = cx
+                .control()
+                .workers()
+                .into_iter()
+                .find(|worker| worker.id() != source)
+                .unwrap()
+                .clone();
+            cx.control().on(HookFn::<Spawn, _>::new(
+                NeutralSpawnProbe {
+                    factory_created: Arc::clone(&factory_created),
+                    relocation: Arc::clone(&relocation),
+                    began: Arc::clone(&began),
+                },
+                |event, probe| {
+                    assert!(event.thread().is_none());
+                    probe.factory_created.store(false, Ordering::Release);
+                    event.register(RelocatedPoll {
+                        factory_created: Arc::clone(&probe.factory_created),
+                        relocation: Arc::clone(&probe.relocation),
+                        began: Arc::clone(&probe.began),
+                    });
+                },
+            ));
+            (cx.scheduler().clone(), destination)
+        })
+        .unwrap();
+
+    scheduler
+        .spawn_at(
+            &destination,
+            TargetTaskData {
+                factory_created: Arc::clone(&factory_created),
+                began: Arc::clone(&began),
+            },
+            |data| {
+                data.factory_created.store(true, Ordering::Release);
+                async move {
+                    assert!(data.began.load(Ordering::Acquire));
+                }
+            },
+        )
+        .join()
+        .unwrap();
+
+    assert_eq!(*relocation.lock().unwrap(), Some((None, destination.id())));
+    runtime.stop().unwrap();
+}
+
+#[derive(Clone)]
+struct LateSpawnProbe {
+    calls: Arc<AtomicUsize>,
+    destinations: Arc<Mutex<Vec<ThreadId>>>,
+}
+
+impl ThreadAware for LateSpawnProbe {
+    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
+        self.destinations.lock().unwrap().push(destination.id());
+    }
+}
+
+#[test]
+fn control_registration_precedes_later_task_submissions() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let (control, scheduler) = runtime
+        .scheduler()
+        .block_on(async |cx| (cx.control().clone(), cx.scheduler().clone()))
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let destinations = Arc::new(Mutex::new(Vec::new()));
+
+    control.on(HookFn::<Spawn, _>::new(
+        LateSpawnProbe {
+            calls: Arc::clone(&calls),
+            destinations: Arc::clone(&destinations),
+        },
+        |event, probe| {
+            assert!(event.thread().is_none());
+            probe.calls.fetch_add(1, Ordering::SeqCst);
+        },
+    ));
+
+    let tasks: Vec<_> = control
+        .workers()
+        .into_iter()
+        .map(|worker| scheduler.spawn_at(worker, (), |()| async {}))
+        .collect();
+    for task in tasks {
+        task.join().unwrap();
+    }
+
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(destinations.lock().unwrap().iter().copied().collect::<HashSet<_>>().len(), 2);
+
+    control.request_stop();
+    assert!(scheduler.spawn(async |_| {}).join().unwrap_err().is_shutdown());
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn spawn_hook_registration_applies_before_local_spawn() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    runtime
+        .scheduler()
+        .block_on(async |cx| {
+            cx.control().on(HookFn::<Spawn, _>::new(PanicCount(Arc::clone(&calls)), |_, count| {
+                count.0.fetch_add(1, Ordering::SeqCst);
+            }));
+            cx.scheduler().spawn(async |_| {}).await.unwrap();
+        })
+        .unwrap();
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    runtime.stop().unwrap();
 }
 
 #[derive(Clone)]
@@ -286,6 +694,7 @@ fn control_appends_panic_hooks_in_registration_order() {
             .is_panic()
     );
     assert_eq!(runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 }).join().unwrap(), 42);
+
     assert_eq!(order.take(), ["ignore"]);
 
     let (installed, installation) = mpsc::channel();

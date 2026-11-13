@@ -58,12 +58,12 @@ impl RuntimeControl {
 
     /// Registers a runtime hook on every live async worker.
     ///
-    /// Arty clones the hook data for each worker and relocates it before the
-    /// callback can run. On a runtime worker, Arty applies the hook to that
-    /// worker before this method returns. Arty sends registration to other
-    /// workers through their normal command queues. A worker applies the hook
-    /// when it processes that command. If runtime shutdown has started, Arty
-    /// ignores the registration.
+    /// Arty clones the hook data for each worker and relocates it before a
+    /// callback can run there. Spawn hooks also keep a worker-neutral instance.
+    /// On a runtime worker, Arty applies the hook before this method returns.
+    /// Arty sends registration to other workers through their normal command
+    /// queues. A worker applies the hook when it processes that command. If
+    /// runtime shutdown has started, Arty ignores the registration.
     ///
     /// [`WorkerInit`](crate::runtime::hook::WorkerInit) runs once on each live
     /// worker. The runtime keeps that registration for workers that start

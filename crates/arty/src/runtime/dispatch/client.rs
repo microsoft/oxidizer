@@ -59,13 +59,18 @@ impl DispatcherClient {
     }
 
     /// Submits to a previously resolved worker without discarding destination affinity.
-    pub(crate) fn spawn_on_worker<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
+    pub(crate) fn spawn_on_worker_from<FF, F, R>(
+        &self,
+        source_index: WorkerIndex,
+        worker_index: WorkerIndex,
+        future_factory: FF,
+    ) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.core.spawn_on_worker(worker_index, future_factory)
+        self.core.spawn_on_worker_from(source_index, worker_index, future_factory)
     }
 
     pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
@@ -86,13 +91,18 @@ impl DispatcherClient {
         self.core.spawn_relocating(source, future_factory)
     }
 
-    pub(crate) fn spawn_at_worker_relocating<FF, F, R>(&self, worker_index: WorkerIndex, future_factory: FF) -> JoinHandle<R>
+    pub(crate) fn spawn_at_worker_relocating<FF, F, R>(
+        &self,
+        source_index: WorkerIndex,
+        worker_index: WorkerIndex,
+        future_factory: FF,
+    ) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: ThreadAware + 'static,
     {
-        self.core.spawn_at_worker_relocating(worker_index, future_factory)
+        self.core.spawn_at_worker_relocating(source_index, worker_index, future_factory)
     }
 
     pub(crate) fn access_io(&self, worker_index: WorkerIndex, access: Box<dyn FnOnce(&Context) + Send>) -> Result<(), Error> {

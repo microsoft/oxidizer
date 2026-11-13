@@ -19,7 +19,7 @@ use plurality::{Arc as PoolArc, MultiPool};
 use crate::inspection::Inspector;
 use crate::wake::RemoteWake;
 use crate::{
-    PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskMetadata, TypeErasedTask, WakeShared, WakeSignal, allocate_task,
+    PanicPolicy, Shutdown, TaskCompletion, TaskHandle, TaskMetadata, TaskPoller, TypeErasedTask, WakeShared, WakeSignal, allocate_task,
     discard_task_panic_payload,
 };
 
@@ -121,11 +121,12 @@ impl ExecutorShared {
         self.shutdown().is_triggered() && self.inner.task_count.get() == 0
     }
 
-    pub(crate) fn add_task<F, T, I>(&self, future: F, metadata: TaskMetadata, completion: T, inspector: I)
+    pub(crate) fn add_task<F, T, P, I>(&self, future: F, metadata: TaskMetadata, poll: P, completion: T, inspector: I)
     where
         F: IntoFuture + 'static,
         F::Output: 'static,
         T: TaskCompletion<F::Output>,
+        P: TaskPoller<F::IntoFuture>,
         I: Inspector<F::IntoFuture>,
     {
         if self.shutdown().is_triggered() {
@@ -147,6 +148,7 @@ impl ExecutorShared {
             &self.inner.task_storage,
             future,
             metadata,
+            poll,
             self.inner.sink.clone(),
             completion,
             inspector,

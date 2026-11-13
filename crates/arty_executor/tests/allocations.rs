@@ -9,10 +9,16 @@
 
 use std::alloc::System;
 use std::cell::Cell;
+use std::hint::black_box;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 
 use alloc_tracker::{Allocator, Session};
-use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskPanicPayload, TaskSet, discard_task_panic_payload};
+use arty_executor::{
+    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskPanicPayload, TaskPoller, TaskSet, discard_task_panic_payload,
+};
 
 #[global_allocator]
 static ALLOCATOR: Allocator<System> = Allocator::system();
@@ -87,4 +93,47 @@ fn spawn_and_complete_one_reuses_all_storage() {
     assert!(!executor.has_tasks());
     executor.shutdown().trigger(arty_executor::ShutdownCause::default());
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Shutdown(_)));
+}
+
+#[derive(Debug)]
+struct OneBytePollHook(u8);
+
+impl<F: Future> TaskPoller<F> for OneBytePollHook {
+    fn poll(&mut self, mut future: Pin<&mut F>, cx: &mut Context<'_>) -> Result<Poll<F::Output>, TaskPanicPayload> {
+        black_box(self.0);
+        catch_unwind(AssertUnwindSafe(|| future.as_mut().poll(cx)))
+    }
+}
+
+#[test]
+fn concrete_poll_hooks_use_no_allocation() {
+    let mut executor = Executor::builder().build();
+    let tasks = executor.tasks();
+    let completed = Rc::new(Cell::new(0));
+    for value in 0..WARM_UP_OPERATIONS {
+        tasks
+            .task(async {})
+            .poll_with(OneBytePollHook(value as u8))
+            .register(CountCompletion(Rc::clone(&completed)));
+        let _ = executor.execute_cycle();
+    }
+    completed.set(0);
+
+    let session = Session::new().no_stdout().no_file();
+    let operation = session.operation("concrete_poll_hooks");
+    {
+        let _span = operation.measure_thread().iterations(MEASURED_OPERATIONS as u64);
+        for value in 0..MEASURED_OPERATIONS {
+            tasks
+                .task(async {})
+                .poll_with(OneBytePollHook(value as u8))
+                .register(CountCompletion(Rc::clone(&completed)));
+            let _ = black_box(executor.execute_cycle());
+        }
+    }
+
+    let (allocations, bytes) = allocation_totals(&session, "concrete_poll_hooks");
+    assert_eq!(allocations, 0, "concrete optional poll hooks must not allocate");
+    assert_eq!(bytes, 0, "concrete optional poll hooks must not allocate bytes");
+    assert_eq!(completed.get(), MEASURED_OPERATIONS);
 }
