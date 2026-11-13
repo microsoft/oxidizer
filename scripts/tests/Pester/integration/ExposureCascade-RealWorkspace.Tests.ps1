@@ -153,14 +153,23 @@ Describe 'Re-exported type edges in the live workspace' {
 
     BeforeAll {
         # Every (crate, allowlisted workspace crate) pair where the crate does
-        # not depend on that workspace crate directly. Self-references are
-        # excluded: a crate cannot cascade from itself.
+        # reaches that workspace crate only transitively. An allowlist can also
+        # name a registry crate with the same name as a workspace member.
         $script:IndirectPairs = @()
         $byName = @{}
         foreach ($p in $script:LiveBaseline) { $byName[$p.Name.Replace('-', '_')] = $p }
 
         foreach ($pkg in $script:LiveBaseline) {
             if ($null -eq $pkg.AllowedExternalTypes) { continue }
+            $reachable = @{}
+            $pending = [System.Collections.Generic.Stack[string]]::new()
+            foreach ($dep in $pkg.Deps) { $pending.Push($dep) }
+            while ($pending.Count -gt 0) {
+                $name = $pending.Pop()
+                if ($reachable.ContainsKey($name)) { continue }
+                $reachable[$name] = $true
+                foreach ($dep in $byName[$name].Deps) { $pending.Push($dep) }
+            }
             $self = $pkg.Name.Replace('-', '_')
             $roots = @($pkg.AllowedExternalTypes |
                     Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace($_) } |
@@ -169,6 +178,7 @@ Describe 'Re-exported type edges in the live workspace' {
                 if (-not $byName.ContainsKey($root)) { continue }
                 if ($root -eq $self) { continue }
                 if ($pkg.Deps -contains $root) { continue }
+                if (-not $reachable.ContainsKey($root)) { continue }
                 $script:IndirectPairs += [pscustomobject]@{ Dependent = $pkg; TargetName = $byName[$root].Name }
             }
         }
@@ -178,6 +188,15 @@ Describe 'Re-exported type edges in the live workspace' {
         # If this ever fails the workspace changed shape; the tests below would
         # then be silently vacuous, so fail loudly instead.
         @($script:IndirectPairs).Count | Should -BeGreaterThan 0
+    }
+
+    It 'does not cascade a local ohno release into consumers of published ohno' {
+        $resolved = Resolve-ReleaseSet `
+            -ParsedTokens (Parse-ReleaseTokens -Tokens @('ohno@breaking')) `
+            -WorkspaceBaseline $script:LiveBaseline `
+            -GetRequiredChangeType $script:NoSelfChangeClassifier
+
+        @($resolved | ForEach-Object { $_.Folder }) | Should -Not -Contain 'anyspawn'
     }
 
     It 'treats every indirect allowlist edge as exposure of the defining crate' {
