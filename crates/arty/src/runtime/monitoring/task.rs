@@ -297,7 +297,65 @@ pub(crate) fn add_task_with_metadata<Body, F, R, T, S>(
 
 #[cfg(test)]
 mod tests {
-    use super::{AsyncTaskInfo, TaskInfo, current_task, enter_current};
+    use std::error::Error as _;
+
+    use arty_executor::{ShutdownCause, ShutdownError, TaskCompletion};
+    use seismograph_runtime::RuntimeMetadata;
+    use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+
+    use super::{AsyncTaskInfo, Completion, TaskInfo, current_task, enter_current};
+    use crate::runtime::shutdown::{Shutdown, ShutdownState};
+    use crate::task::handle::JoinHandlePool;
+
+    #[test]
+    fn monitored_panic_preserves_the_payload_and_executor_shutdown_cause() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("panic-forwarding", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+
+        for stopping in [false, true] {
+            let pool = JoinHandlePool::new(Shutdown::default());
+            let (handle, target) = pool.handle::<u32>();
+            let cause = stopping.then(|| ShutdownCause::panic(&42_u32));
+            let expected = cause.as_ref().and_then(ShutdownCause::as_error).cloned();
+            let completion = Completion {
+                target,
+                info: AsyncTaskInfo::new::<()>(worker.handle().task_events(), None, 0),
+            };
+
+            completion.panicked(Box::new(42_u32), cause);
+
+            if let Some(expected) = expected {
+                assert!(std::ptr::addr_eq(pool.shutdown().error().unwrap().inner(), expected.inner()));
+            } else {
+                assert_eq!(pool.shutdown().state(), ShutdownState::Running);
+            }
+            assert_eq!(*handle.join().unwrap_err().into_panic().unwrap().downcast::<u32>().unwrap(), 42);
+        }
+    }
+
+    #[test]
+    fn monitored_cancellation_delivers_the_executor_shutdown_cause() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("cancellation-forwarding", 1));
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let pool = JoinHandlePool::new(Shutdown::default());
+        let (handle, target) = pool.handle::<u32>();
+        let cause = ShutdownCause::panic(&"executor failure");
+        let expected = cause.as_error().unwrap().clone();
+        let completion = Completion {
+            target,
+            info: AsyncTaskInfo::new::<()>(worker.handle().task_events(), None, 0),
+        };
+
+        completion.cancelled(cause);
+        let error = handle.join().unwrap_err();
+
+        assert!(error.is_shutdown());
+        let source = error.source().unwrap().downcast_ref::<ShutdownError>().unwrap();
+        assert!(std::ptr::addr_eq(source.inner(), expected.inner()));
+        assert!(std::ptr::addr_eq(pool.shutdown().error().unwrap().inner(), expected.inner()));
+    }
 
     #[test]
     fn current_task_scope_restores_its_parent_after_return_and_panic() {

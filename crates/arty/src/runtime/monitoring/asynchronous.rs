@@ -175,14 +175,20 @@ mod tests {
         assert!(!seismograph::recorder::without_recording(|| diagnostics.is_observed()));
         let completion = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
         let (_handle, sender) = completion.handle();
-        crate::runtime::monitoring::add_task::<(), _, _, _>(
-            &executor.tasks(),
-            std::future::pending::<()>(),
-            arty_executor::TaskPlacement::Any,
-            sender,
-        );
+        let parent = seismograph_runtime::allocate_task_id();
+        {
+            let _parent = crate::runtime::monitoring::task::enter_current(parent);
+            crate::runtime::monitoring::add_task::<(), _, _, _>(
+                &executor.tasks(),
+                std::future::pending::<()>(),
+                arty_executor::TaskPlacement::Any,
+                sender,
+            );
+        }
+        let snapshot = capture(&mut executor);
+        assert_eq!(snapshot.tasks[0].parent, Some(parent));
         assert_eq!(
-            capture(&mut executor).tasks[0].activity.unwrap().state,
+            snapshot.tasks[0].activity.unwrap().state,
             seismograph_runtime::snapshot::TaskActivityState::Ready
         );
         diagnostics.parked();
