@@ -78,6 +78,7 @@ pub(crate) fn test_readings(provider: &Provider, schema: &CounterSchema) -> Vec<
     tests::registered_values(provider, schema)
 }
 
+// #[gamma::skip(fn_value.zero, parameter.default_shadow, reason = "ERROR_SUCCESS is zero and the no-op callback deliberately ignores every input.")]
 unsafe extern "system" fn control_callback(_request: u32, _buffer: *mut c_void, _buffer_size: u32) -> u32 {
     // Publication is continuous. Never dereference buffers or run fallible code.
     ERROR_SUCCESS
@@ -113,9 +114,11 @@ impl Provider {
     }
 
     fn start_with(schema: &CounterSchema, name: &str, totals: Arc<[AtomicU64]>, api: Arc<dyn Api>) -> Result<Self, Error> {
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "The validated schema has at most 256 records, so template size conversions cannot fail.")]
         let mut template = template(schema)?;
         let storage = Arc::new(CounterStorage { totals });
         {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "The private registry guard never runs user code; bounded accounting cannot panic and allocation failure aborts.")]
             let mut registry = REGISTRY.lock_result().map_err(|_poisoned| Error::from(Poisoned::new()))?;
             let count = registry.providers.iter().map(|provider| provider.totals.len()).sum::<usize>();
             if count + storage.totals.len() > MAX_PUBLISHED_COUNTERS {
@@ -135,6 +138,7 @@ impl Provider {
             storage,
             api,
         };
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "The validated schema has at most 256 fixed-size native records, far below u32::MAX bytes.")]
         let template_size =
             u32::try_from(template.len() * size_of::<u64>()).map_err(|_overflow| Error::configuration(NativeTemplateSize::new()))?;
         // SAFETY: template has the native header followed by NumCounters native
@@ -219,6 +223,7 @@ fn template(schema: &CounterSchema) -> Result<Vec<u64>, Error> {
     const _: () = assert!(size_of::<PERF_COUNTERSET_INFO>().is_multiple_of(8));
     const _: () = assert!(size_of::<PERF_COUNTER_INFO>().is_multiple_of(8));
     let size = size_of::<PERF_COUNTERSET_INFO>() + schema.counters.len() * size_of::<PERF_COUNTER_INFO>();
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "Schema validation limits the count to 256 before native template construction.")]
     let count = u32::try_from(schema.counters.len()).map_err(|_overflow| Error::configuration(NativeCounterCount::new()))?;
     let mut buffer = vec![0_u64; size / size_of::<u64>()];
     let header = PERF_COUNTERSET_INFO {

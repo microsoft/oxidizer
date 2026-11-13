@@ -213,6 +213,7 @@ fn disabled_and_unbound_events_do_not_evaluate_the_expression() {
     let total = Arc::new(AtomicU64::new(0));
     let mut bindings = MetricBindings::new();
     bindings.bind_event::<Disabled>(|_| Arc::clone(&total)).unwrap();
+    assert!(!bindings.is_interested(&Disabled::DESCRIPTION));
     let sink = sink(bindings);
     emit!(sink, {
         panic!("disabled event construction must not run");
@@ -590,6 +591,7 @@ fn synthetic_views_and_dynamic_emission_forward_indexed_fields() {
     let total = Arc::new(AtomicU64::new(0));
     let mut bindings = MetricBindings::new();
     bindings.bind_event::<NumericOnly>(|_| Arc::clone(&total)).unwrap();
+    bindings.bind_event::<Disabled>(|_| Arc::clone(&total)).unwrap();
     let event = NumericOnly { amount: 31 };
     let dynamic = NumericAdapter(&event);
     let view = EventView::new_synthetic(&dynamic, SystemTime::UNIX_EPOCH);
@@ -1077,13 +1079,15 @@ fn normalized_values_follow_the_required_numeric_kind_without_losing_bits() {
 
 #[test]
 fn repeated_and_reordered_metric_visits_do_not_update_the_wrong_target() {
-    struct Visits(&'static [usize]);
+    struct Visits(&'static [usize], Option<usize>);
     const VISIT_FIELDS: &[FieldDescriptor] = &event_fields([NumericOnly::DESCRIPTION.fields()[0], NumericOnly::DESCRIPTION.fields()[0]]);
     impl Event for Visits {
         const DESCRIPTION: EventDescription = event_description("visits", Some(TypeId::of::<Self>()), None, None, false, VISIT_FIELDS);
         fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
             for &index in self.0 {
-                visitor(&Self::DESCRIPTION.fields()[index], &|_| Value::U64(7))?;
+                visitor(&Self::DESCRIPTION.fields()[index], &|_| {
+                    if self.1 == Some(index) { Value::Bool(true) } else { Value::U64(7) }
+                })?;
             }
             ControlFlow::Continue(())
         }
@@ -1125,11 +1129,20 @@ fn repeated_and_reordered_metric_visits_do_not_update_the_wrong_target() {
         (&[0, 0][..], vec![(0, Value::U64(7))]),
         (&[0, 1, 1][..], vec![(0, Value::U64(7)), (1, Value::U64(7))]),
     ] {
-        let probe = Visits(indices);
+        let probe = Visits(indices, None);
         let view = EventView::new_synthetic(&probe, SystemTime::UNIX_EPOCH);
         let mut values = Vec::new();
         let error = bindings.record(&view, |target, value| values.push((*target, value))).unwrap_err();
         assert!(primary_message(&error).contains("out of order"));
         assert_eq!(values, delivered);
     }
+    let probe = Visits(&[0, 1], Some(1));
+    let view = EventView::new_synthetic(&probe, SystemTime::UNIX_EPOCH);
+    let mut values = Vec::new();
+    let error = bindings.record(&view, |target, value| values.push((*target, value))).unwrap_err();
+    assert_eq!(
+        primary_message(&error),
+        "event `visits` has invalid metric field 1: nonnumeric measurement supplied"
+    );
+    assert_eq!(values, [(0, Value::U64(7))]);
 }

@@ -304,6 +304,7 @@ fn parse_provider(
         id,
         schema_version: schema_version.to_owned(),
         provider_type: element.attribute("providerType").unwrap_or("userMode").to_owned(),
+        // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, reason = "An omitted callback is rejected as non-custom regardless of this fallback spelling.")]
         callback: element.attribute("callback").unwrap_or("default").to_owned(),
         issue: container_issue.map(str::to_owned).or_else(|| {
             profile_issue(
@@ -352,6 +353,7 @@ fn parse_counter_set(element: &XmlElement, guids: &mut HashSet<Uuid>) -> Result<
     Ok(ManifestCounterSet {
         id,
         name,
+        // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, reason = "An omitted instance mode is rejected as non-multiple regardless of this fallback spelling.")]
         instances: element.attribute("instances").unwrap_or("single").to_owned(),
         issue: profile_issue(
             element,
@@ -404,6 +406,7 @@ fn parse_counter(element: &XmlElement) -> Result<ManifestCounter, Error> {
     if groups.len() > 1 {
         return Err(definition_error("counter must not repeat counterAttributes"));
     }
+    // #[gamma::skip(iter.first_to_last, reason = "The check above rejects more than one group, so first and last select the same element.")]
     if let Some(group) = groups.first() {
         issue = issue.or_else(|| profile_issue(group, &[], &["counterAttribute"]));
         for flag in group
@@ -514,6 +517,7 @@ fn parse_document(xml: &str) -> Result<XmlElement, Error> {
         let closes_element = matches!(event, Event::End(_) | Event::Empty(_));
         match event {
             Event::Start(start) | Event::Empty(start) => {
+                // #[gamma::skip(assign_value.default, reason = "The default bool is already false.")]
                 declaration_allowed = false;
                 if root.is_some() {
                     return Err(definition_error("XML must contain exactly one root element"));
@@ -541,7 +545,9 @@ fn parse_document(xml: &str) -> Result<XmlElement, Error> {
             }
             Event::End(_) => {}
             Event::Text(text) => {
+                // #[gamma::skip(assign_value.default, reason = "The default bool is already false.")]
                 declaration_allowed = false;
+                // #[gamma::skip(try.propagate_to_unwrap, reason = "NsReader borrows valid UTF-8 from the input str; decoding this text cannot fail.")]
                 let text = text.xml_content(XmlVersion::Implicit1_0).map_err(syntax_error)?;
                 if text.contains("]]>") {
                     return Err(definition_error("]]> is forbidden outside CDATA"));
@@ -549,14 +555,18 @@ fn parse_document(xml: &str) -> Result<XmlElement, Error> {
                 record_text(&mut stack, &text)?;
             }
             Event::CData(text) => {
+                // #[gamma::skip(stmt.delete_assign, assign_value.default, reason = "An open parent has already disabled declarations; outside a parent this arm immediately returns an error.")]
                 declaration_allowed = false;
                 if stack.is_empty() {
                     return Err(definition_error("CDATA is not allowed outside the root"));
                 }
+                // #[gamma::skip(try.propagate_to_unwrap, reason = "The parent check above prevents record_text failure and the input str guarantees valid UTF-8.")]
                 record_text(&mut stack, &text.xml_content(XmlVersion::Implicit1_0).map_err(syntax_error)?)?;
             }
             Event::GeneralRef(reference) => {
+                // #[gamma::skip(stmt.delete_assign, assign_value.default, reason = "An open parent has already disabled declarations; outside a parent this arm returns an error.")]
                 declaration_allowed = false;
+                // #[gamma::skip(try.propagate_to_unwrap, reason = "The reference name borrows valid UTF-8 from the input str.")]
                 let name = reference.decode().map_err(syntax_error)?;
                 let escaped = format!("&{name};");
                 let text = quick_xml::escape::unescape_with(&escaped, quick_xml::escape::resolve_xml_entity).map_err(syntax_error)?;
@@ -564,6 +574,7 @@ fn parse_document(xml: &str) -> Result<XmlElement, Error> {
                 if stack.is_empty() {
                     return Err(definition_error("references are not allowed outside the root"));
                 }
+                // #[gamma::skip(try.propagate_to_unwrap, reason = "The check above guarantees an open parent, so record_text cannot fail.")]
                 record_text(&mut stack, &text)?;
             }
             Event::Decl(declaration) => {
@@ -571,16 +582,19 @@ fn parse_document(xml: &str) -> Result<XmlElement, Error> {
                     return Err(definition_error("XML declaration must occur once, before any other content"));
                 }
                 validate_declaration(&declaration)?;
+                // #[gamma::skip(assign_value.default, reason = "The default bool is already false.")]
                 declaration_allowed = false;
             }
             Event::DocType(_) => return Err(definition_error("DOCTYPE and external entities are not supported")),
             Event::PI(instruction) => {
+                // #[gamma::skip(assign_value.default, reason = "The default bool is already false.")]
                 declaration_allowed = false;
                 let target = decode_name(QName(instruction.target()), reader.decoder())?;
                 if target.eq_ignore_ascii_case("xml") {
                     return Err(definition_error("processing instruction target xml is reserved"));
                 }
             }
+            // #[gamma::skip(assign_value.default, reason = "The default bool is already false.")]
             Event::Comment(_) => declaration_allowed = false,
             Event::Eof => {
                 if let Some(element) = stack.last() {
@@ -592,6 +606,7 @@ fn parse_document(xml: &str) -> Result<XmlElement, Error> {
             }
         }
         if closes_element {
+            // #[gamma::skip(try.propagate_to_unwrap, literal.str_to_empty, literal.str_to_xyzzy, reason = "NsReader rejects unmatched closing tags and every empty tag pushes its element before this pop.")]
             let element = stack.pop().ok_or_else(|| definition_error("closing tag has no opening tag"))?;
             if let Some(parent) = stack.last_mut() {
                 parent.children.push(element);
@@ -612,6 +627,7 @@ fn parse_attributes(start: &BytesStart<'_>, reader: &NsReader<&[u8]>) -> Result<
             return Err(definition_error("literal < is forbidden in an attribute value"));
         }
         // Use the XML-only resolver even if a downstream dependency enables escape-html.
+        // #[gamma::skip(literal.int_increment, reason = "Only predefined XML entities are resolved, so expansion depth one or two gives the same value.")]
         let value = attribute
             .decoded_and_normalized_value_with(XmlVersion::Implicit1_0, reader.decoder(), 1, quick_xml::escape::resolve_xml_entity)
             .map_err(syntax_error)?;
@@ -624,6 +640,7 @@ fn parse_attributes(start: &BytesStart<'_>, reader: &NsReader<&[u8]>) -> Result<
         }
         let (namespace, local) = reader.resolver().resolve_attribute(attribute.key);
         let namespace = decode_namespace(namespace)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "Attribute names borrow valid UTF-8 from the input str.")]
         let name = reader.decoder().decode(local.as_ref()).map_err(syntax_error)?.into_owned();
         if !expanded_names.insert((namespace.clone(), name.clone())) {
             return Err(definition_error(format!("duplicate expanded attribute {name:?}")));
@@ -644,6 +661,7 @@ fn decode_namespace(namespace: ResolveResult<'_>) -> Result<Option<String>, Erro
         ResolveResult::Bound(namespace) => {
             // NsReader resolves namespace bindings without decoding their attribute values.
             let attribute = quick_xml::events::attributes::Attribute::from((b"xmlns".as_slice(), namespace.as_ref()));
+            // #[gamma::skip(literal.int_increment, reason = "Only predefined XML entities are resolved, so expansion depth one or two gives the same namespace.")]
             let value = attribute
                 .normalized_value_with(XmlVersion::Implicit1_0, 1, quick_xml::escape::resolve_xml_entity)
                 .map_err(syntax_error)?;
@@ -654,6 +672,7 @@ fn decode_namespace(namespace: ResolveResult<'_>) -> Result<Option<String>, Erro
 
 fn validate_declaration(declaration: &BytesDecl<'_>) -> Result<(), Error> {
     declaration.version().map_err(syntax_error)?;
+    // #[gamma::skip(try.propagate_to_unwrap, literal.int_increment, reason = "The input str guarantees UTF-8; version() requires whitespace after xml, so name lengths three and four parse the same attributes.")]
     let start = BytesStart::from_content(
         std::str::from_utf8(declaration.as_ref()).map_err(|cause| syntax_error(quick_xml::encoding::EncodingError::Utf8(cause)))?,
         3,
@@ -664,9 +683,11 @@ fn validate_declaration(declaration: &BytesDecl<'_>) -> Result<(), Error> {
         let (order, valid) = match attribute.key.as_ref() {
             b"version" => (0, attribute.value.as_ref() == b"1.0"),
             b"encoding" => (1, attribute.value.eq_ignore_ascii_case(b"utf-8")),
+            // #[gamma::skip(literal.int_increment, reason = "Standalone remains ordered after version and encoding with either rank two or three.")]
             b"standalone" => (2, matches!(attribute.value.as_ref(), b"yes" | b"no")),
             _ => return Err(definition_error("unsupported XML declaration attribute")),
         };
+        // #[gamma::skip(relational.le_to_lt, reason = "The attribute iterator rejects duplicate names before equal ranks can reach this check.")]
         if !valid || previous.is_some_and(|previous| order <= previous) {
             return Err(definition_error("expected an ordered XML 1.0 declaration with UTF-8 encoding"));
         }
@@ -677,11 +698,15 @@ fn validate_declaration(declaration: &BytesDecl<'_>) -> Result<(), Error> {
 
 fn decode_name(name: QName<'_>, decoder: quick_xml::encoding::Decoder) -> Result<String, Error> {
     let (local, prefix) = name.decompose();
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "XML names borrow valid UTF-8 from the input str.")]
     let local = decoder.decode(local.as_ref()).map_err(syntax_error)?;
     validate_ncname(&local)?;
     if let Some(prefix) = prefix {
-        validate_ncname(&decoder.decode(prefix.as_ref()).map_err(syntax_error)?)?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "XML prefixes borrow valid UTF-8 from the input str.")]
+        let prefix = decoder.decode(prefix.as_ref()).map_err(syntax_error)?;
+        validate_ncname(&prefix)?;
     }
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "The complete XML name borrows valid UTF-8 from the input str.")]
     Ok(decoder.decode(name.as_ref()).map_err(syntax_error)?.into_owned())
 }
 
@@ -774,6 +799,7 @@ fn folded_name(name: &str) -> String {
 
 fn validate_display_name(field: &'static str, value: &str) -> Result<(), Error> {
     validate_text(field, value, MAX_NAME, true)?;
+    // #[gamma::skip(collection.reverse_array, reason = "Character membership does not depend on the order of the forbidden characters.")]
     if value.contains(['\\', '/', '(', ')', '*', '?', '#']) {
         return Err(Error::configuration(CounterPathCharacter::new(field)));
     }
@@ -917,6 +943,221 @@ mod tests {
             error.find_source::<ManifestDefinition>().unwrap().detail,
             "no counter set named \"MYSERVICE\"",
         );
+    }
+
+    #[test]
+    fn rejection_diagnostics_identify_the_invalid_definition() {
+        for (old, new, expected) in [
+            (
+                "instrumentationManifest",
+                "wrongRoot",
+                "expected the Microsoft instrumentationManifest root",
+            ),
+            (
+                "<counters xmlns=",
+                "<other xmlns=",
+                "instrumentation requires a direct counters element",
+            ),
+            ("<provider ", "<other ", "counters must contain a direct provider definition"),
+            (
+                r#"schemaVersion="1.1""#,
+                r#"schemaVersion="3.0""#,
+                "supported counters schemaVersion values are 1.1 and 2.0",
+            ),
+            (
+                r#"providerType="userMode""#,
+                r#"providerType="kernelMode""#,
+                "selected provider must use providerType=\"userMode\"",
+            ),
+            (r#"callback="custom""#, "", "selected provider must use callback=\"custom\""),
+            (
+                r#"defaultScale="0""#,
+                r#"defaultScale="invalid""#,
+                "defaultScale must be an integer",
+            ),
+            (
+                "<counterAttributes>",
+                "<counterAttributes/><counterAttributes>",
+                "counter must not repeat counterAttributes",
+            ),
+            (r#"id="90""#, r#"id="0""#, "counter ID must not be zero"),
+            (
+                r#"id="90""#,
+                r#"id="4294967295""#,
+                "counter ID must not be PERF_WILDCARD_COUNTER (u32::MAX)",
+            ),
+            (r#"id="90""#, r#"id="""#, "invalid decimal counter ID \"\""),
+            ("requests received", "bad<value", "literal < is forbidden in an attribute value"),
+        ] {
+            let mut xml = XML.replace(old, new);
+            if old == "<counters xmlns=" {
+                xml = xml.replace("</counters>", "</other>");
+            } else if old == "<provider " {
+                xml = xml.replace("</provider>", "</other>");
+            }
+            assert_eq!(
+                definition_failure(&xml).find_source::<ManifestDefinition>().unwrap().detail,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn document_rejection_diagnostics_identify_the_invalid_structure() {
+        for (xml, expected) in [
+            (String::new(), "XML must contain a root element"),
+            (format!("{XML}text"), "text is not allowed outside the root"),
+            (format!("{XML}<![CDATA[]]>"), "CDATA is not allowed outside the root"),
+            (format!("{XML}&#32;"), "references are not allowed outside the root"),
+            (
+                XML.replace("<instrumentation>", "<instrumentation>]]>"),
+                "]]> is forbidden outside CDATA",
+            ),
+            (
+                XML.replace("<instrumentation>", "<instrumentation><xmlns:extension/>"),
+                "xmlns cannot be used as an element prefix",
+            ),
+            (
+                XML.replace("<instrumentation>", "<instrumentation><?XML reserved?>"),
+                "processing instruction target xml is reserved",
+            ),
+            (
+                XML.replace("<instrumentation>", "<instrumentation><extension xmlns:a=\"\"/>"),
+                "XML 1.0 forbids undeclaring a namespace prefix",
+            ),
+            (
+                XML.replace(
+                    "<instrumentationManifest ",
+                    "<!DOCTYPE instrumentationManifest><instrumentationManifest ",
+                ),
+                "DOCTYPE and external entities are not supported",
+            ),
+            (
+                XML.replace(
+                    r#"id="90""#,
+                    r#"id="90" xmlns:a="urn:attrs" xmlns:b="urn:attrs" a:extra="1" b:extra="2""#,
+                ),
+                "duplicate expanded attribute \"extra\"",
+            ),
+            (
+                XML.replace(
+                    "</instrumentation>",
+                    "<counters xmlns=\"http://schemas.microsoft.com/win/2005/12/counters\" schemaVersion=\"1.1\"/></instrumentation>",
+                ),
+                "instrumentation must not repeat counters",
+            ),
+        ] {
+            assert_eq!(
+                definition_failure(&xml).find_source::<ManifestDefinition>().unwrap().detail,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn declaration_and_name_diagnostics_retain_the_rejected_content() {
+        for (declaration, expected) in [
+            ("<?xml version=\"1.0\" unknown=\"true\"?>", "unsupported XML declaration attribute"),
+            (
+                "<?xml version=\"1.1\"?>",
+                "expected an ordered XML 1.0 declaration with UTF-8 encoding",
+            ),
+        ] {
+            let xml = XML.replace("<?xml version=\"1.0\" encoding=\"utf-8\"?>", declaration);
+            let error = Manifest::parse(&xml).unwrap_err();
+            assert_eq!(error.find_source::<ManifestDefinition>().unwrap().detail, expected);
+        }
+        for content in ["<!-- comment -->", "<?process valid?>", "<extension/>", "<![CDATA[text]]>", "&#32;"] {
+            let xml = XML
+                .replace("<?xml version=\"1.0\" encoding=\"utf-8\"?>", "")
+                .replace("<instrumentation>", &format!("<instrumentation>{content}<?xml version=\"1.0\"?>"));
+            assert_eq!(
+                definition_failure(&xml).find_source::<ManifestDefinition>().unwrap().detail,
+                "XML declaration must occur once, before any other content",
+            );
+        }
+        for xml in [
+            format!("<!-- comment -->{XML}"),
+            format!("<?process valid?>{XML}"),
+            format!("<?xml version=\"1.0\"?>{XML}"),
+            "<root><?xml version=\"1.0\"?></root>".to_owned(),
+        ] {
+            assert_eq!(
+                definition_failure(&xml).find_source::<ManifestDefinition>().unwrap().detail,
+                "XML declaration must occur once, before any other content",
+            );
+        }
+        for xml in [
+            XML.replace("<instrumentation>", "<instrumentation><?1invalid value?>"),
+            XML.replace(
+                "<instrumentation>",
+                "<instrumentation><1prefix:extension xmlns:1prefix=\"urn:valid\"/>",
+            ),
+            XML.replace("<instrumentation>", "<instrumentation><extension 1invalid=\"value\"/>"),
+        ] {
+            assert!(
+                definition_failure(&xml)
+                    .find_source::<ManifestDefinition>()
+                    .unwrap()
+                    .detail
+                    .starts_with("invalid XML qualified name")
+            );
+        }
+        let error = Manifest::parse("<root><inner>").unwrap_err();
+        assert!(error.find_source::<XmlError>().unwrap().to_string().contains("inner"));
+        let error = Manifest::parse(&XML.replace(EVENTS_NAMESPACE, "urn:&unknown;")).unwrap_err();
+        assert!(error.find_source::<XmlError>().is_some());
+    }
+
+    #[test]
+    fn optional_set_descriptions_and_namespace_attributes_keep_their_contracts() {
+        let empty = XML.replace("My service counters", "");
+        assert_eq!(
+            schema(&empty, &[spec("Requests", 0)]).unwrap(),
+            schema(XML, &[spec("Requests", 0)]).unwrap()
+        );
+        let exact = XML.replace("My service counters", &"d".repeat(MAX_TEXT));
+        schema(&exact, &[spec("Requests", 0)]).unwrap();
+        let too_long = XML.replace("My service counters", &"d".repeat(MAX_TEXT + 1));
+        let error = Manifest::parse(&too_long).unwrap_err();
+        let cause = error.find_source::<TextTooLong>().unwrap();
+        assert_eq!((cause.field, cause.maximum), ("description", MAX_TEXT));
+        for (old, field) in [("MyService", "category"), ("Requests", "counter name")] {
+            let error = Manifest::parse(&XML.replace(old, " ")).unwrap_err();
+            assert_eq!(error.find_source::<EmptyField>().unwrap().field, field);
+        }
+        let namespaced = XML.replace(r#"name="Requests""#, r#"xmlns:a="urn:attrs" a:name="Wrong" name="Requests""#);
+        let manifest = Manifest::parse(&namespaced).unwrap();
+        assert_eq!(manifest.providers[0].sets[0].counters[0].name.as_ref().unwrap().text, "Requests");
+        assert_eq!(
+            schema(&namespaced, &[spec("Requests", 0)])
+                .unwrap_err()
+                .find_source::<ManifestDefinition>()
+                .unwrap()
+                .detail,
+            "unsupported attribute \"name\" on counter"
+        );
+        let empty_namespace = XML.replace("<instrumentation>", "<instrumentation><extension xmlns=\"\"/>");
+        schema(&empty_namespace, &[spec("Requests", 0)]).unwrap();
+        let valid_name = XML.replace("<instrumentation>", "<instrumentation><extension a-name=\"value\"/>");
+        schema(&valid_name, &[spec("Requests", 0)]).unwrap();
+        for name in ["a\u{b7}", "a\u{300}", "a\u{203f}"] {
+            let xml = XML.replace("<instrumentation>", &format!("<instrumentation><{name}/>"));
+            schema(&xml, &[spec("Requests", 0)]).unwrap();
+        }
+        for (xml, field) in [
+            (XML.replace("requests received", "\u{1}"), "manifest"),
+            (
+                XML.replace("<instrumentation>", "<instrumentation><events>&#1;</events>"),
+                "manifest",
+            ),
+            (XML.replace("requests received", "&#1;"), "manifest attribute"),
+        ] {
+            let error = Manifest::parse(&xml).unwrap_err();
+            assert_eq!(error.find_source::<InvalidXml>().unwrap().field, field);
+        }
+        let error = schema(XML, &[spec("invalid\0name", 0)]).unwrap_err();
+        assert_eq!(error.find_source::<InvalidXml>().unwrap().field, "counter name");
     }
 
     #[test]
@@ -1106,7 +1347,10 @@ mod tests {
             vec![spec("Requests", 0), spec("Bytes", 0)],
             vec![spec("Bytes", usize::MAX)],
         ] {
-            assert!(schema(XML, &specs).unwrap_err().find_source::<ManifestDefinition>().is_some());
+            assert_eq!(
+                schema(XML, &specs).unwrap_err().find_source::<ManifestDefinition>().unwrap().detail,
+                "bound source indices must be a permutation of 0..bindings.len()",
+            );
         }
         assert_eq!(
             schema(XML, &[spec("Bytes", 1), spec("Requests", 0)])
@@ -1451,11 +1695,17 @@ mod tests {
             .replace("Requests\"", &format!("{}\"", "🦀".repeat(511)))
             .replace("requests received", &"d".repeat(MAX_TEXT));
         schema(&xml, &[spec(&"🦀".repeat(511), 0)]).unwrap();
-        for xml in [
-            XML.replace("Requests\"", &format!("{}\"", "🦀".repeat(512))),
-            XML.replace("requests received", &"d".repeat(MAX_TEXT + 1)),
+        for (xml, field, maximum) in [
+            (
+                XML.replace("Requests\"", &format!("{}\"", "🦀".repeat(512))),
+                "counter name",
+                MAX_NAME,
+            ),
+            (XML.replace("requests received", &"d".repeat(MAX_TEXT + 1)), "description", MAX_TEXT),
         ] {
-            assert!(Manifest::parse(&xml).unwrap_err().find_source::<TextTooLong>().is_some());
+            let error = Manifest::parse(&xml).unwrap_err();
+            let cause = error.find_source::<TextTooLong>().unwrap();
+            assert_eq!((cause.field, cause.maximum), (field, maximum));
         }
     }
 
@@ -1468,7 +1718,7 @@ mod tests {
         }
         let error = schema(XML, &[spec("line\nbreak", 0)]).unwrap_err();
         assert_eq!(error.find_source::<ControlCharacter>().unwrap().field, "counter name");
-        for name in ["a/b", "a\\b", "(a)", "a*", "a?", "a#b"] {
+        for name in ["a/b", "a\\b", "a(b", "a)b", "a*", "a?", "a#b"] {
             assert!(
                 schema(XML, &[spec(name, 0)])
                     .unwrap_err()
@@ -1494,12 +1744,15 @@ mod tests {
         let actual = CounterSchema::from_manifest(&manifest, &category, &"i".repeat(MAX_NAME), &[spec(&name, 0)]).unwrap();
         assert_eq!(actual.category, category);
         let error = CounterSchema::from_manifest(&manifest, &category, &"i".repeat(MAX_NAME + 1), &[spec(&name, 0)]).unwrap_err();
-        assert_eq!(error.find_source::<TextTooLong>().unwrap().field, "instance");
+        let cause = error.find_source::<TextTooLong>().unwrap();
+        assert_eq!((cause.field, cause.maximum), ("instance", MAX_NAME));
     }
 
     #[test]
     fn empty_selected_counter_sets_and_bindings_fail() {
-        assert_eq!(schema(XML, &[]).unwrap_err().find_source::<CounterCount>().unwrap().count, 0);
+        let error = schema(XML, &[]).unwrap_err();
+        let cause = error.find_source::<CounterCount>().unwrap();
+        assert_eq!((cause.count, cause.maximum), (0, MAX_COUNTERS));
         let empty = XML.replace(
             &XML[XML.find("          <counter id=").unwrap()..XML.find("        </counterSet>").unwrap()],
             "",

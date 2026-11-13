@@ -125,12 +125,13 @@ fn schema() -> CounterSchema {
 fn startup_failures_release_registered_storage_and_started_resources() {
     let _serial = TEST_NATIVE.lock();
     let schema = schema();
-    for (failure, expected) in [
-        ("start", vec!["start"]),
-        ("set_info", vec!["start", "set_info", "stop"]),
-        ("create", vec!["start", "set_info", "create", "stop"]),
+    for (failure, operation, expected) in [
+        ("start", "PerfStartProvider", vec!["start"]),
+        ("set_info", "PerfSetCounterSetInfo", vec!["start", "set_info", "stop"]),
+        ("create", "PerfCreateInstance", vec!["start", "set_info", "create", "stop"]),
         (
             "set_reference",
+            "PerfSetCounterRefValue",
             vec!["start", "set_info", "create", "set_reference", "delete", "stop"],
         ),
     ] {
@@ -147,6 +148,7 @@ fn startup_failures_release_registered_storage_and_started_resources() {
         );
         let error = result.err().unwrap();
         assert_eq!(error.windows_code(), Some(ERROR_INVALID_DATA));
+        assert_eq!(error.find_source::<NativeFailure>().unwrap().operation, operation);
         assert_eq!(api.state.lock().calls, expected);
         assert_eq!(REGISTRY.lock().providers.len(), before);
     }
@@ -180,7 +182,7 @@ fn teardown_removes_only_its_storage_and_retains_cells_when_stop_fails() {
     let before = REGISTRY.lock().providers.len();
     let success_logs = testing_aids::tracing_logs::Capture::new();
     tracing::subscriber::with_default(success_logs.subscriber(), || drop(first));
-    assert!(!success_logs.output().contains("delete_failed"));
+    assert!(success_logs.output().is_empty());
     assert_eq!(
         api.state.lock().calls,
         ["start", "set_info", "create", "set_reference", "delete", "stop"]

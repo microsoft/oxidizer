@@ -196,6 +196,7 @@ impl PerfCounterProcessorBuilder {
         #[cfg(all(windows, target_pointer_width = "64"))]
         {
             let totals = (0..schema.counters.len()).map(|_| AtomicU64::new(0)).collect::<Vec<_>>().into();
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "Real system startup failures are exercised at the injected native Api boundary, not forced through this public entry point.")]
             let native = Provider::start(&schema, &self.instance, Arc::clone(&totals))?;
             Ok(PerfCounterProcessor {
                 bindings: self.bindings,
@@ -244,6 +245,7 @@ impl Debug for PerfCounterProcessor {
 impl PerfCounterProcessor {
     /// Begins configuration without calling a Windows API.
     #[must_use]
+    // #[gamma::skip(fn_value.default, reason = "The method already returns PerfCounterProcessorBuilder::default().")]
     pub fn builder() -> PerfCounterProcessorBuilder {
         PerfCounterProcessorBuilder::default()
     }
@@ -296,6 +298,7 @@ impl PerfCounterProcessor {
             }
         };
         if let Some(underflow) = failure {
+            // #[gamma::skip(literal.int_increment, reason = "Every prepared target has a corresponding schema entry, so the fallback ID is unreachable.")]
             let counter_id = self
                 .schema
                 .counters
@@ -577,6 +580,22 @@ mod tests {
         sink.flush().unwrap();
     }
 
+    #[test]
+    #[cfg(all(windows, target_pointer_width = "64", not(miri)))]
+    fn public_startup_initializes_exactly_the_declared_slots_to_zero() {
+        let _native_tests = crate::native::TEST_NATIVE.lock();
+        let processor = load_bytes(FILE_MANIFEST.as_bytes())
+            .unwrap()
+            .category(FILE_CATEGORY)
+            .instance("initial-values")
+            .bind_event::<RequestCompleted>()
+            .build()
+            .unwrap();
+        assert_eq!(processor.totals.len(), 7);
+        assert!(processor.totals.iter().all(|total| total.load(Ordering::Relaxed) == 0));
+        processor.flush().unwrap();
+    }
+
     fn named_values(processor: &PerfCounterProcessor) -> Vec<(String, u64)> {
         #[cfg(all(windows, target_pointer_width = "64"))]
         let values = crate::native::test_readings(&processor.native, &processor.schema);
@@ -664,14 +683,20 @@ mod tests {
         );
         assert!(processor.is_interested(&WideGauge::DESCRIPTION));
         assert!(!processor.is_interested(&RequestCompleted::DESCRIPTION));
-        processor.record(
-            &MetricTarget {
-                index: 0,
-                kind: InstrumentKind::Gauge,
-            },
-            &Value::I64(-1),
-        );
+        let logs = testing_aids::tracing_logs::Capture::new();
+        tracing::subscriber::with_default(logs.subscriber(), || {
+            processor.record(
+                &MetricTarget {
+                    index: 0,
+                    kind: InstrumentKind::Gauge,
+                },
+                &Value::I64(-1),
+            );
+        });
+        logs.assert_contains("observed_perf_counters.processing.failed");
+        assert!(!logs.output().contains("observed_perf_counters.processing.poisoned"));
         let original = processor.flush().unwrap_err();
+        assert_eq!(original.processor(), "observed_perf_counters");
         let original = std::error::Error::source(&original).unwrap().to_string();
         assert!(original.contains("measurement does not match the prepared integer metric"));
         processor.report(&Overflow::new(7_u32).into());
@@ -727,8 +752,13 @@ mod tests {
             let _guard = processor.error.lock();
             panic!("inject error-state poison");
         }));
-        processor.report(&Overflow::new(9_u32).into());
-        assert!(processor.flush().unwrap_err().to_string().contains("state lock was poisoned"));
+        let logs = testing_aids::tracing_logs::Capture::new();
+        tracing::subscriber::with_default(logs.subscriber(), || processor.report(&Overflow::new(9_u32).into()));
+        logs.assert_contains("observed_perf_counters.processing.poisoned");
+        assert!(!logs.output().contains("observed_perf_counters.processing.failed"));
+        let error = processor.flush().unwrap_err();
+        assert_eq!(error.processor(), "observed_perf_counters");
+        assert!(error.to_string().contains("state lock was poisoned"));
     }
 
     #[test]

@@ -54,7 +54,9 @@ unsafe impl Api for SystemApi {
         let mut handle = null_mut();
         // SAFETY: provider and output handle are valid. The static callback
         // outlives the provider and cannot unwind into Windows.
+        // #[gamma::skip(option.some_to_none, reason = "The callback is a no-op; removing it cannot change the continuously published values.")]
         let code = unsafe { PerfStartProvider(provider, Some(control_callback), &raw mut handle) };
+        // #[gamma::skip(try.propagate_to_unwrap, literal.str_to_empty, literal.str_to_xyzzy, reason = "System resource failures cannot be forced through the real API; injected Api tests check their propagation and operation names.")]
         status("PerfStartProvider", code)?;
         Ok(handle)
     }
@@ -62,6 +64,7 @@ unsafe impl Api for SystemApi {
     unsafe fn set_info(&self, handle: HANDLE, template: &mut [u64], bytes: u32) -> u32 {
         // SAFETY: caller supplies a live provider and the aligned, initialized
         // template whose native byte length is bytes.
+        // #[gamma::skip(expr.increment, reason = "Perflib accepts trailing template padding; one extra byte does not change the declared records.")]
         unsafe { PerfSetCounterSetInfo(handle, template.as_mut_ptr().cast(), bytes) }
     }
 
@@ -75,20 +78,25 @@ unsafe impl Api for SystemApi {
         created_instance(instance, code)
     }
 
+    // #[gamma::skip(fn_value.zero, reason = "Exact real consumer reads require installed counter resources; reference registration is checked at the injected Api boundary.")]
     unsafe fn set_reference(&self, handle: HANDLE, instance: NonNull<PERF_COUNTERSET_INSTANCE>, id: u32, address: *mut c_void) -> u32 {
         // SAFETY: caller retains the instance and reference cell until stop
         // succeeds; id belongs to this provider's registered template.
         unsafe { PerfSetCounterRefValue(handle, instance.as_ptr(), id, address) }
     }
 
+    // #[gamma::skip(fn_value.one, fn_value.zero, reason = "Real native cleanup effects are outside the injected Api; lifecycle tests check both returned statuses.")]
     unsafe fn delete(&self, handle: HANDLE, instance: NonNull<PERF_COUNTERSET_INSTANCE>) -> u32 {
         // SAFETY: caller exclusively owns the live instance and provider.
+        // #[gamma::skip(expr.increment, reason = "Real native cleanup statuses are tested through the injected Api, not forced on the operating system.")]
         unsafe { PerfDeleteInstance(handle, instance.as_ptr()) }
     }
 
+    // #[gamma::skip(fn_value.one, fn_value.zero, reason = "Real native cleanup effects are outside the injected Api; lifecycle tests check both returned statuses.")]
     unsafe fn stop(&self, handle: HANDLE) -> u32 {
         // SAFETY: caller exclusively owns a live provider handle and retains
         // every registered reference cell until this call succeeds.
+        // #[gamma::skip(expr.increment, reason = "Real native cleanup statuses are tested through the injected Api, not forced on the operating system.")]
         unsafe { PerfStopProvider(handle) }
     }
 }

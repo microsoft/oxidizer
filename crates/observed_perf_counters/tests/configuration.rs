@@ -187,6 +187,24 @@ fn events_without_metrics_are_rejected() {
 }
 
 #[test]
+fn log_only_fields_do_not_require_metric_metadata() {
+    #[event("mixed.signals")]
+    #[counter(count, name = "Requests")]
+    #[info]
+    struct MixedSignals {
+        #[unredacted]
+        count: u64,
+        #[unredacted]
+        context: u64,
+    }
+    let result = builder().bind_event::<MixedSignals>().build();
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    result.unwrap();
+    #[cfg(not(all(windows, target_pointer_width = "64")))]
+    assert!(result.unwrap_err().is_unsupported_platform());
+}
+
+#[test]
 fn duplicate_event_registration_is_rejected_instead_of_counting_twice() {
     let error = builder()
         .bind_event::<RequestCompleted>()

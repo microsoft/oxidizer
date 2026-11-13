@@ -187,6 +187,7 @@ async fn complete_initialization(transaction: &Arc<Transaction>, installers: &mu
         }
     }
 
+    // #[gamma::skip(call_result.default, reason = "Gamma observed a timeout: discarding a successful commit sends cleanup down the abort path while committed installers await shutdown.")]
     if commit_if_started(transaction, startup_succeeded(failure.as_ref(), ready, installers.len())) {
         abort_on_drop.disarm();
         return Ok(());
