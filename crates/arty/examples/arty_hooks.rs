@@ -1,21 +1,48 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Register and print a panic hook from an async entry point.
+//! Measure the duration of each async task poll.
 
-use arty::runtime::hook::{HookFn, Panic};
+use std::time::{Duration, Instant};
+
+use arty::runtime::hook::{HookFn, Spawn, TaskPoll};
 use arty::task::{Context, JoinError};
+use arty::time::Clock;
+use thread_aware::ThreadAware;
+
+#[derive(ThreadAware)]
+struct MeasurePoll {
+    clock: Clock,
+    #[thread_aware(skip)]
+    started: Option<Instant>,
+}
+
+impl TaskPoll for MeasurePoll {
+    fn begin(&mut self) {
+        self.started = Some(self.clock.instant());
+    }
+
+    fn end(&mut self) {
+        let started = self.started.take().expect("Arty calls end only after begin for the same task poll");
+        let duration = self.clock.instant().saturating_duration_since(started);
+        println!("task poll duration: {duration:?}");
+    }
+}
 
 #[arty::main]
-#[expect(clippy::panic, reason = "this example demonstrates runtime panic hook behavior")]
 async fn main(cx: Context) -> Result<(), JoinError> {
-    cx.control().on(HookFn::<Panic, _>::new((), |event, ()| {
-        println!("{event:?}");
-        event.ignore();
+    cx.control().on(HookFn::<Spawn, _>::new(cx.clock().clone(), |event, clock| {
+        event.register(MeasurePoll {
+            clock: clock.clone(),
+            started: None,
+        });
     }));
 
-    let panic = cx.scheduler().spawn(async |_| panic!("contained panic")).await.unwrap_err();
-    assert!(panic.is_panic());
-    assert_eq!(cx.scheduler().spawn(async |_| 42).await?, 42);
+    cx.scheduler()
+        .spawn(|cx| async move {
+            cx.clock().delay(Duration::from_secs(1)).await;
+        })
+        .await?;
+
     Ok(())
 }

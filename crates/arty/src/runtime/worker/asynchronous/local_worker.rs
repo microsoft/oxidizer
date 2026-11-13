@@ -8,17 +8,20 @@ use thread_aware::{Thread, ThreadAware};
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, LocalHookGuard, Panic, WorkerInit};
+use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, LocalHookGuard, Panic, Spawn, WorkerInit};
+use crate::runtime::shutdown::ShutdownState;
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-use crate::task::preparation::DeferredTaskFactory;
+use crate::task::preparation::{PreparedTaskFactory, PreparedTaskPoller};
 
 thread_local! {
     static CURRENT: RefCell<Option<LocalWorker>> = const { RefCell::new(None) };
+    static SPAWN_HOOKS: RefCell<Option<Vec<ErasedHookFn<Spawn>>>> = const { RefCell::new(None) };
     static PANIC_HOOKS: RefCell<Option<Vec<ErasedHookFn<Panic>>>> = const { RefCell::new(None) };
 }
 
+static LOCAL_SPAWN_HOOK: LocalHook<Spawn> = LocalHook { hooks: &SPAWN_HOOKS };
 static LOCAL_PANIC_HOOK: LocalHook<Panic> = LocalHook { hooks: &PANIC_HOOKS };
 
 /// Asynchronous worker state that remains attached throughout thread teardown.
@@ -26,6 +29,7 @@ static LOCAL_PANIC_HOOK: LocalHook<Panic> = LocalHook { hooks: &PANIC_HOOKS };
 pub(crate) struct LocalWorker {
     scheduler: Option<SchedulerContext>,
     driver_host: Option<RuntimeDriverHost>,
+    spawn_hooks: Option<LocalHookGuard<Spawn>>,
     panic_hooks: Option<LocalHookGuard<Panic>>,
 }
 
@@ -34,6 +38,7 @@ impl LocalWorker {
         Self {
             scheduler: None,
             driver_host: None,
+            spawn_hooks: None,
             panic_hooks: None,
         }
     }
@@ -60,11 +65,13 @@ impl LocalWorker {
             executor_shutdown,
             results,
         };
+        let spawn_hooks = LOCAL_SPAWN_HOOK.initialize();
         let panic_hooks = LOCAL_PANIC_HOOK.initialize();
         Self::with_current_mut(|current| {
             let current = current.expect("task worker startup attaches its local worker before installing the scheduler");
             assert!(current.scheduler.is_none(), "a scheduler is already installed on this task worker");
             current.scheduler = Some(scheduler);
+            current.spawn_hooks = Some(spawn_hooks);
             current.panic_hooks = Some(panic_hooks);
         });
         for hook in hook_registrations {
@@ -96,6 +103,15 @@ impl LocalWorker {
         });
     }
 
+    pub(crate) fn on_spawn() -> Option<Spawn> {
+        let mut event = Self::with_scheduler(|current| current.map(|current| Spawn::new(Some(current.thread.clone()))))?;
+        LOCAL_SPAWN_HOOK.execute(&mut event);
+        Self::with_scheduler(|current| {
+            let current = current.expect("a running worker retains its scheduler while registering a task");
+            matches!(current.results.shutdown().state(), ShutdownState::Running).then_some(event)
+        })
+    }
+
     pub(crate) fn on_panic(panic: arty_executor::TaskPanicPayload) -> (arty_executor::PanicAction, arty_executor::TaskPanicPayload) {
         if !Self::with_scheduler(|current| current.is_some()) {
             return Panic::new(panic).into_parts();
@@ -107,6 +123,13 @@ impl LocalWorker {
 
     pub(crate) fn install_hook(hook: HookRegistration, source: Option<&Thread>) {
         match hook {
+            HookRegistration::Spawn(hook) => {
+                let destination = Self::with_scheduler(|current| {
+                    let current = current.expect("a running worker retains its scheduler while processing hook registration");
+                    current.thread.clone()
+                });
+                LOCAL_SPAWN_HOOK.install(hook, source, &destination);
+            }
             HookRegistration::Panic(hook) => {
                 let destination = Self::with_scheduler(|current| {
                     let current = current.expect("a running worker retains its scheduler while processing hook registration");
@@ -126,12 +149,13 @@ impl LocalWorker {
     }
 
     pub(super) fn clear_scheduler() {
-        let (scheduler, panic_hooks) = Self::with_current_mut(|current| {
+        let (scheduler, spawn_hooks, panic_hooks) = Self::with_current_mut(|current| {
             current
-                .map(|current| (current.scheduler.take(), current.panic_hooks.take()))
+                .map(|current| (current.scheduler.take(), current.spawn_hooks.take(), current.panic_hooks.take()))
                 .unwrap_or_default()
         });
         drop(scheduler);
+        drop(spawn_hooks);
         drop(panic_hooks);
     }
 
@@ -213,9 +237,17 @@ impl SchedulerContext {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
+        let Some(spawn) = LocalWorker::on_spawn() else {
+            return JoinHandle::try_from_shutdown(self.results.shutdown())
+                .expect("a spawn hook rejects registration only after runtime shutdown starts");
+        };
         let (handle, result_tx) = self.results.handle();
-        let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        self.tasks.task(inner).placement(placement).register(result_tx);
+        let inner = PreparedTaskFactory::new(future_factory, self.context.clone(), spawn.into_handlers());
+        self.tasks
+            .task(inner)
+            .placement(placement)
+            .poll_with(PreparedTaskPoller)
+            .register(result_tx);
         handle
     }
 }

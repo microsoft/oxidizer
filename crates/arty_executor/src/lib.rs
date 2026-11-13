@@ -63,8 +63,10 @@ pub(crate) use task::*;
 pub use task_builder::*;
 pub(crate) use task_handle::*;
 pub(crate) use task_list::*;
-pub use task_metadata::TaskPlacement;
+#[doc(hidden)]
+pub use task_metadata::TaskPoller;
 pub(crate) use task_metadata::*;
+pub use task_metadata::{TaskPlacement, TaskPoll};
 pub use task_set::*;
 
 mod inspection;

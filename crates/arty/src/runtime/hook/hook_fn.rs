@@ -5,11 +5,12 @@ use thread_aware::ThreadAware;
 
 use super::Hook;
 
-/// A runtime hook callback and its worker-local data.
+/// A runtime hook callback and its relocatable data.
 ///
-/// Arty clones the data for each worker and relocates it before the callback
-/// runs. The callback is a function pointer, so it cannot capture data that
-/// bypasses relocation.
+/// Arty clones the data for each worker and relocates each clone before the
+/// callback runs there. Spawn hooks also keep one worker-neutral instance. The
+/// callback is a function pointer, so it cannot capture data that bypasses
+/// relocation.
 #[derive(Debug)]
 pub struct HookFn<H, D>
 where
@@ -25,7 +26,7 @@ where
     H: Hook,
     D: ThreadAware + Clone + 'static,
 {
-    /// Creates a hook from worker-local data and a callback.
+    /// Creates a hook from relocatable data and a callback.
     pub const fn new(data: D, callback: fn(&mut H, &D)) -> Self {
         Self { data, callback }
     }

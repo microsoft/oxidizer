@@ -4,7 +4,7 @@
 use observed::context::Transfer;
 
 use crate::inspection::Inspector;
-use crate::{ExecutorShared, TaskCompletion, TaskMetadata, TaskPlacement};
+use crate::{ExecutorShared, TaskCompletion, TaskMetadata, TaskPlacement, TaskPoller};
 
 /// Configures a task before registering it with an executor.
 ///
@@ -13,13 +13,15 @@ use crate::{ExecutorShared, TaskCompletion, TaskMetadata, TaskPlacement};
 /// without registering a task.
 #[derive(derive_more::Debug)]
 #[must_use = "call register to submit the task"]
-pub struct TaskBuilder<'a, F, I = ()> {
+pub struct TaskBuilder<'a, F, I = (), P = ()> {
     shared: &'a ExecutorShared,
     #[debug(skip)]
     future: F,
     metadata: TaskMetadata,
     #[debug(skip)]
     inspector: I,
+    #[debug(skip)]
+    poll: P,
 }
 
 impl<'a, F> TaskBuilder<'a, F> {
@@ -29,11 +31,12 @@ impl<'a, F> TaskBuilder<'a, F> {
             future,
             metadata: TaskMetadata::default(),
             inspector: (),
+            poll: (),
         }
     }
 }
 
-impl<'a, F, I> TaskBuilder<'a, F, I> {
+impl<'a, F, I, P> TaskBuilder<'a, F, I, P> {
     /// Sets the observed context for task polling, cleanup, and lifecycle events.
     ///
     /// By default, the task has no captured context.
@@ -57,7 +60,7 @@ impl<'a, F, I> TaskBuilder<'a, F, I> {
     /// Ordinary execution cycles do not call it. Calling this method again replaces
     /// the previous callback.
     #[cfg(feature = "inspection")]
-    pub fn inspect<D, J>(self, inspect: J) -> TaskBuilder<'a, F, impl Inspector<F::IntoFuture> + use<F, I, D, J>>
+    pub fn inspect<D, J>(self, inspect: J) -> TaskBuilder<'a, F, impl Inspector<F::IntoFuture> + use<F, I, D, J>, P>
     where
         F: IntoFuture,
         D: 'static,
@@ -68,15 +71,29 @@ impl<'a, F, I> TaskBuilder<'a, F, I> {
             future: self.future,
             metadata: self.metadata,
             inspector: crate::inspection::InspectWith::new(inspect),
+            poll: self.poll,
+        }
+    }
+
+    /// Sets the runtime-owned policy that polls the converted future.
+    #[doc(hidden)]
+    pub fn poll_with<Q>(self, poll: Q) -> TaskBuilder<'a, F, I, Q> {
+        TaskBuilder {
+            shared: self.shared,
+            future: self.future,
+            metadata: self.metadata,
+            inspector: self.inspector,
+            poll,
         }
     }
 }
 
-impl<F, I> TaskBuilder<'_, F, I>
+impl<F, I, P> TaskBuilder<'_, F, I, P>
 where
     F: IntoFuture + 'static,
     F::Output: 'static,
     I: Inspector<F::IntoFuture>,
+    P: TaskPoller<F::IntoFuture>,
 {
     /// Registers the task and its completion target.
     ///
@@ -87,6 +104,7 @@ where
     /// Registration does not wake the executor owner. The caller must arrange an
     /// [`execute_cycle`](crate::Executor::execute_cycle) after registration.
     pub fn register(self, completion: impl TaskCompletion<F::Output>) {
-        self.shared.add_task(self.future, self.metadata, completion, self.inspector);
+        self.shared
+            .add_task(self.future, self.metadata, self.poll, completion, self.inspector);
     }
 }

@@ -58,11 +58,11 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Registers a runtime hook with worker-local callback data.
+    /// Registers a runtime hook with relocatable callback data.
     ///
     /// Arty clones the hook data for each worker and relocates it before a
-    /// callback can run. Registering another hook of the same type appends it
-    /// after earlier callbacks.
+    /// callback can run there. Spawn hooks also keep a worker-neutral instance.
+    /// Registering another hook of the same type appends it after earlier callbacks.
     ///
     /// Arty does not catch a panic from the callback. You must make sure that
     /// the callback completes without a panic.

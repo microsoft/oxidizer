@@ -289,6 +289,9 @@ impl Worker {
         for SpawnCommand { future_factory } in std::iter::from_fn(|| commands.spawn_receiver().try_recv().ok()).take(COMMANDS_PER_CYCLE) {
             let _registered = future_factory.into_inner().register(context.clone(), &self.tasks);
             processed = processed.saturating_add(1);
+            if !commands.system_receiver().is_empty() {
+                return BatchProgress::LimitReached;
+            }
         }
         if processed == COMMANDS_PER_CYCLE {
             BatchProgress::LimitReached

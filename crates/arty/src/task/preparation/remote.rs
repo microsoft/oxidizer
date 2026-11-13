@@ -6,9 +6,11 @@ use std::cell::Cell;
 use arty_executor::{TaskPlacement, TaskSet};
 use plurality::{Box as PoolBox, MultiPool, coerce};
 
+use crate::runtime::ShutdownState;
+use crate::runtime::hook::{Spawn, TaskPolls};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-use crate::task::preparation::{DeferredTaskFactory, discard_panicking_drop};
+use crate::task::preparation::{PreparedTaskFactory, PreparedTaskPoller, discard_panicking_drop};
 
 thread_local! {
     static FUTURE_FACTORIES: MultiPool = MultiPool::new();
@@ -51,39 +53,73 @@ impl<F> Drop for TaskFactory<F> {
 /// registration. The executor can then store the future inline in its task
 /// storage pool. Returning the future requires a `Pin<Box<dyn Future>>` and a
 /// heap allocation for every remote spawn.
-type ErasedRemoteFutureFactory = dyn Fn(Context, &TaskSet) + Send;
+type ErasedRemoteFutureFactory = dyn Fn(Context, &TaskSet, TaskPolls) + Send;
 
 pub(crate) struct RemoteFutureFactory {
     inner: PoolBox<ErasedRemoteFutureFactory>,
+    spawn: Option<Spawn>,
+    requires_spawn: bool,
 }
 
 #[must_use]
 pub(crate) struct RegisteredRemoteTask;
 
 impl RemoteFutureFactory {
+    #[cfg(test)]
     pub(crate) fn new(factory: impl FnOnce(Context, &TaskSet) + Send + 'static) -> Self {
+        Self::new_with_poll_hooks(move |cx, tasks, _poll_hooks| factory(cx, tasks), false)
+    }
+
+    fn new_with_poll_hooks(factory: impl FnOnce(Context, &TaskSet, TaskPolls) + Send + 'static, requires_spawn: bool) -> Self {
         let factory = Cell::new(Some(factory));
         // A pooled box cannot move an erased FnOnce out of its slot. Take the concrete
         // closure through Cell instead, without requiring its captures to be Unpin.
-        let factory = move |cx: Context, tasks: &TaskSet| {
-            factory.take().expect("a remote factory is registered exactly once")(cx, tasks);
+        let factory = move |cx: Context, tasks: &TaskSet, poll_hooks| {
+            factory.take().expect("a remote factory is registered exactly once")(cx, tasks, poll_hooks);
         };
         let mut factory = Some(factory);
         let inner = FUTURE_FACTORIES
             .try_with(|pool| {
                 let factory = factory.take().expect("the pooled allocation consumes the factory once");
-                PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Context, &TaskSet) + Send))
+                PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Context, &TaskSet, TaskPolls) + Send))
             })
             .unwrap_or_else(|_| {
                 let pool = MultiPool::new();
                 let factory = factory.take().expect("the fallback allocation consumes the factory once");
-                PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Context, &TaskSet) + Send))
+                PoolBox::unsize(pool.alloc_box(factory), coerce!(dyn Fn(Context, &TaskSet, TaskPolls) + Send))
             });
-        Self { inner }
+        Self {
+            inner,
+            spawn: None,
+            requires_spawn,
+        }
+    }
+
+    pub(crate) fn with_spawn(mut self, spawn: Spawn) -> Self {
+        self.spawn = Some(spawn);
+        self
     }
 
     pub(crate) fn register(self, cx: Context, tasks: &TaskSet) -> RegisteredRemoteTask {
-        (self.inner)(cx, tasks);
+        if matches!(cx.dispatcher().shutdown().state(), ShutdownState::Started) {
+            return RegisteredRemoteTask;
+        }
+        let Self {
+            inner,
+            spawn,
+            requires_spawn,
+        } = self;
+        let spawn = match spawn {
+            Some(spawn) => spawn,
+            None if requires_spawn => {
+                let Some(spawn) = crate::runtime::worker::asynchronous::LocalWorker::on_spawn() else {
+                    return RegisteredRemoteTask;
+                };
+                spawn
+            }
+            None => Spawn::new(None),
+        };
+        inner(cx, tasks, spawn.into_handlers());
         RegisteredRemoteTask
     }
 }
@@ -100,11 +136,18 @@ where
 {
     let (handle, result_tx) = result_pool.handle();
     let future_factory = TaskFactory::new(future_factory);
-    let future_factory = RemoteFutureFactory::new(move |cx, tasks| {
-        let future_factory = future_factory.into_inner();
-        let inner = DeferredTaskFactory::new(future_factory, cx);
-        tasks.task(inner).placement(placement).register(result_tx);
-    });
+    let future_factory = RemoteFutureFactory::new_with_poll_hooks(
+        move |cx, tasks, poll_hooks| {
+            let future_factory = future_factory.into_inner();
+            let inner = PreparedTaskFactory::new(future_factory, cx, poll_hooks);
+            tasks
+                .task(inner)
+                .placement(placement)
+                .poll_with(PreparedTaskPoller)
+                .register(result_tx);
+        },
+        true,
+    );
     (future_factory, handle)
 }
 
