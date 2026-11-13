@@ -51,6 +51,8 @@ fn load_with_progress(path: &Path, file: File, progress: &mut impl FnMut(super::
     load_reader_with_progress(path, file, length, progress)
 }
 
+// The length parameter is only a capacity hint; read_to_end grows the buffer.
+// #[gamma::skip(parameter.default_shadow)]
 fn load_reader_with_progress(
     path: &Path,
     mut reader: impl Read,
@@ -97,6 +99,27 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, bytes).unwrap();
         path
+    }
+
+    #[test]
+    fn a_reader_failure_keeps_the_input_path_and_does_not_start_decoding() {
+        struct FailedRead;
+
+        impl Read for FailedRead {
+            fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("scripted read failure"))
+            }
+        }
+
+        let error = load_reader_with_progress(Path::new("broken.seismograph"), FailedRead, 0, &mut |_| {
+            panic!("a failed read must not start decoding");
+        })
+        .err()
+        .unwrap()
+        .to_string();
+
+        assert!(error.contains("broken.seismograph"), "{error}");
+        assert!(error.contains("scripted read failure"), "{error}");
     }
 
     #[test]

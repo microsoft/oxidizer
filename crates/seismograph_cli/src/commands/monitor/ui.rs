@@ -2001,7 +2001,7 @@ mod tests {
     use super::super::app::{RuntimeFocus, TaskEventsFocus, TaskHistogram};
     use super::*;
     use crate::allocator_topology::{Segment, Slice, SliceKind, TopologyRegion};
-    use crate::allocator_view::{Estimate, Region, SizeClass, Snapshot, Version};
+    use crate::allocator_view::{Estimate, Region, SizeClass, Snapshot};
 
     fn descriptor() -> MonitorDescriptor {
         MonitorDescriptor {
@@ -2050,7 +2050,7 @@ mod tests {
                 call_stack: stack,
             })
         };
-        let mut allocator = Snapshot::new(Version::new(1, 0, 0));
+        let mut allocator = Snapshot::new();
         allocator.stats.live_bytes = 100_000;
         allocator.stats.peak_live_bytes = 200_000;
         allocator.stats.mapped_bytes = 400_000;

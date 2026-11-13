@@ -15,9 +15,8 @@ use crate::Error;
 /// # Panics
 ///
 /// Propagates a panic from `resolve`.
-pub fn capture(mut snapshot: DecodedSnapshot, resolve: impl FnMut(&mut Symbol)) -> Result<Snapshot, Error> {
-    snapshot.symbols = super::symbols::capture(&snapshot.events, resolve);
-    encode(&snapshot)
+pub fn capture(snapshot: DecodedSnapshot, resolve: impl FnMut(&mut Symbol)) -> Result<Snapshot, Error> {
+    encode(&super::with_symbols(snapshot, resolve))
 }
 
 /// Encodes supplied events, sources, and symbols without consulting the host.

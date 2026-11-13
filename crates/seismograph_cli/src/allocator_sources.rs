@@ -9,13 +9,15 @@ use seismograph::snapshot::SourceSnapshot;
 use seismograph_rallocator::snapshot::{self, BackendState};
 use seismograph_rallocator::source;
 
-use crate::allocator_view::{Snapshot, Version};
+use crate::allocator_view::Snapshot;
 use crate::snapshot_error::Error;
 
 pub(crate) fn decode(sources: &[SourceSnapshot]) -> Result<Snapshot, Error> {
     let native = native_source(sources)?;
     let mimalloc = find(sources, source::MIMALLOC_ID, Error::DuplicateMimallocSource)?;
-    let mut view = Snapshot::event_only(Version::new(0, 1, 0));
+    let mut view = Snapshot::event_only();
+    // Independent backend fields commute; no diagnostic priority is promised.
+    // #[gamma::skip(collection.reverse_array)]
     for entry in [native, mimalloc].into_iter().flatten() {
         if entry.schema_version != snapshot::SCHEMA_VERSION {
             return Err(Error::UnsupportedSchema(entry.schema_version));
@@ -32,7 +34,6 @@ pub(crate) fn decode(sources: &[SourceSnapshot]) -> Result<Snapshot, Error> {
             });
         }
         attach(&mut view, payload);
-        view.metadata.telemetry_schema_version = view.metadata.telemetry_schema_version.max(entry.schema_version);
     }
     Ok(view)
 }
@@ -78,21 +79,23 @@ mod tests {
     }
 
     #[test]
+    fn an_event_only_container_does_not_invent_backend_evidence() {
+        let decoded = decode_container(&[]).unwrap();
+
+        assert_eq!(
+            (decoded.native, decoded.mimalloc, decoded.allocator_state_available),
+            (None, None, false)
+        );
+    }
+
+    #[test]
     fn current_snmalloc_payload_is_not_coerced_into_mimalloc_state() {
         let native = crate::native_view::fixture::snapshot();
         let encoded = fixture::source(&snapshot::Snapshot::from(native.clone()));
 
         let decoded = decode_container(&[encoded]).unwrap();
 
-        assert_eq!(
-            (
-                decoded.session_id(),
-                decoded.native.as_deref(),
-                decoded.mimalloc,
-                decoded.metadata.telemetry_schema_version
-            ),
-            (native.session_id, Some(&native), None, snapshot::SCHEMA_VERSION)
-        );
+        assert_eq!((decoded.native.as_deref(), decoded.mimalloc), (Some(&native), None));
     }
 
     #[test]
@@ -225,11 +228,11 @@ mod tests {
 
         let decoded = decode_container(&[source]).unwrap();
 
-        assert_eq!(decoded.session_id(), payload.header.session_id);
+        assert_eq!(decoded.mimalloc.as_deref(), Some(&payload));
     }
 
     #[test]
-    fn matching_backend_sessions_preserve_the_shared_event_session() {
+    fn matching_backend_sessions_remain_in_both_source_payloads() {
         let native = crate::native_view::fixture::snapshot();
         let mut mimalloc = fixture::snapshot();
         mimalloc.header.session_id = native.session_id;
@@ -240,11 +243,14 @@ mod tests {
 
         let decoded = decode_container(&sources).unwrap();
 
-        assert_eq!(decoded.session_id(), native.session_id);
+        assert_eq!(
+            (decoded.native.as_deref(), decoded.mimalloc.as_deref()),
+            (Some(&native), Some(&mimalloc))
+        );
     }
 
     #[test]
-    fn independent_backend_sessions_do_not_silently_choose_an_event_session() {
+    fn independent_backend_sessions_remain_in_their_own_source_payloads() {
         let mut mimalloc = fixture::snapshot();
         mimalloc.header.session_id = 8;
         let sources = [
@@ -257,10 +263,9 @@ mod tests {
         assert_eq!(
             (
                 decoded.native.as_deref().unwrap().session_id,
-                decoded.mimalloc.as_deref().unwrap().header.session_id,
-                decoded.session_id()
+                decoded.mimalloc.as_deref().unwrap().header.session_id
             ),
-            (7, 8, 0)
+            (7, 8)
         );
     }
 }

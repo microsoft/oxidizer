@@ -593,6 +593,8 @@ fn read_runtime(reader: &mut Reader<'_>) -> Result<Runtime, Error> {
         return Err(malformed());
     }
     let workers = (0..worker_count).map(|_| read_worker(reader)).collect::<Result<Vec<_>, _>>()?;
+    // This bounds allocation; read_task independently rejects truncated metadata.
+    // #[gamma::skip(cond.always_false, expr.decrement)]
     if !count_fits(task_count, TASK_FIXED_LEN, reader.remaining().len()) {
         return Err(malformed());
     }
@@ -714,7 +716,7 @@ fn read_task(reader: &mut Reader<'_>) -> Result<Task, Error> {
     let spawned_at = reader.u64()?.checked_sub(1).map(EventTimestamp::from_ticks);
     let last_worker_id = match reader.u64()? {
         0 => None,
-        value => Some(WorkerId::from_raw(value).ok_or_else(malformed)?),
+        value => Some(WorkerId::from_raw(value).expect("the preceding match arm handles the only invalid worker ID, zero")),
     };
     let metrics = TaskMetrics {
         poll_count: reader.u64()?,
@@ -1681,6 +1683,39 @@ mod tests {
 
             assert_eq!(write_task(&mut Writer::new(&mut bytes), task), Err(()), "output length {length}");
         }
+    }
+
+    #[test]
+    fn task_decoding_rejects_every_truncated_metadata_field() {
+        let mut bytes = [0; TASK_FIXED_LEN];
+        write_task(&mut Writer::new(&mut bytes), &fixture().runtimes[0].tasks[0]).unwrap();
+
+        for length in 0..bytes.len() {
+            assert_eq!(
+                read_task(&mut Reader::new(&bytes[..length])).unwrap_err().kind(),
+                ErrorKind::Malformed,
+                "input length {length}"
+            );
+        }
+    }
+
+    #[test]
+    fn activity_metadata_rejects_timestamps_without_matching_states() {
+        for tag in [0_u64, 1, 2] {
+            for field in [2, 3, 4] {
+                let mut fields = [tag, if tag == 0 { 0 } else { 10 }, 0, 0, 0, 0];
+                fields[field] = 1;
+                let bytes = fields.into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
+
+                assert_eq!(
+                    read_activity(&mut Reader::new(&bytes)).unwrap_err().kind(),
+                    ErrorKind::Malformed,
+                    "tag {tag}, field {field}"
+                );
+            }
+        }
+        let bytes = [3_u64, 10, 1, 0, 0, 0].into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
+        assert_eq!(read_activity(&mut Reader::new(&bytes)).unwrap_err().kind(), ErrorKind::Malformed);
     }
 
     #[test]

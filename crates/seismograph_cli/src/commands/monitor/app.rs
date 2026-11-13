@@ -590,6 +590,8 @@ impl HeapViewState {
         if let Some((_, state)) = snapshot.mimalloc.as_deref().and_then(crate::mimalloc_view::parts) {
             mimalloc.reconcile(state);
         } else {
+            // Both expressions dispatch to the same concrete Default implementation.
+            // #[gamma::skip(assign_value.default)]
             mimalloc = super::mimalloc_ui::Navigation::default();
         }
         self.backend = self.backend(Some(snapshot));
@@ -1657,7 +1659,6 @@ impl App {
             .map(|thread| thread.statistics.thread_id);
         if self.live_activity.record(update, self.io.instant()) {
             self.activity_samples.clear();
-            self.recorder_statistics = None;
             self.activity_observed_at = None;
         }
         self.info_thread_selected = selected
@@ -2455,6 +2456,11 @@ mod tests {
         heap.bucket_selected = 3;
         heap.hotspot_selected = 4;
         heap.stack_scroll = 5;
+        heap.mimalloc.root = 2;
+        heap.mimalloc.selected_owner = Some(11);
+        heap.mimalloc.class = 73;
+        heap.mimalloc.scroll = 9;
+        heap.mimalloc.depth = super::super::mimalloc_ui::Depth::Detail;
         heap.reset();
         let mut thread = ThreadViewState::new();
         thread.focus = ThreadFocus::Objects;
@@ -3607,6 +3613,51 @@ mod tests {
             unreachable!();
         };
         assert_eq!(capture.mimalloc.as_deref(), Some(&payload));
+    }
+
+    #[test]
+    fn refreshing_without_mimalloc_discards_its_previous_drilldown() {
+        let mut view = HeapViewState::new();
+        view.backend = AllocatorBackend::Mimalloc;
+        view.mimalloc.root = 2;
+        view.mimalloc.selected_owner = Some(11);
+        view.mimalloc.class = 73;
+        view.mimalloc.scroll = 9;
+        view.mimalloc.depth = super::super::mimalloc_ui::Depth::Detail;
+
+        view.refresh_native(&empty_capture());
+
+        assert_eq!(view.backend, AllocatorBackend::Snmalloc);
+        assert_eq!(view.mimalloc, super::super::mimalloc_ui::Navigation::default());
+    }
+
+    #[test]
+    fn backend_keys_switch_only_when_both_allocator_sources_are_available() {
+        let mut capture = empty_capture();
+        let native = std::sync::Arc::new(crate::native_view::fixture::snapshot());
+        capture.native = Some(std::sync::Arc::clone(&native));
+        capture.mimalloc = Some(std::sync::Arc::new(crate::mimalloc_view::fixture::snapshot()));
+        let mut view = HeapViewState::new();
+
+        assert!(!handle_heap_key(KeyCode::Null, &mut view, Some(&capture), 100));
+        assert_eq!(view.backend, AllocatorBackend::Snmalloc);
+        assert!(handle_heap_key(KeyCode::Char('b'), &mut view, Some(&capture), 100));
+        assert_eq!(view.backend, AllocatorBackend::Mimalloc);
+        assert!(handle_heap_key(KeyCode::Down, &mut view, Some(&capture), 100));
+        assert_eq!(view.mimalloc.root, 1);
+        assert!(handle_heap_key(KeyCode::Char('b'), &mut view, Some(&capture), 100));
+        assert_eq!(view.backend, AllocatorBackend::Snmalloc);
+
+        capture.native = None;
+        assert!(!handle_heap_key(KeyCode::Null, &mut view, Some(&capture), 100));
+        assert_eq!(view.backend, AllocatorBackend::Mimalloc);
+        assert!(!handle_heap_key(KeyCode::Char('b'), &mut view, Some(&capture), 100));
+        assert_eq!(view.backend, AllocatorBackend::Mimalloc);
+
+        capture.native = Some(native);
+        capture.mimalloc = None;
+        assert!(!handle_heap_key(KeyCode::Char('b'), &mut view, Some(&capture), 100));
+        assert_eq!(view.backend, AllocatorBackend::Snmalloc);
     }
 
     #[test]

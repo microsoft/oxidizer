@@ -311,18 +311,29 @@ pub(crate) fn snapshot(options: SnapshotOptions) -> Result<Snapshot, Error> {
     let mut events = events.unwrap_or_default();
     events.clock = EventClock::CURRENT;
     let sources = capture_sources(SnapshotContext { events: &events })?;
-    let symbols = symbols::capture(&events, |lookup| {
-        #[cfg(not(miri))]
-        symbols::resolve(lookup, |address, visit| backtrace::resolve(address, visit));
-        #[cfg(miri)]
-        let _ = lookup;
-    });
-    encode_snapshot(&DecodedSnapshot {
-        capture_duration_nanos: u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX),
-        events,
-        sources,
-        symbols,
-    })
+    #[cfg(not(miri))]
+    let resolve = symbols::resolve_native;
+    #[cfg(miri)]
+    let resolve = |_lookup: &mut Symbol| {};
+    let snapshot = with_symbols(
+        DecodedSnapshot {
+            events,
+            sources,
+            ..DecodedSnapshot::default()
+        },
+        resolve,
+    );
+    encode_timed(snapshot, || started_at.elapsed())
+}
+
+fn encode_timed(mut snapshot: DecodedSnapshot, elapsed: impl FnOnce() -> std::time::Duration) -> Result<Snapshot, Error> {
+    snapshot.capture_duration_nanos = u64::try_from(elapsed().as_nanos()).unwrap_or(u64::MAX);
+    encode_snapshot(&snapshot)
+}
+
+fn with_symbols(mut snapshot: DecodedSnapshot, resolve: impl FnMut(&mut Symbol)) -> DecodedSnapshot {
+    snapshot.symbols = symbols::capture(&snapshot.events, resolve);
+    snapshot
 }
 
 /// Decodes a seismograph snapshot.
@@ -346,9 +357,13 @@ pub fn decode(bytes: &[u8]) -> Result<DecodedSnapshot, Error> {
     let recording = decode_recording_policies(&mut reader)?;
     let clock = decode_clock(&mut reader)?;
 
+    // This bounds allocation; fixed-field reads also reject truncated rows.
+    // #[gamma::skip(expr.decrement)]
     validate_count_fits(thread_count, reader.remaining().len(), THREAD_FIXED_LEN)?;
     let threads = decode_threads(&mut reader, thread_count)?;
 
+    // This bounds allocation; fixed-field reads also reject truncated rows.
+    // #[gamma::skip(expr.decrement)]
     validate_count_fits(event_count, reader.remaining().len(), EVENT_FIXED_LEN)?;
     let mut events = Vec::with_capacity(event_count);
     for _ in 0..event_count {
@@ -632,6 +647,9 @@ fn encode_snapshot(snapshot: &DecodedSnapshot) -> Result<Snapshot, Error> {
         .threads
         .iter()
         .try_fold(0usize, |total, thread| total.checked_add(26)?.checked_add(thread.name.len()));
+    // Owned buffers and their larger in-memory metadata fit the address space.
+    // These checked sums remain overflow defenses, not practical allocation fixtures.
+    // #[gamma::skip(try.propagate_to_unwrap)]
     let len = HEADER_LEN
         .checked_add(threads_len.ok_or_else(Error::allocation_failed)?)
         .and_then(|len| len.checked_add(events_len?))
@@ -1132,6 +1150,25 @@ mod tests {
         })
         .unwrap();
         assert!(format!("{snapshot:?}").contains("bytes"));
+    }
+
+    #[test]
+    fn encoded_capture_duration_keeps_the_measurement_and_saturates_at_the_wire_limit() {
+        for (elapsed, expected) in [(std::time::Duration::from_nanos(42), 42), (std::time::Duration::MAX, u64::MAX)] {
+            let snapshot = encode_timed(
+                DecodedSnapshot {
+                    events: Events {
+                        clock: EventClock::CURRENT,
+                        ..Events::default()
+                    },
+                    ..DecodedSnapshot::default()
+                },
+                || elapsed,
+            )
+            .unwrap();
+
+            assert_eq!(decode(snapshot.as_bytes()).unwrap().capture_duration_nanos, expected);
+        }
     }
 
     #[test]

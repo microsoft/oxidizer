@@ -1494,6 +1494,27 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_hello_response_write_preserves_the_protocol_error() {
+        use seismograph_protocol::io::IoOperation;
+
+        let (io, control) = MonitorIo::new_mocked();
+        let (mut client, server) = control.connected_pair();
+        seismograph_protocol::write_request(&mut client, 1, &Request::Hello).unwrap();
+        control.fail_next(
+            IoOperation::Write,
+            io::Error::new(io::ErrorKind::PermissionDenied, "scripted hello write failure"),
+        );
+
+        let result = handle_client(&io, server, &test_descriptor(), &AtomicBool::new(true));
+
+        assert!(matches!(
+            result,
+            Err(ClientError::Protocol(seismograph_protocol::Error::Io(error)))
+                if error.kind() == io::ErrorKind::PermissionDenied && error.to_string() == "scripted hello write failure"
+        ));
+    }
+
+    #[test]
     fn connected_requests_handle_repeat_hello_and_all_snapshot_modes() {
         let _test = crate::recorder::TEST_LOCK.lock().unwrap();
         assert_eq!(

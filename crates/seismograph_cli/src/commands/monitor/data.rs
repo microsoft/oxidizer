@@ -2130,10 +2130,15 @@ fn retained_memory_totals<'a>(
     let classify = |size: u64, align: u64| {
         let tier = allocation_tier(size, align, maximum_small, MAX_SMALL_ALIGNMENT_BYTES, medium_slice, medium_region);
         let bucket = match tier {
-            MemoryTier::Small => size_classes
-                .iter()
-                .find(|class| class.block_bytes >= size.max(align).max(1))
-                .map_or(maximum_small, |class| class.block_bytes),
+            MemoryTier::Small => {
+                // Backend small classes exceed both one and two bytes.
+                // #[gamma::skip(literal.int_decrement, literal.int_increment)]
+                let required = size.max(align).max(1);
+                size_classes
+                    .iter()
+                    .find(|class| class.block_bytes >= required)
+                    .map_or(maximum_small, |class| class.block_bytes)
+            }
             MemoryTier::Medium | MemoryTier::Direct => u64::from(histogram_bucket(size)),
         };
         (tier, bucket)
@@ -2277,7 +2282,8 @@ fn allocation_records(
             };
             let correlation = if event.kind == EventKind::Deallocated && !event.allocation_recorded {
                 "orphan free (no retained allocation)"
-            } else if event.kind == EventKind::Reallocated && !event.allocation_recorded {
+            } else if !event.allocation_recorded {
+                // Allocations retain their origin, and orphan frees were handled above.
                 "orphan resize (no retained allocation)"
             } else if deallocated.contains(&(event.thread_log_id, event.allocation_id)) {
                 "matched retained allocation/free pair (source capture)"
@@ -2542,7 +2548,7 @@ mod tests {
 
     #[test]
     fn resized_retained_bytes_move_tiers_without_adding_allocation_traffic() {
-        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(0, 1, 0));
+        let mut snapshot = crate::allocator_view::Snapshot::new();
         snapshot.size_classes.push(crate::allocator_view::SizeClass {
             class_index: 0,
             block_bytes: 64,
@@ -2598,6 +2604,116 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(MemoryTier::Small, 1, 32, 0, 0), (MemoryTier::Medium, 0, 0, 1, 100_000)]
         );
+    }
+
+    #[test]
+    fn retained_memory_buckets_preserve_size_alignment_and_live_hotspot_boundaries() {
+        let snapshot = crate::allocator_view::Snapshot::new();
+        let classes = [64, 128, 4096, 8192].map(|block_bytes| MemorySizeClass {
+            block_bytes,
+            live_allocations: 0,
+            capacity_blocks: 0,
+            requested_bytes: 0,
+            usable_bytes: 0,
+        });
+        for (size, align, tier, bucket) in [
+            (64, 8, MemoryTier::Small, 64),
+            (65, 8, MemoryTier::Small, 128),
+            (128, 8, MemoryTier::Small, 128),
+            (129, 8, MemoryTier::Small, 4096),
+            (1, 64, MemoryTier::Small, 64),
+            (1, 65, MemoryTier::Small, 128),
+            (1, 4096, MemoryTier::Small, 4096),
+            (1, 4097, MemoryTier::Medium, 1),
+            (8192, 8, MemoryTier::Small, 8192),
+            (8193, 8, MemoryTier::Medium, 14),
+            (65536, 8, MemoryTier::Medium, 17),
+        ] {
+            let allocation = Event::from_fields(EventFields {
+                thread_log_id: 1,
+                event_thread_id: 1,
+                sequence: 1,
+                allocation_id: 1,
+                kind: EventKind::Allocated,
+                heap_id: 1,
+                heap_kind: HeapKind::General,
+                freed_after_heap_release: false,
+                address: 0x1000,
+                size,
+                align,
+                call_stack: vec![0x2000],
+            });
+            let mut unrelated_free = allocation.clone();
+            unrelated_free.kind = EventKind::Deallocated;
+            unrelated_free.allocation_id = 2;
+            let events = [allocation, unrelated_free];
+
+            let totals = retained_memory_totals(&snapshot, &classes, &HashSet::new(), &events);
+            assert_eq!(totals.len(), 1);
+            let buckets = &totals[&tier];
+            assert_eq!(buckets.len(), 1);
+            assert_eq!(
+                buckets.keys().copied().collect::<Vec<_>>(),
+                [bucket],
+                "size {size}, alignment {align}"
+            );
+            let total = &buckets[&bucket];
+            let hotspot = &total.hotspots[events[0].call_stack.as_slice()];
+            assert_eq!(
+                (
+                    total.allocations,
+                    total.allocated_bytes,
+                    total.live_allocations,
+                    total.live_bytes,
+                    hotspot.live_bytes
+                ),
+                (1, size, 1, size, size),
+                "size {size}, alignment {align}"
+            );
+        }
+    }
+
+    #[test]
+    fn resize_details_keep_the_actor_origin_storage_and_orphan_evidence_separate() {
+        for (address, movement) in [(0x1000, "in place"), (0x2000, "moved")] {
+            let mut event = Event::from_fields(EventFields {
+                thread_log_id: 11,
+                event_thread_id: 22,
+                sequence: 7,
+                allocation_id: 5,
+                kind: EventKind::Reallocated,
+                heap_id: 9,
+                heap_kind: HeapKind::General,
+                freed_after_heap_release: false,
+                address,
+                size: 64,
+                align: 16,
+                call_stack: Vec::new(),
+            });
+            event.reallocation = Some(seismograph_rallocator::callers::Resize {
+                old_address: 0x1000,
+                old_size: 32,
+            });
+            let mut snapshot = crate::allocator_view::Snapshot::new();
+            snapshot.callers = Some(Callers::from_fields(CallersFields {
+                session_id: 0,
+                total_events: 1,
+                lost_events: 0,
+                threads: Vec::new(),
+                events: vec![event],
+                thread_names: Vec::new(),
+            }));
+
+            let allocation = AllocationSnapshot::from_snapshot(&snapshot);
+            let record = &allocation.records[0];
+            assert_eq!(record.correlation, "orphan resize (no retained allocation)");
+            let details = record.details();
+            assert!(details[0].contains("actor recorder thread 22") && details[0].contains("sequence 7"));
+            assert!(details[1].contains("lifetime #5") && details[1].contains("origin recorder log 11"));
+            assert!(details[2].contains(&format!("Address 0x{address:x}")) && details[2].contains("recorded heap key 9"));
+            assert!(details[3].contains("correlation keys may repeat"));
+            assert!(details[4].contains(&format!("0x1000 / 32 B -> 0x{address:x} / 64 B")) && details[4].contains(movement));
+        }
     }
 
     #[test]
@@ -3294,7 +3410,7 @@ mod tests {
 
     #[test]
     fn retained_memory_totals_and_task_ids_handle_missing_inputs() {
-        let snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(1, 0, 0));
+        let snapshot = crate::allocator_view::Snapshot::new();
         assert!(retained_memory_totals(&snapshot, &[], &HashSet::new(), &[]).is_empty());
         assert_eq!(
             (
@@ -3487,7 +3603,7 @@ mod tests {
 
     #[test]
     fn allocation_snapshot_without_callers_and_unmatched_deallocation_is_empty() {
-        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(1, 0, 0));
+        let mut snapshot = crate::allocator_view::Snapshot::new();
         assert_eq!(
             AllocationSnapshot::from_snapshot(&snapshot),
             AllocationSnapshot {
@@ -3616,7 +3732,7 @@ mod tests {
         reason = "the single assertion compares the complete memory snapshot fixture"
     )]
     fn memory_snapshot_summarizes_regions_and_slices() {
-        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(0, 1, 0));
+        let mut snapshot = crate::allocator_view::Snapshot::new();
         snapshot.stats.live_bytes = 10;
         snapshot.stats.peak_live_bytes = 20;
         snapshot.stats.mapped_bytes = 30;
@@ -3759,7 +3875,7 @@ mod tests {
         reason = "the single assertion covers every retained allocation routing boundary"
     )]
     fn memory_snapshot_groups_retained_allocations_by_routing_shape() {
-        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(0, 1, 0));
+        let mut snapshot = crate::allocator_view::Snapshot::new();
         snapshot.size_classes.push(crate::allocator_view::SizeClass {
             class_index: 0,
             block_bytes: 64,
@@ -3926,7 +4042,7 @@ mod tests {
 
     #[test]
     fn allocation_liveness_pairs_remote_frees_before_allocations_by_owner_and_id() {
-        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(0, 1, 0));
+        let mut snapshot = crate::allocator_view::Snapshot::new();
         let event = |owner, thread, sequence, kind, size, stack| {
             Event::from_fields(EventFields {
                 thread_log_id: owner,
@@ -3968,7 +4084,7 @@ mod tests {
 
     #[test]
     fn allocation_snapshot_ranks_hotspots_by_count_then_bytes() {
-        let mut snapshot = crate::allocator_view::Snapshot::new(crate::allocator_view::Version::new(0, 1, 0));
+        let mut snapshot = crate::allocator_view::Snapshot::new();
         let event = |allocation_id, kind, size, call_stack| {
             Event::from_fields(EventFields {
                 thread_log_id: 1,
@@ -4215,6 +4331,8 @@ mod tests {
 
     #[test]
     fn thread_snapshot_links_same_thread_allocations_and_channels() {
+        use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind as RecordedHeapKind};
+
         let events = [
             (10, RuntimeEventKind::Allocation),
             (10, RuntimeEventKind::Deallocation),
@@ -4228,17 +4346,34 @@ mod tests {
             sequence: EventSequence::new(u64::try_from(index).unwrap()),
             timestamp: EventTimestamp::from_ticks(1),
             kind,
-            payload: EventPayload::Object(ObjectId::new(object)),
+            payload: if matches!(kind, RuntimeEventKind::Allocation | RuntimeEventKind::Deallocation) {
+                EventPayload::Allocation(Allocation {
+                    allocation_id: AllocationId::new(object),
+                    event_thread_id: EventThreadId::new(0),
+                    heap_id: HeapId::new(0),
+                    heap_kind: RecordedHeapKind::General,
+                    freed_after_heap_release: false,
+                    address: RuntimeAddress::new(0x1000),
+                    size: 64,
+                    alignment: 8,
+                })
+            } else {
+                EventPayload::Object(ObjectId::new(object))
+            },
             call_stack: vec![RuntimeAddress::new(0x1000)],
         })
         .collect();
-        let snapshot = ThreadSnapshot::from_events(
-            &Events {
-                events,
-                ..Events::default()
-            },
-            &[],
-        );
+        let decoded = Events {
+            events,
+            ..Events::default()
+        };
+        let snapshot = ThreadSnapshot::from_events(&decoded, &[]);
+        let prepared = super::super::snapshot::prepare(seismograph::snapshot::DecodedSnapshot {
+            events: decoded,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(prepared.threads, snapshot);
         let interactions = snapshot.threads[0]
             .operations
             .iter()

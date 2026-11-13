@@ -272,6 +272,8 @@ pub(crate) fn decode_request(kind: u16, payload: &[u8]) -> Result<Request, Error
 pub(crate) fn encode_response(response: &Response) -> Result<(u16, Cow<'_, [u8]>), Error> {
     match response {
         Response::Hello { instance_id, recording } => {
+            // Capacity is an allocation hint; Vec growth preserves the wire bytes.
+            // #[gamma::skip(literal)]
             let mut payload = Vec::with_capacity(56);
             payload.extend_from_slice(&instance_id.as_bytes());
             payload.extend_from_slice(&encode_recording(*recording));
@@ -343,6 +345,8 @@ pub(crate) fn decode_response(kind: u16, payload: &[u8]) -> Result<Response, Err
 }
 
 fn encode_statistics(statistics: RecorderStatistics) -> Vec<u8> {
+    // Capacity is an allocation hint; Vec growth preserves the wire bytes.
+    // #[gamma::skip(literal)]
     let mut payload = Vec::with_capacity(88);
     push_u64(&mut payload, statistics.thread_count);
     push_u64(&mut payload, statistics.total_events);
@@ -366,7 +370,11 @@ fn decode_statistics(payload: &[u8]) -> Result<RecorderStatistics, Error> {
         lost_events: reader.u64()?,
         event_capacity_per_thread: reader.u64()?,
         allocated_bytes: reader.u64()?,
-        recording: decode_recording(reader.take(40)?)?,
+        recording: decode_recording(
+            reader
+                .take(40)
+                .expect("the 88-byte payload contains 48 counter bytes and 40 policy bytes"),
+        )?,
     };
     reader.finish()?;
     Ok(statistics)
@@ -466,6 +474,8 @@ fn decode_activity(payload: &[u8]) -> Result<RecorderActivity, Error> {
 }
 
 fn encode_recording(configuration: RecordingConfiguration) -> Vec<u8> {
+    // Capacity is an allocation hint; Vec growth preserves the wire bytes.
+    // #[gamma::skip(literal)]
     let mut encoded = Vec::with_capacity(40);
     push_u32(&mut encoded, configuration.event_capacity_per_thread);
     encode_recording_policy(&mut encoded, configuration.allocations);
@@ -1003,7 +1013,7 @@ mod tests {
 
     #[test]
     fn fixed_size_messages_reject_every_adjacent_invalid_length() {
-        for (kind, expected_len) in [(1, 32_usize), (3, 1), (4, 0), (6, 0)] {
+        for (kind, expected_len) in [(1, 0_usize), (2, 40), (3, 1), (4, 0), (6, 0)] {
             for len in [expected_len.saturating_sub(1), expected_len + 1] {
                 if len != expected_len {
                     assert!(matches!(decode_request(kind, &vec![0; len]), Err(Error::InvalidMessage)));
@@ -1011,7 +1021,7 @@ mod tests {
             }
         }
 
-        for (kind, expected_len) in [(101, 50_usize), (102, 0), (104, 82)] {
+        for (kind, expected_len) in [(101, 56_usize), (102, 0), (104, 88)] {
             for len in [expected_len.saturating_sub(1), expected_len + 1] {
                 if len != expected_len {
                     assert!(
@@ -1020,6 +1030,20 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn hello_rejects_every_truncated_instance_and_recording_field() {
+        let response = Response::Hello {
+            instance_id: InstanceId::from_bytes([1; 16]),
+            recording: RecordingConfiguration::default(),
+        };
+        let (kind, payload) = encode_response(&response).unwrap();
+        assert_eq!(decode_response(kind, &payload).unwrap(), response);
+
+        for length in 0..payload.len() {
+            assert!(matches!(decode_response(kind, &payload[..length]), Err(Error::InvalidMessage)));
         }
     }
 

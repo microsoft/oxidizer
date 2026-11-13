@@ -62,9 +62,8 @@ pub(super) fn prepare_with_progress(
         }
     }
     // Application events do not depend on the presence of an allocator source.
-    let view = allocator.get_or_insert_with(|| crate::allocator_view::Snapshot::event_only(crate::allocator_view::Version::new(0, 1, 0)));
-    let mut callers = seismograph_rallocator::events::callers(&decoded.events);
-    callers.session_id = view.session_id();
+    let view = allocator.get_or_insert_with(crate::allocator_view::Snapshot::event_only);
+    let callers = seismograph_rallocator::events::callers(&decoded.events);
     let identities = crate::allocation_identities::from_callers(&callers);
     view.callers = Some(callers);
 
@@ -360,6 +359,37 @@ mod tests {
             ),
             (expected.primitives, expected.threads, None, None, None),
         );
+    }
+
+    #[test]
+    fn allocator_preparation_progress_tracks_each_supported_source_combination() {
+        let native = allocator_source(&seismograph_rallocator::native::Snapshot::default());
+        let mimalloc = crate::mimalloc_view::fixture::source(&crate::mimalloc_view::fixture::snapshot());
+        for (sources, expected_native, expected_mimalloc) in [
+            (vec![runtime_source()], false, false),
+            (vec![native.clone(), runtime_source()], true, false),
+            (vec![mimalloc.clone(), runtime_source()], false, true),
+            (vec![native, mimalloc], true, true),
+        ] {
+            let mut phases = Vec::new();
+            let capture = super::prepare_with_progress(
+                DecodedSnapshot {
+                    sources,
+                    ..Default::default()
+                },
+                &mut |phase| phases.push(phase),
+            )
+            .unwrap();
+
+            assert_eq!(
+                phases.iter().filter(|phase| matches!(phase, super::Phase::DecodeAllocator)).count(),
+                usize::from(expected_native || expected_mimalloc)
+            );
+            assert_eq!(
+                (capture.native.is_some(), capture.mimalloc.is_some()),
+                (expected_native, expected_mimalloc)
+            );
+        }
     }
 
     #[test]

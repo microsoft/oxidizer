@@ -277,21 +277,25 @@ enum Command {
 /// and filesystem. Errors are printed with the same format as the executable.
 #[must_use]
 pub fn execute(args: Vec<OsString>) -> ExitCode {
-    let program = args
-        .first()
-        .and_then(|value| std::path::Path::new(value).file_stem())
-        .and_then(|value| value.to_str())
-        .unwrap_or("seismograph")
-        .to_owned();
+    let program = program_name(&args).to_owned();
     let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(error) => {
             let code = error.exit_code();
             let _ = error.print();
+            // clap returns 0 or 2, so the conversion fallback cannot be selected.
+            // #[gamma::skip(fallback.unwrap_or_to_default, literal.int_decrement, literal.int_increment)]
             return ExitCode::from(u8::try_from(code).unwrap_or(1));
         }
     };
     ExitCode::from(exit_code(run(cli, commands::monitor::verb, commands::monitor::view), &program))
+}
+
+fn program_name(args: &[OsString]) -> &str {
+    args.first()
+        .and_then(|value| std::path::Path::new(value).file_stem())
+        .and_then(|value| value.to_str())
+        .unwrap_or("seismograph")
 }
 
 fn exit_code(result: Result<(), Box<dyn std::error::Error>>, program: &str) -> u8 {
@@ -318,6 +322,15 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::{Cli, Command, run};
+
+    #[test]
+    fn diagnostics_use_the_executable_stem_not_a_command_argument() {
+        let executable = std::path::Path::new("tools").join("renamed.exe").into_os_string();
+        let args = [executable, "view".into(), "capture.seismograph".into()];
+
+        assert_eq!(super::program_name(&args), "renamed");
+        assert_eq!(super::program_name(&[]), "seismograph");
+    }
 
     #[test]
     fn removed_html_export_is_not_a_command() {
@@ -347,14 +360,14 @@ mod tests {
     #[test]
     #[cfg_attr(coverage_nightly, coverage(off))] // Wrong-command panic callbacks are test-only failure paths.
     fn monitor_command_dispatches_and_propagates_failures() {
-        run(
+        let result = run(
             Cli {
                 command: Command::Monitor(crate::commands::monitor::VerbArgs { terminal_error: None }),
             },
             |_| Ok(()),
             |_| panic!("monitor must not dispatch view"),
-        )
-        .unwrap();
+        );
+        assert_eq!(super::exit_code(result, "seismograph"), 0);
 
         let error = run(
             Cli {

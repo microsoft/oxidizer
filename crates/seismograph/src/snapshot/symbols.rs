@@ -60,21 +60,47 @@ pub(super) fn capture(events: &Events, mut resolve: impl FnMut(&mut Symbol)) -> 
 }
 
 #[cfg(any(not(miri), test))]
-pub(super) fn resolve(lookup: &mut Symbol, resolve_address: impl FnOnce(*mut std::ffi::c_void, &mut dyn FnMut(&backtrace::Symbol))) {
+pub(super) struct ResolvedSymbol<'a> {
+    pub(super) name: Option<backtrace::SymbolName<'a>>,
+    pub(super) filename: Option<&'a std::path::Path>,
+    pub(super) line: Option<u32>,
+    pub(super) column: Option<u32>,
+}
+
+#[cfg(not(miri))]
+pub(super) fn resolve_native(lookup: &mut Symbol) {
+    // Defaulting a unit result after the call preserves all of its effects.
+    // #[gamma::skip(call_result.default)]
+    resolve(lookup, |address, visit| {
+        backtrace::resolve(address, |symbol| {
+            visit(ResolvedSymbol {
+                name: symbol.name(),
+                filename: symbol.filename(),
+                line: symbol.lineno(),
+                column: symbol.colno(),
+            });
+        });
+    });
+}
+
+#[cfg(any(not(miri), test))]
+pub(super) fn resolve(lookup: &mut Symbol, resolve_address: impl FnOnce(*mut std::ffi::c_void, &mut dyn FnMut(ResolvedSymbol<'_>))) {
     let address = usize::try_from(crate::recorder::symbol_lookup_address(lookup.address).get())
         .expect("native frame addresses originate from pointer-width addresses in this process");
     resolve_address(std::ptr::with_exposed_provenance_mut::<std::ffi::c_void>(address), &mut |symbol| {
-        lookup.name = lookup.name.take().or_else(|| symbol.name().map(|name| name.to_string()));
+        lookup.name = lookup.name.take().or_else(|| symbol.name.map(|name| name.to_string()));
         lookup.filename = lookup
             .filename
             .take()
-            .or_else(|| symbol.filename().map(|path| path.to_string_lossy().into_owned()));
-        lookup.line = lookup.line.or_else(|| symbol.lineno());
-        lookup.column = lookup.column.or_else(|| symbol.colno());
+            .or_else(|| symbol.filename.map(|path| path.to_string_lossy().into_owned()));
+        lookup.line = lookup.line.or(symbol.line);
+        lookup.column = lookup.column.or(symbol.column);
     });
 }
 
 pub(super) fn encoded_len(symbols: &[Symbol]) -> Option<usize> {
+    // Owned strings and the larger in-memory symbol rows fit the address space.
+    // #[gamma::skip(try.propagate_to_unwrap)]
     symbols.iter().try_fold(4_usize, |len, symbol| {
         len.checked_add(FIXED_LEN)?
             .checked_add(symbol.name.as_ref().map_or(0, String::len))?
@@ -83,7 +109,10 @@ pub(super) fn encoded_len(symbols: &[Symbol]) -> Option<usize> {
 }
 
 pub(super) fn encode(symbols: &[Symbol], writer: &mut Writer<'_>) -> Result<(), Error> {
-    writer.u32(u32::try_from(symbols.len()).map_err(|_error| Error::invalid_format())?)?;
+    // Exercising this error needs more than u32::MAX owned symbol rows.
+    // #[gamma::skip(try.propagate_to_unwrap)]
+    let count = u32::try_from(symbols.len()).map_err(|_error| Error::invalid_format())?;
+    writer.u32(count)?;
     let mut previous = 0;
     for symbol in symbols {
         if symbol.address.get() <= previous {
@@ -98,8 +127,13 @@ pub(super) fn encode(symbols: &[Symbol], writer: &mut Writer<'_>) -> Result<(), 
         writer.u32(fields)?;
         let name = symbol.name.as_deref().unwrap_or("");
         let filename = symbol.filename.as_deref().unwrap_or("");
-        writer.u32(u32::try_from(name.len()).map_err(|_error| Error::invalid_format())?)?;
-        writer.u32(u32::try_from(filename.len()).map_err(|_error| Error::invalid_format())?)?;
+        // Exercising these limits needs strings larger than four GiB.
+        // #[gamma::skip(try.propagate_to_unwrap)]
+        let name_len = u32::try_from(name.len()).map_err(|_error| Error::invalid_format())?;
+        // #[gamma::skip(try.propagate_to_unwrap)]
+        let filename_len = u32::try_from(filename.len()).map_err(|_error| Error::invalid_format())?;
+        writer.u32(name_len)?;
+        writer.u32(filename_len)?;
         writer.u32(symbol.line.unwrap_or(0))?;
         writer.u32(symbol.column.unwrap_or(0))?;
         writer.write(name.as_bytes())?;
@@ -110,15 +144,24 @@ pub(super) fn encode(symbols: &[Symbol], writer: &mut Writer<'_>) -> Result<(), 
 
 pub(super) fn decode(reader: &mut Reader<'_>) -> Result<Vec<Symbol>, Error> {
     let count = reader.u32()? as usize;
+    // A smaller preallocation bound still rejects truncation in the field reads.
+    // #[gamma::skip(expr.decrement)]
     validate_count_fits(count, reader.remaining().len(), FIXED_LEN)?;
     let mut symbols = Vec::with_capacity(count);
     let mut previous = 0;
     for _ in 0..count {
+        // The count check reserves every fixed field before this loop.
+        // #[gamma::skip(try.propagate_to_unwrap)]
         let address = reader.u64()?;
+        // #[gamma::skip(try.propagate_to_unwrap)]
         let fields = reader.u32()?;
+        // #[gamma::skip(try.propagate_to_unwrap)]
         let name_len = reader.u32()? as usize;
+        // #[gamma::skip(try.propagate_to_unwrap)]
         let filename_len = reader.u32()? as usize;
+        // #[gamma::skip(try.propagate_to_unwrap)]
         let line = reader.u32()?;
+        // #[gamma::skip(try.propagate_to_unwrap)]
         let column = reader.u32()?;
         if address <= previous
             || fields & !ALL_FIELDS != 0
@@ -230,6 +273,68 @@ mod tests {
     }
 
     #[test]
+    fn resolution_retains_the_first_known_value_and_fills_missing_fields() {
+        let mut lookup = unresolved(17);
+
+        resolve(&mut lookup, |_, visit| {
+            visit(ResolvedSymbol {
+                name: Some(backtrace::SymbolName::new(b"application::first")),
+                filename: None,
+                line: None,
+                column: Some(7),
+            });
+            visit(ResolvedSymbol {
+                name: Some(backtrace::SymbolName::new(b"application::second")),
+                filename: Some(std::path::Path::new("producer.rs")),
+                line: Some(41),
+                column: Some(9),
+            });
+        });
+
+        assert_eq!(
+            lookup,
+            Symbol {
+                name: Some("application::first".into()),
+                filename: Some("producer.rs".into()),
+                line: Some(41),
+                column: Some(7),
+                ..unresolved(17)
+            }
+        );
+    }
+
+    #[cfg(all(not(miri), any(windows, target_os = "linux", target_os = "macos")))]
+    #[test]
+    fn native_bridge_preserves_the_backends_available_metadata_without_guessing_names() {
+        fn probe() {
+            std::hint::black_box(42);
+        }
+
+        #[cfg(windows)]
+        let platform = windows_sys::Win32::System::Diagnostics::Debug::SymGetOptions as *const ();
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let platform = libc::malloc as *const ();
+        for pointer in [probe as *const (), platform] {
+            let recorded = Address::new(Address::from_ptr(pointer).get() + u64::from(cfg!(windows)));
+            let mut expected = unresolved(recorded.get());
+            backtrace::resolve(pointer.cast_mut().cast(), |symbol| {
+                expected.name = expected.name.take().or_else(|| symbol.name().map(|name| name.to_string()));
+                expected.filename = expected
+                    .filename
+                    .take()
+                    .or_else(|| symbol.filename().map(|path| path.to_string_lossy().into_owned()));
+                expected.line = expected.line.or_else(|| symbol.lineno());
+                expected.column = expected.column.or_else(|| symbol.colno());
+            });
+            let mut actual = unresolved(recorded.get());
+
+            resolve_native(&mut actual);
+
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
     fn symbol_codec_preserves_resolved_unresolved_and_empty_optional_fields() {
         let symbols = vec![
             Symbol {
@@ -237,7 +342,7 @@ mod tests {
                 filename: Some("src\\main.rs".into()),
                 line: Some(31),
                 column: Some(7),
-                ..unresolved(16)
+                ..unresolved(1)
             },
             unresolved(32),
             Symbol {
@@ -261,6 +366,32 @@ mod tests {
         let bytes = encoded(&[]);
 
         assert_eq!(decode(&mut Reader::new(&bytes)).unwrap(), []);
+    }
+
+    #[test]
+    fn a_minimal_symbol_record_needs_no_trailing_padding() {
+        let symbols = [unresolved(1)];
+        let bytes = encoded(&symbols);
+        let mut reader = Reader::new(&bytes);
+
+        assert_eq!(decode(&mut reader).unwrap(), symbols);
+        assert!(reader.remaining().is_empty());
+    }
+
+    #[test]
+    fn symbol_encoding_rejects_every_short_output() {
+        let symbols = [Symbol {
+            name: Some("application".into()),
+            filename: Some("main.rs".into()),
+            line: Some(3),
+            column: Some(5),
+            ..unresolved(1)
+        }];
+        for length in 0..encoded_len(&symbols).unwrap() {
+            let mut bytes = vec![0; length];
+
+            assert!(encode(&symbols, &mut Writer::new(&mut bytes)).is_err(), "output length {length}");
+        }
     }
 
     #[test]

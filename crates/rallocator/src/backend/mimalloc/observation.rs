@@ -290,10 +290,10 @@ fn capture_state() -> Result<seismograph::snapshot::SourceData, seismograph::Err
     };
     let global = memory::observe(WALK_BUDGET);
     let len = seismograph_rallocator::snapshot::encoded_len_mimalloc(&header, &global, owners.as_slice())
-        .map_err(|_error| seismograph::Error::new("mimalloc snapshot sizing failed"))?;
+        .expect("bounded inventory emits unique nonzero persistent owners and valid allocator observations");
     let mut data = seismograph::snapshot::SourceData::zeroed(len)?;
     seismograph_rallocator::snapshot::encode_mimalloc(&header, &global, owners.as_slice(), data.as_mut_bytes())
-        .map_err(|_error| seismograph::Error::new("mimalloc snapshot encoding failed"))?;
+        .expect("output length was computed from the same immutable snapshot and owner rows");
     seismograph_rallocator::snapshot::request_observation();
     Ok(data)
 }

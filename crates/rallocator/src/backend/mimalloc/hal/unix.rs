@@ -29,22 +29,12 @@ pub(super) fn reserve(size: usize, alignment: usize, committed: bool) -> Option<
     if mapping == libc::MAP_FAILED {
         return None;
     }
-    // Page alignment bounds this padding by alignment - page_size, which the
-    // over-reserved mapping contains. No rounded absolute address is needed.
-    let prefix = mapping.addr().wrapping_neg() & (alignment - 1);
-    let suffix = mapped_size - prefix - size;
-    // SAFETY: The aligned address is within the mapping and retains provenance.
-    let address = unsafe { mapping.cast::<u8>().add(prefix) };
-    if prefix != 0 {
-        // SAFETY: The page-aligned prefix is disjoint from the retained range.
-        unsafe { release(mapping.cast(), prefix) };
-    }
-    if suffix != 0 {
-        // SAFETY: The retained range ends before this page-aligned suffix.
-        let end = unsafe { address.add(size) };
-        // SAFETY: No objects or accesses exist in the unused suffix.
-        unsafe { release(end, suffix) };
-    }
+    let release_unused = |address, length| {
+        // SAFETY: Trimming only supplies unused, page-aligned mapping extents.
+        unsafe { release(address, length) };
+    };
+    // SAFETY: mmap owns mapped_size bytes, including enough alignment padding.
+    let address = unsafe { trim_mapping(mapping.cast(), size, mapped_size, alignment, release_unused) };
     #[cfg(target_os = "linux")]
     if committed && policy.purge_slices > 1 && size.is_multiple_of(policy.large_page_size) && alignment >= policy.large_page_size {
         // SAFETY: This optional advice covers exactly the owned mapping. Its
@@ -57,6 +47,32 @@ pub(super) fn reserve(size: usize, alignment: usize, committed: bool) -> Option<
         base: address,
         reserved_size: size,
     })
+}
+
+/// # Safety
+/// The caller owns `mapped_size` bytes with enough padding to align `size` bytes.
+/// The alignment must be a nonzero power of two.
+/// The release callback must release only the supplied unused extents.
+unsafe fn trim_mapping(
+    mapping: *mut u8,
+    size: usize,
+    mapped_size: usize,
+    alignment: usize,
+    mut release: impl FnMut(*mut u8, usize),
+) -> *mut u8 {
+    // Page alignment bounds this padding by alignment - page_size.
+    let prefix = mapping.addr().wrapping_neg() & (alignment - 1);
+    let suffix = mapped_size - prefix - size;
+    // SAFETY: The aligned address is within the mapping and retains provenance.
+    let address = unsafe { mapping.add(prefix) };
+    if prefix != 0 {
+        release(mapping, prefix);
+    }
+    if suffix != 0 {
+        // SAFETY: The retained range ends before this unused suffix.
+        release(unsafe { address.add(size) }, suffix);
+    }
+    address
 }
 
 pub(super) unsafe fn commit(address: *mut u8, size: usize) -> bool {
@@ -170,12 +186,42 @@ fn read_kernel_file_with(
     usize::try_from(count).unwrap_or(0)
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
     use std::cell::Cell;
 
+    #[cfg(target_os = "linux")]
     use super::read_kernel_file_with;
 
+    #[test]
+    fn trimming_preserves_the_aligned_range_and_releases_only_unused_extents() {
+        #[repr(align(32))]
+        struct Storage([u8; 96]);
+
+        let mut storage = Storage([0; 96]);
+        let base = storage.0.as_mut_ptr();
+        for (offset, mapped_size, expected_address, expected_releases) in [
+            (0, 32, 0, vec![]),
+            (0, 56, 0, vec![(32, 24)]),
+            (8, 56, 32, vec![(8, 24)]),
+            (16, 56, 32, vec![(16, 16), (64, 8)]),
+        ] {
+            let mut releases = Vec::new();
+            // SAFETY: Each selected extent fits the aligned, live fixture.
+            let mapping = unsafe { base.add(offset) };
+            // SAFETY: The fixture owns enough padding; this callback only records extents.
+            let address = unsafe {
+                super::trim_mapping(mapping, 32, mapped_size, 32, |address, size| {
+                    releases.push((address.addr() - base.addr(), size));
+                })
+            };
+
+            assert_eq!((address.addr() - base.addr(), releases), (expected_address, expected_releases));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn failed_open_preserves_the_buffer_without_reading_or_closing() {
         let mut buffer = *b"????";
@@ -190,6 +236,7 @@ mod tests {
         assert_eq!((count, buffer), (0, *b"????"));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn failed_read_closes_its_descriptor_and_returns_no_bytes() {
         let mut buffer = *b"????";
@@ -208,6 +255,7 @@ mod tests {
         assert_eq!((count, buffer, closed.get()), (0, *b"????", Some(17)));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn short_read_keeps_its_exact_byte_count_and_closes_the_descriptor() {
         let mut buffer = *b"????";

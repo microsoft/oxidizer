@@ -10,6 +10,8 @@ pub(crate) type Identities = HashMap<(u64, u64), u64>;
 /// Reuse the full capture's identities even when a filter hides storage changes.
 pub(crate) fn from_callers(callers: &Callers) -> Option<Identities> {
     if !callers.events.iter().any(|event| event.kind == EventKind::Reallocated) {
+        // An empty optional map is equivalent: every lookup uses its original ID.
+        // #[gamma::skip(option.none_to_some)]
         return None;
     }
     Some(

@@ -16,7 +16,7 @@ fn successful_resizes_keep_one_record_with_both_storage_endpoints() {
         ..Configuration::default()
     });
     let allocation = Allocation {
-        allocation_id: AllocationId::new(0x1000),
+        allocation_id: AllocationId::new(17),
         event_thread_id: EventThreadId::new(0),
         heap_id: HeapId::new(3),
         heap_kind: HeapKind::General,

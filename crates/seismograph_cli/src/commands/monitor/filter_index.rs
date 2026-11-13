@@ -480,7 +480,6 @@ mod tests {
     use seismograph_rallocator::callers::{AddressLookupFields, Callers};
 
     use super::*;
-    use crate::allocator_view::Version;
 
     fn lookup(address: u64, symbol: &str) -> AddressLookup {
         AddressLookup::from_fields(AddressLookupFields {
@@ -570,7 +569,7 @@ mod tests {
             old_size: 64,
         });
         resize.call_stack = vec![2];
-        let mut source = AllocatorSource::new(Version::new(0, 1, 0));
+        let mut source = AllocatorSource::new();
         let mut callers = Callers::default();
         callers.events = vec![allocation, resize];
         source.callers = Some(callers);
@@ -610,7 +609,7 @@ mod tests {
             event.call_stack = vec![stack];
             event
         };
-        let mut source = AllocatorSource::new(Version::new(0, 1, 0));
+        let mut source = AllocatorSource::new();
         source.stats.live_bytes = 777;
         let mut callers = Callers::default();
         callers.events = vec![

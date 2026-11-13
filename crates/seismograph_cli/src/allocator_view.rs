@@ -4,18 +4,6 @@
 //! Private event-view projection and presentation regression fixtures.
 //! No source codec or compatibility API is attached to this model.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct Version {
-    pub(crate) major: u16,
-    pub(crate) minor: u16,
-    pub(crate) patch: u16,
-}
-impl Version {
-    pub(crate) const fn new(major: u16, minor: u16, patch: u16) -> Self {
-        Self { major, minor, patch }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Estimate {
     pub(crate) value: u64,
@@ -84,19 +72,10 @@ pub(crate) struct Histograms {
     pub(crate) live: Vec<u64>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct Metadata {
-    pub(crate) wire_format_version: u16,
-    pub(crate) telemetry_schema_version: u16,
-    pub(crate) producer_version: Version,
-    pub(crate) capture_duration_nanos: u64,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Snapshot {
     pub(crate) native: Option<std::sync::Arc<seismograph_rallocator::native::Snapshot>>,
     pub(crate) mimalloc: Option<std::sync::Arc<seismograph_rallocator::snapshot::Snapshot>>,
-    pub(crate) metadata: Metadata,
     pub(crate) allocator_state_available: bool,
     pub(crate) stats: Stats,
     pub(crate) size_classes: Vec<SizeClass>,
@@ -109,16 +88,10 @@ pub(crate) struct Snapshot {
     pub(crate) addresses: Vec<seismograph_rallocator::callers::AddressLookup>,
 }
 impl Snapshot {
-    pub(crate) fn new(producer_version: Version) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             native: None,
             mimalloc: None,
-            metadata: Metadata {
-                wire_format_version: 10,
-                telemetry_schema_version: seismograph_rallocator::snapshot::SCHEMA_VERSION,
-                producer_version,
-                capture_duration_nanos: 0,
-            },
             allocator_state_available: true,
             stats: Stats::default(),
             size_classes: Vec::new(),
@@ -131,18 +104,9 @@ impl Snapshot {
             addresses: Vec::new(),
         }
     }
-    pub(crate) fn event_only(producer_version: Version) -> Self {
-        let mut snapshot = Self::new(producer_version);
+    pub(crate) fn event_only() -> Self {
+        let mut snapshot = Self::new();
         snapshot.allocator_state_available = false;
         snapshot
-    }
-
-    pub(crate) fn session_id(&self) -> u64 {
-        match (self.native.as_deref(), self.mimalloc.as_deref()) {
-            (Some(native), Some(mimalloc)) if native.session_id != mimalloc.header.session_id => 0,
-            (Some(native), _) => native.session_id,
-            (_, Some(mimalloc)) => mimalloc.header.session_id,
-            _ => 0,
-        }
     }
 }
