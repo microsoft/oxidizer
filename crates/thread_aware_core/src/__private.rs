@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Private construction APIs for thread-aware runtimes, grouped by version.
+//! Versioned private constructors for thread-aware runtimes.
 
 /// Version 1 of the private construction API.
 pub mod v1 {
@@ -25,7 +25,7 @@ pub mod v1 {
         NumaNode::new(node)
     }
 
-    /// Creates a thread identifier from its runtime, OS thread, and NUMA node.
+    /// Creates a thread coordinate from its runtime, OS thread, and NUMA node.
     #[cfg(any(test, feature = "std"))]
     #[inline]
     #[must_use]

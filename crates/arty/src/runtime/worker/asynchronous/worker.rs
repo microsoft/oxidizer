@@ -158,7 +158,6 @@ impl Worker {
         self.execute_phase();
     }
 
-    #[cfg_attr(test, mutants::skip)] // Critical for code execution to occur in async contexts.
     fn execute_phase(&mut self) {
         while matches!(self.execute_step(), ControlFlow::Continue(())) {}
     }
@@ -245,7 +244,6 @@ impl Worker {
         ControlFlow::Break(())
     }
 
-    #[cfg_attr(test, mutants::skip)] // Mutation testing requires a fine level of control over what is in the channel, which is too bothersome just for mutation testing.
     fn process_system_commands(&self) -> Option<bool> {
         let Some(ReadyWorkerState { commands, context, .. }) = &self.state else {
             return None;
@@ -288,7 +286,6 @@ impl Worker {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // If mutated, shutdown process will never finish - will hang.
     fn begin_shutdown(&mut self) {
         let Some(ReadyWorkerState {
             commands,
@@ -317,7 +314,6 @@ impl Worker {
 }
 
 impl Drop for Worker {
-    #[cfg_attr(test, mutants::skip)] // Worker-owned services must retire before the thread can finish shutdown.
     fn drop(&mut self) {
         if self.state.is_some() {
             self.begin_shutdown();
@@ -346,7 +342,7 @@ mod tests {
     use std::task::Waker;
     use std::thread;
 
-    use arty_executor::{ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, discard_task_panic_payload};
+    use arty_executor::{ShutdownCause, TaskCompletion, TaskPanicPayload, discard_task_panic_payload};
     use arty_io_core::{Cycle, Driver, DriverError, DriverOptions, IoContext};
     #[cfg(not(miri))]
     use events_once::BoxedSender;
@@ -365,7 +361,11 @@ mod tests {
     fn test_blocking_worker() -> (Arc<blocking::Worker>, Shutdown) {
         let shutdown = Shutdown::default();
         (
-            blocking::Worker::new(blocking::Pool::new(None), shutdown.clone(), blocking::PanicPolicy::Ignore),
+            blocking::Worker::new(
+                blocking::Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+                shutdown.clone(),
+                blocking::PanicPolicy::Ignore,
+            ),
             shutdown,
         )
     }
@@ -383,7 +383,7 @@ mod tests {
             F: IntoFuture<Output = R> + 'static,
             R: 'static,
         {
-            self.add(future, TaskOptions::default(), DiscardCompletion);
+            self.task(future).register(DiscardCompletion);
         }
     }
 

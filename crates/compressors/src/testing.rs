@@ -128,13 +128,11 @@ impl CompressionInternal for ProgressCompression {
     // No caller on this fixture path asks for the byte counters. They exist only
     // because the trait requires them.
     #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
     fn total_in(&self) -> u64 {
         0
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
     fn total_out(&self) -> u64 {
         0
     }
@@ -152,7 +150,6 @@ impl Compression for RejectsPush {
 impl CompressionInternal for RejectsPush {
     // If this fixture accepts input, it asks for input
     // endlessly instead. The mutant hangs rather than failing, so no verdict is available.
-    #[cfg_attr(test, mutants::skip)]
     fn push(&mut self, _input: BytesView) -> Result<()> {
         Err(Error::invalid_state("this fixture always rejects pushed input"))
     }
@@ -166,13 +163,11 @@ impl CompressionInternal for RejectsPush {
     // No caller on this fixture path asks for the byte counters. They exist only
     // because the trait requires them.
     #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
     fn total_in(&self) -> u64 {
         0
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    #[cfg_attr(test, mutants::skip)]
     fn total_out(&self) -> u64 {
         0
     }

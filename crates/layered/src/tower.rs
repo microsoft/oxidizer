@@ -82,7 +82,6 @@ where
     type Error = E;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    #[cfg_attr(test, mutants::skip)] // causes unkillable mutants
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Layered services do not use back-pressure, so they are always ready.
         Poll::Ready(Ok(()))

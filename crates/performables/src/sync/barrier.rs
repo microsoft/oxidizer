@@ -90,7 +90,6 @@ impl Barrier<Sync> {
     ///
     /// Panics if a previous internal panic poisoned the barrier state.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // Mutating barrier progress conditions turns tests into unbounded scheduler waits.
     pub fn wait(&self) -> BarrierWaitOutcome {
         if self.raw.parties == 1 {
             self.record(EventKind::BarrierAccess);

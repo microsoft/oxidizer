@@ -133,7 +133,6 @@ impl Service<HttpRequest> for Dispatch {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // causes test timeouts
 fn validate(filter: &RequestFilter, input: &HttpRequest) -> crate::Result<()> {
     // Require a scheme and authority.
     let (Some(scheme), Some(authority)) = (input.uri().scheme(), input.uri().authority()) else {

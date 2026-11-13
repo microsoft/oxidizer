@@ -155,7 +155,6 @@ impl Pool {
     // Answering `false` here is unobservable: every caller then takes the lock and reaches a
     // capacity check that a pool of zero fails anyway, handing back the same engine and keeping
     // the same nothing. Only the lock traffic differs, so no test can hold this to account.
-    #[cfg_attr(test, mutants::skip)]
     fn is_disabled(&self) -> bool {
         self.capacity() == 0
     }

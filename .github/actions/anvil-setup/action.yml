@@ -109,7 +109,7 @@ runs:
 
     # cargo-binstall keeps the cold bootstrap path fast.
     - name: Install cargo-binstall
-      uses: cargo-bins/cargo-binstall@v1.21.0 # pinned by tag: this release is an immutable release (GitHub locks the tag to a commit)
+      uses: cargo-bins/cargo-binstall@851112458b5f28a29e5bc14a690c3f283d9dcc6f # v1.26.2
 
     # cargo-spellcheck links libclang when cargo-binstall falls back to a source
     # build. Install it eagerly on Linux jobs whose selected setup group includes

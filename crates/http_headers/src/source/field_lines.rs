@@ -249,14 +249,7 @@ impl<'a> FieldLines<'a> {
                 _ => return Err(multiple()),
             },
             #[cfg(feature = "http")]
-            Repr::Http(values) => {
-                let mut lines = values.iter();
-                let first = lines.next().map(FieldValueRef::from);
-                if first.is_some() && lines.next().is_some() {
-                    return Err(multiple());
-                }
-                first
-            }
+            Repr::Http(values) => return self.exactly_one_http(values).map(FieldValueRef::from),
         };
         first.ok_or_else(|| DecodeError::new(self.name, DecodeErrorKind::MissingValue))
     }
@@ -294,17 +287,21 @@ impl<'a> FieldLines<'a> {
                 _ => Err(DecodeError::new(self.name, DecodeErrorKind::UnexpectedMultipleValues)),
             },
             #[cfg(feature = "http")]
-            Repr::Http(values) => {
-                let mut values = values.iter();
-                let first = values
-                    .next()
-                    .ok_or_else(|| DecodeError::new(self.name, DecodeErrorKind::MissingValue))?;
-                if values.next().is_some() {
-                    return Err(DecodeError::new(self.name, DecodeErrorKind::UnexpectedMultipleValues));
-                }
-                Ok(FieldValue::from(first))
-            }
+            Repr::Http(values) => self.exactly_one_http(values).map(FieldValue::from),
         }
+    }
+
+    #[cfg(feature = "http")]
+    #[inline]
+    fn exactly_one_http(&self, values: &http::header::GetAll<'a, http::HeaderValue>) -> Result<&'a http::HeaderValue, DecodeError> {
+        let mut values = values.iter();
+        let first = values
+            .next()
+            .ok_or_else(|| DecodeError::new(self.name, DecodeErrorKind::MissingValue))?;
+        if values.next().is_some() {
+            return Err(DecodeError::new(self.name, DecodeErrorKind::UnexpectedMultipleValues));
+        }
+        Ok(first)
     }
 
     /// Iterates the raw field lines in insertion order.

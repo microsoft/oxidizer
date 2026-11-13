@@ -3,16 +3,16 @@
 
 //! HTTP request filtering configuration.
 
-/// Controls which URI schemes the HTTP client is willing to send to.
+/// Controls which URI schemes the HTTP client can use.
 ///
-/// Defaults to [`RequestFilter::Https`]. The builder method typically includes an option
-/// to switch to [`RequestFilter::HttpAndHttps`].
+/// The default is [`RequestFilter::Https`]. A client builder can provide an option
+/// for [`RequestFilter::HttpAndHttps`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum RequestFilter {
-    /// Only `https://` requests are permitted.
+    /// Permits only `https://` requests.
     #[default]
     Https,
-    /// Both `http://` and `https://` requests are permitted.
+    /// Permits `http://` and `https://` requests.
     HttpAndHttps,
 }
 

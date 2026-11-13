@@ -267,7 +267,6 @@ impl<In, Out> AbandonedGuard<In, Out> {
 }
 
 impl<In, Out> Drop for AbandonedGuard<In, Out> {
-    #[cfg_attr(test, mutants::skip)] // The thread::panicking() guard only triggers during unwind, which is impractical to exercise in a unit test.
     fn drop(&mut self) {
         // Skip abandonment recording while the thread is already panicking: recording during an
         // unwind is meaningless. `exit` can touch a lock that the same panic poisoned.

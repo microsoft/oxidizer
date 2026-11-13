@@ -6,43 +6,58 @@
 
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
-# Affected tier. Smoke-only fuzz pass via [bolero](https://crates.io/crates/bolero):
-# each fuzz target gets a 60-second libfuzzer run, just enough to
-# surface obvious crashes/hangs introduced by a PR without paying for
-# a long fuzzing campaign.
+# Fuzz passes via [bolero](https://crates.io/crates/bolero):
+# the default PR campaign uses a fixed run count and seed. The scheduled
+# campaign uses a time budget without specifying a seed.
 #
 # Linux-only: cargo-bolero's libfuzzer engine (and its bolero-afl
 # build dependency) only builds on Linux, so the recipe self-skips on
-# non-Linux hosts -- the pr-runtime-analysis Windows/ARM legs treat
-# bolero as a no-op rather than a failure. This matches oxidizer's
-# reference workflow, whose bolero job runs exclusively on ubuntu.
+# non-Linux hosts -- local non-Linux invocations treat bolero as a
+# no-op rather than a failure. CI schedules pr-fuzzing on Linux only.
+# This matches oxidizer's reference workflow, whose bolero job runs
+# exclusively on ubuntu.
 # Crates that ship bolero harnesses still get them compiled and
 # exercised as ordinary tests by anvil-llvm-cov on every leg; the
 # libfuzzer campaign is the Linux-only extra.
 #
-# Target discovery is `cargo +<nightly> bolero list --profile release` over the affected packages.
+# Discovery and execution use the pinned nightly's host target and release profile.
+# This avoids inheriting a prebuilt cargo-bolero binary's musl build target.
 # Crates with no bolero harness print zero targets and the recipe
 # no-ops. The libfuzzer engine requires nightly, so the test
-# invocation uses the pinned rust_nightly. Adopters who want longer
-# campaigns wire a separate scheduled job; anvil deliberately does
-# not ship a long-form fuzz tier (the failure surface is too
-# repo-specific to standardize).
+# invocation uses the pinned rust_nightly.
+# Scheduled-test selects the scheduled campaign and full-workspace scope.
 
-# Run Bolero tests for affected workspace packages.
+# Run Bolero tests with the PR or scheduled campaign.
 [group("anvil")]
 [script("pwsh", "-NoProfile")]
-anvil-bolero: anvil-bolero-validate-prereqs anvil-impact
+anvil-bolero campaign="pr":
     $ErrorActionPreference = 'Stop'
-    $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
-    $impactExit = $LASTEXITCODE
-    if ($impactExit -ne 0) { exit $impactExit }
+    $campaign = '{{ replace(campaign, "'", "''") }}'
+    $campaignArgs = switch ($campaign) {
+        'pr' { @('--runs', '30000', '-S', '2027') }
+        'scheduled' { @('-T', '90s') }
+        default {
+            [Console]::Error.WriteLine("anvil-bolero: unknown campaign '$campaign'; expected 'pr' or 'scheduled'.")
+            exit 2
+        }
+    }
     if (-not $IsLinux) {
         Write-Host 'anvil-bolero: non-Linux host -- skipping (cargo-bolero/libfuzzer is Linux-only; harnesses still run under anvil-llvm-cov)'
         exit 0
     }
+    & "{{ just_executable() }}" anvil-bolero-validate-prereqs anvil-impact
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
+    $impactExit = $LASTEXITCODE
+    if ($impactExit -ne 0) { exit $impactExit }
     if ($include -eq '--skip') {
         Write-Host 'anvil-bolero: no affected packages; skipping'
         exit 0
+    }
+    $hostTarget = & rustc '+{{ rust_nightly }}' --print host-tuple
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error 'anvil-bolero: pinned compiler host-target discovery failed'
+        exit $LASTEXITCODE
     }
     $packageSpecs = [System.Collections.Generic.List[string]]::new()
     if ($include -and $include -ne '--workspace') {
@@ -80,7 +95,7 @@ anvil-bolero: anvil-bolero-validate-prereqs anvil-impact
     # registry dependency shares the member's name and version.
     $targets = [System.Collections.Generic.List[object]]::new()
     foreach ($packageSpec in $packageSpecs) {
-        $targetsJson = & cargo {{_anvil_stable_toolchain_args}} each --package $packageSpec '--' cargo '+{{ rust_nightly }}' bolero list --profile release --package '{cargo-spec}'
+        $targetsJson = & cargo {{_anvil_stable_toolchain_args}} each --package $packageSpec '--' cargo '+{{ rust_nightly }}' bolero list --profile release --target $hostTarget --package '{cargo-spec}'
         if ($LASTEXITCODE -ne 0) {
             Write-Error "anvil-bolero: target discovery failed for package '$packageSpec'"
             exit $LASTEXITCODE
@@ -108,7 +123,7 @@ anvil-bolero: anvil-bolero-validate-prereqs anvil-impact
             exit 1
         }
         Write-Host "anvil-bolero: $($t.anvilPackageSpec)::${testName}"
-        & cargo {{_anvil_stable_toolchain_args}} each --package $t.anvilPackageSpec '--' cargo '+{{ rust_nightly }}' bolero test --profile release --engine libfuzzer -T 60s --package '{cargo-spec}' $testName
+        & cargo {{_anvil_stable_toolchain_args}} each --package $t.anvilPackageSpec '--' cargo '+{{ rust_nightly }}' bolero test --profile release --target $hostTarget --engine libfuzzer @campaignArgs --package '{cargo-spec}' $testName
         if ($LASTEXITCODE -ne 0) { $failed = $true }
     }
     if ($failed) { exit 1 }

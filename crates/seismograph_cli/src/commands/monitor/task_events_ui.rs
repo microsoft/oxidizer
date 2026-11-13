@@ -14,7 +14,6 @@ use super::super::mouse::{ListTarget, MouseRows};
 use super::super::task_events::{TaskEvent, TaskEventSummary, TaskEventsSnapshot, TaskObject, TaskOperation};
 use super::{draw_empty_panel_with_message, format_count};
 
-#[cfg_attr(test, mutants::skip)] // Panel selection and clipping are terminal presentation glue.
 pub(super) fn draw(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -57,7 +56,6 @@ pub(super) fn draw(
     draw_stack(frame, stack, occurrence, view);
 }
 
-#[cfg_attr(test, mutants::skip)] // Responsive panel splits are terminal layout policy.
 fn areas(area: Rect, focus: TaskEventsFocus) -> [Rect; 3] {
     if area.width < 110 {
         return match focus {
@@ -71,7 +69,6 @@ fn areas(area: Rect, focus: TaskEventsFocus) -> [Rect; 3] {
     Layout::horizontal([Constraint::Length(32), Constraint::Percentage(40), Constraint::Min(0)]).areas(area)
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn block(title: &str, focused: bool) -> Block<'_> {
     Block::default()
         .borders(Borders::ALL)
@@ -79,7 +76,6 @@ fn block(title: &str, focused: bool) -> Block<'_> {
         .border_style(Style::default().fg(if focused { Color::Cyan } else { Color::DarkGray }))
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn selected_style(focused: bool) -> Style {
     if focused {
         Style::default().fg(Color::Black).bg(Color::Cyan)
@@ -88,7 +84,6 @@ fn selected_style(focused: bool) -> Style {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Table paging and highlighting are terminal presentation details.
 fn draw_operations(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -135,7 +130,6 @@ fn draw_operations(
     );
 }
 
-#[cfg_attr(test, mutants::skip)] // Table paging and highlighting are terminal presentation details.
 fn draw_occurrences(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -181,7 +175,6 @@ fn draw_occurrences(
     mouse.register(area, 1, first.saturating_add(state.offset()), count, ListTarget::TaskOccurrences);
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn draw_stack(frame: &mut ratatui::Frame<'_>, area: Rect, occurrence: Option<(&TaskObject, &TaskEvent)>, view: TaskEventsViewState) {
     if area.is_empty() {
         return;

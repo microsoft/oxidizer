@@ -82,7 +82,6 @@ impl<A: Allocator + Clone> Chunk<A> {
 
     #[inline]
     // This is the exact fixed header size for either feature layout.
-    #[cfg_attr(test, mutants::skip)]
     pub(in crate::internal) const fn header_size() -> usize {
         // Under `stats`, `wasted_at_retire` is the last fixed-size field;
         // otherwise it's `next`. The `[UnsafeCell<u8>]` tail has align 1 and
@@ -98,7 +97,6 @@ impl<A: Allocator + Clone> Chunk<A> {
     }
 
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     const fn struct_align() -> usize {
         let base = Self::value_align();
         if base >= CHUNK_ALIGN { base } else { CHUNK_ALIGN }
@@ -107,7 +105,6 @@ impl<A: Allocator + Clone> Chunk<A> {
     /// The chunk type's own alignment, used to round allocation size. This is
     /// separate from [`Self::struct_align`], the base-address alignment.
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     const fn value_align() -> usize {
         let a = mem::align_of::<Arc<A>>();
         let b = mem::align_of::<usize>();
@@ -118,7 +115,6 @@ impl<A: Allocator + Clone> Chunk<A> {
     ///
     /// Uses [`NonNull::byte_sub`] to preserve provenance.
     #[inline]
-    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn header_from_value_ptr(value: NonNull<u8>) -> NonNull<u8> {
         let offset_within_chunk = (value.as_ptr() as usize) & (CHUNK_ALIGN - 1);
         // SAFETY: the smart-pointer invariant guarantees `value` lies
@@ -147,7 +143,6 @@ impl<A: Allocator + Clone> Chunk<A> {
     }
 
     // A chunk allocation must remain within pointer-offset limits.
-    #[cfg_attr(test, mutants::skip)]
     #[expect(
         clippy::cast_ptr_alignment,
         reason = "alloc_chunk_raw returns storage aligned to struct_align(), which is at least Chunk's value alignment"
@@ -365,7 +360,6 @@ impl<A: Allocator + Clone> Chunk<A> {
     /// Returns the chunk's payload capacity in bytes (i.e. `data.len()`).
     #[inline]
     // Returning an incorrect capacity can make allocation retries infinite.
-    #[cfg_attr(test, mutants::skip)]
     pub(in crate::internal) fn capacity(&self) -> usize {
         self.capacity
     }
@@ -456,6 +450,29 @@ mod tests {
     use allocator_api2::alloc::Global;
 
     use super::*;
+
+    #[test]
+    fn a_mutator_can_outlive_its_provider_and_release_the_backing_allocator() {
+        use crate::internal::chunk_mutator::ChunkMutator;
+        use crate::internal::chunk_provider::ChunkProviderConfig;
+        use crate::internal::constants::SizeClass;
+
+        let provider = ChunkProvider::new(Global, ChunkProviderConfig::default());
+        let provider_lifetime = Arc::downgrade(&provider);
+        let chunk = provider.acquire(16, SizeClass::ZERO).unwrap();
+        // SAFETY: acquire returns a live chunk whose owned reference is held here.
+        let allocator_lifetime = unsafe { Arc::downgrade(&(*chunk.as_ptr()).allocator) };
+        // SAFETY: The mutator takes that reference without copying or releasing it.
+        let mutator = unsafe { ChunkMutator::from_owned(chunk) };
+
+        drop(provider);
+        assert!(provider_lifetime.upgrade().is_none());
+        assert!(allocator_lifetime.upgrade().is_some());
+        assert!(mutator.try_alloc_bytes(8).is_some());
+
+        drop(mutator);
+        assert!(allocator_lifetime.upgrade().is_none());
+    }
 
     /// `header_size` is `offset_of!(<last field>) + size_of::<<last field>>()`.
     /// Every fixed header field is pointer-sized and pointer-aligned, so the

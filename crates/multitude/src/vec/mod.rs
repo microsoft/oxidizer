@@ -125,7 +125,6 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// for requests below the current capacity.
     #[cold]
     #[inline(never)]
-    #[cfg_attr(test, mutants::skip)] // `>` vs `>=` observationally equivalent at old_cap == 0
     fn try_grow_to(&mut self, new_cap: usize) -> Result<(), AllocError> {
         if const { mem::size_of::<T>() == 0 } {
             return Ok(());

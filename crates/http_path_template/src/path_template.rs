@@ -315,7 +315,6 @@ fn split_and_parse_segments(body: &str, extended: bool) -> Result<Box<[Segment<'
 /// Counts the depth-0 segments in `body` to pre-size the output vector. An
 /// incorrect count only affects whether that vector reallocates, never the
 /// parsed result.
-#[cfg_attr(test, mutants::skip)]
 fn segment_count_hint(body: &str) -> usize {
     let mut depth = 0_usize;
     let mut count = 1_usize;

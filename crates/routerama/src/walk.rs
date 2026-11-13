@@ -23,8 +23,8 @@ impl<'p> Walk<'_, 'p> {
     /// Returns the first matching leaf without recursive trie descent.
     // Static/dynamic differential and structured-path tests exercise traversal;
     // many local rewrites are equivalent because pending edges backtrack.
-    #[cfg_attr(test, mutants::skip)]
-    pub(crate) fn descend_iterative<const VERBS: bool>(&self, mut node: &'p RtNode, mut depth: usize) -> Option<&'p Leaf> {
+    pub(crate) fn descend_iterative<const VERBS: bool>(&self, mut node: &'p RtNode) -> Option<&'p Leaf> {
+        let mut depth = 0;
         let mut pending: SmallVec<[WalkAction<'p>; 4]> = SmallVec::new();
         let count = self.path.count();
         loop {
@@ -94,9 +94,11 @@ impl<'p> Walk<'_, 'p> {
             }
 
             if let Some(single) = single {
-                if count >= depth && !node.rest.is_empty() {
-                    pending.push(WalkAction::Leaves(&node.rest));
-                }
+                debug_assert!(
+                    count >= depth && !node.rest.is_empty(),
+                    "a matching single edge has a segment, and single-only nodes without rest edges take the fast path above"
+                );
+                pending.push(WalkAction::Leaves(&node.rest));
                 node = single;
                 depth += 1;
                 continue;

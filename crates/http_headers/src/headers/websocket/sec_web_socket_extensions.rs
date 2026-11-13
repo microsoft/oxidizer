@@ -509,9 +509,7 @@ impl SecWebSocketExtensionsBuilder {
     }
 
     fn record_error(&mut self, kind: DecodeErrorKind) {
-        if self.pending_error.is_none() {
-            self.pending_error = Some(kind);
-        }
+        self.pending_error.get_or_insert(kind);
     }
 }
 

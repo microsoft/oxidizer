@@ -53,7 +53,6 @@ gungraun = { workspace = true, features = ["default"] }
 internity_macros = { path = "../internity_macros" }
 lasso = { workspace = true, features = ["multi-threaded"] }
 metabench = { path = "../metabench" }
-mutants = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true, features = ["alloc"] }
 serde_json = { workspace = true, features = ["std"] }

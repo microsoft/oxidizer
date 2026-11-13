@@ -156,7 +156,6 @@ where
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Removing this guard makes the black-box blocking-pool regression deadlock.
 fn assert_not_current_blocking_pool(blocking_pool: Option<&PoolIdentity>) {
     assert!(
         !blocking_pool.is_some_and(BlockingLocalWorker::is_current_pool),

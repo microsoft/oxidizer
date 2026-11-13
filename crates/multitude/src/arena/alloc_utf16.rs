@@ -392,7 +392,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// in-place-transcoded `u16`s, and returns a thin `NonNull<u16>` to
     /// the first payload element.
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // size-hint mutation ⇒ refill spin (OOM)
     fn impl_alloc_utf16_prefixed_from_str(&self, s: &str) -> Result<NonNull<u16>, AllocError> {
         // Precompute the exact UTF-16 length; it cannot exceed `s.len()`.
         let exact = s
@@ -450,7 +449,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// (before adoption). Split out so the single `S::adopt` lives in
     /// [`Self::impl_alloc_utf16_prefixed_from_str_arc`].
     #[inline(always)]
-    #[cfg_attr(test, mutants::skip)] // size-hint mutation ⇒ refill spin (OOM)
     fn alloc_utf16_prefixed_from_str_raw<S: Strong>(&self, s: &str) -> Result<NonNull<u16>, AllocError> {
         // The exact UTF-16 length cannot exceed `s.len()`.
         let exact = s

@@ -191,7 +191,7 @@ impl ErrorLabel {
         self.0
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))] // it includes an unreachable variant and it's fully covered by tests
+    #[cfg_attr(ohno_has_coverage_attribute, coverage(off))] // it includes an unreachable variant and it's fully covered by tests
     const fn from_io(kind: ErrorKind) -> Self {
         match kind {
             ErrorKind::NotFound => Self::from_static("not_found"),
@@ -298,7 +298,6 @@ impl From<ErrorKind> for ErrorLabel {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // causes test timeout
 const fn is_valid_label_char(b: u8) -> bool {
     match b {
         b'_' | b'.' => true,
@@ -307,7 +306,6 @@ const fn is_valid_label_char(b: u8) -> bool {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // causes test timeout
 const fn is_valid_label(s: &str) -> bool {
     let bytes = s.as_bytes();
     let mut i = 0;
@@ -322,7 +320,7 @@ const fn is_valid_label(s: &str) -> bool {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(ohno_has_coverage_attribute, coverage(off))]
 mod tests {
     use testing_aids::ALL_ERROR_KINDS;
 

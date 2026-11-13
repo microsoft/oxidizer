@@ -177,7 +177,6 @@ fn scan_segments_scalar(body: &str, starts: &mut [usize], ends: &mut [usize]) ->
     reason = "the SSE2 separator search groups intrinsics that share one safety precondition and operates on i8 lanes by design"
 )]
 // SIMD correctness is covered differentially by `scan_segments_simd_matches_scalar`.
-#[cfg_attr(test, mutants::skip)]
 fn scan_segments_sse2(body: &str, starts: &mut [usize], ends: &mut [usize]) -> ScanResult {
     use core::arch::x86_64::{_mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_or_si128, _mm_set1_epi8};
 
@@ -285,7 +284,6 @@ fn scan_segments_sse2(body: &str, starts: &mut [usize], ends: &mut [usize]) -> S
     reason = "the NEON separator search groups intrinsics that share one safety precondition"
 )]
 // SIMD correctness is covered differentially by `scan_segments_simd_matches_scalar`.
-#[cfg_attr(test, mutants::skip)]
 fn scan_segments_neon(body: &str, starts: &mut [usize], ends: &mut [usize]) -> ScanResult {
     use core::arch::aarch64::{
         vceqq_u8, vdupq_n_u8, vget_lane_u64, vld1q_u8, vorrq_u8, vreinterpret_u64_u8, vreinterpretq_u16_u8, vshrn_n_u16,
