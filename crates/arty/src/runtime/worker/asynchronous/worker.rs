@@ -505,7 +505,7 @@ mod tests {
         let thread = ThreadBuilder::default().build(thread::current().id());
         let endpoint =
             crate::runtime::testing::worker_endpoint(command_tx, Signal::waker(&signal), thread.clone(), Arc::clone(&blocking_worker));
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown, Vec::new()));
         let io_runtime = arty_io_host::IoRuntime::new(observed::Sink::noop());
         let io = crate::io::Io::new(io_runtime.clone(), dispatcher.clone(), thread.clone());
         if !LocalWorker::is_current() {

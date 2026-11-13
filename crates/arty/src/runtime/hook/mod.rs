@@ -1,7 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Runtime hooks with worker-local callback data.
+//! Callbacks for runtime events.
+//!
+//! This module provides these hooks:
+//!
+//! - [`WorkerInit`] runs once on each async worker after the worker initializes.
+//!   It also runs on workers that start after registration.
+//! - [`Panic`] runs when Arty contains a panic from an async task factory or
+//!   task poll. The callback can stop the runtime or keep it running.
 //!
 //! Arty passes each callback a mutable hook and shared callback data. Arty
 //! clones the data for each worker and relocates it before the callback can run.
@@ -9,8 +16,9 @@
 //! [`ThreadAware`] relocation.
 //!
 //! Register hooks before startup with [`RuntimeBuilder::on`]. Add hooks after
-//! startup with [`RuntimeControl::on`]. Each worker stores one collection for
-//! each event. Arty invokes callbacks in registration order.
+//! startup with [`RuntimeControl::on`]. Arty invokes callbacks in registration
+//! order. Before startup completes, each initial worker runs its [`WorkerInit`]
+//! callbacks from the builder.
 //!
 //! Arty does not catch a panic from a hook callback. You must make sure that
 //! every hook callback completes without a panic.
@@ -32,12 +40,14 @@ mod hook_fn;
 mod local_hook;
 mod panic;
 mod registry;
+mod worker_init;
 
 pub(crate) use hook_fn::ErasedHookFn;
 pub use hook_fn::HookFn;
 pub(crate) use local_hook::{LocalHook, LocalHookGuard};
 pub use panic::Panic;
 pub(crate) use registry::{HookRegistration, registration};
+pub use worker_init::WorkerInit;
 
 /// Marks an event that can be registered as a runtime hook.
 ///

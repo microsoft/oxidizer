@@ -13,9 +13,78 @@ use std::thread::ThreadId;
 use std::time::Duration;
 
 use arty::core::{Thread, ThreadAware};
-use arty::runtime::hook::{HookFn, Panic};
+use arty::runtime::hook::{HookFn, Panic, WorkerInit};
 use arty::runtime::{Runtime, WorkersPolicy};
+use arty::task::Context;
 use support::JoinHandleExt as _;
+
+#[derive(Clone)]
+struct WorkerInitProbe {
+    destination: Option<ThreadId>,
+    observed: mpsc::Sender<WorkerInitObservation>,
+}
+
+impl ThreadAware for WorkerInitProbe {
+    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
+        self.destination = Some(destination.id());
+    }
+}
+
+struct WorkerInitObservation {
+    callback_thread: ThreadId,
+    event_thread: ThreadId,
+    relocated_thread: ThreadId,
+}
+
+#[test]
+fn worker_init_runs_once_per_worker() {
+    let (observed, observations) = mpsc::channel();
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(2))
+        .on(HookFn::<WorkerInit, _>::new(
+            WorkerInitProbe {
+                destination: None,
+                observed,
+            },
+            |event, data| {
+                data.observed
+                    .send(WorkerInitObservation {
+                        callback_thread: std::thread::current().id(),
+                        event_thread: event.thread().id(),
+                        relocated_thread: data.destination.unwrap(),
+                    })
+                    .unwrap();
+            },
+        ))
+        .build()
+        .unwrap();
+
+    let observations = (0..2).map(|_| observations.try_recv().unwrap()).collect::<Vec<_>>();
+    assert_eq!(observations.len(), 2);
+    assert_ne!(observations[0].event_thread, observations[1].event_thread);
+    for observation in observations {
+        assert_eq!(observation.callback_thread, observation.event_thread);
+        assert_eq!(observation.relocated_thread, observation.event_thread);
+    }
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn builder_retains_worker_init_data_until_shutdown() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let lifetime = Arc::downgrade(&calls);
+    let runtime = Runtime::builder()
+        .workers(WorkersPolicy::exactly(2))
+        .on(HookFn::<WorkerInit, _>::new(PanicCount(calls), |_event, data| {
+            data.0.fetch_add(1, Ordering::SeqCst);
+        }))
+        .build()
+        .unwrap();
+
+    assert_eq!(lifetime.upgrade().unwrap().load(Ordering::SeqCst), 2);
+    runtime.stop().unwrap();
+    assert!(lifetime.upgrade().is_none());
+}
 
 #[derive(Clone)]
 struct SharedLog(Arc<Mutex<Vec<&'static str>>>);
@@ -359,6 +428,74 @@ fn panic_callbacks_share_one_borrowed_event() {
     assert_eq!(addresses[0], addresses[1]);
     drop(addresses);
     runtime.stop().unwrap();
+}
+
+#[test]
+fn control_worker_init_runs_once_on_every_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let (control, workers, scheduler) = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            (
+                cx.control().clone(),
+                cx.control().workers().into_iter().cloned().collect::<Vec<_>>(),
+                cx.scheduler().clone(),
+            )
+        })
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    control.on(HookFn::<WorkerInit, _>::new(PanicCount(Arc::clone(&calls)), |_event, data| {
+        data.0.fetch_add(1, Ordering::SeqCst);
+    }));
+    for worker in workers {
+        scheduler.spawn_at(&worker, (), |()| async {}).join().unwrap();
+    }
+
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    runtime.stop().unwrap();
+}
+
+#[derive(Clone)]
+struct RetainedContext {
+    context: Context,
+    _lifetime: Arc<()>,
+}
+
+impl Drop for RetainedContext {
+    fn drop(&mut self) {
+        self.context.control().on(HookFn::<WorkerInit, _>::new((), |_event, ()| {}));
+    }
+}
+
+impl ThreadAware for RetainedContext {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        self.context.relocate(source, destination);
+    }
+}
+
+#[test]
+fn retained_worker_init_data_is_released_during_shutdown() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let lifetime = Arc::new(());
+    let weak = Arc::downgrade(&lifetime);
+
+    runtime
+        .scheduler()
+        .block_on(async move |cx| {
+            cx.control().on(HookFn::<WorkerInit, _>::new(
+                RetainedContext {
+                    context: cx.clone(),
+                    _lifetime: lifetime,
+                },
+                |_event, _data| {},
+            ));
+        })
+        .unwrap();
+
+    assert!(weak.upgrade().is_some());
+    runtime.stop().unwrap();
+    assert!(weak.upgrade().is_none());
 }
 
 #[test]

@@ -289,7 +289,7 @@ mod tests {
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
         let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new()));
 
         report_failure(&Err(Box::new("worker panic")), &dispatcher);
 
@@ -303,7 +303,7 @@ mod tests {
         let current = ThreadBuilder::default().build(thread::current().id());
         let blocking_worker = blocking::Worker::new(blocking::Pool::new(RuntimeName::default(), None, None), shutdown.clone());
         let endpoint = crate::runtime::testing::worker_endpoint(commands, Waker::noop().clone(), current, blocking_worker);
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone()));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(NonEmpty::new(endpoint), shutdown.clone(), Vec::new()));
 
         report_failure(&Ok(()), &dispatcher);
 

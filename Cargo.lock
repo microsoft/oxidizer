@@ -338,9 +338,6 @@ version = "0.2.1"
 dependencies = [
  "arty",
  "derive_more",
- "futures",
- "ohno 0.5.4",
- "performables",
  "static_assertions",
  "tokio",
 ]
