@@ -192,13 +192,13 @@ impl ThreadEntry {
     }
 }
 
-// #[gamma::skip(parameter.default_shadow, reason = "The configured stack size is forwarded to std::thread::Builder, but tests cannot safely observe the allocated stack size.")]
 fn spawn_thread(name: &str, stack_size: usize, task: impl FnOnce() + Send + 'static) -> JoinHandle<()> {
     thread::Builder::new()
         .name(name.to_string())
         .stack_size(stack_size)
         .spawn(task)
-        // Fallible construction and cleanup after partial startup are deferred.
+        // Fallible construction and partial-startup cleanup are intentionally
+        // deferred: https://github.com/microsoft/oxidizer/pull/785#discussion_r4183811801
         .expect("failed to spawn thread")
 }
 
