@@ -406,13 +406,46 @@ fn worker_literals_are_not_limited_to_the_macro_hosts_pointer_width() {
         quote!(340282366920938463463374607431768211456),
         TokenStream::from(forwarded),
     ] {
-        let expansion = main(
-            quote!(workers = #workers),
-            quote! {
-                async fn run(cx: Context) {}
-            },
-        );
-        assert!(!expansion.to_string().contains("compile_error"));
+        let input = quote! {
+            async fn run(cx: Context) {}
+        };
+        let expansion = main(quote!(workers = #workers), input.clone());
+        let expected = quote! {
+            fn run() {
+                let __arty_runtime = ::arty::runtime::Runtime::builder()
+                    .workers(::arty::runtime::WorkersPolicy::exactly(#workers))
+                    .build()
+                    .expect("failed to create the runtime for the entry point");
+                let __arty_result = __arty_runtime
+                    .scheduler()
+                    .block_on(async move |cx: Context| {});
+                let __arty_shutdown = __arty_runtime.stop();
+                __arty_result
+                    .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                    .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+            }
+        };
+        assert_eq!(expansion.to_string(), expected.to_string(), "workers = {workers}");
+
+        let expansion = test(quote!(workers = #workers), input);
+        let expected = quote! {
+            #[::core::prelude::v1::test]
+            fn run() {
+                let __arty_runtime = ::arty::runtime::Runtime::builder()
+                    .workers(::arty::runtime::WorkersPolicy::exactly(#workers))
+                    .monitor(::arty::runtime::MonitorPolicy::disabled())
+                    .build()
+                    .expect("failed to create the runtime for the entry point");
+                let __arty_result = __arty_runtime
+                    .scheduler()
+                    .block_on(async move |cx: Context| {});
+                let __arty_shutdown = __arty_runtime.stop();
+                __arty_result
+                    .and_then(|__arty_value| __arty_shutdown.map(|()| __arty_value))
+                    .unwrap_or_else(|error| ::arty::runtime::__private::resume_error(error))
+            }
+        };
+        assert_eq!(expansion.to_string(), expected.to_string(), "workers = {workers}");
     }
 }
 
@@ -453,6 +486,14 @@ fn worker_policy_unwraps_nested_expression_groups() {
 
 #[test]
 fn invalid_worker_counts_report_errors() {
+    let input = quote! {
+        async fn run(cx: Context) {}
+    };
+    let message = "`workers` must be a nonnegative integer literal, optionally suffixed with `usize`, or `all`; use explicit runtime construction for expressions or other processor policies";
+    let expected = quote! {
+        #input
+        ::core::compile_error! { #message }
+    };
     for workers in [
         quote!(-0),
         quote!(-1),
@@ -475,15 +516,8 @@ fn invalid_worker_counts_report_errors() {
         quote!(WorkersPolicy::all()),
     ] {
         for expand in [main, test] {
-            let expansion = expand(
-                quote!(workers = #workers),
-                quote! {
-                    async fn run(cx: Context) {}
-                },
-            )
-            .to_string();
-            assert!(expansion.contains("compile_error"), "workers = {workers}: {expansion}");
-            assert!(expansion.contains("nonnegative integer literal"), "{expansion}");
+            let expansion = expand(quote!(workers = #workers), input.clone());
+            assert_eq!(expansion.to_string(), expected.to_string(), "workers = {workers}");
         }
     }
 }
@@ -575,7 +609,17 @@ fn duplicate_panic_settings_report_errors() {
 
 #[test]
 fn removed_configuration_options_are_rejected() {
-    for args in [quote!(builder = configure()), quote!(runtime_path = ::renamed)] {
+    for (args, message) in [
+        (
+            quote!(builder = configure()),
+            "Unknown field: `builder`. Available values: `monitor`, `panic`, `workers`",
+        ),
+        (
+            quote!(runtime_path = ::renamed),
+            "Unknown field: `runtime_path`. Available values: `monitor`, `panic`, `workers`",
+        ),
+    ] {
+        let expected = quote!(::core::compile_error! { #message });
         for expand in [main, test] {
             let expansion = expand(
                 args.clone(),
@@ -584,45 +628,63 @@ fn removed_configuration_options_are_rejected() {
                 },
             )
             .to_string();
-            assert!(expansion.contains("compile_error"), "{expansion}");
-            assert!(expansion.contains("Unknown field"), "{expansion}");
+            assert_eq!(expansion, expected.to_string(), "args = {args}");
         }
     }
 }
 
 #[test]
 fn injected_clock_requires_a_named_owned_second_test_parameter() {
-    for input in [
-        quote!(
-            async fn run(cx: Context, _: ClockControl) {}
+    for (input, test_message) in [
+        (
+            quote!(
+                async fn run(cx: Context, _: ClockControl) {}
+            ),
+            "argument must have an identifier",
         ),
-        quote!(
-            async fn run(cx: Context, control: &ClockControl) {}
+        (
+            quote!(
+                async fn run(cx: Context, control: &ClockControl) {}
+            ),
+            "unexpected arguments",
         ),
-        quote!(
-            async fn run(cx: Context, control: ClockControl, extra: ClockControl) {}
+        (
+            quote!(
+                async fn run(cx: Context, control: ClockControl, extra: ClockControl) {}
+            ),
+            "unexpected arguments",
         ),
-        quote!(
-            async fn run(cx: Context, cx: ClockControl) {}
+        (
+            quote!(
+                async fn run(cx: Context, cx: ClockControl) {}
+            ),
+            "arguments must have distinct identifiers",
         ),
-        quote!(
-            async fn run(cx: Context, r#cx: ClockControl) {}
+        (
+            quote!(
+                async fn run(cx: Context, r#cx: ClockControl) {}
+            ),
+            "arguments must have distinct identifiers",
         ),
     ] {
-        for expand in [main, test] {
-            let expansion = expand(TokenStream::new(), input.clone()).to_string();
-            assert!(expansion.starts_with(&input.to_string()));
-            assert!(expansion.contains("compile_error"), "{expansion}");
+        for (expand, message) in [main, test].into_iter().zip(["unexpected arguments", test_message]) {
+            let expansion = expand(TokenStream::new(), input.clone());
+            let expected = quote! {
+                #input
+                ::core::compile_error! { #message }
+            };
+            assert_eq!(expansion.to_string(), expected.to_string(), "input = {input}");
         }
     }
-    let expansion = main(
-        TokenStream::new(),
-        quote!(
-            async fn run(cx: Context, control: ClockControl) {}
-        ),
-    )
-    .to_string();
-    assert!(expansion.contains("unexpected arguments"));
+    let input = quote!(
+        async fn run(cx: Context, control: ClockControl) {}
+    );
+    let expansion = main(TokenStream::new(), input.clone());
+    let expected = quote! {
+        #input
+        ::core::compile_error! { "unexpected arguments" }
+    };
+    assert_eq!(expansion.to_string(), expected.to_string());
 }
 
 #[test]
@@ -632,13 +694,13 @@ fn invalid_signatures_preserve_input_and_report_errors() {
             quote!(
                 fn run(cx: Context) {}
             ),
-            "function must be async",
+            "function must be async to use the attribute",
         ),
         (
             quote!(
                 async fn run() {}
             ),
-            "function must take an Arty task context argument",
+            "function must take an Arty task context argument, such as cx: arty::task::Context",
         ),
         (
             quote!(
@@ -650,7 +712,7 @@ fn invalid_signatures_preserve_input_and_report_errors() {
             quote!(
                 async fn run(cx: &Context) {}
             ),
-            "arty::task::Context by value",
+            "the first parameter must take arty::task::Context by value, such as cx: arty::task::Context",
         ),
         (
             quote!(
@@ -660,38 +722,47 @@ fn invalid_signatures_preserve_input_and_report_errors() {
         ),
     ];
     for (input, message) in cases {
+        let expected = quote! {
+            #input
+            ::core::compile_error! { #message }
+        };
         for expand in [main, test] {
-            let expansion = expand(TokenStream::new(), input.clone()).to_string();
-            assert!(expansion.starts_with(&input.to_string()));
-            assert!(expansion.contains(message), "{expansion}");
-            assert!(expansion.contains("compile_error"));
+            let expansion = expand(TokenStream::new(), input.clone());
+            assert_eq!(expansion.to_string(), expected.to_string(), "input = {input}");
         }
     }
 }
 
 #[test]
 fn malformed_items_and_arguments_report_errors() {
-    for (args, input) in [
-        (TokenStream::new(), quote!(not a function)),
+    for (args, input, message) in [
+        (TokenStream::new(), quote!(not a function), "expected `fn`"),
         (
             quote!(@),
             quote!(
                 async fn run(cx: Context) {}
             ),
+            "expected identifier or literal",
         ),
         (
             quote!(unknown = 1),
             quote!(
                 async fn run(cx: Context) {}
             ),
+            "Unknown field: `unknown`. Available values: `monitor`, `panic`, `workers`",
         ),
         (
             quote!(workers = 1, workers = 2),
             quote!(
                 async fn run(cx: Context) {}
             ),
+            "Duplicate field `workers`",
         ),
     ] {
-        assert!(main(args, input).to_string().contains("compile_error"));
+        let expected = quote!(::core::compile_error! { #message });
+        for expand in [main, test] {
+            let expansion = expand(args.clone(), input.clone());
+            assert_eq!(expansion.to_string(), expected.to_string(), "args = {args}, input = {input}");
+        }
     }
 }
