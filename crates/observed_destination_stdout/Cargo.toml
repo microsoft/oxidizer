@@ -37,6 +37,7 @@ all-features = true
 bon = { workspace = true }
 derive_more = { workspace = true, features = ["debug"] }
 log = { workspace = true }
+scopeguard = { workspace = true }
 # ox-sdk
 observed_destination_core = { workspace = true }
 opentelemetry = { workspace = true, features = ["logs"] }
