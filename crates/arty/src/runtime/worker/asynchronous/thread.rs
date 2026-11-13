@@ -197,8 +197,7 @@ fn spawn_thread(name: &str, stack_size: usize, task: impl FnOnce() + Send + 'sta
         .name(name.to_string())
         .stack_size(stack_size)
         .spawn(task)
-        // Fallible construction and partial-startup cleanup are intentionally
-        // deferred: https://github.com/microsoft/oxidizer/pull/785#discussion_r4183811801
+        // Fallible construction and cleanup after partial startup are deferred.
         .expect("failed to spawn thread")
 }
 

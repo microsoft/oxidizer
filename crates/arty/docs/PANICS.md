@@ -18,8 +18,9 @@ identifies two causes through `arty::runtime::ShutdownCause`.
 `Requested` means that shutdown started without an error.
 `Panic` means that a contained task panic started shutdown.
 
-Other runtime failures return `None`, but `JoinError::is_shutdown()` still returns
-`true` and `std::error::Error::source()` retains the failure.
+Other runtime failures return `None`. For these failures,
+`JoinError::is_shutdown()` still returns `true`, and
+`std::error::Error::source()` retains the failure.
 The method also returns `None` for a direct task panic or an invalid destination.
 The first shutdown cause remains authoritative. Later failures do not replace it.
 Requested shutdown has no error source. For abnormal shutdown, inspect
@@ -30,12 +31,14 @@ Other panic payloads use the diagnostic `non-string panic payload`.
 
 A waker tells a worker that a task is ready to run again.
 Do not rely on Arty to recover from panics in cleanup or notification code.
-This includes `Drop` implementations, custom wakers, and code that announces task completion.
+This code includes `Drop` implementations, custom wakers, and task-completion
+notifications.
 Arty also does not repair state marked unusable after a panic.
 It does not recover from broken internal assumptions or violations of
 requirements for unsafe code.
 
 Arty can catch some of these panics to maintain memory safety. Callers cannot
-rely on continued operation or complete cleanup. The process can terminate without finishing cleanup.
-Resources can remain allocated, or affected tasks and runtime operations can stop making progress.
+rely on continued operation or complete cleanup. The process can terminate
+before cleanup finishes. Resources can remain allocated. Affected tasks and
+runtime operations can stop making progress.
 Arty remains memory-safe under all panic conditions.

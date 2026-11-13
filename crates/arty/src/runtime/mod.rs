@@ -155,7 +155,7 @@ pub use shutdown_cause::ShutdownCause;
 #[doc(inline)]
 pub use workers::Workers;
 
-/// Implementation details for the runtime entry-point macros.
+/// Internal API for the runtime entry-point macros.
 #[cfg(feature = "macros")]
 #[doc(hidden)]
 pub mod __private {
@@ -164,11 +164,13 @@ pub mod __private {
     #[cfg(any(test, feature = "test-util"))]
     pub use crate::time::ClockControl;
 
-    /// Preserves an entry point's return type while reporting root-task failure.
+    /// Preserves the return type of an entry point and reports a root-task failure.
     ///
     /// # Panics
     ///
-    /// Resumes a captured root-task panic or starts an unwind carrying the runtime failure.
+    /// Resumes a captured root-task panic.
+    ///
+    /// For another runtime failure, starts an unwind that carries the failure.
     pub fn resume_error(error: super::Error) -> ! {
         match error.into_source().downcast::<crate::task::JoinError>() {
             Ok(error) if error.is_panic() => {
