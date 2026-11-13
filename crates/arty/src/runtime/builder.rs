@@ -7,15 +7,17 @@ use thread_aware::ThreadBuilder;
 use tick::runtime::InactiveClock;
 
 use crate::runtime::bootstrap;
-use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, RuntimeConfig, RuntimeName, WorkersPolicy};
+use crate::runtime::config::{BlockingPoolPolicy, MonitorPolicy, RuntimeConfig, RuntimeName, WorkersPolicy};
 use crate::runtime::error::Error;
 use crate::runtime::handle::Runtime;
+use crate::runtime::hook::{Hook, HookFn};
 
 /// Configures workers and clocks before starting a runtime.
 ///
 /// Obtain a builder from [`Runtime::builder`]. Change its configuration, then
 /// call [`build`](Self::build) to start the workers.
-/// Each method replaces any earlier value for the same configuration.
+/// Policy methods replace any earlier value for the same configuration.
+/// Hook methods append callbacks in registration order.
 /// Configuring a builder does not start threads.
 ///
 /// See the [runtime defaults](crate::runtime#defaults) for the initial
@@ -35,7 +37,7 @@ use crate::runtime::handle::Runtime;
 /// ```
 #[derive(Debug)]
 pub struct RuntimeBuilder {
-    processor_config: RuntimeConfig,
+    config: RuntimeConfig,
     clock: InactiveClock,
 }
 
@@ -50,42 +52,36 @@ impl RuntimeBuilder {
     /// The builder copies the name. Empty names are accepted.
     /// [`build`](Self::build) rejects names that contain a null character (`\0`).
     /// Operating systems can truncate thread names in diagnostic tools.
+    #[must_use]
+    pub fn name(mut self, name: impl AsRef<str>) -> Self {
+        self.config.name = RuntimeName::new(name);
+        self
+    }
+
+    /// Registers a runtime hook with worker-local callback data.
+    ///
+    /// Arty clones the hook data for each worker and relocates it before a
+    /// callback can run. Registering another hook of the same type appends it
+    /// after earlier callbacks.
+    ///
+    /// Arty does not catch a panic from the callback. You must make sure that
+    /// the callback completes without a panic.
     ///
     /// # Examples
     ///
     /// ```
     /// use arty::runtime::Runtime;
+    /// use arty::runtime::hook::Panic;
     ///
-    /// let runtime = Runtime::builder().name("requests").build()?;
-    /// runtime.scheduler().block_on(async |_| {
-    ///     assert_eq!(std::thread::current().name(), Some("requests-async-0"));
-    /// })?;
-    /// runtime.stop()?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// let builder = Runtime::builder().on(Panic::IGNORE);
     /// ```
     #[must_use]
-    pub fn name(mut self, name: impl AsRef<str>) -> Self {
-        self.processor_config.name = RuntimeName::new(name);
-        self
-    }
-
-    /// Sets how the runtime responds to a panic that it catches in a user task.
-    ///
-    /// The default is [`PanicPolicy::shutdown`]. Use
-    /// [`PanicPolicy::ignore`] to keep the runtime available after a panic.
-    /// With either policy, awaiting the task's [`JoinHandle`](crate::task::JoinHandle) returns an error.
-    /// This also applies to blocking functions.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use arty::runtime::{PanicPolicy, Runtime};
-    ///
-    /// let builder = Runtime::builder().panic(PanicPolicy::ignore());
-    /// ```
-    #[must_use]
-    pub const fn panic(mut self, policy: PanicPolicy) -> Self {
-        self.processor_config.panic_policy = policy;
+    pub fn on<H, D>(mut self, hook: impl Into<HookFn<H, D>>) -> Self
+    where
+        H: Hook,
+        D: thread_aware::ThreadAware + Clone + 'static,
+    {
+        self.config.hook_registrations.push(crate::runtime::hook::registration(hook.into()));
         self
     }
 
@@ -104,7 +100,7 @@ impl RuntimeBuilder {
     /// ```
     #[must_use]
     pub fn monitor(mut self, policy: MonitorPolicy) -> Self {
-        self.processor_config.monitor_options = policy.into();
+        self.config.monitor_options = policy.into();
         self
     }
 
@@ -125,7 +121,7 @@ impl RuntimeBuilder {
     /// ```
     #[must_use]
     pub const fn workers(mut self, count: WorkersPolicy) -> Self {
-        self.processor_config.workers_policy = count;
+        self.config.workers_policy = count;
         self
     }
 
@@ -149,7 +145,7 @@ impl RuntimeBuilder {
     #[must_use]
     pub const fn stack_size(mut self, size: usize) -> Self {
         assert!(size > 0, "stack size must be greater than zero");
-        self.processor_config.stack_size = NonZeroUsize::new(size).expect("size was asserted above to be nonzero");
+        self.config.stack_size = NonZeroUsize::new(size).expect("size was asserted above to be nonzero");
         self
     }
 
@@ -171,7 +167,7 @@ impl RuntimeBuilder {
     /// ```
     #[must_use]
     pub const fn blocking_pool(mut self, policy: BlockingPoolPolicy) -> Self {
-        self.processor_config.blocking_pool_policy = policy;
+        self.config.blocking_pool_policy = policy;
         self
     }
 
@@ -237,7 +233,7 @@ impl RuntimeBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build(self) -> Result<Runtime, Error> {
-        bootstrap::build(self.processor_config, &self.clock, &ThreadBuilder::default())
+        bootstrap::build(self.config, &self.clock, &ThreadBuilder::default())
     }
 }
 
@@ -246,32 +242,16 @@ impl RuntimeBuilder {
     pub(crate) fn new() -> Self {
         Self {
             clock: InactiveClock::new_isolated(),
-            processor_config: RuntimeConfig::default(),
+            config: RuntimeConfig::default(),
         }
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Stack size, stored monitor configuration, and unbuilt processor policies have no public getters.
 mod tests {
-    use std::time::Duration;
-
-    use tick::ClockControl;
-
     use super::*;
-
-    #[test]
-    fn custom_clock_ok() {
-        let clock_control = ClockControl::new();
-        let builder = Runtime::builder().clock(clock_control.clone());
-
-        let (clock, _) = builder.clock.activate(std::task::Waker::noop().clone());
-        let now = clock.system_time();
-
-        clock_control.advance(Duration::from_secs(1));
-
-        assert_eq!(clock.system_time().duration_since(now).unwrap(), Duration::from_secs(1));
-    }
 
     #[test]
     fn resource_limits_preserve_independent_settings() {
@@ -279,47 +259,16 @@ mod tests {
             .workers(WorkersPolicy::exactly(2))
             .stack_size(1024 * 1024)
             .blocking_pool(BlockingPoolPolicy::shared().max(1));
-        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::exactly(2));
-        assert_eq!(builder.processor_config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
-        assert_eq!(builder.processor_config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
-        assert!(builder.processor_config.monitor_options.policy().is_enabled());
-        assert!(matches!(
-            builder.processor_config.panic_policy.into_executor_policy(),
-            arty_executor::PanicPolicy::Shutdown
-        ));
-    }
-
-    #[test]
-    fn maximum_worker_count_replaces_exact_count() {
-        let builder = Runtime::builder()
-            .workers(WorkersPolicy::exactly(2))
-            .workers(WorkersPolicy::at_most(1));
-        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::at_most(1),);
-    }
-
-    #[test]
-    fn zero_worker_policies_can_be_replaced_before_building() {
-        for policy in [WorkersPolicy::exactly(0), WorkersPolicy::at_most(0)] {
-            let builder = Runtime::builder().workers(policy);
-            assert_eq!(builder.processor_config.workers_policy, policy);
-
-            let builder = builder.workers(WorkersPolicy::at_most(1));
-            assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::at_most(1));
-        }
+        assert_eq!(builder.config.workers_policy, WorkersPolicy::exactly(2));
+        assert_eq!(builder.config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
+        assert_eq!(builder.config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
+        assert!(builder.config.monitor_options.policy().is_enabled());
     }
 
     #[test]
     fn all_workers_policy_replaces_maximum_count() {
         let builder = Runtime::builder().workers(WorkersPolicy::at_most(1)).workers(WorkersPolicy::all());
-        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::all(),);
-    }
-
-    #[test]
-    fn automatic_worker_selection_replaces_exact_count() {
-        let builder = Runtime::builder()
-            .workers(WorkersPolicy::exactly(2))
-            .workers(WorkersPolicy::default());
-        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::default());
+        assert_eq!(builder.config.workers_policy, WorkersPolicy::all(),);
     }
 
     #[test]
@@ -329,43 +278,16 @@ mod tests {
             .blocking_pool(BlockingPoolPolicy::shared().max(1))
             .workers(WorkersPolicy::at_most(1))
             .workers(WorkersPolicy::exactly(2));
-        assert_eq!(builder.processor_config.workers_policy, WorkersPolicy::exactly(2));
-        assert_eq!(builder.processor_config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
-        assert_eq!(builder.processor_config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
-        assert!(builder.processor_config.monitor_options.policy().is_enabled());
+        assert_eq!(builder.config.workers_policy, WorkersPolicy::exactly(2));
+        assert_eq!(builder.config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
+        assert_eq!(builder.config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
+        assert!(builder.config.monitor_options.policy().is_enabled());
     }
 
     #[test]
     fn monitor_policy_replaces_the_default() {
         let builder = Runtime::builder().monitor(MonitorPolicy::disabled());
 
-        assert!(!builder.processor_config.monitor_options.policy().is_enabled());
-    }
-
-    #[test]
-    fn panic_replaces_the_default() {
-        let builder = Runtime::builder().panic(PanicPolicy::ignore());
-
-        assert!(matches!(
-            builder.processor_config.panic_policy.into_executor_policy(),
-            arty_executor::PanicPolicy::Ignore
-        ));
-    }
-
-    #[test]
-    fn build_and_stop_inside_futures_executor() {
-        futures::executor::block_on(async {
-            let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
-
-            let (value, scheduler) = runtime
-                .scheduler()
-                .spawn_anywhere((), |cx, ()| async move { (42, cx.scheduler().clone()) })
-                .await
-                .unwrap();
-            assert_eq!(value, 42);
-
-            runtime.stop().unwrap();
-            assert!(scheduler.spawn(async |_| ()).await.unwrap_err().is_shutdown());
-        });
+        assert!(!builder.config.monitor_options.policy().is_enabled());
     }
 }

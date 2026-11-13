@@ -46,19 +46,21 @@
 //! - The clock follows real time.
 //! - [`MonitorPolicy::default`] enables monitoring in the runtime configuration.
 //!   This choice does not start a monitor or add task measurements.
-//! - [`PanicPolicy::default`] stops the runtime after Arty catches a panic
-//!   while it creates or polls a task, or runs a blocking function.
+//! - Without a [`Panic`](hook::Panic) hook, the runtime stops after Arty
+//!   catches a panic while it creates or polls an async task.
+//! - A blocking function panic returns through its join handle without
+//!   stopping the runtime.
 //!
 //! The [`test`](crate::test) attribute disables monitoring by default.
 //! See [`main`](crate::main) and [`test`](crate::test) for their other defaults.
 //!
-//! ## Policy types
+//! ## Configuration types
 //!
 //! - [`WorkersPolicy`] selects how many async workers run and which processors they use.
 //! - [`BlockingPoolPolicy`] selects a shared or per-worker blocking pool and
 //!   sets its thread limit.
-//! - [`PanicPolicy`] selects whether the runtime stops after Arty catches a panic.
 //! - [`MonitorPolicy`] selects the monitoring configuration.
+//! - [`hook`] provides panic hooks.
 //!
 //! [`RuntimeBuilder::stack_size`] sets the async worker stack size.
 //! [`RuntimeBuilder::name`] sets the name used in async and blocking thread names.
@@ -134,22 +136,25 @@ mod control;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
+pub mod hook;
 mod shutdown;
 mod shutdown_cause;
+#[cfg(test)]
+pub(crate) mod testing;
 pub(crate) mod worker;
 mod workers;
 
 #[doc(inline)]
 pub use builder::RuntimeBuilder;
 #[doc(inline)]
-pub use config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, WorkersPolicy};
+pub use config::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 #[doc(inline)]
 pub use control::RuntimeControl;
 #[doc(inline)]
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
-pub(crate) use shutdown::{Shutdown, ShutdownStart, ShutdownState};
+pub(crate) use shutdown::{Shutdown, ShutdownState};
 #[doc(inline)]
 pub use shutdown_cause::ShutdownCause;
 #[doc(inline)]
@@ -187,6 +192,7 @@ pub mod __private {
 
     #[cfg(test)]
     #[cfg_attr(coverage_nightly, coverage(off))]
+    // Public macro calls cannot inject the private errors used by these panic-boundary checks.
     mod tests {
         use std::fmt;
 

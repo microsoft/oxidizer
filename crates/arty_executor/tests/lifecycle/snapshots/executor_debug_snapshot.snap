@@ -44,7 +44,9 @@ Executor {
             sink: observed::sink::core::Sink {
                 variant: "Noop",
             },
-            panic_policy: Shutdown,
+            panic_policy: PanicPolicy(
+                Shutdown,
+            ),
         },
     },
     active: [],

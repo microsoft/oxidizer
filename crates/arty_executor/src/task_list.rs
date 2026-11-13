@@ -101,6 +101,7 @@ impl Drop for TaskList {
 }
 
 #[cfg(test)]
+// Intrusive links and raw-pointer ownership are not exposed by the executor API.
 mod tests {
     use plurality::MultiPool;
     use static_assertions::assert_not_impl_any;

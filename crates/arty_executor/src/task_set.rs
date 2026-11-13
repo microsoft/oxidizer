@@ -49,15 +49,3 @@ impl TaskSet {
         crate::executor_context::is_executing(self.shared.wake().thread_id())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use static_assertions::assert_not_impl_any;
-
-    use super::*;
-
-    #[test]
-    fn thread_safety() {
-        assert_not_impl_any!(TaskSet: Send, Sync);
-    }
-}

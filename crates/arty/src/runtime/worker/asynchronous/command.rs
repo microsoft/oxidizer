@@ -7,7 +7,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::discard_task_panic_payload;
 use performables::sync::channel;
+use thread_aware::Thread;
 
+use crate::runtime::hook::HookRegistration;
 use crate::task::Context;
 use crate::task::preparation::RemoteFutureFactory;
 
@@ -69,6 +71,10 @@ pub(crate) enum SystemCommand {
     #[debug("AccessIo")]
     AccessIo { access: QueuedIoAccess },
 
+    /// Appends one worker-local runtime hook.
+    #[debug("RegisterHook")]
+    RegisterHook { hook: HookRegistration, source: Option<Thread> },
+
     /// Starts shutdown on this worker.
     ///
     /// The worker stops accepting new tasks and discards all queued submissions,
@@ -126,6 +132,7 @@ pub(crate) fn command_channel() -> (CommandSender, CommandReceiver) {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public submission cannot separately close or drain the worker command queues.
 mod tests {
     use std::pin::pin;
     use std::sync::Arc;

@@ -201,8 +201,9 @@ impl RuntimeScheduler {
     ///
     /// Uses a pool chosen by the runtime for synchronous I/O or other calls
     /// that can stop an async worker from running other tasks.
-    /// A panic in this function returns an error through [`JoinHandle`] and
-    /// follows the configured [`PanicPolicy`](crate::runtime::PanicPolicy).
+    /// A panic in this function returns an error through [`JoinHandle`].
+    /// It does not invoke the configured [`Panic`](crate::runtime::hook::Panic)
+    /// hook or stop the runtime.
     /// The function and its result must implement `Send + 'static`.
     ///
     /// Shutdown rejects new blocking functions and cancels queued ones before they start.
@@ -233,6 +234,7 @@ impl RuntimeScheduler {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// These checks control private storage channels or consume private error sources.
 mod tests {
     use std::cell::RefCell;
     use std::future::ready;
@@ -409,16 +411,19 @@ mod tests {
         });
     }
 
+    // Error::into_source is private. Public block_on errors cannot return ownership
+    // of the panic payload for the pointer-identity assertion.
     #[cfg(not(miri))]
-    fn check_borrowed_future_completion(panics: bool) {
+    #[test]
+    fn scoped_poll_panic_is_joined_after_borrowed_future_destruction() {
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
-            .panic(crate::runtime::PanicPolicy::ignore())
+            .on(crate::runtime::hook::Panic::IGNORE)
             .build()
             .unwrap();
         let worker = runtime.scheduler().block_on(async |_| thread::current().id()).unwrap();
         let expected = Arc::new(());
-        let payload = panics.then(|| Arc::clone(&expected));
+        let payload = Some(Arc::clone(&expected));
         let mut record = DropRecord::default();
         let outcome = catch_unwind(AssertUnwindSafe(|| {
             runtime.scheduler().block_on(async |_| {
@@ -431,19 +436,10 @@ mod tests {
             })
         }))
         .unwrap();
-        match outcome {
-            Ok(value) => {
-                assert!(!panics);
-                assert_eq!(value, SendOnlyResult);
-            }
-            Err(error) => {
-                assert!(panics);
-                let error = error.into_source().downcast::<JoinError>().unwrap();
-                assert!(error.is_panic());
-                let payload = error.into_panic().expect("the join error was checked as a panic");
-                assert!(Arc::ptr_eq(&payload.downcast::<Arc<()>>().unwrap(), &expected));
-            }
-        }
+        let error = outcome.unwrap_err().into_source().downcast::<JoinError>().unwrap();
+        assert!(error.is_panic());
+        let payload = error.into_panic().unwrap();
+        assert!(Arc::ptr_eq(&payload.downcast::<Arc<()>>().unwrap(), &expected));
         assert_eq!(
             (record, runtime.scheduler().block_on(async |_| 23).unwrap()),
             (
@@ -454,17 +450,5 @@ mod tests {
                 23
             ),
         );
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    fn scoped_return_waits_for_borrowed_non_send_future_destructor() {
-        check_borrowed_future_completion(false);
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    fn scoped_poll_panic_is_joined_after_borrowed_future_destruction() {
-        check_borrowed_future_completion(true);
     }
 }

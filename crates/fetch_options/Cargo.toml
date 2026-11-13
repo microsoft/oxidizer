@@ -3,7 +3,7 @@
 
 [package]
 name = "fetch_options"
-description = "Options types for 'fetch' crate."
+description = "HTTP transport configuration types for the fetch crate."
 version = "0.2.5"
 readme = "README.md"
 keywords = ["oxidizer", "http", "options", "fetch", "transport"]

@@ -289,6 +289,7 @@ fn signal_from_raw(ptr: *const ()) -> &'static WakeSignal {
 }
 
 #[cfg(test)]
+// Public wakers cannot force queue disconnection or expose wake flags and pool references.
 mod tests {
     use std::pin::pin;
     use std::sync::atomic::{AtomicUsize, Ordering};

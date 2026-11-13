@@ -11,6 +11,7 @@ use performables::arc::Arc;
 use thread_aware::ThreadAware;
 
 use crate::runtime::dispatch::{DispatcherCore, WorkerIndex};
+use crate::runtime::hook::HookRegistration;
 use crate::runtime::shutdown::Shutdown;
 use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
@@ -97,6 +98,10 @@ impl DispatcherClient {
         self.core.access_io(worker_index, access)
     }
 
+    pub(crate) fn register_hook(&self, hook: &HookRegistration) {
+        self.core.register_hook(hook);
+    }
+
     pub(crate) fn stop(&self, cause: impl Into<ShutdownCause>) -> ShutdownCause {
         self.core.stop_inner(cause.into())
     }
@@ -112,6 +117,7 @@ impl fmt::Debug for DispatcherClient {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public schedulers cannot fabricate endpoints or expose command queues and pool identity.
 mod tests {
     use std::task::Waker;
 
@@ -121,37 +127,20 @@ mod tests {
 
     use super::*;
     use crate::runtime::config::RuntimeName;
-    use crate::runtime::dispatch::{WorkerEndpoint, test_threads};
-    use crate::runtime::worker::blocking::{PanicPolicy, Pool};
+    use crate::runtime::dispatch::test_threads;
+    use crate::runtime::testing::worker_endpoint;
+    use crate::runtime::worker::blocking::Pool;
     use crate::task::scheduler::Scheduler;
-
-    impl DispatcherClient {
-        pub(crate) fn for_test(thread: &Thread) -> Self {
-            let (commands, _command_rx) = crate::runtime::worker::asynchronous::command_channel();
-            let shutdown = Shutdown::default();
-            let endpoint = WorkerEndpoint {
-                commands,
-                waker: Waker::noop().clone(),
-                thread: thread.clone(),
-                blocking_worker: Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone(), PanicPolicy::Ignore),
-            };
-            Self::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown))
-        }
-    }
 
     #[test]
     fn clients_observe_the_shared_shutdown_state() {
         let (commands, _command_rx) = crate::runtime::worker::asynchronous::command_channel();
-        let worker = WorkerEndpoint {
+        let worker = worker_endpoint(
             commands,
-            waker: Waker::noop().clone(),
-            thread: test_threads(1).pop().unwrap(),
-            blocking_worker: Worker::new(
-                Pool::new(RuntimeName::default(), None, None),
-                Shutdown::default(),
-                PanicPolicy::Ignore,
-            ),
-        };
+            Waker::noop().clone(),
+            test_threads(1).pop().unwrap(),
+            Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+        );
         let client = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(worker), Shutdown::default()));
         let clone = client.clone();
         assert_eq!(client.shutdown().state(), crate::runtime::ShutdownState::Running);
@@ -167,26 +156,12 @@ mod tests {
         let (worker0_tx, worker0_rx) = crate::runtime::worker::asynchronous::command_channel();
         let (worker1_tx, worker1_rx) = crate::runtime::worker::asynchronous::command_channel();
         let threads = test_threads(2);
-        let blocking_worker = Worker::new(
-            Pool::new(RuntimeName::default(), None, None),
-            Shutdown::default(),
-            PanicPolicy::Ignore,
-        );
+        let blocking_worker = Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default());
 
         let dispatcher = DispatcherCore::new(
             nonempty::NonEmpty::from_vec(vec![
-                WorkerEndpoint {
-                    commands: worker0_tx,
-                    waker: Waker::noop().clone(),
-                    thread: threads[0].clone(),
-                    blocking_worker: Arc::clone(&blocking_worker),
-                },
-                WorkerEndpoint {
-                    commands: worker1_tx,
-                    waker: Waker::noop().clone(),
-                    thread: threads[1].clone(),
-                    blocking_worker: Arc::clone(&blocking_worker),
-                },
+                worker_endpoint(worker0_tx, Waker::noop().clone(), threads[0].clone(), Arc::clone(&blocking_worker)),
+                worker_endpoint(worker1_tx, Waker::noop().clone(), threads[1].clone(), Arc::clone(&blocking_worker)),
             ])
             .unwrap(),
             Shutdown::default(),
@@ -216,35 +191,27 @@ mod tests {
     fn relocate_switches_blocking_worker() {
         let threads = test_threads(2);
 
-        let source_worker = Worker::new(
-            Pool::new(RuntimeName::default(), None, None),
-            Shutdown::default(),
-            PanicPolicy::Ignore,
-        );
+        let source_worker = Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default());
         let destination_shutdown = Shutdown::default();
-        let destination_worker = Worker::new(
-            Pool::new(RuntimeName::default(), None, None),
-            destination_shutdown.clone(),
-            PanicPolicy::Ignore,
-        );
+        let destination_worker = Worker::new(Pool::new(RuntimeName::default(), None, None), destination_shutdown.clone());
         destination_shutdown.begin(ShutdownCause::default());
         let (source_commands, _source_rx) = crate::runtime::worker::asynchronous::command_channel();
         let (destination_commands, _destination_rx) = crate::runtime::worker::asynchronous::command_channel();
 
         let dispatcher = DispatcherCore::new(
             nonempty::NonEmpty::from_vec(vec![
-                WorkerEndpoint {
-                    commands: source_commands,
-                    waker: Waker::noop().clone(),
-                    thread: threads[0].clone(),
-                    blocking_worker: Arc::clone(&source_worker),
-                },
-                WorkerEndpoint {
-                    commands: destination_commands,
-                    waker: Waker::noop().clone(),
-                    thread: threads[1].clone(),
-                    blocking_worker: Arc::clone(&destination_worker),
-                },
+                worker_endpoint(
+                    source_commands,
+                    Waker::noop().clone(),
+                    threads[0].clone(),
+                    Arc::clone(&source_worker),
+                ),
+                worker_endpoint(
+                    destination_commands,
+                    Waker::noop().clone(),
+                    threads[1].clone(),
+                    Arc::clone(&destination_worker),
+                ),
             ])
             .unwrap(),
             Shutdown::default(),
@@ -307,16 +274,12 @@ mod tests {
         let threads = test_threads(2);
         let (commands, command_rx) = crate::runtime::worker::asynchronous::command_channel();
         drop(command_rx);
-        let worker = WorkerEndpoint {
+        let worker = worker_endpoint(
             commands,
-            waker: Waker::noop().clone(),
-            thread: threads[0].clone(),
-            blocking_worker: Worker::new(
-                Pool::new(RuntimeName::default(), None, None),
-                Shutdown::default(),
-                PanicPolicy::Ignore,
-            ),
-        };
+            Waker::noop().clone(),
+            threads[0].clone(),
+            Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+        );
         let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(worker), Shutdown::default()));
         let thread = if registered { threads[0].clone() } else { threads[1].clone() };
         crate::io::Io::new(arty_io_host::IoRuntime::new(Sink::noop()), dispatcher, thread)

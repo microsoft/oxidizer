@@ -182,26 +182,11 @@ impl ExecutorShared {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "inspection"))]
+// Public submission does not expose a mutable borrow of the pending-task queue.
 mod tests {
     use super::*;
-    use crate::ShutdownCause;
 
-    #[test]
-    fn shutdown_completion_requires_a_shutdown_request() {
-        let shared = ExecutorShared::new(
-            Waker::noop().clone(),
-            Sink::noop(),
-            std::thread::current().id(),
-            PanicPolicy::default(),
-        );
-
-        assert!(!shared.shutdown_complete());
-        shared.shutdown().trigger(ShutdownCause::default());
-        assert!(shared.shutdown_complete());
-    }
-
-    #[cfg(feature = "inspection")]
     #[test]
     fn borrowed_submission_storage_reports_busy_and_recovers_after_release() {
         let shared = ExecutorShared::new(

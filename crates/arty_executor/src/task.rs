@@ -316,7 +316,8 @@ where
         }
         Self::retire_payload(maybe_payload);
         let shutdown = shared.shutdown();
-        if matches!(shared.panic_policy(), crate::PanicPolicy::Shutdown) {
+        let (action, panic) = shared.panic_policy().resolve(panic);
+        if action == crate::PanicAction::Shutdown {
             _ = shutdown.publish(ShutdownCause::panic(panic.as_ref()));
         }
         let cause = shutdown.is_triggered().then(|| shutdown.cause());
@@ -534,6 +535,7 @@ pub(crate) trait TypeErasedTask: Send + Sync {
 }
 
 #[cfg(test)]
+// The executor prevents repolling retired tasks and repeated pinned-storage destruction.
 mod tests {
     use std::pin::pin;
     use std::sync::Arc;
@@ -580,7 +582,7 @@ mod tests {
             Waker::noop().clone(),
             Sink::noop(),
             std::thread::current().id(),
-            crate::PanicPolicy::Ignore,
+            crate::PanicPolicy::IGNORE,
         );
         // SAFETY: The handle owns the task on its creating thread.
         let task = unsafe { handle.as_task() };

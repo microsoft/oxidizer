@@ -82,6 +82,7 @@ impl RuntimeDriverHost {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public I/O access cannot manually install hosts or inspect their primary-driver bookkeeping.
 mod tests {
     use std::error::Error as _;
 

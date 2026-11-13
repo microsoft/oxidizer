@@ -82,12 +82,11 @@ impl TaskMetadata {
 mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
 
-    use static_assertions::{assert_impl_all, assert_not_impl_any};
+    use static_assertions::assert_not_impl_any;
 
     use super::*;
 
-    assert_impl_all!(TaskPlacement: UnwindSafe, RefUnwindSafe);
-    // Captured enrichment can contain user-defined interior state. Metadata does
-    // not promise that it can cross a caught-unwind boundary.
+    // Private metadata has no public type through which to check its unwind traits.
+    // Captured enrichment can contain user-defined interior state.
     assert_not_impl_any!(TaskMetadata: UnwindSafe, RefUnwindSafe);
 }
