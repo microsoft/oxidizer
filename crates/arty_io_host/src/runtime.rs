@@ -254,6 +254,7 @@ impl IoRuntime {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    // The public API cannot pause both resolutions between slot lookup and initialization.
     use std::any::TypeId;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier};

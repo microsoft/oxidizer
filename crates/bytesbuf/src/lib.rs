@@ -663,6 +663,3 @@ pub use memory_guard::MemoryGuard;
 pub(crate) use span::Span;
 pub(crate) use span_builder::SpanBuilder;
 pub use view::{BytesView, BytesViewSlices};
-
-#[cfg(test)]
-mod testing;
