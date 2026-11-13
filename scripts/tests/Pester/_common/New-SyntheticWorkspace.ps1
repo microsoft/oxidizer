@@ -378,7 +378,6 @@ function New-SyntheticWorkspace {
         } else {
             Set-Content -Path (Join-Path $srcDir 'lib.rs') -Value "// $($package.Name)" -NoNewline
         }
-        Set-Content -Path (Join-Path $packageDir 'CHANGELOG.md') -Value "# Changelog`n`n## [Unreleased]" -NoNewline
     }
 
     # Packages under external/, deliberately outside `members = ["crates/*"]`
