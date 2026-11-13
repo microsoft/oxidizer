@@ -195,19 +195,21 @@ fn shutdown_error_debug_snapshot() {
     let borrowed = ShutdownCause::panic(&"borrowed panic").into_error().unwrap();
     let owned = ShutdownCause::panic(&String::from("owned panic")).into_error().unwrap();
     let other = ShutdownCause::panic(&42_u32).into_error().unwrap();
-    insta::assert_debug_snapshot!((source, borrowed, owned, other));
+    insta::with_settings!({prepend_module_to_snapshot => false}, {
+        insta::assert_debug_snapshot!("shutdown_error_debug_snapshot", (source, borrowed, owned, other));
+    });
 }
 
 #[test]
 #[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
 fn executor_debug_snapshot() {
     let executor = Executor::builder().build();
-    insta::with_settings!({filters => [
+    insta::with_settings!({prepend_module_to_snapshot => false, filters => [
         (r"alloc::rcs::rc::Rc", "alloc::rc::Rc"),
         (r"0x[0-9a-fA-F]+", "[address]"),
         (r"ThreadId\(\s*\d+,?\s*\)", "ThreadId([id])"),
     ]}, {
-        insta::assert_debug_snapshot!(executor);
+        insta::assert_debug_snapshot!("executor_debug_snapshot", executor);
     });
 }
 
