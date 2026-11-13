@@ -29,10 +29,8 @@ impl<'p> Walk<'_, 'p> {
         let count = self.path.count();
         loop {
             let segment = self.path.segment(depth);
-            let single = node
-                .single
-                .as_deref()
-                .filter(|_| segment.is_some_and(|segment| !segment.is_empty()));
+            let single = node.single.as_deref();
+            let single = single.filter(|_| segment.is_some_and(|segment| !segment.is_empty()));
             if node.literals.is_empty()
                 && node.affix.is_empty()
                 && node.rest.is_empty()
@@ -48,7 +46,11 @@ impl<'p> Walk<'_, 'p> {
                 let bytes = segment.as_bytes();
                 let literal = node.literals.iter().find(|(key, _)| {
                     let key = key.as_bytes();
-                    key.len() == bytes.len() && key.first() == bytes.first() && key == bytes
+                    // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "The final full-byte equality implies both the length and first-byte prefilters; this expression has no other logical AND")]
+                    (
+                        // #[gamma::skip(logical.and_remove_left, logical.and_remove_right, logical.and_to_or, reason = "The unchanged final full-byte equality implies both this length equality and this first-byte equality")]
+                        key.len() == bytes.len() && key.first() == bytes.first()
+                    ) && key == bytes
                 });
                 let first_affix = node.affix.iter().enumerate().find(|(_, (prefix, suffix, _))| {
                     bytes.len() > prefix.len() + suffix.len() && bytes.starts_with(prefix.as_bytes()) && bytes.ends_with(suffix.as_bytes())
@@ -64,7 +66,10 @@ impl<'p> Walk<'_, 'p> {
                     continue;
                 }
 
-                if literal.is_some() || first_affix.is_some() || single.is_some() {
+                if
+                // #[gamma::skip(logical.or_remove_right, reason = "When only single matches, the later single fallback queues the identical rest action and advances to the same node/depth; first_affix=None proves the omitted loop would queue no affix alternatives")]
+                literal.is_some() || first_affix.is_some() || single.is_some() {
+                    // #[gamma::skip(cond.always_true, logical.and_remove_left, logical.and_remove_right, logical.and_to_or, relational.ge_to_gt, reason = "A present segment proves depth is strictly below count; queuing an empty rest slice merely adds a dispatch that returns None before the identical next action")]
                     if count >= depth && !node.rest.is_empty() {
                         pending.push(WalkAction::Leaves(&node.rest));
                     }
@@ -73,12 +78,10 @@ impl<'p> Walk<'_, 'p> {
                     {
                         pending.push(WalkAction::Node(single, depth + 1));
                     }
-                    let skip = first_affix.map_or(0, |(index, _)| usize::from(literal.is_none()) + index);
+                    // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "Zero only requeues earlier nonmatching affixes and at most the already explored first match; immutable path matching repeats the same failure before later alternatives")]
+                    let skip = first_pending_affix(first_affix.map(|(index, _)| index), literal.is_none());
                     for (prefix, suffix, child) in node.affix.iter().skip(skip).rev() {
-                        if bytes.len() > prefix.len() + suffix.len()
-                            && bytes.starts_with(prefix.as_bytes())
-                            && bytes.ends_with(suffix.as_bytes())
-                        {
+                        if pending_affix_matches(bytes, prefix, suffix) {
                             pending.push(WalkAction::Node(child, depth + 1));
                         }
                     }
@@ -94,10 +97,7 @@ impl<'p> Walk<'_, 'p> {
             }
 
             if let Some(single) = single {
-                debug_assert!(
-                    count >= depth && !node.rest.is_empty(),
-                    "a matching single edge has a segment, and single-only nodes without rest edges take the fast path above"
-                );
+                // The single-only fast path already handled nodes without rest leaves.
                 pending.push(WalkAction::Leaves(&node.rest));
                 node = single;
                 depth += 1;
@@ -118,8 +118,7 @@ impl<'p> Walk<'_, 'p> {
             loop {
                 match pending.pop()? {
                     WalkAction::Node(next_node, next_depth) => {
-                        node = next_node;
-                        depth = next_depth;
+                        (node, depth) = (next_node, next_depth);
                         break;
                     }
                     WalkAction::Leaves(leaves) => {
@@ -134,10 +133,26 @@ impl<'p> Walk<'_, 'p> {
 
     /// Selects the first leaf matching the method and custom verb.
     fn dispatch<const VERBS: bool>(&self, leaves: &'p [Leaf]) -> Option<&'p Leaf> {
-        leaves
-            .iter()
-            .find(|leaf| leaf.method == self.method && (!VERBS || leaf.verb.as_deref() == self.verb))
+        leaves.iter().find(|leaf| {
+            leaf.method == self.method
+                && (
+                    // #[gamma::skip(logical.or_remove_left, reason = "VERBS=false is instantiated only for resolvers with no verb leaves and an unsplit request verb None; both equality operands are then None, while VERBS=true already requires the identical equality")]
+                    !VERBS || leaf.verb.as_deref() == self.verb
+                )
+        })
     }
+}
+
+fn first_pending_affix(first: Option<usize>, literal_missing: bool) -> usize {
+    first.map_or(
+        // #[gamma::skip(literal.int_increment, reason = "With no matching affix, skipping an additional nonmatching edge cannot remove a queued alternative")]
+        0,
+        |index| usize::from(literal_missing) + index,
+    )
+}
+
+fn pending_affix_matches(bytes: &[u8], prefix: &str, suffix: &str) -> bool {
+    bytes.len() > prefix.len() + suffix.len() && bytes.starts_with(prefix.as_bytes()) && bytes.ends_with(suffix.as_bytes())
 }
 
 #[cfg(test)]
@@ -146,6 +161,23 @@ mod tests {
     use alloc::string::String;
     use alloc::vec::Vec;
     use core::fmt::Write as _;
+
+    #[test]
+    fn gamma_nov4_pending_affixes_skip_only_the_directly_explored_match_and_require_nonempty_complete_captures() {
+        assert_eq!(super::first_pending_affix(Some(0), true), 1);
+        assert_eq!(super::first_pending_affix(Some(2), true), 3);
+        assert_eq!(super::first_pending_affix(Some(2), false), 2);
+        assert_eq!(super::first_pending_affix(None, false), 0);
+        for (bytes, prefix, suffix, expected) in [
+            ("pre-x.txt", "pre-", ".txt", true),
+            ("pre-.txt", "pre-", ".txt", false),
+            ("x.txt", "pre-", ".txt", false),
+            ("pre-x.bad", "pre-", ".txt", false),
+            (".txt", "", ".txt", false),
+        ] {
+            assert_eq!(super::pending_affix_matches(bytes.as_bytes(), prefix, suffix), expected, "{bytes}");
+        }
+    }
 
     use http_path_template::{Grammar, PathTemplate};
     use routerama_build::Route;

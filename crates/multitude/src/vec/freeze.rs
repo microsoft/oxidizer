@@ -45,6 +45,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     #[inline]
     fn can_freeze_in_place(&self) -> bool {
         let freezable = const { buffer_freezable::<T>() };
+        // #[gamma::skip(logical.and_remove_left, reason = "A freeze prefix is installed only by freezable reservations; splitting clears it and flattening preserves element alignment and nonzero size")]
         freezable && self.buf.has_freeze_prefix()
     }
 

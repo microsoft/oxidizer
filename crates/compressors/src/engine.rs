@@ -103,6 +103,7 @@ pub(crate) unsafe trait Codec {
 
     /// Validates the cumulative byte counts, for engines that enforce limits.
     // Replacing this default with `Ok(())` has no observable effect.
+    // #[gamma::skip(fn_value.ok, parameter.default_shadow, tag = "equivalent", reason = "This default discards all three count parameters and returns Ok(()) for every input")]
     fn check_limits(&self, total_in: u64, total_out: u64, streams: u64) -> Result<()> {
         let _ = (total_in, total_out, streams);
         Ok(())
@@ -111,6 +112,7 @@ pub(crate) unsafe trait Codec {
     /// Returns the remaining absolute output budget, if one is configured.
     // A small constant reduces each step to a few bytes without changing the result.
     // That can exceed the mutation harness's time budget before an assertion is reached.
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The default output budget is None independently of the unused total_out parameter")]
     fn remaining_output(&self, _total_out: u64) -> Option<u64> {
         None
     }
@@ -395,7 +397,9 @@ impl Pump {
     // output buffer and memory provider by reference, rather than `&mut self`, so it borrows
     // disjointly from `self.input` at the call site.
     fn ensure_output_capacity(output: &mut BytesBuf, memory: &OpaqueMemory, additional_bytes: usize) {
-        if output.remaining_capacity() < additional_bytes {
+        if
+        // #[gamma::skip(cond.always_true, relational.lt_to_le, tag = "equivalent", reason = "BytesBuf::reserve is itself a no-op when the requested spare capacity already exists")]
+        output.remaining_capacity() < additional_bytes {
             output.reserve(additional_bytes, memory);
         }
     }
@@ -467,7 +471,8 @@ impl Pump {
                 };
                 Self::ensure_output_capacity(&mut self.output, &self.memory, engine_budget);
                 let spare = self.output.first_unfilled_slice();
-                let limit_budget = remaining.map_or(usize::MAX, |remaining| usize::try_from(remaining).unwrap_or(usize::MAX));
+                let unbounded_budget = usize::MAX;
+                let limit_budget = remaining.map_or(unbounded_budget, |remaining| usize::try_from(remaining).unwrap_or(unbounded_budget));
                 // One probe byte lets the engine prove that a stream ending exactly at the limit
                 // needs no more output, while bounding any overshoot to a byte that is never
                 // returned to the caller.
@@ -490,8 +495,14 @@ impl Pump {
             // can be trusted to have written what it claims.
             unsafe { self.output.advance(produced) };
 
-            self.total_in = self.total_in.saturating_add(u64::try_from(consumed).unwrap_or(u64::MAX));
-            self.total_out = self.total_out.saturating_add(u64::try_from(produced).unwrap_or(u64::MAX));
+            self.total_in = self.total_in.saturating_add(u64::try_from(consumed).unwrap_or(
+                // #[gamma::skip(expr.decrement, tag = "equivalent", reason = "The checked consumed count fits an actual input slice and usize is at most 64 bits on supported targets, so conversion to u64 never uses this fallback")]
+                u64::MAX,
+            ));
+            self.total_out = self.total_out.saturating_add(u64::try_from(produced).unwrap_or(
+                // #[gamma::skip(expr.decrement, tag = "equivalent", reason = "The checked produced count fits an actual output slice and usize is at most 64 bits on supported targets, so conversion to u64 never uses this fallback")]
+                u64::MAX,
+            ));
             input_work = input_work.saturating_add(consumed);
             steps += 1;
 
@@ -608,6 +619,52 @@ fn non_driving_state_reached_the_step_loop() -> ! {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_step_output_budgets_and_flush_return() {
+        struct ObservesBudget {
+            calls: Vec<(Operation, usize)>,
+        }
+        // SAFETY: this fixture writes and reports no output bytes.
+        unsafe impl Codec for ObservesBudget {
+            fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], operation: Operation) -> Result<(Step, usize, usize)> {
+                self.calls.push((operation, output.len()));
+                Ok((
+                    if operation == Operation::Flush {
+                        Step::FlushComplete
+                    } else {
+                        Step::Continue
+                    },
+                    input.len(),
+                    0,
+                ))
+            }
+        }
+        let mut codec = ObservesBudget { calls: Vec::new() };
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(3));
+        assert!(pump.pull(&mut codec, Destination::Stream).unwrap().is_need_input());
+        assert_eq!(codec.calls, [(Operation::Process, 3)]);
+        codec.calls.clear();
+        pump.flush().unwrap();
+        assert!(pump.pull(&mut codec, Destination::Stream).unwrap().is_need_input());
+        assert_eq!(codec.calls, [(Operation::Flush, 7)]);
+    }
+
+    #[test]
+    fn gamma_round2_consumed_overreport_is_rejected_before_advancing_input() {
+        struct Overconsumes;
+        // SAFETY: the invalid input count does not claim any initialized output or access memory.
+        unsafe impl Codec for Overconsumes {
+            fn step(&mut self, input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
+                Ok((Step::Continue, input.len() + 1, 0))
+            }
+        }
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(3));
+        pump.push(view(b"x")).unwrap();
+        let error = pump.pull(&mut Overconsumes, Destination::Stream).unwrap_err();
+        assert_eq!(error.to_string(), "the compression engine reported invalid byte counts");
+        assert_eq!(pump.total_in(), 0);
+    }
+
     use std::num::NonZeroU32;
 
     use bytesbuf::mem::GlobalPool;
@@ -615,6 +672,123 @@ mod tests {
 
     use super::*;
     use crate::testing::{chunk, view};
+
+    #[derive(Debug)]
+    struct SpuriousFlush;
+
+    // SAFETY: this fixture reports no consumed or written bytes.
+    unsafe impl Codec for SpuriousFlush {
+        fn step(&mut self, _input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
+            Ok((Step::FlushComplete, 0, 0))
+        }
+    }
+
+    #[derive(Debug)]
+    struct Stalled;
+
+    // SAFETY: this fixture reports no consumed or written bytes.
+    unsafe impl Codec for Stalled {
+        fn step(&mut self, _input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
+            Ok((Step::Continue, 0, 0))
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_pump_protocol_error_diagnostics_and_flushing_stall() {
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
+        pump.push(view(b"input")).unwrap();
+        assert_eq!(
+            pump.pull(&mut Overreports, Destination::Stream).unwrap_err().to_string(),
+            "the compression engine reported invalid byte counts"
+        );
+        assert_eq!(pump.total_out(), 0);
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(3));
+        assert_eq!(
+            pump.pull(&mut SpuriousFlush, Destination::Stream).unwrap_err().to_string(),
+            "the compression engine completed an unrequested flush"
+        );
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(3));
+        pump.push(view(b"input")).unwrap();
+        assert_eq!(
+            pump.pull(&mut Stalled, Destination::Stream).unwrap_err().to_string(),
+            "the compression engine could not make progress"
+        );
+        let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(3));
+        pump.flush().unwrap();
+        assert_eq!(
+            pump.pull(&mut Stalled, Destination::Stream).unwrap_err().to_string(),
+            "the compression engine could not make progress"
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_pump_state_errors_and_flush_completion() {
+        let memory = || OpaqueMemory::new(GlobalPool::new());
+        let mut maximum = ceiling(Pump::new(memory(), chunk(3)), u64::MAX);
+        maximum.push(view(b"ab")).unwrap();
+        maximum.end_input();
+        assert_eq!(
+            drain(&mut maximum, &mut Passthrough::default(), Destination::Buffer).unwrap(),
+            b"ab"
+        );
+        let mut pump = Pump::new(memory(), chunk(3));
+        let mut codec = Passthrough::default();
+        pump.push(view(b"ab")).unwrap();
+        assert_eq!(
+            pump.push(view(b"c")).unwrap_err().to_string(),
+            "cannot push more input while previously pushed input is still pending"
+        );
+        assert_eq!(
+            pump.pull(&mut codec, Destination::Stream).unwrap().into_data().unwrap().to_vec(),
+            b"ab"
+        );
+        pump.flush().unwrap();
+        assert_eq!(
+            pump.push(view(b"c")).unwrap_err().to_string(),
+            "cannot push more input while a flush is still pending"
+        );
+        assert!(pump.pull(&mut codec, Destination::Stream).unwrap().is_need_input());
+        pump.push(view(b"c")).unwrap();
+        pump.end_input();
+        assert_eq!(drain(&mut pump, &mut codec, Destination::Stream).unwrap(), b"c");
+        assert_eq!(
+            pump.push(view(b"d")).unwrap_err().to_string(),
+            "cannot push more input after end of input was signaled"
+        );
+        assert_eq!(
+            pump.flush().unwrap_err().to_string(),
+            "cannot flush after end of input was signaled"
+        );
+        assert_eq!(pump.total_in(), 3);
+        assert_eq!(pump.total_out(), 3);
+
+        let mut failed = Pump::new(memory(), chunk(3));
+        failed.state = State::Failed;
+        assert_eq!(
+            failed.push(view(b"x")).unwrap_err().to_string(),
+            "cannot push more input after the codec failed"
+        );
+        assert_eq!(failed.flush().unwrap_err().to_string(), "cannot flush after the codec failed");
+        assert_eq!(
+            failed.pull(&mut codec, Destination::Stream).unwrap_err().to_string(),
+            "cannot continue after a previous codec failure"
+        );
+        let mut eof = Pump::new(memory(), chunk(3));
+        eof.state = State::AwaitingEof;
+        eof.push(view(b"")).unwrap();
+        assert_eq!(
+            eof.push(view(b"x")).unwrap_err().to_string(),
+            "trailing data followed the compressed stream"
+        );
+        let mut capped = Pump::new(memory(), chunk(3));
+        capped.streams = 2;
+        capped.state = State::AtStreamLimit { maximum: 2 };
+        capped.push(view(b"")).unwrap();
+        assert_eq!(
+            capped.push(view(b"x")).unwrap_err().to_string(),
+            "decoded stream count reached 3, exceeding the limit of 2"
+        );
+    }
 
     /// An engine that copies input to output verbatim, so tests can isolate pump behavior.
     #[derive(Debug, Default)]
@@ -945,17 +1119,6 @@ mod tests {
 
     #[test]
     fn rejects_an_unrequested_flush_completion() {
-        #[derive(Debug)]
-        struct SpuriousFlush;
-
-        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
-
-        unsafe impl Codec for SpuriousFlush {
-            fn step(&mut self, _input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
-                Ok((Step::FlushComplete, 0, 0))
-            }
-        }
-
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         assert!(pump.pull(&mut SpuriousFlush, Destination::Stream).unwrap_err().is_invalid_state());
     }
@@ -1151,17 +1314,6 @@ mod tests {
 
     #[test]
     fn no_progress_with_pending_input_is_terminal() {
-        #[derive(Debug)]
-        struct Stalled;
-
-        // SAFETY: this fixture reports only what it wrote into the slice, which is usually nothing at all.
-
-        unsafe impl Codec for Stalled {
-            fn step(&mut self, _input: &[u8], _output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
-                Ok((Step::Continue, 0, 0))
-            }
-        }
-
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"input")).unwrap();
 
@@ -1260,28 +1412,28 @@ mod tests {
         assert!(error.is_limit_exceeded());
     }
 
-    #[test]
-    fn rejects_output_counts_beyond_the_provided_slice() {
-        #[derive(Debug)]
-        struct Overreports;
+    #[derive(Debug)]
+    struct Overreports;
 
-        // SAFETY: this fixture over-reports on purpose. It writes one byte and claims
-        // `output.len() + 1`. The test below drives this exact case. Soundness does not
-        // rest on this impl: `Pump::pull` rejects `produced > provided_output` before it reaches
-        // `advance`, and the assertion on `total_out` is what proves the uninitialized tail is
-        // never handed out.
+    // SAFETY: this fixture over-reports on purpose. It writes one byte and claims
+    // `output.len() + 1`. The test below drives this exact case. Soundness does not
+    // rest on this impl: `Pump::pull` rejects `produced > provided_output` before it reaches
+    // `advance`, and the assertion on `total_out` is what proves the uninitialized tail is
+    // never handed out.
 
-        unsafe impl Codec for Overreports {
-            fn step(&mut self, _input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
-                output[0].write(0);
-                Ok((Step::Continue, 0, output.len() + 1))
-            }
-
-            fn remaining_output(&self, _total_out: u64) -> Option<u64> {
-                Some(0)
-            }
+    unsafe impl Codec for Overreports {
+        fn step(&mut self, _input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
+            output[0].write(0);
+            Ok((Step::Continue, 0, output.len() + 1))
         }
 
+        fn remaining_output(&self, _total_out: u64) -> Option<u64> {
+            Some(0)
+        }
+    }
+
+    #[test]
+    fn rejects_output_counts_beyond_the_provided_slice() {
         let mut pump = Pump::new(OpaqueMemory::new(GlobalPool::new()), chunk(64));
         pump.push(view(b"input")).unwrap();
 

@@ -116,6 +116,70 @@ mod tests {
 
     use super::*;
 
+    static STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn gamma_survivor_tracking_activation_and_deallocation_peak() {
+        let _lock = STATE_LOCK.lock().unwrap();
+        let _reset = DisableOnDrop;
+        let allocator = Allocator::new(System);
+        let layout = Layout::from_size_align(16, 8).unwrap();
+        let session = Session::new().no_stdout().no_file();
+        for (name, enabled, peak) in [("tracked free", true, 16.0), ("untracked free", false, 32.0)] {
+            TRACKING_ENABLED.store(false, Ordering::Relaxed);
+            enable_tracking();
+            assert!(TRACKING_ENABLED.load(Ordering::Relaxed));
+            let span = session.operation(name).measure_thread().iterations(1);
+            // SAFETY: The layout has valid alignment and nonzero size.
+            let first = unsafe { allocator.alloc(layout) };
+            assert!(!first.is_null());
+            TRACKING_ENABLED.store(enabled, Ordering::Relaxed);
+            // SAFETY: The pointer is live and the original layout is unchanged.
+            unsafe { allocator.dealloc(first, layout) };
+            enable_tracking();
+            // SAFETY: The layout has valid alignment and nonzero size.
+            let second = unsafe { allocator.alloc(layout) };
+            assert!(!second.is_null());
+            // SAFETY: The pointer is live and the original layout is unchanged.
+            unsafe { allocator.dealloc(second, layout) };
+            drop(span);
+            let report = session.to_report();
+            let operation = report.operations().find(|(operation, _)| *operation == name).unwrap().1;
+            assert_eq!(operation.peak_outstanding_bytes(), Some(peak));
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_borrowed_allocator_resize_size() {
+        struct RejectResize(AtomicUsize);
+        // SAFETY: System owns all live allocations; rejecting realloc preserves the original allocation.
+        unsafe impl GlobalAlloc for RejectResize {
+            unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+                // SAFETY: The caller supplies a valid layout.
+                unsafe { System.alloc(layout) }
+            }
+            unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+                // SAFETY: The caller supplies a live System allocation and its original layout.
+                unsafe { System.dealloc(ptr, layout) };
+            }
+            unsafe fn realloc(&self, _: *mut u8, _: Layout, new_size: usize) -> *mut u8 {
+                self.0.store(new_size, Ordering::Relaxed);
+                std::ptr::null_mut()
+            }
+        }
+        let inner = RejectResize(AtomicUsize::new(0));
+        let borrowed = AllocatorRef(&inner);
+        let layout = Layout::from_size_align(16, 8).unwrap();
+        // SAFETY: The layout has valid alignment and nonzero size.
+        let pointer = unsafe { borrowed.alloc(layout) };
+        assert!(!pointer.is_null());
+        // SAFETY: Failed resizing leaves the original allocation live.
+        assert!(unsafe { borrowed.realloc(pointer, layout, 32) }.is_null());
+        assert_eq!(inner.0.load(Ordering::Relaxed), 32);
+        // SAFETY: The resize failed, preserving the original allocation and layout.
+        unsafe { borrowed.dealloc(pointer, layout) };
+    }
+
     #[derive(Default)]
     struct CountingAllocator {
         allocations: AtomicUsize,
@@ -161,6 +225,7 @@ mod tests {
 
     #[test]
     fn only_enabled_operations_are_tracked_and_both_paths_share_allocator_state() {
+        let _lock = STATE_LOCK.lock().unwrap();
         let _reset = DisableOnDrop;
         let allocator = Allocator::new(CountingAllocator::default());
         let session = Session::new().no_stdout().no_file();

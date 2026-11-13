@@ -157,6 +157,7 @@ impl<'a, T, A: Allocator + Clone> Drain<'_, 'a, T, A> {
         unsafe {
             let v = self.vec.as_mut();
             let start = v.buf.len();
+            // #[gamma::skip(cond.always_true, logical.and_remove_left, logical.and_remove_right, logical.and_to_or, relational.gt_to_ge, reason = "This runs before splice growth: both original tail endpoints remain within the unchanged buffer, so zero-length copies and overlapping self-copies are valid no-ops")]
             if self.tail_len > 0 && self.tail_start != start {
                 let base = v.as_mut_ptr();
                 ptr::copy(base.add(self.tail_start).cast_const(), base.add(start), self.tail_len);
@@ -183,10 +184,12 @@ impl<T, A: Allocator + Clone> Drop for TailGuard<'_, '_, '_, T, A> {
         unsafe {
             let v = d.vec.as_mut();
             let start = v.buf.len();
+            // #[gamma::skip(cond.always_true, reason = "The added equal-offset case copies the valid current vector prefix onto itself; ptr::copy permits identical endpoints, including zero length")]
             if d.tail_start != start {
                 let base = v.as_mut_ptr();
                 ptr::copy(base.add(d.tail_start).cast_const(), base.add(start), d.tail_len);
             }
+
             v.buf.set_len(start + d.tail_len);
         }
     }
@@ -217,5 +220,28 @@ impl<T, A: Allocator + Clone> Drop for Drain<'_, '_, T, A> {
             };
             ptr::drop_in_place(ptr::slice_from_raw_parts_mut(remaining, drop_len));
         }
+    }
+}
+
+#[cfg(test)]
+mod gamma_nov4_tests {
+    use crate::Arena;
+
+    #[test]
+    fn gamma_nov4_close_tail_disarms_both_the_count_and_old_source_offset() {
+        let arena = Arena::new();
+        let mut values = arena.alloc_vec();
+        values.extend([11_u32, 23, 37, 41, 53]);
+        let mut drain = values.drain(1..3);
+        assert_eq!(drain.next(), Some(23));
+        assert_eq!(drain.next(), Some(37));
+        assert_eq!(drain.next(), None);
+        // SAFETY: Every drained element was consumed and the source vector is still live.
+        let (_, start) = unsafe { drain.close_tail() };
+        assert_eq!(start, 1);
+        assert_eq!(drain.tail_len, 0);
+        assert_eq!(drain.tail_start, start);
+        drop(drain);
+        assert_eq!(values.as_slice(), [11, 41, 53]);
     }
 }

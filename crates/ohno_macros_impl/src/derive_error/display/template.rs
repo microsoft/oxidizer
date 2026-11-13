@@ -124,3 +124,37 @@ fn placeholder(contents: &str) -> Placeholder<'_> {
         spec,
     }
 }
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::{Placeholder, Segment, split};
+
+    #[test]
+    fn gamma_survivor_segments_have_no_empty_literals_or_skipped_text() {
+        assert_eq!(
+            split("{a}{b}x").unwrap(),
+            [
+                Segment::Placeholder(Placeholder {
+                    name: Some("a"),
+                    spec: None
+                }),
+                Segment::Placeholder(Placeholder {
+                    name: Some("b"),
+                    spec: None
+                }),
+                Segment::Literal("x"),
+            ]
+        );
+        assert_eq!(
+            split("x{a}").unwrap(),
+            [
+                Segment::Literal("x"),
+                Segment::Placeholder(Placeholder {
+                    name: Some("a"),
+                    spec: None
+                })
+            ]
+        );
+        assert_eq!(split("").unwrap(), []);
+    }
+}

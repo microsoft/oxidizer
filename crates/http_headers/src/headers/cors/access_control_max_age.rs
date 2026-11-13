@@ -190,6 +190,7 @@ impl Field for AccessControlMaxAge {
     /// Reads the count directly, since the field value carries nothing a
     /// borrowed form could retain that the count does not already capture.
     #[inline]
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -205,6 +206,7 @@ impl Field for AccessControlMaxAge {
     /// Reads the count without building a view, since the owned form keeps
     /// nothing else.
     #[inline]
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,

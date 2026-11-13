@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{self, Write as _};
-use std::io::{BufWriter, Write as _};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 use std::process::Command;
@@ -164,13 +164,22 @@ pub(crate) struct BenchmarkReport {
 
 impl BenchmarkReport {
     pub(crate) fn publication_incomplete(path: &Path) -> bool {
-        incomplete_marker(path).is_file()
+        report_file_exists(&incomplete_marker(path))
     }
 
     pub(crate) fn from_results(
         results: impl IntoIterator<Item = NativeResult>,
         backends: Vec<String>,
         artifact_root: String,
+    ) -> Result<Self, Error> {
+        Self::from_results_with_metadata(results, backends, artifact_root, EnvironmentMetadata::collect)
+    }
+
+    fn from_results_with_metadata(
+        results: impl IntoIterator<Item = NativeResult>,
+        backends: Vec<String>,
+        artifact_root: String,
+        collect: impl FnOnce(Vec<String>, String) -> EnvironmentMetadata,
     ) -> Result<Self, Error> {
         let mut entries = BTreeMap::<String, BenchmarkEntry>::new();
         for result in results {
@@ -196,7 +205,7 @@ impl BenchmarkReport {
         }
         let report = Self {
             schema_version: REPORT_SCHEMA_VERSION,
-            metadata: EnvironmentMetadata::collect(backends, artifact_root),
+            metadata: collect(backends, artifact_root),
             entries: entries.into_values().collect(),
         };
         validate_report(&report)?;
@@ -205,14 +214,22 @@ impl BenchmarkReport {
 
     pub(crate) fn read_json(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
+        Self::read_json_with(path, Self::publication_incomplete, read_regular_file)
+    }
+
+    fn read_json_with(
+        path: &Path,
+        publication_incomplete: impl FnOnce(&Path) -> bool,
+        read: impl FnOnce(&Path, u64, &str) -> Result<Vec<u8>, Error>,
+    ) -> Result<Self, Error> {
         let incomplete = incomplete_marker(path);
-        if Self::publication_incomplete(path) {
+        if publication_incomplete(path) {
             return Err(Error::ReportFormat {
                 path: path.to_owned(),
                 message: format!("publication is incomplete; marker {} is present", incomplete.display()),
             });
         }
-        let bytes = read_regular_file(path, MAX_REPORT_JSON_BYTES, "JSON").map_err(Self::report_read_error)?;
+        let bytes = read(path, MAX_REPORT_JSON_BYTES, "JSON").map_err(Self::report_read_error)?;
         let mut report: Self = serde_json::from_slice(&bytes).map_err(|source| Error::ReportJson {
             path: path.to_owned(),
             source,
@@ -297,11 +314,28 @@ impl BenchmarkReport {
     }
 
     pub(crate) fn write_reports(&self, json_path: Option<&Path>, markdown_path: Option<&Path>) -> Result<(), Error> {
-        let json = json_path.map(|path| PreparedReport::json(path, self)).transpose()?;
-        let markdown = markdown_path.map(|path| PreparedReport::markdown(path, self)).transpose()?;
+        #[cfg(test)]
+        if MEMORY_REPORT_FILES.with_borrow(Option::is_some) {
+            return self.write_reports_with(json_path, markdown_path, &mut MemoryReports);
+        }
+        self.write_reports_with(json_path, markdown_path, &mut FilesystemReports)
+    }
+
+    fn write_reports_with<P: ReportPublication>(
+        &self,
+        json_path: Option<&Path>,
+        markdown_path: Option<&Path>,
+        publication: &mut P,
+    ) -> Result<(), Error> {
+        let json = json_path
+            .map(|path| publication.prepare(path, self, ReportEncoding::Json))
+            .transpose()?;
+        let markdown = markdown_path
+            .map(|path| publication.prepare(path, self, ReportEncoding::Markdown))
+            .transpose()?;
         let marker = json_path.zip(markdown_path).map(|(json, markdown)| {
             let marker = incomplete_marker(json);
-            write_atomic_bytes(
+            publication.write_marker(
                 &marker,
                 format!("json={}\nmarkdown={}\n", json.display(), markdown.display()).as_bytes(),
             )?;
@@ -309,19 +343,23 @@ impl BenchmarkReport {
         });
         let marker = marker.transpose()?;
         if let Some(markdown) = markdown {
-            markdown.publish()?;
+            publication.publish(markdown)?;
         }
         if let Some(json) = json {
-            json.publish()?;
+            publication.publish(json)?;
         }
         if let Some(marker) = marker {
-            fs::remove_file(&marker).map_err(|source| Error::ReportIo { path: marker, source })?;
+            publication.remove_marker(marker)?;
         }
         Ok(())
     }
 
     pub(crate) fn render_console_table(&self) -> String {
-        let width = terminal_size::terminal_size().map_or(DEFAULT_CONSOLE_WIDTH, |(terminal_size::Width(width), _)| usize::from(width));
+        self.render_console_table_with_size(terminal_size::terminal_size())
+    }
+
+    fn render_console_table_with_size(&self, size: Option<(terminal_size::Width, terminal_size::Height)>) -> String {
+        let width = size.map_or(DEFAULT_CONSOLE_WIDTH, |(terminal_size::Width(width), _)| usize::from(width));
         self.render_console_table_with_width(width)
     }
 
@@ -428,16 +466,30 @@ impl EnvironmentMetadata {
     }
 
     fn collect(measured_backends: Vec<String>, artifact_root: String) -> Self {
-        let timestamp_utc = Timestamp::now().to_string();
+        Self::collect_with(
+            measured_backends,
+            artifact_root,
+            metadata_timestamp,
+            host_cpu,
+            option_env!("METABENCH_RUSTFLAGS"),
+        )
+    }
+
+    fn collect_with(
+        measured_backends: Vec<String>,
+        artifact_root: String,
+        timestamp: impl FnOnce() -> String,
+        host_cpu: impl FnOnce() -> String,
+        compiler_flags: Option<&str>,
+    ) -> Self {
+        let timestamp_utc = timestamp();
         Self {
             timestamp_utc,
             target_triple: env!("METABENCH_TARGET").to_owned(),
             rustc_version: env!("METABENCH_RUSTC_VERSION").to_owned(),
             host_cpu: host_cpu(),
             profile: env!("METABENCH_PROFILE").to_owned(),
-            compiler_flags: option_env!("METABENCH_RUSTFLAGS")
-                .map(str::to_owned)
-                .filter(|flags| !flags.is_empty()),
+            compiler_flags: compiler_flags.map(str::to_owned).filter(|flags| !flags.is_empty()),
             measured_backends,
             artifact_root,
         }
@@ -561,6 +613,7 @@ fn classify(changes: &[f64], threshold: f64) -> BenchmarkStatus {
         if threshold > 0.0 {
             *change <= -threshold
         } else {
+            // #[gamma::skip(unary.remove_neg, reason = "apply_baseline is the sole production caller and rejects negative or nonfinite thresholds; this branch therefore compares against signed zero, whose negation preserves ordering")]
             *change < -threshold
         }
     }) {
@@ -643,6 +696,7 @@ fn select_metric_count(
 fn project_rows(rows: &[Vec<String>], metric_count: usize) -> Vec<Vec<String>> {
     rows.iter()
         .map(|row| {
+            // #[gamma::skip(arith.add_to_mul, literal.int_decrement, literal.int_increment, literal.int_to_zero, reason = "capacity does not determine the returned cells; extend and push grow the vector as needed")]
             let mut projected = Vec::with_capacity(metric_count + 2);
             projected.extend_from_slice(&row[..=metric_count]);
             projected.push(row.last().cloned().unwrap_or_default());
@@ -732,7 +786,10 @@ fn validate_report(report: &BenchmarkReport) -> Result<(), Error> {
                             || !lower.is_finite()
                             || !upper.is_finite()
                             || lower > upper
-                            || (engine == "criterion" && matches!(name.as_str(), "time" | "median") && (lower < 0.0 || upper < 0.0))
+                            || (engine == "criterion" && matches!(name.as_str(), "time" | "median") && {
+                                // #[gamma::skip(logical.or_remove_right, reason = "earlier disjuncts reject nonfinite bounds and lower > upper; if lower is nonnegative then upper cannot be negative")]
+                                lower < 0.0 || upper < 0.0
+                            })
                     }
                     (None, None) => metric.confidence_level.is_some() || (engine == "criterion" && name == "time"),
                     _ => true,
@@ -763,6 +820,154 @@ fn validate_report(report: &BenchmarkReport) -> Result<(), Error> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReportEncoding {
+    Json,
+    Markdown,
+}
+
+trait ReportPublication {
+    type Prepared;
+
+    fn prepare(&mut self, path: &Path, report: &BenchmarkReport, encoding: ReportEncoding) -> Result<Self::Prepared, Error>;
+    fn write_marker(&mut self, path: &Path, contents: &[u8]) -> Result<(), Error>;
+    fn publish(&mut self, prepared: Self::Prepared) -> Result<(), Error>;
+    fn remove_marker(&mut self, path: PathBuf) -> Result<(), Error>;
+}
+
+struct FilesystemReports;
+
+pub(super) fn report_file_exists(path: &Path) -> bool {
+    #[cfg(test)]
+    if let Some(exists) = MEMORY_REPORT_FILES.with_borrow(|files| files.as_ref().map(|files| files.contains_key(path))) {
+        return exists;
+    }
+    path.is_file()
+}
+
+#[cfg(test)]
+type ReportFiles = BTreeMap<PathBuf, Vec<u8>>;
+
+#[cfg(test)]
+thread_local! {
+    static MEMORY_REPORT_FILES: std::cell::RefCell<Option<ReportFiles>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) fn in_memory_report_file(path: &Path) -> Option<Vec<u8>> {
+    MEMORY_REPORT_FILES.with_borrow(|files| files.as_ref().and_then(|files| files.get(path).cloned()))
+}
+
+#[cfg(test)]
+pub(super) fn with_in_memory_report_files<R>(files: ReportFiles, run: impl FnOnce() -> R) -> (R, ReportFiles) {
+    struct Reset(Option<ReportFiles>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            MEMORY_REPORT_FILES.set(self.0.take());
+        }
+    }
+    let reset = Reset(MEMORY_REPORT_FILES.replace(Some(files)));
+    let result = run();
+    let files = MEMORY_REPORT_FILES
+        .take()
+        .expect("the enclosing report fixture installs its publication observations");
+    drop(reset);
+    (result, files)
+}
+
+#[cfg(test)]
+struct MemoryReports;
+
+#[cfg(test)]
+impl ReportPublication for MemoryReports {
+    type Prepared = (PathBuf, Vec<u8>);
+
+    fn prepare(&mut self, path: &Path, report: &BenchmarkReport, encoding: ReportEncoding) -> Result<Self::Prepared, Error> {
+        let mut bytes = Vec::new();
+        match encoding {
+            ReportEncoding::Json => serde_json::to_writer_pretty(&mut bytes, report).map_err(|source| Error::ReportJson {
+                path: path.to_owned(),
+                source,
+            })?,
+            ReportEncoding::Markdown => report.write_markdown(&mut bytes).map_err(|source| Error::ReportIo {
+                path: path.to_owned(),
+                source,
+            })?,
+        }
+        Ok((path.to_owned(), bytes))
+    }
+
+    fn write_marker(&mut self, path: &Path, contents: &[u8]) -> Result<(), Error> {
+        self.publish((path.to_owned(), contents.to_vec()))
+    }
+
+    fn publish(&mut self, (path, bytes): Self::Prepared) -> Result<(), Error> {
+        MEMORY_REPORT_FILES.with_borrow_mut(|files| {
+            files
+                .as_mut()
+                .expect("the owning report fixture retains its publication map")
+                .insert(path, bytes);
+        });
+        Ok(())
+    }
+
+    fn remove_marker(&mut self, path: PathBuf) -> Result<(), Error> {
+        MEMORY_REPORT_FILES.with_borrow_mut(|files| {
+            assert!(
+                files
+                    .as_mut()
+                    .expect("the owning report fixture retains its publication map")
+                    .remove(&path)
+                    .is_some()
+            );
+        });
+        Ok(())
+    }
+}
+
+impl ReportPublication for FilesystemReports {
+    type Prepared = PreparedReport;
+
+    fn prepare(&mut self, path: &Path, report: &BenchmarkReport, encoding: ReportEncoding) -> Result<Self::Prepared, Error> {
+        match encoding {
+            ReportEncoding::Json => PreparedReport::json(path, report),
+            ReportEncoding::Markdown => PreparedReport::markdown(path, report),
+        }
+    }
+
+    fn write_marker(&mut self, path: &Path, contents: &[u8]) -> Result<(), Error> {
+        write_atomic_bytes(path, contents)
+    }
+
+    fn publish(&mut self, prepared: Self::Prepared) -> Result<(), Error> {
+        prepared.publish()
+    }
+
+    fn remove_marker(&mut self, path: PathBuf) -> Result<(), Error> {
+        fs::remove_file(&path).map_err(|source| Error::ReportIo { path, source })
+    }
+}
+
+trait ReportTemporary {
+    type Writer: Write;
+
+    fn writer(&mut self) -> &mut Self::Writer;
+    fn sync(&self) -> io::Result<()>;
+}
+
+impl ReportTemporary for tempfile::NamedTempFile {
+    type Writer = fs::File;
+
+    fn writer(&mut self) -> &mut Self::Writer {
+        self.as_file_mut()
+    }
+
+    // #[gamma::skip(fn_value.ok, reason = "this adapter calls native file synchronization; publication flush and sync failure policy is tested through ReportTemporary without filesystem fixtures")]
+    fn sync(&self) -> io::Result<()> {
+        self.as_file().sync_all()
+    }
+}
+
 struct PreparedReport {
     path: PathBuf,
     temporary: tempfile::NamedTempFile,
@@ -788,30 +993,13 @@ impl PreparedReport {
     }
 
     fn prepare(path: &Path, write: impl FnOnce(&mut BufWriter<&mut fs::File>) -> Result<(), Error>) -> Result<Self, Error> {
-        let parent = report_parent(path);
-        fs::create_dir_all(parent).map_err(|source| Error::ReportIo {
-            path: parent.to_owned(),
-            source,
-        })?;
-        let mut temporary = tempfile::Builder::new()
-            .prefix(".metabench-")
-            .tempfile_in(parent)
-            .map_err(|source| Error::ReportIo {
-                path: parent.to_owned(),
-                source,
-            })?;
-        {
-            let mut writer = BufWriter::new(temporary.as_file_mut());
-            write(&mut writer)?;
-            writer.flush().map_err(|source| Error::ReportIo {
-                path: path.to_owned(),
-                source,
-            })?;
-        }
-        temporary.as_file().sync_all().map_err(|source| Error::ReportIo {
-            path: path.to_owned(),
-            source,
-        })?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "this adapter constructs a native temporary file; prepare_report_with error propagation is tested with in-memory ReportTemporary implementations")]
+        let temporary = prepare_report_with(
+            path,
+            |parent| fs::create_dir_all(parent),
+            |prefix, parent| tempfile::Builder::new().prefix(prefix).tempfile_in(parent),
+            write,
+        )?;
         Ok(Self {
             path: path.to_owned(),
             temporary,
@@ -827,13 +1015,59 @@ impl PreparedReport {
 }
 
 fn write_atomic_bytes(path: &Path, contents: &[u8]) -> Result<(), Error> {
-    let prepared = PreparedReport::prepare(path, |writer| {
-        writer.write_all(contents).map_err(|source| Error::ReportIo {
+    write_atomic_bytes_with(
+        path,
+        contents,
+        |path, contents| {
+            PreparedReport::prepare(path, |writer| {
+                writer.write_all(contents).map_err(|source| Error::ReportIo {
+                    path: path.to_owned(),
+                    source,
+                })
+            })
+        },
+        PreparedReport::publish,
+    )
+}
+
+fn prepare_report_with<T: ReportTemporary>(
+    path: &Path,
+    create_parent: impl FnOnce(&Path) -> io::Result<()>,
+    create_temporary: impl FnOnce(&str, &Path) -> io::Result<T>,
+    write: impl FnOnce(&mut BufWriter<&mut T::Writer>) -> Result<(), Error>,
+) -> Result<T, Error> {
+    let parent = report_parent(path);
+    create_parent(parent).map_err(|source| Error::ReportIo {
+        path: parent.to_owned(),
+        source,
+    })?;
+    let mut temporary = create_temporary(".metabench-", parent).map_err(|source| Error::ReportIo {
+        path: parent.to_owned(),
+        source,
+    })?;
+    {
+        let mut writer = BufWriter::new(temporary.writer());
+        write(&mut writer)?;
+        writer.flush().map_err(|source| Error::ReportIo {
             path: path.to_owned(),
             source,
-        })
+        })?;
+    }
+    temporary.sync().map_err(|source| Error::ReportIo {
+        path: path.to_owned(),
+        source,
     })?;
-    prepared.publish()
+    Ok(temporary)
+}
+
+fn write_atomic_bytes_with<T>(
+    path: &Path,
+    contents: &[u8],
+    prepare: impl FnOnce(&Path, &[u8]) -> Result<T, Error>,
+    publish: impl FnOnce(T) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let prepared = prepare(path, contents)?;
+    publish(prepared)
 }
 
 fn report_parent(path: &Path) -> &Path {
@@ -848,10 +1082,69 @@ fn incomplete_marker(path: &Path) -> PathBuf {
     PathBuf::from(marker)
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+struct TestHostSources {
+    timestamp: fn() -> String,
+    output: fn(&mut Command) -> io::Result<std::process::Output>,
+    environment: fn(&str) -> Result<String, env::VarError>,
+    #[cfg(target_os = "linux")]
+    cpuinfo: &'static str,
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_HOST_SOURCES: std::cell::Cell<Option<TestHostSources>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) fn with_in_memory_metadata<R>(run: impl FnOnce() -> R) -> R {
+    struct Restore(Option<TestHostSources>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_HOST_SOURCES.set(self.0);
+        }
+    }
+    let _restore = Restore(TEST_HOST_SOURCES.replace(Some(TestHostSources {
+        timestamp: || "2000-01-02T03:04:05Z".into(),
+        output: |_| Err(io::Error::from(io::ErrorKind::NotFound)),
+        environment: |_| Ok("in-memory CPU".into()),
+        #[cfg(target_os = "linux")]
+        cpuinfo: "model name : in-memory CPU\n",
+    })));
+    run()
+}
+
+fn metadata_timestamp() -> String {
+    #[cfg(test)]
+    if let Some(sources) = TEST_HOST_SOURCES.get() {
+        return (sources.timestamp)();
+    }
+    Timestamp::now().to_string()
+}
+
+#[cfg(target_os = "linux")]
+fn host_cpuinfo() -> io::Result<String> {
+    #[cfg(test)]
+    if let Some(sources) = TEST_HOST_SOURCES.get() {
+        return Ok(sources.cpuinfo.to_owned());
+    }
+    fs::read_to_string("/proc/cpuinfo")
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn host_environment(name: &str) -> Result<String, env::VarError> {
+    #[cfg(test)]
+    if let Some(sources) = TEST_HOST_SOURCES.get() {
+        return (sources.environment)(name);
+    }
+    env::var(name)
+}
+
 fn host_cpu() -> String {
     #[cfg(target_os = "linux")]
     {
-        if let Ok(cpuinfo) = fs::read_to_string("/proc/cpuinfo")
+        if let Ok(cpuinfo) = host_cpuinfo()
             && let Some(model) = linux_cpu_identity(&cpuinfo)
         {
             return model;
@@ -867,20 +1160,31 @@ fn host_cpu() -> String {
     }
     #[cfg(target_os = "windows")]
     {
-        let registry = command_value(
-            "reg",
-            &[
-                "query",
-                r"HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0",
-                "/v",
-                "ProcessorNameString",
-            ],
-        );
-        if let Some(identity) = windows_cpu_identity(registry.as_deref(), env::var("PROCESSOR_IDENTIFIER").ok().as_deref()) {
-            return identity;
-        }
+        windows_host_cpu(command_value, host_environment, env::consts::ARCH)
     }
+    #[cfg(not(target_os = "windows"))]
     cpu_identity_fallback(env::consts::ARCH)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_host_cpu(
+    command: impl FnOnce(&str, &[&str]) -> Option<String>,
+    environment: impl FnOnce(&str) -> Result<String, env::VarError>,
+    architecture: &str,
+) -> String {
+    let registry = command(
+        "reg",
+        &[
+            "query",
+            r"HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+            "/v",
+            "ProcessorNameString",
+        ],
+    );
+    if let Some(identity) = windows_cpu_identity(registry.as_deref(), environment("PROCESSOR_IDENTIFIER").ok().as_deref()) {
+        return identity;
+    }
+    cpu_identity_fallback(architecture)
 }
 
 #[cfg(any(target_os = "linux", test))]
@@ -918,9 +1222,29 @@ fn nonempty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn command_value(program: &str, arguments: &[&str]) -> Option<String> {
-    let output = Command::new(program).args(arguments).output().ok()?;
+    command_value_with(program, arguments, host_command_output)
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn host_command_output(command: &mut Command) -> io::Result<std::process::Output> {
+    #[cfg(test)]
+    if let Some(sources) = TEST_HOST_SOURCES.get() {
+        return (sources.output)(command);
+    }
+    command.output()
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn command_value_with(
+    program: &str,
+    arguments: &[&str],
+    output: impl FnOnce(&mut Command) -> io::Result<std::process::Output>,
+) -> Option<String> {
+    let mut command = Command::new(program);
+    command.args(arguments);
+    let output = output(&mut command).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -936,10 +1260,1137 @@ fn cpu_identity_fallback(architecture: &str) -> String {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[derive(Debug)]
+    struct MemoryPrepared {
+        kind: &'static str,
+        path: PathBuf,
+        events: Rc<RefCell<Vec<String>>>,
+    }
+
+    impl Drop for MemoryPrepared {
+        fn drop(&mut self) {
+            self.events.borrow_mut().push(format!("drop-{}", self.kind));
+        }
+    }
+
+    struct MemoryPublication {
+        failure: Option<&'static str>,
+        events: Rc<RefCell<Vec<String>>>,
+        marker: bool,
+    }
+
+    #[derive(Debug)]
+    struct MemoryReportFile {
+        contents: Vec<u8>,
+        failure: &'static str,
+        events: Rc<RefCell<Vec<String>>>,
+    }
+
+    impl Write for MemoryReportFile {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.events.borrow_mut().push("write".into());
+            if self.failure == "write" {
+                Err(io::Error::other("write refused"))
+            } else {
+                self.contents.extend_from_slice(buf);
+                Ok(buf.len())
+            }
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.events.borrow_mut().push("flush".into());
+            if self.failure == "flush" {
+                Err(io::Error::other("flush refused"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct MemoryTemporary {
+        file: MemoryReportFile,
+    }
+
+    impl Drop for MemoryTemporary {
+        fn drop(&mut self) {
+            self.file.events.borrow_mut().push("drop".into());
+        }
+    }
+
+    impl ReportTemporary for MemoryTemporary {
+        type Writer = MemoryReportFile;
+
+        fn writer(&mut self) -> &mut Self::Writer {
+            &mut self.file
+        }
+
+        fn sync(&self) -> io::Result<()> {
+            self.file.events.borrow_mut().push("sync".into());
+            if self.file.failure == "sync" {
+                Err(io::Error::other("sync refused"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn november_report_preparation_owns_temporary_until_write_flush_and_sync_finish() {
+        let path = Path::new("reports").join("bench.json");
+        for (case, expected) in [
+            ("mkdir", vec!["mkdir"]),
+            ("temporary", vec!["mkdir", "temporary"]),
+            ("callback", vec!["mkdir", "temporary", "callback", "drop"]),
+            ("write", vec!["mkdir", "temporary", "callback", "write", "write", "drop"]),
+            ("flush", vec!["mkdir", "temporary", "callback", "write", "flush", "drop"]),
+            ("sync", vec!["mkdir", "temporary", "callback", "write", "flush", "sync", "drop"]),
+            ("success", vec!["mkdir", "temporary", "callback", "write", "flush", "sync", "drop"]),
+        ] {
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let result = prepare_report_with(
+                &path,
+                |parent| {
+                    assert_eq!(parent, Path::new("reports"));
+                    events.borrow_mut().push("mkdir".into());
+                    if case == "mkdir" {
+                        Err(io::Error::other("mkdir refused"))
+                    } else {
+                        Ok(())
+                    }
+                },
+                |prefix, parent| {
+                    assert_eq!(parent, Path::new("reports"));
+                    assert_eq!(prefix, ".metabench-");
+                    events.borrow_mut().push("temporary".into());
+                    if case == "temporary" {
+                        Err(io::Error::other("temporary refused"))
+                    } else {
+                        Ok(MemoryTemporary {
+                            file: MemoryReportFile {
+                                contents: Vec::new(),
+                                failure: case,
+                                events: Rc::clone(&events),
+                            },
+                        })
+                    }
+                },
+                |writer| {
+                    events.borrow_mut().push("callback".into());
+                    if case == "callback" {
+                        Err(Error::ReportIo {
+                            path: "callback".into(),
+                            source: io::Error::other("callback refused"),
+                        })
+                    } else {
+                        writer.write_all(b"report").map_err(|source| Error::ReportIo {
+                            path: "callback".into(),
+                            source,
+                        })
+                    }
+                },
+            );
+            if case == "success" {
+                let temporary = result.unwrap();
+                assert_eq!(temporary.file.contents, b"report");
+                assert_eq!(events.borrow().last().unwrap(), "sync");
+                drop(temporary);
+            } else {
+                let expected_path = match case {
+                    "mkdir" | "temporary" => Path::new("reports"),
+                    "callback" => Path::new("callback"),
+                    _ => &path,
+                };
+                assert!(
+                    matches!(result, Err(Error::ReportIo { path, source }) if path == expected_path && source.kind() == io::ErrorKind::Other && source.to_string() == format!("{case} refused"))
+                );
+            }
+            assert_eq!(*events.borrow(), expected, "{case}");
+        }
+    }
+
+    impl MemoryPublication {
+        fn event(&self, operation: &'static str, path: &Path) -> Result<(), Error> {
+            self.events.borrow_mut().push(operation.into());
+            if self.failure == Some(operation) {
+                Err(Error::ReportIo {
+                    path: path.to_owned(),
+                    source: io::Error::new(io::ErrorKind::PermissionDenied, operation),
+                })
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    impl ReportPublication for MemoryPublication {
+        type Prepared = MemoryPrepared;
+
+        fn prepare(&mut self, path: &Path, report: &BenchmarkReport, encoding: ReportEncoding) -> Result<Self::Prepared, Error> {
+            assert_eq!(report.metadata.artifact_root, "artifacts");
+            let (operation, kind, expected_path) = match encoding {
+                ReportEncoding::Json => ("prepare-json", "json", "report.json"),
+                ReportEncoding::Markdown => ("prepare-markdown", "markdown", "report.md"),
+            };
+            assert_eq!(path, Path::new(expected_path));
+            self.event(operation, path)?;
+            Ok(MemoryPrepared {
+                kind,
+                path: path.to_owned(),
+                events: Rc::clone(&self.events),
+            })
+        }
+
+        fn write_marker(&mut self, path: &Path, contents: &[u8]) -> Result<(), Error> {
+            assert_eq!(path, Path::new("report.json.metabench-incomplete"));
+            assert_eq!(contents, b"json=report.json\nmarkdown=report.md\n");
+            self.event("marker-write", path)?;
+            self.marker = true;
+            Ok(())
+        }
+
+        fn publish(&mut self, prepared: Self::Prepared) -> Result<(), Error> {
+            self.event(
+                if prepared.kind == "json" {
+                    "publish-json"
+                } else {
+                    "publish-markdown"
+                },
+                &prepared.path,
+            )
+        }
+
+        fn remove_marker(&mut self, path: PathBuf) -> Result<(), Error> {
+            assert_eq!(path, Path::new("report.json.metabench-incomplete"));
+            assert!(self.marker);
+            self.event("marker-remove", &path)?;
+            self.marker = false;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn november_report_publication_preserves_exact_order_markers_errors_and_partial_ownership() {
+        let report = BenchmarkReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            metadata: metadata(),
+            entries: Vec::new(),
+        };
+        for (paths, failure, expected) in [
+            (0, None, vec![]),
+            (1, None, vec!["prepare-json", "publish-json", "drop-json"]),
+            (2, None, vec!["prepare-markdown", "publish-markdown", "drop-markdown"]),
+            (
+                3,
+                None,
+                vec![
+                    "prepare-json",
+                    "prepare-markdown",
+                    "marker-write",
+                    "publish-markdown",
+                    "drop-markdown",
+                    "publish-json",
+                    "drop-json",
+                    "marker-remove",
+                ],
+            ),
+            (3, Some("prepare-json"), vec!["prepare-json"]),
+            (3, Some("prepare-markdown"), vec!["prepare-json", "prepare-markdown", "drop-json"]),
+            (
+                3,
+                Some("marker-write"),
+                vec!["prepare-json", "prepare-markdown", "marker-write", "drop-markdown", "drop-json"],
+            ),
+            (
+                3,
+                Some("publish-markdown"),
+                vec![
+                    "prepare-json",
+                    "prepare-markdown",
+                    "marker-write",
+                    "publish-markdown",
+                    "drop-markdown",
+                    "drop-json",
+                ],
+            ),
+            (
+                3,
+                Some("publish-json"),
+                vec![
+                    "prepare-json",
+                    "prepare-markdown",
+                    "marker-write",
+                    "publish-markdown",
+                    "drop-markdown",
+                    "publish-json",
+                    "drop-json",
+                ],
+            ),
+            (
+                3,
+                Some("marker-remove"),
+                vec![
+                    "prepare-json",
+                    "prepare-markdown",
+                    "marker-write",
+                    "publish-markdown",
+                    "drop-markdown",
+                    "publish-json",
+                    "drop-json",
+                    "marker-remove",
+                ],
+            ),
+        ] {
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let mut publication = MemoryPublication {
+                failure,
+                events: Rc::clone(&events),
+                marker: false,
+            };
+            let result = report.write_reports_with(
+                (paths & 1 != 0).then_some(Path::new("report.json")),
+                (paths & 2 != 0).then_some(Path::new("report.md")),
+                &mut publication,
+            );
+            if let Some(operation) = failure {
+                let expected_path = match operation {
+                    "prepare-json" | "publish-json" => "report.json",
+                    "prepare-markdown" | "publish-markdown" => "report.md",
+                    _ => "report.json.metabench-incomplete",
+                };
+                assert!(
+                    matches!(result, Err(Error::ReportIo { path, source }) if path == Path::new(expected_path) && source.kind() == io::ErrorKind::PermissionDenied && source.to_string() == operation)
+                );
+            } else {
+                result.unwrap();
+            }
+            assert_eq!(*events.borrow(), expected, "{paths}/{failure:?}");
+            assert_eq!(
+                publication.marker,
+                matches!(failure, Some("publish-markdown" | "publish-json" | "marker-remove"))
+            );
+        }
+    }
+
+    #[test]
+    fn november_atomic_report_bytes_forward_exact_payload_and_preserve_prepare_or_publish_errors() {
+        for failure in [None, Some("prepare"), Some("publish")] {
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let result = write_atomic_bytes_with(
+                Path::new("report"),
+                b"exact\0bytes\n",
+                |path, contents| {
+                    assert_eq!(path, Path::new("report"));
+                    assert_eq!(contents, b"exact\0bytes\n");
+                    events.borrow_mut().push("prepare".into());
+                    if failure == Some("prepare") {
+                        Err(Error::ReportIo {
+                            path: path.to_owned(),
+                            source: io::Error::other("prepare refused"),
+                        })
+                    } else {
+                        Ok(MemoryPrepared {
+                            kind: "bytes",
+                            path: path.to_owned(),
+                            events: Rc::clone(&events),
+                        })
+                    }
+                },
+                |prepared| {
+                    assert_eq!(prepared.path, Path::new("report"));
+                    events.borrow_mut().push("publish".into());
+                    if failure == Some("publish") {
+                        Err(Error::ReportIo {
+                            path: prepared.path.clone(),
+                            source: io::Error::other("publish refused"),
+                        })
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            if let Some(operation) = failure {
+                assert!(
+                    matches!(result, Err(Error::ReportIo { path, source }) if path == Path::new("report") && source.to_string() == format!("{operation} refused"))
+                );
+            } else {
+                result.unwrap();
+            }
+            assert_eq!(
+                *events.borrow(),
+                if failure == Some("prepare") {
+                    vec!["prepare"]
+                } else {
+                    vec!["prepare", "publish", "drop-bytes"]
+                }
+            );
+        }
+    }
+
+    struct TestHostScope(Option<TestHostSources>);
+
+    impl TestHostScope {
+        fn new() -> Self {
+            Self(TEST_HOST_SOURCES.replace(Some(TestHostSources {
+                timestamp: || "2001-02-03T04:05:06Z".into(),
+                output: deterministic_host_output,
+                environment: |name| {
+                    assert_eq!(name, "PROCESSOR_IDENTIFIER");
+                    Ok("november fallback CPU".into())
+                },
+                #[cfg(target_os = "linux")]
+                cpuinfo: "model name : november CPU\n",
+            })))
+        }
+    }
+
+    impl Drop for TestHostScope {
+        fn drop(&mut self) {
+            TEST_HOST_SOURCES.set(self.0);
+        }
+    }
+
+    fn deterministic_host_output(command: &mut Command) -> io::Result<std::process::Output> {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt as _;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt as _;
+        use std::process::{ExitStatus, Output};
+
+        let arguments = command.get_args().collect::<Vec<_>>();
+        if command.get_program() == "error-probe" {
+            assert!(arguments.is_empty());
+            return Err(io::Error::other("probe denied"));
+        }
+        let registry = command.get_program() == "reg";
+        if registry {
+            assert_eq!(
+                arguments,
+                [
+                    "query",
+                    r"HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+                    "/v",
+                    "ProcessorNameString"
+                ]
+            );
+        } else if command.get_program() == "sysctl" {
+            assert_eq!(arguments[0], "-n");
+            assert!(arguments[1] == "machdep.cpu.brand_string" || arguments[1] == "hw.model");
+            assert_eq!(arguments.len(), 2);
+        } else {
+            assert_eq!(command.get_program(), "november-probe");
+            assert_eq!(arguments, ["--data"]);
+        }
+        Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: if registry {
+                b"ProcessorNameString REG_SZ november CPU\n".to_vec()
+            } else {
+                b"november CPU\n".to_vec()
+            },
+            stderr: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn november_actual_report_entrypoints_forward_metadata_without_native_observations() {
+        let _scope = TestHostScope::new();
+        let backends = vec!["criterion".to_owned(), "allocations".to_owned()];
+        let report = BenchmarkReport::from_results(std::iter::empty::<NativeResult>(), backends.clone(), "owned-run".into()).unwrap();
+        assert!(report.entries.is_empty());
+        assert_eq!(report.metadata.measured_backends, backends);
+        assert_eq!(report.metadata.artifact_root, "owned-run");
+        assert_eq!(report.metadata.timestamp_utc, "2001-02-03T04:05:06Z");
+        assert_eq!(report.metadata.host_cpu, "november CPU");
+        let metadata = EnvironmentMetadata::collect(vec!["vtune".into()], "another-run".into());
+        assert_eq!(metadata.measured_backends, ["vtune"]);
+        assert_eq!(metadata.artifact_root, "another-run");
+        assert_eq!(host_cpu(), "november CPU");
+        assert_eq!(command_value("november-probe", &["--data"]).as_deref(), Some("november CPU"));
+        assert_eq!(command_value("error-probe", &[]), None);
+        assert_eq!(host_environment("PROCESSOR_IDENTIFIER").unwrap(), "november fallback CPU");
+    }
+
+    #[test]
+    fn gamma_round2_console_width_fallback_is_exactly_120_columns() {
+        let mut report = gamma_report(
+            "perf",
+            "cycles",
+            Metric::integer("perf", "cycles", 17, MetricDirection::LowerIsBetter),
+        );
+        report.entries[0].results.get_mut("perf").unwrap().metrics.insert(
+            "instructions".into(),
+            Metric::integer("perf", "instructions", 23, MetricDirection::LowerIsBetter),
+        );
+        for (required_width, included) in [(120, true), (121, false)] {
+            let identity_length = (10..150)
+                .find(|length| {
+                    report.entries[0].identity = "x".repeat(*length);
+                    let metrics = report.table_metrics();
+                    let rows = report.table_rows(&metrics, render_metric_console);
+                    console_projected_width(&metrics, &rows, 2) == required_width
+                })
+                .unwrap();
+            report.entries[0].identity = "x".repeat(identity_length);
+            assert_eq!(report.render_console_table_with_size(None).contains("HW Cycles"), included);
+            assert!(
+                report
+                    .render_console_table_with_size(Some((terminal_size::Width(300), terminal_size::Height(20))))
+                    .contains("HW Cycles")
+            );
+            let narrow = report.render_console_table_with_size(Some((terminal_size::Width(1), terminal_size::Height(20))));
+            assert!(narrow.contains("HW Instr"));
+            assert!(!narrow.contains("HW Cycles"));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_report_reader_validates_policy_schema_and_publication_before_reading() {
+        let path = Path::new("report.json");
+        let expected = report("case", 7.0, MetricDirection::LowerIsBetter);
+        let bytes = serde_json::to_vec(&expected).unwrap();
+        let actual = BenchmarkReport::read_json_with(
+            path,
+            |candidate| {
+                assert_eq!(candidate, path);
+                false
+            },
+            |candidate, limit, format| {
+                assert_eq!(candidate, path);
+                assert_eq!(limit, 64 * 1024 * 1024);
+                assert_eq!(format, "JSON");
+                Ok(bytes)
+            },
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_value(actual).unwrap(), serde_json::to_value(expected).unwrap());
+        assert!(
+            matches!(BenchmarkReport::read_json_with(path, |_| true, |_, _, _| panic!("incomplete report")),
+            Err(Error::ReportFormat { path: failed, message }) if failed == path && message == "publication is incomplete; marker report.json.metabench-incomplete is present")
+        );
+        assert!(
+            matches!(BenchmarkReport::read_json_with(path, |_| false, |_, _, _| Err(Error::ArtifactIo { path: path.into(), source: io::Error::new(io::ErrorKind::PermissionDenied, "read refused") })),
+            Err(Error::ReportIo { path: failed, source }) if failed == path && source.kind() == io::ErrorKind::PermissionDenied)
+        );
+        assert!(
+            matches!(BenchmarkReport::read_json_with(path, |_| false, |_, _, _| Ok(b"invalid JSON".to_vec())),
+            Err(Error::ReportJson { path: failed, .. }) if failed == path)
+        );
+        let mut incompatible = report("case", 7.0, MetricDirection::LowerIsBetter);
+        incompatible.schema_version = 8;
+        assert!(
+            matches!(BenchmarkReport::read_json_with(path, |_| false, |_, _, _| Ok(serde_json::to_vec(&incompatible).unwrap())),
+            Err(Error::UnsupportedReportSchema { path: failed, found: 8, expected: 9 }) if failed == path)
+        );
+    }
+
+    #[test]
+    fn gamma_round2_environment_metadata_retains_inputs_and_nonempty_flags() {
+        for flags in [None, Some(""), Some("-Ctarget-cpu=example")] {
+            let metadata = EnvironmentMetadata::collect_with(
+                vec!["perf".into(), "alloc_tracker".into()],
+                "raw artifacts".into(),
+                || "fixed timestamp".into(),
+                || "fixed CPU".into(),
+                flags,
+            );
+            assert_eq!(metadata.timestamp_utc, "fixed timestamp");
+            assert_eq!(metadata.target_triple, env!("METABENCH_TARGET"));
+            assert_eq!(metadata.rustc_version, env!("METABENCH_RUSTC_VERSION"));
+            assert_eq!(metadata.host_cpu, "fixed CPU");
+            assert_eq!(metadata.profile, env!("METABENCH_PROFILE"));
+            assert_eq!(
+                metadata.compiler_flags.as_deref(),
+                match flags {
+                    Some("") => None,
+                    other => other,
+                }
+            );
+            assert_eq!(metadata.measured_backends, ["perf", "alloc_tracker"]);
+            assert_eq!(metadata.artifact_root, "raw artifacts");
+        }
+    }
+
+    #[test]
+    fn gamma_round2_windows_cpu_query_preserves_registry_env_and_fallback_precedence() {
+        for (registry, environment, expected) in [
+            (
+                Some("ProcessorNameString REG_SZ Registry CPU"),
+                Ok("Environment CPU".to_owned()),
+                "Registry CPU",
+            ),
+            (None, Ok("Environment CPU".to_owned()), "Environment CPU"),
+            (
+                Some("ProcessorNameString REG_SZ  "),
+                Err(env::VarError::NotPresent),
+                "example architecture (CPU model unavailable)",
+            ),
+        ] {
+            let environment_called = std::cell::Cell::new(false);
+            let actual = windows_host_cpu(
+                |program, arguments| {
+                    assert_eq!(program, "reg");
+                    assert_eq!(
+                        arguments,
+                        [
+                            "query",
+                            r"HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+                            "/v",
+                            "ProcessorNameString"
+                        ]
+                    );
+                    registry.map(str::to_owned)
+                },
+                |name| {
+                    assert_eq!(name, "PROCESSOR_IDENTIFIER");
+                    environment_called.set(true);
+                    environment
+                },
+                "example",
+            );
+            assert!(environment_called.get());
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_metadata_commands_validate_status_utf8_and_trim_without_spawning() {
+        use std::ffi::OsStr;
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt as _;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt as _;
+        use std::process::{ExitStatus, Output};
+
+        for (status, stdout, expected) in [
+            (0, b"  CPU name \r\n".to_vec(), Some("CPU name")),
+            (0, b" \t\r\n".to_vec(), None),
+            (0, vec![0xff], None),
+            (1, b"CPU name".to_vec(), None),
+        ] {
+            let actual = command_value_with("metadata-tool", &["first", "space argument"], |command| {
+                assert_eq!(command.get_program(), "metadata-tool");
+                assert_eq!(command.get_args().collect::<Vec<_>>(), ["first", "space argument"].map(OsStr::new));
+                Ok(Output {
+                    status: ExitStatus::from_raw(status),
+                    stdout,
+                    stderr: Vec::new(),
+                })
+            });
+            assert_eq!(actual.as_deref(), expected);
+        }
+        assert!(command_value_with("metadata-tool", &[], |_| Err(io::Error::other("not installed"))).is_none());
+    }
+
+    #[test]
+    fn gamma_round2_report_assembly_preserves_metadata_cases_sources_and_initial_state() {
+        let result = |identity: &str, source: &str| NativeResult {
+            identity: identity.into(),
+            native_identity: format!("native::{identity}"),
+            source: source.into(),
+            metrics: BTreeMap::from([(
+                "cycles".into(),
+                Metric::integer(source, "cycles", 17, MetricDirection::LowerIsBetter),
+            )]),
+            raw_artifacts: vec![format!("{identity}-{source}.json")],
+        };
+        let report = BenchmarkReport::from_results_with_metadata(
+            [
+                result("z-case", "perf"),
+                result("a-case", "perf"),
+                result("z-case", "alloc_tracker"),
+            ],
+            vec!["perf".into(), "allocations".into()],
+            "artifact-root".into(),
+            |backends, root| {
+                assert_eq!(backends, ["perf", "allocations"]);
+                assert_eq!(root, "artifact-root");
+                let mut value = metadata();
+                value.measured_backends = backends;
+                value.artifact_root = root;
+                value
+            },
+        )
+        .unwrap();
+        assert_eq!(report.schema_version, REPORT_SCHEMA_VERSION);
+        assert_eq!(report.metadata.measured_backends, ["perf", "allocations"]);
+        assert_eq!(report.metadata.artifact_root, "artifact-root");
+        assert_eq!(
+            report.entries.iter().map(|entry| entry.identity.as_str()).collect::<Vec<_>>(),
+            ["a-case", "z-case"]
+        );
+        for entry in &report.entries {
+            assert!(entry.prior.is_none());
+            assert_eq!(entry.status, BenchmarkStatus::Uncompared);
+            assert_eq!(entry.results["perf"].metrics["cycles"].value.as_f64().to_bits(), 17.0_f64.to_bits());
+            assert_eq!(entry.results["perf"].raw_artifacts, [format!("{}-perf.json", entry.identity)]);
+        }
+        assert_eq!(report.entries[1].results.len(), 2);
+        assert_eq!(
+            report.entries[1].results["alloc_tracker"].raw_artifacts,
+            ["z-case-alloc_tracker.json"]
+        );
+    }
+
+    #[test]
+    fn gamma_round2_report_assembly_returns_duplicate_and_validation_errors() {
+        let result = || NativeResult {
+            identity: "case".into(),
+            native_identity: "native::case".into(),
+            source: "perf".into(),
+            metrics: BTreeMap::new(),
+            raw_artifacts: Vec::new(),
+        };
+        assert!(matches!(
+            BenchmarkReport::from_results_with_metadata([result(), result()], Vec::new(), String::new(), |_, _| panic!("duplicates fail before collecting metadata")),
+            Err(Error::DuplicateReportBenchmark(identity)) if identity == "case (perf)"
+        ));
+        let invalid = NativeResult {
+            source: "criterion".into(),
+            metrics: BTreeMap::from([(
+                "time".into(),
+                Metric::float("criterion", "time", f64::NAN, MetricDirection::LowerIsBetter),
+            )]),
+            ..result()
+        };
+        assert!(matches!(
+            BenchmarkReport::from_results_with_metadata([invalid], Vec::new(), String::new(), |_, _| metadata()),
+            Err(Error::ReportFormat { path, message })
+                if path == Path::new("<report>") && message == "invalid estimate or confidence metadata for case (criterion/time)"
+        ));
+    }
+
+    #[test]
+    fn gamma_round2_changes_inside_the_threshold_remain_stable() {
+        for change in [-4.0, -1.0, 0.0, 1.0, 4.0] {
+            assert_eq!(classify(&[change], 5.0), BenchmarkStatus::Stable, "{change}");
+        }
+        assert_eq!(classify(&[-5.0], 5.0), BenchmarkStatus::Improved);
+        assert_eq!(classify(&[5.0], 5.0), BenchmarkStatus::Regressed);
+    }
+
+    #[test]
+    fn november_metric_selection_stops_at_first_overflow_including_zero_and_equal_widths() {
+        fn width(_metrics: &[TableMetric], _rows: &[Vec<String>], count: usize) -> usize {
+            assert_ne!(count, 0, "a nonempty table always retains its first metric");
+            [0, 7, 11, 19][count]
+        }
+        let metrics = [
+            TableMetric::new("perf".into(), "cycles".into()),
+            TableMetric::new("perf".into(), "instructions".into()),
+            TableMetric::new("perf".into(), "cache-misses".into()),
+        ];
+        let rows = vec![vec!["case".into(), "17".into(), "23".into(), "29".into(), "STABLE".into()]];
+        for (available, count) in [(0, 1), (6, 1), (7, 1), (10, 1), (11, 2), (18, 2), (19, 3), (20, 3)] {
+            assert_eq!(select_metric_count(&metrics, &rows, available, width), count);
+            assert_eq!(project_rows(&rows, count)[0].len(), count + 2);
+        }
+        assert_eq!(
+            select_metric_count(&metrics, &rows, 8, |_, _, count| [0, 9, 0, 0][count]),
+            1,
+            "later smaller widths must not resume selection after the first overflowing prefix"
+        );
+        assert_eq!(select_metric_count(&[], &[], 0, |_, _, _| panic!("empty table")), 0);
+    }
+
+    #[test]
+    fn november_zero_threshold_keeps_positive_zero_and_detects_only_negative_improvements() {
+        for (changes, expected) in [
+            (&[][..], BenchmarkStatus::Uncompared),
+            (&[0.0][..], BenchmarkStatus::Stable),
+            (&[-0.0][..], BenchmarkStatus::Stable),
+            (&[-f64::EPSILON][..], BenchmarkStatus::Improved),
+            (&[f64::EPSILON][..], BenchmarkStatus::Regressed),
+            (&[-f64::EPSILON, f64::EPSILON][..], BenchmarkStatus::Regressed),
+        ] {
+            assert_eq!(classify(changes, 0.0), expected, "{changes:?}");
+        }
+    }
+
+    #[test]
+    fn gamma_round2_console_rendering_preserves_the_single_metric_at_any_width() {
+        let report = gamma_report(
+            "perf",
+            "cycles",
+            Metric::integer("perf", "cycles", 17, MetricDirection::LowerIsBetter),
+        );
+        let console = report.render_console_table();
+        for required in ["case", "17", "HW Cycles", "UNCOMPARED"] {
+            assert!(console.contains(required), "{required}: {console}");
+        }
+    }
+
+    #[test]
+    fn gamma_round2_console_always_retains_one_metric_at_tiny_width() {
+        let metrics = vec![
+            TableMetric::new("perf".into(), "cycles".into()),
+            TableMetric::new("perf".into(), "instructions".into()),
+        ];
+        let rows = vec![vec!["case".into(), "17".into(), "23".into(), "STABLE".into()]];
+        assert_eq!(select_metric_count(&metrics, &rows, 0, console_projected_width), 1);
+        assert_eq!(select_metric_count(&metrics, &rows, 0, markdown_projected_width), 1);
+        assert_eq!(project_rows(&rows, 1), [vec!["case", "17", "STABLE"]]);
+    }
+
     #[cfg(unix)]
     use std::os::unix::fs::{PermissionsExt as _, symlink};
 
     use super::*;
+
+    fn gamma_report(engine: &str, name: &str, metric: Metric) -> BenchmarkReport {
+        BenchmarkReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            metadata: metadata(),
+            entries: vec![BenchmarkEntry {
+                identity: "case".into(),
+                results: BTreeMap::from([(
+                    engine.into(),
+                    EngineResult {
+                        metrics: BTreeMap::from([(name.into(), metric)]),
+                        raw_artifacts: vec!["raw.json".into()],
+                    },
+                )]),
+                prior: None,
+                status: BenchmarkStatus::Uncompared,
+            }],
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_metric_defaults_and_status() {
+        for metric in [
+            Metric::integer("perf", "cycles", 17, MetricDirection::LowerIsBetter),
+            Metric::float("perf", "cycles", 1.25, MetricDirection::HigherIsBetter),
+        ] {
+            assert_eq!(metric.display_name, "HW Cycles");
+            assert_eq!(metric.unit, None);
+            assert_eq!(metric.statistic, None);
+            assert_eq!(metric.lower_bound, None);
+            assert_eq!(metric.upper_bound, None);
+            assert_eq!(metric.confidence_level, None);
+            assert_eq!(metric.change_percentage, None);
+        }
+        for (status, text) in [
+            (BenchmarkStatus::Uncompared, "UNCOMPARED"),
+            (BenchmarkStatus::Stable, "STABLE"),
+            (BenchmarkStatus::Improved, "IMPROVED"),
+            (BenchmarkStatus::Regressed, "REGRESSED"),
+        ] {
+            assert_eq!(status.to_string(), text);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_percentage_and_threshold_boundaries() {
+        for (old, new, expected) in [
+            (0.0, 0.0, Some(0.0)),
+            (0.0, 0.5, Some(100.0)),
+            (1.0, 2.0, Some(100.0)),
+            (4.0, 3.0, Some(-25.0)),
+            (f64::NAN, 2.0, None),
+            (2.0, f64::INFINITY, None),
+            (f64::NEG_INFINITY, 2.0, None),
+            (2.0, f64::NAN, None),
+        ] {
+            assert_eq!(percentage_shift(old, new), expected);
+        }
+        for (changes, threshold, expected) in [
+            (vec![], 0.0, BenchmarkStatus::Uncompared),
+            (vec![0.0], 0.0, BenchmarkStatus::Stable),
+            (vec![0.5], 0.0, BenchmarkStatus::Regressed),
+            (vec![-0.5], 0.0, BenchmarkStatus::Improved),
+            (vec![0.5], 0.5, BenchmarkStatus::Regressed),
+            (vec![-0.5], 0.5, BenchmarkStatus::Improved),
+            (vec![5.0], 5.0, BenchmarkStatus::Regressed),
+            (vec![-5.0], 5.0, BenchmarkStatus::Improved),
+            (vec![-6.0, 6.0], 5.0, BenchmarkStatus::Regressed),
+            (vec![-4.9, 4.9], 5.0, BenchmarkStatus::Stable),
+        ] {
+            assert_eq!(classify(&changes, threshold), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_baseline_validation_and_changes() {
+        let metric = Metric::integer("perf", "cycles", 100, MetricDirection::LowerIsBetter);
+        let baseline = gamma_report("perf", "cycles", metric.clone());
+        for threshold in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                baseline.clone().apply_baseline(&baseline, threshold),
+                Err(Error::InvalidThreshold(_))
+            ));
+        }
+        let mut wrong_schema = baseline.clone();
+        wrong_schema.schema_version = 0;
+        assert!(matches!(
+            baseline.clone().apply_baseline(&wrong_schema, 5.0),
+            Err(Error::UnsupportedReportSchema { path, found: 0, expected: REPORT_SCHEMA_VERSION })
+                if path == Path::new("<in-memory baseline>")
+        ));
+        let mut current = gamma_report(
+            "perf",
+            "cycles",
+            Metric::integer("perf", "cycles", 105, MetricDirection::LowerIsBetter),
+        );
+        current.apply_baseline(&baseline, 5.0).unwrap();
+        assert_eq!(current.entries[0].status, BenchmarkStatus::Regressed);
+        assert_eq!(current.entries[0].results["perf"].metrics["cycles"].change_percentage, Some(5.0));
+        assert_eq!(
+            current.entries[0].prior.as_ref().unwrap()["perf"].metrics["cycles"].value,
+            metric.value
+        );
+
+        for difference in 0..4 {
+            let mut old = baseline.clone();
+            let previous = old.entries[0].results.get_mut("perf").unwrap().metrics.get_mut("cycles").unwrap();
+            match difference {
+                0 => previous.unit = Some("ns".into()),
+                1 => previous.statistic = Some("mean".into()),
+                2 => previous.direction = MetricDirection::HigherIsBetter,
+                _ => {
+                    previous.direction = MetricDirection::Unknown;
+                }
+            }
+            let mut current = baseline.clone();
+            let current_metric = current.entries[0]
+                .results
+                .get_mut("perf")
+                .unwrap()
+                .metrics
+                .get_mut("cycles")
+                .unwrap();
+            current_metric.change_percentage = Some(99.0);
+            if difference == 3 {
+                current_metric.direction = MetricDirection::Unknown;
+            }
+            current.apply_baseline(&old, 5.0).unwrap();
+            assert_eq!(current.entries[0].status, BenchmarkStatus::Uncompared);
+            assert_eq!(current.entries[0].results["perf"].metrics["cycles"].change_percentage, None);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_baseline_skips_do_not_end_iteration() {
+        let mut old = gamma_report("z", "z", Metric::integer("z", "z", 100, MetricDirection::HigherIsBetter));
+        let mut current = old.clone();
+        current.entries[0].results.get_mut("z").unwrap().metrics.get_mut("z").unwrap().value = MetricValue::Integer(90);
+        current.entries.insert(
+            0,
+            BenchmarkEntry {
+                identity: "absent".into(),
+                results: BTreeMap::new(),
+                prior: None,
+                status: BenchmarkStatus::Uncompared,
+            },
+        );
+        current.entries[1].results.insert(
+            "absent".into(),
+            EngineResult {
+                metrics: BTreeMap::new(),
+                raw_artifacts: vec![],
+            },
+        );
+        current.entries[1]
+            .results
+            .get_mut("z")
+            .unwrap()
+            .metrics
+            .insert("absent".into(), Metric::integer("z", "absent", 0, MetricDirection::Unknown));
+        old.entries[0].results.get_mut("z").unwrap().metrics.insert(
+            "incompatible".into(),
+            Metric::integer("z", "incompatible", 0, MetricDirection::Unknown),
+        );
+        current.entries[1].results.get_mut("z").unwrap().metrics.insert(
+            "incompatible".into(),
+            Metric::integer("z", "incompatible", 0, MetricDirection::Unknown),
+        );
+        current.apply_baseline(&old, 5.0).unwrap();
+        assert_eq!(current.entries[1].status, BenchmarkStatus::Regressed);
+        assert_eq!(current.entries[1].results["z"].metrics["z"].change_percentage, Some(-10.0));
+    }
+
+    #[test]
+    fn gamma_survivor_report_validation_is_engine_and_metric_specific() {
+        for engine in ["criterion", "custom"] {
+            for name in ["time", "median", "count"] {
+                for (value, lower, upper, confidence, statistic) in [
+                    (-1.0, Some(0.0), Some(1.0), Some(0.95), Some("mean")),
+                    (f64::NAN, Some(0.0), Some(1.0), Some(0.95), Some("mean")),
+                    (1.0, Some(-2.0), Some(-1.0), Some(0.95), Some("mean")),
+                    (1.0, None, None, None, Some("mean")),
+                    (1.0, None, None, Some(0.95), Some("mean")),
+                    (1.0, Some(0.0), Some(2.0), Some(0.95), None),
+                    (1.0, Some(0.0), Some(2.0), Some(0.95), Some(" ")),
+                ] {
+                    let mut metric = Metric::float(engine, name, value, MetricDirection::Unknown);
+                    metric.lower_bound = lower;
+                    metric.upper_bound = upper;
+                    metric.confidence_level = confidence;
+                    metric.statistic = statistic.map(str::to_owned);
+                    let timing = engine == "criterion" && matches!(name, "time" | "median");
+                    let expected_error = (timing && (!value.is_finite() || value < 0.0 || lower.is_some_and(|v| v < 0.0)))
+                        || (engine == "criterion" && name == "time" && (lower.is_none() || statistic.is_none_or(|v| v.trim().is_empty())))
+                        || (lower.is_none() && confidence.is_some());
+                    let result = validate_report(&gamma_report(engine, name, metric));
+                    assert_eq!(result.is_err(), expected_error, "{engine}/{name}: {value}");
+                    if let Err(error) = result {
+                        assert!(matches!(error, Error::ReportFormat { path, message }
+                            if path == Path::new("<report>") && message == format!("invalid estimate or confidence metadata for case ({engine}/{name})")));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_report_grids_and_metric_precision() {
+        assert_eq!(escape_table("\u{2028}\u{2029}\n|"), "&#8232;&#8233;&#10;&#124;");
+        let headers = vec!["A".into(), "N".into(), "S".into()];
+        let rows = vec![vec!["é".into(), "12".into(), "ok".into()]];
+        assert_eq!(markdown_column_widths(&headers, &rows), [3, 3, 3]);
+        let mut output = Vec::new();
+        write_markdown_grid(&mut output, &headers, &rows).unwrap();
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "| A   |   N | S   |\n| --- | --: | --- |\n| é   |  12 | ok  |\n"
+        );
+        assert_eq!(render_console_grid(&headers, &rows), "A  N   S \n-  --  --\né  12  ok\n");
+        for count in 0..5 {
+            for index in 0..5 {
+                assert_eq!(
+                    is_markdown_metric_column(index, count),
+                    index != 0 && index < count.saturating_sub(1)
+                );
+            }
+        }
+        let mut metric = Metric::float("custom", "count", 1.23456, MetricDirection::Unknown);
+        metric.unit = Some("ns".into());
+        metric.lower_bound = Some(0.12345);
+        metric.upper_bound = Some(2.34567);
+        metric.confidence_level = Some(0.95);
+        metric.statistic = Some("mean".into());
+        assert_eq!(
+            render_metric_markdown("count", &metric),
+            "1.2346 ns (0.1235..2.3457) 95.0% CI [mean]"
+        );
+        assert_eq!(render_metric_markdown("median", &metric), "1.23 ns (0.12..2.35) 95.0% CI [mean]");
+    }
+
+    #[test]
+    fn gamma_survivor_report_width_boundaries() {
+        let metrics = vec![
+            TableMetric::new("perf".into(), "cycles".into()),
+            TableMetric::new("perf".into(), "instructions".into()),
+        ];
+        let rows = vec![vec!["case".into(), "1".into(), "2".into(), "STABLE".into()]];
+        assert_eq!(table_headers(&metrics), ["Benchmark", "HW Cycles", "HW Instr", "Status"]);
+        assert_eq!(project_rows(&rows, 1), [vec!["case", "1", "STABLE"]]);
+        for projected in [console_projected_width, markdown_projected_width] {
+            let width = projected(&metrics, &rows, 2);
+            assert_eq!(select_metric_count(&metrics, &rows, width, projected), 2);
+            assert_eq!(select_metric_count(&metrics, &rows, width - 1, projected), 1);
+            assert_eq!(select_metric_count(&[], &[], 0, projected), 0);
+        }
+        assert_eq!(console_projected_width(&metrics, &rows, 2), 38);
+        assert_eq!(markdown_projected_width(&metrics, &rows, 2), 45);
+        let mut report = gamma_report("perf", "cycles", Metric::integer("perf", "cycles", 1, MetricDirection::Unknown));
+        report.entries[0].results.get_mut("perf").unwrap().metrics.insert(
+            "instructions".into(),
+            Metric::integer("perf", "instructions", 2, MetricDirection::Unknown),
+        );
+        let metrics = report.table_metrics();
+        let rows = report.table_rows(&metrics, render_metric_console);
+        let width = console_projected_width(&metrics, &rows, 2);
+        assert!(report.render_console_table_with_width(width).contains("HW Cycles"));
+        assert!(!report.render_console_table_with_width(width - 1).contains("HW Cycles"));
+        for (identity_width, two_columns) in [(140, true), (141, false)] {
+            report.entries[0].identity = "x".repeat(identity_width);
+            let mut output = Vec::new();
+            report.write_markdown(&mut output).unwrap();
+            assert_eq!(String::from_utf8(output).unwrap().contains("HW Cycles"), two_columns);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_report_prior_labels_and_markdown_environment() {
+        let mut report = gamma_report(
+            "perf",
+            "cycles",
+            Metric::integer("perf", "cycles", 1, MetricDirection::LowerIsBetter),
+        );
+        let mut prior = report.entries[0].results.clone();
+        prior.get_mut("perf").unwrap().metrics.get_mut("cycles").unwrap().display_name = "stale".into();
+        report.entries[0].prior = Some(prior);
+        report.refresh_display_names();
+        assert_eq!(
+            report.entries[0].prior.as_ref().unwrap()["perf"].metrics["cycles"].display_name,
+            "HW Cycles"
+        );
+        let metrics = vec![
+            TableMetric::new("perf".into(), "cycles".into()),
+            TableMetric::new("missing".into(), "count".into()),
+        ];
+        assert_eq!(
+            report.table_rows(&metrics, render_metric_console),
+            [vec!["case", "1", "-", "UNCOMPARED"], vec!["case (PRIOR)", "1", "-", "-"]]
+        );
+        let mut output = Vec::new();
+        report.write_markdown(&mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.starts_with("# Benchmark Report\n\n## Environment\n\n| Field"));
+        assert!(output.contains("| Value"));
+        assert!(output.contains("Raw artifacts"));
+        assert!(output.contains("artifacts"));
+        assert!(output.contains("Compiler flags"));
+        assert!(output.contains("target&#45;cpu=native"));
+        assert!(output.contains("\n## Results\n\n"));
+        assert!(output.ends_with("\n\n"));
+    }
+
+    #[test]
+    fn gamma_survivor_report_writer_errors_are_returned() {
+        struct FailsAfter(usize);
+        impl io::Write for FailsAfter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                if self.0 == 0 {
+                    return Err(io::Error::new(io::ErrorKind::BrokenPipe, "scripted"));
+                }
+                let count = buf.len().min(self.0);
+                self.0 -= count;
+                Ok(count)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let report = gamma_report("perf", "cycles", Metric::integer("perf", "cycles", 1, MetricDirection::Unknown));
+        let mut output = Vec::new();
+        report.write_markdown(&mut output).unwrap();
+        for budget in 0..output.len() {
+            let error = report.write_markdown(&mut FailsAfter(budget)).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_report_paths_and_cpu_fields() {
+        assert_eq!(report_parent(Path::new("report.json")), Path::new("."));
+        assert_eq!(report_parent(&Path::new("dir").join("report.json")), Path::new("dir"));
+        assert_eq!(
+            incomplete_marker(Path::new("report.json")),
+            Path::new("report.json.metabench-incomplete")
+        );
+        for field in ["model name", "Model", "Hardware", "Processor"] {
+            assert_eq!(linux_cpu_identity(&format!("ignored\n{field}: Cpu X")), Some("Cpu X".into()));
+        }
+        assert_eq!(
+            linux_cpu_identity("Processor: fallback\nmodel name: preferred"),
+            Some("preferred".into())
+        );
+    }
 
     #[test]
     fn report_admission_errors_retain_report_context_and_existing_causes() {

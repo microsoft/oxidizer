@@ -13,6 +13,26 @@ use crate::runtime::Shutdown;
 use crate::runtime::worker::asynchronous::LocalWorker as AsyncLocalWorker;
 use crate::runtime::worker::blocking::{LocalWorker as BlockingLocalWorker, PoolIdentity};
 
+#[cfg(test)]
+mod gamma_round2_tests {
+    use arty_executor::TaskCompletion;
+
+    use super::*;
+    use crate::task::handle::JoinHandlePool;
+
+    #[test]
+    fn gamma_round2_cancelled_sender_publishes_an_error_instead_of_only_closing_the_channel() {
+        let pool = JoinHandlePool::new(Shutdown::default());
+        let (mut handle, sender) = pool.handle::<()>();
+        sender.cancelled(ShutdownCause::default());
+        let State::Pending { rx, .. } = &mut handle.state else {
+            panic!("a new join handle must retain its raw receiver");
+        };
+        let mut context = task::Context::from_waker(task::Waker::noop());
+        assert!(matches!(Pin::new(rx).poll(&mut context), Poll::Ready(Ok(Err(_)))));
+    }
+}
+
 /// A future that returns an async or blocking task's result.
 ///
 /// Await this value inside async code. Successful completion produces `Ok(result)`.
@@ -171,6 +191,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+        // #[gamma::skip(call_result.default, reason = "The assertion returns unit; default_after still executes the assertion.")]
         assert_not_current_blocking_pool(this.blocking_pool.as_ref());
 
         let mut result = match &mut this.state {

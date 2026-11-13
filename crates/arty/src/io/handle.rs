@@ -143,6 +143,7 @@ impl fmt::Debug for Io {
 }
 
 impl ThreadAware for Io {
+    // #[gamma::skip(parameter.default_shadow, reason = "The source coordinate is deliberately unused; relocation resolves ownership from the destination.")]
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
         if self.dispatcher.owns(destination) {
             self.thread = destination.clone();

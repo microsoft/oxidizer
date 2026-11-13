@@ -142,6 +142,20 @@ mod tests {
     use arty_executor::{Executor, TaskPlacement};
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_private_commands_keep_distinct_debug_labels() {
+        assert_eq!(format!("{:?}", SystemCommand::Shutdown), "Shutdown");
+        assert_eq!(
+            format!(
+                "{:?}",
+                SystemCommand::AccessIo {
+                    access: QueuedClosure::new(Box::new(|_| {}))
+                }
+            ),
+            "AccessIo"
+        );
+    }
     use crate::task::preparation::prepare_remote;
 
     struct PanicWake(AtomicBool);
@@ -151,6 +165,26 @@ mod tests {
             self.0.store(true, Ordering::Release);
             panic!("queued join cancellation notification");
         }
+    }
+
+    #[test]
+    fn gamma_survivor_queued_closure_disposes_panicking_capture_payload_without_unwinding() {
+        struct Payload(Arc<AtomicUsize>);
+        impl Drop for Payload {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                panic!("queued capture panic payload");
+            }
+        }
+        struct Capture(Arc<AtomicUsize>);
+        impl Drop for Capture {
+            fn drop(&mut self) {
+                std::panic::panic_any(Payload(Arc::clone(&self.0)));
+            }
+        }
+        let drops = Arc::new(AtomicUsize::new(0));
+        std::panic::catch_unwind(|| drop(QueuedClosure::new(Capture(Arc::clone(&drops))))).unwrap();
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 
     struct PanicOnDrop(Arc<AtomicUsize>);

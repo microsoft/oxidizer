@@ -120,6 +120,16 @@ impl ClientIdentity {
     /// support client identities there.
     #[cfg(any(feature = "native-tls", test))]
     pub(crate) fn build_native_identity(&self) -> Result<native_tls::Identity, ClientIdentityError> {
+        self.build_native_identity_with(|certificates, key| {
+            native_tls::Identity::from_pkcs8(certificates, key).map_err(ClientIdentityError::caused_by)
+        })
+    }
+
+    #[cfg(any(feature = "native-tls", test))]
+    fn build_native_identity_with<T>(
+        &self,
+        build: impl FnOnce(&[u8], &[u8]) -> Result<T, ClientIdentityError>,
+    ) -> Result<T, ClientIdentityError> {
         let key_pkcs8_der = match &self.private_key {
             rustls_pki_types::PrivateKeyDer::Pkcs8(key) => key.secret_pkcs8_der(),
             _ => {
@@ -134,7 +144,7 @@ impl ClientIdentity {
         let mut key_pem = Vec::new();
         write_pem_block(&mut key_pem, "PRIVATE KEY", key_pkcs8_der);
 
-        native_tls::Identity::from_pkcs8(&cert_pem, &key_pem).map_err(ClientIdentityError::caused_by)
+        build(&cert_pem, &key_pem)
     }
 }
 
@@ -171,6 +181,37 @@ mod tests {
     use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs1KeyDer, PrivateSec1KeyDer};
 
     use super::*;
+
+    #[test]
+    fn november6_native_identity_serializes_each_certificate_and_key_with_exact_labels() {
+        let identity = ClientIdentity::from_der([[1, 2, 3], [4, 5, 6]], [7, 8, 9]);
+        let result = identity
+            .build_native_identity_with(|certificates, key| {
+                assert_eq!(
+                    certificates,
+                    b"-----BEGIN CERTIFICATE-----\nAQID\n-----END CERTIFICATE-----\n\
+                      -----BEGIN CERTIFICATE-----\nBAUG\n-----END CERTIFICATE-----\n"
+                );
+                assert_eq!(key, b"-----BEGIN PRIVATE KEY-----\nBwgJ\n-----END PRIVATE KEY-----\n");
+                Ok(73)
+            })
+            .unwrap();
+        assert_eq!(result, 73);
+        let error = identity
+            .build_native_identity_with::<()>(|_, _| Err(ClientIdentityError::caused_by("identity rejected")))
+            .unwrap_err();
+        assert!(error.to_string().contains("identity rejected"));
+    }
+
+    #[test]
+    fn gamma_survivor_pem_lines_are_exactly_sixty_four_columns() {
+        let mut out = Vec::new();
+        write_pem_block(&mut out, "CERTIFICATE", &[0; 49]);
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!("-----BEGIN CERTIFICATE-----\n{}\nAA==\n-----END CERTIFICATE-----\n", "A".repeat(64))
+        );
+    }
 
     #[test]
     fn from_pem_parses_valid_cert_and_key() {

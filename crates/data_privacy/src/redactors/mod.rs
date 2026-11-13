@@ -14,6 +14,7 @@ pub mod rapidhash_redactor;
 pub(crate) fn u64_to_hex_array<const N: usize>(mut value: u64) -> [u8; N] {
     const HEX_LOWER_CHARS: &[u8; 16] = b"0123456789abcdef";
 
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "The loop overwrites every buffer byte before returning it, including when N is zero.")]
     let mut buffer = [0u8; N];
     for e in buffer.iter_mut().rev() {
         *e = HEX_LOWER_CHARS[(value & 0x0f) as usize];

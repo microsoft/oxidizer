@@ -111,6 +111,7 @@ impl Repr {
     /// Stores `bytes` inline when short enough, otherwise in shared storage.
     fn new(bytes: &[u8], sensitive: bool) -> Self {
         if bytes.len() <= INLINE_CAPACITY {
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "copy_from_slice overwrites the entire live prefix and bytes beyond the stored len are never read")]
             let mut buf = [0; INLINE_CAPACITY];
             buf[..bytes.len()].copy_from_slice(bytes);
             #[expect(clippy::cast_possible_truncation, reason = "guarded by the INLINE_CAPACITY check above")]
@@ -1243,6 +1244,10 @@ mod tests {
     #[cfg(feature = "http")]
     #[test]
     fn http_conversions_preserve_bytes_and_sensitivity() {
+        let boundary = http::HeaderValue::from_bytes(&[b'a'; INLINE_CAPACITY]).unwrap();
+        let inlined = FieldValue::from(&boundary);
+        assert!(matches!(inlined.repr, Repr::Inline { .. }));
+        assert_eq!(inlined.as_bytes(), boundary.as_bytes());
         let mut http = http::HeaderValue::from_static("secret");
         http.set_sensitive(true);
         let borrowed_owned = FieldValue::from(&http);

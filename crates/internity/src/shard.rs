@@ -136,3 +136,29 @@ impl Shard {
         self.state.read().capacities()
     }
 }
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::Shard;
+
+    #[test]
+    fn gamma_survivor_generation_counts_only_distinct_insertions() {
+        let shard = Shard::with_capacity(0, 0);
+        assert_eq!(shard.generation(), 0);
+        let first = shard.intern(0, 7, "first");
+        assert_eq!(shard.generation(), 1);
+        assert_eq!(shard.intern(0, 7, "first"), first);
+        assert_eq!(shard.generation(), 1);
+        assert_eq!(shard.intern_bytes(0, 7, b"first").unwrap(), first);
+        assert_eq!(shard.generation(), 1);
+        let second_hash = 0x01ff_ffff_ffff_ffff;
+        let second = shard.intern_bytes(0, second_hash, b"second").unwrap();
+        assert_eq!(shard.generation(), 2);
+        assert_eq!(shard.get(second_hash, "second"), Some(second));
+        assert_eq!(shard.intern_bytes(0, second_hash, b"second").unwrap(), second);
+        assert_eq!(shard.len(), 2);
+        assert_eq!(shard.generation(), 2);
+        shard.intern_bytes(0, 10, &[0xff]).unwrap_err();
+        assert_eq!(shard.generation(), 2);
+    }
+}

@@ -85,6 +85,7 @@ impl FromStr for MonitorOwner {
             return Err(Error::InvalidDescriptor);
         };
         let mut components = sid.split('-');
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "str::split always yields at least one component, including for an empty suffix")]
         let authority = components.next().ok_or(Error::InvalidDescriptor)?;
         let authority_value = authority.parse::<u64>().map_err(|_error| Error::InvalidDescriptor)?;
         if authority_value > 0xffff_ffff_ffff || authority_value.to_string() != authority {
@@ -194,12 +195,9 @@ impl MonitorDescriptor {
         let (file, owner) = io.read_descriptor(path).map_err(|source| registry_error(path, source))?;
         let bytes = read_descriptor_bytes(file, path)?;
         let descriptor = decode_descriptor(&bytes)?;
-        let expected_endpoint = MonitorEndpoint::for_instance(
-            path.parent().ok_or(Error::InvalidDescriptor)?,
-            &descriptor.owner,
-            descriptor.process_id,
-            descriptor.instance_id,
-        );
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "successful read_descriptor already requires path.parent in Unix, Windows read_descriptor_with, and mocked Runtime::read_file; unsupported native backends never succeed")]
+        let parent = path.parent().ok_or(Error::InvalidDescriptor)?;
+        let expected_endpoint = MonitorEndpoint::for_instance(parent, &descriptor.owner, descriptor.process_id, descriptor.instance_id);
         if descriptor.owner != owner
             || path.file_name() != Some(std::ffi::OsStr::new(&descriptor.file_name()))
             || descriptor.endpoint != expected_endpoint
@@ -225,6 +223,7 @@ impl MonitorDescriptor {
                 let Some(parent) = path.parent() else { return false };
                 parent
             }
+            // #[gamma::skip(literal.str_to_xyzzy, reason = "WindowsSid endpoint construction ignores directory; UnixUser construction produces a different enum variant and never equals a NamedPipe regardless of directory")]
             MonitorEndpoint::NamedPipe(_) => Path::new(""),
             MonitorEndpoint::UnixSocket(_) => return false,
         };
@@ -267,6 +266,7 @@ fn encode_descriptor(descriptor: &MonitorDescriptor) -> Result<Vec<u8>, Error> {
         }
         MonitorOwner::WindowsSid(sid) => {
             bytes.push(2);
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "endpoint_matches_identity already round-tripped the canonical SID parser, which limits it to a 48-bit authority and at most fifteen u32 components, far below the u16 string-length limit")]
             push_string(&mut bytes, sid)?;
         }
     }
@@ -274,7 +274,9 @@ fn encode_descriptor(descriptor: &MonitorDescriptor) -> Result<Vec<u8>, Error> {
         MonitorEndpoint::UnixSocket(_) => 1,
         MonitorEndpoint::NamedPipe(_) => 2,
     });
-    push_string(&mut bytes, descriptor.endpoint.path().to_str().ok_or(Error::InvalidDescriptor)?)?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "endpoint_matches_identity already requires UTF-8 for UnixSocket, while an equal canonical NamedPipe is constructed entirely from UTF-8 SID and numeric text")]
+    let endpoint = descriptor.endpoint.path().to_str().ok_or(Error::InvalidDescriptor)?;
+    push_string(&mut bytes, endpoint)?;
     push_string(&mut bytes, &descriptor.name)?;
     match &descriptor.instance {
         Some(instance) => {
@@ -295,6 +297,7 @@ fn decode_descriptor(bytes: &[u8]) -> Result<MonitorDescriptor, Error> {
         return Err(Error::UnsupportedVersion);
     }
     let process_id = reader.u32()?;
+    // #[gamma::skip(literal.int_increment, reason = "copy_from_slice overwrites the entire instance ID before it is read")]
     let mut instance_id = [0; 16];
     instance_id.copy_from_slice(reader.take(16)?);
     let owner = match reader.u8()? {
@@ -339,49 +342,79 @@ mod tests {
     use super::*;
 
     #[test]
-    fn oversized_descriptor_is_rejected_before_a_later_read_error() {
-        struct OversizedReader {
-            remaining: usize,
-        }
-
-        impl Read for OversizedReader {
-            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-                if self.remaining == 0 {
-                    return Err(io::Error::new(io::ErrorKind::PermissionDenied, "read beyond oversized descriptor"));
-                }
-                let count = buf.len().min(self.remaining);
-                buf[..count].fill(0);
-                self.remaining -= count;
-                Ok(count)
-            }
-        }
-
-        let reader = OversizedReader {
-            remaining: MAX_DESCRIPTOR_BYTES + 1,
-        };
+    fn november_public_descriptor_read_rejects_parentless_paths_at_the_backend_before_decoding() {
+        let (io, control) = MonitorIo::new_mocked();
+        let value = descriptor();
+        let path = Path::new("");
+        assert!(path.parent().is_none());
+        control.put_file(path, value.owner.clone(), encode_descriptor(&value).unwrap());
         assert!(matches!(
-            read_descriptor_bytes(reader, Path::new("descriptor.monitor")),
-            Err(Error::MessageTooLarge)
+            MonitorDescriptor::read_file(&io, path),
+            Err(Error::Registry { path: rejected, source }) if rejected == path && source.kind() == io::ErrorKind::InvalidInput
         ));
     }
 
     #[test]
-    fn descriptor_byte_read_failure_preserves_the_path_and_source() {
-        struct FailingReader;
-
-        impl Read for FailingReader {
+    fn gamma_round2_descriptor_reader_preserves_post_open_errors_and_the_byte_limit() {
+        struct FailedRead;
+        impl Read for FailedRead {
             fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
-                Err(io::Error::new(io::ErrorKind::PermissionDenied, "injected read failure"))
+                Err(io::Error::new(io::ErrorKind::PermissionDenied, "scripted post-open failure"))
             }
         }
-
-        let path = Path::new("descriptor.monitor");
-        let Error::Registry { path: failed_path, source } = read_descriptor_bytes(FailingReader, path).unwrap_err() else {
-            panic!("descriptor read errors must retain their registry context");
+        let path = Path::new("descriptor-only-in-memory");
+        let Error::Registry { path: actual_path, source } = read_descriptor_bytes(FailedRead, path).unwrap_err() else {
+            panic!("post-open error must retain registry context");
         };
-        assert_eq!(failed_path, path);
+        assert_eq!(actual_path, path);
         assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
-        assert_eq!(source.to_string(), "injected read failure");
+        assert_eq!(source.to_string(), "scripted post-open failure");
+        assert_eq!(read_descriptor_bytes(&[17, 23][..], path).unwrap(), [17, 23]);
+        let oversized = vec![7; MAX_DESCRIPTOR_BYTES + 2];
+        let mut reader = io::Cursor::new(oversized);
+        assert!(matches!(read_descriptor_bytes(&mut reader, path), Err(Error::MessageTooLarge)));
+        assert_eq!(reader.position(), u64::try_from(MAX_DESCRIPTOR_BYTES + 1).unwrap());
+    }
+    #[test]
+    fn gamma_survivor_descriptor_decode_rejects_empty_instance_and_wrong_endpoint_independently() {
+        let value = descriptor();
+        let mut bytes = encode_descriptor(&value).unwrap();
+        let endpoint_start = 34;
+        bytes[endpoint_start] = b'x';
+        assert!(matches!(decode_descriptor(&bytes), Err(Error::InvalidDescriptor)));
+        let mut bytes = encode_descriptor(&value).unwrap();
+        bytes.truncate(bytes.len() - value.instance.as_ref().unwrap().len() - 2);
+        bytes.extend_from_slice(&[0, 0]);
+        assert!(matches!(decode_descriptor(&bytes), Err(Error::InvalidDescriptor)));
+    }
+
+    #[test]
+    fn gamma_survivor_descriptor_read_rejects_valid_endpoint_in_wrong_directory() {
+        let (io, control) = crate::io::MonitorIo::new_mocked();
+        control.set_owner(MonitorOwner::UnixUser(1001));
+        let directory = crate::discovery::Directory::current(&io).unwrap();
+        let value = descriptor();
+        let path = directory.path().join(value.file_name());
+        control.put_file(&path, value.owner.clone(), encode_descriptor(&value).unwrap());
+        assert!(matches!(MonitorDescriptor::read_file(&io, &path), Err(Error::InvalidDescriptor)));
+    }
+
+    #[test]
+    fn gamma_survivor_descriptor_endpoint_length_and_sid_decode_errors_do_not_panic() {
+        let mut value = descriptor();
+        let directory = PathBuf::from(format!("/{}", "a".repeat(65_536)));
+        value.endpoint = MonitorEndpoint::for_instance(&directory, &value.owner, value.process_id, value.instance_id);
+        assert!(matches!(encode_descriptor(&value), Err(Error::MessageTooLarge)));
+        let header = encode_descriptor(&descriptor()).unwrap();
+        let mut missing = header[..26].to_vec();
+        missing.push(2);
+        assert!(matches!(decode_descriptor(&missing), Err(Error::InvalidDescriptor)));
+        for owner in ["not a SID", "S-1-x-1", "\0"] {
+            let mut bytes = header[..26].to_vec();
+            bytes.push(2);
+            push_string(&mut bytes, owner).unwrap();
+            assert!(matches!(decode_descriptor(&bytes), Err(Error::InvalidDescriptor)));
+        }
     }
 
     fn descriptor() -> MonitorDescriptor {
@@ -566,5 +599,50 @@ mod tests {
             MonitorDescriptor::read_file(&crate::io::MonitorIo::new_native(), wrong_name),
             Err(Error::InvalidDescriptor)
         ));
+    }
+    #[test]
+    fn oversized_descriptor_is_rejected_before_a_later_read_error() {
+        struct OversizedReader {
+            remaining: usize,
+        }
+
+        impl Read for OversizedReader {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if self.remaining == 0 {
+                    return Err(io::Error::new(io::ErrorKind::PermissionDenied, "read beyond oversized descriptor"));
+                }
+                let count = buf.len().min(self.remaining);
+                buf[..count].fill(0);
+                self.remaining -= count;
+                Ok(count)
+            }
+        }
+
+        let reader = OversizedReader {
+            remaining: MAX_DESCRIPTOR_BYTES + 1,
+        };
+        assert!(matches!(
+            read_descriptor_bytes(reader, Path::new("descriptor.monitor")),
+            Err(Error::MessageTooLarge)
+        ));
+    }
+
+    #[test]
+    fn descriptor_byte_read_failure_preserves_the_path_and_source() {
+        struct FailingReader;
+
+        impl Read for FailingReader {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::new(io::ErrorKind::PermissionDenied, "injected read failure"))
+            }
+        }
+
+        let path = Path::new("descriptor.monitor");
+        let Error::Registry { path: failed_path, source } = read_descriptor_bytes(FailingReader, path).unwrap_err() else {
+            panic!("descriptor read errors must retain their registry context");
+        };
+        assert_eq!(failed_path, path);
+        assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(source.to_string(), "injected read failure");
     }
 }

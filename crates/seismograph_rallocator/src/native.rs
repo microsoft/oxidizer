@@ -5,7 +5,7 @@
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 static PUBLICATION_ENABLED: AtomicBool = AtomicBool::new(true);
 static OBSERVATION_ROUND: AtomicU64 = AtomicU64::new(1);
@@ -45,7 +45,68 @@ pub fn request_observation() -> u64 {
 /// Process-relative monotonic time, saturated to the wire representation.
 #[must_use]
 pub fn captured_nanos() -> u64 {
-    u64::try_from(EPOCH.get_or_init(Instant::now).elapsed().as_nanos()).unwrap_or(u64::MAX)
+    captured_nanos_from_elapsed(native_elapsed_nanos())
+}
+
+fn native_elapsed_nanos() -> u128 {
+    native_elapsed().as_nanos()
+}
+
+fn native_elapsed() -> Duration {
+    #[cfg(test)]
+    if let Some(nanos) = TEST_NATIVE_NANOS.get() {
+        return Duration::new(
+            u64::try_from(nanos / 1_000_000_000).unwrap(),
+            u32::try_from(nanos % 1_000_000_000).unwrap(),
+        );
+    }
+    EPOCH.get_or_init(Instant::now).elapsed()
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_NATIVE_NANOS: std::cell::Cell<Option<u128>> = const { std::cell::Cell::new(None) };
+}
+
+fn captured_nanos_from_elapsed(nanos: u128) -> u64 {
+    u64::try_from(nanos).unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod gamma_round2_tests {
+    use super::*;
+
+    #[test]
+    fn nov6_actual_native_timestamp_preserves_zero_exact_values_and_saturation_without_observing_a_clock() {
+        struct Restore(Option<u128>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_NATIVE_NANOS.set(self.0);
+            }
+        }
+        let _restore = Restore(TEST_NATIVE_NANOS.get());
+        for (input, expected) in [
+            (0, 0),
+            (37, 37),
+            (u128::from(u64::MAX), u64::MAX),
+            (u128::from(u64::MAX) + 1, u64::MAX),
+        ] {
+            TEST_NATIVE_NANOS.set(Some(input));
+            assert_eq!(captured_nanos(), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_native_timestamp_conversion_preserves_exact_values_and_saturation() {
+        for (input, expected) in [
+            (0, 0),
+            (37, 37),
+            (u128::from(u64::MAX), u64::MAX),
+            (u128::from(u64::MAX) + 1, u64::MAX),
+        ] {
+            assert_eq!(captured_nanos_from_elapsed(input), expected);
+        }
+    }
 }
 
 /// Number of native small-object size classes.

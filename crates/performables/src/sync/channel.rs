@@ -77,6 +77,7 @@ struct QueueState<T> {
 
 impl<T> QueueState<T> {
     fn send_is_closed(&self) -> bool {
+        // #[gamma::skip(logical.or_remove_right, reason = "The last receiver sets closed under this same state lock when receivers reaches zero.")]
         self.closed || self.receivers == 0
     }
 
@@ -788,6 +789,7 @@ impl<T> OneshotReceiver<T> {
             .receiver_waiters
             .enqueue_if_needed(&waiter, || self.shared.receiver_ready())
         {
+            // #[gamma::skip(stmt.delete_call, reason = "enqueue_if_needed already removed and deactivated this waiter; take_result also takes it on either terminal result.")]
             self.waiter.take();
             self.take_result().map_or(Poll::Pending, Poll::Ready)
         } else {
@@ -1106,6 +1108,7 @@ impl<T> WatchReceiver<T> {
                     telemetry::record(EventKind::ChannelReceive, std::ptr::from_ref(&*self.shared).cast::<()>());
                     return Ok(WatchRef { guard: state });
                 }
+                // #[gamma::skip(cond.always_false, reason = "changed_async immediately reports the same closed error when there is no unseen version.")]
                 if status & WATCH_CLOSED != 0 {
                     return Err(Error::without_value(ERROR_CLOSED));
                 }
@@ -1121,10 +1124,16 @@ impl<T> WatchReceiver<T> {
     /// Returns [`Error`] when all senders are gone and no newer
     /// version remains unobserved.
     pub fn changed(&self) -> Result<(), Error> {
+        self.changed_before_wait(|| {})
+    }
+
+    fn changed_before_wait(&self, before_wait: impl FnOnce()) -> Result<(), Error> {
         if let Some(result) = self.try_changed() {
             return result;
         }
         telemetry::record(EventKind::ChannelReceiveContention, std::ptr::from_ref(&*self.shared).cast::<()>());
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "Windows CI mutant 8f1d8b00bd4a: removing the injected handoff prevents the controlled send and exceeded the test timeout")]
+        before_wait();
         block_on(self.changed_with_recording_async(ContentionRecording::Recorded))
     }
 
@@ -1252,7 +1261,7 @@ impl<T> Drop for WatchChanged<'_, T> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn test_channel_deadline() -> Option<std::time::Instant> {
-    (!testing_aids::is_mutation_testing()).then(|| std::time::Instant::now() + Duration::from_secs(2))
+    (!testing_aids::is_mutation_testing()).then(|| std::time::Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 }))
 }
 
 #[cfg(test)]
@@ -1294,6 +1303,331 @@ impl<T: fmt::Display> fmt::Display for WatchRef<'_, T> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn nov4_ready_queue_wait_skips_registration_at_its_initial_readiness_check() {
+        let (sender, _receiver) = super::bounded::<u32>(1);
+        let mut waiting = std::pin::pin!(super::QueueWait::send(&sender.shared));
+        crate::sync::effects::take();
+        assert!(
+            waiting
+                .as_mut()
+                .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+                .is_ready()
+        );
+        assert_eq!(crate::sync::effects::take().locks, 1);
+    }
+
+    #[test]
+    fn nov4_closed_watch_changed_skips_shard_registration_at_its_initial_check() {
+        let (sender, receiver) = super::watch(7_u32);
+        drop(sender);
+        let mut waiting = std::pin::pin!(super::WatchChanged {
+            receiver: &receiver,
+            registration: None,
+        });
+        crate::sync::effects::take();
+        assert!(
+            waiting
+                .as_mut()
+                .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+                .is_ready()
+        );
+        assert_eq!(crate::sync::effects::take().locks, 0);
+    }
+    #[cfg(feature = "seismograph")]
+    struct DropHook(std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>);
+
+    #[cfg(feature = "seismograph")]
+    #[expect(clippy::allow_attributes, reason = "no-op waker detection differs between supported compilers")]
+    #[allow(
+        unknown_lints,
+        clippy::manual_noop_waker,
+        reason = "the owned waker runs a callback on drop to steal readiness"
+    )]
+    impl Wake for DropHook {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    #[cfg(feature = "seismograph")]
+    impl Drop for DropHook {
+        fn drop(&mut self) {
+            if let Some(callback) = self.0.get_mut().expect("only Drop accesses the hook mutex").take() {
+                callback();
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "seismograph")]
+    fn gamma_round2_synchronous_watch_records_contention_before_the_native_wait_without_double_counting() {
+        use seismograph::recorder::event::EventKind as RecordedKind;
+
+        crate::gamma_round2_telemetry::enable_recording();
+        let (sender, receiver) = watch(23);
+        let before = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::ChannelReceiveContention);
+        receiver
+            .changed_before_wait(|| {
+                assert_eq!(
+                    crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::ChannelReceiveContention),
+                    before + 1
+                );
+                sender.send_replace(31);
+            })
+            .unwrap();
+        assert_eq!(*receiver.borrow(), 31);
+        assert_eq!(
+            crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::ChannelReceiveContention),
+            before + 1
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "seismograph")]
+    fn gamma_round2_channel_retries_record_contention_once_after_readiness_is_stolen() {
+        use seismograph::recorder::event::EventKind as RecordedKind;
+
+        crate::gamma_round2_telemetry::enable_recording();
+        let hook = |callback| Waker::from(Arc::new(DropHook(std::sync::Mutex::new(Some(callback)))));
+        {
+            let (sender, receiver) = bounded(1);
+            sender.try_send(7).unwrap();
+            let filler = sender.clone();
+            let waker = hook(Box::new(move || filler.try_send(99).unwrap()));
+            let before = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::ChannelSendContention);
+            let mut future = Box::pin(sender.send_async(11));
+            assert!(future.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+            drop(waker);
+            // Model the state update before its wake, then steal readiness as the queued waker is released.
+            assert_eq!(sender.shared.state().values.pop_front(), Some(7));
+            assert!(future.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
+            assert_eq!(
+                crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::ChannelSendContention),
+                before + 1
+            );
+            assert_eq!(receiver.try_recv().unwrap(), 99);
+            assert!(matches!(
+                future.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+                Poll::Ready(Ok(()))
+            ));
+            assert_eq!(receiver.try_recv().unwrap(), 11);
+        }
+        {
+            let (sender, receiver) = bounded(1);
+            let stealer = receiver.clone();
+            let waker = hook(Box::new(move || assert_eq!(stealer.try_recv().unwrap(), 17)));
+            let before = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::ChannelReceiveContention);
+            let mut future = Box::pin(receiver.recv_async());
+            assert!(future.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+            drop(waker);
+            sender.shared.state().values.push_back(17);
+            assert!(future.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
+            assert_eq!(
+                crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::ChannelReceiveContention),
+                before + 1
+            );
+            sender.try_send(19).unwrap();
+            assert!(matches!(
+                future.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+                Poll::Ready(Ok(19))
+            ));
+        }
+        {
+            let (sender, receiver) = watch(23);
+            let receiver = Arc::new(receiver);
+            let stealer = Arc::clone(&receiver);
+            let waker = hook(Box::new(move || drop(stealer.borrow_and_update())));
+            let before = crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::ChannelReceiveContention);
+            let mut future = Box::pin(receiver.changed_async());
+            assert!(future.as_mut().poll(&mut Context::from_waker(&waker)).is_pending());
+            drop(waker);
+            sender.shared.state().value = 29;
+            sender.shared.status.0.fetch_add(super::WATCH_CHANGED, Ordering::Release);
+            assert!(future.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
+            assert_eq!(
+                crate::gamma_round2_telemetry::recorded_test_events(RecordedKind::ChannelReceiveContention),
+                before + 1
+            );
+            sender.send_replace(31);
+            assert!(matches!(
+                future.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+                Poll::Ready(Ok(()))
+            ));
+            assert_eq!(*receiver.borrow(), 31);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_cancelled_dequeued_waiter_does_not_handoff_without_readiness() {
+        let (sender, receiver) = bounded(1);
+        sender.try_send(7).unwrap();
+        let counter = Arc::new(WakeCounter::default());
+        let waker = Waker::from(Arc::clone(&counter));
+        let mut first = QueueWait::send(&sender.shared);
+        let mut second = QueueWait::send(&sender.shared);
+        assert!(Pin::new(&mut first).poll(&mut Context::from_waker(Waker::noop())).is_pending());
+        assert!(Pin::new(&mut second).poll(&mut Context::from_waker(&waker)).is_pending());
+        assert_eq!(receiver.try_recv().unwrap(), 7);
+        sender.try_send(11).unwrap();
+        drop(first);
+        assert_eq!(counter.0.load(Ordering::Relaxed), 0);
+        drop(second);
+    }
+
+    #[test]
+    fn gamma_round2_last_receiver_publishes_the_closed_bit() {
+        let (sender, receiver) = super::bounded::<u32>(1);
+        drop(receiver);
+        let state = sender.shared.state();
+        assert_eq!(state.receivers, 0);
+        assert!(state.closed);
+        assert!(state.send_is_closed());
+    }
+
+    #[test]
+    fn gamma_round2_ready_queue_wait_does_not_materialize_waiter_storage() {
+        let (sender, _receiver) = super::bounded::<u32>(1);
+        let before = format!("{:?}", sender.shared.send_waiters);
+        let mut wait = super::QueueWait::send(&sender.shared);
+        assert!(
+            std::pin::Pin::new(&mut wait)
+                .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+                .is_ready()
+        );
+        assert_eq!(format!("{:?}", sender.shared.send_waiters), before);
+    }
+
+    #[test]
+    fn gamma_round2_ready_watch_wait_does_not_materialize_registration_slots() {
+        let (sender, receiver) = super::watch(1);
+        sender.send_replace(2);
+        let before = format!("{:?}", receiver.shared.receiver_waiters);
+        let mut wait = super::WatchChanged {
+            receiver: &receiver,
+            registration: None,
+        };
+        assert!(
+            std::pin::Pin::new(&mut wait)
+                .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+                .is_ready()
+        );
+        assert_eq!(format!("{:?}", receiver.shared.receiver_waiters), before);
+    }
+
+    use std::pin::Pin;
+
+    #[test]
+    fn gamma_round2_oneshot_contention_is_marked_by_poll_and_try_recv() {
+        let (_sender, mut receiver) = super::oneshot::<u32>();
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(Pin::new(&mut receiver).poll(&mut context).is_pending());
+        assert!(receiver.contention_recorded);
+        assert!(Pin::new(&mut receiver).poll(&mut context).is_pending());
+        assert!(receiver.contention_recorded);
+        let (_sender, mut receiver) = super::oneshot::<u32>();
+        assert!(receiver.try_recv().unwrap_err().is_empty());
+        assert!(receiver.contention_recorded);
+    }
+
+    #[test]
+    fn gamma_round2_oneshot_terminal_paths_unlink_a_still_queued_registration() {
+        for sent in [false, true] {
+            let (_sender, mut receiver) = super::oneshot::<u32>();
+            assert!(Pin::new(&mut receiver).poll(&mut Context::from_waker(Waker::noop())).is_pending());
+            let waiter = Arc::clone(receiver.waiter.as_ref().unwrap());
+            assert_eq!(Arc::strong_count(&waiter), 3);
+            {
+                let mut state = receiver.shared.state();
+                if sent {
+                    state.value = Some(23);
+                } else {
+                    state.sender_alive = false;
+                }
+            }
+            let result = receiver.take_result().unwrap();
+            if sent {
+                assert_eq!(result, Ok(23));
+            } else {
+                assert!(result.unwrap_err().is_closed());
+            }
+            assert!(receiver.waiter.is_none());
+            assert_eq!(Arc::strong_count(&waiter), 1);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_ready_queue_registration_releases_waiter_before_wait_drop() {
+        for receiving in [false, true] {
+            let (sender, receiver) = super::bounded::<u32>(1);
+            let mut wait = if receiving {
+                sender.try_send(7).unwrap();
+                super::QueueWait::receive(&receiver.shared)
+            } else {
+                super::QueueWait::send(&sender.shared)
+            };
+            let observer = std::sync::Arc::new(super::Waiter::new());
+            let weak = std::sync::Arc::downgrade(&observer);
+            wait.waiter = Some(std::sync::Arc::clone(&observer));
+            assert_eq!(std::sync::Arc::strong_count(&observer), 2);
+            assert_eq!(
+                wait.poll_registered(&std::task::Context::from_waker(std::task::Waker::noop())),
+                std::task::Poll::Ready(())
+            );
+            assert!(wait.waiter.is_none());
+            assert_eq!(std::sync::Arc::strong_count(&observer), 1);
+            drop(observer);
+            assert!(weak.upgrade().is_none());
+            drop(wait);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_ready_oneshot_registration_releases_waiter_before_receiver_drop() {
+        for sent in [false, true] {
+            let (sender, mut receiver) = super::oneshot::<u32>();
+            let observer = std::sync::Arc::new(super::Waiter::new());
+            let weak = std::sync::Arc::downgrade(&observer);
+            receiver.waiter = Some(std::sync::Arc::clone(&observer));
+            if sent {
+                sender.send(7).unwrap();
+            } else {
+                drop(sender);
+            }
+            let result = receiver.poll_waiter(&std::task::Context::from_waker(std::task::Waker::noop()));
+            assert_eq!(matches!(result, std::task::Poll::Ready(Ok(7))), sent);
+            assert!(result.is_ready());
+            assert!(receiver.waiter.is_none());
+            assert_eq!(std::sync::Arc::strong_count(&observer), 1);
+            drop(observer);
+            assert!(weak.upgrade().is_none());
+            drop(receiver);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_oneshot_terminal_receive_marks_shared_receiver_dead_before_future_drop() {
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::task::{Context, Waker};
+
+        for sent in [false, true] {
+            let (sender, mut receiver) = super::oneshot::<u32>();
+            let shared = Arc::clone(&receiver.shared);
+            if sent {
+                sender.send(7).unwrap();
+            } else {
+                drop(sender);
+            }
+            let result = Pin::new(&mut receiver).poll(&mut Context::from_waker(Waker::noop()));
+            assert!(result.is_ready());
+            if sent {
+                assert!(matches!(result, std::task::Poll::Ready(Ok(7))));
+            } else {
+                assert!(matches!(result, std::task::Poll::Ready(Err(_))));
+            }
+            assert!(!shared.state().receiver_alive);
+        }
+    }
+
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};

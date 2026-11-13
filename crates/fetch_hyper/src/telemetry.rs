@@ -56,6 +56,30 @@ mod tests {
     use crate::testing::sorted_attributes;
 
     #[test]
+    fn gamma_survivor_connection_attribute_order_is_exact() {
+        let uri = templated_uri::BaseUri::from_static("https://example.test:8443");
+        let connected = hyper_util::client::legacy::connect::Connected::new().negotiated_h2();
+        assert_eq!(
+            create_connection_attributes(&uri, &connected),
+            vec![
+                KeyValue::new("server.address", "example.test"),
+                KeyValue::new("server.port", 8443_i64),
+                KeyValue::new("url.scheme", "https"),
+                KeyValue::new("network.protocol.version", "2"),
+            ]
+        );
+        assert_eq!(
+            create_connection_failure_attributes(&uri, LABEL_CONNECT),
+            vec![
+                KeyValue::new("server.address", "example.test"),
+                KeyValue::new("server.port", 8443_i64),
+                KeyValue::new("url.scheme", "https"),
+                KeyValue::new("error.type", "connect"),
+            ]
+        );
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore)]
     fn create_connection_attributes_emits_expected_keys() {
         let uri = templated_uri::BaseUri::from_static("https://example.com:8443");

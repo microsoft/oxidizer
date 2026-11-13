@@ -153,7 +153,9 @@ fn parse_rename(
         if deserialize_target.is_some() || serialize_target.is_some() {
             return Err(meta.error("duplicate serde rename"));
         }
-        let value = meta.value()?.parse::<LitStr>()?.value();
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The preceding peek proves the equals token consumed by meta.value; parsing its following value remains fallible below.")]
+        let value = meta.value()?;
+        let value = value.parse::<LitStr>()?.value();
         *deserialize_target = Some(value.clone());
         *serialize_target = Some(value);
         return Ok(());
@@ -186,7 +188,9 @@ fn parse_rule(
         if deserialize_target.is_some() || serialize_target.is_some() {
             return Err(meta.error("duplicate serde rename rule"));
         }
-        let rule = RenameRule::parse(&meta.value()?.parse::<LitStr>()?)?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The preceding peek proves the equals token consumed by meta.value; the literal and rename-rule checks remain fallible below.")]
+        let value = meta.value()?;
+        let rule = RenameRule::parse(&value.parse::<LitStr>()?)?;
         *deserialize_target = Some(rule);
         *serialize_target = Some(rule);
         return Ok(());
@@ -212,7 +216,9 @@ fn parse_rule(
 /// Parses `default` / `default = "path"`.
 fn parse_default(meta: &syn::meta::ParseNestedMeta<'_>) -> syn::Result<DefaultValue> {
     if meta.input.peek(syn::Token![=]) {
-        let value = meta.value()?.parse::<LitStr>()?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The preceding peek proves the equals token consumed by meta.value; parsing its following literal remains fallible below.")]
+        let value = meta.value()?;
+        let value = value.parse::<LitStr>()?;
         Ok(DefaultValue::Path(value.parse()?))
     } else {
         Ok(DefaultValue::Trait)
@@ -398,12 +404,15 @@ fn record_conversion(meta: &syn::meta::ParseNestedMeta<'_>) -> syn::Result<proc_
 }
 
 fn is_rejected_container_repr(meta: &syn::meta::ParseNestedMeta<'_>) -> bool {
+    // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "any performs unordered membership testing of the same four distinct attribute names.")]
     ["tag", "content", "untagged", "remote"].iter().any(|name| meta.path.is_ident(name))
 }
 
 fn consume_bound(meta: &syn::meta::ParseNestedMeta<'_>) -> syn::Result<()> {
     if meta.input.peek(syn::Token![=]) {
-        let _ = meta.value()?.parse::<LitStr>()?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The preceding peek proves the equals token consumed by meta.value; parsing its following literal remains fallible below.")]
+        let value = meta.value()?;
+        let _ = value.parse::<LitStr>()?;
         return Ok(());
     }
     meta.parse_nested_meta(|nested| {

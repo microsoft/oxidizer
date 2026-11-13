@@ -119,11 +119,40 @@ trait Materializer<T: ?Sized>: Send + Sync {
     fn materialize(&self, current: &T, source: Option<&Thread>, destination: &Thread) -> Box<T>;
 }
 
+#[cfg(test)]
+mod gamma_round2_tests {
+    use super::*;
+
+    #[derive(Clone, Default)]
+    struct Probe {
+        source: Option<Thread>,
+        destination: Option<Thread>,
+    }
+
+    impl ThreadAware for Probe {
+        fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+            self.source = source.cloned();
+            self.destination = Some(destination.clone());
+        }
+    }
+
+    #[test]
+    fn gamma_round2_unrecorded_factory_forwards_the_supplied_source() {
+        let (source, destination) = thread_aware::Relocator::between_threads().relocate(&mut ());
+        let (current, factory) = Factory::from_data(Probe::default(), std::convert::identity);
+        assert!(factory.source.is_none());
+        let value = factory.materialize(&current, source.as_ref(), &destination);
+        assert_eq!(value.source, source);
+        assert_eq!(value.destination.as_ref(), Some(&destination));
+    }
+}
+
 struct FunctionMaterializer<T> {
     constructor: fn() -> T,
 }
 
 impl<T: 'static> Materializer<T> for FunctionMaterializer<T> {
+    // #[gamma::skip(parameter.default_shadow, reason = "The source argument is unused; this materializer always calls its constructor.")]
     fn materialize(&self, _current: &T, _source: Option<&Thread>, _destination: &Thread) -> Box<T> {
         Box::new((self.constructor)())
     }
@@ -134,6 +163,7 @@ struct BoxedFunctionMaterializer<T: ?Sized> {
 }
 
 impl<T: 'static + ?Sized> Materializer<T> for BoxedFunctionMaterializer<T> {
+    // #[gamma::skip(parameter.default_shadow, reason = "The source argument is unused; this materializer always calls its constructor.")]
     fn materialize(&self, _current: &T, _source: Option<&Thread>, _destination: &Thread) -> Box<T> {
         (self.constructor)()
     }
@@ -162,6 +192,7 @@ impl<T> Materializer<T> for CloneCurrentMaterializer<T>
 where
     T: Clone + Send + 'static,
 {
+    // #[gamma::skip(parameter.default_shadow, reason = "The source argument is unused; this materializer clones the current value.")]
     fn materialize(&self, current: &T, _source: Option<&Thread>, _destination: &Thread) -> Box<T> {
         Box::new(current.clone())
     }

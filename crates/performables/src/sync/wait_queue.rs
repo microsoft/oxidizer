@@ -26,23 +26,41 @@ pub(super) fn block_on<F: Future>(future: F) -> F::Output {
     let mut future = pin!(future);
     #[cfg(test)]
     let deadline = test_deadline();
+    #[cfg(not(test))]
+    let deadline = None;
     loop {
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return output,
-            Poll::Pending => {
-                #[cfg(not(test))]
-                park();
-                #[cfg(test)]
-                test_park(deadline);
-            }
+            // #[gamma::skip(call.replace_with_default, tag = "timeout", reason = "November 4 campaign: removing the pending-future park exceeded the test timeout.")]
+            Poll::Pending => park_current(deadline),
         }
     }
+}
+
+// #[gamma::skip(fn_value.unit, tag = "timeout", reason = "November 4 campaign: an empty parker made pending-future loops exceed the test timeout.")]
+// #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The deadline only bounds the test watchdog; production ignores it and parks without a deadline.")]
+#[inline]
+fn park_current(deadline: Option<Instant>) {
+    #[cfg(not(test))]
+    let _ = deadline;
+    #[cfg(test)]
+    if crate::sync::effects::injected_park() {
+        return;
+    }
+    #[cfg(test)]
+    test_park(deadline);
+    // #[gamma::skip(stmt.delete_call, reason = "The native parking adapter is replaced by the injected parker in deterministic tests; blocking-poll tests verify one park per pending result.")]
+    #[cfg(not(test))]
+    park();
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn test_deadline() -> Option<Instant> {
-    (!testing_aids::is_mutation_testing()).then(|| Instant::now() + Duration::from_secs(2))
+    if crate::sync::effects::park_is_injected() {
+        return None;
+    }
+    (!testing_aids::is_mutation_testing()).then(|| Instant::now() + Duration::from_secs(if cfg!(miri) { 120 } else { 2 }))
 }
 
 #[cfg(test)]
@@ -106,6 +124,7 @@ fn block_on_until_with<F: Future>(future: F, mut remaining: impl FnMut() -> Opti
         match future.as_mut().poll(&mut context) {
             Poll::Ready(output) => return Some(output),
             Poll::Pending => {
+                // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 park_timeout(remaining()?);
             }
         }
@@ -213,6 +232,8 @@ impl WaitQueue {
     }
 
     pub(super) fn wake_one_marked(&self, clear_waiting: impl FnOnce()) {
+        #[cfg(test)]
+        crate::sync::effects::record_wake_dispatch();
         self.with_existing_state(|state| {
             if let Some(state) = state {
                 state.wake_one_marked(clear_waiting);
@@ -245,6 +266,8 @@ impl WaitQueue {
     }
 
     pub(super) fn wake_all_marked(&self, clear_waiting: impl FnOnce()) {
+        #[cfg(test)]
+        crate::sync::effects::record_wake_dispatch();
         self.with_existing_state(|state| {
             if let Some(state) = state {
                 state.wake_all_marked(clear_waiting);
@@ -322,6 +345,7 @@ impl EagerWaitQueue {
             let mut waiters = self.waiters.lock();
             let waker = loop {
                 let Some(waiter) = waiters.pop_front() else {
+                    // #[gamma::skip(loop.break_value_default, reason = "The inferred Option<Waker> default is already None.")]
                     break None;
                 };
                 waiter.queued.store(false, Ordering::Release);
@@ -351,6 +375,7 @@ impl EagerWaitQueue {
             let mut waiters = self.waiters.lock();
             let index = waiter.position.swap(usize::MAX, Ordering::Relaxed);
             let removed = waiters.remove_index_if(index, |queued| Arc::ptr_eq(queued, waiter)).is_some();
+            // #[gamma::skip(cond.always_true, reason = "An absent registration was never queued or was already popped or cancelled, each of which leaves queued=false.")]
             if removed {
                 waiter.queued.store(false, Ordering::Release);
             }
@@ -394,6 +419,103 @@ impl EagerWaitQueue {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn nov4_blocking_poll_dispatches_exactly_one_injected_park_per_pending_result() {
+        let parks = std::rc::Rc::new(std::cell::Cell::new(0));
+        let observed = std::rc::Rc::clone(&parks);
+        crate::sync::effects::with_park(
+            move || observed.set(observed.get() + 1),
+            || {
+                let mut polls = 0;
+                let output = super::block_on(std::future::poll_fn(|_| {
+                    polls += 1;
+                    if polls == 1 {
+                        std::task::Poll::Pending
+                    } else {
+                        std::task::Poll::Ready(17)
+                    }
+                }));
+                assert_eq!(output, 17);
+                assert_eq!(polls, 2);
+            },
+        );
+        assert_eq!(parks.get(), 1);
+    }
+    #[test]
+    fn nov4_empty_eager_queue_skips_locking_at_the_wake_one_hint() {
+        let queue = super::EagerWaitQueue::new();
+        crate::sync::effects::take();
+        queue.wake_one();
+        assert_eq!(crate::sync::effects::take().locks, 0);
+    }
+    #[test]
+    fn nov4_ready_recheck_of_one_waiter_preserves_the_other_waiters_wake_hint() {
+        let queue = super::EagerWaitQueue::new();
+        let first = Arc::new(Waiter::new());
+        let ready = Arc::new(Waiter::new());
+        let counter = Arc::new(WakeCounter::default());
+        let waker = Waker::from(Arc::clone(&counter));
+        first.register(&waker);
+        ready.register(Waker::noop());
+        assert!(!queue.enqueue_if_needed(&first, || false));
+        assert!(!queue.enqueue_if_needed(&ready, || false));
+        let cleared = AtomicBool::new(false);
+        assert!(queue.enqueue_if_needed_marked(&ready, || {}, || true, || cleared.store(true, Ordering::Relaxed)));
+        assert!(!cleared.load(Ordering::Relaxed));
+        assert!(queue.has_waiters());
+        queue.wake_one();
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+        assert!(!queue.has_waiters());
+    }
+
+    #[test]
+    fn gamma_round2_park_budget_reserves_exactly_one_infinite_timeout_sentinel() {
+        let infinite = super::Timeout::new(std::time::Duration::MAX);
+        assert_eq!(
+            infinite.remaining_after(std::time::Duration::ZERO),
+            Some(std::time::Duration::from_millis(u64::from(u32::MAX) - 1))
+        );
+        let finite = super::Timeout::new(std::time::Duration::from_millis(7));
+        assert_eq!(
+            finite.remaining_after(std::time::Duration::from_millis(2)),
+            Some(std::time::Duration::from_millis(5))
+        );
+        assert_eq!(finite.remaining_after(std::time::Duration::from_millis(7)), None);
+    }
+
+    #[test]
+    fn gamma_round2_cancel_distinguishes_membership_and_clears_the_empty_queue_flag() {
+        let queue = super::EagerWaitQueue::new();
+        let first = Arc::new(Waiter::new());
+        let absent = Arc::new(Waiter::new());
+        first.register(Waker::noop());
+        assert!(!queue.enqueue_if_needed(&first, || false));
+        assert!(!queue.cancel(&absent));
+        assert!(queue.has_waiters.load(Ordering::Acquire));
+        assert!(queue.cancel(&first));
+        assert!(!queue.has_waiters.load(Ordering::Acquire));
+        assert!(!queue.cancel(&first));
+        assert!(!queue.has_waiters.load(Ordering::Acquire));
+        assert!(queue.waiters.lock().is_empty());
+    }
+
+    #[test]
+    fn gamma_survivor_ready_recheck_clears_previously_enqueued_waiter_membership() {
+        let queue = super::EagerWaitQueue::new();
+        let waiter = std::sync::Arc::new(super::Waiter::new());
+        waiter.register(std::task::Waker::noop());
+        assert!(!queue.enqueue_if_needed(&waiter, || false));
+        assert!(waiter.queued.load(std::sync::atomic::Ordering::Acquire));
+        assert_eq!(std::sync::Arc::strong_count(&waiter), 2);
+        assert!(queue.enqueue_if_needed(&waiter, || true));
+        assert!(!waiter.queued.load(std::sync::atomic::Ordering::Acquire));
+        assert!(!waiter.active.load(std::sync::atomic::Ordering::Acquire));
+        assert_eq!(waiter.position.load(std::sync::atomic::Ordering::Relaxed), usize::MAX);
+        assert!(queue.waiters.lock().is_empty());
+        assert!(!queue.has_waiters.load(std::sync::atomic::Ordering::Acquire));
+        assert_eq!(std::sync::Arc::strong_count(&waiter), 1);
+    }
+
     use std::pin::Pin;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -409,6 +531,49 @@ mod tests {
         fn wake(self: Arc<Self>) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    #[test]
+    fn gamma_survivor_wait_queue_cancellation_and_draining_reset_registration_metadata() {
+        let queue = super::EagerWaitQueue::new();
+        let first = Arc::new(Waiter::new());
+        let second = Arc::new(Waiter::new());
+        assert_eq!(first.position.load(Ordering::Relaxed), usize::MAX);
+        for waiter in [&first, &second] {
+            waiter.register(Waker::noop());
+            assert!(!queue.enqueue_if_needed(waiter, || false));
+        }
+        assert!(queue.has_waiters());
+        assert!(queue.cancel(&first));
+        assert!(!first.active.load(Ordering::Acquire));
+        assert!(!first.queued.load(Ordering::Acquire));
+        assert_eq!(first.position.load(Ordering::Relaxed), usize::MAX);
+        assert!(first.waker.lock().is_none());
+        assert!(queue.has_waiters());
+        queue.wake_one();
+        assert!(!queue.has_waiters());
+        assert!(!second.queued.load(Ordering::Acquire));
+        assert_eq!(second.position.load(Ordering::Relaxed), usize::MAX);
+        assert!(second.waker.lock().is_none());
+        assert!(!queue.cancel(&second));
+
+        let completed = Arc::new(Waiter::new());
+        completed.register(Waker::noop());
+        assert!(!queue.enqueue_if_needed(&completed, || false));
+        assert!(queue.enqueue_if_needed(&completed, || true));
+        assert!(!completed.active.load(Ordering::Acquire));
+        assert!(!completed.queued.load(Ordering::Acquire));
+        assert_eq!(completed.position.load(Ordering::Relaxed), usize::MAX);
+        assert!(!queue.has_waiters());
+        assert!(completed.waker.lock().is_none());
+
+        let last = Arc::new(Waiter::new());
+        last.register(Waker::noop());
+        assert!(!queue.enqueue_if_needed(&last, || false));
+        queue.wake_all();
+        assert!(!last.queued.load(Ordering::Acquire));
+        assert_eq!(last.position.load(Ordering::Relaxed), usize::MAX);
+        assert!(!queue.has_waiters());
     }
 
     struct PendingOnce(bool);

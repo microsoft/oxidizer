@@ -158,7 +158,11 @@ pub fn write_response(writer: &mut impl Write, request_id: u64, response: &Respo
 /// After any error, frame alignment is not guaranteed and the reader must be
 /// discarded rather than reused for another frame.
 pub fn read_response(reader: &mut impl Read) -> Result<(u64, Response), Error> {
-    let frame = read_frame(reader, MAX_SNAPSHOT_BYTES)?;
+    #[cfg(target_pointer_width = "64")]
+    let maximum = { MAX_SNAPSHOT_BYTES };
+    #[cfg(not(target_pointer_width = "64"))]
+    let maximum = MAX_SNAPSHOT_BYTES;
+    let frame = read_frame(reader, maximum)?;
     message::decode_response(frame.kind, &frame.payload).map(|response| (frame.request_id, response))
 }
 
@@ -177,18 +181,41 @@ pub fn read_control_response(reader: &mut impl Read) -> Result<(u64, Response), 
     message::decode_response(frame.kind, &frame.payload).map(|response| (frame.request_id, response))
 }
 
+fn message_length(length: usize) -> Result<u32, Error> {
+    u32::try_from(length).map_err(|_error| Error::MessageTooLarge)
+}
+
 fn write_frame(writer: &mut impl Write, kind: u16, request_id: u64, payload: &[u8]) -> Result<(), Error> {
-    let payload_len = u32::try_from(payload.len()).map_err(|_error| Error::MessageTooLarge)?;
+    write_frame_with_length(writer, kind, request_id, payload.len(), |writer| writer.write_all(payload))
+}
+
+fn write_frame_with_length<W: Write>(
+    writer: &mut W,
+    kind: u16,
+    request_id: u64,
+    payload_length: usize,
+    write_payload: impl FnOnce(&mut W) -> std_io::Result<()>,
+) -> Result<(), Error> {
+    let payload_len = message_length(payload_length)?;
     writer.write_all(&FRAME_MAGIC).map_err(Error::Io)?;
     writer.write_all(&VERSION.to_le_bytes()).map_err(Error::Io)?;
     writer.write_all(&kind.to_le_bytes()).map_err(Error::Io)?;
     writer.write_all(&request_id.to_le_bytes()).map_err(Error::Io)?;
     writer.write_all(&payload_len.to_le_bytes()).map_err(Error::Io)?;
-    writer.write_all(payload).map_err(Error::Io)?;
+    write_payload(writer).map_err(Error::Io)?;
     writer.flush().map_err(Error::Io)
 }
 
 fn read_frame(reader: &mut impl Read, maximum: usize) -> Result<Frame, Error> {
+    read_frame_with_reserve(reader, maximum, Vec::try_reserve)
+}
+
+fn read_frame_with_reserve(
+    reader: &mut impl Read,
+    maximum: usize,
+    mut reserve: impl FnMut(&mut Vec<u8>, usize) -> Result<(), std::collections::TryReserveError>,
+) -> Result<Frame, Error> {
+    // #[gamma::skip(literal.int_increment, reason = "read_exact initializes the entire header or returns before any header field is read")]
     let mut header = [0; FRAME_HEADER_BYTES];
     reader.read_exact(&mut header).map_err(Error::Io)?;
     if header[..4] != FRAME_MAGIC {
@@ -198,9 +225,11 @@ fn read_frame(reader: &mut impl Read, maximum: usize) -> Result<Frame, Error> {
         return Err(Error::UnsupportedVersion);
     }
     let kind = u16::from_le_bytes([header[6], header[7]]);
+    // #[gamma::skip(literal.int_increment, reason = "copy_from_slice overwrites the entire request ID before it is read")]
     let mut request_id = [0; 8];
     request_id.copy_from_slice(&header[8..16]);
     let request_id = u64::from_le_bytes(request_id);
+    // #[gamma::skip(literal.int_increment, reason = "copy_from_slice overwrites the entire length before it is read")]
     let mut len = [0; 4];
     len.copy_from_slice(&header[16..20]);
     let len = u32::from_le_bytes(len) as usize;
@@ -208,16 +237,18 @@ fn read_frame(reader: &mut impl Read, maximum: usize) -> Result<Frame, Error> {
         return Err(Error::MessageTooLarge);
     }
     let mut payload = Vec::new();
+    // #[gamma::skip(literal.int_increment, reason = "each read_exact overwrites every byte copied into payload; failed reads return before copying")]
     let mut chunk = [0_u8; FRAME_READ_CHUNK_BYTES];
     for _ in 0..len / chunk.len() {
         reader.read_exact(&mut chunk).map_err(Error::Io)?;
-        payload.try_reserve(chunk.len()).map_err(|_error| Error::MessageTooLarge)?;
+        reserve(&mut payload, chunk.len()).map_err(|_error| Error::MessageTooLarge)?;
         payload.extend_from_slice(&chunk);
     }
     let tail_len = len % chunk.len();
+    // #[gamma::skip(cond.always_true, reason = "a zero-length tail performs only an empty read_exact, reserve of zero, and empty extension; it consumes no bytes and preserves the payload")]
     if tail_len != 0 {
         reader.read_exact(&mut chunk[..tail_len]).map_err(Error::Io)?;
-        payload.try_reserve(tail_len).map_err(|_error| Error::MessageTooLarge)?;
+        reserve(&mut payload, tail_len).map_err(|_error| Error::MessageTooLarge)?;
         payload.extend_from_slice(&chunk[..tail_len]);
     }
     Ok(Frame { kind, request_id, payload })
@@ -235,6 +266,62 @@ mod tests {
     use std::io;
 
     use super::*;
+
+    #[test]
+    fn november_public_recording_frames_preserve_each_distinct_sampling_byte_and_request_identity() {
+        use crate::message::{RecordingConfiguration, RecordingPolicy};
+
+        for sampling in [0x0001_0203, 0x0003_0405, 0x0007_0605] {
+            let request = Request::SetRecording(RecordingConfiguration {
+                allocations: RecordingPolicy {
+                    enabled: true,
+                    capture_backtraces: false,
+                    sampling_one_in: sampling,
+                },
+                ..RecordingConfiguration::default()
+            });
+            let mut bytes = Vec::new();
+            write_request(&mut bytes, 0x0102_0304_0506_0708, &request).unwrap();
+            assert_eq!(bytes[FRAME_HEADER_BYTES + 6..FRAME_HEADER_BYTES + 10], sampling.to_le_bytes());
+            assert_eq!(read_request(&mut bytes.as_slice()).unwrap(), (0x0102_0304_0506_0708, request));
+        }
+    }
+
+    #[test]
+    fn november_frame_allocation_failures_propagate_before_copying_each_chunk_and_tail_without_large_allocations() {
+        let payload = vec![17; FRAME_READ_CHUNK_BYTES + 1];
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, 1, 23, &payload).unwrap();
+        for fail_at in [0, 1] {
+            let mut reader = io::Cursor::new(&bytes);
+            let mut requests = Vec::new();
+            let result = read_frame_with_reserve(&mut reader, MAX_SNAPSHOT_BYTES, |buffer, additional| {
+                requests.push((buffer.len(), additional));
+                if requests.len() - 1 == fail_at {
+                    return Err(Vec::<u8>::new().try_reserve(usize::MAX).unwrap_err());
+                }
+                buffer.try_reserve(additional)
+            });
+            assert!(matches!(result, Err(Error::MessageTooLarge)));
+            let expected = [(0, FRAME_READ_CHUNK_BYTES), (FRAME_READ_CHUNK_BYTES, 1)];
+            assert_eq!(requests, expected[..=fail_at]);
+            assert_eq!(
+                reader.position(),
+                u64::try_from(FRAME_HEADER_BYTES + FRAME_READ_CHUNK_BYTES + fail_at).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn november_frame_length_admission_rejects_unrepresentable_payload_before_any_header_or_payload_write() {
+        let Some(length) = (u32::MAX as usize).checked_add(1) else {
+            return;
+        };
+        let mut bytes = Vec::new();
+        let error = write_frame_with_length(&mut bytes, 1, 23, length, |_| panic!("invalid length must not publish payload")).unwrap_err();
+        assert!(matches!(error, Error::MessageTooLarge));
+        assert!(bytes.is_empty());
+    }
 
     #[test]
     fn control_responses_reject_large_advertisements_after_the_header() {
@@ -427,5 +514,13 @@ mod tests {
                 true,
             )
         );
+    }
+    #[test]
+    fn gamma_round2_message_lengths_preserve_the_exact_u32_limit_without_large_payloads() {
+        assert_eq!(message_length(37).unwrap(), 37);
+        assert_eq!(message_length(u32::MAX as usize).unwrap(), u32::MAX);
+        if let Some(overflow) = (u32::MAX as usize).checked_add(1) {
+            assert!(matches!(message_length(overflow), Err(Error::MessageTooLarge)));
+        }
     }
 }

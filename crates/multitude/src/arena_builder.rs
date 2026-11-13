@@ -157,6 +157,7 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
     /// Resolve a desired preallocation `capacity` (total chunk-allocation
     /// bytes) into a `(target_class, chunk_count)` pair.
     fn resolve_capacity(capacity: usize) -> Option<(SizeClass, usize)> {
+        // #[gamma::skip(cond.always_false, literal.int_increment, reason = "The builder validates capacity as zero or at least MIN_CHUNK_BYTES; resolving zero to Some with count zero still preallocates no chunks")]
         if capacity == 0 {
             return None;
         }
@@ -218,6 +219,7 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
     {
         self.validate();
         let capacity = Self::resolve_capacity(self.capacity);
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "try_from_config only constructs provider and empty state and unconditionally returns Ok; preallocation errors below still propagate")]
         let arena = Arena::try_from_config(self.allocator, self.max_normal_alloc, self.byte_budget)?;
         if let Some((class, n)) = capacity {
             for _ in 0..n {

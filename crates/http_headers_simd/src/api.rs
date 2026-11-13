@@ -48,9 +48,14 @@ pub fn ascii_str(bytes: &[u8]) -> Option<&str> {
 fn all_ascii(bytes: &[u8]) -> bool {
     const BLOCK: usize = 16;
 
-    let mut chunks = bytes.chunks_exact(BLOCK);
+    let mut chunks = bytes.chunks_exact(
+        // #[gamma::skip(expr.decrement, expr.increment, tag = "equivalent", reason = "Chunk size changes grouping only; every chunk byte and every remainder byte still participate in the OR reduction")]
+        BLOCK,
+    );
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "The result tests only the high bit; starting the OR accumulator with low bit 1 cannot change whether bit 7 is set")]
     let mut high = 0_u8;
     for chunk in &mut chunks {
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only bit 7 of the combined OR reduction is observed; an initial low bit 1 cannot affect it")]
         let mut block = 0_u8;
         for &byte in chunk {
             block |= byte;

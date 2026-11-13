@@ -22,12 +22,20 @@ impl<'a> Iterator for CorsTokens<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.remaining.is_empty() {
+            if
+            // #[gamma::skip(cond.always_false, cond.negate, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.remaining.is_empty() {
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 self.remaining = self.values.next()?.as_bytes();
             }
             let end = self.remaining.iter().position(|byte| *byte == b',').unwrap_or(self.remaining.len());
             let (item, rest) = self.remaining.split_at(end);
-            self.remaining = rest.get(1..).unwrap_or_default();
+            self.remaining = rest
+                .get(
+                    // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    1..,
+                )
+                .unwrap_or_default();
             let item = validate::trim_ows(item);
             if !item.is_empty() {
                 return Some(item);

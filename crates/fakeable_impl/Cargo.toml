@@ -43,6 +43,10 @@ syn = { workspace = true, features = ["clone-impls", "extra-traits", "full", "pa
 insta = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 
+[[test]]
+name = "gamma_survivor_expansion"
+path = "tests/gamma_survivor_expansion.rs"
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

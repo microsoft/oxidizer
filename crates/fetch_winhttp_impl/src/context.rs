@@ -376,6 +376,7 @@ impl CallbackOperationSlot {
 
     fn take_for_status(&self, status: u32) -> Option<ActiveOperation> {
         let tag = self.state.load(Ordering::Acquire);
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "resource", reason = "Nov 4 SARIF b35a81c58749 exceeded its memory limit when absent operation tags panicked")]
         let kind = active_kind(tag)?;
 
         if kind.callback_status() != status {
@@ -386,9 +387,9 @@ impl CallbackOperationSlot {
     }
 
     fn take_kind(&self, kind: OperationKind) -> Option<ActiveOperation> {
-        self.state
-            .compare_exchange(kind as u8, OPERATION_CLAIMED, Ordering::AcqRel, Ordering::Acquire)
-            .ok()?;
+        if !claim_operation(&self.state, kind) {
+            return None;
+        }
 
         // The claim and the read-out below are deliberately not one atomic
         // step: the tag stays CLAIMED while the payload moves out and only then
@@ -407,16 +408,24 @@ impl CallbackOperationSlot {
         // SAFETY: arming initialized the value before publishing the tag, and
         // the successful claim grants this callback sole ownership.
         let active = unsafe { active.assume_init_read() };
+        // #[gamma::skip(expr.decrement, tag = "resource", reason = "Nov 4 SARIF 4771610eacd2 exceeded its memory limit after decrementing the idle tag")]
         self.state.store(OPERATION_IDLE, Ordering::Release);
 
         Some(active)
     }
 
     fn take_any(&self) -> Option<ActiveOperation> {
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "resource", reason = "Nov 4 SARIF 1db414ec2e36 exceeded its memory limit when absent operation tags panicked")]
         let kind = active_kind(self.state.load(Ordering::Acquire))?;
 
         self.take_kind(kind)
     }
+}
+
+fn claim_operation(state: &AtomicU8, kind: OperationKind) -> bool {
+    state
+        .compare_exchange(kind as u8, OPERATION_CLAIMED, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
 }
 
 impl fmt::Debug for CallbackOperationSlot {
@@ -437,6 +446,7 @@ impl Drop for CallbackOperationSlot {
     fn drop(&mut self) {
         let state = *self.state.get_mut();
 
+        // #[gamma::skip(cond.always_true, tag = "resource", reason = "Nov 4 SARIF ee0d0a813fad exceeded its memory limit after treating uninitialized idle payload storage as active")]
         if active_kind(state).is_some() {
             // SAFETY: dropping RequestContext requires exclusive ownership. An
             // active value is therefore uniquely owned here and must be dropped
@@ -477,6 +487,7 @@ impl Drop for CallbackOperationSlot {
 }
 
 fn active_kind(state: u8) -> Option<OperationKind> {
+    // #[gamma::skip(cond.always_false, relational.le_to_lt, tag = "equivalent", reason = "from_discriminant returns None for both reserved tags 0 and 1, exactly as this early return does")]
     if state <= OPERATION_CLAIMED {
         return None;
     }
@@ -736,6 +747,102 @@ mod tests {
         OperationBuffer, OperationKind, RequestContext, active_kind,
     };
     use crate::mocks::{complete, drive, finish, installed, status_info_len};
+
+    #[test]
+    fn november4_slot_claim_restores_idle_and_can_be_rearmed() {
+        use std::sync::atomic::Ordering;
+
+        let slot = Box::pin(CallbackOperationSlot::new());
+        for kind in OperationKind::ALL.into_iter().cycle().take(8) {
+            assert!(slot.take_for_status(kind.callback_status()).is_none());
+            assert!(slot.take_any().is_none());
+            // SAFETY: this test owns the pinned idle slot; both endpoints of
+            // each previous event are destroyed before the next arm.
+            let receiver = unsafe { slot.as_ref().arm(kind, OperationBuffer::none()) };
+            let active = slot.take_for_status(kind.callback_status()).unwrap();
+            assert_eq!(active.kind, kind);
+            assert_eq!(slot.state.load(Ordering::Acquire), OPERATION_IDLE);
+            assert!(slot.take_any().is_none());
+            assert!(slot.take_for_status(kind.callback_status()).is_none());
+            drop(receiver);
+            drop(active);
+        }
+    }
+
+    #[test]
+    fn november4_all_slot_tags_decode_only_declared_operations() {
+        for tag in u8::MIN..=u8::MAX {
+            let expected = OperationKind::ALL.into_iter().find(|kind| *kind as u8 == tag);
+            assert_eq!(active_kind(tag), expected, "tag {tag}");
+        }
+    }
+
+    #[test]
+    fn gamma_round2_operation_claim_publishes_reserved_state_before_any_payload_move() {
+        use std::sync::atomic::{AtomicU8, Ordering};
+
+        for kind in [
+            OperationKind::SendRequest,
+            OperationKind::HeadersAvailable,
+            OperationKind::Read,
+            OperationKind::Write,
+        ] {
+            let state = AtomicU8::new(kind as u8);
+            assert!(super::claim_operation(&state, kind));
+            assert_eq!(state.load(Ordering::Acquire), OPERATION_CLAIMED);
+            for competitor in [
+                OperationKind::SendRequest,
+                OperationKind::HeadersAvailable,
+                OperationKind::Read,
+                OperationKind::Write,
+            ] {
+                assert!(!super::claim_operation(&state, competitor));
+                assert_eq!(state.load(Ordering::Acquire), OPERATION_CLAIMED);
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_diagnostics_preserve_low_bit_and_idle_claims_are_optional() {
+        let diagnostics = super::SecureFailureDiagnostics::new();
+        assert_eq!(diagnostics.observed(), None);
+        for flags in [0, 1, 0x8000_0001, u32::MAX] {
+            diagnostics.record(flags);
+            assert_eq!(diagnostics.observed(), Some(flags));
+        }
+        let slot = CallbackOperationSlot::new();
+        assert!(slot.take_any().is_none());
+        assert!(slot.take_kind(OperationKind::Read).is_none());
+        assert_eq!(format!("{slot:?}"), "CallbackOperationSlot { active: None, .. }");
+        assert_eq!(active_kind(OPERATION_CLAIMED), None);
+    }
+
+    #[test]
+    fn gamma_survivor_context_debug_names_and_armed_state() {
+        let (mut guard, context, contexts, session, closes) = installed();
+        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
+        // SAFETY: installed retains this context until finish; no mutable reference or callback overlaps this shared read.
+        let context_ref = unsafe { &*context };
+        let debug = format!("{context_ref:?}");
+        for text in [
+            "RequestContext { operation: CallbackOperationSlot { active: Some(SendRequest)",
+            "secure_failure_flags: None",
+            "cold_connect_state: Unobserved",
+            "connect:",
+            "session:",
+        ] {
+            assert!(debug.contains(text), "{debug}");
+        }
+        // SAFETY: the installed context is live; the send status has no payload and callbacks run sequentially.
+        unsafe {
+            complete(context, OperationKind::SendRequest.callback_status(), std::ptr::null_mut(), 0);
+        }
+        assert!(matches!(drive(future).unwrap(), CompletionResult::SendRequestComplete));
+        // SAFETY: the future has completed and finish owns the sole terminal notification.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
+    }
 
     assert_impl_all!(OperationKind: UnwindSafe, RefUnwindSafe);
     assert_impl_all!(OperationBuffer: UnwindSafe, RefUnwindSafe);

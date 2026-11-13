@@ -78,6 +78,30 @@ fn cors_names_share_case_insensitive_identity_without_changing_wire_spelling() {
 }
 
 #[test]
+fn cors_empty_response_lists_preserve_repeated_field_lines() {
+    macro_rules! check {
+        ($header:ty, $name:expr) => {{
+            for wire in [&["", ""][..], &[" \t", ",", ", ,"][..]] {
+                let source = Source {
+                    name: $name,
+                    values: wire.iter().map(|value| FieldValue::from_static(value)).collect(),
+                };
+                let owned = <$header>::owned(&source).unwrap().unwrap();
+                let borrowed = <$header>::view(&source).unwrap().unwrap();
+                assert_eq!(owned.iter().count(), 0);
+                assert_eq!(borrowed.iter().count(), 0);
+                assert_eq!(
+                    owned.field_values().map(|value| value.as_bytes()).collect::<Vec<_>>(),
+                    wire.iter().map(|value| value.as_bytes()).collect::<Vec<_>>()
+                );
+            }
+        }};
+    }
+    check!(AccessControlAllowHeaders, &FieldName::AccessControlAllowHeaders);
+    check!(AccessControlExposeHeaders, &FieldName::AccessControlExposeHeaders);
+}
+
+#[test]
 fn cors_methods_share_case_sensitive_identity_and_extension_tokens() {
     let source = Source {
         name: &FieldName::AccessControlAllowMethods,

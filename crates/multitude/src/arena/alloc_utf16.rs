@@ -21,6 +21,48 @@ use crate::internal::thin_dst::{AtomicStrong, LocalStrong, Strong};
 use crate::strings::{Utf16Str, Utf16String};
 use crate::{AllocError, Arc, Box, Rc};
 
+fn prefixed_utf16_layout(exact: usize) -> Result<(usize, usize), AllocError> {
+    let elem_size = mem::size_of::<u16>();
+    let elem_align = mem::align_of::<u16>();
+    // At least `elem_align` payload bytes so the returned pointer
+    // is strictly inside the chunk (smart-pointer recovery
+    // invariant).
+    let payload_bytes = exact.checked_mul(elem_size).ok_or(AllocError::CAPACITY_OVERFLOW)?.max(elem_align);
+    let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError::CAPACITY_OVERFLOW)?;
+    Ok((total, elem_align))
+}
+
+fn with_prefixed_utf16_layout<T>(exact: usize, allocate: impl FnOnce(usize, usize) -> Result<T, AllocError>) -> Result<T, AllocError> {
+    let (total, elem_align) = prefixed_utf16_layout(exact)?;
+    allocate(total, elem_align)
+}
+
+#[test]
+fn gamma_nov4_utf16_count_overflow_is_propagated_before_dispatching_any_allocation() {
+    for exact in [usize::MAX, usize::MAX / 2] {
+        assert_eq!(
+            with_prefixed_utf16_layout::<()>(exact, |_, _| panic!("overflow cannot dispatch an allocation")),
+            Err(AllocError::CAPACITY_OVERFLOW)
+        );
+    }
+    assert_eq!(
+        with_prefixed_utf16_layout(7, |total, alignment| Ok((total, alignment))).unwrap(),
+        (PREFIX_BYTES + 14, 2)
+    );
+    assert_eq!(
+        with_prefixed_utf16_layout::<()>(7, |_, _| Err(AllocError::CAPACITY_OVERFLOW)),
+        Err(AllocError::CAPACITY_OVERFLOW)
+    );
+}
+
+#[test]
+fn gamma_round2_utf16_prefix_size_overflow_is_a_recoverable_plan_error() {
+    assert_eq!(prefixed_utf16_layout(0).unwrap(), (PREFIX_BYTES + 2, 2));
+    assert_eq!(prefixed_utf16_layout(7).unwrap(), (PREFIX_BYTES + 14, 2));
+    prefixed_utf16_layout(usize::MAX / 2).unwrap_err();
+    prefixed_utf16_layout(usize::MAX).unwrap_err();
+}
+
 #[cfg_attr(docsrs, doc(cfg(feature = "utf16")))]
 impl<A: Allocator + Clone> Arena<A> {
     /// Copy `s` into a chunk and return an `Arc<Utf16Str>`.
@@ -394,37 +436,44 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     fn impl_alloc_utf16_prefixed_from_str(&self, s: &str) -> Result<NonNull<u16>, AllocError> {
         // Precompute the exact UTF-16 length; it cannot exceed `s.len()`.
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "Each UTF16 unit count is bounded by the corresponding UTF8 byte count, so every partial sum is bounded by the valid str length")]
         let exact = s
             .chars()
             .try_fold(0_usize, |acc, c| acc.checked_add(c.len_utf16()))
             .ok_or(AllocError::CAPACITY_OVERFLOW)?;
-        let elem_size = mem::size_of::<u16>();
-        let elem_align = mem::align_of::<u16>();
-        // At least `elem_align` payload bytes so the returned pointer
-        // is strictly inside the chunk (smart-pointer recovery
-        // invariant).
-        let payload_bytes = exact.checked_mul(elem_size).ok_or(AllocError::CAPACITY_OVERFLOW)?.max(elem_align);
-        let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError::CAPACITY_OVERFLOW)?;
-        loop {
-            if let Some((uninit, chunk_ptr)) = self.current().try_alloc_with_chunk(total, elem_align) {
-                let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
-                let payload = transcode_utf16_into(uninit.as_non_null(), s, exact);
-                let _ = chunk_ref.forget();
-                return Ok(payload);
-            }
-            if self.is_oversized(total) {
-                return self.alloc_oversized_shared_with(total, |mutator, chunk_ptr| {
-                    let (base, _chunk_unused) = mutator
-                        .try_alloc_with_chunk(total, elem_align)
-                        .expect("dedicated oversized chunk sized to fit utf-16 payload");
-                    let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
-                    let payload = transcode_utf16_into(base.as_non_null(), s, exact);
+        with_prefixed_utf16_layout(exact, |total, elem_align| {
+            loop {
+                if let Some((uninit, chunk_ptr)) = self.current().try_alloc_with_chunk(total, elem_align) {
+                    let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
+                    let payload = transcode_utf16_into(uninit.as_non_null(), s, exact);
                     let _ = chunk_ref.forget();
-                    payload
-                });
+                    return Ok(payload);
+                }
+                if self.is_oversized(total) {
+                    return self.alloc_oversized_shared_with(
+                        // #[gamma::skip(expr.increment, reason = "The usize prefix plus u16 payload is even; acquire_oversized adds word-minus-one slack and rounds to a word, so increasing this even minimum by one preserves the same rounded payload and allocation result")]
+                        total,
+                        |mutator, chunk_ptr| {
+                            let (base, _chunk_unused) = mutator
+                                .try_alloc_with_chunk(
+                                    total,
+                                    // #[gamma::skip(expr.decrement, reason = "This fresh chunk starts immediately after a pointer or AtomicU32 header, already aligned for u16; requesting alignment one instead of two preserves its first reservation address and size")]
+                                    elem_align,
+                                )
+                                .expect("dedicated oversized chunk sized to fit utf-16 payload");
+                            let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
+                            let payload = transcode_utf16_into(base.as_non_null(), s, exact);
+                            let _ = chunk_ref.forget();
+                            payload
+                        },
+                    );
+                }
+                self.refill(
+                    // #[gamma::skip(expr.decrement, reason = "The UTF16 prefix, payload, and chunk header are even, so subtracting one cannot cross a power-of-two normal size-class boundary; the ratchet floor is unchanged and the request remains normal")]
+                    total,
+                )?;
             }
-            self.refill(total)?;
-        }
+        })
     }
 
     /// Strong-prefixed `Arc<Utf16Str>`
@@ -451,6 +500,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     fn alloc_utf16_prefixed_from_str_raw<S: Strong>(&self, s: &str) -> Result<NonNull<u16>, AllocError> {
         // The exact UTF-16 length cannot exceed `s.len()`.
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "Each UTF16 unit count is bounded by the corresponding UTF8 byte count, so every partial sum is bounded by the valid str length")]
         let exact = s
             .chars()
             .try_fold(0_usize, |acc, c| acc.checked_add(c.len_utf16()))

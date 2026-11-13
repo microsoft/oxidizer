@@ -59,6 +59,7 @@ mod observation;
 mod pagemap;
 mod recording;
 mod remote;
+mod sync_fence;
 mod thread;
 
 use std::alloc::{GlobalAlloc, Layout};

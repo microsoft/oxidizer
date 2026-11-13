@@ -443,6 +443,8 @@ debug = "full"
 [profile.mutants]
 inherits = "test"
 debug = "none"
+# Disable incremental caches to reduce disk use across mutation builds.
+incremental = false
 
 # Profile used by `cargo bolero` (it passes `--profile fuzz` by default).
 # Optimized build with single codegen unit, as recommended by cargo-bolero

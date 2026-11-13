@@ -324,6 +324,7 @@ pub fn print_log_record(
 fn write_interpolated(w: &mut (impl Write + ?Sized), template: &str, record: &SdkLogRecord) -> std::io::Result<()> {
     let mut remaining = template;
 
+    // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "The char-array search pattern is an unordered set; reversing its members finds the same earliest brace.")]
     while let Some(offset) = remaining.find(['{', '}']) {
         w.write_all(&remaining.as_bytes()[..offset])?;
         remaining = &remaining[offset..];

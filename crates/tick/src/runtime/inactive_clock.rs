@@ -190,3 +190,21 @@ impl From<crate::ClockControl> for InactiveClock<Isolated> {
         }
     }
 }
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_inactive_clock_relocation_preserves_original_isolated_registration() {
+        let builder = thread_aware::ThreadBuilder::default();
+        let source = builder.build(std::thread::spawn(|| std::thread::current().id()).join().unwrap());
+        let destination = builder.build(std::thread::current().id());
+        let mut clock = InactiveClock::new_isolated();
+        assert_eq!(format!("{:?}", clock.state.register_driver(Waker::noop().clone())), "Some(0)");
+        clock.relocate(Some(&source), &destination);
+        assert_eq!(format!("{:?}", clock.state.register_driver(Waker::noop().clone())), "Some(0)");
+        clock.relocate(Some(&destination), &source);
+        assert_eq!(format!("{:?}", clock.state.register_driver(Waker::noop().clone())), "Some(1)");
+    }
+}

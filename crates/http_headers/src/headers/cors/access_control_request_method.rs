@@ -86,6 +86,7 @@ impl RequestMethodStore {
             return Ok(Self::Registered(method));
         }
         extension_method(value.as_bytes())?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The sole caller already validates these immutable field lines; the cardinality check above proves exactly one, so exactly_one_owned repeats only successful checks")]
         let owned = values.exactly_one_owned()?;
         Ok(Self::Extension(owned))
     }
@@ -342,6 +343,7 @@ impl Field for AccessControlRequestMethod {
     }
 
     #[inline]
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -358,6 +360,7 @@ impl Field for AccessControlRequestMethod {
     /// Validates without building a view, since the owned form keeps only the
     /// field value.
     #[inline]
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -416,6 +419,16 @@ mod tests {
     use super::{AccessControlRequestMethod, AccessControlRequestMethodOwned, RequestMethodStore, registered_method};
     use crate::headers::cors::test_map::TestMap;
     use crate::{DecodeErrorKind, FieldName, FieldValue};
+
+    #[test]
+    fn gamma_afternoon_method_display_propagates_invalid_extension_storage() {
+        let value = AccessControlRequestMethodOwned {
+            method: RequestMethodStore::Extension(FieldValue::from_static("bad method")),
+        };
+        let mut output = String::new();
+        assert!(std::fmt::write(&mut output, format_args!("{value}")).is_err());
+        assert!(output.is_empty());
+    }
 
     #[test]
     fn registered_and_extension_constructors_cover_storage_and_accessors() {

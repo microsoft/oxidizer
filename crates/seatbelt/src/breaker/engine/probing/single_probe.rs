@@ -76,6 +76,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_round2_a_replacement_probe_restarts_the_entire_cooldown() {
+        let now = tick::ClockControl::new().to_clock().instant();
+        let cooldown = Duration::from_secs(5);
+        let mut probe = SingleProbe::new(cooldown, AbandonedPolicy::default());
+        assert_eq!(probe.allow_probe(now), AllowProbeResult::Accepted);
+        let replacement = now + cooldown + Duration::from_nanos(1);
+        assert_eq!(probe.allow_probe(replacement), AllowProbeResult::Accepted);
+        assert_eq!(probe.entered_at, Some(replacement));
+        assert_eq!(probe.allow_probe(replacement), AllowProbeResult::Rejected);
+        assert_eq!(probe.allow_probe(replacement + cooldown), AllowProbeResult::Rejected);
+        assert_eq!(
+            probe.allow_probe(replacement + cooldown + Duration::from_nanos(1)),
+            AllowProbeResult::Accepted
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_single_probe_records_first_entry_and_rejects_exact_cooldown_boundary() {
+        let now = tick::ClockControl::new().to_clock().instant();
+        let mut probe = SingleProbe::new(Duration::from_secs(5), AbandonedPolicy::default());
+        assert_eq!(probe.allow_probe(now), AllowProbeResult::Accepted);
+        assert_eq!(probe.entered_at, Some(now));
+        assert_eq!(probe.allow_probe(now), AllowProbeResult::Rejected);
+        assert_eq!(probe.allow_probe(now + Duration::from_secs(5)), AllowProbeResult::Rejected);
+        assert_eq!(
+            probe.allow_probe(now + Duration::from_secs(5) + Duration::from_nanos(1)),
+            AllowProbeResult::Accepted
+        );
+    }
+
+    #[test]
     fn allow_probe_accepts_single_probe() {
         let mut probe = SingleProbe::new(Duration::from_secs(5), AbandonedPolicy::default());
         let now = Instant::now();

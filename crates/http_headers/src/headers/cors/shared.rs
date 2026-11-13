@@ -101,6 +101,7 @@ impl Hash for CorsList {
     // LLVM emits an uncallable polymorphized instance for this hasher adapter.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn hash<H: Hasher>(&self, state: &mut H) {
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves every hash write and replaces only the unit return value with unit")]
         hash_cors_list(self, state);
     }
 }
@@ -165,6 +166,7 @@ impl CorsList {
         S: AsRef<str>,
     {
         let items = items.into_iter();
+        // #[gamma::skip(literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "The item-size multiplier is an allocation estimate; validation and serialization visit every iterator item independently")]
         let capacity = items.size_hint().0.saturating_mul(8);
         let mut items = ListItemSourceAdapter(items);
         list_from_source(name, &mut items, capacity, allow_empty)
@@ -196,6 +198,7 @@ impl CorsList {
     #[inline(always)]
     pub(super) fn decode(name: &'static FieldName, values: &FieldLines<'_>, allow_empty: bool) -> Result<Self, DecodeError> {
         values.validate_list_item_limit(b',', true)?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The preceding admission check validates the same immutable field lines; repeated_owned repeats that check and cannot newly reject them")]
         let mut repeated = values.repeated_owned()?;
         let (first, first_owned) = repeated.next().expect("FieldLines always contains at least one field line");
         let Some(saw_item) = validate_list_value(first.as_bytes()) else {
@@ -237,6 +240,7 @@ impl CorsList {
         allow_empty: bool,
     ) -> Result<Self, DecodeError> {
         let mut saw_item = first_saw_item;
+        // #[gamma::skip(literal.int_decrement, literal.int_increment, literal.int_to_zero, tag = "equivalent", reason = "This estimate only sizes Vec storage; both leading lines and every remaining line are pushed independently")]
         let mut stored = Vec::with_capacity(2_usize.saturating_add(rest.size_hint().0));
         stored.push(first_owned);
         for (offset, (value, owned)) in iter::once((second, second_owned)).chain(rest).enumerate() {
@@ -271,10 +275,14 @@ where
     S: AsRef<str>,
 {
     // LLVM emits an uncallable polymorphized instance for this type adapter.
+    // #[gamma::skip(fn_value.ok, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn next_with(&mut self, visitor: &mut dyn FnMut(&str) -> Result<(), DecodeError>) -> Result<bool, DecodeError> {
         let Some(item) = self.0.next() else {
-            return Ok(false);
+            return Ok(
+                // #[gamma::skip(literal.bool_flip, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                false,
+            );
         };
         visitor(item.as_ref())?;
         Ok(true)
@@ -292,6 +300,8 @@ fn list_from_source(
         bytes: Vec::with_capacity(capacity),
         allow_empty,
     };
+    #[cfg(test)]
+    tests::INITIAL_LIST_CAPACITY.set(builder.bytes.capacity());
     while items.next_with(&mut |item| append_list_item(&mut builder, item))? {}
     finish_list_items(builder)
 }
@@ -326,6 +336,7 @@ pub(super) fn view_list_values<'a>(
     values.validate_list_item_limit(b',', true)?;
     let mut repeated = values.repeated();
     let first = repeated.next().expect("FieldLines always contains at least one field line");
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The full validate_list walk validates the identical singleton line and preserves its error index and allow_empty policy")]
     if repeated.next().is_none() {
         validate_single_list(name, first, allow_empty)?;
         return Ok(Some(CorsListView { values }));
@@ -956,6 +967,7 @@ fn validate_list_from_source(
 #[expect(clippy::inline_always, reason = "preserves pre-split inlining in hot CORS list decoding")]
 #[inline(always)]
 fn validate_list_value(bytes: &[u8]) -> Option<bool> {
+    // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "Declining the common-literal shortcut runs the complete token-list scanner with the same empty-member policy")]
     if let Some(members) = common_list_line(bytes) {
         return Some(members);
     }
@@ -1105,6 +1117,7 @@ pub(super) fn untrimmed_range(bytes: &[u8]) -> Option<Range<usize>> {
 }
 
 pub(super) fn trimmed_range(bytes: &[u8]) -> Range<usize> {
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The complete first/last non-OWS searches below return the identical full range for an already untrimmed nonempty slice")]
     if bytes.first().is_some_and(|byte| !matches!(byte, b' ' | b'\t')) && bytes.last().is_some_and(|byte| !matches!(byte, b' ' | b'\t')) {
         return 0..bytes.len();
     }
@@ -1134,6 +1147,19 @@ pub(super) fn invalid_number(name: &'static FieldName) -> DecodeError {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    std::thread_local! {
+        pub(super) static INITIAL_LIST_CAPACITY: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn gamma_afternoon_cors_source_reserves_the_announced_initial_capacity() {
+        let mut items = super::ListItemSourceAdapter(["GET"].into_iter());
+        INITIAL_LIST_CAPACITY.set(0);
+        let result = super::list_from_source(&crate::FieldName::AccessControlAllowMethods, &mut items, 64, false);
+        result.unwrap();
+        assert!(INITIAL_LIST_CAPACITY.get() >= 64);
+    }
+
     use std::collections::hash_map::DefaultHasher;
 
     use super::super::test_map::TestMap;
@@ -1265,6 +1291,7 @@ mod tests {
             true,
         )
         .expect("one field line");
+        assert!(matches!(&one, CorsList::One(_)));
         assert_eq!(one.value_count(), 1);
         assert_eq!(one.field_values().count(), 1);
         assert_eq!(one.clone().into_field_values().len(), 1);
@@ -1284,6 +1311,7 @@ mod tests {
             true,
         )
         .expect("several field lines");
+        assert!(matches!(&many, CorsList::Many(_)));
         assert_eq!(many.value_count(), 2);
         assert_eq!(many.clone().into_field_values().len(), 2);
         assert!(many == many.clone());

@@ -155,6 +155,7 @@ where
     /// The `TLS` backend is supplied at [`build`](Self::build) time.
     #[must_use]
     pub fn new(connector: C, spawner: Spawner, clock: Clock, mut options: TransportOptions) -> Self {
+        // #[gamma::skip(call_result.default, tag = "equivalent", reason = "coerce_options returns unit; default_after still executes its option updates and replaces only () with ()")]
         coerce_options(&mut options);
 
         let hyper_builder = configure_hyper_builder(spawner, &clock, &options);
@@ -201,7 +202,7 @@ where
     /// otherwise [`TlsBackend`] cannot be constructed.
     #[must_use]
     pub fn build(self, tls: TlsBackend) -> HyperTransport {
-        let meter = self.meter.clone().unwrap_or_else(|| opentelemetry::global::meter("fetch_hyper"));
+        let meter = transport_meter(self.meter.clone(), opentelemetry::global::meter);
         let body_builder = self
             .body_builder
             .clone()
@@ -225,12 +226,21 @@ fn configure_hyper_builder(spawner: Spawner, clock: &Clock, options: &TransportO
     let mut hyper_builder = legacy::Client::builder(SpawnerExecutor(spawner));
     hyper_builder.timer(timer.clone()).pool_timer(timer);
 
+    // #[gamma::skip(call_result.default, tag = "equivalent", reason = "apply_pool_options returns unit; default_after preserves all builder mutations and returns the same ()")]
     apply_pool_options(&mut hyper_builder, &options.connection_pool);
+    // #[gamma::skip(call_result.default, tag = "equivalent", reason = "apply_http2_options returns unit; default_after preserves all builder mutations and returns the same ()")]
     apply_http2_options(&mut hyper_builder, &options.http_2);
+    // #[gamma::skip(call.replace_with_default, stmt.delete_call, tag = "resource", reason = "Nov 4 SARIF 24f333b1f171 and 1784ebd6412c timed out after removing keep-alive configuration")]
+    // #[gamma::skip(call_result.default, tag = "equivalent", reason = "apply_keep_alive returns unit; default_after still applies the keep-alive configuration and returns the same ()")]
     apply_keep_alive(&mut hyper_builder, &options.connection_keep_alive);
+    // #[gamma::skip(call_result.default, tag = "equivalent", reason = "apply_http_version_preference returns unit; default_after preserves its builder mutations and returns the same ()")]
     apply_http_version_preference(&mut hyper_builder, &options.supported_http_versions);
 
     hyper_builder
+}
+
+fn transport_meter(meter: Option<Meter>, global: impl FnOnce(&'static str) -> Meter) -> Meter {
+    meter.unwrap_or_else(|| global("fetch_hyper"))
 }
 
 fn apply_pool_options(hyper_builder: &mut legacy::Builder, pool: &ConnectionPoolOptions) {
@@ -265,10 +275,16 @@ fn initial_stream_window_size(http_2: &Http2Options) -> Option<u32> {
     http_2.initial_stream_window_size.map(|size| size.min(MAX_HTTP2_STREAM_WINDOW_SIZE))
 }
 
+// #[gamma::skip(fn_value.unit, tag = "resource", reason = "Nov 4 SARIF fce5a9bd1283 timed out after replacing keep-alive configuration with unit")]
 fn apply_keep_alive(hyper_builder: &mut legacy::Builder, keep_alive: &ConnectionKeepAlive) {
     match *keep_alive {
         ConnectionKeepAlive::Disabled => {
-            hyper_builder.http2_keep_alive_while_idle(false).http2_keep_alive_interval(None);
+            hyper_builder
+                .http2_keep_alive_while_idle(
+                    // #[gamma::skip(literal.bool_flip, tag = "equivalent", reason = "the following interval(None) disables KeepAlive creation in hyper's ping::channel; the idle flag is read only when that interval is Some")]
+                    false,
+                )
+                .http2_keep_alive_interval(None);
         }
         ConnectionKeepAlive::ActiveConnections { interval, timeout } => {
             hyper_builder
@@ -277,6 +293,7 @@ fn apply_keep_alive(hyper_builder: &mut legacy::Builder, keep_alive: &Connection
                 .http2_keep_alive_timeout(timeout);
         }
         ConnectionKeepAlive::ActiveAndIdleConnections { interval, timeout } => {
+            // #[gamma::skip(stmt.delete_call, tag = "resource", reason = "Nov 4 SARIF 783ccdbf03a8 timed out after deleting the idle keep-alive configuration chain")]
             hyper_builder
                 .http2_keep_alive_while_idle(true)
                 .http2_keep_alive_interval(interval)
@@ -304,6 +321,376 @@ mod tests {
     use super::*;
     use crate::testing::FakeConnector;
 
+    #[test]
+    fn gamma_round2_default_meter_scope_and_explicit_meter_short_circuit_are_exact() {
+        let provider = SdkMeterProvider::builder().build();
+        let expected = provider.meter("controlled-meter");
+        let rendered = format!("{expected:?}");
+        let actual = transport_meter(None, |scope| {
+            assert_eq!(scope, "fetch_hyper");
+            expected.clone()
+        });
+        assert_eq!(format!("{actual:?}"), rendered);
+        let actual = transport_meter(Some(expected), |_| panic!("explicit meter must bypass the global provider"));
+        assert_eq!(format!("{actual:?}"), rendered);
+    }
+
+    fn gamma_round2_raw_builder() -> legacy::Builder {
+        legacy::Client::builder(SpawnerExecutor(Spawner::new_tokio(None)))
+    }
+
+    #[test]
+    fn gamma_round2_pool_settings_match_explicit_hyper_configuration() {
+        for timeout in [None, Some(Duration::from_secs(17))] {
+            let pool = ConnectionPoolOptions::default().max_connections(3).connection_idle_timeout(timeout);
+            let mut actual = gamma_round2_raw_builder();
+            let mut expected = actual.clone();
+            expected.pool_idle_timeout(timeout).pool_max_idle_per_host(3);
+            apply_pool_options(&mut actual, &pool);
+            assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+        }
+    }
+
+    struct GammaH2Io(hyper_util::rt::TokioIo<tokio::io::DuplexStream>);
+
+    impl hyper::rt::Read for GammaH2Io {
+        fn poll_read(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: hyper::rt::ReadBufCursor<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::pin::Pin::new(&mut self.get_mut().0).poll_read(cx, buf)
+        }
+    }
+
+    impl hyper::rt::Write for GammaH2Io {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            std::pin::Pin::new(&mut self.get_mut().0).poll_write(cx, buf)
+        }
+        fn poll_flush(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+            std::pin::Pin::new(&mut self.get_mut().0).poll_flush(cx)
+        }
+        fn poll_shutdown(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+            std::pin::Pin::new(&mut self.get_mut().0).poll_shutdown(cx)
+        }
+    }
+
+    impl hyper_util::client::legacy::connect::Connection for GammaH2Io {
+        fn connected(&self) -> hyper_util::client::legacy::connect::Connected {
+            hyper_util::client::legacy::connect::Connected::new()
+        }
+    }
+
+    #[derive(Clone)]
+    struct GammaH2Connector(std::sync::Arc<std::sync::Mutex<Option<tokio::io::DuplexStream>>>);
+
+    impl tower::Service<http::Uri> for GammaH2Connector {
+        type Response = GammaH2Io;
+        type Error = std::io::Error;
+        type Future = std::future::Ready<std::result::Result<GammaH2Io, std::io::Error>>;
+
+        fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> std::task::Poll<std::result::Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _request: http::Uri) -> Self::Future {
+            let io = self.0.lock().unwrap().take().unwrap();
+            std::future::ready(Ok(GammaH2Io(hyper_util::rt::TokioIo::new(io))))
+        }
+    }
+
+    #[derive(Clone)]
+    struct GammaH2Timer {
+        clock: Clock,
+        sleeps: futures::channel::mpsc::UnboundedSender<Duration>,
+    }
+
+    impl hyper::rt::Timer for GammaH2Timer {
+        fn sleep(&self, duration: Duration) -> std::pin::Pin<Box<dyn hyper::rt::Sleep>> {
+            self.sleeps.unbounded_send(duration).unwrap();
+            hyper::rt::Timer::sleep(&crate::timer::ClockTimer::new(self.clock.clone()), duration)
+        }
+
+        fn sleep_until(&self, deadline: std::time::Instant) -> std::pin::Pin<Box<dyn hyper::rt::Sleep>> {
+            self.sleep(deadline.saturating_duration_since(self.clock.instant()))
+        }
+
+        fn now(&self) -> std::time::Instant {
+            self.clock.instant()
+        }
+    }
+
+    type GammaTaskQueue = std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<std::sync::Arc<GammaManualTask>>>>;
+
+    #[derive(Clone, Default)]
+    struct GammaManualExecutor(GammaTaskQueue);
+
+    struct GammaManualTask {
+        future: std::sync::Mutex<std::pin::Pin<Box<dyn Future<Output = ()> + Send>>>,
+        queue: GammaTaskQueue,
+    }
+
+    impl futures::task::ArcWake for GammaManualTask {
+        fn wake_by_ref(arc_self: &std::sync::Arc<Self>) {
+            arc_self.queue.lock().unwrap().push_back(std::sync::Arc::clone(arc_self));
+        }
+    }
+
+    impl<F: Future<Output = ()> + Send + 'static> hyper::rt::Executor<F> for GammaManualExecutor {
+        fn execute(&self, fut: F) {
+            self.0.lock().unwrap().push_back(std::sync::Arc::new(GammaManualTask {
+                future: std::sync::Mutex::new(Box::pin(fut)),
+                queue: std::sync::Arc::clone(&self.0),
+            }));
+        }
+    }
+
+    impl GammaManualExecutor {
+        fn run_until_stalled(&self) {
+            for _ in 0..10_000 {
+                let Some(task) = self.0.lock().unwrap().pop_front() else { return };
+                let waker = futures::task::waker_ref(&task);
+                let mut future = task.future.lock().unwrap();
+                if future.as_mut().poll(&mut std::task::Context::from_waker(&waker)).is_ready() {
+                    *future = Box::pin(std::future::pending());
+                }
+            }
+            panic!("the in-memory HTTP/2 task queue failed to quiesce");
+        }
+    }
+
+    #[test]
+    fn gamma_round2_keep_alive_idle_flags_and_disabled_reset_are_effective() {
+        use futures::FutureExt;
+        use futures::executor::block_on;
+        use hyper::rt::Executor;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        for policy in [
+            ConnectionKeepAlive::Disabled,
+            ConnectionKeepAlive::active_connections(Duration::from_secs(7), Duration::from_secs(3)),
+            ConnectionKeepAlive::active_and_idle_connections(Duration::from_secs(7), Duration::from_secs(3)),
+        ] {
+            let executor = GammaManualExecutor::default();
+            let control = tick::ClockControl::new();
+            let (sleeps, _observed) = futures::channel::mpsc::unbounded();
+            let (io, mut peer) = tokio::io::duplex(8192);
+            let connector = GammaH2Connector(std::sync::Arc::new(std::sync::Mutex::new(Some(io))));
+            let mut builder = legacy::Client::builder(executor.clone());
+            builder
+                .http2_only(true)
+                .http2_adaptive_window(false)
+                .http2_keep_alive_while_idle(true)
+                .http2_keep_alive_interval(Duration::from_secs(7))
+                .timer(GammaH2Timer {
+                    clock: control.to_clock(),
+                    sleeps,
+                });
+            apply_keep_alive(&mut builder, &policy);
+            let client = builder.build::<_, http_body_util::Empty<Bytes>>(connector);
+            let request_client = client.clone();
+            let (sent, received) = std::sync::mpsc::channel();
+            executor.execute(async move {
+                sent.send(request_client.get("http://in-memory.invalid/".parse().unwrap()).await)
+                    .unwrap();
+            });
+            executor.run_until_stalled();
+            let mut preface = [0; 24];
+            block_on(peer.read_exact(&mut preface)).unwrap();
+            assert_eq!(block_on(gamma_round2_h2_frame(&mut peer)).0, 4);
+            block_on(peer.write_all(&[0, 0, 0, 4, 0, 0, 0, 0, 0])).unwrap();
+            executor.run_until_stalled();
+            block_on(peer.write_all(&[0, 0, 1, 1, 5, 0, 0, 0, 1, 0x88])).unwrap();
+            executor.run_until_stalled();
+            let response = received.try_recv().unwrap().unwrap();
+            assert_eq!(response.status(), http::StatusCode::OK);
+            drop(response);
+            executor.run_until_stalled();
+            let mut bytes = [0; 8192];
+            while let Some(read) = peer.read(&mut bytes).now_or_never() {
+                assert!(read.unwrap() > 0);
+            }
+            control.advance(Duration::from_secs(7));
+            executor.run_until_stalled();
+            let ping = peer.read(&mut bytes).now_or_never();
+            if matches!(policy, ConnectionKeepAlive::ActiveAndIdleConnections { .. }) {
+                let count = ping.unwrap().unwrap();
+                assert_eq!(count, 17);
+                assert_eq!(bytes[3], 6);
+            } else {
+                assert!(ping.is_none(), "disabled and active-only policies must not ping an idle stream");
+            }
+            drop((client, peer));
+            executor.run_until_stalled();
+        }
+    }
+
+    async fn gamma_round2_h2_frame(peer: &mut tokio::io::DuplexStream) -> (u8, Vec<u8>) {
+        use tokio::io::AsyncReadExt;
+
+        let mut header = [0; 9];
+        peer.read_exact(&mut header).await.unwrap();
+        let length = usize::from(header[0]) * 65536 + usize::from(header[1]) * 256 + usize::from(header[2]);
+        let mut payload = vec![0; length];
+        peer.read_exact(&mut payload).await.unwrap();
+        (header[3], payload)
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "native Windows tests cover HTTP/2 handshakes; Tokio runtime initialization uses IOCP"
+    )]
+    async fn gamma_round2_http2_keep_alive_uses_the_configured_intervals() {
+        use futures::StreamExt;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        for policy in [
+            ConnectionKeepAlive::active_connections(Duration::from_secs(7), Duration::from_secs(3)),
+            ConnectionKeepAlive::active_and_idle_connections(Duration::from_secs(7), Duration::from_secs(3)),
+        ] {
+            let control = tick::ClockControl::new();
+            let (sleeps, mut observed) = futures::channel::mpsc::unbounded();
+            let (io, mut peer) = tokio::io::duplex(8192);
+            let connector = GammaH2Connector(std::sync::Arc::new(std::sync::Mutex::new(Some(io))));
+            let mut options = TransportOptions::default();
+            options.supported_http_versions = vec![Version::HTTP_2];
+            options.connection_keep_alive = policy;
+            options.http_2.adaptive_window = false;
+            let mut builder = configure_hyper_builder(Spawner::new_tokio(None), &control.to_clock(), &options);
+            builder.timer(GammaH2Timer {
+                clock: control.to_clock(),
+                sleeps,
+            });
+            let client = builder.build::<_, http_body_util::Empty<Bytes>>(connector);
+            let request = tokio::spawn(async move { client.get("http://in-memory.invalid/".parse().unwrap()).await });
+            let mut preface = [0; 24];
+            peer.read_exact(&mut preface).await.unwrap();
+            assert_eq!(gamma_round2_h2_frame(&mut peer).await.0, 4);
+            peer.write_all(&[0, 0, 0, 4, 0, 0, 0, 0, 0]).await.unwrap();
+            assert_eq!(observed.next().await.unwrap(), Duration::from_secs(7));
+            control.advance(Duration::from_secs(7));
+            loop {
+                let (kind, payload) = gamma_round2_h2_frame(&mut peer).await;
+                if kind == 6 {
+                    assert_eq!(payload.len(), 8);
+                    break;
+                }
+            }
+            let mut timeout = observed.next().await.unwrap();
+            if timeout == Duration::from_secs(7) {
+                timeout = observed.next().await.unwrap();
+            }
+            assert_eq!(timeout, Duration::from_secs(3));
+            control.advance(Duration::from_secs(3));
+            let error = request.await.unwrap().unwrap_err();
+            assert_eq!(
+                crate::recoverability::detect_recoverability(&error),
+                seatbelt::RecoveryInfo::retry()
+            );
+            let mut source: &(dyn std::error::Error + 'static) = &error;
+            loop {
+                if let Some(error) = source.downcast_ref::<hyper::Error>() {
+                    assert!(error.is_timeout(), "{error:?}");
+                    break;
+                }
+                source = source.source().unwrap();
+            }
+        }
+    }
+
+    async fn gamma_round2_h2_settings(options: Http2Options, keep_alive: ConnectionKeepAlive) -> Vec<(u16, u32)> {
+        use tokio::io::AsyncReadExt;
+
+        let (io, mut peer) = tokio::io::duplex(8192);
+        let connector = GammaH2Connector(std::sync::Arc::new(std::sync::Mutex::new(Some(io))));
+        let mut transport = TransportOptions::default();
+        transport.supported_http_versions = vec![Version::HTTP_2];
+        transport.http_2 = options;
+        transport.connection_keep_alive = keep_alive;
+        let builder = configure_hyper_builder(Spawner::new_tokio(None), &Clock::new_frozen(), &transport);
+        let client = builder.build::<_, http_body_util::Empty<Bytes>>(connector);
+        let request = tokio::spawn(async move { client.get("http://in-memory.invalid/".parse().unwrap()).await });
+        let mut preface = [0; 24];
+        peer.read_exact(&mut preface).await.unwrap();
+        assert_eq!(&preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+        let mut header = [0; 9];
+        peer.read_exact(&mut header).await.unwrap();
+        assert_eq!(header[3], 4, "first HTTP/2 frame must be SETTINGS");
+        let length = usize::from(header[0]) * 65536 + usize::from(header[1]) * 256 + usize::from(header[2]);
+        let mut payload = vec![0; length];
+        peer.read_exact(&mut payload).await.unwrap();
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        payload
+            .chunks_exact(6)
+            .map(|setting| {
+                (
+                    u16::from_be_bytes(setting[..2].try_into().unwrap()),
+                    u32::from_be_bytes(setting[2..].try_into().unwrap()),
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "native Windows tests cover HTTP/2 handshakes; Tokio runtime initialization uses IOCP"
+    )]
+    async fn gamma_round2_http2_window_settings_are_encoded_on_the_wire() {
+        for adaptive in [false, true] {
+            let mut options = Http2Options::default();
+            options.initial_stream_window_size = Some(123_456);
+            options.adaptive_window = adaptive;
+            let settings = gamma_round2_h2_settings(options, ConnectionKeepAlive::Disabled).await;
+            assert!(settings.contains(&(4, if adaptive { 65_535 } else { 123_456 })), "{settings:?}");
+        }
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        all(miri, windows),
+        ignore = "native Windows tests cover HTTP/2 handshakes; Tokio runtime initialization uses IOCP"
+    )]
+    async fn gamma_round2_configured_timer_supports_keep_alive_handshake() {
+        let mut options = Http2Options::default();
+        options.initial_stream_window_size = Some(123_456);
+        options.adaptive_window = false;
+        let settings = gamma_round2_h2_settings(
+            options,
+            ConnectionKeepAlive::active_connections(Duration::from_secs(7), Duration::from_secs(3)),
+        )
+        .await;
+        assert!(settings.contains(&(4, 123_456)), "{settings:?}");
+    }
+
+    #[test]
+    fn gamma_round2_configuration_composes_pool_and_version_options() {
+        let clock = Clock::new_frozen();
+        let mut options = TransportOptions::default();
+        options.supported_http_versions = vec![Version::HTTP_2, Version::HTTP_11];
+        options.connection_pool = ConnectionPoolOptions::default()
+            .max_connections(7)
+            .connection_idle_timeout(Duration::from_secs(11));
+        let actual = configure_hyper_builder(Spawner::new_tokio(None), &clock, &options);
+        let mut expected = gamma_round2_raw_builder();
+        expected.pool_idle_timeout(Duration::from_secs(11)).pool_max_idle_per_host(7);
+        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+    }
+
+    #[test]
+    fn gamma_round2_body_builder_setter_keeps_the_supplied_limits() {
+        let body = HttpBodyBuilder::new_fake().with_options(http_extensions::HttpBodyOptions::default().buffer_limit(17));
+        let expected = format!("{body:?}");
+        let builder = make_builder().body_builder(body);
+        assert_eq!(format!("{:?}", builder.body_builder.unwrap()), expected);
+    }
+
     fn tls() -> TlsBackend {
         native_tls::TlsConnector::new().unwrap().into()
     }
@@ -319,6 +706,17 @@ mod tests {
 
     fn make_builder() -> HyperTransportBuilder<FakeConnector, crate::testing::FakeStream> {
         make_builder_with(TransportOptions::default())
+    }
+
+    #[test]
+    fn gamma_survivor_builder_coerces_empty_versions_and_retains_meter() {
+        let mut options = TransportOptions::default();
+        options.supported_http_versions.clear();
+        let builder = make_builder_with(options);
+        assert_eq!(builder.options.supported_http_versions, [Version::HTTP_11, Version::HTTP_2]);
+        let provider = SdkMeterProvider::builder().build();
+        let builder = builder.meter(provider.meter("gamma-builder"));
+        assert!(builder.meter.is_some());
     }
 
     fn http_and_https_options() -> TransportOptions {

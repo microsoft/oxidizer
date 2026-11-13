@@ -16,6 +16,101 @@ use core::{mem, slice};
 use super::constants::buffer_freezable;
 use super::uninit::{Uninit, copy_bytes_nonoverlapping};
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_round2_remove_and_insert_do_not_shift_initialized_spare_sentinels() {
+        let arena = crate::Arena::new();
+        let source: alloc::vec::Vec<u8> = (0..32).map(|index| 101 + index).collect();
+        for index in 0..4 {
+            let mut storage = arena.alloc_slice_copy(&source);
+            let pointer = NonNull::new(storage.as_mut_ptr()).unwrap();
+            // SAFETY: The arena allocation supplies 32 initialized u8 slots. The
+            // buffer exclusively uses its prefix until it is dropped below.
+            let mut buffer = unsafe { ArenaBuf::from_raw_parts(pointer, 4, 32, false) };
+            assert_eq!(buffer.remove(index), Some(source[index]));
+            let mut logical = source[..4].to_vec();
+            logical.remove(index);
+            assert_eq!(buffer.as_slice(), logical);
+            drop(buffer);
+            let mut expected = source.clone();
+            expected.copy_within(index + 1..4, index);
+            assert_eq!(&*storage, expected);
+        }
+        for index in 0..=4 {
+            let mut storage = arena.alloc_slice_copy(&source);
+            let pointer = NonNull::new(storage.as_mut_ptr()).unwrap();
+            // SAFETY: This distinct arena allocation supplies 32 initialized u8
+            // slots, accessed only through buffer until it is dropped below.
+            let mut buffer = unsafe { ArenaBuf::from_raw_parts(pointer, 4, 32, false) };
+            buffer.insert_within_cap(index, 0xee);
+            let mut logical = source[..4].to_vec();
+            logical.insert(index, 0xee);
+            assert_eq!(buffer.as_slice(), logical);
+            drop(buffer);
+            let mut expected = source.clone();
+            expected.copy_within(index..4, index + 1);
+            expected[index] = 0xee;
+            assert_eq!(&*storage, expected);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_buffer_split_absorb_and_prefix_invariants() {
+        let arena = crate::Arena::builder().with_capacity(2048).build();
+        let _ = arena.alloc(0_u8);
+        let current = arena.current();
+        let mut head = ArenaBuf::<u64>::new();
+        head.replace_buffer(current.try_alloc_freezable_slice::<u64>(8).unwrap());
+        head.extend_copy(&[1, 2, 3, 4, 5]);
+        let original = head.ptr;
+        assert!(head.has_freeze_prefix());
+        let mut tail = head.split_off_buf(2);
+        assert_eq!(head.as_slice(), &[1, 2]);
+        assert_eq!(head.cap(), 2);
+        assert!(head.has_freeze_prefix());
+        assert_eq!(tail.as_slice(), &[3, 4, 5]);
+        assert_eq!(tail.cap(), 6);
+        assert!(!tail.has_freeze_prefix());
+        assert_eq!(tail.ptr.as_ptr() as usize, original.as_ptr() as usize + 2 * mem::size_of::<u64>());
+        head.truncate(1);
+        let tail_ptr = tail.ptr;
+        assert!(!head.try_absorb_adjacent(&mut tail));
+        assert_eq!(head.as_slice(), &[1]);
+        assert_eq!(tail.ptr, tail_ptr);
+        assert_eq!(tail.as_slice(), &[3, 4, 5]);
+        head.push_within_cap(99).unwrap();
+        assert!(head.try_absorb_adjacent(&mut tail));
+        assert_eq!(head.ptr, original);
+        assert_eq!(head.cap(), 8);
+        assert_eq!(head.as_slice(), &[1, 99, 3, 4, 5]);
+        assert!(head.has_freeze_prefix());
+        assert_eq!(tail.ptr, NonNull::dangling());
+        assert_eq!(tail.len(), 0);
+        assert_eq!(tail.cap(), 0);
+        head.clear();
+        assert!(head.as_slice().is_empty());
+        assert_eq!(head.cap(), 8);
+    }
+
+    #[test]
+    fn gamma_survivor_buffer_zst_split_preserves_unbounded_capacity() {
+        let mut head = ArenaBuf::<()>::new();
+        for _ in 0..3 {
+            head.push_within_cap(()).unwrap();
+        }
+        let tail = head.split_off_buf(1);
+        assert_eq!(head.len(), 1);
+        assert_eq!(tail.len(), 2);
+        assert_eq!(head.cap(), usize::MAX);
+        assert_eq!(tail.cap(), usize::MAX);
+        assert!(!tail.has_freeze_prefix());
+        assert_eq!(tail.ptr, NonNull::dangling());
+    }
+}
+
 /// A growable buffer of `T` whose storage lives in an arena chunk.
 ///
 /// # Invariants
@@ -194,6 +289,7 @@ impl<'a, T> ArenaBuf<'a, T> {
     #[inline]
     pub(crate) unsafe fn replace_buffer_raw(&mut self, new_ptr: NonNull<T>, new_cap: usize) {
         debug_assert!(new_cap >= self.len, "replace_buffer_raw: new capacity below live length");
+        // #[gamma::skip(cond.always_true, relational.gt_to_ge, reason = "Copying zero elements between the aligned non-null source and destination pointers is a no-op")]
         if self.len > 0 {
             // SAFETY: source holds `self.len` initialized `T`s; destination
             // is a fresh, non-overlapping reservation of at least `new_cap
@@ -234,6 +330,7 @@ impl<'a, T> ArenaBuf<'a, T> {
         // / ZST), and `src.as_ptr()` is likewise non-null and aligned.
         unsafe {
             let dst = self.ptr.as_ptr().add(self.len);
+            // #[gamma::skip(cond.always_false, reason = "The generic copy duplicates the same one-byte elements as the specialized byte-copy path")]
             if const { mem::size_of::<T>() == 1 } {
                 copy_bytes_nonoverlapping(src.as_ptr().cast(), dst.cast(), src.len());
             } else {
@@ -253,6 +350,7 @@ impl<'a, T> ArenaBuf<'a, T> {
     /// elements remain. No-op when `new_len >= len`.
     #[inline]
     pub(crate) fn truncate(&mut self, new_len: usize) {
+        // #[gamma::skip(relational.ge_to_gt, reason = "At equal lengths the remaining path assigns the same length and drops an empty slice")]
         if new_len >= self.len {
             return;
         }
@@ -260,6 +358,7 @@ impl<'a, T> ArenaBuf<'a, T> {
         // Lower `len` first so a panic in an element's `Drop` won't
         // leave the remainder being re-dropped twice.
         self.len = new_len;
+        // #[gamma::skip(cond.always_true, reason = "drop_in_place has no effect for elements whose type has no drop glue")]
         if const { mem::needs_drop::<T>() } {
             // SAFETY: the `drop_count` slots starting at `new_len` were
             // initialized; we hold `&mut self`, so there are no outstanding
@@ -278,6 +377,7 @@ impl<'a, T> ArenaBuf<'a, T> {
             return None;
         }
         let last = self.len - 1;
+        // #[gamma::skip(cond.always_true, reason = "slice::swap on the same valid index is a no-op")]
         if idx != last {
             self.as_mut_slice().swap(idx, last);
         }
@@ -297,6 +397,7 @@ impl<'a, T> ArenaBuf<'a, T> {
         // For ZSTs the dangling pointer is fine (no memory access).
         unsafe {
             let base = self.ptr.as_ptr().add(idx);
+            // #[gamma::skip(cond.always_true, relational.lt_to_le, reason = "At insertion at the end, ptr::copy moves zero elements between aligned pointers within or one past the reserved capacity")]
             if idx < self.len {
                 ptr::copy(base, base.add(1), self.len - idx);
             }
@@ -322,6 +423,7 @@ impl<'a, T> ArenaBuf<'a, T> {
             let base = self.ptr.as_ptr().add(idx);
             let value = ptr::read(base);
             let tail = self.len - idx - 1;
+            // #[gamma::skip(cond.always_true, relational.gt_to_ge, reason = "Removing the last element makes this an overlap-safe zero-element copy with an aligned one-past source")]
             if tail > 0 {
                 ptr::copy(base.add(1), base, tail);
             }
@@ -511,6 +613,7 @@ impl<T> FusedIterator for DrainAll<'_, T> {}
 impl<T> Drop for DrainAll<'_, T> {
     #[inline]
     fn drop(&mut self) {
+        // #[gamma::skip(cond.always_true, logical.and_remove_left, logical.and_remove_right, logical.and_to_or, relational.lt_to_le, reason = "The iterator maintains head <= tail; the extra executions only drop an empty aligned slice or values with no drop glue")]
         if const { mem::needs_drop::<T>() } && self.head < self.tail {
             let len = self.tail - self.head;
             // SAFETY: `[head, tail)` is the still-initialized sub-range.
