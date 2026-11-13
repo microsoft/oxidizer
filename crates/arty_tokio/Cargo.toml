@@ -39,6 +39,7 @@ default = []
 [dependencies]
 arty = { workspace = true, features = ["rt"] }
 derive_more = { workspace = true, features = ["debug"] }
+thread_aware = { workspace = true, features = ["derive", "std"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 
 [dev-dependencies]

@@ -1,15 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty::core::{Thread, ThreadAware};
 use arty::runtime::hook::{HookFn, WorkerInit};
 use arty::runtime::{RuntimeBuilder, RuntimeControl};
+use thread_aware::ThreadAware;
 use tokio::runtime::Handle;
 
 use crate::TokioHandle;
 
+#[derive(ThreadAware)]
 struct TokioSupport {
+    #[thread_aware(skip)]
     handle: Handle,
+    #[thread_aware(skip)]
     owned_runtime: Option<tokio::runtime::Runtime>,
 }
 
@@ -28,10 +31,6 @@ impl Drop for TokioSupport {
             runtime.shutdown_background();
         }
     }
-}
-
-impl ThreadAware for TokioSupport {
-    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
 /// Adds Tokio support to an Arty runtime.

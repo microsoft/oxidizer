@@ -339,6 +339,7 @@ dependencies = [
  "arty",
  "derive_more",
  "static_assertions",
+ "thread_aware",
  "tokio",
 ]
 
