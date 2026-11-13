@@ -23,7 +23,12 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio"
 exclude = true
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["arty::task::context::Context", "tokio::runtime::handle::Handle"]
+allowed_external_types = [
+    "arty::runtime::builder::RuntimeBuilder",
+    "arty::runtime::control::RuntimeControl",
+    "tokio::runtime::handle::Handle",
+    "tokio::runtime::runtime::Runtime",
+]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -34,25 +39,15 @@ default = []
 [dependencies]
 arty = { workspace = true, features = ["rt"] }
 derive_more = { workspace = true, features = ["debug"] }
-ohno = { workspace = true }
-performables = { workspace = true }
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 
 [dev-dependencies]
 arty = { path = "../arty", features = ["macros", "rt"] }
-futures = { workspace = true, features = ["executor"] }
-ohno = { path = "../ohno", features = ["app-err"] }
 static_assertions = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["io-util", "rt-multi-thread"] }
 
 [[example]]
-name = "external_runtime"
-
-[[example]]
-name = "tokio_library"
-
-[[example]]
-name = "tokio_drivers"
+name = "arty_tokio_basic"
 
 # >>> anvil-managed: anvil-lints
 [lints]
