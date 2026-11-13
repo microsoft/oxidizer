@@ -361,6 +361,17 @@ mod tests {
     use crate::error_labels::collect_error_labels;
     use crate::fake::FakeDeps;
 
+    #[test]
+    fn gamma_round2_router_without_alternatives_is_not_attached_to_the_request() {
+        let handler = FakeHandler::from_fn(|request| {
+            assert!(request.extensions().get::<Router>().is_none());
+            HttpResponseBuilder::new_fake().status(StatusCode::OK).build()
+        });
+        let client = HttpClient::builder_fake(handler, FakeDeps::default()).minimal_pipeline().build();
+        let response = futures::executor::block_on(client.get("https://example.test/").fetch()).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
     #[cfg_attr(miri, ignore)]
     #[test]
     fn assert_send() {

@@ -53,22 +53,33 @@ impl<'q, const WIDE: bool> Parser<'q, WIDE> {
     // Arithmetic mutations of cursor advancement create non-terminating loops;
     // boundary and malformed-input behavior is pinned by unit tests below.
     pub(crate) fn next_pair(&mut self) -> Result<Option<Pair<'q>>, Error> {
+        // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, unary.remove_not, reason = "Scalar and wide pair parsing apply the same separator, decoding, offset, and resource-limit rules")]
         if !WIDE {
             return self.next_pair_scalar();
         }
         loop {
+            // #[gamma::skip(cond.always_false, reason = "All unmutated cursor updates stay at or below input.len(); at exhaustion the empty rest is below SIMD_THRESHOLD and immediately delegates to the scalar parser's identical end check")]
             if self.input.as_bytes().get(self.cursor).is_none() {
                 return Ok(None);
             }
             let offset = self.cursor;
             let rest = &self.input[offset..];
+            // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, relational.lt_to_gt, relational.lt_to_le, reason = "Both branches parse the same pair; vector helpers themselves handle short inputs through their scalar tail")]
             if rest.len() < SIMD_THRESHOLD {
                 return self.next_pair_scalar();
             }
             let separator = find_byte::<true>(rest.as_bytes(), b'&');
             let pair_len = separator.unwrap_or(rest.len());
             let raw_pair = &rest[..pair_len];
-            self.cursor = separator.map_or(self.input.len(), |_| offset + pair_len + 1);
+            self.cursor = separator.map_or(
+                // #[gamma::skip(expr.increment, reason = "With no separator the pair consumes the input, and the next call terminates via get(cursor).is_none for either len or len plus one")]
+                self.input.len(),
+                |_|
+            // #[gamma::skip(arith.add_to_mul, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            offset + pair_len +
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1,
+            );
             if raw_pair.is_empty() {
                 continue;
             }
@@ -97,7 +108,9 @@ impl<'q, const WIDE: bool> Parser<'q, WIDE> {
     #[inline(always)]
     fn next_pair_scalar(&mut self) -> Result<Option<Pair<'q>>, Error> {
         loop {
-            if self.input.as_bytes().get(self.cursor).is_none() {
+            if
+            // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.input.as_bytes().get(self.cursor).is_none() {
                 return Ok(None);
             }
             let offset = self.cursor;
@@ -105,7 +118,21 @@ impl<'q, const WIDE: bool> Parser<'q, WIDE> {
             let scan = scan_pair(rest.as_bytes());
             let pair_len = scan.separator.unwrap_or(rest.len());
             let raw_pair = &rest[..pair_len];
-            self.cursor = scan.separator.map_or(self.input.len(), |_| advance(offset, advance(pair_len, 1)));
+            self.cursor = scan.separator.map_or(
+                // #[gamma::skip(expr.increment, reason = "With no separator the pair consumes the input, and the next call terminates via get(cursor).is_none for either len or len plus one")]
+                self.input.len(),
+                |_| {
+                    advance(
+                        offset,
+                        // #[gamma::skip(expr.decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                        advance(
+                            pair_len,
+                            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                            1,
+                        ),
+                    )
+                },
+            );
             if raw_pair.is_empty() {
                 continue;
             }
@@ -119,9 +146,11 @@ impl<'q, const WIDE: bool> Parser<'q, WIDE> {
                 Some(index) => (&raw_pair[..index], &raw_pair[index + 1..]),
                 None => (raw_pair, ""),
             };
+            // #[gamma::skip(cond.always_false, reason = "The fallback decode_known calls with false encoding flags return the same borrowed strings and enforce the same cumulative budget")]
             if !scan.key_encoded && !scan.value_encoded {
                 let decoded_len = unencoded_pair_decoded_len(raw_pair, scan.equals);
                 if let Some(total) = self.decoded.checked_add(decoded_len)
+                    // #[gamma::skip(relational.le_to_lt, reason = "At equality the fallback decode_known path accepts the same inclusive budget")]
                     && total <= self.limits.max_decoded_length
                 {
                     self.decoded = total;
@@ -219,13 +248,21 @@ fn decode_encoded<'q>(input: &'q str, offset: usize, decoded_total: &mut usize, 
     while bytes.get(index).is_some() {
         let Some(relative) = bytes[index..].iter().position(|&byte| matches!(byte, b'%' | b'+')) else {
             output.push_str(&input[index..]);
+            // #[gamma::skip(loop.break_to_continue, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
             break;
         };
         let special = advance(index, relative);
         output.push_str(&input[index..special]);
         if bytes[special] == b'+' {
             output.push(' ');
-            index = advance(special, 1);
+            // #[gamma::skip(stmt.delete_assign, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+            index =
+            // #[gamma::skip(call.replace_with_default, call_result.default, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+            advance(
+            // #[gamma::skip(expr.decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            special,
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1);
         } else {
             let Some((&high, rest)) = bytes.get(advance(special, 1)).zip(bytes.get(advance(special, 2)..)) else {
                 return Err(Error::parsing(None, offset + special, ErrorKind::InvalidEncoding));
@@ -243,11 +280,17 @@ fn decode_encoded<'q>(input: &'q str, offset: usize, decoded_total: &mut usize, 
             // ASCII escapes keep the String valid without a second UTF-8
             // pass. Non-ASCII bytes continue in the same allocation and
             // validate the completed byte sequence below.
+            // #[gamma::skip(cond.always_true, reason = "The byte-vector decoder also accepts ASCII escapes, preserving bytes, ownership, errors, and decoded-length accounting")]
             if !byte.is_ascii() {
                 return decode_encoded_bytes(input, offset, decoded_total, limits, output.into_bytes(), special);
             }
             output.push(char::from(byte));
-            index = advance(special, 3);
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            index =
+            // #[gamma::skip(call.replace_with_default, call_result.default, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            advance(special,
+            // #[gamma::skip(literal.int_to_zero, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            3);
         }
     }
     add_decoded(decoded_total, output.len(), offset, limits)?;
@@ -267,7 +310,14 @@ fn decode_encoded_bytes<'q>(
         match bytes[index] {
             b'+' => {
                 output.push(b' ');
-                index = advance(index, 1);
+                // #[gamma::skip(stmt.delete_assign, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+                index =
+                // #[gamma::skip(assign_value.default, call_result.default, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                advance(
+                // #[gamma::skip(expr.decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                index,
+                // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                1);
             }
             b'%' => {
                 let Some((&high, rest)) = bytes.get(advance(index, 1)).zip(bytes.get(advance(index, 2)..)) else {
@@ -283,11 +333,23 @@ fn decode_encoded_bytes<'q>(
                     return Err(Error::parsing(None, offset + index, ErrorKind::InvalidEncoding));
                 };
                 output.push(high * 16 + low);
-                index = advance(index, 3);
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                index =
+                // #[gamma::skip(assign_value.default, call_result.default, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                advance(index,
+                // #[gamma::skip(literal.int_to_zero, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                3);
             }
             byte => {
                 output.push(byte);
-                index = advance(index, 1);
+                // #[gamma::skip(stmt.delete_assign, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+                index =
+                // #[gamma::skip(assign_value.default, call_result.default, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                advance(
+                // #[gamma::skip(expr.decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                index,
+                // #[gamma::skip(literal.int_decrement, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+                1);
             }
         }
     }

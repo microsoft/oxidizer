@@ -102,12 +102,14 @@ unsafe impl Codec for FlateCompress {
 
         let status = compress.compress_uninit(input, output, flush).map_err(compression_failed)?;
 
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The per-call consumed byte count is bounded by the input slice length, which already fits usize")]
         let consumed = step_count(compress.total_in() - before_in)?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The per-call produced byte count is bounded by the output slice length, which already fits usize")]
         let produced = step_count(compress.total_out() - before_out)?;
 
         let step = match operation {
             _ if status == Status::StreamEnd => Step::StreamEnd,
-            Operation::Flush if consumed == input.len() && produced < output.len() => Step::FlushComplete,
+            Operation::Flush if flush_complete(consumed, input.len(), produced, output.len()) => Step::FlushComplete,
             _ => Step::Continue,
         };
 
@@ -117,6 +119,10 @@ unsafe impl Codec for FlateCompress {
     fn stream_ended(&mut self) -> Result<StreamEnd> {
         Ok(StreamEnd::Complete)
     }
+}
+
+fn flush_complete(consumed: usize, input_len: usize, produced: usize, output_len: usize) -> bool {
+    consumed == input_len && produced < output_len
 }
 
 /// Drives `flate2`'s decoder, across as many concatenated streams as the configuration allows.
@@ -220,7 +226,9 @@ unsafe impl Codec for FlateDecompress {
                 Error::corrupt_data(format!("the compressed data is not a valid {} stream", wrapper.name())).with_source(error)
             })?;
 
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The per-call consumed byte count is bounded by the input slice length, which already fits usize")]
         let consumed = step_count(decompress.total_in() - before_in)?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The per-call produced byte count is bounded by the output slice length, which already fits usize")]
         let produced = step_count(decompress.total_out() - before_out)?;
 
         let step = if status == Status::StreamEnd {
@@ -262,6 +270,69 @@ unsafe impl Codec for FlateDecompress {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nov6_flush_completes_with_exactly_one_unused_output_byte() {
+        let input = b"flush the complete prefix";
+        let mut reference = FlateCompress::new(Wrapper::Zlib, Level::DEFAULT, Pool::disabled().clone());
+        let mut roomy = [MaybeUninit::uninit(); 512];
+        let (step, consumed, produced) = reference.step(input, &mut roomy, Operation::Flush).unwrap();
+        assert_eq!(step, Step::FlushComplete);
+        assert_eq!(consumed, input.len());
+
+        let mut codec = FlateCompress::new(Wrapper::Zlib, Level::DEFAULT, Pool::disabled().clone());
+        let mut output = vec![MaybeUninit::uninit(); produced + 1];
+        assert_eq!(
+            codec.step(input, &mut output, Operation::Flush).unwrap(),
+            (Step::FlushComplete, input.len(), produced)
+        );
+    }
+
+    #[test]
+    fn gamma_afternoon_flush_completion_requires_all_input_and_unused_output_capacity() {
+        for (consumed, input_len, produced, output_len, expected) in [
+            (0, 0, 0, 1, true),
+            (1, 1, 1, 2, true),
+            (0, 1, 0, 1, false),
+            (1, 2, 1, 2, false),
+            (1, 1, 1, 1, false),
+            (0, 0, 0, 0, false),
+        ] {
+            assert_eq!(super::flush_complete(consumed, input_len, produced, output_len), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_finished_encoder_failure_preserves_message_and_source() {
+        let mut codec = FlateCompress::new(Wrapper::Zlib, Level::DEFAULT, Pool::disabled().clone());
+        let mut output = [MaybeUninit::uninit(); 128];
+        assert_eq!(codec.step(b"first", &mut output, Operation::Finish).unwrap().0, Step::StreamEnd);
+        let error = codec.step(b"second", &mut output, Operation::Process).unwrap_err();
+        assert!(error.is_invalid_state());
+        assert_eq!(error.to_string(), "the compression engine reported a failure");
+        assert!(std::error::Error::source(&error).unwrap().is::<flate2::CompressError>());
+    }
+
+    #[test]
+    fn gamma_survivor_flate_reset_and_limit_forwarding() {
+        use crate::engine::Codec as _;
+        let limits = crate::limits::FormatLimits::new(Some(1), None, Some(2));
+        let mut decoder = super::FlateDecompress::new(
+            crate::flate::Wrapper::Zlib,
+            limits,
+            true,
+            crate::TrailingData::Reject,
+            crate::pool::Pool::disabled().clone(),
+        );
+        assert!(!decoder.needs_reset);
+        decoder.check_limits(40_000, 40_000, 2).unwrap();
+        assert!(decoder.check_limits(40_000, 40_001, 2).unwrap_err().is_limit_exceeded());
+        assert!(decoder.check_limits(40_000, 40_000, 3).unwrap_err().is_limit_exceeded());
+        decoder.needs_reset = true;
+        let mut output = [std::mem::MaybeUninit::uninit(); 16];
+        decoder.step(&[], &mut output, crate::engine::Operation::Process).unwrap();
+        assert!(!decoder.needs_reset);
+    }
+
     use super::*;
 
     #[test]

@@ -120,6 +120,7 @@ impl ErrorLabel {
         let mut parts = parts.into_iter().map(Into::into).filter(|v: &Self| !v.as_str().is_empty());
         let mut result = match parts.next() {
             Some(first) => String::from(first.as_str()),
+            // #[gamma::skip(return_value.default, tag = "equivalent", reason = "The original return already calls Default for the same Self type.")]
             None => return Self::default(),
         };
         for part in parts {

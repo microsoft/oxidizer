@@ -119,6 +119,7 @@ impl std::fmt::Debug for CacheTelemetry {
 impl CacheTelemetry {
     /// Creates a new `CacheTelemetry` with logging disabled.
     #[must_use]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "Derived Default initializes the same false logging flag and absent handler, with identical feature gating.")]
     pub(crate) fn new() -> Self {
         Self {
             #[cfg(any(feature = "logs", test))]
@@ -505,6 +506,40 @@ impl CacheTelemetry {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_disabled_error_logging_does_not_format_or_emit_a_trace() {
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        let capture = testing_aids::tracing_logs::Capture::new();
+        let _guard = capture.subscriber().set_default();
+        super::CacheTelemetry::new().record_error_with_duration("round2", "round2.error", std::time::Duration::from_nanos(7));
+        assert_eq!(capture.output(), "");
+    }
+
+    #[test]
+    fn gamma_round2_insert_rejection_callbacks_preserve_the_fallback_role() {
+        #[derive(Clone)]
+        struct Roles(std::sync::Arc<std::sync::Mutex<Vec<(bool, std::time::Duration)>>>);
+
+        impl crate::CacheEventHandler for Roles {
+            fn on_tier_event(&self, event: &crate::CacheTierEvent<'_>) {
+                assert_eq!(event.outcome, super::attributes::EVENT_INSERT_REJECTED);
+                self.0.lock().unwrap().push((event.fallback, event.duration));
+            }
+
+            fn on_operation_complete(&self, _: &crate::CacheOperationEvent<'_>) {}
+        }
+
+        let roles = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let telemetry = super::CacheTelemetry::new().with_handler(std::sync::Arc::new(Roles(std::sync::Arc::clone(&roles))));
+        telemetry.record_insert_rejected("round2", true);
+        telemetry.record_insert_rejected_with_duration("round2", std::time::Duration::from_nanos(7), true);
+        assert_eq!(
+            *roles.lock().unwrap(),
+            [(true, std::time::Duration::ZERO), (true, std::time::Duration::from_nanos(7))]
+        );
+    }
+
     use std::sync::Mutex;
 
     use testing_aids::tracing_logs::Capture;
@@ -513,6 +548,38 @@ mod tests {
 
     fn subscriber(capture: &Capture) -> impl tracing::Subscriber {
         capture.subscriber()
+    }
+
+    #[cfg(feature = "memory")]
+    #[test]
+    fn gamma_survivor_private_memory_notifications_emit_standalone_nonfallback_callbacks() {
+        type RecordedEvent = (String, bool, Duration, RequestId);
+
+        #[derive(Clone, Default)]
+        struct Handler(Arc<Mutex<Vec<RecordedEvent>>>);
+        impl CacheEventHandler for Handler {
+            fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
+                assert_eq!(event.tier_name, "memory-events");
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((event.outcome.into(), event.fallback, event.duration, event.request_id));
+            }
+            fn on_operation_complete(&self, _: &CacheOperationEvent<'_>) {
+                panic!("standalone memory notifications have no operation callback");
+            }
+        }
+        let handler = Handler::default();
+        let telemetry = CacheTelemetry::new().with_handler(Arc::new(handler.clone()));
+        telemetry.record_eviction("memory-events");
+        telemetry.record_background_expired("memory-events");
+        assert_eq!(
+            *handler.0.lock().unwrap(),
+            [
+                ("cache.eviction".into(), false, Duration::ZERO, 0),
+                ("cache.expired".into(), false, Duration::ZERO, 0)
+            ]
+        );
     }
 
     #[test]

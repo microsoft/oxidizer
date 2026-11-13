@@ -36,6 +36,7 @@ impl Message {
     /// all, because a brace may open a placeholder that `format!` still has to resolve.
     #[must_use]
     pub(crate) fn opaque(template: String, arguments: Vec<TokenStream>) -> Self {
+        // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "contains treats the char array as an unordered set, so reversing the two braces leaves the result unchanged.")]
         if arguments.is_empty() && !template.contains(['{', '}']) {
             Self::Literal(template)
         } else {
@@ -73,6 +74,7 @@ impl Parse for FormatArgs {
         let template = input.parse::<LitStr>()?;
 
         let arguments = if input.peek(Token![,]) {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "peek proves the exact comma token that this parse consumes.")]
             _ = input.parse::<Token![,]>()?;
             Punctuated::<Expr, Token![,]>::parse_terminated(input)?.into_iter().collect()
         } else {

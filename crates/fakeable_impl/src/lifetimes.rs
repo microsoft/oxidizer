@@ -41,6 +41,7 @@ pub(super) fn add_explicit_lifetimes(sig: &syn::Signature) -> syn::Signature {
     for (index, param) in sig.generics.params.iter().enumerate() {
         if !matches!(param, syn::GenericParam::Lifetime(_)) {
             insert_at = index;
+            // #[gamma::skip(loop.break_to_continue, loop.delete_break, tag = "equivalent", reason = "This signature is only emitted as tokens; syn::Generics prints every lifetime before type and const parameters regardless of its insertion position.")]
             break;
         }
     }
@@ -79,6 +80,7 @@ pub(super) fn count_nested_elided_references(ty: &syn::Type, nested: bool) -> us
             let parent_nested = self.nested;
             self.nested = true;
             syn::visit::visit_type(self, i);
+            // #[gamma::skip(stmt.delete_assign, tag = "equivalent", reason = "Every descendant is visited with nested=true; the restored root flag is never read after this single-tree visitor finishes.")]
             self.nested = parent_nested;
         }
     }
@@ -111,6 +113,7 @@ fn add_lifetime_to_nested_references(ty: &mut syn::Type, lifetime: &syn::Lifetim
             let parent_nested = self.nested;
             self.nested = true;
             syn::visit_mut::visit_type_mut(self, i);
+            // #[gamma::skip(stmt.delete_assign, tag = "equivalent", reason = "Every descendant is visited with nested=true; the restored root flag is never read after this single-tree visitor finishes.")]
             self.nested = parent_nested;
         }
     }
@@ -189,10 +192,26 @@ pub(super) fn type_contains_implicit_higher_ranked_elision(ty: &syn::Type) -> bo
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use quote::ToTokens;
+    use quote::{ToTokens, quote};
     use syn::{Type, parse_quote};
 
-    use super::{add_explicit_lifetimes, add_lifetime_to_references, contains_reference_in_generic};
+    use super::{
+        add_explicit_lifetimes, add_lifetime_to_nested_references, add_lifetime_to_references, contains_reference_in_generic,
+        count_nested_elided_references,
+    };
+
+    #[test]
+    fn gamma_survivor_nested_reference_helpers_preserve_outer_elision() {
+        let mut ty: syn::Type = parse_quote!(&Option<&str>);
+        let lifetime = parse_quote!('chosen);
+        assert_eq!(count_nested_elided_references(&ty, false), 1);
+        assert_eq!(count_nested_elided_references(&ty, true), 2);
+        add_lifetime_to_nested_references(&mut ty, &lifetime, true);
+        assert_eq!(ty.to_token_stream().to_string(), quote!(&'chosen Option<&'chosen str>).to_string());
+        let mut ty: syn::Type = parse_quote!(&Option<&str>);
+        add_lifetime_to_references(&mut ty, &lifetime);
+        assert_eq!(ty.to_token_stream().to_string(), quote!(&Option<&'chosen str>).to_string());
+    }
 
     #[test]
     fn detects_references_nested_in_generic_arguments() {

@@ -153,6 +153,7 @@ fn validate_accept_relaxed(bytes: &[u8]) -> Result<(), DecodeError> {
 }
 
 fn validate_accept_with(bytes: &[u8], relaxed: bool) -> Result<(), DecodeError> {
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The fallible plain validator still executes; declining its success repeats the same media-range and parameter grammar through the quote-aware validator")]
     if validate_accept_plain(bytes, relaxed)? {
         return Ok(());
     }
@@ -164,6 +165,7 @@ fn validate_accept_plain(bytes: &[u8], relaxed: bool) -> Result<bool, DecodeErro
     let mut quality_seen = false;
     try_plain_items(bytes, b';', false, |segment| {
         if first {
+            // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
             first = false;
             return validate_media_range(segment);
         }
@@ -196,13 +198,28 @@ fn validate_accept_quoted(bytes: &[u8], relaxed: bool) -> Result<(), DecodeError
 }
 
 fn validate_accept_parameter(bytes: &[u8], quality_seen: &mut bool, relaxed: bool) -> Result<(), DecodeError> {
-    if !*quality_seen && bytes.len() >= 2 && bytes[0].eq_ignore_ascii_case(&b'q') && bytes[1] == b'=' {
+    // #[gamma::skip(cond.always_false, relational.ge_to_gt, literal.byte_to_nul, tag = "equivalent", reason = "These changes only decline the compact q= shortcut on admitted field bytes; parse_parameter below recognizes the same q name and invokes the identical quality validator")]
+    if !*quality_seen
+        && bytes.len() >=
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Raising the two-byte minimum only declines an empty q= value, which the parameter parser also rejects")]
+            2
+        && bytes[
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "A shifted name index sees equals rather than q for compact q=, declining to the complete parameter parser")]
+            0
+        ]
+        .eq_ignore_ascii_case(&b'q')
+        && bytes[
+            // #[gamma::skip(literal.int_decrement, tag = "equivalent", reason = "An earlier equals index compares the same byte against q and equals, so the shortcut declines to complete parsing")]
+            1
+        ] == b'='
+    {
         validate_quality(&bytes[2..], &FieldName::Accept, relaxed)?;
         *quality_seen = true;
         return Ok(());
     }
     let (name, value, compact) = parse_parameter(bytes, *quality_seen, &FieldName::Accept)?;
     if validate::eq_ignore_ascii_case(name, b"q") {
+        // #[gamma::skip(logical.and_remove_right, tag = "equivalent", reason = "A compact first q= parameter already returned through the shortcut above; strict remaining q parameters are noncompact and relaxed mode keeps this conjunction false")]
         if *quality_seen || (!relaxed && !compact) {
             return Err(invalid_syntax(&FieldName::Accept));
         }
@@ -249,6 +266,31 @@ pub(super) fn validate_media_range(bytes: &[u8]) -> Result<(), DecodeError> {
 )]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_accept_plain_and_quoted_paths_preserve_quality_state() {
+        for relaxed in [false, true] {
+            super::validate_accept_parameter(b"q=0.5", &mut false, relaxed).unwrap();
+            super::validate_accept_parameter(b"qx=0.5", &mut false, relaxed).unwrap();
+            assert_eq!(
+                super::validate_accept_parameter(b"q=", &mut false, relaxed).unwrap_err().kind(),
+                crate::DecodeErrorKind::InvalidSyntax
+            );
+            assert_eq!(super::validate_accept_parameter(b"q = 0.5", &mut false, relaxed).is_ok(), relaxed);
+            assert!(super::validate_accept_plain(b"text/plain;charset=utf-8", relaxed).unwrap());
+            assert!(super::validate_accept_plain(b"text/plain;q=0.5", relaxed).unwrap());
+            assert!(super::validate_accept_parameter(b"q = 2", &mut false, relaxed).is_err());
+            assert_eq!(
+                super::validate_accept_quoted(b"text/plain;q=invalid", relaxed).unwrap_err().kind(),
+                crate::DecodeErrorKind::InvalidSyntax
+            );
+        }
+    }
+    #[test]
+    fn gamma_round2_accept_parameter_fallback_returns_errors_instead_of_panicking() {
+        for bytes in [b"text/plain;q=2".as_slice(), b"text/plain;a", b"text/plain;a=\"unterminated"] {
+            assert!(super::validate_accept_quoted(bytes, false).err().is_some(), "{bytes:?}");
+        }
+    }
     use super::super::accept_scan::scan_accept_line;
     use super::super::recognition_test_support::{self, exhaustive};
     use super::super::shared::{WELL_KNOWN_ACCEPT, invalid, invalid_syntax};

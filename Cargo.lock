@@ -2572,6 +2572,7 @@ dependencies = [
 name = "http_headers"
 version = "0.1.2"
 dependencies = [
+ "alloc_tracker",
  "argh",
  "axum",
  "base64 0.23.1",
@@ -3748,6 +3749,19 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "performables",
+ "static_assertions",
+]
+
+[[package]]
+name = "observed_destination_memory"
+version = "0.1.0"
+dependencies = [
+ "bon",
+ "derive_more",
+ "log",
+ "observed_destination_core",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "static_assertions",
 ]
 

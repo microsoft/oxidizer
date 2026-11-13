@@ -175,9 +175,11 @@ impl Sink {
         let mut states = Vec::new();
         for child in children {
             match &*child.inner {
+                // #[gamma::skip(call_result.default, reason = "push returns unit; default_after retains the insertion and its unit result.")]
                 SinkInner::Single(state) => push(&mut states, state.clone()),
                 SinkInner::Composite { children } => {
                     for child in children {
+                        // #[gamma::skip(call_result.default, reason = "push returns unit; default_after retains the insertion and its unit result.")]
                         push(&mut states, child.clone());
                     }
                 }
@@ -329,15 +331,21 @@ impl Sink {
     /// downstream slot write. The entry slice is built by the caller, so this
     /// does not avoid the slice's own allocation.
     pub(crate) fn push_enrichment(&self, entries: PerformableArc<[EnrichmentEntry]>) -> Guard {
-        if entries.is_empty() {
-            return Guard::empty();
-        }
-
-        match &*self.inner {
+        Self::push_enrichment_with(entries, |entries| match &*self.inner {
             SinkInner::Single(state) => state.enrichment.push(entries),
             SinkInner::Composite { children } => Guard::merge(children.iter().map(|c| c.enrichment.push(PerformableArc::clone(&entries)))),
             SinkInner::Noop => Guard::empty(),
+        })
+    }
+
+    fn push_enrichment_with(
+        entries: PerformableArc<[EnrichmentEntry]>,
+        push: impl FnOnce(PerformableArc<[EnrichmentEntry]>) -> Guard,
+    ) -> Guard {
+        if entries.is_empty() {
+            return Guard::empty();
         }
+        push(entries)
     }
 
     pub(crate) fn enrichment_push_state(&self, entries: PerformableArc<[EnrichmentEntry]>) -> PushState {
@@ -402,6 +410,7 @@ impl Sink {
                 continue;
             }
             sink.dispatch(&event, remaining_bitmask);
+            // #[gamma::skip(literal.int_increment, reason = "A failed shift requires 64 processors in this sink; the total limit is 64, so no later processor reads the fallback.")]
             remaining_bitmask = remaining_bitmask.checked_shr(sink.processors.len() as u32).unwrap_or(0);
         }
     }
@@ -441,6 +450,7 @@ impl Sink {
         let mut cursor = head.as_ref();
         while let Some(node) = cursor {
             slices.push(&*node.entries);
+            // #[gamma::skip(stmt.delete_assign, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
             cursor = node.parent.as_ref();
         }
         let capacity = slices.iter().map(|slice| slice.len()).sum();
@@ -547,6 +557,74 @@ mod tests {
     use super::*;
     use crate::enrichment::Enrichment;
     use crate::typestates::Set;
+
+    #[test]
+    fn gamma_round2_empty_enrichment_never_enters_the_downstream_fanout_adapter() {
+        let entries = PerformableArc::from(Vec::<EnrichmentEntry>::new());
+        let guard = Sink::push_enrichment_with(entries, |_| {
+            panic!("empty enrichment must bypass every downstream child clone and push")
+        });
+        drop(guard);
+        let mut pushes = 0;
+        let entries = PerformableArc::from(vec![EnrichmentEntry::unclassified("round2", 7_i64)]);
+        drop(Sink::push_enrichment_with(entries, |entries| {
+            pushes += 1;
+            assert_eq!(entries.len(), 1);
+            Guard::empty()
+        }));
+        assert_eq!(pushes, 1);
+    }
+
+    #[test]
+    fn gamma_round2_zero_dispatch_mask_does_not_materialize_or_sample_an_event_view() {
+        let step = std::time::Duration::from_millis(1);
+        let control = tick::ClockControl::new().auto_advance(step);
+        let clock = control.to_simple_clock();
+        let processor: Arc<dyn EventProcessor> = Arc::new(AlwaysInterestedProcessor::default());
+        let sink = Sink::builder("round2-zero")
+            .clock(clock.clone())
+            .processors(vec![processor])
+            .build();
+        let SinkInner::Single(state) = &*sink.inner else {
+            panic!("a single configured processor remains a single sink");
+        };
+        let before = clock.system_time();
+        state.dispatch(&DummyDyn, 0);
+        assert_eq!(clock.system_time().duration_since(before).unwrap(), step);
+    }
+
+    #[test]
+    fn gamma_survivor_composite_retains_only_capacity_for_its_flattened_children() {
+        let sink = Sink::composite([
+            Sink::builder("first").clock(SimpleClock::new_frozen()).build(),
+            Sink::builder("second").clock(SimpleClock::new_frozen()).build(),
+        ]);
+        let SinkInner::Composite { children } = &*sink.inner else {
+            panic!("two distinct sinks must remain composite");
+        };
+        assert_eq!(children.len(), 2);
+        assert_eq!(children.capacity(), children.len());
+        assert_eq!(
+            children.iter().map(|child| child.id.label()).collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_empty_enrichment_keeps_each_private_head_unallocated() {
+        for sink in [
+            Sink::builder("single").clock(SimpleClock::new_frozen()).build(),
+            Sink::composite([
+                Sink::builder("first").clock(SimpleClock::new_frozen()).build(),
+                Sink::builder("second").clock(SimpleClock::new_frozen()).build(),
+            ]),
+        ] {
+            let guard = sink.push_enrichment(PerformableArc::from(Vec::<EnrichmentEntry>::new()));
+            assert!(sink.sinks().iter().all(|child| child.enrichment.current().is_none()));
+            drop(guard);
+            assert!(sink.sinks().iter().all(|child| child.enrichment.current().is_none()));
+        }
+    }
 
     // These atomics are observation counters only. Assertions read them after the
     // synchronous emission, so no ordering relative to other memory is required.

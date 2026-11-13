@@ -364,6 +364,7 @@ fn step(row: u16, byte: u8) -> u16 {
 pub(super) fn scan_accept_line(bytes: &[u8]) -> bool {
     let mut row = row(MEMBER_DUE);
 
+    // #[gamma::skip(literal.int_decrement, literal.int_increment, literal.int_to_one, tag = "equivalent", reason = "Chunk width only partitions the same ordered byte fold; every complete chunk and the entire remainder are processed")]
     let mut blocks = bytes.chunks_exact(8);
     for block in &mut blocks {
         for byte in block {

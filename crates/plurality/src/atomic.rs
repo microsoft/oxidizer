@@ -8,7 +8,18 @@
 
 pub(crate) use core::sync::atomic::Ordering;
 #[cfg(not(loom))]
-pub(crate) use core::sync::atomic::{AtomicU32, AtomicUsize, fence};
+pub(crate) use core::sync::atomic::{AtomicU32, AtomicUsize};
 
 #[cfg(loom)]
-pub(crate) use loom::sync::atomic::{AtomicU32, AtomicUsize, fence};
+pub(crate) use loom::sync::atomic::{AtomicU32, AtomicUsize};
+
+#[inline]
+pub(crate) fn fence(order: Ordering) {
+    // #[gamma::skip(stmt.delete_call, reason = "The native memory-ordering intrinsic needs concurrent model checking; deterministic lifecycle tests verify fence dispatch at every final-owner call site.")]
+    #[cfg(not(loom))]
+    core::sync::atomic::fence(order);
+    #[cfg(loom)]
+    loom::sync::atomic::fence(order);
+    #[cfg(all(test, not(loom)))]
+    crate::test_hooks::record_fence();
+}

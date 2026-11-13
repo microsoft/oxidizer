@@ -49,6 +49,7 @@ impl EventEnrichment {
         const PLACEHOLDER: SinkId = SinkId::new("<replay>");
         Self {
             head: None,
+            // #[gamma::skip(literal.bool_flip, reason = "Replay contexts have no enrichment head; isolation is never consulted without a node.")]
             isolated: false,
             id: PLACEHOLDER,
         }
@@ -59,6 +60,7 @@ impl EventEnrichment {
     fn visit(&self, visitor: &mut dyn FnMut(&FieldDescriptor, &FieldValueFn<'_>) -> ControlFlow<()>) -> ControlFlow<()> {
         // Enrichment chains are typically short; reserve stack space to avoid heap alloc in the common case.
         const EXPECTED_NODES_COUNT: usize = 16;
+        // #[gamma::skip(cond.always_false, reason = "Without a head the collection and visitation loops are empty and also return Continue.")]
         if self.head.is_none() {
             return ControlFlow::Continue(());
         }
@@ -68,6 +70,7 @@ impl EventEnrichment {
         let mut cursor = self.head.as_ref();
         while let Some(node) = cursor {
             nodes.push(node);
+            // #[gamma::skip(stmt.delete_assign, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
             cursor = node.parent.as_ref();
         }
 
@@ -273,6 +276,53 @@ impl std::fmt::Debug for EventView<'_> {
 mod tests {
     use super::*;
     use crate::processing::FieldVisitorFn;
+
+    #[test]
+    fn gamma_round2_enrichment_visitor_filters_entries_without_losing_following_entries() {
+        use crate::enrichment::EnrichmentEntry;
+
+        let target = SinkId::new("round2.target");
+        let other = SinkId::new("round2.other");
+        let parent = Arc::new(EnrichmentNode {
+            entries: Arc::from(vec![EnrichmentEntry::unclassified("outer", 1_i64).with_target(target)]),
+            parent: None,
+        });
+        let head = Arc::new(EnrichmentNode {
+            entries: Arc::from(vec![
+                EnrichmentEntry::unclassified("wrong_target", 2_i64).with_target(other),
+                EnrichmentEntry::unclassified("global", 3_i64),
+                EnrichmentEntry::unclassified("inner", 4_i64).with_target(target),
+            ]),
+            parent: Some(parent),
+        });
+        let enrichment = EventEnrichment {
+            head: Some(head),
+            isolated: true,
+            id: target,
+        };
+        let mut names = Vec::new();
+        assert_eq!(
+            enrichment.visit(&mut |descriptor, _| {
+                names.push(descriptor.field_name());
+                ControlFlow::Continue(())
+            }),
+            ControlFlow::Continue(())
+        );
+        assert_eq!(names, ["outer", "inner"]);
+        let mut calls = 0;
+        assert_eq!(
+            enrichment.visit(&mut |_, _| {
+                calls += 1;
+                ControlFlow::Break(())
+            }),
+            ControlFlow::Break(())
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(
+            EventEnrichment::empty().visit(&mut |_, _| panic!("an empty context cannot visit a field")),
+            ControlFlow::Continue(())
+        );
+    }
 
     /// An event that reports a distinct value from every accessor, so a view
     /// that answers from the wrong one (or from a constant) is visible.

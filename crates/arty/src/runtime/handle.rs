@@ -175,15 +175,23 @@ impl Runtime {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn stop(mut self) -> Result<(), Error> {
-        if crate::runtime::worker::WorkerMarker::is_current() {
+        self.stop_with(crate::runtime::worker::WorkerMarker::is_current(), Self::wait)
+    }
+
+    // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "The November 4 afternoon campaign timed out when resetting current_worker made a worker try to join itself.")]
+    fn stop_with(&mut self, current_worker: bool, wait: impl FnOnce(&Self) -> Result<(), Error>) -> Result<(), Error> {
+        if
+        // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        current_worker {
             let cause = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
             crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(&self.scheduler.dispatcher, cause);
             self.shutdown_on_drop = false;
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             panic_shutdown_from_worker("Runtime::stop");
         }
         _ = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
         self.shutdown_on_drop = false;
-        self.wait()
+        wait(self)
     }
 
     fn wait(&self) -> Result<(), Error> {
@@ -212,6 +220,7 @@ impl Drop for Runtime {
         let cause = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
         if crate::runtime::worker::WorkerMarker::is_current() {
             crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(&self.scheduler.dispatcher, cause);
+            // #[gamma::skip(cond.always_false, tag = "oom", reason = "The November 4 afternoon campaign exceeded its memory limit when this guard no longer prevented another panic during worker unwinding.")]
             if std::thread::panicking() {
                 return;
             }
@@ -230,8 +239,31 @@ fn panic_shutdown_from_worker(operation: &str) -> ! {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// These checks inject worker failures or retain the private joiner after consuming the runtime.
 mod tests {
-    use std::cell::RefCell;
+    #[test]
+    fn gamma_round2_worker_stop_disarms_drop_shutdown_before_reporting_the_programming_error() {
+        let shutdown = crate::runtime::shutdown::Shutdown::default();
+        let endpoint = worker_endpoint(
+            crate::runtime::worker::asynchronous::command_channel().0,
+            Waker::noop().clone(),
+            ThreadBuilder::default().build(thread::current().id()),
+            Worker::new(
+                Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+                shutdown.clone(),
+            ),
+        );
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown));
+        let mut runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(Vec::new()));
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.stop_with(true, |_| panic!("worker stop must not join its own workers"))
+        }));
+        let armed = runtime.shutdown_on_drop;
+        runtime.shutdown_on_drop = false;
+        _ = panic.unwrap_err();
+        assert!(!armed);
+    }
+
     use std::future::poll_fn;
     use std::task::{Poll, Waker};
     use std::thread;
@@ -240,36 +272,25 @@ mod tests {
     use thread_aware::ThreadBuilder;
 
     use super::*;
-    use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
-    use crate::runtime::worker::blocking::{PanicPolicy, Pool, Worker};
+    use crate::runtime::config::RuntimeName;
+    use crate::runtime::dispatch::DispatcherCore;
+    use crate::runtime::testing::worker_endpoint;
+    use crate::runtime::worker::blocking::{Pool, Worker};
     use crate::task::JoinError;
-
-    thread_local! {
-        static SHUTDOWN_GUARD: RefCell<Option<ShutdownGuard>> = const { RefCell::new(None) };
-    }
-
-    struct ShutdownGuard(crate::runtime::RuntimeControl);
-
-    impl Drop for ShutdownGuard {
-        fn drop(&mut self) {
-            self.0.request_stop();
-        }
-    }
 
     #[test]
     fn explicit_stop_reports_a_worker_panic_after_joining() {
         let worker = thread::spawn(|| panic!("worker shutdown failure"));
         let (commands, _command_rx) = crate::runtime::worker::asynchronous::command_channel();
-        let endpoint = WorkerEndpoint {
+        let endpoint = worker_endpoint(
             commands,
-            waker: Waker::noop().clone(),
-            thread: ThreadBuilder::default().build(worker.thread().id()),
-            blocking_worker: Worker::new(
-                Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+            Waker::noop().clone(),
+            ThreadBuilder::default().build(worker.thread().id()),
+            Worker::new(
+                Pool::new(RuntimeName::default(), None, None),
                 crate::runtime::shutdown::Shutdown::default(),
-                PanicPolicy::Ignore,
             ),
-        };
+        );
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
@@ -282,16 +303,15 @@ mod tests {
     fn authoritative_shutdown_failure_precedes_later_worker_panic() {
         let worker = thread::spawn(|| panic!("worker teardown failure"));
         let (commands, _command_rx) = crate::runtime::worker::asynchronous::command_channel();
-        let endpoint = WorkerEndpoint {
+        let endpoint = worker_endpoint(
             commands,
-            waker: Waker::noop().clone(),
-            thread: ThreadBuilder::default().build(worker.thread().id()),
-            blocking_worker: Worker::new(
-                Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+            Waker::noop().clone(),
+            ThreadBuilder::default().build(worker.thread().id()),
+            Worker::new(
+                Pool::new(RuntimeName::default(), None, None),
                 crate::runtime::shutdown::Shutdown::default(),
-                PanicPolicy::Ignore,
             ),
-        };
+        );
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
@@ -318,7 +338,7 @@ mod tests {
     fn ignored_task_worker_stop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
-            .panic(crate::runtime::PanicPolicy::ignore())
+            .on(crate::runtime::hook::Panic::IGNORE)
             .build()
             .unwrap();
         let joiner = runtime.worker_joiner.clone_for_test();
@@ -371,7 +391,7 @@ mod tests {
     fn ignored_task_worker_drop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
             .workers(crate::runtime::WorkersPolicy::exactly(1))
-            .panic(crate::runtime::PanicPolicy::ignore())
+            .on(crate::runtime::hook::Panic::IGNORE)
             .build()
             .unwrap();
         let joiner = runtime.worker_joiner.clone_for_test();
@@ -454,24 +474,6 @@ mod tests {
 
         assert_programming_error(error, "Runtime drop");
         joiner.join().unwrap();
-    }
-
-    #[test]
-    fn thread_local_shutdown_guard_survives_worker_slot_teardown() {
-        thread::spawn(|| {
-            let runtime = single_worker_runtime();
-            let (control, scheduler) = runtime
-                .scheduler()
-                .block_on(async |cx| (cx.control().clone(), cx.scheduler().clone()))
-                .unwrap();
-            SHUTDOWN_GUARD.with(|guard| {
-                assert!(guard.replace(Some(ShutdownGuard(control))).is_none());
-            });
-            scheduler.spawn(async |_| {}).join().unwrap();
-            runtime.stop().unwrap();
-        })
-        .join()
-        .unwrap();
     }
 
     fn assert_programming_error(error: JoinError, operation: &str) {

@@ -110,6 +110,7 @@ windows = { workspace = true, features = [
 [target.'cfg(windows)'.dev-dependencies]
 future_assert = { path = "../future_assert" }
 futures = { workspace = true, features = ["std"] }
+http_extensions = { path = "../http_extensions", features = ["test-util"] }
 mockall = { workspace = true }
 observed_testing = { path = "../observed_testing" }
 performables = { path = "../performables" }

@@ -97,10 +97,8 @@ impl Args {
             MonitorSetting::Disabled => quote!(.monitor(#runtime_path::runtime::MonitorPolicy::disabled())),
         });
         let panic = self.panic.map(|panic| match panic {
-            PanicSetting::Shutdown => {
-                quote!(.panic(#runtime_path::runtime::PanicPolicy::shutdown()))
-            }
-            PanicSetting::Ignore => quote!(.panic(#runtime_path::runtime::PanicPolicy::ignore())),
+            PanicSetting::Shutdown => quote!(.on(#runtime_path::runtime::hook::Panic::SHUTDOWN)),
+            PanicSetting::Ignore => quote!(.on(#runtime_path::runtime::hook::Panic::IGNORE)),
         });
         let clock = clock.map(|binding| quote!(.clock(::core::clone::Clone::clone(&#binding))));
         Ok(quote!(#runtime_path::runtime::Runtime::builder() #workers #monitor #panic #clock .build()))
@@ -108,7 +106,45 @@ impl Args {
 }
 
 fn arty_path() -> TokenStream {
-    arty_path_for(crate_name("arty").ok())
+    arty_path_with(|name| crate_name(name).ok())
+}
+
+fn arty_path_with(resolve: impl FnOnce(&str) -> Option<FoundCrate>) -> TokenStream {
+    arty_path_for(resolve("arty"))
+}
+
+#[cfg(test)]
+mod gamma_round2 {
+    use super::*;
+
+    #[test]
+    fn gamma_round2_runtime_lookup_uses_the_package_name_before_resolving_an_alias() {
+        let tokens = arty_path_with(|name| {
+            assert_eq!(name, "arty");
+            Some(FoundCrate::Name("renamed_runtime".to_owned()))
+        });
+        assert_eq!(tokens.to_string(), quote!(::renamed_runtime).to_string());
+    }
+
+    #[test]
+    fn gamma_round2_clock_alone_requires_runtime_builder() {
+        let args = Args {
+            monitor: None,
+            panic: None,
+            workers: None,
+        };
+        let clock = parse_quote!(clock);
+        let output = args.runtime(&quote!(::arty), Some(&clock), false).unwrap();
+        assert_eq!(
+            output.to_string(),
+            quote!(
+                ::arty::runtime::Runtime::builder()
+                    .clock(::core::clone::Clone::clone(&clock))
+                    .build()
+            )
+            .to_string()
+        );
+    }
 }
 
 fn arty_path_for(found: Option<FoundCrate>) -> TokenStream {
@@ -126,6 +162,7 @@ fn arty_path_for(found: Option<FoundCrate>) -> TokenStream {
 
 fn worker_policy(mut value: &Expr, runtime_path: &TokenStream) -> syn::Result<TokenStream> {
     while let Expr::Group(group) = value {
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         value = &group.expr;
     }
     if let Expr::Lit(syn::ExprLit { lit: Lit::Int(count), .. }) = value
@@ -311,6 +348,24 @@ mod tests {
     use testing_aids::render_expansion;
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_worker_policy_unwraps_nested_invisible_groups() {
+        let literal: Expr = parse_quote!(3usize);
+        let grouped = Expr::Group(syn::ExprGroup {
+            attrs: Vec::new(),
+            group_token: syn::token::Group::default(),
+            expr: Box::new(Expr::Group(syn::ExprGroup {
+                attrs: Vec::new(),
+                group_token: syn::token::Group::default(),
+                expr: Box::new(literal),
+            })),
+        });
+        assert_eq!(
+            worker_policy(&grouped, &quote!(::arty)).unwrap().to_string(),
+            quote!(::arty::runtime::WorkersPolicy::exactly(3usize)).to_string()
+        );
+    }
 
     #[test]
     fn arty_path_uses_a_renamed_dependency() {
@@ -629,7 +684,7 @@ mod tests {
 
     #[test]
     fn main_panic_settings_are_forwarded_exactly() {
-        for policy in [quote!(shutdown), quote!(ignore)] {
+        for (policy, constant) in [(quote!(shutdown), quote!(SHUTDOWN)), (quote!(ignore), quote!(IGNORE))] {
             let expansion = main(
                 quote!(panic = #policy),
                 quote! {
@@ -639,7 +694,7 @@ mod tests {
             let expected = quote! {
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
-                        .panic(::arty::runtime::PanicPolicy::#policy())
+                        .on(::arty::runtime::hook::Panic::#constant)
                         .build()
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
@@ -658,7 +713,7 @@ mod tests {
 
     #[test]
     fn test_panic_settings_are_forwarded_exactly() {
-        for policy in [quote!(shutdown), quote!(ignore)] {
+        for (policy, constant) in [(quote!(shutdown), quote!(SHUTDOWN)), (quote!(ignore), quote!(IGNORE))] {
             let expansion = test(
                 quote!(panic = #policy),
                 quote! {
@@ -670,7 +725,7 @@ mod tests {
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
                         .monitor(::arty::runtime::MonitorPolicy::disabled())
-                        .panic(::arty::runtime::PanicPolicy::#policy())
+                        .on(::arty::runtime::hook::Panic::#constant)
                         .build()
                         .expect("failed to create the runtime for the entry point");
                     let __arty_result = __arty_runtime
@@ -842,7 +897,7 @@ mod tests {
             quote!("ignore"),
             quote!(continue),
             quote!(abort),
-            quote!(PanicPolicy::shutdown()),
+            quote!(Panic::shutdown()),
             quote!(::shutdown),
         ] {
             for expand in [main, test] {

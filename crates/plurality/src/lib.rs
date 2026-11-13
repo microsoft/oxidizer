@@ -168,6 +168,10 @@ mod pool_stats;
 mod rc;
 mod slot;
 mod sync;
+#[cfg(test)]
+#[cfg(not(loom))]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test-only observation and abort interception.
+mod test_hooks;
 
 pub use alloced::Alloc;
 pub use boxed::Box;

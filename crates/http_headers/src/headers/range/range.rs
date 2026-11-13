@@ -117,6 +117,7 @@ fn validate_byte_range_set_relaxed(bytes: &[u8]) -> Result<(), DecodeError> {
             continue;
         }
         parse_byte_spec_relaxed(item)?;
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only count == 0 is observed; each nonempty item occupies bytes, so doubling this count cannot overflow usize for an isize-bounded slice")]
         count += 1;
     }
     if count == 0 {
@@ -358,6 +359,7 @@ impl RangeOwned {
         I: IntoIterator<Item = ByteRangeSpec>,
     {
         let specs = specs.into_iter();
+        // #[gamma::skip(literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "Only initial allocation uses the prefix and per-spec estimates; validated ranges are appended independently")]
         let mut wire = String::with_capacity(6_usize.saturating_add(specs.size_hint().0.saturating_mul(8)));
         wire.push_str("bytes=");
         let mut count = 0_usize;
@@ -366,6 +368,7 @@ impl RangeOwned {
                 wire.push_str(", ");
             }
             append_byte_spec(&mut wire, spec)?;
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only zero versus nonzero controls separators and emptiness; every encoded spec occupies bytes, so doubled counts cannot overflow before Vec length becomes unrepresentable")]
             count += 1;
         }
         if count == 0 {
@@ -406,6 +409,7 @@ impl RangeOwned {
         if !valid_extension_payload(range_set.as_bytes()) {
             return Err(invalid_syntax(&FieldName::Range));
         }
+        // #[gamma::skip(arith.add_to_mul, arith.add_to_sub, literal.int_decrement, literal.int_increment, tag = "equivalent", reason = "The validated unit is nonempty, so unit.len()-1 cannot underflow; this expression only estimates String capacity")]
         let mut wire = String::with_capacity(unit.len() + 1 + range_set.len());
         wire.push_str(unit);
         wire.push('=');
@@ -715,6 +719,7 @@ pub(super) struct ParsedRange<'a> {
 #[inline(always)]
 pub(super) fn parse_range(bytes: &[u8]) -> Result<ParsedRange<'_>, DecodeError> {
     if let Some(payload) = bytes.strip_prefix(b"bytes=") {
+        // #[gamma::skip(cond.always_true, literal.int_decrement, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "The complete wide validator follows a declined shortcut; starts 0, 1, and 5 point into the fixed bytes= prefix and cannot recognize a byte-range spec")]
         if !http_headers_simd::scan_byte_range_set(bytes, 6) {
             validate_byte_range_set_wide(bytes, 6)?;
         }
@@ -765,11 +770,20 @@ impl Iterator for ByteRangeIter<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.remaining.is_empty() {
+            if
+            // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.remaining.is_empty() {
                 return None;
             }
             let (item, remaining) = if let Some(separator) = self.remaining.iter().position(|byte| *byte == b',') {
-                (&self.remaining[..separator], &self.remaining[separator + 1..])
+                (
+                    &self.remaining[..separator],
+                    &self.remaining[
+                // #[gamma::skip(arith.add_to_mul, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                separator +
+                // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                1..],
+                )
             } else {
                 (self.remaining, &[] as &[u8])
             };
@@ -787,6 +801,7 @@ impl Iterator for ByteRangeIter<'_> {
 pub(super) fn validate_byte_range_set(bytes: &[u8], start: usize) -> Result<(), DecodeError> {
     // The accelerated scanner settles any set that fits one classification
     // window; the word-at-a-time scanner covers the longer ones.
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "Declining the SIMD shortcut runs the complete wide and scalar validators over the same byte-range set")]
     if http_headers_simd::scan_byte_range_set(bytes, start) {
         return Ok(());
     }
@@ -797,6 +812,7 @@ pub(super) fn validate_byte_range_set(bytes: &[u8], start: usize) -> Result<(), 
 #[cold]
 #[inline(never)]
 fn validate_byte_range_set_wide(bytes: &[u8], start: usize) -> Result<(), DecodeError> {
+    // #[gamma::skip(cond.always_false, call.replace_with_default, call_result.default, tag = "equivalent", reason = "Declining this optional word scanner runs the complete scalar validator over the same immutable byte-range set")]
     if scan_byte_range_set(bytes, start) {
         return Ok(());
     }
@@ -849,11 +865,15 @@ fn word_at(bytes: &[u8], at: usize) -> u64 {
 )]
 #[inline]
 fn scan_byte_range_set(bytes: &[u8], start: usize) -> bool {
+    // #[gamma::skip(cond.always_false, literal.int_decrement, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "Below eight bytes word_at obtains no eight-byte array and returns its all-zero fallback; that word cannot begin a byte-range spec, so the scalar fallback still decides")]
     if bytes.len() < 8 {
         return false;
     }
     let mut at = start;
+    // #[gamma::skip(bool_expr.negate, tag = "equivalent", reason = "This loop has no break or loop value: every exit returns from the enclosing function before an outer boolean negation can execute; its body has no other eligible boolean-expression negation site")]
     loop {
+        // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 6 campaign mutant 4fff551159d7 removes the exhausted-input guard and timed out while the zero-padded tail scanner kept advancing")]
+        // #[gamma::skip(relational.ge_to_gt, tag = "equivalent", reason = "At equality an extra scan cannot return true because end exceeds the input length; its next at is larger and the unchanged greater-than test returns false")]
         if at >= bytes.len() {
             return false;
         }
@@ -871,7 +891,10 @@ fn scan_byte_range_set(bytes: &[u8], start: usize) -> bool {
         if rest as u8 != b',' {
             return false;
         }
-        at = end + 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        at =
+        // #[gamma::skip(assign_value.default, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        end + 1;
         if matches!(bytes.get(at), Some(b' ' | b'\t')) {
             at += 1;
         }
@@ -897,12 +920,14 @@ fn scan_byte_range_spec(word: u64) -> Option<usize> {
         if word as u8 != b'-' {
             return None;
         }
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "nondigit has bits only in lane positions 7 modulo 8; rotating by 9 instead of 8 moves them to position 6 and trailing_zeros divided by eight counts the identical digit run")]
         let suffix_len = digit_run(nondigit.rotate_right(8));
         if suffix_len == 0 || suffix_len > MAX_RUN {
             return None;
         }
         return Some(1 + suffix_len);
     }
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "An eight-digit run fails the following hyphen test; a seven-digit run puts the hyphen last and its wrapped second run makes the unchanged total-run bound fail")]
     if first_len > MAX_RUN {
         return None;
     }
@@ -914,6 +939,7 @@ fn scan_byte_range_spec(word: u64) -> Option<usize> {
         return None;
     }
     let last = word.rotate_right(shift + 8);
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "shift is a whole number of bytes and nondigit has bits only at lane position seven; adding one to the extra byte shift preserves trailing_zeros divided by eight")]
     let last_len = digit_run(nondigit.rotate_right(shift + 8));
     if first_len + last_len > MAX_RUN {
         return None;
@@ -947,6 +973,7 @@ pub(super) fn validate_byte_range_set_slow(bytes: &[u8]) -> Result<(), DecodeErr
             continue;
         }
         let _spec = parse_byte_spec(item)?;
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only count == 0 is observed; each nonempty item occupies bytes, so doubling this count cannot overflow usize for an isize-bounded slice")]
         count += 1;
     }
     if count == 0 {
@@ -1017,6 +1044,38 @@ fn valid_extension_payload(bytes: &[u8]) -> bool {
 )]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_word_range_scanner_preserves_prefix_lengths_and_rejects_inversions() {
+        for (wire, expected) in [
+            (b"1-1,\0\0\0\0".as_slice(), Some(3)),
+            (b"12-34,\0\0", Some(5)),
+            (b"123-456,", Some(7)),
+            (b"9-10,\0\0\0", Some(4)),
+            (b"10-9,\0\0\0", None),
+            (b"2-1,\0\0\0\0", None),
+            (b"0-0,\0\0\0\0", Some(3)),
+            (b"1-01,\0\0\0", None),
+            (b"1234567-", None),
+            (b"1-123456", None),
+            (b"-123456,", Some(7)),
+            (b"-1234567", None),
+            (b"12-,\0\0\0\0", Some(3)),
+        ] {
+            let word = u64::from_le_bytes(wire.try_into().unwrap());
+            assert_eq!(super::scan_byte_range_spec(word), expected, "{wire:?}");
+        }
+        for (wire, start, expected) in [
+            (b"bytes=0-1".as_slice(), 6, true),
+            (b"bytes=9-8", 6, false),
+            (b"0-1, 2-3", 0, true),
+            (b"bytes=0-", 6, true),
+            (b"bytes=0-1,", 6, false),
+            (b"bytes=-1,-123,", 6, false),
+            (b"12345678", 8, false),
+        ] {
+            assert_eq!(super::scan_byte_range_set(wire, start), expected, "{wire:?}");
+        }
+    }
     use std::ops::Bound;
 
     use super::{

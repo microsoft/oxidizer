@@ -310,9 +310,9 @@ fn invalid_limits_and_panicking_visitors_report_errors() {
     let failed = executor.inspect::<u32>(1, |_| panic!("visitor failed")).unwrap_err();
 
     assert_eq!((invalid, failed), (InspectionError::InvalidLimit, InspectionError::Panicked));
-    assert!(!invalid.to_string().is_empty());
-    assert!(!failed.to_string().is_empty());
-    assert!(!InspectionError::Busy.to_string().is_empty());
+    assert_eq!(invalid.to_string(), "the task inspection limit must be greater than zero");
+    assert_eq!(failed.to_string(), "the task inspector or visitor panicked");
+    assert_eq!(InspectionError::Busy.to_string(), "native task storage is busy");
 }
 
 #[test]
@@ -465,10 +465,16 @@ fn inspector_capture_drop_panics_preserve_each_terminal_notification() {
         }
     }
     struct Capture(Rc<Cell<usize>>);
+    struct Payload;
+    impl Drop for Payload {
+        fn drop(&mut self) {
+            panic!("inspector panic payload destructor");
+        }
+    }
     impl Drop for Capture {
         fn drop(&mut self) {
             self.0.set(self.0.get() + 1);
-            panic!("inspector capture destructor");
+            std::panic::panic_any(Payload);
         }
     }
     for (mode, expected) in [

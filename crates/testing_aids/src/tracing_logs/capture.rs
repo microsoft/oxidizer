@@ -21,6 +21,7 @@ pub struct Capture {
 
 impl Capture {
     #[must_use]
+    // #[gamma::skip(fn_value.default, reason = "Capture derives Default, which constructs the same empty Arc<Mutex<Vec<u8>>>.")]
     pub fn new() -> Self {
         Self {
             buffer: std::sync::Arc::new(Mutex::new(Vec::new())),

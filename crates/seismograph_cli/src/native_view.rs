@@ -272,6 +272,70 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_survivor_native_owner_absence_idle_age_and_class_bars_are_distinct() {
+        use seismograph_rallocator::native::ClassState;
+
+        let mut snapshot = fixture::snapshot();
+        let mut owner = snapshot.owners[0];
+        owner.observation = None;
+        owner.source = ObservationSource::Unavailable;
+        assert_eq!(
+            owner_lines(&snapshot, &owner)[1],
+            "Publication slot System allocation failed; state is UNKNOWN, not zero or merely never-observed."
+        );
+        owner.source = ObservationSource::Busy;
+        assert_eq!(
+            owner_lines(&snapshot, &owner)[1],
+            "No readable observation: classes, large ranges, caches and outgoing returns are UNKNOWN."
+        );
+        owner = snapshot.owners[0];
+        owner.source = ObservationSource::IdleInspection;
+        let observation = owner.observation.as_mut().unwrap();
+        observation.captured_nanos = 10;
+        observation.classes.fill(ClassState::default());
+        observation.classes[1].object_bytes = 32;
+        observation.classes[1].observed_slabs = 2;
+        observation.classes[2].object_bytes = 64;
+        observation.classes[2].observed_slabs = 4;
+        snapshot.captured_nanos = 30;
+        let lines = owner_lines(&snapshot, &owner);
+        assert!(lines[1].starts_with("Collector idle inspection (no recorder contributor)"));
+        assert!(lines[1].ends_with("age 20 ns at capture"));
+        assert_eq!(
+            lines[3],
+            "42 class descriptors unavailable; absent descriptors are not measured zero capacity."
+        );
+        assert!(lines[4].starts_with("  class  1"));
+        assert!(lines[4].ends_with("[##########..........]"));
+        assert!(lines[5].starts_with("  class  2"));
+        assert!(lines[5].ends_with("[####################]"));
+        assert!(!lines.iter().any(|line| line.starts_with("  class  0")));
+        owner
+            .observation
+            .as_mut()
+            .unwrap()
+            .classes
+            .iter_mut()
+            .for_each(|class| class.object_bytes = 8);
+        assert!(
+            !owner_lines(&snapshot, &owner)
+                .iter()
+                .any(|line| line.contains("class descriptors unavailable"))
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_native_html_keeps_global_range_section_and_closing_pre() {
+        let mut snapshot = fixture::snapshot();
+        snapshot.global.ranges.counts.fill(0);
+        snapshot.global.ranges.counts[3] = 2;
+        let html = render_html(Some(&snapshot));
+        assert!(html.contains("Global backend cached ranges (physical residency unknown): 16 B observed"));
+        assert!(html.contains("2^ 3 B"));
+        assert!(html.contains("</pre><p>Native capacity is NOT application-live memory."));
+    }
+
+    #[test]
     fn unavailable_publication_is_unknown_and_empty_inventory_bars_are_unfilled() {
         let mut snapshot = fixture::snapshot();
         let owner = &mut snapshot.owners[0];

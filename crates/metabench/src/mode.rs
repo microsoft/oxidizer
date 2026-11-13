@@ -28,7 +28,11 @@ impl Mode {
     /// still honored and surfaces [`crate::error::Error::UnsupportedMode`]
     /// when it actually runs.
     pub(crate) fn default_set() -> Vec<Self> {
-        if cfg!(target_os = "linux") {
+        Self::default_set_for(cfg!(target_os = "linux"))
+    }
+
+    fn default_set_for(linux: bool) -> Vec<Self> {
+        if linux {
             vec![Self::Criterion, Self::Gungraun, Self::Allocations]
         } else {
             vec![Self::Criterion, Self::Allocations]
@@ -72,5 +76,28 @@ impl FromStr for Mode {
             "allocations" => Ok(Self::Allocations),
             _ => Err(Error::InvalidMode(value.to_owned())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn november_default_engines_keep_exact_platform_membership_and_order() {
+        use super::Mode;
+
+        assert_eq!(Mode::default_set_for(true), [Mode::Criterion, Mode::Gungraun, Mode::Allocations]);
+        assert_eq!(Mode::default_set_for(false), [Mode::Criterion, Mode::Allocations]);
+        assert_eq!(Mode::default_set(), Mode::default_set_for(cfg!(target_os = "linux")));
+    }
+
+    #[test]
+    fn gamma_round2_default_engine_order_tracks_platform_support() {
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            super::Mode::default_set(),
+            [super::Mode::Criterion, super::Mode::Gungraun, super::Mode::Allocations]
+        );
+        #[cfg(not(target_os = "linux"))]
+        assert_eq!(super::Mode::default_set(), [super::Mode::Criterion, super::Mode::Allocations]);
     }
 }

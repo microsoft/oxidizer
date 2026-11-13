@@ -70,6 +70,7 @@ struct ProcessorInterest<'a> {
 impl ProcessorInterest<'_> {
     fn ask_all(&self, description: &EventDescription) -> u64 {
         while self.next_processor_index.get() < self.processors.len() {
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             self.ask_next_processor(description);
         }
         self.bitmask.get()
@@ -77,14 +78,22 @@ impl ProcessorInterest<'_> {
 
     fn ask_until_one_interested(&self, description: &EventDescription) -> bool {
         while self.bitmask.get() == 0 && self.next_processor_index.get() < self.processors.len() {
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             self.ask_next_processor(description);
         }
         self.bitmask.get() != 0
     }
 
+    // #[gamma::skip(fn_value.unit, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     fn ask_next_processor(&self, description: &EventDescription) {
         let index = self.next_processor_index.get();
-        self.next_processor_index.set(index + 1);
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        self.next_processor_index.set(
+            // #[gamma::skip(arith.add_to_mul, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            index +
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1,
+        );
         if self.processors[index].is_interested(description) {
             self.bitmask.set(self.bitmask.get() | 1 << index);
         }

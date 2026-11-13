@@ -432,7 +432,9 @@ impl FieldName {
         if let Some(known) = Self::known_from_bytes(bytes) {
             return Ok(known);
         }
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The fallback lowercases every validated ASCII byte and constructs the same Arc<str>; lowercase input is unchanged by that complete path")]
         if bytes.iter().all(|byte| !byte.is_ascii_uppercase()) {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The preceding token-byte validation admits only ASCII, so these bytes are necessarily valid UTF-8")]
             let lowercase = str::from_utf8(bytes).map_err(|_invalid| InvalidFieldName)?;
             return Ok(Self::Custom(Arc::from(lowercase)));
         }
@@ -447,6 +449,7 @@ impl FieldName {
     /// the whole table.
     fn known_from_bytes(bytes: &[u8]) -> Option<Self> {
         for &index in known_candidates(bytes.len())? {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "KNOWN_BY_LENGTH contains only indexes emitted by the const loop bounded by KNOWN_TEXTS.len(), and the following const assertions verify every bucket")]
             let text = KNOWN_TEXTS.get(index)?;
             if eq_ignore_ascii_case(text, bytes) {
                 return Self::ALL_KNOWN.get(index).cloned();
@@ -519,7 +522,9 @@ impl FieldName {
 
 /// Keeps ordinary names stack-backed while bounding the constructor's stack frame.
 fn lowercase_custom_name(bytes: &[u8]) -> Arc<str> {
+    // #[gamma::skip(cond.always_false, relational.le_to_lt, tag = "equivalent", reason = "The heap fallback lowercases exactly the same validated bytes and returns the same Arc<str> as this stack-buffer path")]
     if bytes.len() <= STACK_NORMALIZATION_CAPACITY {
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "The loop overwrites every byte in the returned prefix; unused initialized bytes are never read")]
         let mut lowercase = [0; STACK_NORMALIZATION_CAPACITY];
         for (destination, source) in lowercase.iter_mut().zip(bytes) {
             *destination = source.to_ascii_lowercase();
@@ -719,6 +724,8 @@ mod tests {
 
     #[test]
     fn known_names_are_dense_case_insensitive_and_round_trip() {
+        assert_eq!(super::known_candidates(0), Some([].as_slice()));
+        assert!(FieldName::known_from_bytes(b"").is_none());
         assert_eq!(FieldName::ALL_KNOWN.len(), FieldName::COUNT);
         for (index, name) in FieldName::ALL_KNOWN.iter().enumerate() {
             assert_eq!(name.index(), Some(index));

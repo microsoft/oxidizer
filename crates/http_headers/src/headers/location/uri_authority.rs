@@ -92,6 +92,7 @@ impl fmt::Debug for UriAuthority<'_> {
 
 fn validate_host(host: &str) -> Result<(), DecodeError> {
     if let Some(literal) = host.strip_prefix('[').and_then(|host| host.strip_suffix(']')) {
+        // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "The character-array prefix pattern is an unordered membership test for the same two version letters")]
         if literal.starts_with(['v', 'V']) {
             let (version, address) = literal[1..].split_once('.').ok_or_else(invalid)?;
             if version.is_empty() || !version.bytes().all(|byte| byte.is_ascii_hexdigit()) || address.is_empty() {

@@ -904,13 +904,106 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_transform_build_does_not_enable_unrequested_stampede_protection() {
+        let clock = tick::Clock::new_frozen();
+        let cache = crate::Cache::builder::<i32, i32>(clock.clone())
+            .storage(cachet_tier::MockCache::new())
+            .transform(
+                crate::TransformEncoder::new(crate::infallible(|key: &i32| *key)),
+                crate::TransformCodec::new(crate::infallible(|value: &i32| *value), crate::infallible_owned(|value: i32| value)),
+            )
+            .fallback(crate::Cache::builder(clock).storage(cachet_tier::MockCache::new()))
+            .build();
+        assert!(cache.mergers.is_none());
+    }
+
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use cachet_tier::MockCache;
 
     use super::*;
     use crate::telemetry::handler::RequestId;
     use crate::{CacheEventHandler, CacheOperationEvent, CacheTierEvent};
+
+    #[test]
+    fn gamma_round2_computed_entry_and_stored_candidate_share_the_same_original_timestamp() {
+        let control = tick::ClockControl::new().auto_advance(Duration::from_millis(1));
+        let storage = MockCache::<u32, u32>::new();
+        let cache = Cache::builder(control.to_clock()).storage(storage.clone()).build();
+        block_on(async {
+            let returned = cache.insert_computed_entry(&7, CacheEntry::new(37)).await.unwrap();
+            let stored = storage.get(&7).await.unwrap().unwrap();
+            assert!(returned.cached_at().is_some());
+            assert_eq!(stored.cached_at(), returned.cached_at());
+            assert_eq!(*stored.value(), 37);
+        });
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gamma_round2_compute_paths_record_exact_success_failure_and_none_events() {
+        use seismograph::recorder::event::EventKind;
+
+        seismograph::recorder(seismograph::recorder::Configuration {
+            cache: seismograph::recorder::Policy::all(false),
+            event_capacity_per_thread: seismograph::recorder::EventBufferCapacity::new(1024),
+            ..Default::default()
+        });
+        let count = |kind| {
+            let thread = seismograph::recorder::thread_id();
+            seismograph::snapshot::decode(
+                seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default())
+                    .unwrap()
+                    .as_bytes(),
+            )
+            .unwrap()
+            .events
+            .events
+            .iter()
+            .filter(|event| event.thread_id == thread && event.kind == kind)
+            .count()
+        };
+        let succeeded = count(EventKind::CacheComputeSucceeded);
+        let failed = count(EventKind::CacheComputeFailed);
+        let none = count(EventKind::CacheComputeReturnedNone);
+        let cache = Cache::builder::<u32, u32>(Clock::new_frozen()).storage(MockCache::new()).build();
+        block_on(async {
+            assert_eq!(*cache.do_get_or_insert(&1, || async { 7 }).await.unwrap().value(), 7);
+            assert_eq!(count(EventKind::CacheComputeSucceeded), succeeded + 1);
+            assert_eq!(
+                *cache
+                    .do_get_or_insert_with(&2, || async { CacheEntry::new(11) })
+                    .await
+                    .unwrap()
+                    .value(),
+                11
+            );
+            assert_eq!(count(EventKind::CacheComputeSucceeded), succeeded + 2);
+            cache.do_try_get_or_insert(&3, || async { Ok::<_, Error>(13) }).await.unwrap();
+            assert_eq!(count(EventKind::CacheComputeSucceeded), succeeded + 3);
+            cache
+                .do_try_get_or_insert_with(&4, || async { Ok::<_, Error>(CacheEntry::new(17)) })
+                .await
+                .unwrap();
+            assert_eq!(count(EventKind::CacheComputeSucceeded), succeeded + 4);
+            cache.do_optionally_get_or_insert(&5, || async { Some(19) }).await.unwrap();
+            assert_eq!(count(EventKind::CacheComputeSucceeded), succeeded + 5);
+            cache
+                .do_try_get_or_insert(&6, || async { Err::<u32, _>(Error::from_message("round2 failure")) })
+                .await
+                .unwrap_err();
+            assert_eq!(count(EventKind::CacheComputeFailed), failed + 1);
+            cache
+                .do_try_get_or_insert_with(&7, || async { Err::<CacheEntry<u32>, _>(Error::from_message("round2 failure")) })
+                .await
+                .unwrap_err();
+            assert_eq!(count(EventKind::CacheComputeFailed), failed + 2);
+            assert!(cache.do_optionally_get_or_insert(&8, || async { None }).await.unwrap().is_none());
+            assert_eq!(count(EventKind::CacheComputeReturnedNone), none + 1);
+        });
+    }
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
         futures::executor::block_on(f)

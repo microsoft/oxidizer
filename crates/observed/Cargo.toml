@@ -63,6 +63,10 @@ thread_aware = { path = "../thread_aware", default-features = false, features = 
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 
+[[test]]
+name = "gamma_round2_context"
+required-features = ["test-util"]
+
 [[bench]]
 name = "observed_benchmarks"
 harness = false

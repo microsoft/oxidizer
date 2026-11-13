@@ -10,6 +10,7 @@ use gungraun::__internal::{InternalBenchRunMode, InternalLibFunctionKind, Intern
 use serde::{Deserialize, Serialize};
 
 use crate::BenchmarkIdentity;
+use crate::error::Error;
 use crate::probe_error::{
     DuplicateProbeBackendIdentity, DuplicateProbeIdentity, InvalidProbeArguments, MissingProbeDiscoveryPath, ProbeCaseLimit, ProbeError,
     ProbeIndexOutOfBounds, ProbeSelectionMismatch,
@@ -149,8 +150,16 @@ fn discover_targets(groups: &[ProbeGroup]) -> Result<Vec<ProbeTarget>, ProbeErro
 }
 
 fn publish_targets(output: Option<OsString>, targets: &[ProbeTarget]) -> Result<(), ProbeError> {
+    publish_targets_with(output, targets, |path, targets| crate::artifact::write_json(path, &targets))
+}
+
+fn publish_targets_with(
+    output: Option<OsString>,
+    targets: &[ProbeTarget],
+    write: impl FnOnce(&Path, &[ProbeTarget]) -> Result<(), Error>,
+) -> Result<(), ProbeError> {
     let output = output.ok_or_else(MissingProbeDiscoveryPath::new)?;
-    crate::artifact::write_json(Path::new(&output), &targets)?;
+    write(Path::new(&output), targets)?;
     Ok(())
 }
 
@@ -210,6 +219,60 @@ fn run_probe_groups_inner(
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn november_actual_probe_publication_retains_the_requested_path_and_every_target_field_without_files() {
+        let targets = [ProbeTarget {
+            identity: "canonical".to_owned(),
+            native_identity: "native-id".to_owned(),
+            group: 2,
+            benchmark: 3,
+            case: 5,
+            iteration: Some(7),
+        }];
+        crate::artifact::with_in_memory_json_sink(
+            |path, value| {
+                assert_eq!(path, Path::new("declared-probe.json"));
+                assert_eq!(
+                    value,
+                    serde_json::json!([{
+                        "identity": "canonical", "native_identity": "native-id",
+                        "group": 2, "benchmark": 3, "case": 5, "iteration": 7,
+                    }])
+                );
+                Ok(())
+            },
+            || publish_targets(Some("declared-probe.json".into()), &targets).unwrap(),
+        );
+        publish_targets(None, &targets).unwrap_err();
+    }
+
+    #[test]
+    fn gamma_round2_probe_publication_requires_output_and_propagates_writer_errors() {
+        assert!(publish_targets_with(None, &[], |_, _| panic!("missing output")).is_err());
+        let targets = vec![
+            serde_json::from_value::<ProbeTarget>(serde_json::json!({
+                "identity": "case", "native_identity": "native/case", "group": 1, "benchmark": 2, "case": 3, "iteration": null
+            }))
+            .unwrap(),
+        ];
+        let called = std::cell::Cell::new(false);
+        publish_targets_with(Some("cases.json".into()), &targets, |path, values| {
+            assert_eq!(path, Path::new("cases.json"));
+            assert_eq!(values.len(), 1);
+            assert_eq!(values[0].identity, "case");
+            assert_eq!(values[0].native_identity, "native/case");
+            called.set(true);
+            Ok(())
+        })
+        .unwrap();
+        assert!(called.get());
+        let error = publish_targets_with(Some("cases.json".into()), &targets, |_, _| {
+            Err(Error::Metadata("publish refused".into()))
+        })
+        .unwrap_err();
+        assert_eq!(error.to_string(), Error::Metadata("publish refused".into()).to_string());
+    }
+
     use std::cell::{Cell, RefCell};
     use std::error::Error as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -253,6 +316,62 @@ mod tests {
         ITERATION_COUNT.set(count);
         COUNT_CALLS.set(0);
         EXECUTIONS.with_borrow_mut(Vec::clear);
+    }
+
+    #[test]
+    fn gamma_round2_listing_reports_discovery_errors_before_publication() {
+        static CASES: [InternalMacroLibBench; 2] = [
+            InternalMacroLibBench {
+                id_display: Some("case_0"),
+                ..native_case(InternalLibFunctionKind::Default(default_case))
+            },
+            native_case(InternalLibFunctionKind::Iter(iterator_case)),
+        ];
+        static BENCHMARKS: [ProbeBenchmark; 1] = [ProbeBenchmark {
+            identity: BenchmarkIdentity::__new("group", "workload", "native", "workload", true),
+            cases: &CASES,
+        }];
+        reset_callbacks(MAX_PROBE_CASES);
+        let groups = [ProbeGroup {
+            benchmarks: &BENCHMARKS,
+            setup: |enabled| enabled,
+            teardown: |enabled| enabled,
+        }];
+        let error = run_probe_groups_inner(&groups, |enabled| enabled, |enabled| enabled, &["--metabench-probe-list".into()]).unwrap_err();
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<ProbeCaseLimit>().unwrap().limit,
+            MAX_PROBE_CASES
+        );
+        assert_eq!(COUNT_CALLS.get(), 1);
+        EXECUTIONS.with_borrow(|calls| assert!(calls.is_empty()));
+    }
+
+    #[test]
+    fn gamma_survivor_case_budget_precedes_identity_collisions() {
+        static CASES: [InternalMacroLibBench; 2] = [
+            InternalMacroLibBench {
+                id_display: Some("case_0"),
+                ..native_case(InternalLibFunctionKind::Default(default_case))
+            },
+            native_case(InternalLibFunctionKind::Iter(iterator_case)),
+        ];
+        static BENCHMARKS: [ProbeBenchmark; 1] = [ProbeBenchmark {
+            identity: BenchmarkIdentity::__new("group", "workload", "native", "workload", true),
+            cases: &CASES,
+        }];
+        reset_callbacks(MAX_PROBE_CASES);
+        let groups = [ProbeGroup {
+            benchmarks: &BENCHMARKS,
+            setup: |enabled| enabled,
+            teardown: |enabled| enabled,
+        }];
+        let error = discover_targets(&groups).unwrap_err();
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<ProbeCaseLimit>().unwrap().limit,
+            MAX_PROBE_CASES
+        );
+        assert_eq!(COUNT_CALLS.get(), 1);
+        EXECUTIONS.with_borrow(|calls| assert!(calls.is_empty()));
     }
 
     #[test]
