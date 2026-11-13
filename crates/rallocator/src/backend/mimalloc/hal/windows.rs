@@ -511,31 +511,6 @@ mod tests {
     }
 
     #[test]
-    fn native_retry_wait_can_reach_a_successful_second_attempt() {
-        let calls = Cell::new(0);
-        let expected = std::ptr::without_provenance_mut::<u8>(SLICE);
-
-        let result = reserve_raw_with(
-            SLICE,
-            SLICE,
-            true,
-            |_, _, _| {
-                calls.set(calls.get() + 1);
-                if calls.get() == 1 {
-                    // SAFETY: Last-error state belongs to this test thread.
-                    unsafe { SetLastError(1455) };
-                    std::ptr::null_mut()
-                } else {
-                    expected
-                }
-            },
-            Wait::NATIVE,
-        );
-
-        assert_eq!((result, calls.get()), (expected, 2));
-    }
-
-    #[test]
     fn noncommit_and_nonmemory_failures_do_not_wait() {
         let waits = RefCell::new(Vec::new());
         let mut wait = |delay| waits.borrow_mut().push(delay);

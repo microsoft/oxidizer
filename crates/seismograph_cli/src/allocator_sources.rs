@@ -201,24 +201,36 @@ mod tests {
 
     #[test]
     fn duplicate_mimalloc_ids_are_rejected_at_both_container_and_preparation_boundaries() {
-        let encoded = fixture::source(&fixture::snapshot());
-        let sources = [encoded.clone(), encoded];
+        let mut sources = [
+            fixture::source(&fixture::snapshot()),
+            fixture::source(&snapshot::Snapshot::from(crate::native_view::fixture::snapshot())),
+        ];
+        let valid = seismograph::snapshot::decode(&fixture::container(&sources)).unwrap();
+        assert_eq!(valid.sources, sources);
+        sources[1].id = sources[0].id;
 
-        let container_failed = seismograph::snapshot::decode(&fixture::container(&sources)).is_err();
+        let container = seismograph::snapshot::decode(&fixture::container(&sources)).unwrap_err();
         let preparation = decode(&sources).unwrap_err();
 
-        assert!(container_failed && matches!(preparation, Error::DuplicateMimallocSource));
+        assert_eq!(container.to_string(), "the seismograph snapshot is malformed or unsupported");
+        assert!(matches!(preparation, Error::DuplicateMimallocSource));
     }
 
     #[test]
     fn duplicate_snmalloc_ids_are_rejected_at_both_container_and_preparation_boundaries() {
-        let encoded = fixture::source(&snapshot::Snapshot::from(crate::native_view::fixture::snapshot()));
-        let sources = [encoded.clone(), encoded];
+        let mut sources = [
+            fixture::source(&snapshot::Snapshot::from(crate::native_view::fixture::snapshot())),
+            fixture::source(&fixture::snapshot()),
+        ];
+        let valid = seismograph::snapshot::decode(&fixture::container(&sources)).unwrap();
+        assert_eq!(valid.sources, sources);
+        sources[1].id = sources[0].id;
 
-        let container_failed = seismograph::snapshot::decode(&fixture::container(&sources)).is_err();
+        let container = seismograph::snapshot::decode(&fixture::container(&sources)).unwrap_err();
         let preparation = decode(&sources).unwrap_err();
 
-        assert!(container_failed && matches!(preparation, Error::DuplicateAllocatorSource));
+        assert_eq!(container.to_string(), "the seismograph snapshot is malformed or unsupported");
+        assert!(matches!(preparation, Error::DuplicateAllocatorSource));
     }
 
     #[test]
