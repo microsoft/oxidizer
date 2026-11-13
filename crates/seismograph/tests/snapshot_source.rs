@@ -53,14 +53,30 @@ fn snapshot_file_persistence_uses_the_caller_path() {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn invalid_utf8_source_name_is_rejected() {
-    snapshot::register_source(&SOURCE);
-    let encoded = seismograph::snapshot(SnapshotOptions::default()).unwrap();
-    let mut bytes = encoded.as_bytes().to_vec();
-    assert_eq!(snapshot::decode(&bytes).unwrap().sources[0].name, "source");
+    use seismograph::recorder::event::{EventClock, Events};
+    use seismograph::snapshot::{DecodedSnapshot, test_util};
 
-    let name = bytes.windows(b"source".len()).rposition(|value| value == b"source").unwrap();
-    bytes[name] = 0xff;
+    let fixture = DecodedSnapshot {
+        events: Events {
+            clock: EventClock::CURRENT,
+            ..Events::default()
+        },
+        sources: vec![SourceSnapshot {
+            id: SourceId::new(1),
+            name: "source".to_owned(),
+            schema_version: 1,
+            data: b"captured".to_vec(),
+        }],
+        ..DecodedSnapshot::default()
+    };
+    let encoded = test_util::encode(&fixture).unwrap();
+    let mut bytes = encoded.as_bytes().to_vec();
+    assert_eq!(snapshot::decode(&bytes).unwrap().sources, fixture.sources);
+
+    let name_offset = bytes.windows(b"source".len()).rposition(|value| value == b"source").unwrap();
+    bytes[name_offset] = 0xff;
 
     assert_eq!(
         snapshot::decode(&bytes).unwrap_err().to_string(),
