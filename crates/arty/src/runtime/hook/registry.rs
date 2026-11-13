@@ -6,12 +6,6 @@ use thread_aware::ThreadAware;
 use super::hook_fn::{ErasedHookFn, HookFn};
 use super::{Hook, Panic};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PanicAction {
-    Ignore,
-    Shutdown,
-}
-
 #[derive(Clone, derive_more::Debug, ThreadAware)]
 pub(crate) enum HookRegistration {
     Panic(ErasedHookFn<Panic>),

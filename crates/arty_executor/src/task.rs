@@ -581,7 +581,7 @@ mod tests {
             Waker::noop().clone(),
             Sink::noop(),
             std::thread::current().id(),
-            crate::PanicPolicy::Ignore,
+            crate::PanicPolicy::IGNORE,
         );
         // SAFETY: The handle owns the task on its creating thread.
         let task = unsafe { handle.as_task() };

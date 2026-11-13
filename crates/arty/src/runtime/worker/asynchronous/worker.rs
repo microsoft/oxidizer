@@ -17,7 +17,7 @@ use tick::runtime::{ClockDriver, InactiveClock};
 use crate::io::{Io, RuntimeDriverHost};
 use crate::runtime::config::MonitorOptions;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{HookRegistration, PanicAction};
+use crate::runtime::hook::HookRegistration;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{CommandReceiver, LocalWorker, Signal, SpawnCommand, SystemCommand};
 #[cfg(test)]
@@ -29,12 +29,7 @@ use crate::task::Context;
 const COMMANDS_PER_CYCLE: usize = 256;
 
 fn resolve_task_panic(panic: arty_executor::TaskPanicPayload) -> (arty_executor::PanicAction, arty_executor::TaskPanicPayload) {
-    let (action, panic) = LocalWorker::on_panic(panic);
-    let action = match action {
-        PanicAction::Ignore => arty_executor::PanicAction::Ignore,
-        PanicAction::Shutdown => arty_executor::PanicAction::Shutdown,
-    };
-    (action, panic)
+    LocalWorker::on_panic(panic)
 }
 
 fn suspend_wait(deadline: Instant, now: Instant) -> Duration {

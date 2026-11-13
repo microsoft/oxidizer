@@ -8,7 +8,7 @@ use thread_aware::Thread;
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, LocalHookGuard, Panic, PanicAction};
+use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, LocalHookGuard, Panic};
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
@@ -96,7 +96,7 @@ impl LocalWorker {
         });
     }
 
-    pub(crate) fn on_panic(panic: arty_executor::TaskPanicPayload) -> (PanicAction, arty_executor::TaskPanicPayload) {
+    pub(crate) fn on_panic(panic: arty_executor::TaskPanicPayload) -> (arty_executor::PanicAction, arty_executor::TaskPanicPayload) {
         if !Self::with_scheduler(|current| current.is_some()) {
             return Panic::new(panic).into_parts();
         }
@@ -247,7 +247,7 @@ mod tests {
     fn panic_without_installed_scheduler_defaults_to_shutdown() {
         let (action, panic) = LocalWorker::on_panic(Box::new(42_u32));
 
-        assert_eq!(action, PanicAction::Shutdown);
+        assert_eq!(action, arty_executor::PanicAction::Shutdown);
         assert_eq!(*panic.downcast::<u32>().unwrap(), 42);
     }
 

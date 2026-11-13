@@ -37,7 +37,7 @@ pub(crate) use hook_fn::ErasedHookFn;
 pub use hook_fn::HookFn;
 pub(crate) use local_hook::{LocalHook, LocalHookGuard};
 pub use panic::Panic;
-pub(crate) use registry::{HookRegistration, PanicAction, registration};
+pub(crate) use registry::{HookRegistration, registration};
 
 /// Marks an event that can be registered as a runtime hook.
 ///

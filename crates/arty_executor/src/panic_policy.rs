@@ -16,36 +16,42 @@ pub enum PanicAction {
 }
 
 /// Selects how the executor responds to a contained task panic.
-#[derive(Clone, derive_more::Debug, Default)]
-pub enum PanicPolicy {
-    /// Start executor shutdown with a panic cause.
-    #[default]
+#[derive(Clone, derive_more::Debug)]
+pub struct PanicPolicy(PanicPolicyKind);
+
+#[derive(Clone, derive_more::Debug)]
+enum PanicPolicyKind {
     Shutdown,
-
-    /// Contain the failed task and continue running other tasks.
     Ignore,
-
-    /// Ask the caller how to respond to each contained task panic.
-    ///
-    /// The resolver runs synchronously on the executor thread. It receives and
-    /// must return the original panic payload. It must not panic.
     Dynamic(#[debug(ignore)] Rc<dyn Fn(TaskPanicPayload) -> (PanicAction, TaskPanicPayload)>),
 }
 
 impl PanicPolicy {
+    /// Starts executor shutdown with a panic cause.
+    pub const SHUTDOWN: Self = Self(PanicPolicyKind::Shutdown);
+
+    /// Contains the failed task and continues running other tasks.
+    pub const IGNORE: Self = Self(PanicPolicyKind::Ignore);
+
     /// Creates a policy that inspects each panic before selecting an action.
     ///
     /// The resolver runs synchronously on the executor thread. It must return
     /// the original panic payload and must not panic.
     pub fn dynamic(resolve: impl Fn(TaskPanicPayload) -> (PanicAction, TaskPanicPayload) + 'static) -> Self {
-        Self::Dynamic(Rc::new(resolve))
+        Self(PanicPolicyKind::Dynamic(Rc::new(resolve)))
     }
 
     pub(crate) fn resolve(&self, panic: TaskPanicPayload) -> (PanicAction, TaskPanicPayload) {
-        match self {
-            Self::Shutdown => (PanicAction::Shutdown, panic),
-            Self::Ignore => (PanicAction::Ignore, panic),
-            Self::Dynamic(resolve) => resolve(panic),
+        match &self.0 {
+            PanicPolicyKind::Shutdown => (PanicAction::Shutdown, panic),
+            PanicPolicyKind::Ignore => (PanicAction::Ignore, panic),
+            PanicPolicyKind::Dynamic(resolve) => resolve(panic),
         }
+    }
+}
+
+impl Default for PanicPolicy {
+    fn default() -> Self {
+        Self::SHUTDOWN
     }
 }

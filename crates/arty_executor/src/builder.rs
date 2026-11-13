@@ -103,11 +103,14 @@ mod tests {
 
     #[test]
     fn panic_policy_is_configurable() {
-        assert!(matches!(ExecutorBuilder::new().panic_policy, PanicPolicy::Shutdown));
-        assert!(matches!(
-            ExecutorBuilder::new().panic_policy(PanicPolicy::Ignore).panic_policy,
-            PanicPolicy::Ignore
-        ));
+        let (default, _) = ExecutorBuilder::new().panic_policy.resolve(Box::new(()));
+        let (configured, _) = ExecutorBuilder::new()
+            .panic_policy(PanicPolicy::IGNORE)
+            .panic_policy
+            .resolve(Box::new(()));
+
+        assert_eq!(default, crate::PanicAction::Shutdown);
+        assert_eq!(configured, crate::PanicAction::Ignore);
     }
 
     #[test]

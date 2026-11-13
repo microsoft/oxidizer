@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use arty_executor::TaskPanicPayload;
+use arty_executor::{PanicAction, TaskPanicPayload};
 
 use super::hook_fn::HookFn;
-use super::registry::PanicAction;
 
 /// Reports that Arty contained a panic from user task code.
 ///

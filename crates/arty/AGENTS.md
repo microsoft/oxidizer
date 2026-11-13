@@ -10,11 +10,10 @@
   the original panic.
 - Apply the configured `Panic` hook to async task factories and polls.
   Forward its `ShutdownCause` without another panic decision.
-- For blocking callbacks, apply the policy at the blocking execution boundary.
-  Publish the cause before delivering the panic result. Wake the associated
-  async worker only when publication starts shutdown.
-- Keep panic policy and worker wakers out of shared shutdown state.
-- The shutdown policy starts coordinated runtime shutdown. The ignore policy
+- A blocking callback panic returns through its `JoinHandle`. It does not invoke
+  the `Panic` hook or start runtime shutdown.
+- Keep panic hooks and worker wakers out of shared shutdown state.
+- The shutdown action starts coordinated runtime shutdown. The ignore action
   leaves the scheduler usable.
 - Add cleanup containment only when needed for memory safety or exact-once
   release of runtime-owned task storage. Keep the catch as narrow as possible.

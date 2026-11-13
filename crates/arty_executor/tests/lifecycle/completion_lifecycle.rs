@@ -308,7 +308,7 @@ fn completed_result_remains_available_after_executor_stops() {
 #[test]
 fn task_panic_publishes_the_original_payload_and_keeps_the_executor_usable() {
     let (sink, processor) = test_emitter(TEST_ID);
-    let mut executor = Executor::builder().sink(sink.clone()).panic_policy(PanicPolicy::Ignore).build();
+    let mut executor = Executor::builder().sink(sink.clone()).panic_policy(PanicPolicy::IGNORE).build();
     let tasks = executor.tasks();
     let mut panicked = tasks
         .task(poll_fn(|_| -> Poll<usize> { panic!("task panic") }))
@@ -509,7 +509,7 @@ fn newly_submitted_tasks_run_before_awakened_tasks() {
 
 #[test]
 fn shutdown_panic_policy_publishes_the_payload_before_shutdown() {
-    let mut executor = Executor::builder().panic_policy(PanicPolicy::Shutdown).build();
+    let mut executor = Executor::builder().panic_policy(PanicPolicy::SHUTDOWN).build();
     let mut completion = executor
         .tasks()
         .task(poll_fn(|_| -> Poll<()> { panic!("shutdown panic") }))
@@ -579,13 +579,13 @@ fn panic_notification_carries_the_authoritative_shutdown_cause() {
     });
 
     for (policy, existing, expects_policy_shutdown) in [
-        (PanicPolicy::Ignore, None, false),
-        (PanicPolicy::Shutdown, None, true),
+        (PanicPolicy::IGNORE, None, false),
+        (PanicPolicy::SHUTDOWN, None, true),
         (dynamic_ignore, None, false),
         (PanicPolicy::dynamic(shutdown), None, true),
-        (PanicPolicy::Ignore, Some(ShutdownCause::default()), false),
+        (PanicPolicy::IGNORE, Some(ShutdownCause::default()), false),
         (
-            PanicPolicy::Shutdown,
+            PanicPolicy::SHUTDOWN,
             Some(ShutdownError::new(std::io::Error::other("first shutdown cause")).into()),
             true,
         ),
@@ -657,7 +657,7 @@ impl Drop for ReadyDropPanic {
 
 #[test]
 fn completed_future_destructor_panic_is_published_as_the_task_panic() {
-    let mut executor = Executor::builder().panic_policy(PanicPolicy::Ignore).build();
+    let mut executor = Executor::builder().panic_policy(PanicPolicy::IGNORE).build();
     let mut completion = executor.tasks().task(ReadyDropPanic).register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
@@ -687,7 +687,7 @@ impl Drop for PollAndDropPanic {
 
 #[test]
 fn poll_panic_remains_primary_when_future_disposal_also_panics() {
-    let mut executor = Executor::builder().panic_policy(PanicPolicy::Ignore).build();
+    let mut executor = Executor::builder().panic_policy(PanicPolicy::IGNORE).build();
     let mut completion = executor.tasks().task(PollAndDropPanic).register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
