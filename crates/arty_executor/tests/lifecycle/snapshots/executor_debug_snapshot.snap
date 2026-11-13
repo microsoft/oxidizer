@@ -1,0 +1,61 @@
+---
+source: crates/arty_executor/tests/lifecycle/completion_lifecycle.rs
+expression: executor
+---
+Executor {
+    shared: ExecutorShared {
+        inner: ExecutorSharedInner {
+            new_tasks: RefCell {
+                value: [],
+            },
+            task_storage: plurality::multi_pool::MultiPool {
+                layouts: 0,
+                max_layouts: None,
+                chunks_allocated: 0,
+                len: 0,
+                ..
+            },
+            task_count: Cell {
+                value: 0,
+            },
+            shutdown: Shutdown { .. },
+            wake: WakeShared {
+                inner: WakeSharedInner {
+                    thread_id: ThreadId([id]),
+                    parent_waker: Waker {
+                        data: [address],
+                        vtable: [address],
+                    },
+                    remote_wake_tx: Sender {
+                        len: 0,
+                        capacity: None,
+                        closed: false,
+                        ..
+                    },
+                    remote_wakes_pending: false,
+                },
+            },
+            remote_wakes: Receiver {
+                len: 0,
+                capacity: None,
+                closed: false,
+                ..
+            },
+            sink: observed::sink::core::Sink {
+                variant: "Noop",
+            },
+            panic_policy: PanicPolicy(
+                Shutdown,
+            ),
+        },
+    },
+    active: [],
+    pending: TaskList {
+        _owner_thread: PhantomData<alloc::rc::Rc<()>>,
+        ..
+    },
+    clock: SimpleClock(
+        SystemFast,
+    ),
+    last_cycle_ended: None,
+}

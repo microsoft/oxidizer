@@ -1,0 +1,5 @@
+---
+source: crates/cachet_tier/tests/dynamic.rs
+expression: cache
+---
+DynamicCache(..)

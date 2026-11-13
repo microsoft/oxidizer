@@ -8,7 +8,6 @@
 //! blocking the primary cache path.
 
 use std::collections::HashSet;
-use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -35,19 +34,14 @@ use crate::telemetry::cache::{WithRequestIdExt, next_request_id};
 ///
 /// let refresh = TimeToRefresh::new(Duration::from_secs(300), Spawner::new_tokio(None));
 /// ```
+#[derive(derive_more::Debug)]
 pub struct TimeToRefresh<K> {
     /// The duration after which a cached entry should be refreshed.
     pub duration: Duration,
     pub(crate) spawner: Spawner,
+    // K need not implement Debug.
+    #[debug(skip)]
     in_flight: Mutex<HashSet<K>>,
-}
-
-impl<K> Debug for TimeToRefresh<K> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TimeToRefresh")
-            .field("duration", &self.duration)
-            .finish_non_exhaustive()
-    }
 }
 
 impl<K> TimeToRefresh<K>
@@ -322,14 +316,6 @@ mod tests {
         assert!(!refresh.try_start_refresh(&key1));
         assert!(refresh.try_start_refresh(&key2));
         assert!(!refresh.try_start_refresh(&key3));
-    }
-
-    #[test]
-    fn time_to_refresh_debug() {
-        let refresh = create_refresh();
-        let debug_str = format!("{refresh:?}");
-        assert!(debug_str.contains("TimeToRefresh"), "got: {debug_str}");
-        assert!(debug_str.contains("duration"), "got: {debug_str}");
     }
 }
 

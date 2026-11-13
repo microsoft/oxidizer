@@ -3,8 +3,7 @@
 
 //! Runtime submission and control capabilities.
 
-use std::any::type_name;
-use std::fmt::Debug;
+use std::fmt;
 use std::thread::ThreadId;
 
 use arty_executor::ShutdownCause;
@@ -108,10 +107,11 @@ impl DispatcherClient {
     }
 }
 
-impl Debug for DispatcherClient {
-    #[cfg_attr(coverage_nightly, coverage(off))] // Opaque diagnostic formatting only.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct(type_name::<Self>()).finish()
+impl fmt::Debug for DispatcherClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DispatcherClient")
+            .field("worker_count", &self.workers().into_iter().len())
+            .finish_non_exhaustive()
     }
 }
 

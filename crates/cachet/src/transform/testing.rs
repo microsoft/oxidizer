@@ -3,7 +3,6 @@
 
 //! Test utilities for codec testing.
 
-use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use super::codec::DecodeOutcome;
@@ -25,6 +24,7 @@ use crate::{Codec, Encoder, Error};
 /// // A codec that always returns a soft failure
 /// let codec = MockCodec::<i32>::soft_failure("version mismatch");
 /// ```
+#[derive(derive_more::Debug)]
 pub(crate) struct MockCodec<T> {
     soft_failure: Option<&'static str>,
     _phantom: PhantomData<T>,
@@ -65,12 +65,6 @@ impl<T: Clone + Send + Sync> Codec<T, T> for MockCodec<T> {
     }
 }
 
-impl<T> Debug for MockCodec<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MockCodec").field("soft_failure", &self.soft_failure).finish()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,13 +89,9 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
     fn debug_output() {
-        let codec = MockCodec::<i32>::value();
-        let debug = format!("{codec:?}");
-        assert!(debug.contains("MockCodec"));
-
-        let codec = MockCodec::<i32>::soft_failure("reason");
-        let debug = format!("{codec:?}");
-        assert!(debug.contains("reason"));
+        let codecs = (MockCodec::<i32>::value(), MockCodec::<i32>::soft_failure("reason"));
+        insta::assert_debug_snapshot!(codecs);
     }
 }

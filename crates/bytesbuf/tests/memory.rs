@@ -5,7 +5,19 @@
 
 #![cfg(feature = "std")]
 
-use bytesbuf::mem::{GlobalPool, OpaqueMemory};
+use bytesbuf::mem::{CallbackMemory, GlobalPool, OpaqueMemory};
+
+#[test]
+#[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
+fn callback_memory_debug_snapshot() {
+    #[derive(Clone, thread_aware::ThreadAware)]
+    struct CallbackData;
+
+    let memory = CallbackMemory::new(CallbackData, |_, size| GlobalPool::new().reserve(size));
+    insta::with_settings!({filters => [(r"0x[0-9a-fA-F]+", "[address]")]}, {
+        insta::assert_debug_snapshot!(memory);
+    });
+}
 
 #[test]
 fn converted_global_pool_and_its_clone_reserve_writable_memory() {

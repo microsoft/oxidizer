@@ -19,7 +19,11 @@ include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/allocation_hints"
 
 [dependencies]
+derive_more = { workspace = true, features = ["debug"] }
 pin-project-lite.workspace = true
+
+[dev-dependencies]
+insta = { workspace = true, features = ["filters"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]

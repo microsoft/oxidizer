@@ -1,9 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::type_name;
-use std::fmt;
-
 use arty_io_core::{DriverError, IoContext};
 use arty_io_host::IoRuntime;
 use performables::arc::Arc;
@@ -29,7 +26,7 @@ use crate::task::Context;
 /// Arty creates each context type once per runtime.
 /// I/O libraries implement [`IoContext`]. See
 /// [driver roles](crate::io#driver-roles) for the rules that their drivers follow.
-#[derive(Clone)]
+#[derive(Clone, derive_more::Debug)]
 pub struct Io {
     runtime: IoRuntime,
     dispatcher: DispatcherClient,
@@ -131,14 +128,6 @@ impl Io {
         });
         self.dispatcher.access_io(worker_index, access)?;
         receive_context(&result_rx, &self.dispatcher)
-    }
-}
-
-impl fmt::Debug for Io {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(type_name::<Self>())
-            .field("thread", &self.thread)
-            .finish_non_exhaustive()
     }
 }
 

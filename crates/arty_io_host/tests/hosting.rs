@@ -240,14 +240,10 @@ impl Driver for FormattingFailureDriver {
     }
 }
 
+#[derive(derive_more::Debug)]
 struct ReentrantFormatError {
+    #[debug(skip)]
     state: Arc<State>,
-}
-
-impl fmt::Debug for ReentrantFormatError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReentrantFormatError").finish_non_exhaustive()
-    }
 }
 
 impl fmt::Display for ReentrantFormatError {
@@ -486,7 +482,29 @@ fn runtime_identity_is_shared_only_by_clones() {
 
     assert_eq!(runtime, runtime.clone());
     assert_ne!(runtime, test_runtime());
-    assert_eq!(format!("{runtime:?}"), "IoRuntime { .. }");
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
+fn driver_host_debug_snapshot() {
+    let host = host(&test_runtime());
+    insta::with_settings!({filters => [
+        (r"alloc::rcs::rc::Rc", "alloc::rc::Rc"),
+        (r"0x[0-9a-fA-F]+", "[address]"),
+        (r"ThreadId\(\s*\d+,?\s*\)", "ThreadId([id])"),
+        (r"Owner \{\s*id: \d+,\s*\}", "Owner { id: [id] }"),
+    ]}, {
+        insta::assert_debug_snapshot!(host);
+    });
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
+fn reentrant_error_debug_snapshot() {
+    let error = ReentrantFormatError {
+        state: Arc::new(State::default()),
+    };
+    insta::assert_debug_snapshot!(error);
 }
 
 #[test]
@@ -914,8 +932,6 @@ fn interrupt_waker_tracks_primary_and_is_safe_after_drop() {
     let state = Arc::new(State::default());
     let interrupt = host.waker();
     let _ = host.context::<Context<false>>(Arc::clone(&state)).unwrap();
-    assert!(format!("{host:?}").starts_with("DriverHost { thread: "));
-
     interrupt.wake_by_ref();
     assert_eq!(state.interrupts.load(Ordering::SeqCst), 1);
 

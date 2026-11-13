@@ -74,6 +74,8 @@ dependencies = [
 name = "allocation_hints"
 version = "0.2.0"
 dependencies = [
+ "derive_more",
+ "insta",
  "pin-project-lite",
 ]
 
@@ -249,6 +251,7 @@ dependencies = [
  "foldhash 0.2.0",
  "futures",
  "gungraun",
+ "insta",
  "many_cpus",
  "metabench",
  "nonempty",
@@ -276,6 +279,7 @@ dependencies = [
  "data_privacy",
  "derive_more",
  "gungraun",
+ "insta",
  "metabench",
  "nm",
  "observed",
@@ -304,7 +308,9 @@ version = "0.6.1"
 dependencies = [
  "arty_io_core",
  "data_privacy",
+ "derive_more",
  "foldhash 0.2.0",
+ "insta",
  "observed",
  "observed_testing",
  "static_assertions",
@@ -859,7 +865,9 @@ dependencies = [
  "benchmarking",
  "bytes",
  "criterion",
+ "derive_more",
  "gungraun",
+ "insta",
  "libc",
  "new_zealand",
  "nm",
@@ -902,8 +910,10 @@ dependencies = [
  "criterion",
  "ctor",
  "dashmap",
+ "derive_more",
  "future_assert",
  "futures",
+ "insta",
  "layered",
  "parking_lot 0.13.0",
  "pin-project-lite",
@@ -949,7 +959,9 @@ dependencies = [
 name = "cachet_tier"
 version = "0.6.1"
 dependencies = [
+ "derive_more",
  "dynosaur",
+ "insta",
  "ohno 0.5.4",
  "parking_lot 0.13.0",
  "recoverable",
@@ -2885,8 +2897,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b67d3d2e287e4b86c10b3f3b641033d1f89b74bdb39d05f34952e2b9a6fe21cd"
 dependencies = [
  "once_cell",
+ "regex",
  "serde",
  "similar",
+ "strip-ansi-escapes",
  "tempfile",
 ]
 
@@ -5588,6 +5602,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strip-ansi-escapes"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a8f8038e7e7969abb3f1b7c2a811225e9296da208539e0f79c5251d6cac0025"
+dependencies = [
+ "vte",
+]
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6507,6 +6530,15 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vte"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "231fdcd7ef3037e8330d8e17e61011a2c244126acc0a982f4040ac3f9f0bc077"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "walkdir"

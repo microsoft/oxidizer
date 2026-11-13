@@ -563,6 +563,27 @@ fn runtime(workers: usize) -> Runtime {
     Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
 }
 
+#[test]
+#[cfg_attr(miri, ignore = "Debug snapshots run natively and under cargo careful")]
+fn io_debug_snapshot() {
+    let runtime = runtime(2);
+    let io = runtime
+        .scheduler()
+        .spawn_anywhere((), |cx, ()| async move { cx.io().clone() })
+        .join()
+        .unwrap();
+    runtime.stop().unwrap();
+
+    insta::with_settings!({filters => [
+        (r"0x[0-9a-fA-F]+", "[address]"),
+        (r"ThreadId\(\s*\d+,?\s*\)", "ThreadId([id])"),
+        (r"Owner \{\s*id: \d+,\s*\}", "Owner { id: [id] }"),
+        (r"NumaNode\(\s*\d+,?\s*\)", "NumaNode([node])"),
+    ]}, {
+        insta::assert_debug_snapshot!("io_debug_snapshot", io);
+    });
+}
+
 fn worker_schedulers(runtime: &Runtime, workers: usize) -> Vec<Scheduler> {
     let schedulers: Vec<_> = (0..workers)
         .map(|_| {
