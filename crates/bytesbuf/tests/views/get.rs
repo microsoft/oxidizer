@@ -6,11 +6,12 @@
 use std::mem::MaybeUninit;
 
 use bytesbuf::BytesView;
-use bytesbuf::mem::testing::TransparentMemory;
+
+use crate::test_memory::TestMemory;
 
 #[test]
 fn get_byte() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
     assert_eq!(view.get_byte(), 1);
@@ -22,7 +23,7 @@ fn get_byte() {
 
 #[test]
 fn copy_to_slice() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
     let mut dst = [0u8; 4];
@@ -34,7 +35,7 @@ fn copy_to_slice() {
 
 #[test]
 fn copy_to_smaller_slice_copies_partially() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
     let mut dst = [0u8; 3];
@@ -47,7 +48,7 @@ fn copy_to_smaller_slice_copies_partially() {
 #[test]
 #[should_panic]
 fn copy_to_bigger_slice_panics() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
     let mut dst = [0u8; 8];
@@ -56,7 +57,7 @@ fn copy_to_bigger_slice_panics() {
 
 #[test]
 fn copy_to_uninit_slice() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
     let mut dst = MaybeUninit::<[u8; 4]>::uninit();
@@ -71,7 +72,7 @@ fn copy_to_uninit_slice() {
 
 #[test]
 fn copy_to_uninit_smaller_slice_copies_partially() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
     let mut dst = MaybeUninit::<[u8; 3]>::uninit();
@@ -87,7 +88,7 @@ fn copy_to_uninit_smaller_slice_copies_partially() {
 #[test]
 #[should_panic]
 fn copy_to_uninit_bigger_slice_panics() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
     let mut dst = [MaybeUninit::<u8>::uninit(); 8];
@@ -96,7 +97,7 @@ fn copy_to_uninit_bigger_slice_panics() {
 
 #[test]
 fn copy_to_slice_multi_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let data_part1 = [10_u8, 20];
     let data_part2 = [30_u8, 40, 50];
     let view_part1 = BytesView::copied_from_slice(&data_part1, &memory);
@@ -112,7 +113,7 @@ fn copy_to_slice_multi_span() {
 
 #[test]
 fn copy_to_uninit_slice_multi_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let data_part1 = [10_u8, 20];
     let data_part2 = [30_u8, 40, 50];
     let view_part1 = BytesView::copied_from_slice(&data_part1, &memory);
@@ -131,7 +132,7 @@ fn copy_to_uninit_slice_multi_span() {
 
 #[test]
 fn get_u16_le() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(&[0x34, 0x12, 0x78, 0x56], &memory);
 
     assert_eq!(view.get_u16_le(), 0x1234);
@@ -142,7 +143,7 @@ fn get_u16_le() {
 
 #[test]
 fn get_u32_le_multi_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let view_part1 = BytesView::copied_from_slice(&[0x78_u8, 0x56], &memory);
     let view_part2 = BytesView::copied_from_slice(&[0x34_u8, 0x12], &memory);
     let mut view_combined = BytesView::from_views([view_part1, view_part2]);
@@ -154,7 +155,7 @@ fn get_u32_le_multi_span() {
 
 #[test]
 fn get_u16_be() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(&[0x12, 0x34, 0x56, 0x78], &memory);
 
     assert_eq!(view.get_u16_be(), 0x1234);
@@ -165,7 +166,7 @@ fn get_u16_be() {
 
 #[test]
 fn get_u32_be_multi_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let view_part1 = BytesView::copied_from_slice(&[0x12_u8, 0x34], &memory);
     let view_part2 = BytesView::copied_from_slice(&[0x56_u8, 0x78], &memory);
     let mut view_combined = BytesView::from_views([view_part1, view_part2]);
@@ -177,7 +178,7 @@ fn get_u32_be_multi_span() {
 
 #[test]
 fn get_u16_ne() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(&[0x34, 0x12, 0x78, 0x56], &memory);
 
     if cfg!(target_endian = "big") {
@@ -193,7 +194,7 @@ fn get_u16_ne() {
 
 #[test]
 fn get_u32_ne_multi_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let view_part1 = BytesView::copied_from_slice(&[0x78_u8, 0x56], &memory);
     let view_part2 = BytesView::copied_from_slice(&[0x34_u8, 0x12], &memory);
     let mut view_combined = BytesView::from_views([view_part1, view_part2]);
@@ -209,7 +210,7 @@ fn get_u32_ne_multi_span() {
 
 #[test]
 fn get_signed_and_float_round_trip() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     let mut data = Vec::new();
     data.extend_from_slice(&(-12345_i16).to_le_bytes());
@@ -232,7 +233,7 @@ fn get_signed_and_float_round_trip() {
 
 #[test]
 fn get_wide_value_multi_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let value: u128 = 0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210;
     let bytes = value.to_le_bytes();
 
@@ -247,7 +248,7 @@ fn get_wide_value_multi_span() {
 
 #[test]
 fn get_misaligned_single_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     // Drop a single leading byte so the eight value bytes sit at an odd offset from the
     // allocation base, exercising the fast path against a misaligned source.
@@ -264,7 +265,7 @@ fn get_misaligned_single_span() {
 #[test]
 #[should_panic]
 fn get_num_insufficient_bytes_panics() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(&[0x00, 0x01, 0x02], &memory);
 
     // Only three bytes are available, so reading a four-byte value must panic.

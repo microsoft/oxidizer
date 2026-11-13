@@ -5,11 +5,12 @@
 
 use bytes::{Buf, Bytes};
 use bytesbuf::BytesView;
-use bytesbuf::mem::testing::TransparentMemory;
+
+use crate::test_memory::TestMemory;
 
 #[test]
 fn view_to_bytes() {
-    let mut builder = TransparentMemory::new().reserve(100);
+    let mut builder = TestMemory::new().reserve(100);
 
     builder.put_slice(1234_u64.to_ne_bytes());
     builder.put_slice(5678_u64.to_ne_bytes());
@@ -43,7 +44,7 @@ fn empty_view_to_bytes() {
 
 #[test]
 fn into_bytes() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
     let bytes: Bytes = view.into();
@@ -53,7 +54,7 @@ fn into_bytes() {
 
 #[test]
 fn test_view_to_bytes() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
@@ -69,7 +70,7 @@ fn test_view_to_bytes() {
 
 #[test]
 fn test_multi_block_view_to_bytes() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     let hello = BytesView::copied_from_slice(b"Hello, ", &memory);
     let world = BytesView::copied_from_slice(b"world!", &memory);

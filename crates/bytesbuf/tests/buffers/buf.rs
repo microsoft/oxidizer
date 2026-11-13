@@ -8,14 +8,16 @@
 use std::mem::MaybeUninit;
 use std::pin::pin;
 
-use bytesbuf::mem::testing::FixedBlockMemory;
-use bytesbuf::mem::{BlockMeta, GlobalPool, Memory};
+#[cfg(feature = "std")]
+use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::{BlockMeta, Memory};
 use bytesbuf::{BytesBuf, BytesView};
 use new_zealand::nz;
 use static_assertions::assert_impl_all;
 use testing_aids::assert_panic;
 
 use crate::test_block::TestMemoryBlock;
+use crate::test_memory::TestMemory;
 
 const U64_SIZE: usize = size_of::<u64>();
 const TWO_U64_SIZE: usize = size_of::<u64>() + size_of::<u64>();
@@ -33,8 +35,9 @@ fn write_copy_of_slice(dst: &mut [MaybeUninit<u8>], src: &[u8]) {
 
 // Compile time test
 fn _can_use_in_dyn_traits(mem: &dyn Memory) {
-    let buf = mem.reserve(123);
-    let _ = buf.into_writer(mem);
+    let _ = mem.reserve(123);
+    #[cfg(feature = "std")]
+    let _ = BytesBuf::new().into_writer(mem);
 }
 
 #[cfg(feature = "seismograph")]
@@ -61,7 +64,7 @@ fn seismograph_identity_follows_consumed_data() {
 fn seismograph_recording_state_reports_exact_buffer_shape() {
     use seismograph_io::Buffer;
 
-    let memory = FixedBlockMemory::new(nz!(4));
+    let memory = TestMemory::with_block_size(nz!(4));
     let mut buffer = memory.reserve(8);
     buffer.put_slice(*b"abcdef");
 
@@ -84,7 +87,7 @@ fn seismograph_io_recording_is_gated_and_captures_buffer_state_delta() {
     let release = SnapshotOptions {
         event_buffers: EventBufferDisposition::Release,
     };
-    let memory = FixedBlockMemory::new(nz!(4));
+    let memory = TestMemory::with_block_size(nz!(4));
     let mut buffer = memory.reserve(8);
     buffer.put_slice(*b"abcdef");
     let resource = Resource::new(IoResourceKind::Other);
@@ -152,7 +155,7 @@ fn seismograph_io_recording_is_gated_and_captures_buffer_state_delta() {
 
 #[test]
 fn smoke_test() {
-    let memory = FixedBlockMemory::new(nz!(1234));
+    let memory = TestMemory::with_block_size(nz!(1234));
 
     let min_length = 1000;
 
@@ -212,7 +215,7 @@ fn extend_capacity() {
     assert_eq!(buf.capacity(), 0);
     assert_eq!(buf.remaining_capacity(), 0);
 
-    let memory = FixedBlockMemory::new(nz!(100));
+    let memory = TestMemory::with_block_size(nz!(100));
 
     // Have 0, desired 10, requesting 10, will get 100.
     buf.reserve(10, &memory);
@@ -245,7 +248,7 @@ fn extend_capacity() {
 
 #[test]
 fn append_existing_view() {
-    let memory = FixedBlockMemory::new(nz!(1234));
+    let memory = TestMemory::with_block_size(nz!(1234));
 
     let min_length = 1000;
 
@@ -296,7 +299,7 @@ fn append_existing_view() {
 #[test]
 fn consume_all_mixed() {
     let mut buf = BytesBuf::new();
-    let memory = FixedBlockMemory::new(nz!(8));
+    let memory = TestMemory::with_block_size(nz!(8));
 
     // Reserve some capacity and add initial data.
     buf.reserve(16, &memory);
@@ -334,7 +337,7 @@ fn peek_basic() {
     assert_eq!(buf.capacity(), 0);
     assert_eq!(buf.remaining_capacity(), 0);
 
-    let memory = FixedBlockMemory::new(nz!(10));
+    let memory = TestMemory::with_block_size(nz!(10));
 
     // Peeking an empty buffer is fine, it is just an empty BytesView in that case.
     let peeked = buf.peek();
@@ -420,7 +423,7 @@ fn consume_part_of_frozen_span() {
     assert_eq!(buf.capacity(), 0);
     assert_eq!(buf.remaining_capacity(), 0);
 
-    let memory = FixedBlockMemory::new(nz!(10));
+    let memory = TestMemory::with_block_size(nz!(10));
 
     buf.reserve(100, &memory);
 
@@ -463,7 +466,7 @@ fn iter_available_empty_with_capacity() {
     assert_eq!(buf.capacity(), 0);
     assert_eq!(buf.remaining_capacity(), 0);
 
-    let memory = FixedBlockMemory::new(nz!(100));
+    let memory = TestMemory::with_block_size(nz!(100));
 
     // Capacity: 0 -> 1000 (10x100)
     buf.reserve(1000, &memory);
@@ -495,7 +498,7 @@ fn iter_available_nonempty() {
     assert_eq!(buf.capacity(), 0);
     assert_eq!(buf.remaining_capacity(), 0);
 
-    let memory = FixedBlockMemory::new(nz!(8));
+    let memory = TestMemory::with_block_size(nz!(8));
 
     // Capacity: 0 -> 16 (2x8)
     buf.reserve(TWO_U64_SIZE, &memory);
@@ -552,7 +555,7 @@ fn vectored_write_zero() {
     assert_eq!(buf.capacity(), 0);
     assert_eq!(buf.remaining_capacity(), 0);
 
-    let memory = FixedBlockMemory::new(nz!(8));
+    let memory = TestMemory::with_block_size(nz!(8));
 
     // Capacity: 0 -> 16 (2x8)
     buf.reserve(TWO_U64_SIZE, &memory);
@@ -578,7 +581,7 @@ fn vectored_write_one_slice() {
     assert_eq!(buf.capacity(), 0);
     assert_eq!(buf.remaining_capacity(), 0);
 
-    let memory = FixedBlockMemory::new(nz!(8));
+    let memory = TestMemory::with_block_size(nz!(8));
 
     // Capacity: 0 -> 8 (1x8)
     buf.reserve(U64_SIZE, &memory);
@@ -614,7 +617,7 @@ fn vectored_write_multiple_slices() {
     assert_eq!(buf.capacity(), 0);
     assert_eq!(buf.remaining_capacity(), 0);
 
-    let memory = FixedBlockMemory::new(nz!(8));
+    let memory = TestMemory::with_block_size(nz!(8));
 
     // Capacity: 0 -> 24 (3x8)
     buf.reserve(THREE_U64_SIZE, &memory);
@@ -679,7 +682,7 @@ fn vectored_write_max_len() {
     assert_eq!(buf.capacity(), 0);
     assert_eq!(buf.remaining_capacity(), 0);
 
-    let memory = FixedBlockMemory::new(nz!(8));
+    let memory = TestMemory::with_block_size(nz!(8));
 
     // Capacity: 0 -> 24 (3x8)
     buf.reserve(THREE_U64_SIZE, &memory);
@@ -740,7 +743,7 @@ fn vectored_write_max_len() {
 fn vectored_write_max_len_overflow() {
     let mut buf = BytesBuf::new();
 
-    let memory = FixedBlockMemory::new(nz!(8));
+    let memory = TestMemory::with_block_size(nz!(8));
 
     // Capacity: 0 -> 24 (3x8)
     buf.reserve(THREE_U64_SIZE, &memory);
@@ -759,7 +762,7 @@ fn vectored_write_overcommit() {
     assert_eq!(buf.capacity(), 0);
     assert_eq!(buf.remaining_capacity(), 0);
 
-    let memory = FixedBlockMemory::new(nz!(8));
+    let memory = TestMemory::with_block_size(nz!(8));
 
     // Capacity: 0 -> 16 (2x8)
     buf.reserve(TWO_U64_SIZE, &memory);
@@ -784,7 +787,7 @@ fn vectored_write_abort() {
     assert_eq!(buf.capacity(), 0);
     assert_eq!(buf.remaining_capacity(), 0);
 
-    let memory = FixedBlockMemory::new(nz!(8));
+    let memory = TestMemory::with_block_size(nz!(8));
 
     // Capacity: 0 -> 8 (1x8)
     buf.reserve(U64_SIZE, &memory);
@@ -834,7 +837,7 @@ fn peek_empty_builder() {
 
 #[test]
 fn peek_with_frozen_spans_only() {
-    let memory = FixedBlockMemory::new(nz!(10));
+    let memory = TestMemory::with_block_size(nz!(10));
     let mut buf = BytesBuf::new();
 
     buf.reserve(20, &memory);
@@ -855,7 +858,7 @@ fn peek_with_frozen_spans_only() {
 
 #[test]
 fn peek_with_partially_filled_span_builder() {
-    let memory = FixedBlockMemory::new(nz!(10));
+    let memory = TestMemory::with_block_size(nz!(10));
     let mut buf = BytesBuf::new();
 
     buf.reserve(10, &memory);
@@ -876,7 +879,7 @@ fn peek_with_partially_filled_span_builder() {
 
 #[test]
 fn peek_preserves_capacity_of_partial_span_builder() {
-    let memory = FixedBlockMemory::new(nz!(20));
+    let memory = TestMemory::with_block_size(nz!(20));
     let mut buf = BytesBuf::new();
 
     buf.reserve(20, &memory);
@@ -909,7 +912,7 @@ fn peek_preserves_capacity_of_partial_span_builder() {
 
 #[test]
 fn peek_with_mixed_frozen_and_unfrozen() {
-    let memory = FixedBlockMemory::new(nz!(10));
+    let memory = TestMemory::with_block_size(nz!(10));
     let mut buf = BytesBuf::new();
 
     buf.reserve(30, &memory);
@@ -943,7 +946,7 @@ fn peek_with_mixed_frozen_and_unfrozen() {
 
 #[test]
 fn peek_then_consume() {
-    let memory = FixedBlockMemory::new(nz!(20));
+    let memory = TestMemory::with_block_size(nz!(20));
     let mut buf = BytesBuf::new();
 
     buf.reserve(20, &memory);
@@ -974,7 +977,7 @@ fn peek_then_consume() {
 
 #[test]
 fn peek_multiple_times() {
-    let memory = FixedBlockMemory::new(nz!(20));
+    let memory = TestMemory::with_block_size(nz!(20));
     let mut buf = BytesBuf::new();
 
     buf.reserve(20, &memory);
@@ -999,7 +1002,7 @@ fn first_unfilled_slice_meta_no_capacity() {
 
 #[test]
 fn first_unfilled_slice_meta_no_meta() {
-    let memory = FixedBlockMemory::new(nz!(64));
+    let memory = TestMemory::with_block_size(nz!(64));
     let buf = memory.reserve(64);
     assert!(buf.first_unfilled_slice_meta().is_none());
 }
@@ -1031,7 +1034,7 @@ fn first_unfilled_slice_meta_with_meta() {
 
 #[test]
 fn split_off_remaining_basic() {
-    let memory = FixedBlockMemory::new(nz!(100));
+    let memory = TestMemory::with_block_size(nz!(100));
     let mut buf = memory.reserve(100);
 
     buf.put_u64_ne(1234);
@@ -1051,7 +1054,7 @@ fn split_off_remaining_basic() {
 
 #[test]
 fn split_off_remaining_write_to_split() {
-    let memory = FixedBlockMemory::new(nz!(100));
+    let memory = TestMemory::with_block_size(nz!(100));
     let mut buf = memory.reserve(100);
 
     buf.put_u64_ne(1111);
@@ -1075,7 +1078,7 @@ fn split_off_remaining_write_to_split() {
 
 #[test]
 fn split_off_remaining_all_capacity() {
-    let memory = FixedBlockMemory::new(nz!(100));
+    let memory = TestMemory::with_block_size(nz!(100));
     let mut buf = memory.reserve(100);
     let full_capacity = buf.remaining_capacity();
 
@@ -1087,7 +1090,7 @@ fn split_off_remaining_all_capacity() {
 
 #[test]
 fn split_off_remaining_zero() {
-    let memory = FixedBlockMemory::new(nz!(100));
+    let memory = TestMemory::with_block_size(nz!(100));
     let mut buf = memory.reserve(100);
     let original_capacity = buf.remaining_capacity();
 
@@ -1100,7 +1103,7 @@ fn split_off_remaining_zero() {
 
 #[test]
 fn split_off_remaining_multi_block() {
-    let memory = FixedBlockMemory::new(nz!(10));
+    let memory = TestMemory::with_block_size(nz!(10));
 
     // Reserve enough to trigger multiple blocks.
     let mut buf = memory.reserve(30);
@@ -1139,7 +1142,7 @@ fn split_off_remaining_empty_buffer_no_capacity() {
 
 #[test]
 fn split_off_remaining_panics_on_overflow() {
-    let memory = FixedBlockMemory::new(nz!(100));
+    let memory = TestMemory::with_block_size(nz!(100));
     let mut buf = memory.reserve(100);
     let capacity = buf.remaining_capacity();
 
@@ -1148,7 +1151,7 @@ fn split_off_remaining_panics_on_overflow() {
 
 #[test]
 fn split_off_remaining_checked_returns_none() {
-    let memory = FixedBlockMemory::new(nz!(100));
+    let memory = TestMemory::with_block_size(nz!(100));
     let mut buf = memory.reserve(100);
     let capacity = buf.remaining_capacity();
 

@@ -16,13 +16,13 @@ use std::pin::pin;
 use std::thread;
 
 use bytesbuf::mem::BlockMeta;
-use bytesbuf::mem::testing::{FixedBlockMemory, TransparentMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use new_zealand::nz;
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use testing_aids::assert_panic;
 
 use crate::test_block::TestMemoryBlock;
+use crate::test_memory::TestMemory;
 
 assert_impl_all!(BytesView: Send, Sync, Eq);
 assert_not_impl_any!(BytesView: From<&'static [u8]>);
@@ -69,7 +69,7 @@ impl Hasher for RecordingHasher {
 
 #[test]
 fn smoke_test() {
-    let mut span_builder = TransparentMemory::new().reserve(10);
+    let mut span_builder = TestMemory::new().reserve(10);
 
     span_builder.put_slice(1234_u64.to_ne_bytes());
     span_builder.put_slice(16_u16.to_ne_bytes());
@@ -107,7 +107,7 @@ fn smoke_test() {
 
 #[test]
 fn oob_is_panic() {
-    let mut span_builder = TransparentMemory::new().reserve(10);
+    let mut span_builder = TestMemory::new().reserve(10);
 
     span_builder.put_slice(1234_u64.to_ne_bytes());
     span_builder.put_slice(16_u16.to_ne_bytes());
@@ -170,7 +170,7 @@ fn extend_lifetime_references_all_blocks() {
 
 #[test]
 fn from_views() {
-    let mut span_builder = TransparentMemory::new().reserve(100);
+    let mut span_builder = TestMemory::new().reserve(100);
 
     span_builder.put_slice(1234_u64.to_ne_bytes());
     span_builder.put_slice(5678_u64.to_ne_bytes());
@@ -201,7 +201,7 @@ fn empty_view() {
 #[test]
 fn slice_from_single_span_view() {
     // A very simple view to start with, consisting of just one 100 byte span.
-    let span_builder = TransparentMemory::new().reserve(100);
+    let span_builder = TestMemory::new().reserve(100);
 
     let mut buf = span_builder;
 
@@ -235,7 +235,7 @@ fn slice_from_single_span_view() {
 
 #[test]
 fn slice_from_multi_span_view() {
-    let memory = FixedBlockMemory::new(nz!(10));
+    let memory = TestMemory::with_block_size(nz!(10));
     let mut buf = memory.reserve(100);
 
     for i in 0..100 {
@@ -270,7 +270,7 @@ fn slice_from_multi_span_view() {
 
 #[test]
 fn slice_indexing_kinds() {
-    let span_builder = TransparentMemory::new().reserve(10);
+    let span_builder = TestMemory::new().reserve(10);
 
     let mut buf = span_builder;
     buf.put_byte(0);
@@ -314,7 +314,7 @@ fn slice_indexing_kinds() {
 
 #[test]
 fn slice_checked_with_excluded_start_bound() {
-    let span_builder = TransparentMemory::new().reserve(100);
+    let span_builder = TestMemory::new().reserve(100);
 
     let mut buf = span_builder;
     buf.put_byte(0);
@@ -351,7 +351,7 @@ fn slice_checked_with_excluded_start_bound() {
 
 #[test]
 fn slice_oob_is_panic() {
-    let span_builder = TransparentMemory::new().reserve(1000);
+    let span_builder = TestMemory::new().reserve(1000);
 
     let mut buf = span_builder;
     buf.put_byte_repeated(0, 100);
@@ -369,7 +369,7 @@ fn slice_oob_is_panic() {
 
 #[test]
 fn slice_at_boundary_is_not_panic() {
-    let span_builder = TransparentMemory::new().reserve(100);
+    let span_builder = TestMemory::new().reserve(100);
 
     let mut buf = span_builder;
     buf.put_byte_repeated(0, 100);
@@ -389,7 +389,7 @@ fn slice_at_boundary_is_not_panic() {
 
 #[test]
 fn slice_empty_is_empty_if_not_oob() {
-    let span_builder = TransparentMemory::new().reserve(100);
+    let span_builder = TestMemory::new().reserve(100);
 
     let mut buf = span_builder;
 
@@ -410,7 +410,7 @@ fn slice_empty_is_empty_if_not_oob() {
 
 #[test]
 fn consume_all_slices() {
-    let memory = FixedBlockMemory::new(nz!(10));
+    let memory = TestMemory::with_block_size(nz!(10));
     let mut buf = memory.reserve(100);
 
     for i in 0..100 {
@@ -453,7 +453,7 @@ fn multithreaded_usage() {
         .unwrap();
     }
 
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
     post_to_another_thread(view);
@@ -461,7 +461,7 @@ fn multithreaded_usage() {
 
 #[test]
 fn slices_iterator() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let segment1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
     let segment2 = BytesView::copied_from_slice(b"Hello, another world!", &memory);
 
@@ -482,7 +482,7 @@ fn slices_iterator_empty() {
 
 #[test]
 fn to_vec_single_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
     let bytes = view.to_vec();
@@ -494,7 +494,7 @@ fn to_vec_single_span() {
 
 #[test]
 fn to_vec_multi_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let segment1 = BytesView::copied_from_slice(b"Hello, ", &memory);
     let segment2 = BytesView::copied_from_slice(b"world!", &memory);
 
@@ -516,7 +516,7 @@ fn to_vec_empty() {
 
 #[test]
 fn eq_view() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     let view1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
     let view2 = BytesView::copied_from_slice(b"Hello, world!", &memory);
@@ -555,7 +555,7 @@ fn eq_view() {
 
 #[test]
 fn eq_slice() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     let view1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
@@ -584,7 +584,7 @@ fn eq_slice() {
 
 #[test]
 fn eq_array() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     let view1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
@@ -619,9 +619,9 @@ fn first_slice_meta_empty_view() {
 
 #[test]
 fn first_slice_meta_no_metadata() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let view = BytesView::copied_from_slice(b"Hello", &memory);
-    // TransparentMemory does not attach metadata.
+    // TestMemory does not attach metadata.
     assert!(view.first_slice_meta().is_none());
 }
 
@@ -650,7 +650,7 @@ fn first_slice_meta_with_metadata() {
 
 #[test]
 fn meta_none() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     let view1 = BytesView::copied_from_slice(b"Hello, ", &memory);
     let view2 = BytesView::copied_from_slice(b"world!", &memory);
@@ -726,7 +726,7 @@ fn meta_some() {
 
 #[test]
 fn append_single_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     // Create two single-span views.
     let mut view1 = BytesView::copied_from_slice(b"Hello, ", &memory);
@@ -743,7 +743,7 @@ fn append_single_span() {
 
 #[test]
 fn append_multi_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     // Create two multi-span views (2 spans each)
     let view1_part1 = BytesView::copied_from_slice(b"AAA", &memory);
@@ -765,7 +765,7 @@ fn append_multi_span() {
 
 #[test]
 fn append_empty_view() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     let mut view1 = BytesView::copied_from_slice(b"Hello", &memory);
     let view2 = BytesView::new();
@@ -786,7 +786,7 @@ fn append_empty_view() {
 #[test]
 fn append_preserves_identity_when_only_one_view_has_data() {
     use seismograph_io::Buffer;
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut populated = BytesView::copied_from_slice(b"Hello", &memory);
     let populated_id = populated.recording_state().id();
     populated.append(BytesView::new());
@@ -804,7 +804,7 @@ fn append_preserves_identity_when_only_one_view_has_data() {
 
 #[test]
 fn concat_single_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     // Create two single-span views
     let view1 = BytesView::copied_from_slice(b"Hello, ", &memory);
@@ -826,7 +826,7 @@ fn concat_single_span() {
 
 #[test]
 fn concat_multi_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     // Create two multi-span views (2 spans each)
     let view1_part1 = BytesView::copied_from_slice(b"AAA", &memory);
@@ -853,7 +853,7 @@ fn concat_multi_span() {
 
 #[test]
 fn concat_empty_views() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
 
     let view1 = BytesView::copied_from_slice(b"Hello", &memory);
     let view2 = BytesView::new();

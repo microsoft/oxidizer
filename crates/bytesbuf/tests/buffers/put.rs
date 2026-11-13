@@ -3,12 +3,13 @@
 
 //! Tests behavior through the public API.
 
-use bytesbuf::mem::testing::TransparentMemory;
 use bytesbuf::{BytesBuf, BytesView};
+
+use crate::test_memory::TestMemory;
 
 #[test]
 fn put_slice() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(100);
 
     let data = [1u8, 2, 3, 4, 5];
@@ -25,7 +26,7 @@ fn put_slice() {
 
 #[test]
 fn put_slice_empty() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(100);
 
     buf.put_slice([]);
@@ -36,7 +37,7 @@ fn put_slice_empty() {
 
 #[test]
 fn put_view_single_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(100);
 
     let data = [10_u8, 20, 30, 40, 50];
@@ -56,7 +57,7 @@ fn put_view_single_span() {
 
 #[test]
 fn put_view_multi_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(100);
 
     let data_part1 = [10_u8, 20];
@@ -79,7 +80,7 @@ fn put_view_multi_span() {
 
 #[test]
 fn put_view_empty() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(100);
 
     let view = BytesView::new();
@@ -92,7 +93,7 @@ fn put_view_empty() {
 
 #[test]
 fn put_view_peeked_from_self() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(100);
 
     let data = [1u8, 2, 3, 4, 5];
@@ -115,7 +116,7 @@ fn put_view_peeked_from_self() {
 
 #[test]
 fn put_byte() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(10);
 
     buf.put_byte(0xAB);
@@ -132,7 +133,7 @@ fn put_byte() {
 
 #[test]
 fn put_bytes() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(10);
 
     buf.put_byte_repeated(0xFF, 5);
@@ -148,7 +149,7 @@ fn put_bytes() {
 
 #[test]
 fn put_bytes_into_multi_span() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = BytesBuf::new();
 
     // Result: 5
@@ -169,7 +170,7 @@ fn put_bytes_into_multi_span() {
 
 #[test]
 fn put_num() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(16);
 
     buf.put_u32_le(0x1234_5678);
@@ -206,7 +207,7 @@ fn put_num() {
 
 #[test]
 fn put_num_signed_and_float_round_trip() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(64);
 
     buf.put_i16_le(-12345);

@@ -6,14 +6,15 @@
 use std::io::Write;
 
 use bytesbuf::BytesBuf;
-use bytesbuf::mem::testing::{FixedBlockMemory, TransparentMemory};
 use new_zealand::nz;
+
+use crate::test_memory::TestMemory;
 
 #[test]
 fn smoke_test_write_and_verify_data() {
     let test_data = b"Hello, world! This is a test.";
 
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let builder = memory.reserve(100);
 
     let mut write_adapter = builder.into_writer(&memory);
@@ -31,7 +32,7 @@ fn smoke_test_write_and_verify_data() {
 
 #[test]
 fn existing_content_is_preserved() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut builder = memory.reserve(100);
 
     // Add some initial content to the builder
@@ -55,7 +56,7 @@ fn existing_content_is_preserved() {
 fn sufficient_capacity_not_extended() {
     let test_data = b"Small data"; // Much smaller than 100 bytes
 
-    let memory = FixedBlockMemory::new(nz!(1024));
+    let memory = TestMemory::with_block_size(nz!(1024));
     let builder = memory.reserve(100);
 
     let initial_capacity = builder.capacity();
@@ -79,7 +80,7 @@ fn sufficient_capacity_not_extended() {
 
 #[test]
 fn empty_buffer_small_write_reserves_initial_size() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let buf = BytesBuf::new();
     assert_eq!(buf.capacity(), 0);
 
@@ -92,7 +93,7 @@ fn empty_buffer_small_write_reserves_initial_size() {
 
 #[test]
 fn empty_buffer_large_write_reserves_growth_size() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let buf = BytesBuf::new();
 
     let payload = vec![0u8; 4096 + 1];
@@ -106,7 +107,7 @@ fn empty_buffer_large_write_reserves_growth_size() {
 
 #[test]
 fn non_empty_buffer_reserves_growth_size() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(16);
     buf.put_slice([1; 16]);
     assert_eq!(buf.remaining_capacity(), 0);

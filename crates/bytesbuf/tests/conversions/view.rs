@@ -3,15 +3,17 @@
 
 //! Tests behavior through the public API.
 
+#[cfg(feature = "std")]
 use std::io::IoSlice;
 
 use bytes::Buf;
-use bytesbuf::mem::testing::FixedBlockMemory;
 use new_zealand::nz;
+
+use crate::test_memory::TestMemory;
 
 #[test]
 fn buf_compat() {
-    let memory = FixedBlockMemory::new(nz!(25));
+    let memory = TestMemory::with_block_size(nz!(25));
 
     // 25 x 4
     let mut buf = memory.reserve(100);
@@ -39,21 +41,25 @@ fn buf_compat() {
 
     Buf::advance(&mut bytes, 5);
 
-    let mut io_slices = [IoSlice::new(&[]); 4];
-    let n = Buf::chunks_vectored(&bytes, &mut io_slices);
+    #[cfg(feature = "std")]
+    {
+        let mut io_slices = [IoSlice::new(&[]); 4];
+        let n = Buf::chunks_vectored(&bytes, &mut io_slices);
 
-    // We have already advanced past the first 30 bytes
-    // but the remaining 70 should still be here for us as 20 + 25 + 25.
-    assert_eq!(n, 3);
+        // We have already advanced past the first 30 bytes
+        // but the remaining 70 should still be here for us as 20 + 25 + 25.
+        assert_eq!(n, 3);
 
-    assert_eq!(&*io_slices[0], &[0x44; 20]);
-    assert_eq!(&*io_slices[1], &[0x44; 25]);
-    assert_eq!(&*io_slices[2], &[0x44; 25]);
+        assert_eq!(&*io_slices[0], &[0x44; 20]);
+        assert_eq!(&*io_slices[1], &[0x44; 25]);
+        assert_eq!(&*io_slices[2], &[0x44; 25]);
+    }
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn chunks_vectored_empty_dst() {
-    let memory = FixedBlockMemory::new(nz!(25));
+    let memory = TestMemory::with_block_size(nz!(25));
     let mut buf = memory.reserve(25);
     buf.put_byte_repeated(0x44, 25);
 

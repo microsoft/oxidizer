@@ -6,11 +6,12 @@
 use std::io::{BufRead, Read};
 
 use bytesbuf::BytesView;
-use bytesbuf::mem::testing::TransparentMemory;
+
+use crate::test_memory::TestMemory;
 
 #[test]
 fn smoke_test() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(b"Hello, world", &memory);
 
     let mut buffer = [0u8; 5];
@@ -36,7 +37,7 @@ fn smoke_test() {
 
 #[test]
 fn buf_read_fill_buf_and_consume() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(b"Hello, world", &memory);
 
     // fill_buf returns the first contiguous slice without consuming it.
@@ -60,7 +61,7 @@ fn buf_read_fill_buf_and_consume() {
 
 #[test]
 fn buf_read_read_line() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(b"first\nsecond\n", &memory);
 
     let mut line = String::new();
@@ -81,7 +82,7 @@ fn buf_read_read_line() {
 
 #[test]
 fn buf_read_on_empty_view() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut view = BytesView::copied_from_slice(b"", &memory);
 
     let buf = view.fill_buf().unwrap();

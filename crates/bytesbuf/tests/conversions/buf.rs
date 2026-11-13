@@ -4,11 +4,12 @@
 //! Tests behavior through the public API.
 
 use bytes::BufMut;
-use bytesbuf::mem::testing::TransparentMemory;
+
+use crate::test_memory::TestMemory;
 
 #[test]
 fn buf_mut_compat() {
-    let memory = TransparentMemory::new();
+    let memory = TestMemory::new();
     let mut buf = memory.reserve(100);
 
     assert_eq!(BufMut::remaining_mut(&buf), 100);
@@ -20,26 +21,27 @@ fn buf_mut_compat() {
 
     let chunk = BufMut::chunk_mut(&mut buf);
     assert_eq!(chunk.len(), 100);
+    chunk.copy_from_slice(&[0; 100]);
 
-    // SAFETY: Lies - we did not write anything. But we will also
-    // not touch the data - we are only inspecting the bookkeeping.
-    // Good enough for test code.
+    // SAFETY: The first 50 bytes of this chunk were initialized above.
     unsafe {
         BufMut::advance_mut(&mut buf, 50);
     }
 
     let chunk = BufMut::chunk_mut(&mut buf);
     assert_eq!(chunk.len(), 50);
+    chunk.copy_from_slice(&[0; 50]);
 
-    // SAFETY: See above.
+    // SAFETY: All 50 bytes of this chunk were initialized above.
     unsafe {
         BufMut::advance_mut(&mut buf, 50);
     }
 
     let chunk = BufMut::chunk_mut(&mut buf);
     assert_eq!(chunk.len(), 100);
+    chunk.copy_from_slice(&[0; 100]);
 
-    // SAFETY: See above.
+    // SAFETY: All 100 bytes of this chunk were initialized above.
     unsafe {
         BufMut::advance_mut(&mut buf, 100);
     }

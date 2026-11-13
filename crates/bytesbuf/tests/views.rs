@@ -9,8 +9,11 @@ use bytesbuf::mem;
 #[path = "../src/mem/testing/test_block.rs"]
 mod test_block;
 
+mod test_memory;
+
 mod views {
     mod get;
+    #[cfg(feature = "std")]
     mod read;
     mod view;
 }

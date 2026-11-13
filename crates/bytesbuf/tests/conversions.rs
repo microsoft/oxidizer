@@ -5,7 +5,13 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+#[cfg(feature = "bytes-compat")]
+use bytesbuf::mem;
+
 mod support;
+
+#[cfg(feature = "bytes-compat")]
+mod test_memory;
 
 mod conversions {
     #[cfg(feature = "bytes-compat")]
