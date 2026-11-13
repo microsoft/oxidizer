@@ -169,7 +169,6 @@ impl<T: ?Sized, A: Allocator> From<Box<T, A>> for Pin<Box<T, A>> {
 
 impl<T, A: Allocator> Box<MaybeUninit<T>, A> {
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // Removing initialization makes assume_init() UB, so the mutant is invalid.
     pub(crate) fn write_value(&mut self, value: T) {
         // SAFETY: allocation APIs call this only for a freshly reserved,
         // uniquely owned uninitialized slot.

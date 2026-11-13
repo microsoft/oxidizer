@@ -9,7 +9,6 @@ use std::task::Poll;
 
 use arty_executor::{ExecutorBuilder, PanicPolicy, TaskBuilder, TaskPlacement, TaskSet, discard_task_panic_payload};
 use static_assertions::{assert_impl_all, assert_not_impl_any};
-use thread_aware::ThreadBuilder;
 
 use super::support::TaskBuilderExt as _;
 
@@ -27,7 +26,7 @@ fn default_builder() {
 fn panic_policy_is_configurable() {
     for (builder, shuts_down) in [
         (ExecutorBuilder::new(), true),
-        (ExecutorBuilder::new().panic_policy(PanicPolicy::Ignore), false),
+        (ExecutorBuilder::new().panic_policy(PanicPolicy::IGNORE), false),
     ] {
         let mut executor = builder.build();
         let _completion = executor
@@ -44,14 +43,22 @@ fn panic_policy_is_configurable() {
 #[test]
 fn configured_thread_must_identify_the_current_thread() {
     let foreign_id = std::thread::spawn(|| std::thread::current().id()).join().unwrap();
-    let thread = ThreadBuilder::default().build(foreign_id);
+    let thread = thread_aware_core::__private::v1::new_thread(
+        thread_aware_core::__private::v1::new_owner(),
+        foreign_id,
+        thread_aware_core::__private::v1::new_numa_node(0),
+    );
 
     catch_unwind(|| ExecutorBuilder::new().thread(thread).build()).unwrap_err();
 }
 
 #[test]
 fn configured_current_thread_builds_the_executor() {
-    let thread = ThreadBuilder::default().build(std::thread::current().id());
+    let thread = thread_aware_core::__private::v1::new_thread(
+        thread_aware_core::__private::v1::new_owner(),
+        std::thread::current().id(),
+        thread_aware_core::__private::v1::new_numa_node(0),
+    );
 
     drop(ExecutorBuilder::new().thread(thread).build());
 }

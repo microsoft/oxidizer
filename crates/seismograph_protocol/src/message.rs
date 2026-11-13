@@ -395,7 +395,6 @@ const ACTIVITY_HEADER_BYTES: usize = 148;
 // Five counters, the retired flag, and the length prefix of an empty name.
 const ACTIVITY_THREAD_MIN_BYTES: usize = 43;
 
-#[cfg_attr(test, mutants::skip)] // The only observable boundary requires constructing a payload larger than u32::MAX.
 fn activity_size(activity: &RecorderActivity) -> Result<usize, Error> {
     let size = activity.threads.iter().try_fold(ACTIVITY_HEADER_BYTES, |size, thread| {
         u16::try_from(thread.name.len()).map_err(|_error| Error::MessageTooLarge)?;

@@ -262,7 +262,7 @@ impl DriverHost {
         let mut drivers = self
             .drivers
             .try_borrow_mut()
-            .map_err(|_borrow_error| DriverError::from_message("I/O driver initialization cannot overlap cycle execution"))?;
+            .expect("the initial borrow succeeded and synchronous initialization returned without retaining a driver borrow");
         match local.role {
             DriverRole::Primary => {
                 assert!(
@@ -434,5 +434,20 @@ mod tests {
         };
 
         assert_eq!(error.to_string(), "I/O context retrieval cannot be nested during initialization");
+    }
+
+    #[test]
+    fn context_retrieval_is_rejected_while_drivers_are_borrowed() {
+        let thread = ThreadBuilder::default().build(std::thread::current().id());
+        let runtime = IoRuntime::new(Sink::noop());
+        let host = runtime.driver_host(thread, Waker::noop().clone()).unwrap();
+        let drivers = host.drivers.borrow_mut();
+
+        let Err(error) = host.context::<TestContext>(()) else {
+            panic!("context retrieval should fail while drivers are borrowed");
+        };
+        assert_eq!(error.to_string(), "I/O context retrieval cannot overlap driver cycle execution");
+        drop(drivers);
+        host.context::<TestContext>(()).unwrap();
     }
 }

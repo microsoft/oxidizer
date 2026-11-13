@@ -308,7 +308,6 @@ known_headers! {
 const MAX_NAME_LEN: usize = (1 << 16) - 1;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)] // `>` to `>=` is equivalent when assigning the same length.
 const fn max_known_len() -> usize {
     let mut longest = 0;
     let mut index = 0;

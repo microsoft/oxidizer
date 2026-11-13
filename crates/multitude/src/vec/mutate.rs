@@ -201,7 +201,6 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// O(1) when the buffer is still at the chunk's bump cursor: reclaims the
     /// unused capacity tail without moving data. Otherwise this is a no-op.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // thin delegation; logic covered via `reclaim_capacity_tail`
     /// ```
     /// use multitude::Arena;
     ///
@@ -219,7 +218,6 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     ///
     /// Capacity remains at least `max(self.len(), min_capacity)`. Reclamation
     /// only succeeds while the buffer is still at the chunk's bump cursor.
-    #[cfg_attr(test, mutants::skip)]
     /// ```
     /// use multitude::Arena;
     ///
@@ -247,7 +245,6 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     // At the exact normal-allocation boundary, the refill hint routes the
     // buffer through the oversized path, so either comparison is observable
     // as the same failed reclaim.
-    #[cfg_attr(test, mutants::skip)]
     pub(super) fn reclaim_capacity_tail(&mut self, target_cap: usize) -> bool {
         if const { mem::size_of::<T>() == 0 } {
             return false;
@@ -717,7 +714,6 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// Panics if `at > len`, or if the backing allocator fails. Use
     /// [`Self::try_split_off`] for a fallible variant.
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // routing mutations produce externally indistinguishable empty tails
     /// ```
     /// use multitude::Arena;
     ///
@@ -742,7 +738,6 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// # Panics
     ///
     /// Panics if `at > len`.
-    #[cfg_attr(test, mutants::skip)] // routing mutations produce externally indistinguishable empty tails
     /// ```
     /// # fn main() -> Result<(), multitude::AllocError> {
     /// use multitude::Arena;

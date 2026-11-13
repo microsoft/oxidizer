@@ -11,7 +11,8 @@ use std::rc::Rc;
 use std::task::{Context, Poll};
 use std::thread::{self, ThreadId};
 
-use arty::runtime::{PanicPolicy, Runtime, WorkersPolicy};
+use arty::runtime::hook::Panic;
+use arty::runtime::{Runtime, WorkersPolicy};
 
 #[derive(Debug, Default, PartialEq, Eq)]
 struct DropRecord {
@@ -46,7 +47,7 @@ impl Drop for BorrowingFuture<'_> {
 fn scoped_return_waits_for_borrowed_non_send_future_destructor() {
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
-        .panic(PanicPolicy::ignore())
+        .on(Panic::IGNORE)
         .build()
         .unwrap();
     let worker = runtime.scheduler().block_on(async |_| thread::current().id()).unwrap();

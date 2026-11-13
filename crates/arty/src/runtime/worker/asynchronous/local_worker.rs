@@ -8,6 +8,7 @@ use thread_aware::Thread;
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
+use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, LocalHookGuard, Panic};
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
@@ -15,13 +16,17 @@ use crate::task::preparation::DeferredTaskFactory;
 
 thread_local! {
     static CURRENT: RefCell<Option<LocalWorker>> = const { RefCell::new(None) };
+    static PANIC_HOOKS: RefCell<Option<Vec<ErasedHookFn<Panic>>>> = const { RefCell::new(None) };
 }
+
+static LOCAL_PANIC_HOOK: LocalHook<Panic> = LocalHook { hooks: &PANIC_HOOKS };
 
 /// Asynchronous worker state that remains attached throughout thread teardown.
 #[derive(Debug)]
 pub(crate) struct LocalWorker {
     scheduler: Option<SchedulerContext>,
     driver_host: Option<RuntimeDriverHost>,
+    panic_hooks: Option<LocalHookGuard<Panic>>,
 }
 
 impl LocalWorker {
@@ -29,6 +34,7 @@ impl LocalWorker {
         Self {
             scheduler: None,
             driver_host: None,
+            panic_hooks: None,
         }
     }
 
@@ -40,7 +46,12 @@ impl LocalWorker {
         });
     }
 
-    pub(super) fn register_scheduler(context: Context, tasks: TaskSet, executor_shutdown: ExecutorShutdown) {
+    pub(super) fn install_scheduler(
+        context: Context,
+        tasks: TaskSet,
+        executor_shutdown: ExecutorShutdown,
+        hook_registrations: Vec<HookRegistration>,
+    ) {
         let results = JoinHandlePool::new(context.dispatcher().shutdown().clone());
         let scheduler = SchedulerContext {
             thread: context.thread().clone(),
@@ -49,11 +60,16 @@ impl LocalWorker {
             executor_shutdown,
             results,
         };
+        let panic_hooks = LOCAL_PANIC_HOOK.initialize();
         Self::with_current_mut(|current| {
-            let current = current.expect("task worker startup attaches its local worker before registering the scheduler");
-            assert!(current.scheduler.is_none(), "a scheduler is already registered on this task worker");
+            let current = current.expect("task worker startup attaches its local worker before installing the scheduler");
+            assert!(current.scheduler.is_none(), "a scheduler is already installed on this task worker");
             current.scheduler = Some(scheduler);
+            current.panic_hooks = Some(panic_hooks);
         });
+        for hook in hook_registrations {
+            Self::install_hook(hook, None);
+        }
     }
 
     pub(crate) fn is_current() -> bool {
@@ -80,10 +96,33 @@ impl LocalWorker {
         });
     }
 
-    #[cfg_attr(test, mutants::skip)] // Retaining direct registration during executor teardown can strand shutdown.
+    pub(crate) fn on_panic(panic: arty_executor::TaskPanicPayload) -> (arty_executor::PanicAction, arty_executor::TaskPanicPayload) {
+        if !Self::with_scheduler(|current| current.is_some()) {
+            return Panic::new(panic).into_parts();
+        }
+        let mut event = Panic::new(panic);
+        LOCAL_PANIC_HOOK.execute(&mut event);
+        event.into_parts()
+    }
+
+    pub(crate) fn install_hook(hook: HookRegistration, source: Option<&Thread>) {
+        let destination = Self::with_scheduler(|current| {
+            let current = current.expect("a running worker retains its scheduler while processing hook registration");
+            current.thread.clone()
+        });
+        match hook {
+            HookRegistration::Panic(hook) => LOCAL_PANIC_HOOK.install(hook, source, &destination),
+        }
+    }
+
     pub(super) fn clear_scheduler() {
-        let scheduler = Self::with_current_mut(|current| current.and_then(|current| current.scheduler.take()));
+        let (scheduler, panic_hooks) = Self::with_current_mut(|current| {
+            current
+                .map(|current| (current.scheduler.take(), current.panic_hooks.take()))
+                .unwrap_or_default()
+        });
         drop(scheduler);
+        drop(panic_hooks);
     }
 
     pub(crate) fn install_driver_host(driver_host: RuntimeDriverHost) {
@@ -185,10 +224,12 @@ mod tests {
     use tick::runtime::InactiveClock;
 
     use super::*;
-    use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
+    use crate::runtime::config::RuntimeName;
+    use crate::runtime::dispatch::DispatcherCore;
     use crate::runtime::shutdown::Shutdown;
+    use crate::runtime::testing::worker_endpoint;
     use crate::runtime::worker::asynchronous::SpawnCommand;
-    use crate::runtime::worker::blocking::{PanicPolicy, Pool, Worker};
+    use crate::runtime::worker::blocking::{Pool, Worker};
 
     #[derive(Default)]
     struct CountingWake(AtomicUsize);
@@ -204,6 +245,14 @@ mod tests {
     }
 
     #[test]
+    fn panic_without_installed_scheduler_defaults_to_shutdown() {
+        let (action, panic) = LocalWorker::on_panic(Box::new(42_u32));
+
+        assert_eq!(action, arty_executor::PanicAction::Shutdown);
+        assert_eq!(*panic.downcast::<u32>().unwrap(), 42);
+    }
+
+    #[test]
     fn relocating_registration_checks_owner_execution_and_shutdown() {
         let observations = std::thread::spawn(|| {
             let thread = ThreadBuilder::default().build(std::thread::current().id());
@@ -211,16 +260,12 @@ mod tests {
             let shutdown = Shutdown::default();
             let (commands, command_rx) = crate::runtime::worker::asynchronous::command_channel();
             let core = DispatcherCore::new(
-                NonEmpty::new(WorkerEndpoint {
+                NonEmpty::new(worker_endpoint(
                     commands,
-                    waker: Waker::from(std::sync::Arc::clone(&wakes)),
-                    thread: thread.clone(),
-                    blocking_worker: Worker::new(
-                        Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
-                        shutdown.clone(),
-                        PanicPolicy::Ignore,
-                    ),
-                }),
+                    Waker::from(std::sync::Arc::clone(&wakes)),
+                    thread.clone(),
+                    Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
+                )),
                 shutdown.clone(),
             );
             let dispatcher = DispatcherClient::new(Arc::clone(&core));
@@ -233,7 +278,7 @@ mod tests {
             let context = Context::new(dispatcher, clock, io, thread.clone());
             let mut executor = Executor::builder().thread(thread.clone()).build();
             LocalWorker::attach();
-            LocalWorker::register_scheduler(context, executor.tasks(), executor.shutdown());
+            LocalWorker::install_scheduler(context, executor.tasks(), executor.shutdown(), Vec::new());
 
             let mut join = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 42 }));
             let registered_locally = command_rx.spawn_receiver().try_recv().is_err() && executor.has_tasks();
@@ -265,16 +310,12 @@ mod tests {
             let other_thread = ThreadBuilder::default().build(std::thread::current().id());
             let (other_tx, other_rx) = crate::runtime::worker::asynchronous::command_channel();
             let other_core = DispatcherCore::new(
-                NonEmpty::new(WorkerEndpoint {
-                    commands: other_tx,
-                    waker: Waker::noop().clone(),
-                    thread: other_thread.clone(),
-                    blocking_worker: Worker::new(
-                        Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
-                        Shutdown::default(),
-                        PanicPolicy::Ignore,
-                    ),
-                }),
+                NonEmpty::new(worker_endpoint(
+                    other_tx,
+                    Waker::noop().clone(),
+                    other_thread.clone(),
+                    Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
+                )),
                 Shutdown::default(),
             );
             let _remote = other_core.spawn_relocating(&other_thread, |_| async { 9 });
@@ -291,6 +332,13 @@ mod tests {
             let rejection_not_queued = command_rx.spawn_receiver().try_recv().is_err();
             let rejection_not_woken = wakes.0.load(Ordering::Relaxed) == before;
             LocalWorker::clear_scheduler();
+            let (scheduler_cleared, retained_scheduler, retained_hooks) = LocalWorker::with_current_mut(|current| {
+                let current = current.expect("the test worker remains attached until thread teardown");
+                let cleared = current.scheduler.is_none() && current.panic_hooks.is_none();
+                (cleared, current.scheduler.take(), current.panic_hooks.take())
+            });
+            drop(retained_scheduler);
+            drop(retained_hooks);
             [
                 ("same-owner registration stays local", registered_locally),
                 ("idle worker is woken", idle_worker_woken),
@@ -302,6 +350,7 @@ mod tests {
                 ("shutdown rejects registration", rejected_after_shutdown),
                 ("shutdown rejection sends no command", rejection_not_queued),
                 ("shutdown rejection does not wake the worker", rejection_not_woken),
+                ("scheduler cleanup releases worker-local state", scheduler_cleared),
             ]
         })
         .join()

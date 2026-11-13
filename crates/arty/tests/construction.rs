@@ -10,7 +10,8 @@ use std::error::Error as StdError;
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 
-use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, PanicPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
+use arty::runtime::hook::Panic;
+use arty::runtime::{BlockingPoolPolicy, Error, MonitorPolicy, Runtime, RuntimeBuilder, WorkersPolicy};
 use testing_aids::TEST_TIMEOUT;
 
 #[cfg(test)]
@@ -256,8 +257,11 @@ fn default_runtime_construction_uses_one_worker() {
 
 #[test]
 fn explicit_panic_policies_preserve_runtime_construction() {
-    for policy in [PanicPolicy::shutdown(), PanicPolicy::ignore()] {
-        let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).panic(policy).build().unwrap();
+    for builder in [
+        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::SHUTDOWN),
+        Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::IGNORE),
+    ] {
+        let runtime = builder.build().unwrap();
 
         assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
         runtime.stop().unwrap();

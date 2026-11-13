@@ -296,7 +296,6 @@ impl HttpClientBuilder {
     /// global provider.
     ///
     /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
-    #[cfg_attr(test, mutants::skip)] // Mutants remove fields that the public behavior cannot distinguish.
     pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
         // Use the provider for both resilience and HTTP metrics.
         self.resilience_context = self.resilience_context.use_metrics(&meter_provider);

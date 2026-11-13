@@ -62,7 +62,6 @@ impl<A: Allocator + Clone> CurrentChunk<A> {
     /// Replace the contained mutator, dropping the previous one in
     /// place. Equivalent to `let _ = self.replace(new);`.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // body→() leaks chunk refcount → OOM
     pub(crate) fn drop_replace(&self, new: ChunkMutator<A>) {
         let _old = self.replace(new);
     }

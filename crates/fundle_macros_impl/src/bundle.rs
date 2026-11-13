@@ -188,7 +188,6 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     Ok(expanded)
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn generate_builder_struct(
     _vis: &Visibility,
     builder_name: &Ident,
@@ -224,7 +223,6 @@ fn generate_struct_build_method(struct_name: &Ident, builder_name: &Ident, type_
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn generate_default_impl(builder_name: &Ident, field_names: &[&Ident], type_params: &[Ident]) -> proc_macro2::TokenStream {
     let not_set_params = type_params.iter().map(|_| quote!(::fundle::NotSet));
     let none_fields = field_names.iter().map(|name| quote!(#name: ::std::option::Option::None));
@@ -243,7 +241,6 @@ fn generate_default_impl(builder_name: &Ident, field_names: &[&Ident], type_para
 }
 
 #[expect(clippy::cognitive_complexity, reason = "Complex builder generation logic")]
-#[cfg_attr(test, mutants::skip)]
 fn generate_setter_impls(
     builder_name: &Ident,
     field_names: &[&Ident],
@@ -346,7 +343,6 @@ fn generate_setter_impls(
     impls
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn generate_as_ref_impls(
     builder_name: &Ident,
     field_names: &[&Ident],
@@ -391,7 +387,6 @@ fn generate_as_ref_impls(
     impls
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn generate_build_impl(
     builder_name: &Ident,
     struct_name: &Ident,
@@ -413,7 +408,6 @@ fn generate_build_impl(
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn parse_forward_attribute(attrs: &[Attribute]) -> syn::Result<Option<Vec<Path>>> {
     for attr in attrs {
         if attr.path().is_ident("forward")
@@ -443,7 +437,6 @@ fn parse_forward_attribute(attrs: &[Attribute]) -> syn::Result<Option<Vec<Path>>
     Ok(None)
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn generate_forwarded_as_ref_impls(
     struct_name: &Ident,
     builder_name: &Ident,
@@ -500,7 +493,6 @@ fn generate_forwarded_as_ref_impls(
     (struct_impls, builder_impls)
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn generate_export_impls(struct_name: &Ident, field_types: &[&Type], field_names: &[&Ident]) -> proc_macro2::TokenStream {
     // Export all types, not just unique ones
     let num_exports = field_types.len();
@@ -538,7 +530,6 @@ fn generate_export_impls(struct_name: &Ident, field_types: &[&Type], field_names
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn generate_builder_export_impls(
     builder_name: &Ident,
     field_names: &[&Ident],
@@ -580,7 +571,6 @@ fn generate_builder_export_impls(
 }
 
 #[expect(clippy::too_many_lines, reason = "Generated macro with many patterns")]
-#[cfg_attr(test, mutants::skip)]
 fn generate_select_macro(
     struct_name: &Ident,
     builder_name: &Ident,
@@ -730,7 +720,6 @@ fn generate_select_macro(
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn generate_reader_writer_impls(builder_name: &Ident, type_params: &[Ident]) -> proc_macro2::TokenStream {
     quote! {
         #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
@@ -745,7 +734,6 @@ fn generate_reader_writer_impls(builder_name: &Ident, type_params: &[Ident]) -> 
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn generate_read_toggle(builder_name: &Ident, field_names: &[&Ident], type_params: &[Ident]) -> proc_macro2::TokenStream {
     let field_assignments = field_names.iter().map(|name| {
         quote! { #name: self.#name }
@@ -764,7 +752,6 @@ fn generate_read_toggle(builder_name: &Ident, field_names: &[&Ident], type_param
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn generate_reader_getters(
     builder_name: &Ident,
     field_names: &[&Ident],

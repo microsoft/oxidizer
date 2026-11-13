@@ -34,7 +34,6 @@ impl HttpClone {
 
     /// Clone only safe methods (e.g. `GET`, `HEAD`, `OPTIONS`). This is the
     /// default.
-    #[cfg_attr(test, mutants::skip)] // SafeOnly is the default, so skip in mutation testing
     #[must_use]
     pub fn safe_only() -> Self {
         Self(Inner::SafeOnly)

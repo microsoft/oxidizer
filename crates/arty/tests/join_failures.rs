@@ -15,7 +15,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context as PollContext, Poll, Waker};
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, RuntimeBuilder, ShutdownCause, WorkersPolicy};
+use arty::runtime::hook::Panic;
+use arty::runtime::{BlockingPoolPolicy, Runtime, RuntimeBuilder, ShutdownCause, WorkersPolicy};
 use arty::task::JoinError;
 #[cfg(feature = "macros")]
 use arty::task::{Context, JoinHandle};
@@ -38,7 +39,7 @@ fn runtime() -> Runtime {
 #[test]
 fn failure_kinds_are_distinct_and_thread_safe() {
     static_assertions::assert_impl_all!(JoinError: std::error::Error, Send, Sync);
-    let runtime = runtime_builder().panic(PanicPolicy::ignore()).build().unwrap();
+    let runtime = runtime_builder().on(Panic::IGNORE).build().unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
     let panic = scheduler
         .spawn(async |_| std::panic::panic_any(std::cell::Cell::new(42)))
@@ -442,7 +443,7 @@ fn blocking_callback_can_poll_rejected_blocking_join_after_shutdown() {
 
 #[test]
 fn root_execution_returns_errors_and_preserves_borrowed_storage() {
-    let runtime = runtime_builder().panic(PanicPolicy::ignore()).build().unwrap();
+    let runtime = runtime_builder().on(Panic::IGNORE).build().unwrap();
     assert!(
         runtime
             .scheduler()

@@ -89,12 +89,7 @@ and `cargo run --example` in this workspace get it with.
 - **Exempt the fixture module from coverage and mutation testing.** It is
   scaffolding driven by the tests, not code under test. Mark the module
   `#[cfg_attr(coverage_nightly, coverage(off))]` and add its path to
-  `exclude_globs` in `.cargo/mutants.toml`.
-
-  While `.cargo/mutants.linux.toml` and `.cargo/mutants.windows.toml` are in
-  use for platform-specific exclusions, add the path to those configurations
-  as well. Cargo-mutants reads only one complete configuration at a time, so
-  they do not inherit exclusions from `.cargo/mutants.toml`.
+  `exclude-files` in the root `gamma.toml`.
 
 - **Allow the implementation crate's types through the facade's
   external-type check.** The facade re-exports them, so

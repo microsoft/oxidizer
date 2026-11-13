@@ -52,10 +52,6 @@ pub(crate) struct Sender<R: Send + 'static> {
 }
 
 impl<R: Send + 'static> Sender<R> {
-    pub(crate) const fn shutdown(&self) -> &Shutdown {
-        &self.shutdown
-    }
-
     fn publish(mut self, result: Result<R, JoinError>) {
         let tx = self.tx.take().expect("an Arty result sender publishes at most one result");
         discard_unwind(|| tx.send(result));

@@ -297,7 +297,6 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
 
     /// Retain only the characters for which `f` returns `true`, in
     /// order.
-    #[cfg_attr(test, mutants::skip)] // `+= → *=` on counter ⇒ infinite loop
     #[expect(
         clippy::missing_panics_doc,
         reason = "the internal `.expect` guards a char-boundary invariant (`idx < len`) and is unreachable; a `# Panics` section would be misleading"

@@ -15,14 +15,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use arty_executor::{
-    CycleOutcome, Executor, PanicPolicy, Shutdown, ShutdownCause, ShutdownError, TaskCompletion, TaskPanicPayload, TaskPlacement, TaskSet,
+    CycleOutcome, Executor, PanicAction, PanicPolicy, Shutdown, ShutdownCause, ShutdownError, TaskCompletion, TaskPanicPayload,
+    TaskPlacement, TaskSet,
 };
 use observed::Sink;
 use observed::enrichment::{Enrichment, EnrichmentEntry};
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
 use observed_testing::{TEST_ID, test_emitter};
-use thread_aware::ThreadBuilder;
 
 use super::support::{CompletionHandle, TaskBuilderExt as _, TaskOutcome};
 
@@ -260,7 +260,11 @@ fn failed_construction_preserves_existing_executor_notifications() {
 
 #[test]
 fn configured_current_thread_executes_tasks() {
-    let thread = ThreadBuilder::default().build(std::thread::current().id());
+    let thread = thread_aware_core::__private::v1::new_thread(
+        thread_aware_core::__private::v1::new_owner(),
+        std::thread::current().id(),
+        thread_aware_core::__private::v1::new_numa_node(0),
+    );
     let mut executor = Executor::builder().thread(thread).build();
     let mut handle = executor.tasks().task(async { 42 }).register_test();
 
@@ -352,7 +356,7 @@ fn completed_result_remains_available_after_executor_stops() {
 #[test]
 fn task_panic_publishes_the_original_payload_and_keeps_the_executor_usable() {
     let (sink, processor) = test_emitter(TEST_ID);
-    let mut executor = Executor::builder().sink(sink.clone()).panic_policy(PanicPolicy::Ignore).build();
+    let mut executor = Executor::builder().sink(sink.clone()).panic_policy(PanicPolicy::IGNORE).build();
     let tasks = executor.tasks();
     let mut panicked = tasks
         .task(poll_fn(|_| -> Poll<usize> { panic!("task panic") }))
@@ -553,7 +557,7 @@ fn newly_submitted_tasks_run_before_awakened_tasks() {
 
 #[test]
 fn shutdown_panic_policy_publishes_the_payload_before_shutdown() {
-    let mut executor = Executor::builder().panic_policy(PanicPolicy::Shutdown).build();
+    let mut executor = Executor::builder().panic_policy(PanicPolicy::SHUTDOWN).build();
     let mut completion = executor
         .tasks()
         .task(poll_fn(|_| -> Poll<()> { panic!("shutdown panic") }))
@@ -599,6 +603,11 @@ impl TaskCompletion<()> for CapturePanic {
 
 #[test]
 fn panic_notification_carries_the_authoritative_shutdown_cause() {
+    fn shutdown(panic: TaskPanicPayload) -> (PanicAction, TaskPanicPayload) {
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"panic notification"));
+        (PanicAction::Shutdown, panic)
+    }
+
     fn assert_same_cause(actual: &ShutdownCause, expected: &ShutdownCause) {
         match (actual.as_error(), expected.as_error()) {
             (Some(actual), Some(expected)) => assert!(std::ptr::addr_eq(actual.inner(), expected.inner())),
@@ -607,16 +616,29 @@ fn panic_notification_carries_the_authoritative_shutdown_cause() {
         }
     }
 
-    for (policy, existing) in [
-        (PanicPolicy::Ignore, None),
-        (PanicPolicy::Shutdown, None),
-        (PanicPolicy::Ignore, Some(ShutdownCause::default())),
+    let inspected = Rc::new(Cell::new(false));
+    let dynamic_ignore = PanicPolicy::dynamic({
+        let inspected = Rc::clone(&inspected);
+        move |panic| {
+            assert_eq!(panic.downcast_ref::<&str>(), Some(&"panic notification"));
+            inspected.set(true);
+            (PanicAction::Ignore, panic)
+        }
+    });
+
+    for (policy, existing, expects_policy_shutdown) in [
+        (PanicPolicy::IGNORE, None, false),
+        (PanicPolicy::SHUTDOWN, None, true),
+        (dynamic_ignore, None, false),
+        (PanicPolicy::dynamic(shutdown), None, true),
+        (PanicPolicy::IGNORE, Some(ShutdownCause::default()), false),
         (
-            PanicPolicy::Shutdown,
+            PanicPolicy::SHUTDOWN,
             Some(ShutdownError::new(std::io::Error::other("first shutdown cause")).into()),
+            true,
         ),
     ] {
-        let expects_shutdown = matches!(policy, PanicPolicy::Shutdown) || existing.is_some();
+        let expects_shutdown = expects_policy_shutdown || existing.is_some();
         let mut executor = Executor::builder().panic_policy(policy).build();
         let shutdown = executor.shutdown();
         let notification = Rc::new(RefCell::new(None));
@@ -661,6 +683,7 @@ fn panic_notification_carries_the_authoritative_shutdown_cause() {
             assert!(matches!(outcome, CycleOutcome::Suspend));
         }
     }
+    assert!(inspected.get());
 }
 
 struct ReadyDropPanic;
@@ -682,7 +705,7 @@ impl Drop for ReadyDropPanic {
 
 #[test]
 fn completed_future_destructor_panic_is_published_as_the_task_panic() {
-    let mut executor = Executor::builder().panic_policy(PanicPolicy::Ignore).build();
+    let mut executor = Executor::builder().panic_policy(PanicPolicy::IGNORE).build();
     let mut completion = executor.tasks().task(ReadyDropPanic).register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
@@ -712,7 +735,7 @@ impl Drop for PollAndDropPanic {
 
 #[test]
 fn poll_panic_remains_primary_when_future_disposal_also_panics() {
-    let mut executor = Executor::builder().panic_policy(PanicPolicy::Ignore).build();
+    let mut executor = Executor::builder().panic_policy(PanicPolicy::IGNORE).build();
     let mut completion = executor.tasks().task(PollAndDropPanic).register_test();
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));

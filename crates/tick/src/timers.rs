@@ -139,7 +139,6 @@ impl Timers {
     /// The caller invokes each waker after releasing its timer lock. Returns
     /// the next timer instant, or `None` when no timer remains.
     #[cfg(any(feature = "test-util", test))]
-    #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn advance_timers(&mut self, now: Instant, ready: &mut ReadyWakers) -> Option<Instant> {
         self.alive = true;
 

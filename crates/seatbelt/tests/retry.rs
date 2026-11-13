@@ -435,4 +435,99 @@ async fn clone_service_works_independently(#[case] use_tower: bool) {
     assert_eq!(call_count.load(Ordering::SeqCst), 6);
 }
 
+#[cfg(feature = "metrics")]
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn one_retry_reports_one_resilience_event(#[case] use_tower: bool) {
+    use opentelemetry::KeyValue;
+    use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics};
+    use opentelemetry_sdk::metrics::reader::MetricReader;
+    use opentelemetry_sdk::metrics::{InstrumentKind, ManualReader, Pipeline, SdkMeterProvider, Temporality};
+
+    #[derive(Debug)]
+    struct SharedReader(Arc<ManualReader>);
+
+    impl MetricReader for SharedReader {
+        fn register_pipeline(&self, pipeline: std::sync::Weak<Pipeline>) {
+            self.0.register_pipeline(pipeline);
+        }
+
+        fn collect(&self, rm: &mut ResourceMetrics) -> OTelSdkResult {
+            self.0.collect(rm)
+        }
+
+        fn force_flush(&self) -> OTelSdkResult {
+            self.0.force_flush()
+        }
+
+        fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+            self.0.shutdown_with_timeout(timeout)
+        }
+
+        fn temporality(&self, kind: InstrumentKind) -> Temporality {
+            self.0.temporality(kind)
+        }
+    }
+
+    let reader = Arc::new(ManualReader::builder().build());
+    let provider = SdkMeterProvider::builder().with_reader(SharedReader(Arc::clone(&reader))).build();
+    let clock = Clock::new_frozen();
+    let context = ResilienceContext::new(&clock).name("test_pipeline").use_metrics(&provider);
+    let attempts = Arc::new(AtomicU32::new(0));
+    let inner_attempts = Arc::clone(&attempts);
+    let stack = (
+        Retry::layer("test_retry", &context)
+            .clone_input_with(|input: &mut String, _| Some(input.clone()))
+            .base_delay(Duration::ZERO)
+            .use_jitter(false)
+            .max_retry_attempts(1)
+            .recovery_with(|output: &Result<String, String>, _| {
+                if output.is_err() {
+                    RecoveryInfo::retry()
+                } else {
+                    RecoveryInfo::never()
+                }
+            }),
+        Execute::new(move |input: String| {
+            let result = if inner_attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err("retry".to_owned())
+            } else {
+                Ok(input)
+            };
+            async move { result }
+        }),
+    );
+    let mut service = stack.into_service();
+    assert_eq!(
+        execute_service(&mut service, "test".to_owned(), use_tower).await,
+        Ok("test".to_owned())
+    );
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+
+    let mut metrics = ResourceMetrics::default();
+    reader.collect(&mut metrics).unwrap();
+    let events: Vec<_> = metrics
+        .scope_metrics()
+        .flat_map(ScopeMetrics::metrics)
+        .filter(|metric| metric.name() == "resilience.event")
+        .collect();
+    assert_eq!(events.len(), 1);
+    let AggregatedMetrics::U64(MetricData::Sum(sum)) = events[0].data() else {
+        panic!("resilience events must be a u64 counter");
+    };
+    let points: Vec<_> = sum.data_points().collect();
+    assert_eq!(points.len(), 1);
+    assert_eq!(points[0].value(), 1);
+    for attribute in [
+        KeyValue::new("resilience.pipeline.name", "test_pipeline"),
+        KeyValue::new("resilience.strategy.name", "test_retry"),
+        KeyValue::new("resilience.event.name", "retry"),
+    ] {
+        assert!(points[0].attributes().any(|actual| *actual == attribute));
+    }
+}
+
 testing_aids::init_tracing!();

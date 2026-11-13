@@ -55,9 +55,9 @@ The unsupported-host contract confirms that this reuse does not enable Gungraun.
 
 Unit regressions also check collector activation, report boundary values,
 generated probe registration, bounded pipe draining, and exact worker cleanup
-deadlines. Platform-specific mutation configurations exclude only adapters
-that the host does not compile and explicitly documented equivalent flag
-mutations; the active platform retains its behavioral checks.
+deadlines. Gamma evaluates platform conditions during mutation discovery.
+Review equivalent flag mutations from actual Gamma findings before adding
+narrow source suppressions. The active platform retains its behavioral checks.
 
 Windows pipe regressions run in a subprocess with an independent deadline so
 a broken nonblocking read fails promptly instead of hanging the test suite.

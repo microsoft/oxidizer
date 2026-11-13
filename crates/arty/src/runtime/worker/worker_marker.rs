@@ -12,12 +12,10 @@ thread_local! {
 pub(crate) struct WorkerMarker;
 
 impl WorkerMarker {
-    #[cfg_attr(test, mutants::skip)] // Removing worker classification lets worker-side runtime shutdown self-join.
     pub(crate) fn attach() {
         assert!(!ATTACHED.replace(true), "a local worker is already attached to this thread");
     }
 
-    #[cfg_attr(test, mutants::skip)] // Returning false lets worker-side runtime shutdown self-join.
     pub(crate) fn is_current() -> bool {
         ATTACHED.get()
     }
