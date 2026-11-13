@@ -14,20 +14,25 @@ use futures::FutureExt;
 use futures::future::Either;
 use http::header::HOST;
 use http::{HeaderMap, HeaderName};
+use http_body::Body;
+use http_body_util::BodyExt;
+use http_extensions::body::{Content, StreamingBody};
 use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
 use layered::{Layer, Service};
 use observed::{Event, Sink};
+use parking_lot::Mutex;
 use routerama::RouteTable;
 use templated_uri::BasePath;
 use tick::SimpleClock;
 
 use crate::server::{
-    ActiveRequests, HeaderField, HeaderValues, MediaTypeError, MediaTypes, OTHER, RequestAbandoned, RequestAndResponseHeaders,
-    RequestComplete, RequestEnd, RequestError, ResponseBody, RouteFields, RouteValues, TelemetryDropGuard, UriAuthority,
-    emit_when_body_ends, header_fields,
+    ActiveRequests, BodyBuffer, HeaderField, HeaderValues, MediaTypeError, MediaTypes, OTHER, RequestAbandoned, RequestAndResponseHeaders,
+    RequestComplete, RequestEnd, RequestError, RouteFields, RouteValues, TelemetryDropGuard, UriAuthority, emit_when_body_ends,
+    header_fields,
 };
 
 const DEFAULT_BODY_SIZE_LIMIT: usize = 32 * 1024;
+const MAX_BODY_SIZE_LIMIT: usize = 1536 * 1024;
 
 /// Produces telemetry about the requests that go through it, in the form of `observed` events.
 ///
@@ -54,6 +59,7 @@ impl Telemetry<()> {
             route_parameter_data_classes: BTreeMap::new(),
             request_header_data_classes: HeaderMap::default(),
             response_header_data_classes: HeaderMap::default(),
+            request_body_media_types: MediaTypes::default(),
             response_body_media_types: MediaTypes::default(),
             body_size_limit: DEFAULT_BODY_SIZE_LIMIT,
         }
@@ -63,7 +69,11 @@ impl Telemetry<()> {
 impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
     type Out = Result<HttpResponse>;
 
-    fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a request goes through each step here in order: the pass-through checks, the drop guard, the copy of the request body and the call of the handler"
+    )]
+    fn execute(&self, mut input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
         let layer = &self.layer;
 
         if layer.excluded_paths.contains(input.uri().path()) {
@@ -116,10 +126,36 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
                     response: None,
                 })
             }),
-            response_body: None,
+            request_body_buffer: None,
+            response_body_buffer: None,
             finished: false,
         };
         guard.add_active_request(1);
+        if layer.request_body_media_types.matches(input.headers()) {
+            let buffer = Arc::new(Mutex::new(BodyBuffer::new(layer.body_size_limit)));
+            if !input.body().is_end_stream() {
+                input = input.map(|body| {
+                    body.map(|content| {
+                        Ok(match content {
+                            Content::Bytes(bytes) => {
+                                buffer.lock().push(&bytes);
+                                Content::Bytes(bytes)
+                            }
+                            Content::Streaming(inner) => {
+                                let buffer = Arc::clone(&buffer);
+                                Content::Streaming(StreamingBody::new(inner.inspect_frame(move |frame| {
+                                    if let Some(data) = frame.data_ref() {
+                                        buffer.lock().push(data);
+                                    }
+                                })))
+                            }
+                        })
+                    })
+                    .expect("map fails only for a consumed body, which is at its end, so the check above rules it out")
+                });
+            }
+            guard.request_body_buffer = Some(buffer);
+        }
         // The middleware resumes each panic that it catches and never polls the handler again, so the
         // handler does not need to be unwind safe. The handler can panic in the call too, because
         // `Execute` runs the handler closure in `execute`.
@@ -140,7 +176,7 @@ impl<T: RequestHandler> Service<HttpRequest> for Telemetry<T> {
                             .map(|fields| HeaderValues::new(fields, response.headers()));
                     }
                     if layer.response_body_media_types.matches(response.headers()) {
-                        guard.response_body = Some(ResponseBody::new(layer.body_size_limit));
+                        guard.response_body_buffer = Some(BodyBuffer::new(layer.body_size_limit));
                     }
                     Ok(emit_when_body_ends(guard, response))
                 }
@@ -175,6 +211,7 @@ pub struct TelemetryLayer {
     pub(crate) route_parameter_data_classes: BTreeMap<String, DataClass>,
     pub(crate) request_header_data_classes: HeaderMap<DataClass>,
     pub(crate) response_header_data_classes: HeaderMap<DataClass>,
+    pub(crate) request_body_media_types: MediaTypes,
     pub(crate) response_body_media_types: MediaTypes,
     pub(crate) body_size_limit: usize,
 }
@@ -252,11 +289,23 @@ impl TelemetryLayer {
         self
     }
 
-    /// Sets the media types of the response bodies to log, such as `application/json`, `text/*` or `*/*`.
+    /// Sets the media types of the request bodies to log, such as `application/json`. [Bodies](crate#bodies) tells
+    /// which `Content-Type` values the types cover.
     ///
     /// # Errors
     ///
-    /// Returns an error if an entry is not a media type.
+    /// Returns an error if an entry is not a media type, such as `json` or `text/*`.
+    pub fn request_body_media_types(mut self, types: impl IntoIterator<Item = &'static str>) -> std::result::Result<Self, MediaTypeError> {
+        self.request_body_media_types = MediaTypes::parse(types)?;
+        Ok(self)
+    }
+
+    /// Sets the media types of the response bodies to log, such as `application/json`. [Bodies](crate#bodies) tells
+    /// which `Content-Type` values the types cover.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an entry is not a media type, such as `json` or `text/*`.
     pub fn response_body_media_types(mut self, types: impl IntoIterator<Item = &'static str>) -> std::result::Result<Self, MediaTypeError> {
         self.response_body_media_types = MediaTypes::parse(types)?;
         Ok(self)
@@ -264,10 +313,10 @@ impl TelemetryLayer {
 
     /// Sets the number of bytes to log from each body.
     ///
-    /// The default is 32 KiB.
+    /// The default is 32 KiB. Values above 1.5 MiB become 1.5 MiB.
     #[must_use]
     pub fn body_size_limit(mut self, limit: usize) -> Self {
-        self.body_size_limit = limit;
+        self.body_size_limit = limit.min(MAX_BODY_SIZE_LIMIT);
         self
     }
 }

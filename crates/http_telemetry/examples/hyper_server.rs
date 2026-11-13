@@ -5,12 +5,15 @@
 //!
 //! The server takes HTTP/1.1 and HTTP/2 on one local port. The application routes each request
 //! with a `routerama` resolver, and the middleware matches each request to a route with the same
-//! resolver. A client sends five requests over each protocol:
+//! resolver. A client sends six requests over each protocol:
 //!
 //! - `GET /books/1`: the server responds with a short JSON body. The middleware emits the complete
 //!   event when the body ends. The event shows the route as `http.route=/books/{book}`. The
 //!   layer gives the route parameter `book` a data class that the printer shows unchanged:
 //!   `http.route.parameter.book=1`.
+//! - `POST /books/1/reviews` with a short JSON body: the handler reads the review and responds with
+//!   201, the location of the review and no body. The middleware copies the body while the handler
+//!   reads it, so the event shows it as `http.request.body`.
 //! - `GET /missing`: no route matches, so the server responds with 404 and no body. The middleware
 //!   emits the complete event when the handler returns. The event has no `http.route`.
 //! - `GET /books/1/chapters`: the server sends one chunk of the body and then waits. The client
@@ -23,9 +26,9 @@
 //! Each request has an `x-request-id` header. The layer gives the header a data class that the
 //! printer shows unchanged, so each event shows its value as `http.request.header.x-request-id`.
 //!
-//! The layer also logs the bodies of `application/json` responses. So each event of a request to
-//! a path under `/books/1` shows, as `http.response.body`, the part of the body that the server
-//! read before the request ended: the whole body, or the first chunk.
+//! The layer also logs the bodies of `application/json` requests and responses. So each event of a
+//! `GET` request to a path under `/books/1` shows, as `http.response.body`, the part of the body
+//! that the server read before the request ended: the whole body, or the first chunk.
 //!
 //! The middleware also emits the `1` and the `-1` of `http.server.active_requests` for each
 //! request that it does not exclude. The client waits for that `-1` before it prints its line and
@@ -49,12 +52,12 @@ use bytesbuf::BytesView;
 use data_privacy::{DataClass, RedactionEngine};
 use futures::channel::mpsc::{self, UnboundedSender};
 use futures::{StreamExt, stream};
-use http::header::{CONTENT_TYPE, HOST};
-use http::{HeaderName, Request, Response, StatusCode};
-use http_body_util::{BodyExt, Empty};
+use http::header::{CONTENT_TYPE, HOST, LOCATION};
+use http::{HeaderName, Method, Request, Response, StatusCode};
+use http_body_util::{BodyExt, Full};
 use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest};
-use http_telemetry::Telemetry;
-use hyper::body::Incoming;
+use http_telemetry::{MediaTypeError, Telemetry};
+use hyper::body::{Bytes, Incoming};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use layered::{Execute, Service, Stack};
@@ -69,8 +72,18 @@ use tokio::net::{TcpListener, TcpStream};
 /// seconds.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The paths that the client requests over each protocol.
-const PATHS: [&str; 5] = ["/books/1", "/missing", "/books/1/chapters", "/books/1/pages", HEALTH_PATH];
+/// The requests that the client sends over each protocol.
+const REQUESTS: [(Method, &str); 6] = [
+    (Method::GET, "/books/1"),
+    (Method::POST, "/books/1/reviews"),
+    (Method::GET, "/missing"),
+    (Method::GET, "/books/1/chapters"),
+    (Method::GET, "/books/1/pages"),
+    (Method::GET, HEALTH_PATH),
+];
+
+/// The body of the `POST` request.
+const REVIEW: &str = r#"{"stars":5}"#;
 
 /// The path that the layer excludes, so that the middleware emits no event for it.
 const HEALTH_PATH: &str = "/health";
@@ -98,6 +111,9 @@ enum BookRoute<'p> {
 
     #[route(GET, "/books/{book}/pages")]
     GetPages { book: &'p str },
+
+    #[route(POST, "/books/{book}/reviews")]
+    AddReview { book: &'p str },
 
     #[route(GET, "/health")]
     Health,
@@ -128,6 +144,19 @@ impl EventProcessor for RequestEndProcessor {
     }
 }
 
+/// Builds `request` with its body: [`REVIEW`] as JSON for a `POST` request, else no body.
+fn with_body(request: http::request::Builder) -> Request<Full<BytesView>> {
+    let (request, body) = if request.method_ref() == Some(&Method::POST) {
+        (
+            request.header(CONTENT_TYPE, "application/json"),
+            BytesView::from(Bytes::from_static(REVIEW.as_bytes())),
+        )
+    } else {
+        (request, BytesView::default())
+    };
+    request.body(Full::new(body)).expect("the example builds valid requests")
+}
+
 /// Reads `response`: only the first chunk of its body if `hang_up` is true, else the whole body.
 /// Returns the line that the client prints.
 async fn read(response: hyper::Result<Response<Incoming>>, hang_up: bool) -> String {
@@ -153,7 +182,7 @@ async fn read(response: hyper::Result<Response<Incoming>>, hang_up: bool) -> Str
     clippy::too_many_lines,
     reason = "the example runs its scenario from top to bottom in one function"
 )]
-async fn main() {
+async fn main() -> Result<(), MediaTypeError> {
     let (sender, mut request_ends) = mpsc::unbounded();
     // The sink calls its processors in order, so each event is printed before its signal.
     let sink = Sink::builder("server")
@@ -186,19 +215,27 @@ async fn main() {
                 chunk(format!(r#"{{"book":"{book}","page":1}}"#)),
                 Err(HttpError::validation("the page is missing")),
             ]))),
+            Ok(BookRoute::AddReview { book }) => Response::builder()
+                .status(StatusCode::CREATED)
+                .header(LOCATION, format!("/books/{book}/reviews/1"))
+                .body(bodies.empty()),
             Ok(BookRoute::Health) => Response::builder().body(bodies.empty()),
             Err(_) => Response::builder().status(StatusCode::NOT_FOUND).body(bodies.empty()),
         }
         .expect("the example builds valid responses");
-        async move { Ok::<_, HttpError>(response) }
+        let body = request.into_body();
+        async move {
+            body.into_bytes().await?;
+            Ok::<_, HttpError>(response)
+        }
     });
     let telemetry = Telemetry::server(sink)
         .excluded_paths([BasePath::from_static("/health/")])
         .route_resolver(resolver)
         .route_parameter_data_classes([("book", PUBLIC)])
         .request_header_data_classes([(REQUEST_ID, PUBLIC)])
-        .response_body_media_types(["application/json"])
-        .expect("application/json is a media type");
+        .request_body_media_types(["application/json"])?
+        .response_body_media_types(["application/json"])?;
     let service = Arc::new((telemetry, handler).into_service());
 
     // hyper serves each connection, and takes HTTP/1.1 and HTTP/2 on the same port.
@@ -234,20 +271,22 @@ async fn main() {
         let mut request_id = 0_u32;
         // One connection for each HTTP/1.1 request, because a hang-up or a failed body ends the
         // connection.
-        for path in PATHS {
+        for (method, path) in REQUESTS {
             request_id += 1;
-            println!("GET {path} over HTTP/1.1");
+            println!("{method} {path} over HTTP/1.1");
             let stream = TcpStream::connect(address).await.expect("the server listens on the address");
             let (mut http1, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
                 .await
                 .expect("the server takes HTTP/1.1");
             let connection = tokio::spawn(connection);
             // An HTTP/1.1 request has the path in the request line and the host in a header.
-            let request = Request::get(path)
-                .header(HOST, address.to_string())
-                .header(REQUEST_ID, request_id)
-                .body(Empty::<BytesView>::new())
-                .expect("the example paths are valid URIs");
+            let request = with_body(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header(HOST, address.to_string())
+                    .header(REQUEST_ID, request_id),
+            );
             let line = read(http1.send_request(request).await, path == HANG_UP_PATH).await;
             connection.abort();
             if path != HEALTH_PATH {
@@ -263,13 +302,15 @@ async fn main() {
             .await
             .expect("the server takes HTTP/2");
         tokio::spawn(connection);
-        for path in PATHS {
+        for (method, path) in REQUESTS {
             request_id += 1;
-            println!("GET {path} over HTTP/2");
-            let request = Request::get(format!("http://{address}{path}"))
-                .header(REQUEST_ID, request_id)
-                .body(Empty::<BytesView>::new())
-                .expect("the example paths are valid URIs");
+            println!("{method} {path} over HTTP/2");
+            let request = with_body(
+                Request::builder()
+                    .method(method)
+                    .uri(format!("http://{address}{path}"))
+                    .header(REQUEST_ID, request_id),
+            );
             let line = read(http2.send_request(request).await, path == HANG_UP_PATH).await;
             if path != HEALTH_PATH {
                 request_ends.next().await.expect("the sink reports the -1 of each request");
@@ -280,4 +321,5 @@ async fn main() {
     tokio::time::timeout(TIMEOUT, requests)
         .await
         .expect("the requests finish within the timeout");
+    Ok(())
 }

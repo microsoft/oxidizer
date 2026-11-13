@@ -48,11 +48,13 @@ data_privacy = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
+http-body-util = { workspace = true }
 http_extensions = { workspace = true }
 http_headers = { workspace = true, features = ["headers-content-length", "headers-negotiation", "http"] }
 layered = { workspace = true }
 observed = { workspace = true }
 ohno = { workspace = true }
+parking_lot = { workspace = true }
 routerama = { workspace = true }
 smallvec = { workspace = true }
 templated_uri = { workspace = true }
@@ -63,7 +65,6 @@ bytesbuf = { path = "../bytesbuf", features = ["bytes-compat"] }
 criterion = { workspace = true }
 future_assert = { path = "../future_assert" }
 futures = { workspace = true, features = ["executor"] }
-http-body-util = { workspace = true }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }

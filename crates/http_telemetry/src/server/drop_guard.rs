@@ -13,11 +13,12 @@ use http_headers::headers::{Host, HostView};
 use observed::context::Transfer;
 use observed::{Sink, Text, emit};
 use ohno::{ErrorLabel, Labeled};
+use parking_lot::Mutex;
 use smallvec::SmallVec;
 use tick::Stopwatch;
 
 use super::events::{ActiveRequests, Headers, RequestAbandoned, RequestComplete, RequestError, RouteParameters};
-use super::{HeaderField, OTHER, ResponseBody, RouteFields};
+use super::{BodyBuffer, HeaderField, OTHER, RouteFields};
 
 /// The texts of the statuses 500 to 599, three digits each. `StatusCode::as_str` returns a text that
 /// borrows the status, so the `error.type` of a complete event comes from here.
@@ -99,7 +100,8 @@ pub(crate) struct TelemetryDropGuard {
     pub(crate) uri_authority: Option<UriAuthority>,
     pub(crate) route_values: Option<RouteValues>,
     pub(crate) headers: Option<Box<RequestAndResponseHeaders>>,
-    pub(crate) response_body: Option<ResponseBody>,
+    pub(crate) request_body_buffer: Option<Arc<Mutex<BodyBuffer>>>,
+    pub(crate) response_body_buffer: Option<BodyBuffer>,
     pub(crate) finished: bool,
 }
 
@@ -186,7 +188,8 @@ impl TelemetryDropGuard {
                         duration_secs,
                         request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
                         response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
-                        response_body: self.response_body.as_ref().map(ResponseBody::text),
+                        request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                        response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                     }
                 });
             }
@@ -206,7 +209,8 @@ impl TelemetryDropGuard {
                     duration_secs,
                     request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
                     response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
-                    response_body: self.response_body.as_ref().map(ResponseBody::text),
+                    request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                    response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                 }
             }),
             RequestEnd::Panic(status_code) => emit!(self.sink, {
@@ -225,7 +229,8 @@ impl TelemetryDropGuard {
                     duration_secs,
                     request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
                     response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
-                    response_body: self.response_body.as_ref().map(ResponseBody::text),
+                    request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                    response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                 }
             }),
             RequestEnd::Abandoned(status_code) => emit!(self.sink, {
@@ -244,7 +249,8 @@ impl TelemetryDropGuard {
                     duration_secs,
                     request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
                     response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
-                    response_body: self.response_body.as_ref().map(ResponseBody::text),
+                    request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                    response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                 }
             }),
         }

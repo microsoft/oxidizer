@@ -54,7 +54,8 @@
 //! | `http.route.parameter.<name>` | string | The value of a [configured route parameter](TelemetryLayer::route_parameter_data_classes), percent-encoded as in the request, redacted according to its data class. | `1` | If the request matches a route that has the parameter. |
 //! | `http.request.header.<name>` | string | The value of a [configured request header](TelemetryLayer::request_header_data_classes), redacted according to its data class. The values of repeated header lines are joined with `, `, and bytes that are not valid UTF-8 become `�`. | `0f3a9c` | If the request has the header. |
 //! | `http.response.header.<name>` | string | The value of a [configured response header](TelemetryLayer::response_header_data_classes), as for a request header. | `120` | If the response has the header. |
-//! | `http.response.body` | string | The start of the response body, up to the [size limit](TelemetryLayer::body_size_limit), as text. Bytes that are not valid UTF-8 become `�`. Empty for a response without content. See [Response bodies](#response-bodies). | `{"book":"1"}` | If the `Content-Type` of the response matches one of the [response body media types](TelemetryLayer::response_body_media_types). |
+//! | `http.request.body` | string | The start of the request body, up to the [size limit](TelemetryLayer::body_size_limit), as text. Bytes that are not valid UTF-8 become `�`. It holds only the bytes that the handler read, unless the body is in memory. See [Bodies](#bodies). | `{"stars":5}` | If the [request body media types](TelemetryLayer::request_body_media_types) cover the `Content-Type` of the request. |
+//! | `http.response.body` | string | The start of the response body, up to the [size limit](TelemetryLayer::body_size_limit), as text. Bytes that are not valid UTF-8 become `�`. Empty for a response without content. See [Bodies](#bodies). | `{"book":"1"}` | If the [response body media types](TelemetryLayer::response_body_media_types) cover the `Content-Type` of the response. |
 //!
 //! # Metrics
 //!
@@ -124,13 +125,33 @@
 //! - A response to `CONNECT` with a status from 200 to 299.
 //! - A response with a status from 100 to 199, 204 or 304.
 //!
-//! # Response bodies
+//! # Bodies
+//!
+//! The middleware logs a body when the media types of its direction cover the `Content-Type` of
+//! the body. A list that is not empty covers a `Content-Type` in three cases, without regard to
+//! ASCII case and to the parameters of the `Content-Type`:
+//!
+//! - It equals one of the media types, such as `application/json`.
+//! - Its type is `text`, such as `text/plain`.
+//! - Its type is `application`, and its subtype ends with `+json` or `+xml`, such as
+//!   `application/problem+json`.
+//!
+//! An empty list covers no `Content-Type`, so the middleware logs no body of that direction.
+//!
+//! The middleware does not redact the bodies that it logs. It logs the bytes that pass through it,
+//! so if a layer after it in the tuple decompresses the request or compresses the response, as the
+//! server layer of `http_compression` does, it logs the compressed bytes.
+//!
+//! The middleware copies the bytes of a logged request body while the handler reads the body, so
+//! the events show the bytes that the handler read before the request ended. The middleware does
+//! not read a request body by itself, so it does not delay the handler. A request body whose bytes
+//! are already in memory is copied when the request arrives, also if the handler does not read it.
 //!
 //! The middleware copies the bytes of a logged response body while the server reads the body, so
 //! the error and abandoned events show the bytes that the server read before the request ended.
-//! The middleware does not redact the body. It logs the bytes that it gets from the inner service,
-//! so if a layer after it in the tuple compresses the response, as the server layer of
-//! `http_compression` does, it logs the compressed bytes.
+//!
+//! The copy of a body grows only with the bytes that arrive, up to the size limit, so the length
+//! that a client declares does not decide how much memory the middleware uses.
 //!
 //! # When the middleware emits no event
 //!

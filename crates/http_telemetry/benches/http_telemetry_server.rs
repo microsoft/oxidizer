@@ -21,7 +21,7 @@ use common::{ACTIVE, Echoing, Failing, NeverResponding, PUBLIC, Responding, SECR
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use data_privacy::{DataClass, RedactionEngine};
 use http::header::{CONTENT_TYPE, RETRY_AFTER};
-use http::{HeaderName, HeaderValue, Method, Request, StatusCode, Version};
+use http::{HeaderName, HeaderValue, Method, Request, StatusCode, Uri, Version};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler};
 use http_telemetry::Telemetry;
 use layered::Layer;
@@ -319,6 +319,46 @@ fn frames_32() -> HttpBody {
     common::scripted((0..32).map(|_| common::data(&"a".repeat(32))))
 }
 
+/// The server middleware that logs the bodies of `application/json` requests, over a sink with two processors that
+/// read every field, in front of [`Echoing`]. The stack already got one request.
+fn request_logging_stack() -> Telemetry<Echoing> {
+    let stack = Telemetry::server(reading_sink(2))
+        .request_body_media_types(["application/json"])
+        .expect("application/json is a media type")
+        .layer(Echoing(StatusCode::OK));
+    read_to_end(&stack, post("application/json", streamed_bytes(1024)));
+    stack
+}
+
+/// A `POST` request over HTTP/1.1 to `http://example.com/books/1/reviews`, with `body` and with `content_type` as
+/// its `Content-Type`. [`Echoing`] responds with both.
+fn post(content_type: &'static str, body: HttpBody) -> HttpRequest {
+    let mut request = Request::post(Uri::from_static("http://example.com/books/1/reviews"))
+        .body(body)
+        .expect("the URI is valid");
+    request.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
+    request
+}
+
+/// A streamed body of `length` bytes in frames of 8 KiB at most, with an exact size hint, as a request body with a
+/// `Content-Length` has.
+fn streamed_bytes(length: usize) -> HttpBody {
+    let frames = (0..length)
+        .step_by(8192)
+        .map(|start| common::data(&"a".repeat((length - start).min(8192))));
+    common::sized_scripted(frames)
+}
+
+/// A body whose exact size hint declares `declared` bytes, as a `Content-Length` does, but that sends only the first
+/// `sent` bytes and then stalls.
+fn stalled(sent: usize, declared: usize) -> HttpBody {
+    common::sized_scripted([
+        common::data(&"a".repeat(sent)),
+        Step::Pending,
+        common::data(&"a".repeat(declared - sent)),
+    ])
+}
+
 /// A request for `/books/1` with the header `x-request-id`, and with `retry_after` as the header
 /// `retry-after`. [`Echoing`] copies both headers to the response.
 fn with_headers(retry_after: HeaderValue) -> HttpRequest {
@@ -514,6 +554,19 @@ fn complete_with_response_body<S: Borrow<Telemetry<Echoing>>>(stack: S, request:
     stack
 }
 
+#[metabench::benchmark(COMPLETE_WITH_REQUEST_BODY, GROUP, "complete_with_request_body")]
+#[bench::logging_off(Box::new(echoing_stack(reading_sink(2))), post("application/json", streamed_bytes(1024)))]
+#[bench::not_matching(Box::new(request_logging_stack()), post("image/png", streamed_bytes(1024)))]
+#[bench::bytes_1024(Box::new(request_logging_stack()), post("application/json", filled(1024)))]
+#[bench::invalid_utf8(Box::new(request_logging_stack()), post("application/json", in_memory(&invalid_utf8())))]
+#[bench::streamed_1024(Box::new(request_logging_stack()), post("application/json", streamed_bytes(1024)))]
+#[bench::streamed_65536(Box::new(request_logging_stack()), post("application/json", streamed_bytes(65536)))]
+#[bench::stalled_1024_of_65536(Box::new(request_logging_stack()), post("application/json", stalled(1024, 65536)))]
+fn complete_with_request_body<S: Borrow<Telemetry<Echoing>>>(stack: S, request: HttpRequest) -> S {
+    read_to_end(stack.borrow(), request);
+    stack
+}
+
 #[expect(clippy::too_many_lines, reason = "one registration for each case of the group")]
 fn criterion_benchmarks(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group(GROUP);
@@ -678,6 +731,23 @@ fn criterion_benchmarks(criterion: &mut Criterion) {
             );
         });
     }
+    let logging_on = request_logging_stack();
+    let streamed_1024: fn() -> HttpRequest = || post("application/json", streamed_bytes(1024));
+    for (case, stack, request) in [
+        ("logging_off", &logging_off, streamed_1024),
+        ("not_matching", &logging_on, || post("image/png", streamed_bytes(1024))),
+        ("bytes_1024", &logging_on, || post("application/json", filled(1024))),
+        ("invalid_utf8", &logging_on, || post("application/json", in_memory(&invalid_utf8()))),
+        ("streamed_1024", &logging_on, streamed_1024),
+        ("streamed_65536", &logging_on, || post("application/json", streamed_bytes(65536))),
+        ("stalled_1024_of_65536", &logging_on, || {
+            post("application/json", stalled(1024, 65536))
+        }),
+    ] {
+        group.bench_function(BenchmarkId::new(COMPLETE_WITH_REQUEST_BODY.benchmark_name(), case), |bencher| {
+            bencher.iter_batched(request, |request| complete_with_request_body(stack, request), BatchSize::SmallInput);
+        });
+    }
     group.finish();
 }
 
@@ -705,5 +775,6 @@ metabench::main!(
         COMPLETE_WITH_ROUTE_PARAMETERS,
         COMPLETE_WITH_HEADERS,
         COMPLETE_WITH_RESPONSE_BODY,
+        COMPLETE_WITH_REQUEST_BODY,
     ],
 );
