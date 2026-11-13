@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(test)]
+
 //! Tests behavior through the public API.
 
 use std::ptr::NonNull;

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(test)]
+
 use std::num::NonZero;
 
 use bytesbuf::BytesBuf;
