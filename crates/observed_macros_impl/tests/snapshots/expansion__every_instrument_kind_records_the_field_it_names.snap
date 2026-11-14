@@ -9,21 +9,7 @@ struct Operation {
     duration_ms: f32,
 }
 const _: () = {
-    impl ::observed::Event for Operation {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "operation",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Operation>()),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "operation",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
-                ),
-            ),
-            ::core::option::Option::None,
-            true,
-            false,
-        );
+    impl ::observed::VisitFields for Operation {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -116,5 +102,21 @@ const _: () = {
             }
             ::core::ops::ControlFlow::Continue(())
         }
+    }
+    impl ::observed::Event for Operation {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "operation",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Operation>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "operation",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            true,
+            false,
+        );
     }
 };

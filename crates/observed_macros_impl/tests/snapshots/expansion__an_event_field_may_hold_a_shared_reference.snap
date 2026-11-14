@@ -8,23 +8,7 @@ struct SharedRefs<'a> {
     optional: Option<&'a u64>,
 }
 const _: () = {
-    impl<'a> ::observed::Event for SharedRefs<'a> {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "shared.refs",
-            ::core::option::Option::Some(
-                ::core::any::TypeId::of::<SharedRefs<'static>>(),
-            ),
-            ::core::option::Option::Some(
-                ::observed::metadata::LogDescription::new(
-                    "shared.refs",
-                    ::observed::Severity::Info,
-                    ::core::option::Option::None,
-                ),
-            ),
-            ::core::option::Option::None,
-            false,
-            false,
-        );
+    impl<'a> ::observed::VisitFields for SharedRefs<'a> {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -71,5 +55,23 @@ const _: () = {
             }
             ::core::ops::ControlFlow::Continue(())
         }
+    }
+    impl<'a> ::observed::Event for SharedRefs<'a> {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "shared.refs",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<SharedRefs<'static>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "shared.refs",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
     }
 };

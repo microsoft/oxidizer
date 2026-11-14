@@ -1,0 +1,52 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"generic.metric\"\"#,\nr\"\n        #[counter(hits)]\n        struct GenericMetric<T> {\n            #[unredacted]\n            hits: u64,\n            payload: T,\n        }\n        \",)"
+---
+struct GenericMetric<T> {
+    hits: u64,
+    payload: T,
+}
+const _: () = {
+    impl<T: 'static> ::observed::VisitFields for GenericMetric<T>
+    where
+        T: ::core::marker::Send + ::core::marker::Sync,
+    {
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "hits",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
+                            "hits",
+                            ::observed::metadata::MetricDescription::new(
+                                "generic.metric",
+                                ::observed::metadata::InstrumentKind::Counter,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.hits.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+    impl<T: 'static> ::observed::Event for GenericMetric<T>
+    where
+        T: ::core::marker::Send + ::core::marker::Sync,
+    {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "generic.metric",
+            ::core::option::Option::Some(::core::any::TypeId::of::<GenericMetric<T>>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            true,
+            false,
+        );
+    }
+};

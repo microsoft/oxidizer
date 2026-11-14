@@ -186,7 +186,7 @@ pub(crate) mod value;
 
 // Re-export core types at the crate root for convenience.
 pub use error::{FlushError, SinkFlushError};
-pub use event::Event;
+pub use event::{Event, VisitFields};
 pub use key::Key;
 /// Derives the [`Enrichment`](enrichment::Enrichment) trait for a struct.
 ///
@@ -298,7 +298,7 @@ pub use key::Key;
 /// )();
 /// ```
 pub use observed_macros::Enrichment;
-/// Declares a struct as an [`Event`] and generates its trait impl.
+/// Declares a struct as an [`Event`] and generates its [`VisitFields`] and [`Event`] impls.
 ///
 /// # Full syntax
 ///
@@ -329,6 +329,10 @@ pub use observed_macros::Enrichment;
 ///     opt: Option<T>,                       // `None` → filled with "n/a" (default)
 ///     #[if_none(drop)]                      // ...or omit `opt` entirely when `None`
 ///     opt2: Option<T>,
+///
+///     // ── fields known only at run time ────────────────────────
+///     #[flatten]                            // visit the fields of `extra` here; E: VisitFields
+///     extra: E,
 /// }
 /// ```
 ///
@@ -424,6 +428,7 @@ pub use observed_macros::Enrichment;
 /// | `#[unredacted]` | Escape hatch: bypass redaction for a value that carries no user data. Never implicit. The type must implement `Into<Value>`. |
 /// | `#[data_class(<expr>)]` | Wrap the value in `Sensitive::new(value, <expr>)` for classification. |
 /// | `#[if_none(drop)]` / `#[if_none("...")]` | Control how a `None` `Option<T>` is recorded. The default is `#[if_none("n/a")]`. |
+/// | `#[flatten]` | Visit the fields of the value as fields of the event. The type must implement [`VisitFields`]. |
 ///
 /// `#[unredacted]` and `#[data_class(...)]` are mutually exclusive.
 ///

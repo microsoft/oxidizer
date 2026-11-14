@@ -119,7 +119,7 @@ mod tests {
     use std::time::Duration;
 
     use observed::metadata::InstrumentKind;
-    use observed::{Event as _, Severity};
+    use observed::{Event as _, Severity, VisitFields as _};
     use observed_testing::{ExpectedEvent, ExpectedEventDescription, TEST_ID, test_emitter};
     use static_assertions::{assert_impl_all, assert_not_impl_any};
 

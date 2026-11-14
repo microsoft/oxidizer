@@ -49,6 +49,7 @@ bolero = { workspace = true, features = ["std"] }
 # not itself activate that feature on `bolero-engine`.
 criterion = { workspace = true }
 gungraun = { workspace = true, features = ["default"] }
+insta = { workspace = true }
 itoa = { workspace = true }
 matchit = { workspace = true }
 metabench = { path = "../metabench" }

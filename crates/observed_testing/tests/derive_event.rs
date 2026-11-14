@@ -13,8 +13,9 @@
 
 use std::ops::ControlFlow;
 
-use observed::metadata::InstrumentKind;
-use observed::{Event, Severity, Value, event};
+use observed::metadata::{FieldDescriptor, InstrumentKind};
+use observed::processing::FieldVisitorFn;
+use observed::{Event, Severity, Value, VisitFields, event};
 use observed_testing::types::{PiiString, PublicString};
 use observed_testing::{ExpectedEventDescription, MicrosoftEnterpriseDataTaxonomy, passthrough_redaction_engine};
 
@@ -936,6 +937,73 @@ fn parenthesized_reference_to_redactable_type() {
                 log_key: Some("name"),
                 metric_key: None,
                 value: Value::from("bob"),
+            },
+        ],
+    );
+}
+
+#[test]
+fn flatten_visits_inner_fields() {
+    struct Tags<'a>(&'a [(FieldDescriptor, i64)]);
+
+    impl VisitFields for Tags<'_> {
+        fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            for (descriptor, count) in self.0 {
+                visitor(descriptor, &|_| Value::from(*count))?;
+            }
+            ControlFlow::Continue(())
+        }
+    }
+
+    #[event("flattened")]
+    #[info]
+    struct Flattened<'a> {
+        #[unredacted]
+        items: i64,
+        #[flatten]
+        tags: Tags<'a>,
+        #[unredacted]
+        batch: i64,
+    }
+
+    let engine = passthrough_redaction_engine();
+    let tags = [
+        (FieldDescriptor::log_only("tag.red"), 3),
+        (FieldDescriptor::log_only("tag.blue"), 5),
+    ];
+    let event = Flattened {
+        items: 8,
+        tags: Tags(&tags),
+        batch: 2,
+    };
+
+    let entries = collect_fields(&event, &engine);
+    sort_and_compare(
+        &entries,
+        &[
+            ExpectedField {
+                field_name: "batch",
+                log_key: Some("batch"),
+                metric_key: None,
+                value: Value::from(2_i64),
+            },
+            ExpectedField {
+                field_name: "items",
+                log_key: Some("items"),
+                metric_key: None,
+                value: Value::from(8_i64),
+            },
+            ExpectedField {
+                field_name: "tag.blue",
+                log_key: Some("tag.blue"),
+                metric_key: None,
+                value: Value::from(5_i64),
+            },
+            ExpectedField {
+                field_name: "tag.red",
+                log_key: Some("tag.red"),
+                metric_key: None,
+                value: Value::from(3_i64),
             },
         ],
     );

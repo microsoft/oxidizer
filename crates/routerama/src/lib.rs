@@ -54,10 +54,10 @@
 //! ## What gets generated
 //!
 //! For an enum named `BookRoute`, Routerama generates a `BookRouteResolver`
-//! implementing [`Resolver`]. Static-only enums get an infallible `resolver`
-//! constructor. Enums containing dynamic routes instead get a
-//! `BookRouteResolverBuilder` and an `add_<variant>(method, path)` method for
-//! each dynamic variant. `#[resolver(name = ApiResolver)]` explicitly names
+//! implementing [`Resolver`] and [`RouteTable`]. Static-only enums get an
+//! infallible `resolver` constructor. Enums containing dynamic routes instead
+//! get a `BookRouteResolverBuilder` and an `add_<variant>(method, path)` method
+//! for each dynamic variant. `#[resolver(name = ApiResolver)]` explicitly names
 //! the resolver `ApiResolver` and its builder `ApiResolverBuilder`.
 //! [`Resolver::resolve`] returns `Result<Route, ResolveError>`.
 //!
@@ -242,12 +242,14 @@ mod raw_match;
 mod raw_resolver;
 mod resolve_error;
 mod resolver;
+mod route_table;
 mod rt_node;
 mod walk;
 
 pub use configuration_error::ConfigurationError;
 pub use resolve_error::ResolveError;
 pub use resolver::Resolver;
+pub use route_table::{RouteHit, RouteTable};
 
 /// Runtime support for generated resolvers.
 #[doc(hidden)]

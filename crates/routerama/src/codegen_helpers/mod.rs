@@ -6,7 +6,10 @@
 mod scan;
 mod scanned_path;
 
+pub use alloc::borrow::Cow;
+
 pub use scan::{scan_segments, seg_bytes, split_verb, substr};
 pub use scanned_path::{InvalidPath, ScannedPath, scan_path, with_scanned_path};
 
 pub use crate::route_match::RouteMatch;
+pub use crate::route_table::{RouteHit, route_hit};

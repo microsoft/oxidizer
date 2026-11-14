@@ -61,7 +61,7 @@ pub(crate) fn emit_when_body_ends(mut guard: TelemetryDropGuard, response: HttpR
                 bytes_read: 0,
             })))
         })
-        .expect("the response body was confirmed above to not be at its end")
+        .expect("map fails only for a consumed body, which is at its end, so the check above rules it out")
     })
 }
 
@@ -102,6 +102,9 @@ impl Body for TelemetryBody {
             Poll::Ready(Some(Ok(frame))) => {
                 if let Some(data) = frame.data_ref() {
                     this.bytes_read += data.len() as u64;
+                    if let Some(buffer) = &mut this.guard.response_body_buffer {
+                        buffer.push(data);
+                    }
                 }
                 if ended || frame.is_trailers() {
                     this.guard.emit(RequestEnd::Complete(this.status_code));

@@ -11,6 +11,24 @@ struct Subject {
     v: u64,
 }
 const _: () = {
+    impl ::observed::VisitFields for Subject {
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "v",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("v"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
             "severity",
@@ -26,6 +44,19 @@ const _: () = {
             false,
             false,
         );
+    }
+};
+
+---- input ----
+#[event("severity")]
+#[debug] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::VisitFields for Subject {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -43,17 +74,6 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
     }
-};
-
----- input ----
-#[event("severity")]
-#[debug] struct Subject { #[unredacted] v: u64 }
-
----- yields ----
-struct Subject {
-    v: u64,
-}
-const _: () = {
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
             "severity",
@@ -69,6 +89,19 @@ const _: () = {
             false,
             false,
         );
+    }
+};
+
+---- input ----
+#[event("severity")]
+#[info] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::VisitFields for Subject {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -86,17 +119,6 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
     }
-};
-
----- input ----
-#[event("severity")]
-#[info] struct Subject { #[unredacted] v: u64 }
-
----- yields ----
-struct Subject {
-    v: u64,
-}
-const _: () = {
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
             "severity",
@@ -112,6 +134,19 @@ const _: () = {
             false,
             false,
         );
+    }
+};
+
+---- input ----
+#[event("severity")]
+#[warning] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::VisitFields for Subject {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -129,17 +164,6 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
     }
-};
-
----- input ----
-#[event("severity")]
-#[warning] struct Subject { #[unredacted] v: u64 }
-
----- yields ----
-struct Subject {
-    v: u64,
-}
-const _: () = {
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
             "severity",
@@ -155,6 +179,19 @@ const _: () = {
             false,
             false,
         );
+    }
+};
+
+---- input ----
+#[event("severity")]
+#[error] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::VisitFields for Subject {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -172,17 +209,6 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
     }
-};
-
----- input ----
-#[event("severity")]
-#[error] struct Subject { #[unredacted] v: u64 }
-
----- yields ----
-struct Subject {
-    v: u64,
-}
-const _: () = {
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
             "severity",
@@ -198,6 +224,19 @@ const _: () = {
             false,
             false,
         );
+    }
+};
+
+---- input ----
+#[event("severity")]
+#[fatal] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::VisitFields for Subject {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -215,17 +254,6 @@ const _: () = {
             ::core::ops::ControlFlow::Continue(())
         }
     }
-};
-
----- input ----
-#[event("severity")]
-#[fatal] struct Subject { #[unredacted] v: u64 }
-
----- yields ----
-struct Subject {
-    v: u64,
-}
-const _: () = {
     impl ::observed::Event for Subject {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
             "severity",
@@ -241,21 +269,5 @@ const _: () = {
             false,
             false,
         );
-        fn visit_fields(
-            &self,
-            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
-        ) -> ::core::ops::ControlFlow<()> {
-            {
-                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "v",
-                    ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("v"),
-                    ),
-                    ::core::option::Option::None,
-                );
-                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
-            }
-            ::core::ops::ControlFlow::Continue(())
-        }
     }
 };

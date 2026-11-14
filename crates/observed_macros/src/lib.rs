@@ -10,14 +10,14 @@
 //! Procedural macros for the `observed` crate.
 //!
 //! This crate provides:
-//! - `#[event(...)]` - generate an `Event` trait impl for a struct
+//! - `#[event(...)]` - generate `VisitFields` and `Event` trait impls for a struct
 //! - `#[derive(Enrichment)]` - generate an `Enrichment` trait impl for a struct
 //!
 //! **Do not depend on this crate directly.** Use the re-exports from `observed` instead.
 
 use proc_macro::TokenStream;
 
-/// Declares a struct as an `observed` event and generates its `Event` trait impl.
+/// Declares a struct as an `observed` event and generates its `VisitFields` and `Event` trait impls.
 /// See the re-export in the `observed` crate for full documentation.
 ///
 /// This is an attribute macro (not a derive): it consumes the sibling

@@ -1,0 +1,7 @@
+---
+source: crates/routerama/tests/route_table_macro.rs
+expression: printed
+---
+/accounts/{user} [user]
+/status []
+/users/{user} [user]

@@ -17,7 +17,7 @@ Implementation of the procedural macros for the `observed` crate.
 
 This crate holds the logic behind:
 
-* `#[event(...)]` - generate an `Event` trait impl for a struct
+* `#[event(...)]` - generate `VisitFields` and `Event` trait impls for a struct
 * `#[derive(Enrichment)]` - generate an `Enrichment` trait impl for a struct
 
 **Do not depend on this crate directly.** Use the re-exports from `observed` instead.

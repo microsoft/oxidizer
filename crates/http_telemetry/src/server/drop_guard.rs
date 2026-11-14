@@ -5,18 +5,20 @@
 
 use std::sync::Arc;
 
-use http::uri::Authority;
-use http::{HeaderValue, Method, StatusCode, Version};
+use http::uri::{Authority, PathAndQuery};
+use http::{HeaderMap, HeaderValue, Method, StatusCode, Version};
 use http_extensions::HttpError;
 use http_headers::SingleValueField;
 use http_headers::headers::{Host, HostView};
 use observed::context::Transfer;
 use observed::{Sink, Text, emit};
 use ohno::{ErrorLabel, Labeled};
+use parking_lot::Mutex;
+use smallvec::SmallVec;
 use tick::Stopwatch;
 
-use super::OTHER;
-use super::events::{ActiveRequests, RequestAbandoned, RequestComplete, RequestError};
+use super::events::{ActiveRequests, Headers, RequestAbandoned, RequestComplete, RequestError, RouteParameters};
+use super::{BodyBuffer, HeaderField, OTHER, RouteFields};
 
 /// The texts of the statuses 500 to 599, three digits each. `StatusCode::as_str` returns a text that
 /// borrows the status, so the `error.type` of a complete event comes from here.
@@ -46,12 +48,38 @@ pub(crate) enum RequestEnd<'a> {
     Abandoned(Option<StatusCode>),
 }
 
-/// The authority of the target URI
 pub(crate) enum UriAuthority {
     /// The authority of the request URI, and the default port of its scheme.
     Uri(Authority, Option<u16>),
     /// The `Host` header of a request whose URI has no authority.
     Host(HeaderValue),
+}
+
+pub(crate) struct RouteValues {
+    pub(crate) route_fields: Arc<RouteFields>,
+    pub(crate) path_and_query: PathAndQuery,
+}
+
+/// The values of the configured headers of the request and of the response.
+pub(crate) struct RequestAndResponseHeaders {
+    pub(crate) request: Option<HeaderValues>,
+    pub(crate) response: Option<HeaderValues>,
+}
+
+pub(crate) struct HeaderValues {
+    pub(crate) fields: Arc<[HeaderField]>,
+    pub(crate) values: SmallVec<[(usize, HeaderValue); 2]>,
+}
+
+impl HeaderValues {
+    pub(crate) fn new(fields: Arc<[HeaderField]>, headers: &HeaderMap) -> Self {
+        let values = fields
+            .iter()
+            .enumerate()
+            .flat_map(|(index, field)| headers.get_all(&field.header_name).iter().map(move |value| (index, value.clone())))
+            .collect();
+        Self { fields, values }
+    }
 }
 
 /// Drop guard that emits the event of one request, also when the caller drops the request future.
@@ -70,6 +98,10 @@ pub(crate) struct TelemetryDropGuard {
     pub(crate) version: Version,
     pub(crate) scheme: Option<&'static str>,
     pub(crate) uri_authority: Option<UriAuthority>,
+    pub(crate) route_values: Option<RouteValues>,
+    pub(crate) headers: Option<Box<RequestAndResponseHeaders>>,
+    pub(crate) request_body_buffer: Option<Arc<Mutex<BodyBuffer>>>,
+    pub(crate) response_body_buffer: Option<BodyBuffer>,
     pub(crate) finished: bool,
 }
 
@@ -85,6 +117,10 @@ impl TelemetryDropGuard {
         );
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a request can end in four ways, and the code for each way lists all fields of its event"
+    )]
     pub(crate) fn emit(&mut self, end: RequestEnd<'_>) {
         if self.finished {
             return;
@@ -111,13 +147,24 @@ impl TelemetryDropGuard {
             }
             None => (None, None),
         };
-        // `emit!` builds an event only for a sink that is interested in it, so the method and the host are copied
-        // only then.
         let method_original = || (method == OTHER).then(|| Text::from(Arc::<str>::from(self.method.as_str())));
         let server_address = || {
             server_address
                 .filter(|host| !host.is_empty())
                 .map(|host| Text::from(Arc::<str>::from(host)))
+        };
+        let headers = self.headers.as_deref();
+        let match_route = || {
+            let route = self.route_values.as_ref().and_then(
+                |RouteValues {
+                     route_fields,
+                     path_and_query,
+                 }| {
+                    let route_hit = route_fields.route_table.match_route(self.method.as_str(), path_and_query.path())?;
+                    Some((route_fields.routes.get(route_hit.route())?.as_ref()?, route_hit))
+                },
+            );
+            (route.as_ref().map(|(route, _)| route.template.clone()), RouteParameters(route))
         };
         match end {
             RequestEnd::Complete(status_code) => {
@@ -125,8 +172,8 @@ impl TelemetryDropGuard {
                     let start = usize::from(index) * 3;
                     SERVER_ERROR_STATUSES.get(start..start + 3)
                 });
-                emit!(
-                    self.sink,
+                emit!(self.sink, {
+                    let (route_template, route_parameters) = match_route();
                     RequestComplete {
                         method,
                         method_original: method_original(),
@@ -134,14 +181,20 @@ impl TelemetryDropGuard {
                         protocol_version,
                         server_address: server_address(),
                         server_port,
+                        route_template,
+                        route_parameters,
                         status_code: status_code.as_u16(),
                         error_type,
                         duration_secs,
+                        request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
+                        response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
+                        request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                        response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                     }
-                );
+                });
             }
-            RequestEnd::Error(error, status_code) => emit!(
-                self.sink,
+            RequestEnd::Error(error, status_code) => emit!(self.sink, {
+                let (route_template, route_parameters) = match_route();
                 RequestError {
                     method,
                     method_original: method_original(),
@@ -149,13 +202,19 @@ impl TelemetryDropGuard {
                     protocol_version,
                     server_address: server_address(),
                     server_port,
+                    route_template,
+                    route_parameters,
                     status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: Text::from(ErrorLabel::from_error_chain(error, resolve_error_label).into_cow()),
                     duration_secs,
+                    request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
+                    response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
+                    request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                    response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                 }
-            ),
-            RequestEnd::Panic(status_code) => emit!(
-                self.sink,
+            }),
+            RequestEnd::Panic(status_code) => emit!(self.sink, {
+                let (route_template, route_parameters) = match_route();
                 RequestError {
                     method,
                     method_original: method_original(),
@@ -163,13 +222,19 @@ impl TelemetryDropGuard {
                     protocol_version,
                     server_address: server_address(),
                     server_port,
+                    route_template,
+                    route_parameters,
                     status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: Text::from("panic"),
                     duration_secs,
+                    request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
+                    response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
+                    request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                    response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                 }
-            ),
-            RequestEnd::Abandoned(status_code) => emit!(
-                self.sink,
+            }),
+            RequestEnd::Abandoned(status_code) => emit!(self.sink, {
+                let (route_template, route_parameters) = match_route();
                 RequestAbandoned {
                     method,
                     method_original: method_original(),
@@ -177,11 +242,17 @@ impl TelemetryDropGuard {
                     protocol_version,
                     server_address: server_address(),
                     server_port,
+                    route_template,
+                    route_parameters,
                     status_code: status_code.map(|status_code| status_code.as_u16()),
                     error_type: "abandoned",
                     duration_secs,
+                    request_headers: Headers(headers.and_then(|headers| headers.request.as_ref())),
+                    response_headers: Headers(headers.and_then(|headers| headers.response.as_ref())),
+                    request_body: self.request_body_buffer.as_ref().map(|buffer| buffer.lock().text()),
+                    response_body: self.response_body_buffer.as_ref().map(BodyBuffer::text),
                 }
-            ),
+            }),
         }
         self.add_active_request(-1);
     }

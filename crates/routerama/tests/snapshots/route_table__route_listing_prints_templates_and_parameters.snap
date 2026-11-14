@@ -1,0 +1,8 @@
+---
+source: crates/routerama/tests/route_table.rs
+expression: printed
+---
+/books []
+/books/{book} [book]
+/files/{path=**} [path]
+/shelves/{shelf.id}/books/{book}/reviews/{review} [shelf.id, book, review]

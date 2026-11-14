@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use common::{
     ABANDONED, ACTIVE, COMPLETE, Capture, Captured, DURATION, Echoing, Probe, Step, Tenant, data, duration, poll_frame, scripted, server,
+    sorted,
 };
 use future_assert::{FutureTestExt, poll_once};
 use http::{Method, StatusCode, Version};
@@ -160,20 +161,20 @@ fn unknown_method_meters_other_and_logs_original() {
 
     let event = capture.single();
     assert_eq!(
-        (event.logs, event.dimensions),
+        (sorted(&event.logs), sorted(&event.dimensions)),
         (
-            vec![
+            sorted(&[
                 ("http.request.method", Value::from("_OTHER")),
                 ("http.request.method_original", Value::from("PURGE")),
                 ("network.protocol.version", Value::from("1.1")),
                 ("http.response.status_code", Value::I64(200)),
                 (DURATION, Value::F64(0.0)),
-            ],
-            vec![
+            ]),
+            sorted(&[
                 ("http.request.method", Value::from("_OTHER")),
                 ("network.protocol.version", Value::from("1.1")),
                 ("http.response.status_code", Value::I64(200)),
-            ],
+            ]),
         )
     );
 }

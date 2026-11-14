@@ -6,22 +6,7 @@ struct Heartbeat {
     level: f64,
 }
 const _: () = {
-    impl ::observed::Event for Heartbeat {
-        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "heartbeat",
-            ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
-            ::core::option::Option::None,
-            ::core::option::Option::Some(
-                ::observed::metadata::MetricDescription::new(
-                    "heartbeat",
-                    ::observed::metadata::InstrumentKind::Counter,
-                    "",
-                    "",
-                ),
-            ),
-            true,
-            false,
-        );
+    impl ::observed::VisitFields for Heartbeat {
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -46,5 +31,22 @@ const _: () = {
             }
             ::core::ops::ControlFlow::Continue(())
         }
+    }
+    impl ::observed::Event for Heartbeat {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "heartbeat",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
+            ::core::option::Option::None,
+            ::core::option::Option::Some(
+                ::observed::metadata::MetricDescription::new(
+                    "heartbeat",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                ),
+            ),
+            true,
+            false,
+        );
     }
 };
