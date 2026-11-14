@@ -33,7 +33,7 @@ impl<'a, F> TaskBuilder<'a, F> {
     }
 }
 
-impl<'a, F, I> TaskBuilder<'a, F, I> {
+impl<F, I> TaskBuilder<'_, F, I> {
     /// Sets the observed context for task polling, cleanup, and lifecycle events.
     ///
     /// By default, the task has no captured context.
@@ -50,13 +50,15 @@ impl<'a, F, I> TaskBuilder<'a, F, I> {
         self.metadata.placement = placement;
         self
     }
+}
 
+#[cfg(feature = "inspection")]
+impl<'a, F, I> TaskBuilder<'a, F, I> {
     /// Sets a callback that describes the converted future during explicit inspection.
     ///
     /// The callback is stored with the future without a separate task allocation.
     /// Ordinary execution cycles do not call it. Calling this method again replaces
     /// the previous callback.
-    #[cfg(feature = "inspection")]
     pub fn inspect<D, J>(self, inspect: J) -> TaskBuilder<'a, F, impl Inspector<F::IntoFuture> + use<F, I, D, J>>
     where
         F: IntoFuture,
