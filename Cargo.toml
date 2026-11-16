@@ -5,6 +5,10 @@
 resolver = "2"
 members = ["crates/*"]
 
+# Local investigation build used by DCF. Remove with the matching DCF override.
+[patch.crates-io]
+native-tls = { path = 'C:\src\rust-native-tls-dcf' }
+
 [workspace.package]
 edition = "2024"
 rust-version = "1.95"

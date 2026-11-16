@@ -40,7 +40,7 @@ all-features = true
 [features]
 default = []
 rustls = ["dep:rustls", "dep:sha2", "dep:x509-parser"]
-native-tls = ["dep:native-tls"]
+native-tls = ["dep:native-tls", "dep:sha2", "dep:x509-parser"]
 
 [dependencies]
 

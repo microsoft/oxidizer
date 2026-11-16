@@ -58,8 +58,10 @@ mod native_tls;
 #[cfg(any(feature = "native-tls", test))]
 pub use native_tls::NativeTlsOptions;
 
-#[cfg(any(feature = "rustls", test))]
+#[cfg(any(feature = "native-tls", feature = "rustls", test))]
 mod certificate_diagnostics;
+#[cfg(any(feature = "native-tls", feature = "rustls", test))]
+pub use certificate_diagnostics::peer_certificate_details;
 #[cfg(any(feature = "rustls", test))]
 mod rustls;
 #[cfg(any(feature = "rustls", test))]

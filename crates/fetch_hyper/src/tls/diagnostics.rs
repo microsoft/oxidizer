@@ -40,7 +40,7 @@ pub(crate) fn context(destination: &Uri, validation_name: &str, name_override: O
 
 #[cfg(any(feature = "native-tls", test))]
 pub(crate) const NATIVE_CERTIFICATE_UNAVAILABLE: &str = "peer_certificate_subject=unavailable, peer_certificate_sans=unavailable, peer_certificate_sha256=unavailable \
-     (the native TLS failure API does not expose the peer certificate)";
+     (the native TLS backend did not expose a certificate for this handshake failure)";
 
 #[cfg(any(feature = "rustls", test))]
 pub(crate) const RUSTLS_CERTIFICATE_UNAVAILABLE: &str = "peer_certificate_subject=unavailable, peer_certificate_sans=unavailable, peer_certificate_sha256=unavailable \

@@ -319,13 +319,22 @@ async fn connect_https<S: HyperIo + Unpin>(
         Ok(stream) => Ok(wrap_https_stream(stream)),
         Err(error) => {
             let context = context();
+            let certificate = match error.peer_certificate() {
+                Some(certificate) => match certificate.to_der() {
+                    Ok(der) => fetch_tls::peer_certificate_details(&der),
+                    Err(export_error) => {
+                        format!("peer_certificate_details=unavailable (failed to export the peer certificate: {export_error})")
+                    }
+                },
+                None => NATIVE_CERTIFICATE_UNAVAILABLE.to_owned(),
+            };
             let recovery = error_kind
                 .lock()
                 .expect("handshake error recorder mutex must not be poisoned because recording does not execute user code")
                 .map_or_else(RecoveryInfo::never, RecoveryInfo::from);
             Err(Box::new(
                 http_extensions::HttpError::other(error, recovery, crate::error_labels::LABEL_CONNECT).enrich(format!(
-                    "{context}, tls_sni_name=unavailable (managed by native TLS), {NATIVE_CERTIFICATE_UNAVAILABLE}"
+                    "{context}, tls_sni_name=unavailable (managed by native TLS), {certificate}"
                 )),
             ))
         }
@@ -782,6 +791,16 @@ mod tests {
             panic!("connection reset should fail the handshake");
         };
 
+        assert!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<native_tls::Error>()
+                .unwrap()
+                .peer_certificate()
+                .is_none()
+        );
+        assert!(error.to_string().contains("peer_certificate_subject=unavailable"));
         assert_eq!(
             error.downcast_ref::<http_extensions::HttpError>().unwrap().recovery().kind(),
             RecoveryKind::Retry
@@ -910,10 +929,34 @@ mod tests {
             "{message}"
         );
         assert!(message.contains(&format!("remote_address={}", server.address)), "{message}");
-        assert!(message.contains("peer_certificate_subject=unavailable"), "{message}");
-        assert!(message.contains("peer_certificate_sans=unavailable"), "{message}");
-        assert!(message.contains("peer_certificate_sha256=unavailable"), "{message}");
-        assert!(error.source().unwrap().is::<native_tls::Error>());
+        let native_error = error.source().unwrap().downcast_ref::<native_tls::Error>().unwrap();
+        #[cfg(windows)]
+        {
+            assert!(message.contains("TLS peer certificate (unverified)"), "{message}");
+            assert!(message.contains("expected.example.test"), "{message}");
+            assert!(!message.contains("peer_certificate_subject=unavailable"), "{message}");
+            assert!(!message.contains("peer_certificate_sans=unavailable"), "{message}");
+            assert!(!message.contains("peer_certificate_sha256=unavailable"), "{message}");
+            assert_eq!(
+                native_error.peer_certificate().unwrap().to_der().unwrap(),
+                server.root.to_der().unwrap()
+            );
+            let mut source: &(dyn std::error::Error + 'static) = native_error;
+            while let Some(inner) = source.source() {
+                source = inner;
+            }
+            assert_eq!(
+                source.downcast_ref::<std::io::Error>().unwrap().raw_os_error(),
+                Some(-2_146_762_481)
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            assert!(message.contains("peer_certificate_subject=unavailable"), "{message}");
+            assert!(message.contains("peer_certificate_sans=unavailable"), "{message}");
+            assert!(message.contains("peer_certificate_sha256=unavailable"), "{message}");
+            assert!(native_error.peer_certificate().is_none());
+        }
         assert_eq!(
             error.downcast_ref::<http_extensions::HttpError>().unwrap().recovery().kind(),
             RecoveryKind::Never
