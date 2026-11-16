@@ -6,9 +6,6 @@
 
 //! OTLP log and metric destinations.
 //!
-//! Use these destinations with `observed_otel` or register them
-//! directly on OpenTelemetry SDK provider builders:
-//!
 //! - [`otlp_logs`] sends batched logs.
 //! - [`otlp_metrics`] sends periodic metrics.
 //!

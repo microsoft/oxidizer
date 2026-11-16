@@ -23,8 +23,8 @@ use crate::{OtlpDestinationProtocol, with_optional_timeout};
 ///
 /// let destination = otlp_metrics("http://localhost:4318/v1/metrics").build();
 /// ```
-pub fn otlp_metrics(endpoint: impl Into<String>) -> OtlpMetricDestinationBuilder<otlp_metric_destination_builder::SetEndpoint> {
-    OtlpMetricDestination::builder().endpoint(endpoint.into())
+pub fn otlp_metrics(endpoint: impl Into<String>) -> OtlpMetricDestinationBuilder {
+    OtlpMetricDestination::builder(endpoint)
 }
 
 /// A metric destination that periodically exports over OTLP gRPC or HTTP/protobuf.
@@ -32,6 +32,7 @@ pub fn otlp_metrics(endpoint: impl Into<String>) -> OtlpMetricDestinationBuilder
 #[builder(derive(Debug))]
 pub struct OtlpMetricDestination {
     /// Collector URL.
+    #[builder(start_fn, into)]
     endpoint: String,
     /// Export transport (default: HTTP/protobuf).
     #[builder(default = OtlpDestinationProtocol::Http)]
@@ -63,6 +64,13 @@ impl OtlpMetricDestination {
             &str,
         ) -> DestinationResult<MetricExporterBuilder<HttpExporterBuilderSet>>,
     ) -> DestinationResult<MeterProviderBuilder> {
+        if self.endpoint.is_empty() {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "OTLP endpoint must not be empty",
+            ))?;
+        }
+
         let mut exporter = MetricExporter::builder();
         if let Some(temporality) = self.temporality {
             exporter = exporter.with_temporality(temporality);
@@ -112,11 +120,10 @@ impl<S: otlp_metric_destination_builder::IsComplete> IntoMetricDestination for O
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::io::{Error, ErrorKind};
-
     use observed_destination_core::MeterProviderBuilderExt;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
-
-    use crate::{OtlpDestinationProtocol, otlp_metrics};
+    use rstest::rstest;
+    use crate::{otlp_metrics, OtlpDestinationProtocol};
 
     #[test]
     fn metric_registration_propagates_http_client_error() {
@@ -130,16 +137,25 @@ mod tests {
         assert_eq!(error.downcast::<Error>().unwrap().kind(), expected);
     }
 
-    #[test]
+    #[rstest]
     #[cfg_attr(
         all(miri, windows),
         ignore = "Reqwest's Tokio runtime requires CreateIoCompletionPort, which Miri does not support"
     )]
-    fn metric_registration_propagates_exporter_error() {
-        for protocol in [OtlpDestinationProtocol::Grpc, OtlpDestinationProtocol::Http] {
-            let result = SdkMeterProvider::builder().register(otlp_metrics("http://[invalid").protocol(protocol));
-
-            result.unwrap_err();
-        }
+    #[case::http_empty_host("", OtlpDestinationProtocol::Http, "OTLP endpoint must not be empty")]
+    #[case::http_malformed_host("http://[invalid", OtlpDestinationProtocol::Http, "invalid exporter configuration: endpoint: invalid endpoint 'http://[invalid': invalid authority")]
+    #[case::grpc_empty_host("", OtlpDestinationProtocol::Grpc, "OTLP endpoint must not be empty")]
+    #[case::grpc_malformed_host("http://[invalid", OtlpDestinationProtocol::Grpc, "invalid exporter configuration: endpoint: invalid endpoint 'http://[invalid': invalid URI: invalid authority")]
+    fn metric_registration_rejects_invalid_endpoints(
+        #[case] endpoint: &str,
+        #[case] protocol: OtlpDestinationProtocol,
+        #[case] error_text: &str) {
+        assert_eq!(
+            SdkMeterProvider::builder()
+                .register(otlp_metrics(endpoint).protocol(protocol))
+                .unwrap_err()
+                .to_string(),
+            error_text
+        );
     }
 }

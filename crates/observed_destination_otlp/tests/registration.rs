@@ -25,7 +25,7 @@ use opentelemetry_proto::tonic::collector::logs::v1::{ExportLogsServiceRequest, 
 use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::{MetricsService, MetricsServiceServer};
 use opentelemetry_proto::tonic::collector::metrics::v1::{ExportMetricsServiceRequest, ExportMetricsServiceResponse};
 use opentelemetry_proto::tonic::common::v1::any_value;
-use opentelemetry_proto::tonic::metrics::v1::{metric, number_data_point};
+use opentelemetry_proto::tonic::metrics::v1::{metric, number_data_point, AggregationTemporality};
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::{SdkMeterProvider, Temporality};
 use prost::Message;
@@ -94,6 +94,7 @@ fn metric_registration_delivers_measurement(#[case] protocol: OtlpDestinationPro
     };
 
     assert_eq!(sum.data_points[0].value, Some(number_data_point::Value::AsInt(7)));
+    assert_eq!(sum.aggregation_temporality, AggregationTemporality::Delta as i32);
 }
 
 #[rstest]

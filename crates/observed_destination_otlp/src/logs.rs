@@ -10,7 +10,6 @@ use opentelemetry_otlp::{
     HttpExporterBuilderSet, LogExporter, LogExporterBuilder, OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, Protocol, WithExportConfig,
 };
 use opentelemetry_sdk::logs::{BatchLogProcessor, LoggerProviderBuilder};
-
 use crate::http_client::with_blocking_http_client;
 use crate::{OtlpDestinationProtocol, with_optional_timeout};
 
@@ -23,8 +22,8 @@ use crate::{OtlpDestinationProtocol, with_optional_timeout};
 ///
 /// let destination = otlp_logs("http://localhost:4318/v1/logs").build();
 /// ```
-pub fn otlp_logs(endpoint: impl Into<String>) -> OtlpLogDestinationBuilder<otlp_log_destination_builder::SetEndpoint> {
-    OtlpLogDestination::builder().endpoint(endpoint.into())
+pub fn otlp_logs(endpoint: impl Into<String>) -> OtlpLogDestinationBuilder {
+    OtlpLogDestination::builder(endpoint)
 }
 
 /// A log destination that sends batches over OTLP HTTP/protobuf or gRPC.
@@ -32,6 +31,7 @@ pub fn otlp_logs(endpoint: impl Into<String>) -> OtlpLogDestinationBuilder<otlp_
 #[builder(derive(Debug))]
 pub struct OtlpLogDestination {
     /// Collector URL.
+    #[builder(start_fn, into)]
     endpoint: String,
     /// Export transport (default: HTTP/protobuf).
     #[builder(default = OtlpDestinationProtocol::Http)]
@@ -53,6 +53,13 @@ impl OtlpLogDestination {
             &str,
         ) -> DestinationResult<LogExporterBuilder<HttpExporterBuilderSet>>,
     ) -> DestinationResult<LoggerProviderBuilder> {
+        if self.endpoint.is_empty() {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "OTLP endpoint must not be empty",
+            ))?;
+        }
+
         let exporter = match self.protocol {
             OtlpDestinationProtocol::Http => configure_http(
                 LogExporter::builder()
@@ -101,6 +108,7 @@ mod tests {
 
     use observed_destination_core::LoggerProviderBuilderExt;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
+    use rstest::rstest;
 
     use crate::{OtlpDestinationProtocol, otlp_logs};
 
@@ -116,16 +124,25 @@ mod tests {
         assert_eq!(error.downcast::<Error>().unwrap().kind(), expected);
     }
 
-    #[test]
+    #[rstest]
     #[cfg_attr(
         all(miri, windows),
         ignore = "Reqwest's Tokio runtime requires CreateIoCompletionPort, which Miri does not support"
     )]
-    fn log_registration_propagates_exporter_error() {
-        for protocol in [OtlpDestinationProtocol::Grpc, OtlpDestinationProtocol::Http] {
-            let result = SdkLoggerProvider::builder().register(otlp_logs("http://[invalid").protocol(protocol));
-
-            result.unwrap_err();
-        }
+    #[case::http_empty_host("", OtlpDestinationProtocol::Http, "OTLP endpoint must not be empty")]
+    #[case::http_malformed_host("http://[invalid", OtlpDestinationProtocol::Http, "invalid exporter configuration: endpoint: invalid endpoint 'http://[invalid': invalid authority")]
+    #[case::grpc_empty_host("", OtlpDestinationProtocol::Grpc, "OTLP endpoint must not be empty")]
+    #[case::grpc_malformed_host("http://[invalid", OtlpDestinationProtocol::Grpc, "invalid exporter configuration: endpoint: invalid endpoint 'http://[invalid': invalid URI: invalid authority")]
+    fn log_registration_rejects_invalid_endpoints(
+        #[case] endpoint: &str,
+        #[case] protocol: OtlpDestinationProtocol,
+        #[case] error_text: &str) {
+        assert_eq!(
+            SdkLoggerProvider::builder()
+                .register(otlp_logs(endpoint).protocol(protocol))
+                .unwrap_err()
+                .to_string(),
+            error_text
+        );
     }
 }
