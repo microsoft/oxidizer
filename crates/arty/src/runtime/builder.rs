@@ -27,7 +27,6 @@ use crate::runtime::handle::Runtime;
 /// use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 ///
 /// let runtime = Runtime::builder()
-///     .monitor(arty::runtime::MonitorPolicy::disabled())
 ///     .workers(WorkersPolicy::at_most(4))
 ///     .blocking_pool(BlockingPoolPolicy::shared().max(4))
 ///     .build()?;
@@ -41,7 +40,7 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
-    /// Sets the runtime name used in worker thread names.
+    /// Sets the runtime name used in worker thread names and monitoring.
     ///
     /// Async threads use `<name>-async-<index>`, with indices starting at zero.
     /// Shared blocking pools use `<name>-blocking-<thread index>`.
@@ -194,10 +193,7 @@ impl RuntimeBuilder {
     /// # #[cfg(all(feature = "rt", feature = "test-util"))]
     /// # fn sequential_delay() -> Result<(), Box<dyn std::error::Error>> {
     /// let control = arty::time::ClockControl::new().auto_advance_timers(true);
-    /// let runtime = arty::runtime::Runtime::builder()
-    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
-    ///     .clock(control)
-    ///     .build()?;
+    /// let runtime = arty::runtime::Runtime::builder().clock(control).build()?;
     /// runtime.scheduler().block_on(async |cx| {
     ///     let duration = std::time::Duration::from_secs(30);
     ///     let watch = cx.clock().stopwatch();
@@ -239,9 +235,7 @@ impl RuntimeBuilder {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::builder()
-    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
-    ///     .build()?;
+    /// let runtime = Runtime::builder().build()?;
     /// assert_eq!(runtime.scheduler().block_on(async |_| 42)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```

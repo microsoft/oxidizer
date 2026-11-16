@@ -13,13 +13,14 @@ use nonempty::NonEmpty;
 use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
+use crate::runtime::monitoring::TaskMonitoring;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{CommandSender, LocalWorker, QueuedFactory, QueuedIoAccess, SpawnCommand, SystemCommand};
 use crate::runtime::worker::blocking::Worker;
 use crate::runtime::{Error, Workers};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-use crate::task::preparation::prepare_remote_with_size;
+use crate::task::preparation::prepare_remote;
 
 #[derive(Clone, Debug)]
 pub(crate) struct WorkerEndpoint {
@@ -161,23 +162,14 @@ impl DispatcherCore {
         WorkerIndex(self.next_async_worker_index.fetch_add(1, Ordering::Relaxed) % self.worker_endpoints.len())
     }
 
-    pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    pub(crate) fn spawn<FF, F, R, S>(&self, future_factory: FF, monitoring: TaskMonitoring<F, S>) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
+        S: Fn() -> usize + Send + 'static,
     {
-        self.enqueue(self.next_worker_index(), TaskPlacement::Any, future_factory)
-    }
-
-    #[cfg(feature = "monitor")]
-    pub(crate) fn spawn_with_size<FF, F, R>(&self, future_factory: FF, body_size: usize) -> JoinHandle<R>
-    where
-        FF: FnOnce(Context) -> F + Send + 'static,
-        F: Future<Output = R> + 'static,
-        R: Send + 'static,
-    {
-        self.enqueue_with_size(self.next_worker_index(), TaskPlacement::Any, future_factory, move || body_size)
+        self.enqueue(self.next_worker_index(), TaskPlacement::Any, future_factory, monitoring)
     }
 
     pub(crate) fn spawn_relocating<FF, F, R>(&self, source: &Thread, future_factory: FF) -> JoinHandle<R>
@@ -285,7 +277,7 @@ impl DispatcherCore {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(worker_index, TaskPlacement::SameThread, future_factory)
+        self.enqueue(worker_index, TaskPlacement::SameThread, future_factory, TaskMonitoring::capture())
     }
 
     /// Records the execution worker so a successful result can relocate when its join is polled.
@@ -296,24 +288,16 @@ impl DispatcherCore {
         R: ThreadAware + 'static,
     {
         let source = self.worker_endpoints[usize::from(worker_index)].thread.clone();
-        self.enqueue(worker_index, placement, future_factory).relocate_result_from(source)
+        self.enqueue(worker_index, placement, future_factory, TaskMonitoring::capture())
+            .relocate_result_from(source)
     }
 
-    fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>
-    where
-        FF: FnOnce(Context) -> F + Send + 'static,
-        F: Future<Output = R> + 'static,
-        R: Send + 'static,
-    {
-        self.enqueue_with_size(worker_index, placement, future_factory, size_of::<F>)
-    }
-
-    fn enqueue_with_size<FF, F, R, S>(
+    fn enqueue<FF, F, R, S>(
         &self,
         worker_index: WorkerIndex,
         placement: TaskPlacement,
         future_factory: FF,
-        body_size: S,
+        monitoring: TaskMonitoring<F, S>,
     ) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
@@ -329,7 +313,7 @@ impl DispatcherCore {
             .worker_endpoints
             .get(usize::from(worker_index))
             .expect("worker index must identify a registered runtime worker");
-        let (future_factory, join_handle) = prepare_remote_with_size(&self.remote_results, future_factory, placement, body_size);
+        let (future_factory, join_handle) = prepare_remote(&self.remote_results, future_factory, placement, monitoring);
 
         // A worker can close its channel before this send if shutdown already
         // reached that worker. The join handle detects the disconnection.
@@ -396,9 +380,15 @@ mod tests {
 
         let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default());
 
-        dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
+        dispatcher.spawn(
+            |_| async move { unreachable!("we do not expect the task to be executed") },
+            TaskMonitoring::capture(),
+        );
 
-        dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
+        dispatcher.spawn(
+            |_| async move { unreachable!("we do not expect the task to be executed") },
+            TaskMonitoring::capture(),
+        );
 
         assert_eq!(drain_spawn(&worker_rx).len(), 2);
     }
@@ -415,9 +405,15 @@ mod tests {
 
         let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default());
 
-        dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
+        dispatcher.spawn(
+            |_| async move { unreachable!("we do not expect the task to be executed") },
+            TaskMonitoring::capture(),
+        );
 
-        dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
+        dispatcher.spawn(
+            |_| async move { unreachable!("we do not expect the task to be executed") },
+            TaskMonitoring::capture(),
+        );
 
         assert_eq!(drain_spawn(&worker1_rx).len(), 1);
         assert_eq!(drain_spawn(&worker2_rx).len(), 1);
@@ -432,7 +428,10 @@ mod tests {
         let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default());
 
         for _ in 0..4 {
-            dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
+            dispatcher.spawn(
+                |_| async move { unreachable!("we do not expect the task to be executed") },
+                TaskMonitoring::capture(),
+            );
         }
 
         assert_eq!(drain_spawn(&worker1_rx).len(), 2);
@@ -503,7 +502,7 @@ mod tests {
         let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint(&threads[0]).0), Shutdown::default());
         dispatcher.stop_inner(ShutdownError::new(Error::worker_panicked()).into());
 
-        let mut join = pin!(dispatcher.spawn(|_| async {}));
+        let mut join = pin!(dispatcher.spawn(|_| async {}, TaskMonitoring::capture()));
         let Poll::Ready(Err(error)) = join.as_mut().poll(&mut task::Context::from_waker(Waker::noop())) else {
             panic!("shutdown rejection must be immediately ready");
         };
@@ -599,7 +598,7 @@ mod tests {
         // Close the command channel.
         drop(command_rx);
 
-        let join_handle = dispatcher.spawn(|_| async move {});
+        let join_handle = dispatcher.spawn(|_| async move {}, TaskMonitoring::capture());
         let join_handle = pin!(join_handle);
 
         let mut cx = task::Context::from_waker(Waker::noop());

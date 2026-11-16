@@ -45,7 +45,7 @@ fn build_with_processors(
     let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
     #[cfg(feature = "monitor")]
     let (diagnostics, monitor_options) = {
-        let diagnostics = crate::runtime::monitoring::RuntimeDiagnostics::start(monitor_options.policy(), worker_count)?;
+        let diagnostics = crate::runtime::monitoring::RuntimeDiagnostics::start(monitor_options.policy(), &name, worker_count)?;
         let mut monitor_options = monitor_options;
         monitor_options.set_runtime(diagnostics.as_ref().map(crate::runtime::monitoring::RuntimeDiagnostics::handle));
         (diagnostics, monitor_options)

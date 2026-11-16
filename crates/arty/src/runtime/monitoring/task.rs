@@ -249,17 +249,6 @@ impl<R: 'static, T: TaskCompletion<R>> TaskCompletion<R> for Completion<T> {
     }
 }
 
-pub(crate) fn add_task<Body, F, R, T>(tasks: &TaskSet, future: F, placement: TaskPlacement, completion: T)
-where
-    Body: 'static,
-    F: IntoFuture<Output = R> + 'static,
-    R: 'static,
-    T: TaskCompletion<R>,
-{
-    // The function item stores no bytes. Only erased scoped futures carry a size.
-    add_task_with_metadata::<Body, _, _, _, _>(tasks, future, placement, completion, current_task(), size_of::<Body>);
-}
-
 pub(crate) fn add_task_with_metadata<Body, F, R, T, S>(
     tasks: &TaskSet,
     future: F,

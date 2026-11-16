@@ -12,11 +12,13 @@ use performables::arc::Arc;
 use performables::sync::mutex::Mutex;
 
 use crate::runtime::config::RuntimeName;
+#[cfg(test)]
+use crate::runtime::monitoring::BlockingJob;
+use crate::runtime::monitoring::{BlockingPoolMonitoring, BlockingWorkerMonitoring};
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::blocking::queue::{Queue, QueuedJob};
 use crate::runtime::worker::blocking::{LocalWorker, PanicPolicy, PoolIdentity};
 use crate::task::handle::{JoinHandle, JoinHandlePool};
-#[cfg(not(feature = "monitor"))]
 use crate::task::preparation::prepare_blocking;
 
 const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
@@ -68,10 +70,8 @@ impl JoinableThreadPool {
         F: FnOnce() + Send + 'static,
     {
         self.enqueue(QueuedJob {
-            body: Box::new(job),
+            body: BlockingJob::Plain(Box::new(job)),
             shutdown: None,
-            #[cfg(feature = "monitor")]
-            info: None,
         })
     }
 
@@ -99,52 +99,20 @@ impl JoinableThreadPool {
                 .name(name)
                 .spawn(move || {
                     attach_thread(identity);
-                    #[cfg(feature = "monitor")]
-                    let mut diagnostics = None;
-                    while let Some(job) = receiver.pop(
-                        index,
-                        #[cfg(feature = "monitor")]
-                        &mut diagnostics,
-                    ) {
+                    let mut diagnostics = BlockingWorkerMonitoring::default();
+                    while let Some(job) = receiver.pop(index, &mut diagnostics) {
                         active_count.fetch_add(1, Ordering::SeqCst);
                         queued_count.fetch_sub(1, Ordering::SeqCst);
                         let canceled = job
                             .shutdown
                             .as_ref()
                             .is_some_and(|shutdown| matches!(shutdown.state(), ShutdownState::Started));
-                        #[cfg(feature = "monitor")]
-                        let observation = diagnostics.as_ref().filter(|_| !canceled).and_then(|worker| {
-                            job.info.as_ref().map(|info| {
-                                info.started_on(worker.task_events());
-                                let poll = worker.is_observed().then(|| worker.task_poll_started(info.id()));
-                                (worker, poll)
-                            })
-                        });
-                        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            #[cfg(feature = "monitor")]
-                            let _current = observation
-                                .as_ref()
-                                .and_then(|(_, poll)| poll.as_ref())
-                                .and(job.info.as_ref())
-                                .map(|info| crate::runtime::monitoring::enter_current(info.id()));
-                            if canceled {
-                                drop(job.body);
-                            } else {
-                                (job.body)();
-                            }
-                        }));
-                        #[cfg(feature = "monitor")]
-                        if let Some((worker, Some(poll))) = observation {
-                            worker.task_poll_finished(poll);
-                        }
-                        #[cfg(feature = "monitor")]
-                        receiver.finish(index);
+                        let outcome = diagnostics.run(job.body, canceled);
                         active_count.fetch_sub(1, Ordering::SeqCst);
                         if let Err(panic) = outcome {
                             discard_task_panic_payload(panic);
                         }
                     }
-                    #[cfg(feature = "monitor")]
                     receiver.retire(index);
                 })
                 .expect("blocking worker thread creation must succeed");
@@ -213,25 +181,16 @@ impl Worker {
         R: Send + 'static,
     {
         let runtime_shutdown = self.remote_results.shutdown().clone();
-        #[cfg(feature = "monitor")]
-        let info = matches!(runtime_shutdown.state(), ShutdownState::Running)
-            .then(|| self.pool.task_info::<F>())
-            .flatten();
-        #[cfg(feature = "monitor")]
-        let (task, join_handle) =
-            crate::task::preparation::prepare_blocking_with_info(&self.remote_results, body, self.panic_policy.clone(), info.clone());
-        #[cfg(not(feature = "monitor"))]
-        let (task, join_handle) = prepare_blocking(&self.remote_results, body, self.panic_policy.clone());
+        let monitoring = self.pool.monitoring.task::<F>(&runtime_shutdown);
+        let (task, join_handle) = prepare_blocking(&self.remote_results, body, self.panic_policy.clone(), monitoring);
         if matches!(runtime_shutdown.state(), ShutdownState::Started) {
             drop(task);
             return join_handle;
         }
         let join_handle = join_handle.blocking_pool(Arc::clone(&self.pool.identity));
         let job = QueuedJob {
-            body: Box::new(task),
+            body: task,
             shutdown: Some(runtime_shutdown),
-            #[cfg(feature = "monitor")]
-            info,
         };
         if matches!(self.remote_results.shutdown().state(), ShutdownState::Running) && self.pool.enqueue(job) {
             self.pool.grow_if_overloaded();
@@ -256,8 +215,7 @@ pub(crate) struct Pool {
     inner: Arc<Mutex<Option<JoinableThreadPool>>>,
     identity: PoolIdentity,
     max_thread_count: NonZeroUsize,
-    #[cfg(feature = "monitor")]
-    events: std::sync::Arc<std::sync::OnceLock<seismograph_runtime::task::EventContext>>,
+    monitoring: BlockingPoolMonitoring,
 }
 
 impl Pool {
@@ -281,15 +239,13 @@ impl Pool {
         // Start with one thread and let the pool grow as needed.
         let identity = Arc::new(());
         let thread_pool = JoinableThreadPool::new(name, async_worker_index, Self::INITIAL_THREAD_COUNT, Arc::clone(&identity));
-        #[cfg(feature = "monitor")]
-        let events = std::sync::Arc::clone(&thread_pool.receiver.events);
+        let monitoring = thread_pool.receiver.monitoring.clone();
 
         Self {
             inner: Arc::new(Mutex::new(Some(thread_pool))),
             identity,
             max_thread_count: max_thread_count.unwrap_or(Self::MAX_THREAD_COUNT_DEFAULT),
-            #[cfg(feature = "monitor")]
-            events,
+            monitoring,
         }
     }
 
@@ -299,10 +255,8 @@ impl Pool {
         F: FnOnce() + Send + 'static,
     {
         self.enqueue(QueuedJob {
-            body: Box::new(f),
+            body: BlockingJob::Plain(Box::new(f)),
             shutdown: None,
-            #[cfg(feature = "monitor")]
-            info: None,
         })
     }
 
@@ -321,14 +275,6 @@ impl Pool {
         if let Some(pool) = pool.as_ref() {
             pool.receiver.enable_monitoring(runtime);
         }
-    }
-
-    #[cfg(feature = "monitor")]
-    fn task_info<F: 'static>(&self) -> Option<std::sync::Arc<crate::runtime::monitoring::TaskInfo>> {
-        self.events
-            .get()
-            .copied()
-            .map(|events| std::sync::Arc::new(crate::runtime::monitoring::TaskInfo::new::<F>(events)))
     }
 
     fn join(&self) {

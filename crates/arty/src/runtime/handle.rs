@@ -45,9 +45,7 @@ use crate::task::RuntimeScheduler;
 /// ```
 /// use arty::runtime::Runtime;
 ///
-/// let runtime = Runtime::builder()
-///     .monitor(arty::runtime::MonitorPolicy::disabled())
-///     .build()?;
+/// let runtime = Runtime::builder().build()?;
 /// let task = runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 });
 /// assert_eq!(futures::executor::block_on(task)?, 42);
 /// runtime.stop()?;
@@ -122,9 +120,7 @@ impl Runtime {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::builder()
-    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
-    ///     .build()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let scheduler = runtime.scheduler();
     /// let first = scheduler.spawn_anywhere((), |_, ()| async { 20 });
     /// let second = scheduler.spawn_anywhere((), |_, ()| async { 22 });
@@ -183,9 +179,7 @@ impl Runtime {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::builder()
-    ///     .monitor(arty::runtime::MonitorPolicy::disabled())
-    ///     .build()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
     ///     cx.control().request_stop();
     ///     cx.scheduler()

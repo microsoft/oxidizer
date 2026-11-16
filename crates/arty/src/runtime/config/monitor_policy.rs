@@ -26,41 +26,23 @@
 #[derive(Debug, Clone)]
 pub struct MonitorPolicy {
     enabled: bool,
-    name: Option<String>,
 }
 
 impl MonitorPolicy {
     /// Creates a policy with monitoring enabled in the runtime configuration.
     #[must_use]
     pub const fn enabled() -> Self {
-        Self { enabled: true, name: None }
+        Self { enabled: true }
     }
 
     /// Creates a policy with monitoring disabled in the runtime configuration.
     #[must_use]
     pub const fn disabled() -> Self {
-        Self {
-            enabled: false,
-            name: None,
-        }
-    }
-
-    /// Sets the runtime name shown by the Seismograph CLI.
-    ///
-    /// The default name is `arty`. Each runtime has a separate local endpoint.
-    #[must_use]
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
+        Self { enabled: false }
     }
 
     pub(crate) const fn is_enabled(&self) -> bool {
         self.enabled
-    }
-
-    #[cfg(feature = "monitor")]
-    pub(crate) fn runtime_name(&self) -> &str {
-        self.name.as_deref().unwrap_or("arty")
     }
 }
 

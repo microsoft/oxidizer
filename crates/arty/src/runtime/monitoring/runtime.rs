@@ -4,6 +4,7 @@
 use seismograph::monitor::Monitor;
 use seismograph_runtime::{RuntimeHandle, RuntimeMetadata, RuntimeRegistration};
 
+use crate::runtime::config::RuntimeName;
 use crate::runtime::{Error, MonitorPolicy};
 
 #[derive(Debug)]
@@ -13,16 +14,16 @@ pub(crate) struct RuntimeDiagnostics {
 }
 
 impl RuntimeDiagnostics {
-    pub(crate) fn start(policy: &MonitorPolicy, workers: usize) -> Result<Option<Self>, Error> {
+    pub(crate) fn start(policy: &MonitorPolicy, name: &RuntimeName, workers: usize) -> Result<Option<Self>, Error> {
         if !policy.is_enabled() {
             return Ok(None);
         }
         let workers = u32::try_from(workers).map_err(Error::new)?;
-        let builder = Monitor::builder().name(policy.runtime_name());
+        let builder = Monitor::builder().name(name.as_str());
         #[cfg(test)]
         let builder = builder.io(seismograph_protocol::io::MonitorIo::new_mocked().0);
         let monitor = builder.start().map_err(Error::new)?;
-        let registration = seismograph_runtime::register_runtime(RuntimeMetadata::new(policy.runtime_name(), workers));
+        let registration = seismograph_runtime::register_runtime(RuntimeMetadata::new(name.as_str(), workers));
         Ok(Some(Self { monitor, registration }))
     }
 

@@ -184,7 +184,12 @@ mod tests {
     #[test]
     fn queued_factory_disposal_contains_join_notification_panic() {
         let result_pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
-        let (factory, join) = prepare_remote(&result_pool, |_| async { 42 }, TaskPlacement::Any);
+        let (factory, join) = prepare_remote(
+            &result_pool,
+            |_| async { 42 },
+            TaskPlacement::Any,
+            crate::runtime::monitoring::TaskMonitoring::capture(),
+        );
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
         let waker = Waker::from(Arc::clone(&wake));

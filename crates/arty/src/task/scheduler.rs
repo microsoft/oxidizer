@@ -38,7 +38,7 @@ use crate::task::handle::JoinHandle;
 ///
 /// ```
 /// # #[cfg(all(feature = "macros", feature = "rt"))]
-/// # #[arty::main(monitor = disabled)]
+/// # #[arty::main]
 /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
 /// let scheduler = cx.scheduler().clone();
 /// let task = scheduler.spawn(async |_| 42);
@@ -112,7 +112,7 @@ impl Scheduler {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main(monitor = disabled)]
+    /// # #[arty::main]
     /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// use std::rc::Rc;
     /// use std::time::Duration;
@@ -186,7 +186,7 @@ impl Scheduler {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main(monitor = disabled)]
+    /// # #[arty::main]
     /// # async fn main(cx: arty::task::Context) -> Result<(), arty::task::JoinError> {
     /// let answer = cx
     ///     .scheduler()
@@ -243,7 +243,7 @@ impl Scheduler {
     ///
     /// ```
     /// # #[cfg(all(feature = "macros", feature = "rt"))]
-    /// # #[arty::main(monitor = disabled)]
+    /// # #[arty::main]
     /// # async fn main(
     /// #     cx: arty::task::Context,
     /// # ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

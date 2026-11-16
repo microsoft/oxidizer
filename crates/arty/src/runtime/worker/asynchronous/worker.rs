@@ -946,7 +946,9 @@ mod tests {
                 })))
                 .unwrap();
         }
-        let join = worker_context(&worker).dispatcher().spawn(|_| async {});
+        let join = worker_context(&worker)
+            .dispatcher()
+            .spawn(|_| async {}, crate::runtime::monitoring::TaskMonitoring::capture());
         commands.system_sender().send(SystemCommand::Shutdown).unwrap();
 
         assert!(worker.execute_step().is_break());
@@ -1688,13 +1690,16 @@ mod tests {
             })))
             .unwrap();
         let invoked = Arc::new(AtomicBool::new(false));
-        let join = worker_context(&worker).dispatcher().spawn({
-            let invoked = Arc::clone(&invoked);
-            move |_| {
-                invoked.store(true, Ordering::Relaxed);
-                std::future::ready(())
-            }
-        });
+        let join = worker_context(&worker).dispatcher().spawn(
+            {
+                let invoked = Arc::clone(&invoked);
+                move |_| {
+                    invoked.store(true, Ordering::Relaxed);
+                    std::future::ready(())
+                }
+            },
+            crate::runtime::monitoring::TaskMonitoring::capture(),
+        );
 
         assert!(worker.execute_step().is_break());
 

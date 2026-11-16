@@ -57,7 +57,7 @@
 //!
 //! A monitor is a local connection through which the Seismograph CLI can
 //! collect diagnostics. Each enabled runtime owns one connection and removes it
-//! after its workers stop. [`MonitorPolicy::name`] sets the displayed runtime name.
+//! after its workers stop. [`RuntimeBuilder::name`] sets the displayed runtime name.
 //! Use [`MonitorPolicy::disabled`] to run without this connection or task inspection.
 //!
 //! Collection reads live async tasks and queued or running blocking functions
@@ -96,7 +96,6 @@
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let runtime = Runtime::builder()
-//!         .monitor(arty::runtime::MonitorPolicy::disabled())
 //!         .workers(WorkersPolicy::at_most(2))
 //!         .blocking_pool(BlockingPoolPolicy::shared().max(4))
 //!         .build()?;
@@ -158,7 +157,6 @@ mod control;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
-#[cfg(feature = "monitor")]
 pub(crate) mod monitoring;
 mod shutdown;
 mod shutdown_cause;

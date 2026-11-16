@@ -77,23 +77,18 @@ impl DispatcherClient {
         self.core.spawn_on_worker(worker_index, future_factory)
     }
 
-    pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    pub(crate) fn spawn<FF, F, R, S>(
+        &self,
+        future_factory: FF,
+        monitoring: crate::runtime::monitoring::TaskMonitoring<F, S>,
+    ) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
+        S: Fn() -> usize + Send + 'static,
     {
-        self.core.spawn(future_factory)
-    }
-
-    #[cfg(feature = "monitor")]
-    pub(crate) fn spawn_with_size<FF, F, R>(&self, future_factory: FF, body_size: usize) -> JoinHandle<R>
-    where
-        FF: FnOnce(Context) -> F + Send + 'static,
-        F: Future<Output = R> + 'static,
-        R: Send + 'static,
-    {
-        self.core.spawn_with_size(future_factory, body_size)
+        self.core.spawn(future_factory, monitoring)
     }
 
     pub(crate) fn spawn_relocating<FF, F, R>(&self, source: &thread_aware::Thread, future_factory: FF) -> JoinHandle<R>

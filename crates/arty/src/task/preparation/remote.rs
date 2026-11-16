@@ -6,6 +6,7 @@ use std::cell::Cell;
 use arty_executor::{TaskPlacement, TaskSet};
 use plurality::{Box as PoolBox, MultiPool, coerce};
 
+use crate::runtime::monitoring::TaskMonitoring;
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
 use crate::task::preparation::{DeferredTaskFactory, discard_panicking_drop};
@@ -88,25 +89,11 @@ impl RemoteFutureFactory {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn prepare_remote<FF, F, R>(
+pub(crate) fn prepare_remote<FF, F, R, S>(
     result_pool: &JoinHandlePool,
     future_factory: FF,
     placement: TaskPlacement,
-) -> (RemoteFutureFactory, JoinHandle<R>)
-where
-    FF: FnOnce(Context) -> F + Send + 'static,
-    F: Future<Output = R> + 'static,
-    R: Send + 'static,
-{
-    prepare_remote_with_size(result_pool, future_factory, placement, size_of::<F>)
-}
-
-pub(crate) fn prepare_remote_with_size<FF, F, R, S>(
-    result_pool: &JoinHandlePool,
-    future_factory: FF,
-    placement: TaskPlacement,
-    body_size: S,
+    monitoring: TaskMonitoring<F, S>,
 ) -> (RemoteFutureFactory, JoinHandle<R>)
 where
     FF: FnOnce(Context) -> F + Send + 'static,
@@ -115,18 +102,11 @@ where
     S: Fn() -> usize + Send + 'static,
 {
     let (handle, result_tx) = result_pool.handle();
-    #[cfg(feature = "monitor")]
-    let parent = crate::runtime::monitoring::current_task();
-    #[cfg(not(feature = "monitor"))]
-    let _ = body_size;
     let future_factory = TaskFactory::new(future_factory);
     let future_factory = RemoteFutureFactory::new(move |cx, tasks| {
         let future_factory = future_factory.into_inner();
         let inner = DeferredTaskFactory::new(future_factory, cx);
-        #[cfg(feature = "monitor")]
-        crate::runtime::monitoring::add_task_with_metadata::<F, _, _, _, _>(tasks, inner, placement, result_tx, parent, body_size);
-        #[cfg(not(feature = "monitor"))]
-        tasks.task(inner).placement(placement).register(result_tx);
+        monitoring.register(tasks, inner, placement, result_tx);
     });
     (future_factory, handle)
 }

@@ -43,7 +43,7 @@ fn runtime(name: &str) -> Runtime {
     Runtime::builder()
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .monitor(MonitorPolicy::enabled().name(name))
+        .name(name)
         .panic(PanicPolicy::ignore())
         .build()
         .unwrap()
@@ -81,11 +81,14 @@ fn monitor_policy_defaults_to_enabled() {
         .scheduler()
         .block_on(async |cx| cx.control().workers().into_iter().count())
         .unwrap();
-    let active = diagnostics.capture(CaptureOptions::default()).unwrap().state;
+    let active = diagnostics.capture(CaptureOptions::default()).unwrap();
     runtime.stop().unwrap();
     let stopped = runtimes().into_iter().find(|runtime| runtime.id == diagnostics.id()).unwrap().state;
 
-    assert_eq!((workers, active, stopped), (1, RuntimeState::Running, RuntimeState::Stopped));
+    assert_eq!(
+        (workers, active.name.as_str(), active.state, stopped),
+        (1, "arty", RuntimeState::Running, RuntimeState::Stopped)
+    );
 }
 
 #[test]
@@ -107,7 +110,8 @@ fn explicit_monitor_policies_preserve_runtime_behavior() {
 fn disabled_monitoring_registers_no_runtime() {
     let _recording = RecorderGuard::new();
     let runtime = Runtime::builder()
-        .monitor(MonitorPolicy::disabled().name("disabled-monitor"))
+        .name("disabled-monitor")
+        .monitor(MonitorPolicy::disabled())
         .build()
         .unwrap();
 
@@ -143,6 +147,7 @@ fn local_and_remote_tasks_are_collected_without_recording() {
 
     let snapshot = capture(&runtime);
     runtime.stop().unwrap();
+    assert_eq!(snapshot.name, "native-tasks");
     assert!(parent.join().unwrap_err().is_shutdown());
     let observed = snapshot
         .tasks
@@ -714,7 +719,7 @@ fn queued_remote_children_retain_their_recorded_parent() {
     });
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
-        .monitor(MonitorPolicy::enabled().name("remote-parent-links"))
+        .name("remote-parent-links")
         .build()
         .unwrap();
     let (started, ready) = mpsc::channel();
@@ -1016,7 +1021,7 @@ fn growing_pool(name: &str, policy: BlockingPoolPolicy, expected_blocking_worker
     let runtime = Runtime::builder()
         .workers(WorkersPolicy::exactly(2))
         .blocking_pool(policy.max(2))
-        .monitor(MonitorPolicy::enabled().name(name))
+        .name(name)
         .build()
         .unwrap();
     let scheduler = runtime.scheduler().block_on(async |cx| cx.scheduler().clone()).unwrap();
