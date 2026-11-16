@@ -107,6 +107,14 @@ fn explicit_monitor_policies_preserve_runtime_behavior() {
     }
 }
 
+#[cfg(feature = "macros")]
+#[arty_macros::test(monitor = enabled)]
+async fn test_macro_can_enable_monitoring(cx: crate::task::Context) {
+    let _recording = RecorderGuard::new();
+    assert!(super::task::current_events().is_some());
+    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+}
+
 #[test]
 fn disabled_monitoring_registers_no_runtime() {
     let _recording = RecorderGuard::new();

@@ -79,6 +79,9 @@
 //!   [`ClockControl`](crate::time::ClockControl).
 //!   Enable it in dev-dependencies, not production dependencies.
 
+#[cfg(all(test, feature = "macros", feature = "monitor", not(miri)))]
+extern crate self as arty;
+
 use arty_io_core as _;
 /// Runs an async entry point on an Arty runtime.
 ///
