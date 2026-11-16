@@ -341,7 +341,6 @@ use proc_macro::TokenStream;
 /// Private methods remain available only on the real implementation and cannot be called
 /// through fake instances.
 #[proc_macro_attribute]
-#[cfg_attr(test, mutants::skip)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn fakeable(args: TokenStream, input: TokenStream) -> TokenStream {
     fakeable_impl(args.into(), input.into()).into()

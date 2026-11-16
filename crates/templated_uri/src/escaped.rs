@@ -208,7 +208,6 @@ impl EscapedString {
     ///
     /// # Panics
     /// if the provided string contains any reserved characters.
-    #[cfg_attr(test, mutants::skip)] // Mutating this function leads to infinite loop and timeout
     #[expect(clippy::panic, reason = "accepts only static string and behavior is clearly documented")]
     #[inline]
     #[must_use]
@@ -224,7 +223,6 @@ impl EscapedString {
 /// `%XX` percent-escape sequences. Returns `None` on success or a static description of
 /// the first fault found. Shared by [`EscapedString::try_new`] (runtime) and
 /// [`EscapedString::from_static`] (compile-time).
-#[cfg_attr(test, mutants::skip)] // mutating this function leads to infinite loop and timeout
 const fn validate_escaped(bytes: &[u8]) -> Option<&'static str> {
     let mut i = 0;
     while i < bytes.len() {
@@ -282,7 +280,7 @@ fn first_reserved(bytes: &[u8]) -> Option<usize> {
 // the `while` loop forever, pushing to `out` until the process runs out of memory. That hangs the mutation
 // runner rather than producing a killable diff, so the function is skipped; its output is
 // pinned by the differential/fuzz/exact-hex and re-validation tests in this module instead.
-#[cfg_attr(test, mutants::skip)]
+// #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "Only first is defaultable here; setting that optimization offset to zero rescans the unreserved prefix and emits the same encoding.")]
 fn percent_encode(s: &str, first: usize) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
 
@@ -298,7 +296,10 @@ fn percent_encode(s: &str, first: usize) -> String {
     while i < bytes.len() {
         let b = bytes[i];
         if is_unreserved_byte(b) {
-            i += 1;
+            // #[gamma::skip(assign.add_to_sub, stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            i +=
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
             continue;
         }
         // Flush the pending run of clean bytes, then emit the escape for this byte.
@@ -308,9 +309,13 @@ fn percent_encode(s: &str, first: usize) -> String {
         out.push('%');
         out.push(HEX[(b >> 4) as usize] as char);
         out.push(HEX[(b & 0x0f) as usize] as char);
-        i += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        i +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
         run_start = i;
     }
+    // #[gamma::skip(cond.always_true, relational.lt_to_le, tag = "equivalent", reason = "When run_start equals len, the added branch only appends an empty string.")]
     if run_start < bytes.len() {
         out.push_str(&s[run_start..]);
     }
@@ -372,6 +377,14 @@ impl<'de> serde::Deserialize<'de> for EscapedString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gamma_survivor_encoder_reserves_clean_length_plus_headroom() {
+        let input = " abcdefghijklmnopqrst";
+        let encoded = percent_encode(input, 0);
+        assert_eq!(encoded, "%20abcdefghijklmnopqrst");
+        assert_eq!(encoded.capacity(), input.len() + 16);
+    }
 
     const RESERVED_CHARACTERS: &str = "{}/:?#[]@!$&'()*+,;=";
 

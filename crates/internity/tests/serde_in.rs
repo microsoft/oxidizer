@@ -183,6 +183,18 @@ fn trailing_sequence_fields_are_rejected() {
 }
 
 #[test]
+fn incomplete_tuples_are_rejected() {
+    let mut lexicon = LocalLexicon::new();
+    for (input, expected) in [
+        ("[]", "invalid length 0, expected a tuple of size 2 at line 1 column 2"),
+        ("[1]", "invalid length 1, expected a tuple of size 2 at line 1 column 3"),
+    ] {
+        let result: Result<(u32, u32), _> = lexicon.deserialize_in(&mut json(input));
+        assert_eq!(result.unwrap_err().to_string(), expected, "{input}");
+    }
+}
+
+#[test]
 fn tuple_and_unit_structs() {
     let mut lexicon = LocalLexicon::new();
 

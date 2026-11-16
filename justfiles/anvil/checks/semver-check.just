@@ -7,7 +7,9 @@
 # See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Affected tier (compares changed crates' current API against the PR
-# target branch baseline; only changed crates' surface is at risk).
+# target branch baseline; only changed crates' surface is at risk). Generate
+# both rustdoc snapshots with each revision's lockfile, not the fresh consumer
+# resolution performed by cargo-semver-checks --baseline-rev.
 #
 # Several real-world conditions aren't actually SemVer violations:
 #   - bin-only crates have no API to compare (reported as a missing lib target).
@@ -15,13 +17,12 @@
 #   - crates newly added since the PR base have no manifest at their
 #     current workspace-relative path in that baseline.
 #   - crates renamed since the PR base have no matching package in that
-#     baseline ("package `<name>` not found in ...").
+#     baseline.
 #   - crates where the branch baseline lacks a lib target the
 #     current source has (bin -> bin+lib transition).
 # We pre-filter to publishable library crates from cargo metadata, skip
-# packages whose current manifest path is absent from the baseline,
-# then run cargo-semver-checks per-package and tolerate the remaining
-# "no-comparable-baseline" failure modes.
+# packages whose current manifest path is absent from the baseline, and
+# establish renames / missing baseline libraries from metadata before building.
 #
 # Findings policy: cargo-semver-checks is *advisory*. Real SemVer
 # findings and operational failures do NOT fail the recipe -- breaking
@@ -29,28 +30,78 @@
 # baseline is not evidence that the PR broke the API. Instead, either
 # outcome writes a markdown advisory body to
 # `target/anvil/comments/semver.md`; when the tree is clean we remove
-# that file. Anvil preflight failures before cargo-semver-checks still
+# that file. Anvil preflight failures before snapshot generation still
 # fail because no comparison can be configured. cloud-workflow wiring (GH:
 # marocchino/sticky-pull-request-comment; ADO: pwsh + REST API)
 # inspects the file after the recipe and upserts / clears a sticky
 # PR comment accordingly. Local invocation gets the same file
 # written under target/ for inspection.
 #
-# TODO(anvil-runner): even after a `cargo ox-run` helper absorbs the
-# skip/splat preamble, this recipe stays multi-step: cargo-metadata
-# filter to publishable library crates (cargo-semver-checks --workspace
-# fails on bin-only workspaces), intersect the affected set ($include) with that
-# set, verify the PR branch baseline is present, skip newly-added
-# manifest paths, then invoke per-crate against that baseline with
-# special handling for renamed crates ("package `<name>` not found in
-# ...") and bin->bin+lib transitions (reported as a missing lib target).
-
 # Check affected crates for semantic versioning violations.
 [group("anvil")]
 [script("pwsh", "-NoProfile")]
 anvil-semver-check: anvil-semver-check-validate-prereqs anvil-impact
     $ErrorActionPreference = 'Stop'
     $stableArgs = {{_anvil_stable_toolchain_args}}
+
+    function Add-Report($lines, [string]$heading, [string]$output) {
+        $lines.Add($heading) | Out-Null
+        $lines.Add('') | Out-Null
+        $lines.Add('```') | Out-Null
+        foreach ($line in ($output.TrimEnd() -split "`r?`n")) {
+            $lines.Add($line.TrimEnd()) | Out-Null
+        }
+        $lines.Add('```') | Out-Null
+        $lines.Add('') | Out-Null
+    }
+
+    function Invoke-CargoJson([string[]]$arguments) {
+        $stderrFile = [System.IO.Path]::GetTempFileName()
+        try {
+            $stdout = @(& cargo @stableArgs @arguments 2> $stderrFile) | Out-String
+            $code = $LASTEXITCODE
+            $stderr = [System.IO.File]::ReadAllText($stderrFile)
+        } finally {
+            Remove-Item -LiteralPath $stderrFile -Force -ErrorAction Stop
+        }
+        if ($code -eq 0 -and -not [string]::IsNullOrWhiteSpace($stderr)) {
+            [Console]::Error.Write($stderr)
+        }
+        [pscustomobject]@{ ExitCode = $code; Stdout = $stdout; Stderr = $stderr }
+    }
+
+    # Build one revision's locked API snapshot, keeping defaults enabled and
+    # the checker's case-sensitive feature exclusions so file-input comparisons
+    # cover the same feature-gated API as cargo-semver-checks' own generation.
+    function Get-RustdocSnapshot($package, [string]$workspace, [string]$targetDir) {
+        $features = @($package.features.PSObject.Properties.Name | Where-Object {
+            $_ -and $_ -cnotin @('unstable', 'nightly', 'bench', 'no_std') -and
+                $_ -cnotmatch '^(_|unstable[-_])'
+        })
+        $featureArgs = if ($features.Count -gt 0) { @('--features', ($features -join ',')) } else { @() }
+        $lib = $package.targets | Where-Object { $_.kind -contains 'lib' } | Select-Object -First 1
+        $json = Join-Path (Join-Path (Join-Path $targetDir $targetName) 'doc') ($lib.name.Replace('-', '_') + '.json')
+        # A previous invocation must never supply a success-shaped stale artifact.
+        if (Test-Path -LiteralPath $json) { Remove-Item -LiteralPath $json -Force }
+        Push-Location -LiteralPath $workspace
+        try {
+            $outputLines = @(& cargo @stableArgs rustdoc --locked --lib --quiet `
+                --manifest-path $package.manifest_path --package $package.id `
+                --target $target --target-dir $targetDir @featureArgs `
+                '--' '-Z' 'unstable-options' '--output-format=json' `
+                '--document-private-items' '--document-hidden-items' '--cap-lints=allow' 2>&1)
+            $code = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+        $output = $outputLines | Out-String
+        if ($code -eq 0 -and -not (Test-Path -LiteralPath $json -PathType Leaf)) {
+            $code = 101
+            $output += "anvil-semver-check: cargo rustdoc succeeded but did not produce '$json'; check the library's rustdoc configuration."
+        }
+        [pscustomobject]@{ ExitCode = $code; Output = $output; Path = $json }
+    }
+
     $include = (& "{{ just_executable() }}" _anvil-impact-include affected)
     $impactExit = $LASTEXITCODE
     if ($impactExit -ne 0) { exit $impactExit }
@@ -72,13 +123,13 @@ anvil-semver-check: anvil-semver-check-validate-prereqs anvil-impact
     # null, `publish = false` as an empty array, and named-registry restrictions
     # as a nonempty array. Only the empty array is non-publishable.
     $libPkgs = @{}
-    $metadataJson = & cargo @stableArgs metadata --no-deps --format-version 1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error 'anvil-semver-check: cargo metadata failed'
-        exit $LASTEXITCODE
+    $metadata = Invoke-CargoJson -arguments @('metadata', '--locked', '--no-deps', '--format-version', '1')
+    if ($metadata.ExitCode -ne 0) {
+        Write-Error "anvil-semver-check: cargo metadata failed (exit $($metadata.ExitCode)):`n$($metadata.Stdout)$($metadata.Stderr)"
+        exit $metadata.ExitCode
     }
     try {
-        $meta = $metadataJson | ConvertFrom-Json
+        $meta = $metadata.Stdout | ConvertFrom-Json
     } catch {
         Write-Error "anvil-semver-check: could not parse cargo metadata output: $_"
         exit 1
@@ -118,88 +169,164 @@ anvil-semver-check: anvil-semver-check-validate-prereqs anvil-impact
     #
     # The jobs that run this recipe check out full history (GitHub
     # pr-fast: fetch-depth: 0; ADO: the default full checkout), so the
-    # baseline commit is already present locally and no fetch is needed:
-    # cargo-semver-checks reads only that one commit's tree (via gix, no
-    # history walk). If the baseline is genuinely absent (a shallow local
+    # baseline commit is already present locally and no fetch is needed.
+    # If the baseline is genuinely absent (a shallow local
     # clone, or a mis-configured job) we fail loudly with actionable
     # guidance rather than silently misreporting an unresolvable baseline
     # as a breaking change.
     $base = (& "{{just_executable()}}" _anvil-base-ref)
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $base = $base.Trim()
-    & git rev-parse --verify "$base^{commit}" 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    $baseSha = @(& git rev-parse --verify "$base^{commit}" 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $baseSha.Count -ne 1) {
         Write-Error "anvil-semver-check: baseline '$base' is not present in this clone (shallow/truncated history? fetch it or unshallow)."
         exit 1
     }
+    $baseSha = $baseSha[0].Trim()
+    $gitRoot = @(& git rev-parse --show-toplevel)
+    if ($LASTEXITCODE -ne 0 -or $gitRoot.Count -ne 1) {
+        Write-Error 'anvil-semver-check: could not locate the Git root; run this recipe in a Git checkout.'
+        exit 1
+    }
+    $gitRoot = $gitRoot[0].Trim()
+    $packages = @($packages | Sort-Object -CaseSensitive | Where-Object {
+        $manifestPath = [System.IO.Path]::GetRelativePath($gitRoot, $libPkgs[$_].manifest_path).Replace('\', '/')
+        & git cat-file -e ('{0}:{1}' -f $baseSha, $manifestPath) 2>$null
+        if ($LASTEXITCODE -eq 0) { $true } else {
+            Write-Host "anvil-semver-check: $_ has no manifest at '$manifestPath' in baseline $base; skipping (new or moved crate)" -ForegroundColor Yellow
+            $false
+        }
+    })
+    if ($packages.Count -eq 0) {
+        Remove-Item -LiteralPath $commentFile -ErrorAction SilentlyContinue
+        exit 0
+    }
+
+    # Pin both subprocess scopes to the current compiler, even when the baseline
+    # selects an obsolete/uninstalled toolchain. This recipe owns its environment.
+    $sysroot = @(& rustc @stableArgs --print sysroot)
+    if ($LASTEXITCODE -ne 0 -or $sysroot.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$sysroot[0])) {
+        Write-Error 'anvil-semver-check: rustc could not report the selected compiler sysroot; validate the stable toolchain and retry.'
+        exit 1
+    }
+    $env:RUSTUP_TOOLCHAIN = $sysroot[0].Trim()
+    $env:RUSTC_BOOTSTRAP = '1'
+    $targetOutput = Invoke-CargoJson -arguments @('config', '-Z', 'unstable-options', 'get', 'build.target', '--format=json-value')
+    if ($targetOutput.ExitCode -eq 0) {
+        $targets = @($targetOutput.Stdout | ConvertFrom-Json)
+        if ($targets.Count -ne 1 -or $targets[0] -isnot [string] -or [string]::IsNullOrWhiteSpace($targets[0])) {
+            Write-Error 'anvil-semver-check: select one build target with CARGO_BUILD_TARGET and retry; multi-target comparisons are not supported.'
+            exit 1
+        }
+        $target = $targets[0]
+    } elseif ($targetOutput.Stderr.Contains('config value `build.target` is not set')) {
+        $hostTarget = @(& rustc @stableArgs --print host-tuple)
+        if ($LASTEXITCODE -ne 0 -or $hostTarget.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$hostTarget[0])) {
+            Write-Error 'anvil-semver-check: rustc could not report the host target; set CARGO_BUILD_TARGET explicitly and retry.'
+            exit 1
+        }
+        $target = $hostTarget[0].Trim()
+    } else {
+        Write-Error "anvil-semver-check: could not read Cargo's build target; fix the Cargo configuration and retry.`n$($targetOutput.Stdout)$($targetOutput.Stderr)"
+        exit 1
+    }
+    $targetName = $target
+    if ($target.EndsWith('.json', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $target = [System.IO.Path]::GetFullPath($target)
+        $targetName = [System.IO.Path]::GetFileNameWithoutExtension($target)
+    }
+
     $findings = New-Object System.Collections.Generic.List[string]
     $inconclusive = New-Object System.Collections.Generic.List[string]
-    foreach ($p in $packages) {
-        # A manifest absent at its current workspace-relative path did
-        # not exist on the PR base, so this is a newly-added crate (or a
-        # moved crate with no same-path baseline). Treat it as having no
-        # comparable path baseline, so cargo-semver-checks need not run.
-        $manifestPath = [System.IO.Path]::GetRelativePath(
-            $meta.workspace_root,
-            $libPkgs[$p].manifest_path
-        ).Replace('\', '/')
-        $baselineManifest = '{0}:{1}' -f $base, $manifestPath
-        & git cat-file -e $baselineManifest 2>$null
+    $buildRoot = [System.IO.Path]::GetFullPath('target/anvil/semver')
+    $tmpRoot = $env:RUNNER_TEMP
+    if (-not $tmpRoot) { $tmpRoot = $env:AGENT_TEMPDIRECTORY }
+    if (-not $tmpRoot) { $tmpRoot = [System.IO.Path]::GetTempPath() }
+    $baselineRoot = Join-Path $tmpRoot "anvil-semver-$PID-$([System.Guid]::NewGuid().ToString('N'))"
+    try {
+        $cloneOutput = @(& git clone --shared --no-checkout --quiet '--' $gitRoot $baselineRoot 2>&1)
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "anvil-semver-check: $p has no manifest at '$manifestPath' in baseline $base; skipping (new or moved crate)" -ForegroundColor Yellow
-            continue
+            throw "anvil-semver-check: failed to create the local baseline clone: $($cloneOutput -join [Environment]::NewLine)"
         }
-
-        Write-Host "anvil-semver-check: $p (baseline $base)"
-        $outputLines = @(& cargo @stableArgs semver-checks --package $p --baseline-rev $base 2>&1)
-        $semverExit = $LASTEXITCODE
-        $output = ($outputLines | Out-String)
-        if ($semverExit -eq 100) {
-            # cargo-semver-checks 0.49+ reserves exit 100 for a completed
-            # check with deny-level SemVer findings. These are advisory.
-            Write-Host $output
-            $findings.Add('#### `' + $p + '`') | Out-Null
-            $findings.Add('') | Out-Null
-            $findings.Add('```') | Out-Null
-            foreach ($line in ($output.TrimEnd() -split "`r?`n")) {
-                $findings.Add($line.TrimEnd()) | Out-Null
+        # A local source snapshot must not fetch LFS assets from the clone's local origin.
+        $checkoutOutput = @(& git -C $baselineRoot -c filter.lfs.process= -c filter.lfs.smudge= `
+            -c filter.lfs.required=false checkout --quiet --detach $baseSha 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw "anvil-semver-check: failed to check out baseline ${baseSha}: $($checkoutOutput -join [Environment]::NewLine)"
+        }
+        $workspacePath = [System.IO.Path]::GetRelativePath($gitRoot, $meta.workspace_root)
+        $baselineWorkspace = Join-Path $baselineRoot $workspacePath
+        Push-Location -LiteralPath $baselineWorkspace
+        try {
+            $baselineMetadata = Invoke-CargoJson -arguments @(
+                'metadata', '--locked', '--no-deps', '--format-version', '1',
+                '--manifest-path', (Join-Path $baselineWorkspace 'Cargo.toml')
+            )
+            $baselineExit = $baselineMetadata.ExitCode
+        } finally {
+            Pop-Location
+        }
+        $baselineMeta = $null
+        if ($baselineExit -eq 0) {
+            try {
+                $baselineMeta = $baselineMetadata.Stdout | ConvertFrom-Json
+            } catch {
+                $baselineExit = 101
+                $baselineMetadata.Stderr += "anvil-semver-check: could not parse baseline metadata: $_"
             }
-            $findings.Add('```') | Out-Null
-            $findings.Add('') | Out-Null
-        } elseif ($semverExit -eq 101) {
-            # Exit 101 means the check could not complete. Some conditions
-            # intentionally have no usable branch baseline: a package renamed
-            # in place, a baseline bin becoming a library, or a dependency
-            # version in the baseline becoming yanked after that commit landed.
-            $packageMissing = $output.Contains(('package `{0}` not found in' -f $p))
-            $manifestParseFailed = $output.Contains('possibly due to errors:')
-            $renamedPackage = $packageMissing -and -not $manifestParseFailed
-            $baselineLibraryMissing = $output.Contains('has no lib target') -or
-                                      $output.Contains('no library targets found')
-            $baselineDependencyYanked = $output.Contains('is yanked') -and
-                                        ($output -match 'target[\\/]+semver-checks[\\/]+git-')
-            if ($renamedPackage -or $baselineLibraryMissing -or $baselineDependencyYanked) {
-                Write-Host "  $p has no usable branch baseline; skipping (renamed, bin->lib, or yanked baseline dependency)" -ForegroundColor Yellow
-            } else {
-                Write-Warning "anvil-semver-check: $p could not be checked (cargo-semver-checks exit 101):`n$output"
-                $inconclusive.Add('#### `' + $p + '` (exit 101)') | Out-Null
-                $inconclusive.Add('') | Out-Null
-                $inconclusive.Add('```') | Out-Null
-                foreach ($line in ($output.TrimEnd() -split "`r?`n")) {
-                    $inconclusive.Add($line.TrimEnd()) | Out-Null
+        }
+        if ($baselineExit -ne 0) {
+            $output = $baselineMetadata.Stdout + $baselineMetadata.Stderr
+            Write-Warning "anvil-semver-check: locked baseline metadata failed (exit ${baselineExit}):`n$output"
+            Add-Report $inconclusive "#### Baseline metadata (exit $baselineExit)" $output
+        } else {
+            $baselinePackages = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
+            foreach ($old in $baselineMeta.packages) {
+                $path = [System.IO.Path]::GetRelativePath($baselineMeta.workspace_root, $old.manifest_path).Replace('\', '/')
+                $baselinePackages[$path] = $old
+            }
+            foreach ($p in $packages) {
+                $currentPackage = $libPkgs[$p]
+                $path = [System.IO.Path]::GetRelativePath($meta.workspace_root, $currentPackage.manifest_path).Replace('\', '/')
+                $old = if ($baselinePackages.ContainsKey($path)) { $baselinePackages[$path] } else { $null }
+                if (-not $old -or $old.name -cne $p -or -not ($old.targets | Where-Object { $_.kind -contains 'lib' })) {
+                    Write-Host "anvil-semver-check: $p has no comparable baseline library at '$path'; skipping (new, moved, renamed, or bin->lib)" -ForegroundColor Yellow
+                    continue
                 }
-                $inconclusive.Add('```') | Out-Null
-                $inconclusive.Add('') | Out-Null
+                if ($meta.metadata.'cargo-semver-checks' -or $currentPackage.metadata.'cargo-semver-checks') {
+                    Write-Warning "anvil-semver-check: $p uses Cargo metadata lint overrides; cargo-semver-checks file inputs use the built-in lint policy instead."
+                }
+                Write-Host "anvil-semver-check: $p (locked current vs baseline $base)"
+                $current = Get-RustdocSnapshot $currentPackage $meta.workspace_root (Join-Path $buildRoot 'current')
+                if ($current.ExitCode -ne 0) {
+                    Write-Warning "anvil-semver-check: $p current locked rustdoc failed (exit $($current.ExitCode)):`n$($current.Output)"
+                    Add-Report $inconclusive ('#### `' + $p + '` current rustdoc (exit ' + $current.ExitCode + ')') $current.Output
+                    continue
+                }
+                $baseline = Get-RustdocSnapshot $old $baselineMeta.workspace_root (Join-Path $buildRoot 'baseline')
+                if ($baseline.ExitCode -ne 0) {
+                    Write-Warning "anvil-semver-check: $p baseline locked rustdoc failed (exit $($baseline.ExitCode)):`n$($baseline.Output)"
+                    Add-Report $inconclusive ('#### `' + $p + '` baseline rustdoc (exit ' + $baseline.ExitCode + ')') $baseline.Output
+                    continue
+                }
+                $outputLines = @(& cargo @stableArgs semver-checks --package $p `
+                    --current-rustdoc $current.Path --baseline-rustdoc $baseline.Path 2>&1)
+                $semverExit = $LASTEXITCODE
+                $output = $outputLines | Out-String
+                if ($semverExit -eq 0 -or $semverExit -eq 100) {
+                    Write-Host $output
+                    if ($semverExit -eq 100) {
+                        Add-Report $findings ('#### `' + $p + '`') $output
+                    }
+                } else {
+                    Write-Warning "anvil-semver-check: $p comparison failed (exit ${semverExit}):`n$output"
+                    Add-Report $inconclusive ('#### `' + $p + '` (exit ' + $semverExit + ')') $output
+                }
             }
-        } elseif ($semverExit -ne 0) {
-            Write-Warning "anvil-semver-check: $p failed with unexpected cargo-semver-checks exit code ${semverExit}:`n$output"
-            $inconclusive.Add('#### `' + $p + '` (exit ' + $semverExit + ')') | Out-Null
-            $inconclusive.Add('') | Out-Null
-            $inconclusive.Add('```') | Out-Null
-            foreach ($line in ($output.TrimEnd() -split "`r?`n")) {
-                $inconclusive.Add($line.TrimEnd()) | Out-Null
-            }
-            $inconclusive.Add('```') | Out-Null
-            $inconclusive.Add('') | Out-Null
+        }
+    } finally {
+        if (Test-Path -LiteralPath $baselineRoot) {
+            Remove-Item -LiteralPath $baselineRoot -Recurse -Force -ErrorAction Stop
         }
     }
     [System.IO.Directory]::CreateDirectory((Split-Path -Parent $commentFile)) | Out-Null
@@ -225,7 +352,7 @@ anvil-semver-check: anvil-semver-check-validate-prereqs anvil-impact
             $lines.Add('') | Out-Null
             $lines.Add('### Inconclusive comparisons') | Out-Null
             $lines.Add('') | Out-Null
-            $lines.Add('`cargo semver-checks` could not complete the following comparisons. These failures are **informational** because an unbuildable baseline is not evidence of a breaking API change.') | Out-Null
+            $lines.Add('The locked rustdoc builds or `cargo semver-checks` could not complete the following comparisons. These failures are **informational** because an unbuildable baseline is not evidence of a breaking API change.') | Out-Null
             $lines.Add('') | Out-Null
             foreach ($f in $inconclusive) { $lines.Add($f) | Out-Null }
         }

@@ -39,7 +39,6 @@ typeid = { workspace = true }
 [dev-dependencies]
 futures = { workspace = true }
 insta = { workspace = true }
-mutants = { workspace = true }
 regex = { workspace = true, features = ["unicode-perl"] }
 testing_aids = { path = "../testing_aids" }
 tokio = { workspace = true, features = [

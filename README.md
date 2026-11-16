@@ -55,6 +55,7 @@ These are the primary crates built out of this repo:
 - [`metabench`](./crates/metabench/README.md) - Run Criterion, Gungraun, Linux perf, Intel VTune, and allocation benchmarks together and combine their reports.
 - [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`observed_destination_file`](./crates/observed_destination_file/README.md) - File destination for Observed pipeline.
+- [`observed_destination_memory`](./crates/observed_destination_memory/README.md) - In-memory destination for Observed pipeline.
 - [`observed_destination_stdout`](./crates/observed_destination_stdout/README.md) - stdout destination for Observed pipeline.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`performables`](./crates/performables/README.md) - Thread-aware synchronization and ownership primitives.

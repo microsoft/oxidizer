@@ -73,8 +73,16 @@ impl Wrapper {
             #[cfg(any(test, feature = "zlib"))]
             Self::Zlib => Decompress::new(true),
             #[cfg(any(test, feature = "gzip"))]
-            Self::Gzip => Decompress::new_gzip(WINDOW_BITS),
+            Self::Gzip => Self::gzip_decompressor(WINDOW_BITS),
         }
+    }
+
+    #[cfg(any(test, feature = "gzip"))]
+    fn gzip_decompressor(window_bits: u8) -> Decompress {
+        #[cfg(test)]
+        tests::LAST_GZIP_WINDOW_BITS.set(Some(window_bits));
+        // #[gamma::skip(expr.decrement, tag = "equivalent", reason = "The zlib-rs gzip decoder allocates its history at MAX_WBITS independently of this argument; 14 and 15 both enable gzip and retain the full 32 KiB history")]
+        Decompress::new_gzip(window_bits)
     }
 
     /// Whether a recycled decompressor keeps this container's framing after a reset.
@@ -96,17 +104,16 @@ impl Wrapper {
     /// The boolean `Decompress::reset` needs to restore this container.
     ///
     /// Only `Raw` and `Zlib` ever reach this call: [`Self::reset_restores_framing`] keeps a gzip
-    /// decompressor out of the pool, so `checkout` never asks it to reset. Written without a
-    /// dedicated `Gzip` arm so every branch stays reachable through that existing pooling test.
+    /// decompressor out of the pool, so `checkout` never asks it to reset.
     #[cfg(any(test, feature = "deflate", feature = "zlib"))]
     pub(crate) fn expects_zlib_header(self) -> bool {
-        #[cfg(any(test, feature = "zlib"))]
-        {
-            matches!(self, Self::Zlib)
-        }
-        #[cfg(not(any(test, feature = "zlib")))]
-        {
-            false
+        match self {
+            #[cfg(any(test, feature = "deflate"))]
+            Self::Raw => false,
+            #[cfg(any(test, feature = "zlib"))]
+            Self::Zlib => true,
+            #[cfg(any(test, feature = "gzip"))]
+            Self::Gzip => false,
         }
     }
 
@@ -125,6 +132,60 @@ impl Wrapper {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    std::thread_local! {
+        pub(super) static LAST_GZIP_WINDOW_BITS: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };
+    }
+
+    #[test]
+    fn gamma_afternoon_gzip_decoder_requests_the_full_deflate_window() {
+        LAST_GZIP_WINDOW_BITS.set(None);
+        let _decoder = super::Wrapper::Gzip.decompressor();
+        assert_eq!(LAST_GZIP_WINDOW_BITS.get(), Some(15));
+    }
+
+    #[test]
+    fn nov6_gzip_decoder_retains_long_distance_history_across_small_output_chunks() {
+        let mut state = 0x1234_5678_u32;
+        let block: Vec<u8> = (0..20_000)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                state.to_be_bytes()[0]
+            })
+            .collect();
+        let payload = [block.as_slice(), block.as_slice()].concat();
+        let mut encoded = Vec::with_capacity(payload.len() + 1_024);
+        assert_eq!(
+            Wrapper::Gzip
+                .compressor(Level::HIGH)
+                .compress_vec(&payload, &mut encoded, flate2::FlushCompress::Finish)
+                .unwrap(),
+            flate2::Status::StreamEnd
+        );
+        assert!(encoded.len() < 30_000, "the encoder must use history more than 16 KiB behind it");
+
+        let mut decoder = Wrapper::Gzip.decompressor();
+        let mut plain = Vec::new();
+        let mut consumed = 0;
+        loop {
+            let mut chunk = [0; 1_024];
+            let before_in = decoder.total_in();
+            let before_out = decoder.total_out();
+            let status = decoder
+                .decompress(&encoded[consumed..], &mut chunk, flate2::FlushDecompress::None)
+                .unwrap();
+            let step_in = usize::try_from(decoder.total_in() - before_in).unwrap();
+            let step_out = usize::try_from(decoder.total_out() - before_out).unwrap();
+            consumed += step_in;
+            plain.extend_from_slice(&chunk[..step_out]);
+            if status == flate2::Status::StreamEnd {
+                break;
+            }
+            assert!(step_in != 0 || step_out != 0, "the decoder must make progress");
+        }
+        assert_eq!(consumed, encoded.len());
+        assert_eq!(plain, payload);
+    }
+
     use super::*;
 
     #[test]
@@ -139,6 +200,13 @@ mod tests {
         assert!(Wrapper::Raw.reset_restores_framing());
         assert!(Wrapper::Zlib.reset_restores_framing());
         assert!(!Wrapper::Gzip.reset_restores_framing());
+    }
+
+    #[test]
+    fn nov6_only_zlib_requests_a_header_when_resetting_a_decoder() {
+        assert!(!Wrapper::Raw.expects_zlib_header());
+        assert!(Wrapper::Zlib.expects_zlib_header());
+        assert!(!Wrapper::Gzip.expects_zlib_header());
     }
 
     #[test]

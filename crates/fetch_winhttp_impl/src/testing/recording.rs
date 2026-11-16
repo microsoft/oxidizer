@@ -145,6 +145,31 @@ impl ResponseScript {
     }
 }
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use http::StatusCode;
+
+    use super::{ResponsePlan, ResponseScript};
+
+    #[test]
+    fn gamma_survivor_response_script_indexes_sequence_and_repeat_without_io() {
+        let script = ResponseScript::Sequence(vec![
+            ResponsePlan::status(StatusCode::CREATED),
+            ResponsePlan::status(StatusCode::ACCEPTED),
+            ResponsePlan::status(StatusCode::NO_CONTENT),
+        ]);
+        assert!(script.records());
+        assert_eq!(script.plan(0).status, StatusCode::CREATED);
+        assert_eq!(script.plan(1).status, StatusCode::ACCEPTED);
+        assert_eq!(script.plan(2).status, StatusCode::NO_CONTENT);
+        assert_eq!(script.plan(3).status, StatusCode::INTERNAL_SERVER_ERROR);
+        let repeat = ResponseScript::Repeat(ResponsePlan::status(StatusCode::FORBIDDEN));
+        assert!(!repeat.records());
+        assert_eq!(repeat.plan(0).status, StatusCode::FORBIDDEN);
+        assert_eq!(repeat.plan(73).status, StatusCode::FORBIDDEN);
+    }
+}
+
 /// What a fixture observed on the wire for one request.
 ///
 /// This is the only channel through which a test can assert on what the transport actually sent,

@@ -84,6 +84,16 @@ mod decompression {
             None => handler,
         }
     }
+
+    #[cfg(test)]
+    mod gamma_round2 {
+        #[test]
+        fn gamma_round2_no_formats_means_no_decompression_layer() {
+            let mut options = super::ClientOptions::default();
+            options.decompression.formats.clear();
+            assert!(super::layer(&options, &super::HttpBodyBuilder::new_fake()).is_none());
+        }
+    }
 }
 
 /// Decompression support for a build without a compression implementation.
@@ -101,12 +111,10 @@ mod decompression {
     /// Returns an empty layer because this build cannot decompress responses.
     pub(super) type Layer = std::convert::Infallible;
 
-    #[cfg_attr(test, mutants::skip)] // Trivial adapter, inactive in the all-features mutation suite.
     pub(super) const fn layer(_: &ClientOptions, _: &HttpBodyBuilder) -> Option<Layer> {
         None
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial identity adapter, inactive in the all-features mutation suite.
     pub(super) const fn wrap(handler: TransportHandler, _: Option<&Layer>) -> TransportHandler {
         handler
     }

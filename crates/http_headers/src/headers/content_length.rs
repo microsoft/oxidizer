@@ -111,6 +111,7 @@ impl Field for ContentLength {
         &FieldName::ContentLength
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -122,6 +123,7 @@ impl Field for ContentLength {
         let mut repeated = lines.repeated();
         let first = repeated.next().expect("FieldLines always contains at least one value");
         let second = repeated.next();
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The general path applies the same decimal parser to the identical sole member and reports the same InvalidNumber at field-line zero")]
         if second.is_none() && !first.as_bytes().contains(&b',') {
             return parse_decimal_ows(first.as_bytes())
                 .map(ContentLengthOwned)
@@ -140,6 +142,7 @@ impl Field for ContentLength {
         Ok(parsed.map(ContentLengthOwned))
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The only defaultable argument is forwarded to view_with whose mode is unused; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, mode: crate::DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -170,7 +173,10 @@ fn parse_content_length_line(parsed: &mut Option<u64>, bytes: &[u8], value_index
 fn parse_decimal_ows(bytes: &[u8]) -> Option<u64> {
     let mut index = 0;
     while bytes.get(index).is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
-        index += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        index +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
     let digit_start = index;
     let mut value = 0_u64;
@@ -179,6 +185,7 @@ fn parse_decimal_ows(bytes: &[u8]) -> Option<u64> {
             value = value.checked_mul(10)?.checked_add(u64::from(byte - b'0'))?;
             index += 1;
         } else {
+            // #[gamma::skip(loop.break_to_continue, loop.delete_break, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         }
     }
@@ -186,7 +193,10 @@ fn parse_decimal_ows(bytes: &[u8]) -> Option<u64> {
         return None;
     }
     while bytes.get(index).is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
-        index += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        index +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
     (index == bytes.len()).then_some(value)
 }

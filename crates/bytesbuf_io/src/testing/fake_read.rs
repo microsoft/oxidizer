@@ -16,6 +16,19 @@ use crate::Read;
 // but for now, we keep it simple because no scenario where that was relevant has appeared yet.
 const PREFERRED_READ_SIZE: usize = 100;
 
+fn read_size(requested: usize, remaining: usize, maximum: Option<NonZero<usize>>) -> usize {
+    requested.min(remaining).min(maximum.map_or(usize::MAX, NonZero::get))
+}
+
+#[test]
+fn gamma_round2_unlimited_fake_read_plan_preserves_the_full_usize_range() {
+    assert_eq!(read_size(usize::MAX, usize::MAX, None), usize::MAX);
+    assert_eq!(read_size(usize::MAX, 17, None), 17);
+    assert_eq!(read_size(11, usize::MAX, None), 11);
+    assert_eq!(read_size(usize::MAX, usize::MAX, NonZero::new(23)), 23);
+    assert_eq!(read_size(0, usize::MAX, None), 0);
+}
+
 /// A [`Read`] that reads from a [`BytesView`].
 ///
 /// This is for test and example purposes only and is not optimized for performance.
@@ -64,17 +77,15 @@ impl FakeRead {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // Mutations easily lead to infinite loops, not worth the effort.
     #[expect(
         clippy::unused_async,
         clippy::unused_async_trait_impl,
         reason = "API compatibility between trait and inherent fn"
     )]
     pub async fn read_at_most_into(&mut self, len: usize, mut into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
-        let bytes_to_read = len
-            .min(self.contents.len())
-            .min(self.max_read_size.map_or(usize::MAX, NonZero::get));
+        let bytes_to_read = read_size(len, self.contents.len(), self.max_read_size);
 
+        // #[gamma::skip(cond.always_false, reason = "A zero-byte range is empty; putting it and advancing by zero preserve the destination and source, then return the same zero count")]
         if bytes_to_read == 0 {
             return Ok((0, into));
         }
@@ -108,7 +119,6 @@ impl FakeRead {
     /// # Errors
     ///
     /// This call never fails.
-    #[cfg_attr(test, mutants::skip)] // Mutations easily lead to infinite loops, not worth the effort.
     pub async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         let previous_len = into.len();
 
@@ -141,6 +151,7 @@ impl FakeRead {
     ///
     /// This call never fails.
     pub async fn read_any(&mut self) -> Result<BytesBuf, Infallible> {
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "The inherent read returns Result with the uninhabited Infallible error type")]
         Ok(self.read_at_most_into(PREFERRED_READ_SIZE, BytesBuf::new()).await?.1)
     }
 
@@ -177,17 +188,14 @@ impl FakeRead {
 impl Read for FakeRead {
     type Error = Infallible;
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_at_most_into(&mut self, len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_at_most_into(len, into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_more_into(into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_any(&mut self) -> Result<BytesBuf, Infallible> {
         self.read_any().await
     }
@@ -195,7 +203,6 @@ impl Read for FakeRead {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Memory for FakeRead {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         self.reserve(min_bytes)
     }
@@ -203,7 +210,6 @@ impl Memory for FakeRead {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl HasMemory for FakeRead {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn memory(&self) -> impl MemoryShared {
         self.memory()
     }

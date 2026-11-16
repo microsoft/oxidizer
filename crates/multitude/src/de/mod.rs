@@ -431,12 +431,10 @@ where
                 formatter.write_str("an optional value")
             }
 
-            #[cfg_attr(test, mutants::skip)] // `Option<T>::default()` is also `None`
             fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
                 Ok(None)
             }
 
-            #[cfg_attr(test, mutants::skip)] // `Option<T>::default()` is also `None`
             fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
                 Ok(None)
             }

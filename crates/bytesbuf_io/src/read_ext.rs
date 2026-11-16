@@ -145,7 +145,6 @@ where
         self.read_at_most_into_while(len, buffer, inspect_fn).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Some generated mutations are unreachable.
     async fn read_at_most_into_while<F>(
         &mut self,
         len: usize,

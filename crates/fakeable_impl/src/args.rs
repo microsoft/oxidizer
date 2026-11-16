@@ -140,6 +140,7 @@ impl Parse for FakeableArg {
                 // Only accept boolean true
                 let lookahead = input.lookahead1();
                 if lookahead.peek(syn::LitBool) {
+                    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The preceding lookahead proves the next token is the same LitBool that is parsed here.")]
                     let value: syn::LitBool = input.parse()?;
                     if value.value {
                         Ok(Self::GenerateMockallFake(value))

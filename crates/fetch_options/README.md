@@ -13,11 +13,11 @@
 
 </div>
 
-Configuration options for HTTP client transport behavior.
+HTTP client transport configuration.
 
-This crate provides types for configuring various aspects of HTTP connections,
-including connection keep-alive behavior, connection pooling, HTTP version support,
-HTTP/2 flow control, and socket-level tuning.
+This crate defines connect timeouts, request filtering, connection information,
+keep-alive, connection pools, idle timeouts, pool selection, connection lifetime,
+HTTP versions, HTTP/2 stream limits and flow control, and socket configuration.
 
 ## Example
 

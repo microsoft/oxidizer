@@ -49,7 +49,6 @@ use syn::{Path, parse_quote};
 /// `#[serde(try_from)]` are also rejected; `#[serde(into)]` is ignored (it only
 /// affects serialization).
 #[proc_macro_derive(DeserializeIn, attributes(internity, serde))]
-#[cfg_attr(test, mutants::skip)] // `proc_macro::TokenStream` is only usable by rustc.
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn derive_deserialize_in(input: TokenStream) -> TokenStream {
     let root_path: Path = parse_quote!(::internity);
@@ -88,7 +87,6 @@ pub fn derive_deserialize_in(input: TokenStream) -> TokenStream {
 /// affect deserialization). `#[serde(skip_serializing_if)]` is rejected because
 /// the interner-aware encoder cannot evaluate the predicate mid-stream.
 #[proc_macro_derive(SerializeIn, attributes(internity, serde))]
-#[cfg_attr(test, mutants::skip)] // `proc_macro::TokenStream` is only usable by rustc.
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn derive_serialize_in(input: TokenStream) -> TokenStream {
     let root_path: Path = parse_quote!(::internity);

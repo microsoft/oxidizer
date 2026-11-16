@@ -246,7 +246,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Box: with-closure fill path. Uses an `InitGuard`-equivalent loop
     /// so a panicking `f` drops the already-initialized prefix.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // `+= → *=` on the fill counter ⇒ infinite loop
     fn impl_alloc_slice_box_with<T, F: FnMut(usize) -> T>(&self, len: usize, mut f: F) -> Result<Box<[T], A>, AllocError> {
         check_slice_box_layout::<T, _>(self, len)?;
         // Check overflow before the refill loop.
@@ -379,6 +378,7 @@ impl<A: Allocator + Clone> Arena<A> {
 /// smart-pointer header recovery. Slice length is full-width in the
 /// chunk prefix.
 #[inline]
+// #[gamma::skip(parameter.default_shadow, reason = "Only element alignment is checked; the unused length is stored at full width in the allocation prefix")]
 fn check_slice_box_layout<T, A: Allocator + Clone>(arena: &Arena<A>, _len: usize) -> Result<(), AllocError> {
     if arena.rejects_smart_ptr_align(mem::align_of::<T>()) {
         return Err(AllocError::ALIGNMENT_TOO_LARGE);

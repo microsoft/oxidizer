@@ -22,9 +22,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use arty_executor::{
-    CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskSet, discard_task_panic_payload,
-};
+use arty_executor::{CycleOutcome, Executor, ShutdownCause, TaskCompletion, TaskPanicPayload, TaskSet, discard_task_panic_payload};
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use gungraun::{Callgrind, CallgrindMetrics, LibraryBenchmarkConfig};
 
@@ -71,7 +69,7 @@ struct CycleState {
 fn cycle_state(pending_task: bool) -> CycleState {
     let executor = Executor::builder().build();
     if pending_task {
-        executor.tasks().add(pending::<()>(), TaskOptions::default(), DiscardCompletion);
+        executor.tasks().task(pending::<()>()).register(DiscardCompletion);
     }
     CycleState { executor }
 }
@@ -110,31 +108,29 @@ struct SelfWakingState {
 
 fn self_waking_state(clone_waker: bool) -> SelfWakingState {
     let executor = Executor::builder().build();
-    executor.tasks().add(
-        SelfWakingFuture {
+    executor
+        .tasks()
+        .task(SelfWakingFuture {
             remaining_polls: SELF_WAKING_POLL_COUNT,
             clone_waker,
-        },
-        TaskOptions::default(),
-        DiscardCompletion,
-    );
+        })
+        .register(DiscardCompletion);
     SelfWakingState { executor }
 }
 
 fn clone_waker_state() -> CloneWakerState {
     let executor = Executor::builder().build();
     let captured = Rc::new(RefCell::new(None));
-    executor.tasks().add(
-        {
+    executor
+        .tasks()
+        .task({
             let captured = Rc::clone(&captured);
             poll_fn(move |cx| {
                 *captured.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending::<()>
             })
-        },
-        TaskOptions::default(),
-        DiscardCompletion,
-    );
+        })
+        .register(DiscardCompletion);
     CloneWakerState {
         _captured: captured,
         executor,
@@ -145,17 +141,15 @@ fn retained_waker_after_executor_drop() -> Waker {
     let mut executor = Executor::builder().build();
     let tasks = executor.tasks();
     let captured = Rc::new(RefCell::new(None));
-    tasks.add(
-        {
+    tasks
+        .task({
             let captured = Rc::clone(&captured);
             poll_fn(move |cx| {
                 *captured.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending::<()>
             })
-        },
-        TaskOptions::default(),
-        DiscardCompletion,
-    );
+        })
+        .register(DiscardCompletion);
 
     assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
     let retained = captured.borrow_mut().take().expect("the task captured its waker");
@@ -175,7 +169,7 @@ fn execute_cycle<S: borrow::BorrowMut<CycleState>>(mut state: S) -> (CycleOutcom
 #[metabench::benchmark(ADD_TASK, TASK, "add_task")]
 #[bench::ready(Box::new(executor_state()))]
 fn add_task<S: borrow::Borrow<ExecutorState>>(state: S) -> S {
-    black_box(&state.borrow().tasks).add(async {}, TaskOptions::default(), DiscardCompletion);
+    black_box(&state.borrow().tasks).task(async {}).register(DiscardCompletion);
     state
 }
 

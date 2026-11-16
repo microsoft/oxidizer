@@ -212,7 +212,6 @@ impl Uri {
 }
 
 impl RedactedDisplay for Uri {
-    #[cfg_attr(test, mutants::skip)] // Do not mutate display output.
     fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter) -> fmt::Result {
         if let Some(base_uri) = self.base_uri.as_ref() {
             write!(f, "{base_uri}")?;
@@ -229,7 +228,6 @@ impl RedactedDisplay for Uri {
 }
 
 impl RedactedDebug for Uri {
-    #[cfg_attr(test, mutants::skip)] // Do not mutate debug output.
     fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter) -> fmt::Result {
         if let Some(base_uri) = self.base_uri.as_ref() {
             write!(f, "{base_uri}")?;

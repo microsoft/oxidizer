@@ -509,6 +509,7 @@ fn spawn_at_rejects_a_worker_from_another_runtime() {
     assert!(error.is_invalid_destination());
     assert!(!error.is_panic());
     assert!(!error.is_shutdown());
+    assert_eq!(error.shutdown_cause(), None);
     assert_eq!(error.to_string(), "target thread is not a worker of this runtime");
     assert!(error.into_panic().is_none());
     assert_eq!((relocations.load(Ordering::SeqCst), invocations.load(Ordering::SeqCst)), (0, 0));

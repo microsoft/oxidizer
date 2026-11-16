@@ -82,7 +82,6 @@ impl MaybeBacktrace {
     /// Returns [`MaybeBacktrace::Disabled`]; backtrace capture is unavailable without `std`.
     #[cfg(not(feature = "std"))]
     #[cfg_attr(coverage_nightly, coverage(off))] // no_std-only path (AGENTS.md, "no_std Support").
-    #[cfg_attr(test, mutants::skip)] // no_std-only path (AGENTS.md, "no_std Support").
     fn capture() -> Self {
         Self::Disabled
     }

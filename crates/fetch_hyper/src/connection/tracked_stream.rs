@@ -76,7 +76,6 @@ impl<T: Read + Unpin> Read for TrackedStream<T> {
 
 impl<T: Write + Unpin> Write for TrackedStream<T> {
     // Skip: `Poll::from(Ok(N))` mutations spin hyper's write loop forever (timeout, not failure).
-    #[cfg_attr(test, mutants::skip)]
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.inner).poll_write(cx, buf)
     }
@@ -94,7 +93,6 @@ impl<T: Write + Unpin> Write for TrackedStream<T> {
     }
 
     // Skip: see `poll_write`.
-    #[cfg_attr(test, mutants::skip)]
     fn poll_write_vectored(mut self: Pin<&mut Self>, cx: &mut Context<'_>, bufs: &[IoSlice<'_>]) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.inner).poll_write_vectored(cx, bufs)
     }
@@ -122,6 +120,22 @@ mod tests {
 
     use super::*;
     use crate::testing::PanickingStream;
+
+    #[test]
+    fn gamma_survivor_tracked_stream_preserves_write_vectored_capability() {
+        let (inner, _) = tokio::io::duplex(64);
+        let inner = hyper_util::rt::TokioIo::new(inner);
+        let capability = hyper::rt::Write::is_write_vectored(&inner);
+        let now = tick::Clock::new_frozen().instant();
+        let stream = TrackedStream {
+            inner,
+            base_uri: BaseUri::from_static("https://example.test"),
+            info: ConnectionInfo::new(move || now, PoolIndex::new(0), None),
+            connection_duration: None,
+            connected: Connected::new(),
+        };
+        assert_eq!(hyper::rt::Write::is_write_vectored(&stream), capability);
+    }
 
     fn frozen_info(pool_index: usize) -> ConnectionInfo {
         ConnectionInfo::new(std::time::Instant::now, PoolIndex::new(pool_index), None)

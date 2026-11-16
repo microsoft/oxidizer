@@ -35,7 +35,10 @@ fn compression_level(level: Level) -> i32 {
     // regression against a recorded measurement.
     const MAPPING: [i32; 10] = [1, 1, 2, 2, 3, 3, 3, 6, 9, 12];
 
-    MAPPING[usize::from(level.get().min(9))]
+    MAPPING[usize::from(level.get().min(
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Level is bounded by nine, so increasing this redundant clamp to ten preserves every mapping index")]
+        9,
+    ))]
 }
 
 /// Lends zstd an output slice that is still uninitialized.
@@ -65,7 +68,6 @@ unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
     // A mutant that reports a smaller capacity is not wrong, only slow: zstd writes no more than it
     // is offered, so the same bytes are produced a step at a time and the harness times out instead
     // of reaching a verdict.
-    #[cfg_attr(test, mutants::skip)]
     fn capacity(&self) -> usize {
         self.buffer.len()
     }
@@ -81,6 +83,7 @@ unsafe impl zstd_safe::WriteBuf for UninitOutput<'_> {
     // written, but an invalid report gives no reason to believe that. Therefore, an
     // out-of-range count aborts instead.
     unsafe fn filled_until(&mut self, n: usize) {
+        // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "WriteBuf::filled_until requires the caller to have initialized n bytes in this buffer; that unsafe caller contract already proves n does not exceed its length")]
         self.check_reported_count(n);
         self.filled = n;
     }
@@ -115,7 +118,6 @@ impl UninitOutput<'_> {
 /// count means the engine has more to give and must be driven again.
 // Treating a zero remaining count as anything else leaves a finish that never completes, so that
 // mutant hangs rather than failing and mutation testing records a timeout instead of a verdict.
-#[cfg_attr(test, mutants::skip)]
 fn finish_step(operation: Operation, remaining: usize) -> Step {
     match operation {
         Operation::Finish if remaining == 0 => Step::StreamEnd,
@@ -139,17 +141,19 @@ fn decompression_failed(code: usize) -> Error {
 /// This is therefore defensive against the bundled native library's contract rather than a check on
 /// this crate's own invariants: the bounds are queried from `zstd_safe` at run time, so a future
 /// zstd can narrow them or add validation that `set_parameter` does not perform today. Therefore,
-/// this function reports an error instead of asserting. A caller can handle a dependency build
+/// the returned mapper reports an error instead of asserting. A caller can handle a dependency build
 /// failure normally. An assertion introduces a panic that can unwind or abort, depending on the
 /// build configuration.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
-#[cold]
-fn compression_level_rejected(level: i32, code: usize) -> BuildError {
-    BuildError::new(format!(
-        "zstd rejected compression level {level}: {}",
-        zstd_safe::get_error_name(code)
-    ))
+fn compression_level_rejected(level: i32) -> impl FnOnce(usize) -> BuildError {
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cold]
+    move |code| {
+        BuildError::new(format!(
+            "zstd rejected compression level {level}: {}",
+            zstd_safe::get_error_name(code)
+        ))
+    }
 }
 
 /// zstd clamps `WindowLogMax` to `ZSTD_WINDOWLOG_MIN..=ZSTD_WINDOWLOG_MAX`, and
@@ -159,19 +163,20 @@ fn compression_level_rejected(level: i32, code: usize) -> BuildError {
 /// the same reason as [`compression_level_rejected`]: those limits come from the linked zstd, so a
 /// different build can reject a value that this build accepts.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
-#[cold]
-fn window_log_rejected(window: u32, code: usize) -> BuildError {
-    BuildError::new(format!(
-        "zstd rejected maximum window log {window}: {}",
-        zstd_safe::get_error_name(code)
-    ))
+fn window_log_rejected(window: u32) -> impl FnOnce(usize) -> BuildError {
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cold]
+    move |code| {
+        BuildError::new(format!(
+            "zstd rejected maximum window log {window}: {}",
+            zstd_safe::get_error_name(code)
+        ))
+    }
 }
 
 /// Resetting a session has no parameters to validate and no documented failure mode. This
 /// guards against a native error the bundled zstd version has never been observed to return.
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)]
 #[cold]
 fn reset_for_next_frame_failed(code: usize) -> Error {
     Error::invalid_state(format!(
@@ -194,15 +199,17 @@ pub(crate) struct ZstdCompress {
 }
 
 impl ZstdCompress {
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "Fresh or reset contexts accept levels validated against the linked zstd library's own bounds.")]
     pub(crate) fn new(level: Level, options: &Zstd, pool: Pool) -> ::core::result::Result<Self, BuildError> {
         let level = options.level.map_or_else(|| compression_level(level), CompressionLevel::get);
         let mut context = pool.take_zstd_compressor().unwrap_or_else(CCtx::create);
 
         // Applied unconditionally: a recycled context comes back with its parameters cleared, so
         // that a recycled compressor is indistinguishable from a fresh one.
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Fresh or pool-reset contexts are in init stage; bundled zstd 1.5.7 clamps its supported compression-level parameter without allocation and cannot return an error here")]
         context
             .set_parameter(CParameter::CompressionLevel(level))
-            .map_err(|code| compression_level_rejected(level, code))?;
+            .map_err(compression_level_rejected(level))?;
 
         Ok(Self {
             context: Some(context),
@@ -276,6 +283,7 @@ pub(crate) struct ZstdDecompress {
 }
 
 impl ZstdDecompress {
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "Fresh or reset contexts accept WindowLog values bounded by the linked zstd library's own limits.")]
     pub(crate) fn new(
         limits: FormatLimits,
         multi_stream: bool,
@@ -286,9 +294,10 @@ impl ZstdDecompress {
         let mut context = pool.take_zstd_decompressor().unwrap_or_else(DCtx::create);
 
         if let Some(window) = options.max_window_log {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The context is fresh or pool-reset to init and WindowLog enforces zstd 1.5.7's exact target-specific bounds; setting this supported scalar parameter allocates nothing and succeeds")]
             context
                 .set_parameter(DParameter::WindowLogMax(window.get()))
-                .map_err(|code| window_log_rejected(window.get(), code))?;
+                .map_err(window_log_rejected(window.get()))?;
         }
 
         Ok(Self {
@@ -327,6 +336,7 @@ impl Drop for ZstdDecompress {
 unsafe impl Codec for ZstdDecompress {
     fn step(&mut self, input: &[u8], output: &mut [MaybeUninit<u8>], _operation: Operation) -> Result<(Step, usize, usize)> {
         if self.needs_reset {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "Bundled zstd 1.5.7 ZSTD_DCtx_reset with SessionOnly only resets scalar state and returns zero; its stage error applies exclusively to the parameter-reset branch")]
             self.engine()
                 .reset(ResetDirective::SessionOnly)
                 .map_err(reset_for_next_frame_failed)?;
@@ -366,10 +376,8 @@ unsafe impl Codec for ZstdDecompress {
         self.limits.check(total_in, total_out, streams)
     }
 
-    // Delegates to `FormatLimits::remaining_output`, and is excluded for the same reason: a mutant
-    // that answers a small constant only shrinks the slice offered per step, so the pump crawls and
-    // the harness times out rather than reaching a verdict.
-    #[cfg_attr(test, mutants::skip)]
+    // A small constant shrinks the slice offered per step without changing the result.
+    // That can exceed the mutation harness's time budget.
     fn remaining_output(&self, total_out: u64) -> Option<u64> {
         self.limits.remaining_output(total_out)
     }
@@ -382,6 +390,71 @@ unsafe impl Codec for ZstdDecompress {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_pledged_source_size_mismatch_returns_a_codec_error() {
+        let mut codec = ZstdCompress::new(Level::DEFAULT, &Zstd::new(), Pool::disabled().clone()).unwrap();
+        codec.engine().set_pledged_src_size(Some(5)).unwrap();
+        let mut output = [MaybeUninit::uninit(); 128];
+        assert_eq!(codec.step(b"ab", &mut output, Operation::Process).unwrap().1, 2);
+        let error = codec.step(b"cd", &mut output, Operation::Finish).unwrap_err();
+        assert!(error.is_invalid_state());
+        assert!(error.to_string().contains("Src size is incorrect"));
+    }
+
+    #[test]
+    fn gamma_survivor_zstd_reset_and_limit_forwarding() {
+        use crate::engine::Codec as _;
+        let limits = crate::limits::FormatLimits::new(Some(1), None, Some(2));
+        let mut decoder = super::ZstdDecompress::new(
+            limits,
+            true,
+            crate::TrailingData::Reject,
+            &crate::zstd::Zstd::new(),
+            crate::pool::Pool::disabled().clone(),
+        )
+        .unwrap();
+        assert!(!decoder.needs_reset);
+        decoder.check_limits(40_000, 40_000, 2).unwrap();
+        assert!(decoder.check_limits(40_000, 40_001, 2).unwrap_err().is_limit_exceeded());
+        assert!(decoder.check_limits(40_000, 40_000, 3).unwrap_err().is_limit_exceeded());
+        decoder.needs_reset = true;
+        let mut output = [std::mem::MaybeUninit::uninit(); 16];
+        decoder.step(&[], &mut output, crate::engine::Operation::Process).unwrap();
+        assert!(!decoder.needs_reset);
+        let debug = format!("{decoder:?}");
+        assert!(debug.starts_with("ZstdDecompress { limits: "));
+        assert!(debug.contains("multi_stream: true"));
+        decoder.stream_ended().unwrap();
+        assert!(decoder.needs_reset);
+    }
+
+    #[test]
+    fn gamma_survivor_zstd_error_translation_keeps_native_code_and_settings() {
+        let code = usize::MAX;
+        let native = zstd_safe::get_error_name(code);
+        assert_ne!(native, zstd_safe::get_error_name(0));
+        assert_eq!(
+            super::compression_failed(code).to_string(),
+            format!("zstd compression failed: {native}")
+        );
+        assert_eq!(
+            super::decompression_failed(code).to_string(),
+            format!("zstd decompression failed: {native}")
+        );
+        assert_eq!(
+            super::compression_level_rejected(7)(code).to_string(),
+            format!("zstd rejected compression level 7: {native}")
+        );
+        assert_eq!(
+            super::window_log_rejected(20)(code).to_string(),
+            format!("zstd rejected maximum window log 20: {native}")
+        );
+        assert_eq!(
+            super::reset_for_next_frame_failed(code).to_string(),
+            format!("zstd failed to reset for the next frame: {native}")
+        );
+    }
+
     use super::*;
 
     #[test]

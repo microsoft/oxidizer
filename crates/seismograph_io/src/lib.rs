@@ -73,7 +73,10 @@ impl BufferState {
     pub fn new(id: Option<BufferId>, len: usize, span_count: usize) -> Self {
         Self {
             id,
-            len: u64::try_from(len).unwrap_or(u64::MAX),
+            len: u64::try_from(len).unwrap_or(
+                // #[gamma::skip(expr.decrement, reason = "usize is at most 64 bits on supported Rust targets, so conversion to u64 cannot select this fallback")]
+                u64::MAX,
+            ),
             span_count: u32::try_from(span_count).unwrap_or(u32::MAX),
         }
     }
@@ -183,6 +186,7 @@ impl Operation {
         let Some(recorded) = self.recorded.take() else {
             return;
         };
+        // #[gamma::skip(call_result.default, reason = "record_finish returns unit; default_after preserves its recording and buffer callback")]
         record_finish(recorded, completed_bytes, outcome, buffer);
     }
 
@@ -232,6 +236,7 @@ impl Drop for Operation {
         let Some(recorded) = self.recorded.take() else {
             return;
         };
+        // #[gamma::skip(call_result.default, reason = "record_finish returns unit; default_after preserves its canceled event")]
         record_finish(recorded, 0, IoOutcome::Canceled, Option::<fn() -> BufferState>::None);
     }
 }

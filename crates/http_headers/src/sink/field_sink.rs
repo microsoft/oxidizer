@@ -60,6 +60,12 @@ impl FieldEncodeOutput for CollectOutput {
 }
 
 fn reserve_collected_values(values: &mut EncodedValues, additional: usize) -> Result<(), InsertError> {
+    #[cfg(test)]
+    tests::LAST_VALUE_RESERVATION.set(Some(additional));
+    #[cfg(test)]
+    if tests::FAIL_NEXT_VALUE_RESERVATION.replace(false) {
+        return Err(InsertError::new(InsertErrorKind::AllocationFailed));
+    }
     values
         .try_reserve(additional)
         .map_err(|_error| InsertError::new(InsertErrorKind::AllocationFailed))
@@ -72,6 +78,12 @@ fn try_push_collected_value(values: &mut EncodedValues, value: FieldValue) -> Re
 }
 
 fn reserve_bytes(length: usize) -> Result<Vec<u8>, InsertError> {
+    #[cfg(test)]
+    tests::LAST_BYTE_RESERVATION.set(Some(length));
+    #[cfg(test)]
+    if tests::FAIL_NEXT_BYTE_RESERVATION.replace(false) {
+        return Err(InsertError::new(InsertErrorKind::AllocationFailed));
+    }
     let mut bytes = Vec::new();
     bytes
         .try_reserve_exact(length)
@@ -250,6 +262,81 @@ mod tests {
     use crate::{FieldName, FieldValue, FieldValueRef};
 
     type BorrowedFieldValue<'a> = FieldValueRef<'a>;
+
+    // One-shot, thread-local faults exercise propagation without exhausting memory.
+    std::thread_local! {
+        pub(super) static FAIL_NEXT_VALUE_RESERVATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        pub(super) static FAIL_NEXT_BYTE_RESERVATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        pub(super) static LAST_VALUE_RESERVATION: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+        pub(super) static LAST_BYTE_RESERVATION: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    }
+
+    #[test]
+    fn default_sink_gamma_afternoon_distinguishes_capacity_limits_from_allocation_failure() {
+        let mut output = CollectOutput {
+            values: EncodedValues::new(),
+        };
+        FAIL_NEXT_BYTE_RESERVATION.set(true);
+        LAST_BYTE_RESERVATION.set(None);
+        let result = output.begin_value(isize::MAX as usize, FieldSensitivity::NonSensitive);
+        assert!(matches!(result, Err(error) if error.kind() == InsertErrorKind::AllocationFailed));
+        assert_eq!(LAST_BYTE_RESERVATION.get(), Some(isize::MAX as usize));
+        assert!(!FAIL_NEXT_BYTE_RESERVATION.get());
+        LAST_BYTE_RESERVATION.set(None);
+        let result = output.begin_value(isize::MAX as usize + 1, FieldSensitivity::NonSensitive);
+        assert!(matches!(result, Err(error) if error.kind() == InsertErrorKind::CapacityExceeded));
+        assert_eq!(LAST_BYTE_RESERVATION.get(), None);
+        assert!(output.values.is_empty());
+    }
+
+    #[test]
+    fn default_sink_gamma_afternoon_returns_reservation_failures_without_committing() {
+        let allocation_error = Err(InsertError::new(InsertErrorKind::AllocationFailed));
+        let mut sink = Sink {
+            values: vec![FieldValue::from_static("original")],
+            append_calls: 0,
+        };
+        FAIL_NEXT_BYTE_RESERVATION.set(true);
+        assert_eq!(
+            sink.set_encoded(
+                &FieldName::UserAgent,
+                BytesEncoder {
+                    expected: FIELD_VALUE_INLINE_CAPACITY + 1,
+                    bytes: b"x",
+                    sensitive: false,
+                },
+            ),
+            allocation_error
+        );
+        assert!(!FAIL_NEXT_BYTE_RESERVATION.get());
+        assert_eq!(sink.values, [FieldValue::from_static("original")]);
+
+        FAIL_NEXT_VALUE_RESERVATION.set(true);
+        assert_eq!(
+            sink.append_encoded(
+                &FieldName::UserAgent,
+                BytesEncoder {
+                    expected: 1,
+                    bytes: b"x",
+                    sensitive: false,
+                },
+            ),
+            allocation_error
+        );
+        assert!(!FAIL_NEXT_VALUE_RESERVATION.get());
+        assert_eq!(LAST_VALUE_RESERVATION.get(), Some(1));
+        assert_eq!(sink.append_calls, 0);
+        assert_eq!(sink.values, [FieldValue::from_static("original")]);
+
+        FAIL_NEXT_VALUE_RESERVATION.set(true);
+        assert_eq!(
+            sink.set_encoded(&FieldName::UserAgent, FieldValue::from_static("new")),
+            allocation_error
+        );
+        assert!(!FAIL_NEXT_VALUE_RESERVATION.get());
+        assert_eq!(LAST_VALUE_RESERVATION.get(), Some(1));
+        assert_eq!(sink.values, [FieldValue::from_static("original")]);
+    }
 
     #[derive(Default)]
     struct Sink {
@@ -600,6 +687,13 @@ mod tests {
                 values: EncodedValues::new(),
             };
             let mut writer = output.begin_value(length, FieldSensitivity::Sensitive).expect("writer starts");
+            assert_eq!(
+                matches!(&writer.bytes, super::WriterBytes::Inline(_)),
+                length <= FIELD_VALUE_INLINE_CAPACITY
+            );
+            if let super::WriterBytes::Spilled(buffer) = &writer.bytes {
+                assert!(buffer.capacity() >= length);
+            }
             for chunk in bytes.chunks(7) {
                 writer.write_bytes(chunk).expect("chunk writes");
             }

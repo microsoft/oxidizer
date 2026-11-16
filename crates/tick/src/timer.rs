@@ -137,7 +137,6 @@ impl Timer {
             self.period = Duration::MAX;
         }
     }
-    #[cfg_attr(test, mutants::skip)] // cannot reliably check that poll_tick has been called
     fn poll_next_tick(&mut self, cx: &Context<'_>) -> Poll<TimerTick> {
         if self.period == Duration::MAX {
             return Poll::Pending;
@@ -207,6 +206,15 @@ mod tests {
 
     use super::*;
     use crate::ClockControl;
+
+    #[test]
+    fn gamma_survivor_finite_overflow_timer_sets_never_complete_period() {
+        let clock = ClockControl::new().to_clock();
+        let mut timer = Timer::new(&clock, Duration::MAX - Duration::from_nanos(1));
+        assert!(timer.poll_next_tick(&Context::from_waker(Waker::noop())).is_pending());
+        assert_eq!(timer.period, Duration::MAX);
+        assert!(timer.current.is_none());
+    }
 
     #[test]
     fn missing_timer_is_treated_as_fired_when_the_task_changes() {

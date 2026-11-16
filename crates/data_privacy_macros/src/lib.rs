@@ -12,36 +12,32 @@
 
 #[expect(missing_docs, reason = "this is documented in the data_privacy reexport")]
 #[proc_macro_attribute]
-#[cfg_attr(test, mutants::skip)]
 pub fn taxonomy(attr_args: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     data_privacy_macros_impl::taxonomy::taxonomy(attr_args.into(), item.into())
-        .unwrap_or_else(|err| err.to_compile_error())
+        .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
 
 #[expect(missing_docs, reason = "this is documented in the data_privacy reexport")]
 #[proc_macro_attribute]
-#[cfg_attr(test, mutants::skip)]
 pub fn classified(attr_args: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     data_privacy_macros_impl::classified::classified(attr_args.into(), item.into())
-        .unwrap_or_else(|err| err.to_compile_error())
+        .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
 
 #[expect(missing_docs, reason = "this is documented in the data_privacy reexport")]
 #[proc_macro_derive(RedactedDebug, attributes(unredacted))]
-#[cfg_attr(test, mutants::skip)]
 pub fn redacted_debug(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     data_privacy_macros_impl::derive::redacted_debug(input.into())
-        .unwrap_or_else(|err| err.to_compile_error())
+        .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
 
 #[expect(missing_docs, reason = "this is documented in the data_privacy reexport")]
 #[proc_macro_derive(RedactedDisplay, attributes(unredacted))]
-#[cfg_attr(test, mutants::skip)]
 pub fn redacted_display(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     data_privacy_macros_impl::derive::redacted_display(input.into())
-        .unwrap_or_else(|err| err.to_compile_error())
+        .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

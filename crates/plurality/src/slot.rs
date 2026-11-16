@@ -36,8 +36,6 @@ const MAX_REFCOUNT: u32 = i32::MAX as u32;
 
 /// Aborts before the refcount exceeds [`MAX_REFCOUNT`].
 #[inline]
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)] // Overflow branch needs `old >= i32::MAX`, which a test cannot produce.
 pub(crate) fn check_refcount_overflow(old: u32) {
     if old >= MAX_REFCOUNT {
         abort();
@@ -50,15 +48,41 @@ pub(crate) fn check_refcount_overflow(old: u32) {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[expect(clippy::panic, reason = "deliberate double-panic to abort on refcount overflow in no_std")]
 fn abort() -> ! {
-    struct Bomb;
-    impl Drop for Bomb {
-        #[cfg_attr(test, mutants::skip)] // Unreachable without a `> i32::MAX` refcount; aborts the process, so a test can neither trigger nor catch it.
-        fn drop(&mut self) {
-            panic!("plurality: refcount overflow");
-        }
-    }
-    let _bomb = Bomb;
+    #[cfg(all(test, not(loom)))]
+    crate::test_hooks::intercept_abort();
+    let _bomb = RefcountOverflowBomb;
     panic!("plurality: refcount overflow");
+}
+
+struct RefcountOverflowBomb;
+
+impl Drop for RefcountOverflowBomb {
+    #[expect(clippy::panic, reason = "a second panic deliberately aborts on refcount overflow in no_std")]
+    fn drop(&mut self) {
+        panic!("plurality: refcount overflow");
+    }
+}
+
+#[cfg(all(test, not(loom)))]
+mod nov4_tests {
+    extern crate std;
+
+    use super::*;
+
+    #[test]
+    fn nov4_overflow_policy_aborts_at_the_exact_refcount_boundary() {
+        assert!(!crate::test_hooks::abort_was_requested(|| check_refcount_overflow(
+            MAX_REFCOUNT - 1
+        )));
+        assert!(crate::test_hooks::abort_was_requested(|| check_refcount_overflow(MAX_REFCOUNT)));
+        assert!(crate::test_hooks::abort_was_requested(|| check_refcount_overflow(MAX_REFCOUNT + 1)));
+    }
+
+    #[test]
+    fn nov4_overflow_bomb_destructor_panics_before_any_unwinding_is_started() {
+        let payload = std::panic::catch_unwind(|| drop(RefcountOverflowBomb)).unwrap_err();
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"plurality: refcount overflow"));
+    }
 }
 
 /// A single slot in a chunk: storage for one `T`, an atomic refcount that

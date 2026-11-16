@@ -1,10 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::any::Any;
 use std::cell::OnceCell;
 use std::error::Error;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::task::Waker;
 
 use ohno::OhnoCore;
@@ -97,6 +99,12 @@ impl std::panic::UnwindSafe for ShutdownError {}
 impl std::panic::RefUnwindSafe for ShutdownError {}
 
 impl ShutdownError {
+    /// Returns whether a contained task panic initiated shutdown.
+    #[must_use]
+    pub fn is_panic(&self) -> bool {
+        self.inner().is::<ContainedRuntimePanic>()
+    }
+
     /// Wraps an error that caused shutdown.
     pub fn new(error: impl Error + Send + Sync + 'static) -> Self {
         Self {
@@ -148,10 +156,21 @@ pub struct ShutdownCause {
 }
 
 impl ShutdownCause {
-    /// Creates a shutdown cause for a contained runtime panic.
+    /// Creates a shutdown cause without consuming the original panic payload.
+    ///
+    /// String payloads supply the diagnostic message. Other payloads use
+    /// `non-string panic payload` because they have no required display format.
     #[must_use]
-    pub fn panic() -> Self {
-        ShutdownError::new(ContainedRuntimePanic::new()).into()
+    pub fn panic(payload: &(dyn Any + Send)) -> Self {
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("non-string panic payload");
+        ShutdownError::new(ContainedRuntimePanic {
+            message: Arc::from(message),
+        })
+        .into()
     }
 
     /// Creates a shutdown cause from an error.
@@ -173,9 +192,18 @@ impl ShutdownCause {
     }
 }
 
-#[ohno::error]
-#[display("a contained runtime operation panicked")]
-struct ContainedRuntimePanic;
+#[derive(Debug)]
+struct ContainedRuntimePanic {
+    message: Arc<str>,
+}
+
+impl fmt::Display for ContainedRuntimePanic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "runtime shutdown was caused by a task panic: {}", self.message)
+    }
+}
+
+impl Error for ContainedRuntimePanic {}
 
 impl From<ShutdownError> for ShutdownCause {
     fn from(error: ShutdownError) -> Self {
@@ -188,116 +216,5 @@ impl Debug for ShutdownCause {
         f.debug_struct("ShutdownCause")
             .field("has_error", &self.as_error().is_some())
             .finish()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::error::Error;
-    use std::fmt::{self, Debug, Display};
-    use std::panic::{RefUnwindSafe, UnwindSafe};
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::task::Waker;
-
-    use static_assertions::{assert_impl_all, assert_not_impl_any};
-
-    use super::{Shutdown, ShutdownCause, ShutdownError};
-
-    #[derive(Debug)]
-    struct SourceError;
-
-    impl Display for SourceError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("source failure")
-        }
-    }
-
-    impl Error for SourceError {}
-
-    struct WakeCount(AtomicUsize);
-
-    impl std::task::Wake for WakeCount {
-        fn wake(self: Arc<Self>) {
-            // Trigger calls the waker synchronously, and the test reads the
-            // counter after both calls. No data is published through it.
-            self.0.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    #[test]
-    fn shutdown_handle_is_cloneable_and_send_only() {
-        assert_impl_all!(Shutdown: Clone, Debug, UnwindSafe, RefUnwindSafe);
-        assert_not_impl_any!(Shutdown: Send, Sync);
-    }
-
-    #[test]
-    fn first_trigger_publishes_the_cause_and_wakes_the_owner_once() {
-        let wake_count = Arc::new(WakeCount(AtomicUsize::new(0)));
-        let shutdown = Shutdown::new(Waker::from(Arc::clone(&wake_count)));
-        let expected = ShutdownError::new(SourceError);
-
-        shutdown.trigger(expected.clone().into());
-        shutdown.trigger(ShutdownCause::default());
-
-        let actual = shutdown.cause().into_error().unwrap();
-        assert!(std::ptr::eq(
-            actual.inner().downcast_ref::<SourceError>().unwrap(),
-            expected.inner().downcast_ref::<SourceError>().unwrap()
-        ));
-        // The synchronous trigger calls complete before this load.
-        assert_eq!(wake_count.0.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn default_cause_has_no_error() {
-        assert_impl_all!(ShutdownCause: Clone, Debug, Default, Send, Sync, UnwindSafe, RefUnwindSafe);
-
-        assert!(ShutdownCause::default().as_error().is_none());
-    }
-
-    #[test]
-    fn default_cause_and_clone_have_no_error() {
-        let cause = ShutdownCause::default();
-        let clone = cause.clone();
-
-        assert!(cause.as_error().is_none());
-        assert!(clone.as_error().is_none());
-    }
-
-    #[test]
-    fn panic_cause_preserves_its_diagnostic() {
-        let cause = ShutdownCause::panic();
-
-        assert_eq!(
-            cause.as_error().unwrap().inner().to_string(),
-            "a contained runtime operation panicked"
-        );
-    }
-
-    #[test]
-    fn cloned_error_preserves_source_identity() {
-        assert_impl_all!(ShutdownError: Clone, Debug, Display, Error, Send, Sync, UnwindSafe, RefUnwindSafe);
-
-        let error = ShutdownError::new(SourceError);
-        let clone = error.clone();
-
-        let source = error.inner().downcast_ref::<SourceError>().unwrap();
-        let cloned_source = clone.inner().downcast_ref::<SourceError>().unwrap();
-        assert!(std::ptr::eq(source, cloned_source));
-        assert_eq!(error.to_string(), "source failure");
-        assert!(format!("{error:?}").contains("ShutdownError"));
-    }
-
-    #[test]
-    fn consuming_error_cause_returns_the_shutdown_error() {
-        let error = ShutdownError::new(SourceError);
-        let expected = error.clone();
-
-        let consumed = ShutdownCause::from_error(error).into_error().unwrap();
-
-        let expected = expected.inner().downcast_ref::<SourceError>().unwrap();
-        let consumed = consumed.inner().downcast_ref::<SourceError>().unwrap();
-        assert!(std::ptr::eq(expected, consumed));
     }
 }

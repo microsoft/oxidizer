@@ -135,6 +135,50 @@ fn concurrent_external_access_registers_one_context_and_driver() {
 }
 
 #[test]
+fn external_io_access_precedes_an_earlier_queued_spawn() {
+    let runtime = runtime(1);
+    let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();
+    let scheduler = cx.scheduler().clone();
+    let notification_observer = Scenario::options(RolePlan::PreferPrimary);
+    let _driver = cx.io().context::<TestContext<CacheContext>>(&notification_observer);
+    let (blocker_started_tx, blocker_started_rx) = mpsc::channel();
+    let (release_blocker_tx, release_blocker_rx) = mpsc::channel();
+    let blocker = scheduler.spawn(move |_| {
+        blocker_started_tx.send(()).unwrap();
+        release_blocker_rx.recv().unwrap();
+        async {}
+    });
+    blocker_started_rx.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap();
+
+    let external_scenario = Scenario::options(RolePlan::PreferPrimary);
+    let spawn_observed_context = Arc::new(AtomicBool::new(false));
+    let skipped = scheduler.spawn({
+        let external_scenario = external_scenario.clone();
+        let spawn_observed_context = Arc::clone(&spawn_observed_context);
+        move |_| {
+            spawn_observed_context.store(
+                external_scenario.context_constructions.load(Ordering::SeqCst) == 1,
+                Ordering::SeqCst,
+            );
+            async {}
+        }
+    });
+    let wakes_before_access = notification_observer.driver_wakes.load(Ordering::SeqCst);
+    let external = thread::spawn({
+        let io = cx.io().clone();
+        move || io.try_context::<TestContext<SystemBeforeSpawn>>(&external_scenario).unwrap()
+    });
+    wait_until(|| notification_observer.driver_wakes.load(Ordering::SeqCst) > wakes_before_access);
+    release_blocker_tx.send(()).unwrap();
+
+    blocker.join().unwrap();
+    let _context = external.join().unwrap();
+    skipped.join().unwrap();
+    assert!(spawn_observed_context.load(Ordering::SeqCst));
+    runtime.stop().unwrap();
+}
+
+#[test]
 fn external_access_from_a_running_futures_executor_uses_the_bound_worker() {
     let runtime = runtime(1);
     let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();

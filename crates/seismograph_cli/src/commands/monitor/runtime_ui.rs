@@ -14,7 +14,6 @@ use super::super::mouse::{ListTarget, MouseRows};
 use super::super::runtime_timeline::{ExecutionMetrics, HistogramBin, Interval, TimeWindow, bins, histogram};
 use super::{draw_empty_panel_with_message, format_count, format_runtime_duration};
 
-#[cfg_attr(test, mutants::skip)]
 pub(super) fn draw(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -53,7 +52,6 @@ pub(super) fn draw(
     super::task_events_ui::draw(frame, mouse, events_area, task, Some(&capture.task_events), view);
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn block(title: impl Into<Line<'static>>, focused: bool) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
@@ -61,17 +59,14 @@ fn block(title: impl Into<Line<'static>>, focused: bool) -> Block<'static> {
         .border_style(Style::default().fg(if focused { Color::Cyan } else { Color::DarkGray }))
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn fraction(value: Option<f64>) -> String {
     value.map_or_else(|| "-".into(), |value| format!("{:.1}%", value.clamp(0.0, 1.0) * 100.0))
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn duration(value: Option<u64>) -> String {
     value.map_or_else(|| "-".into(), format_runtime_duration)
 }
 
-#[cfg_attr(test, mutants::skip)] // Glyph thresholds are presentation-only terminal formatting.
 fn timeline(intervals: &[Interval], window: Option<TimeWindow>, width: usize, color: Color) -> Line<'static> {
     Line::from(
         bins(intervals, window, width)
@@ -94,7 +89,6 @@ fn timeline(intervals: &[Interval], window: Option<TimeWindow>, width: usize, co
     )
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn axis(window: Option<TimeWindow>) -> String {
     window.map_or_else(
         || "Window unobserved".into(),
@@ -107,7 +101,6 @@ fn axis(window: Option<TimeWindow>) -> String {
     )
 }
 
-#[cfg_attr(test, mutants::skip)] // Worker table clipping and column selection are terminal layout.
 fn draw_workers(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -200,7 +193,6 @@ fn draw_workers(
     );
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn selection(focused: bool) -> Style {
     if focused {
         Style::default().fg(Color::Black).bg(Color::Cyan)
@@ -209,7 +201,6 @@ fn selection(focused: bool) -> Style {
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn task_row(task: &RuntimeTaskSummary) -> Row<'static> {
     Row::new(
         [
@@ -230,7 +221,6 @@ fn task_row(task: &RuntimeTaskSummary) -> Row<'static> {
     )
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tasks: &[&RuntimeTaskSummary], view: RuntimeViewState) {
     if area.is_empty() {
         return;
@@ -275,7 +265,6 @@ fn draw_tasks(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, tas
     mouse.register(area, 1, first.saturating_add(state.offset()), tasks.len(), ListTarget::RuntimeTasks);
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn draw_worker_activity(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -316,7 +305,6 @@ fn draw_worker_activity(
     draw_histogram(frame, mouse, distribution, "Poll · worker", &worker.metrics.poll_samples, view);
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn draw_task_details(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -357,7 +345,6 @@ fn draw_task_details(
     draw_task_statistics(frame, mouse, content, task, window, view);
 }
 
-#[cfg_attr(test, mutants::skip)] // Compact summary selection is terminal presentation policy.
 fn draw_task_statistics(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -421,7 +408,6 @@ fn draw_task_statistics(
     draw_histogram(frame, mouse, distribution, title, samples, view);
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn wake_distribution(metrics: &ExecutionMetrics) -> (&'static str, &[u64]) {
     if metrics.ready_samples.is_empty() && !metrics.wake_samples.is_empty() {
         ("Wake-to-poll (raw)", &metrics.wake_samples)
@@ -430,7 +416,6 @@ fn wake_distribution(metrics: &ExecutionMetrics) -> (&'static str, &[u64]) {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Histogram labels and plot sizing are defensive terminal layout.
 fn draw_histogram(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect, title: &str, samples: &[u64], view: RuntimeViewState) {
     if area.is_empty() {
         return;
@@ -481,7 +466,6 @@ fn draw_histogram(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, area: Rect,
     frame.render_widget(Paragraph::new(histogram_axis(&bins, usize::from(width))), Rect { width, ..ticks });
 }
 
-#[cfg_attr(test, mutants::skip)] // Bar widths are terminal rendering arithmetic, not snapshot semantics.
 fn draw_histogram_bars(
     frame: &mut ratatui::Frame<'_>,
     mouse: &MouseRows,
@@ -541,7 +525,6 @@ fn draw_histogram_bars(
     width
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn histogram_axis(bins: &[HistogramBin], width: usize) -> String {
     let first = histogram_duration(bins[0].lower);
     let last = format!("{}+", histogram_duration(bins[bins.len() - 1].lower));
@@ -553,7 +536,6 @@ fn histogram_axis(bins: &[HistogramBin], width: usize) -> String {
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn histogram_duration(nanos: u64) -> String {
     if nanos >= 1_000_000_000_000 {
         format!("{:.2e}s", std::time::Duration::from_nanos(nanos).as_secs_f64())
@@ -570,6 +552,240 @@ fn histogram_duration(nanos: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gamma_survivor_timeline_glyphs_use_strict_fraction_boundaries() {
+        for (end, expected) in [(2, "▃"), (3, "▄"), (4, "▅"), (5, "▆"), (6, "▇"), (7, "█")] {
+            assert_eq!(
+                timeline(
+                    &[Interval {
+                        start: 0,
+                        end: end * 1_000_000_000
+                    }],
+                    Some(TimeWindow {
+                        start: 0,
+                        end: 8_000_000_000
+                    }),
+                    1,
+                    Color::Cyan
+                )
+                .to_string(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_missing_runtime_panels_keep_order_titles_and_task_prompt() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let view = super::super::super::app::App::with_io(io).runtime_view;
+        let (buffer, _) = render(100, 24, |frame, mouse, area| {
+            let areas = Layout::vertical([Constraint::Length(6); 4]).areas::<4>(area);
+            draw(
+                frame,
+                mouse,
+                [areas[0], areas[1], areas[2], areas[3], Rect::default()],
+                None,
+                None,
+                view,
+            );
+        });
+        let lines = buffer
+            .content
+            .chunks(100)
+            .map(|line| line.iter().map(ratatui::buffer::Cell::symbol).collect::<String>())
+            .collect::<Vec<_>>();
+        for (row, title) in [
+            (0, "Runtime Workers"),
+            (6, "Tasks"),
+            (12, "Worker Activity"),
+            (18, "Task Statistics"),
+        ] {
+            assert!(lines[row].contains(title), "{}", lines[row]);
+        }
+        let (buffer, _) = render(40, 8, |frame, mouse, area| {
+            draw_task_details(frame, mouse, area, None, None, view);
+        });
+        assert!(text(&buffer).contains("Task Statistics"));
+        assert!(text(&buffer).contains("Select a task."));
+    }
+
+    #[test]
+    fn gamma_survivor_runtime_tables_page_from_selected_row_not_last_row() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let mut view = super::super::super::app::App::with_io(io).runtime_view;
+        let runtime = RuntimeMonitorSnapshot {
+            workers: (1..=4)
+                .map(|id| RuntimeWorkerSummary {
+                    runtime_id: id,
+                    worker_id: Some(id),
+                    runtime_name: format!("worker{id}"),
+                    ..RuntimeWorkerSummary::default()
+                })
+                .collect(),
+            ..RuntimeMonitorSnapshot::default()
+        };
+        view.worker_selected = 2;
+        let (buffer, mouse) = render(120, 5, |frame, mouse, area| draw_workers(frame, mouse, area, &runtime, view, false));
+        assert_eq!(mouse.at(buffer.area, 1, 2), Some((ListTarget::RuntimeWorkers, 1)));
+        assert_eq!(mouse.at(buffer.area, 1, 3), Some((ListTarget::RuntimeWorkers, 2)));
+        assert_eq!(buffer[(1, 3)].bg, Color::Cyan);
+        let output = text(&buffer);
+        assert!(output.contains("worker2"));
+        assert!(output.contains("worker3"));
+        assert!(!output.contains("worker1"));
+        assert!(!output.contains("worker4"));
+        let tasks = (1..=4)
+            .map(|id| RuntimeTaskSummary {
+                task_id: id,
+                ..RuntimeTaskSummary::default()
+            })
+            .collect::<Vec<_>>();
+        let tasks = tasks.iter().collect::<Vec<_>>();
+        view.focus = RuntimeFocus::Tasks;
+        view.task_selected = 2;
+        let (buffer, mouse) = render(100, 5, |frame, mouse, area| draw_tasks(frame, mouse, area, &tasks, view));
+        assert_eq!(mouse.at(buffer.area, 1, 2), Some((ListTarget::RuntimeTasks, 1)));
+        assert_eq!(mouse.at(buffer.area, 1, 3), Some((ListTarget::RuntimeTasks, 2)));
+        assert_eq!(buffer[(1, 3)].bg, Color::Cyan);
+        assert!(text(&buffer).contains("#2"));
+        assert!(text(&buffer).contains("#3"));
+        assert!(!text(&buffer).contains("#4"));
+    }
+
+    #[test]
+    fn gamma_survivor_runtime_empty_worker_messages_keep_evidence_and_focus() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let view = super::super::super::app::App::with_io(io).runtime_view;
+        for (source, events, filtered, expected) in [
+            (
+                false,
+                0,
+                false,
+                ["No runtime source or runtime events", "Use an instrumented runtime"],
+            ),
+            (
+                false,
+                1,
+                false,
+                ["No runtime workers or tasks were recorded.", "Enable Runtime tasks"],
+            ),
+            (
+                true,
+                0,
+                false,
+                ["No runtime workers or tasks were recorded.", "Enable Runtime tasks"],
+            ),
+            (false, 0, true, ["No matching runtime activity.", "Press F to change"]),
+        ] {
+            let runtime = RuntimeMonitorSnapshot {
+                source_present: source,
+                runtime_events: events,
+                ..RuntimeMonitorSnapshot::default()
+            };
+            let (buffer, _) = render(120, 6, |frame, mouse, area| {
+                draw_workers(frame, mouse, area, &runtime, view, filtered);
+            });
+            let output = text(&buffer);
+            for phrase in expected {
+                assert!(output.contains(phrase), "{output}");
+            }
+            assert_eq!(buffer[(0, 0)].fg, Color::Cyan);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_histogram_compact_labels_width_and_selected_baseline() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let mut view = super::super::super::app::App::with_io(io).runtime_view;
+        view.focus = RuntimeFocus::Activity;
+        view.activity_scroll = 1;
+        let (buffer, mouse) = render(50, 6, |frame, mouse, area| {
+            draw_histogram(frame, mouse, area, "Wake-to-poll (raw)", &[0, 10, 10], view);
+        });
+        let output = text(&buffer);
+        assert!(output.contains("Raw wake n=3 · count 0..2"));
+        assert!(output.contains("10ns..<100ns: 2"));
+        assert_eq!(baseline(&buffer), (0..12).map(|index| (index * 2, 4)).collect::<Vec<_>>());
+        assert_eq!(buffer[(2, 4)].bg, Color::DarkGray);
+        assert_eq!(mouse.at(buffer.area, 2, 3), Some((ListTarget::RuntimeActivity, 1)));
+        assert_eq!(mouse.at(buffer.area, 1, 3), None);
+        assert_eq!(mouse.at(buffer.area, 24, 3), None);
+        let axis = (0..50).map(|x| buffer[(x, 5)].symbol()).collect::<String>();
+        assert_eq!(axis.trim_end(), "0ns         log10 100s+");
+        let (buffer, _) = render(50, 6, |frame, mouse, area| {
+            draw_histogram(frame, mouse, area, "Poll · worker", &[0, 10, 10], view);
+        });
+        assert!(text(&buffer).contains("n=3 · count 0..2"));
+        assert!(!text(&buffer).contains("Raw wake"));
+    }
+
+    #[test]
+    fn gamma_survivor_activity_summaries_preserve_timeline_rows_at_each_height() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let view = super::super::super::app::App::with_io(io).runtime_view;
+        let worker = RuntimeWorkerSummary {
+            window: Some(TimeWindow {
+                start: 0,
+                end: 1_000_000_000,
+            }),
+            ..RuntimeWorkerSummary::default()
+        };
+        for (height, summary_height) in [(9, 2), (10, 3), (11, 4)] {
+            let (buffer, _) = render(100, height, |frame, mouse, area| {
+                draw_worker_activity(frame, mouse, area, &worker, view);
+            });
+            assert_eq!(buffer[(1, summary_height)].symbol(), "▁");
+            let output = text(&buffer);
+            assert_eq!(output.contains("Median - · max -"), summary_height >= 3);
+            assert_eq!(output.contains("Window 1s · lower bound"), summary_height >= 4);
+        }
+        let mut task = RuntimeTaskSummary::default();
+        task.activity.state = "Ready".into();
+        task.activity.ready_for = Some(12);
+        for height in [8, 9, 10] {
+            let (buffer, _) = render(100, height, |frame, mouse, area| {
+                draw_task_statistics(frame, mouse, area, &task, worker.window, view);
+            });
+            let output = text(&buffer);
+            assert_eq!(output.contains("Ready for 12ns · global"), height < 9);
+            assert_eq!(output.contains("State global"), height >= 9);
+            assert_eq!(output.contains("Ready global "), height >= 10);
+        }
+        let (buffer, _) = render(100, 3, |frame, mouse, area| {
+            draw_task_details(frame, mouse, area, Some(&task), worker.window, view);
+        });
+        assert!(text(&buffer).contains("Poll | Ready · t"));
+    }
+
+    #[test]
+    fn gamma_survivor_histogram_minimum_rows_gaps_and_eighth_cell_sliver_are_exact() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let mut view = super::super::super::app::App::with_io(io).runtime_view;
+        view.focus = RuntimeFocus::Activity;
+        let bins = histogram(&[0, 10, 10], RUNTIME_HISTOGRAM_BINS);
+        for (width, drawn, gap) in [(22, 12, 0), (23, 23, 1), (24, 23, 1)] {
+            let (buffer, _) = render(width, 1, |frame, mouse, area| {
+                assert_eq!(draw_histogram_bars(frame, mouse, area, &bins, view), drawn);
+            });
+            assert_eq!(baseline(&buffer), (0..12).map(|index| (index * (1 + gap), 0)).collect::<Vec<_>>());
+        }
+        let (buffer, _) = render(50, 0, |frame, mouse, area| {
+            assert_eq!(draw_histogram_bars(frame, mouse, area, &bins, view), 23);
+        });
+        assert!(buffer.content.is_empty());
+        let samples = std::iter::repeat_n(10, 15).chain([0]).collect::<Vec<_>>();
+        let (buffer, _) = render(50, 6, |frame, mouse, area| {
+            draw_histogram(frame, mouse, area, "Poll", &samples, view);
+        });
+        assert_eq!(buffer[(0, 3)].symbol(), "▁");
+        assert_eq!(buffer[(0, 3)].fg, Color::Yellow);
+        let (buffer, _) = render(50, 3, |frame, mouse, area| draw_histogram(frame, mouse, area, "Poll", &[], view));
+        assert!(text(&buffer).contains("No completed samples"));
+        assert!(baseline(&buffer).is_empty());
+        let axis = (0..50).map(|x| buffer[(x, 2)].symbol()).collect::<String>();
+        assert_eq!(axis.trim_end(), "0ns         log10 100s+");
+    }
 
     #[test]
     fn missing_durations_and_observations_are_not_zero() {

@@ -27,7 +27,6 @@ pub struct ResilienceContext<In, Out> {
 }
 
 impl<In, Out> ThreadAware for ResilienceContext<In, Out> {
-    #[cfg_attr(test, mutants::skip)]
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         // Only clock is thread-aware for now. At some point, we also want
         // telemetry to be thread-aware too.

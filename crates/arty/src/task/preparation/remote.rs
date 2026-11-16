@@ -3,7 +3,7 @@
 
 use std::cell::Cell;
 
-use arty_executor::{TaskOptions, TaskPlacement, TaskSet};
+use arty_executor::{TaskPlacement, TaskSet};
 use plurality::{Box as PoolBox, MultiPool, coerce};
 
 use crate::task::Context;
@@ -103,14 +103,14 @@ where
     let future_factory = RemoteFutureFactory::new(move |cx, tasks| {
         let future_factory = future_factory.into_inner();
         let inner = DeferredTaskFactory::new(future_factory, cx);
-        let options = TaskOptions::new(placement);
-        tasks.add(inner, options, result_tx);
+        tasks.task(inner).placement(placement).register(result_tx);
     });
     (future_factory, handle)
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public spawning cannot inject missing TLS pools or inspect private result disposal.
 mod tests {
     use std::cell::RefCell;
     use std::panic::{AssertUnwindSafe, catch_unwind};

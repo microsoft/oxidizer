@@ -3,11 +3,20 @@
 
 //! Deterministic, bounded decoder fuzzing and a replayable regression corpus.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 
-use rest_over_grpc::codegen_helpers::{RequestBodyKind, decode_request};
+use rest_over_grpc::codegen_helpers::{RequestBodyKind, RestParse, decode_request};
 use rest_over_grpc::handling::Code;
 use serde::Deserialize;
+
+#[test]
+fn path_floats_accept_negative_infinity() {
+    let single = f32::parse_rest(Cow::Borrowed("-Infinity")).unwrap();
+    let double = f64::parse_rest(Cow::Borrowed("-Infinity")).unwrap();
+    assert!(single.is_infinite() && single.is_sign_negative());
+    assert!(double.is_infinite() && double.is_sign_negative());
+}
 
 #[derive(Debug, Deserialize)]
 struct Root {

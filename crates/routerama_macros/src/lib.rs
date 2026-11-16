@@ -95,7 +95,6 @@ use proc_macro::TokenStream;
 /// }
 /// ```
 #[proc_macro_derive(FromQuery, attributes(query, serde))]
-#[cfg_attr(test, mutants::skip)]
 pub fn derive_from_query(input: TokenStream) -> TokenStream {
     routerama_build::macro_impl::derive_from_query(input.into()).into()
 }
@@ -160,7 +159,6 @@ pub fn derive_from_query(input: TokenStream) -> TokenStream {
 /// [`Option::None`]: core::option::Option::None
 /// [`Vec`]: std::vec::Vec
 #[proc_macro_derive(ToQuery, attributes(query, serde))]
-#[cfg_attr(test, mutants::skip)]
 pub fn derive_to_query(input: TokenStream) -> TokenStream {
     routerama_build::macro_impl::derive_to_query(input.into()).into()
 }
@@ -180,7 +178,6 @@ pub fn derive_to_query(input: TokenStream) -> TokenStream {
 /// represented by `routerama::ResolveError`. See the
 /// [`routerama`](https://docs.rs/routerama) crate documentation for the full
 /// model.
-#[cfg_attr(test, mutants::skip)]
 #[proc_macro_attribute]
 pub fn resolver(attr: TokenStream, item: TokenStream) -> TokenStream {
     routerama_build::macro_impl::resolver(attr.into(), item.into()).into()

@@ -167,7 +167,6 @@ impl Family {
         }
     }
 
-    #[cfg_attr(test, mutants::skip)] // Explanatory wording does not affect event identity or attribution.
     const fn identity_note(self) -> &'static str {
         match self {
             Self::Allocation => "Stable allocation ID and matching heap/address/layout; freeing actor is not allocation ownership",
@@ -364,6 +363,7 @@ fn split_lifetimes(key: ObjectKey, events: Vec<TaskEvent>) -> Vec<ObjectHistory>
     let mut events = events.into_iter().peekable();
     while let Some(first) = events.next() {
         let mut tied = vec![first];
+        // #[gamma::skip(cond.negate, tag = "timeout", reason = "November 6 campaign 89a36bb33ca1: negating this tie-group condition exceeded the timeout")]
         while events.peek().is_some_and(|event| event.timestamp == tied[0].timestamp) {
             if let Some(event) = events.next() {
                 tied.push(event);

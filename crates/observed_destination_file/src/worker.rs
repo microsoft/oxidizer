@@ -158,8 +158,6 @@ impl Worker {
     }
 
     /// Drain logs and handle control messages until shutdown.
-    // Mutating loop termination can prevent shutdown and hang the joining test thread.
-    #[cfg_attr(test, mutants::skip)]
     fn serve(&mut self, mut receive_wake: impl FnMut(&Receiver<()>, Duration) -> Result<(), ChannelError>) {
         loop {
             if self.process_control_messages() {
@@ -190,8 +188,6 @@ impl Worker {
         }
     }
 
-    // Mutating wake/disconnect handling can leave the worker spinning indefinitely.
-    #[cfg_attr(test, mutants::skip)]
     fn wait_for_wake(&mut self, receive_wake: &mut impl FnMut(&Receiver<()>, Duration) -> Result<(), ChannelError>) -> bool {
         let timeout = self.wait_timeout(self.clock.instant());
         match receive_wake(&self.wake_rx, timeout) {
@@ -215,8 +211,6 @@ impl Worker {
         timeout
     }
 
-    // Mutating shutdown handling can leave the worker or its joining thread blocked.
-    #[cfg_attr(test, mutants::skip)]
     fn process_control_messages(&mut self) -> bool {
         loop {
             match self.control_rx.try_recv() {

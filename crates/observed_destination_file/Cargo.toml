@@ -51,7 +51,6 @@ tick = { workspace = true }
 
 [dev-dependencies]
 fakeable = { workspace = true }
-mutants = { workspace = true }
 tempfile = { workspace = true }
 tick = { workspace = true, features = ["test-util"] }
 

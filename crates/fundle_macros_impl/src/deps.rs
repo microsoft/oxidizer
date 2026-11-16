@@ -52,7 +52,6 @@ pub fn deps(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     Ok(expanded)
 }
 
-#[cfg_attr(test, mutants::skip)]
 fn generate_args_from_impl(
     struct_name: &Ident,
     field_names: &[&Ident],

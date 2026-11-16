@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use arty_executor::{ShutdownCause, TaskCompletion, TaskOptions, TaskPanicPayload, TaskSet, discard_task_panic_payload};
+use arty_executor::{ShutdownCause, TaskBuilder, TaskCompletion, TaskPanicPayload, discard_task_panic_payload};
 
 pub(crate) enum TaskOutcome<R> {
     Completed(R),
@@ -89,24 +89,21 @@ impl<R> Future for CompletionHandle<R> {
 }
 
 /// Creates completion target and handle pairs for integration tests.
-pub(crate) trait TaskSetExt {
-    fn add_test<F, R>(&self, future: F, options: TaskOptions) -> CompletionHandle<R>
-    where
-        F: IntoFuture<Output = R> + 'static,
-        R: 'static;
+pub(crate) trait TaskBuilderExt<R> {
+    fn register_test(self) -> CompletionHandle<R>;
 }
 
-impl TaskSetExt for TaskSet {
-    fn add_test<F, R>(&self, future: F, options: TaskOptions) -> CompletionHandle<R>
-    where
-        F: IntoFuture<Output = R> + 'static,
-        R: 'static,
-    {
+impl<F> TaskBuilderExt<F::Output> for TaskBuilder<'_, F>
+where
+    F: IntoFuture + 'static,
+    F::Output: 'static,
+{
+    fn register_test(self) -> CompletionHandle<F::Output> {
         let state = Rc::new(RefCell::new(CompletionState {
             outcome: None,
             waker: None,
         }));
-        self.add(future, options, CompletionTarget { state: Rc::clone(&state) });
+        self.register(CompletionTarget { state: Rc::clone(&state) });
         CompletionHandle { state }
     }
 }

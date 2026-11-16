@@ -79,3 +79,29 @@ fn http_line_iteration_preserves_repetition_and_sensitivity() {
     assert_eq!(values, lines.iter().collect::<Vec<_>>());
     assert_eq!(lines.iter().map(FieldValueRef::is_sensitive).collect::<Vec<_>>(), [true, false]);
 }
+
+#[test]
+fn exactly_one_rejects_multiple_field_lines_across_sources() {
+    let values = [FieldValue::from_static("a=1"), FieldValue::from_static("b=2")];
+    let borrowed = values.each_ref().map(FieldValue::as_field_value_ref);
+    #[cfg(feature = "http")]
+    let map = {
+        let mut map = http::HeaderMap::new();
+        map.append(http::header::SET_COOKIE, http::HeaderValue::from_static("a=1"));
+        map.append(http::header::SET_COOKIE, http::HeaderValue::from_static("b=2"));
+        map
+    };
+    let sources = [
+        FieldLines::from_slice(&FieldName::SetCookie, &values).unwrap(),
+        FieldLines::from_borrowed(&FieldName::SetCookie, &borrowed).unwrap(),
+        #[cfg(feature = "http")]
+        FieldLines::from_http(&FieldName::SetCookie, map.get_all(http::header::SET_COOKIE)).unwrap(),
+    ];
+
+    for lines in sources {
+        let error = lines.exactly_one().unwrap_err();
+
+        assert_eq!(error.header(), &FieldName::SetCookie);
+        assert_eq!(error.kind(), http_headers::DecodeErrorKind::UnexpectedMultipleValues);
+    }
+}

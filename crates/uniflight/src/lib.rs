@@ -272,7 +272,6 @@ where
     /// ```
     #[inline]
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Equivalent mutant: delegates to Default
     pub fn new_per_process() -> Self {
         Self::default()
     }
@@ -297,7 +296,6 @@ where
     /// ```
     #[inline]
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Equivalent mutant: delegates to Default
     pub fn new_per_numa() -> Self {
         Self::default()
     }
@@ -324,7 +322,6 @@ where
     /// ```
     #[inline]
     #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Equivalent mutant: delegates to Default
     pub fn new_per_thread() -> Self {
         Self::default()
     }
@@ -355,7 +352,6 @@ where
     S: Strategy<MergerState<K, T>> + Send + Sync,
     PerformableArc<MergerState<K, T>, S>: ThreadAware,
 {
-    #[cfg_attr(test, mutants::skip)]
     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.inner.relocate(source, destination);
     }

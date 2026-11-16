@@ -82,7 +82,6 @@ http = { workspace = true }
 insta = { workspace = true, features = ["json"] }
 jiff = { workspace = true, default-features = true, features = ["serde"] }
 layered = { path = "../layered", features = ["tower-service", "dynamic-service"] }
-mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
 opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
 opentelemetry-stdout = { workspace = true, default-features = false, features = ["metrics", "logs"] }

@@ -108,7 +108,6 @@ where
 {
     type Out = Out;
 
-    #[cfg_attr(test, mutants::skip)] // enable_if guard causes test timeouts under mutation
     async fn execute(&self, input: In) -> Self::Out {
         if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
@@ -194,7 +193,6 @@ where
 }
 
 impl<In: Send + 'static, Out: Send + 'static> LatencyShared<In, Out> {
-    #[cfg_attr(test, mutants::skip)] // causes test timeouts
     fn should_inject(&self, input: &In) -> bool {
         let rate = self.rate.call(input, LatencyRateArgs {}).clamp(0.0, 1.0);
         self.rnd.next_f64() < rate
@@ -264,6 +262,22 @@ mod tests {
 
     use super::*;
     use crate::testing::FailReadyService;
+
+    #[test]
+    fn gamma_survivor_latency_zero_random_boundary_does_not_inject_zero_rate() {
+        let clock = tick::ClockControl::new().to_clock();
+        let context = ResilienceContext::<(), ()>::new(&clock);
+        let shared: LatencyShared<(), ()> = LatencyShared::new(
+            clock,
+            LatencyRate::new(|(): &(), _| 0.0),
+            EnableIf::new(true),
+            LatencyDuration::new(|(): &(), _| Duration::from_millis(1)),
+            Rnd::new_fixed(0.0),
+            context.create_telemetry("boundary".into()),
+        );
+        assert!(matches!(&shared.rnd, Rnd::Test(_)));
+        assert!(!shared.should_inject(&()));
+    }
 
     // The tokio runtime builds an IO driver (mio IOCP/epoll) under `--all-features`
     // feature unification (tokio `net`), which is unsupported under Miri.

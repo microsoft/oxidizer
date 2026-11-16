@@ -51,12 +51,14 @@ impl ComponentRanges {
             let path_end = find_either(bytes, b'?', b'#').unwrap_or(bytes.len());
             (None, None, 0, path_end)
         } else {
+            // #[gamma::skip(literal.byte_to_nul, tag = "equivalent", reason = "The validated simple URI subset cannot contain NUL; the other unchanged colon needle still locates the same scheme terminator")]
             let scheme_end = find_either(bytes, b':', b':').expect("the simple absolute subset includes a scheme colon");
             let start = scheme_end + 3;
             let path_end = find_either(&bytes[start..], b'?', b'#').map_or(bytes.len(), |offset| start + offset);
             // Colons and slashes in a query or fragment are not authority boundaries.
             let host_end = find_either(&bytes[start..path_end], b':', b'/').map_or(path_end, |offset| start + offset);
             let path_start = if bytes.get(host_end) == Some(&b':') {
+                // #[gamma::skip(literal.byte_to_distinct, literal.byte_to_nul, tag = "equivalent", reason = "Before the first slash this validated authority suffix contains only decimal port digits; neither x nor NUL can precede the unchanged slash needle")]
                 find_either(&bytes[host_end + 1..path_end], b'/', b'/').map_or(path_end, |offset| host_end + 1 + offset)
             } else {
                 host_end
@@ -64,6 +66,7 @@ impl ComponentRanges {
             (NonZeroUsize::new(scheme_end), Some(start..host_end), path_start, path_end)
         };
         let (query_end, fragment_start) = if bytes.get(path_end) == Some(&b'?') {
+            // #[gamma::skip(literal.byte_to_nul, tag = "equivalent", reason = "The validated simple URI subset cannot contain NUL; the other unchanged hash needle still locates the same fragment terminator")]
             let query_end = find_either(&bytes[path_end + 1..], b'#', b'#').map_or(bytes.len(), |offset| path_end + 1 + offset);
             (
                 NonZeroUsize::new(query_end),

@@ -23,8 +23,7 @@ use std::thread::ThreadId;
 
 use crate::{NumaNode, Owner, Thread, ThreadAware};
 
-/// Implements [`ThreadAware`] for a type that holds nothing bound to a thread, so a
-/// move leaves it valid as-is and `relocate` has nothing to do.
+/// Implements [`ThreadAware`] for a type with no thread-bound state.
 macro_rules! impl_thread_aware {
     ($t:ty) => {
         impl ThreadAware for $t {
@@ -70,8 +69,8 @@ impl_thread_aware!(PathBuf);
 impl_thread_aware!(Duration);
 #[cfg(any(test, feature = "std"))]
 impl_thread_aware!(Path);
-// Both socket-address variants contain only address, port, flow-info, and scope-id values;
-// none of their fields carry thread-local or shared state that relocation could re-home.
+// Socket addresses contain only address, port, flow-info, and scope-id values. They have no
+// thread-local or shared state to relocate.
 #[cfg(any(test, feature = "std"))]
 impl_thread_aware!(SocketAddr);
 #[cfg(any(test, feature = "std"))]
@@ -80,8 +79,8 @@ impl_thread_aware!(SocketAddrV4);
 impl_thread_aware!(SocketAddrV6);
 
 impl_thread_aware!(str);
-// Immutable process-lifetime string labels have no referent state to relocate and cannot dangle.
-// This narrow reference exception does not extend to borrowed or mutable references in general.
+// Process-lifetime string labels cannot dangle and have no referent state to relocate. Other
+// borrowed or mutable references do not have this exception.
 impl_thread_aware!(&'static str);
 
 impl_thread_aware!(Owner);
@@ -113,7 +112,7 @@ macro_rules! impl_thread_aware_tuple {
                     }
                 }
 
-                // Recursively call the macro for the rest of the tuple
+                // Generate implementations for the remaining tuple sizes.
                 impl_thread_aware_tuple!($($tail,)*);
     };
 
@@ -131,7 +130,7 @@ macro_rules! impl_thread_aware_fn {
             fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
         }
 
-        // Recursively call the macro for the rest of the function parameters
+        // Generate implementations for the remaining function arities.
         impl_thread_aware_fn!($($tail,)*);
     };
     () => {
@@ -148,8 +147,7 @@ macro_rules! impl_thread_aware_arities {
     };
 }
 
-// Match the established `thread_aware` boundary so compatibility code can rely on the same
-// tuple and safe function-pointer arities.
+// Match the `thread_aware` tuple and safe function-pointer arities.
 impl_thread_aware_arities!(A, B, C, D, E, F, G, H, I, J, K, L);
 
 impl<T, const N: usize> ThreadAware for [T; N]
@@ -239,7 +237,7 @@ where
         }
     }
 }
-/// Implements [`ThreadAware`] for a single-threaded interior-mutability wrapper.
+/// Implements [`ThreadAware`] for a single-threaded interior-mutable wrapper.
 ///
 /// `relocate` already holds `&mut self`, so the inner value is reachable through
 /// `get_mut` without a borrow flag or a `Cell` round-trip.

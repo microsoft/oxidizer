@@ -37,7 +37,6 @@ impl ClockDriver {
     /// # Errors
     ///
     /// Returns `Err(ClockGone)` when all clocks are gone and no timer remains.
-    #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     #[expect(clippy::needless_pass_by_ref_mut, reason = "the mut forces exclusive ownership of the driver")]
     pub fn advance_timers(&mut self, now: Instant) -> Result<Option<Instant>, ClockGone> {
         let next_timer = match &self.state {

@@ -615,6 +615,21 @@ fn supports_canonical_names_aliases_and_rename_all() {
 }
 
 #[test]
+#[expect(non_snake_case, reason = "repeated underscores exercise the query field-name conversion")]
+fn rename_all_skips_leading_and_repeated_separators() {
+    #[derive(Debug, PartialEq, Eq, FromQuery, ToQuery)]
+    #[query(rename_all = "camelCase")]
+    struct Query {
+        __user__name: String,
+    }
+
+    let query = Query::from_query("userName=ferris").unwrap();
+
+    assert_eq!(query.__user__name, "ferris");
+    assert_eq!(query.to_query_string().unwrap(), "userName=ferris");
+}
+
+#[test]
 fn produces_canonical_form_encoding_and_repeated_pairs() {
     let query = SearchQuery {
         q: Cow::Borrowed("rust language+"),

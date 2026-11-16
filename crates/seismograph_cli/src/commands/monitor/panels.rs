@@ -19,7 +19,6 @@ pub(super) const TABS: [(MonitorTab, &str); 8] = [
     (MonitorTab::Cache, "  Cache  "),
 ];
 
-#[cfg_attr(test, mutants::skip)] // Tab hit-testing is terminal geometry.
 fn tab_at(area: Rect, column: u16, row: u16) -> Option<MonitorTab> {
     let inner = Block::default().borders(Borders::ALL).inner(area);
     if row != inner.y || !inner.contains((column, row).into()) {
@@ -78,9 +77,7 @@ struct Divider {
     hit: Rect,
 }
 
-#[cfg_attr(test, mutants::skip)]
 impl Panels {
-    #[cfg_attr(test, mutants::skip)] // Compact-mode thresholds are presentation policy.
     pub(super) fn runtime_compact(area: Rect) -> bool {
         area.width < 110 || area.height < 32
     }
@@ -107,7 +104,6 @@ impl Panels {
         self.dragging = None;
     }
 
-    #[cfg_attr(test, mutants::skip)] // Split arithmetic is width-dependent terminal layout.
     pub(super) fn arrange(&self, tab: MonitorTab, area: Rect) -> Arrangement {
         let mut dividers = Vec::new();
         let mut split = |id, direction, parent, default| {
@@ -209,9 +205,7 @@ impl Panels {
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
 impl App {
-    #[cfg_attr(test, mutants::skip)] // Mouse routing is terminal input glue.
     pub(super) fn handle_mouse(&mut self, event: MouseEvent, area: Rect) {
         if let Some(help) = &self.help {
             help.handle_mouse(event);
@@ -285,7 +279,6 @@ impl App {
     }
 }
 
-#[cfg_attr(test, mutants::skip)] // Drag ratios are low-value terminal layout arithmetic.
 fn dragged_constraint(position: u16, start: u16, length: u16, minimum: u16) -> Option<Constraint> {
     if length == 0 {
         return None;
@@ -295,7 +288,6 @@ fn dragged_constraint(position: u16, start: u16, length: u16, minimum: u16) -> O
     Some(Constraint::Ratio(u32::from(offset), u32::from(length)))
 }
 
-#[cfg_attr(test, mutants::skip)]
 const fn info_scroll_key(kind: MouseEventKind) -> Option<KeyCode> {
     match kind {
         MouseEventKind::ScrollUp => Some(KeyCode::Up),
@@ -306,6 +298,51 @@ const fn info_scroll_key(kind: MouseEventKind) -> Option<KeyCode> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_survivor_minimum_panel_geometry_and_popup_cancel_drag() {
+        use super::*;
+        let mut panels = Panels::default();
+        panels.sizes[Split::Io as usize] = Some(Constraint::Length(99));
+        let layout = panels.arrange(MonitorTab::Io, Rect::new(0, 0, 100, 20));
+        assert_eq!((layout.areas[0].width, layout.areas[1].width), (97, 3));
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let mut app = App::with_io(io);
+        app.panels.dragging = Some((MonitorTab::Io, Split::Io));
+        app.recording_configuration_popup = Some(super::super::app::RecordingConfigurationPopup::new(
+            seismograph_protocol::message::RecordingConfiguration::default(),
+        ));
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column: 0,
+                row: 0,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+            Rect::new(0, 0, 100, 20),
+        );
+        assert!(app.panels.dragging.is_none());
+        app.recording_configuration_popup = None;
+        app.handle_key(KeyCode::F(1));
+        app.panels.dragging = Some((MonitorTab::Io, Split::Io));
+        app.handle_mouse(mouse(MouseEventKind::Moved, 0, 0), Rect::new(0, 0, 100, 20));
+        assert!(app.panels.dragging.is_none());
+    }
+
+    #[test]
+    fn gamma_survivor_tab_mouse_rows_match_tiny_connected_layout() {
+        for (height, expected) in [(3, MonitorTab::Info), (4, MonitorTab::Heaps)] {
+            let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+            let mut app = App::with_io(io);
+            app.screen = Screen::Offline {
+                path: "pending.seismograph".into(),
+                tab: MonitorTab::Info,
+                snapshot: None,
+            };
+            app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 11, 1), Rect::new(0, 0, 80, height));
+            assert_eq!(offline_tab(&app), expected);
+        }
+    }
+
     use crossterm::event::KeyModifiers;
 
     use super::*;

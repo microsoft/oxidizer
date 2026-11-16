@@ -58,7 +58,6 @@ impl Sym {
     /// Packs a shard index and a 1-based local index into a `Sym`.
     #[cfg(feature = "std")]
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // XOR and OR are equivalent because shard and local bits never overlap.
     pub(crate) fn pack(shard: usize, local1: u32) -> Self {
         debug_assert!(shard < NUM_SHARDS);
         debug_assert!((1..=LOCAL_MASK).contains(&local1));

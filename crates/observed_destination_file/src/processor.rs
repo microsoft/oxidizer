@@ -242,16 +242,12 @@ pub(super) struct BackgroundWriterInner {
 }
 
 impl BackgroundWriterInner {
-    // Removing command delivery prevents shutdown and hangs the joining test thread.
-    #[cfg_attr(test, mutants::skip)]
     fn send_control(&self, message: ControlMessage) -> Result<(), ChannelError<ControlMessage>> {
         self.control_tx.send(message)?;
         self.wake_worker();
         Ok(())
     }
 
-    // Removing the wake strands shutdown commands while the caller joins the worker.
-    #[cfg_attr(test, mutants::skip)]
     fn wake_worker(&self) {
         let _ = self.wake_tx.try_send(());
     }

@@ -63,8 +63,10 @@ impl Parse for EventArgs {
         })?;
         let mut disabled = false;
         while input.peek(Token![,]) {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The loop condition proves the exact comma token that this parse consumes.")]
             input.parse::<Token![,]>()?;
             if input.is_empty() {
+                // #[gamma::skip(loop.break_to_continue, tag = "equivalent", reason = "An empty stream cannot contain the comma required by the next loop iteration.")]
                 break;
             }
             let flag: Ident = input.parse()?;
@@ -102,6 +104,7 @@ impl Parse for LogAttrBody {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let mut message = None;
         if input.peek(LitStr) {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "peek proves the exact LitStr token parsed here.")]
             message = Some(input.parse::<LitStr>()?.value());
             if !input.is_empty() {
                 input.parse::<Token![,]>()?;
@@ -154,6 +157,7 @@ impl Parse for MetricAttrBody {
         // A leading bare identifier (not `ident = ...`) is the positional field.
         let mut field = None;
         if input.peek(Ident) && !input.peek2(Token![=]) {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "peek proves the exact Ident token parsed here.")]
             field = Some(input.parse()?);
             if !input.is_empty() {
                 input.parse::<Token![,]>()?;
@@ -389,6 +393,7 @@ pub(crate) fn numeric_kind(ty: &syn::Type) -> Option<NumericKind> {
     let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
         return None;
     };
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "This type comes from a parsed event field; Syn requires parsed type paths to contain at least one segment.")]
     let ident = type_path.path.segments.last()?.ident.to_string();
     match ident.as_str() {
         "u8" | "u16" | "u32" | "u64" | "usize" => Some(NumericKind::UnsignedInt),
@@ -520,7 +525,9 @@ fn parse_metric_attr(attr: &Attribute) -> Result<MetricAttrBody> {
         Meta::Path(_) => Ok(MetricAttrBody {
             field: None,
             name: None,
+            // #[gamma::skip(option.none_to_some, tag = "equivalent", reason = "Generated metric metadata resolves both an absent description and an empty description to the same empty string.")]
             description: None,
+            // #[gamma::skip(option.none_to_some, tag = "equivalent", reason = "Generated metric metadata resolves both an absent unit and an empty unit to the same empty string.")]
             unit: None,
         }),
         Meta::List(_) => attr.parse_args::<MetricAttrBody>(),
@@ -712,6 +719,7 @@ fn parse_field_def(field: &Field) -> Result<FieldDef<'_>> {
 
     for attr in &field.attrs {
         if shared.try_parse(attr)? {
+            // #[gamma::skip(loop.delete_continue, tag = "equivalent", reason = "Consumed shared attributes have names disjoint from metric instruments, so the remaining rejection check cannot match them.")]
             continue;
         }
         if attr
@@ -825,6 +833,7 @@ fn is_event_helper_attr(attr: &Attribute) -> bool {
 /// Returns whether `attr` is a field-level helper (`#[dimension]`, `#[unredacted]`,
 /// `#[data_class]`, `#[if_none]`) that must be stripped from the re-emitted struct.
 fn is_field_helper_attr(attr: &Attribute) -> bool {
+    // #[gamma::skip(collection.reverse_array, tag = "equivalent", reason = "The membership test uses any; order does not affect whether the attribute name is present.")]
     ["dimension", "unredacted", "data_class", "if_none"]
         .iter()
         .any(|name| attr.path().is_ident(name))
@@ -855,6 +864,7 @@ fn validate_message_placeholders(def: &EventDef<'_>) -> Result<()> {
     };
 
     // Quick scan: skip validation if there are no placeholders at all.
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "Without an opening brace the subsequent placeholder loop executes zero times and returns the same Ok result.")]
     if !message.contains('{') {
         return Ok(());
     }
@@ -869,11 +879,13 @@ fn validate_message_placeholders(def: &EventDef<'_>) -> Result<()> {
     while let Some((_, after_open)) = rest.split_once('{') {
         // Escaped `{{` — skip the second brace and keep scanning.
         if let Some(stripped) = after_open.strip_prefix('{') {
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             rest = stripped;
             continue;
         }
         // An unterminated `{` (no closing brace) is ignored.
         let Some((placeholder, remainder)) = after_open.split_once('}') else {
+            // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         };
         if !placeholder.is_empty() && !log_key_names.iter().any(|name| name == placeholder) {
@@ -886,6 +898,7 @@ fn validate_message_placeholders(def: &EventDef<'_>) -> Result<()> {
                 ),
             ));
         }
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         rest = remainder;
     }
 
@@ -1078,6 +1091,7 @@ fn generate_field_visit(field: &FieldDef<'_>, has_log: bool) -> TokenStream {
     // Log routing
     let log_key = if !has_log {
         None
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "FieldDef::log_key returns exactly the same unraw field name for Default routing; only Cow ownership differs.")]
     } else if matches!(field.log, LogRouting::Default) {
         Some(Cow::Borrowed(default_key.as_str()))
     } else {

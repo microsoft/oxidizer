@@ -33,6 +33,9 @@ mod field_attrs;
 
 mod struct_gen;
 
+#[cfg(test)]
+mod gamma_round2;
+
 use enum_gen::build_enum_body;
 use field_attrs::parse_field_attrs;
 use struct_gen::build_struct_body;
@@ -55,7 +58,9 @@ fn impl_transfer(input: &DeriveInput, root_path: &Path) -> syn::Result<TokenStre
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let body = match &input.data {
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "add_bounds already parsed every field attribute; build_struct_body can only repeat those successful parses.")]
         Data::Struct(s) => build_struct_body(name, &s.fields, root_path)?,
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "add_bounds already parsed every variant field attribute; build_enum_body can only repeat those successful parses.")]
         Data::Enum(e) => build_enum_body(name, e, root_path)?,
         Data::Union(_u) => {
             return Err(syn::Error::new_spanned(
@@ -203,12 +208,14 @@ fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics, usage: 
             usage.has_skipped_field = true;
             continue;
         }
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "collect_generics_in_type and every recursive branch always return Ok(()).")]
         collect_generics_in_type(&field.ty, &generic_idents, usage)?;
     }
     Ok(())
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
+// #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "This traversal has no error-producing operation; every leaf and recursive call returns Ok(()).")]
 fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc: &mut GenericUsage) -> syn::Result<()> {
     match ty {
         Type::Path(TypePath { path, .. }) => {
@@ -216,6 +223,7 @@ fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc
                 if generic_idents.contains(&segment.ident) {
                     acc.relocated.insert(segment.ident.clone());
                 }
+
                 if let PathArguments::AngleBracketed(ab) = &segment.arguments {
                     for arg in &ab.args {
                         if let syn::GenericArgument::Type(t) = arg {

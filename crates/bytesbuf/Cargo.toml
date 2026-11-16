@@ -61,7 +61,6 @@ alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 bytes = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
-mutants = { workspace = true }
 new_zealand = { workspace = true }
 nm = { workspace = true }
 plurality = { path = "../plurality" }

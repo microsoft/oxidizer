@@ -46,7 +46,7 @@ No duplicate work item is required.
 | P11 | **Keep telemetry non-panicking contract.** Catch-and-continue could report incomplete startup or shutdown as successful. Existing public observability tests cover supported processors; a panicking processor remains contract violation. |
 | P12 | **Confirmed separate Tick integrity work.** Custom timer wakers still run through Tick's timer path; lock-bound callback redesign is not hidden as an Arty task failure in this change. The final-timer integration test preserves worker-terminal reporting. |
 | P13 | **Test-util only; deferred transactional Tick change.** Saturating virtual time would silently change the requested value. |
-| P14 | **Implemented typed rejection.** Post-shutdown and disconnected `TaskSet::add` return a `JoinHandle` that resolves to shutdown-only `arty_executor::JoinError`. |
+| P14 | **Implemented typed rejection.** Registrations through `TaskSet::task(...).register(...)` after shutdown report cancellation through the supplied completion target. |
 | P15 | **Keep raw executor non-reentrancy invariants.** Recovering from interrupted `RefCell` state without rollback proof would be unsafe. |
 | P16 | **Implemented fallible raw joins.** `arty_executor::JoinHandle<R>` now returns `Result<R, JoinError>` and reports shutdown without adding panic recovery to the raw executor. |
 | P17 | **Removed obsolete timeout configuration.** Executor construction and drop are safe; shutdown no longer enters a state that waits on externally retained result storage. |

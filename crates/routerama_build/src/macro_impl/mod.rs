@@ -66,6 +66,7 @@ impl Parse for ResolverAttr {
         if name.to_string().starts_with("r#") {
             return Err(syn::Error::new(name.span(), "the resolver type name cannot be a raw identifier"));
         }
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "Parsing an optional punctuation token succeeds with None when absent and Some when present")]
         let _trailing_comma = input.parse::<Option<Token![,]>>()?;
         if !input.is_empty() {
             return Err(input.error("unexpected resolver attribute argument"));
@@ -86,6 +87,7 @@ struct RouteAttr {
 impl Parse for RouteAttr {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let method = if input.peek(LitStr) {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "The enclosing peek(LitStr) guarantees the next token is a string literal")]
             let method: LitStr = input.parse()?;
             let value = method.value();
             if !is_http_token(&value) {
@@ -258,6 +260,7 @@ pub(crate) fn declared_fields(variant: &Variant) -> syn::Result<Vec<String>> {
 }
 
 fn fmt_list(items: &[String]) -> String {
+    // #[gamma::skip(cond.always_false, reason = "Joining an empty slice produces an empty string, so the else branch formats the identical pair of braces used only as diagnostic text")]
     if items.is_empty() {
         "{}".to_owned()
     } else {

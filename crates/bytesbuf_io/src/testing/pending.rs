@@ -40,6 +40,7 @@ impl Pending {
     /// This call never fails (because it never completes).
     #[cfg_attr(coverage_nightly, coverage(off))] // Contains intentionally unreachable code.
     #[expect(clippy::needless_pass_by_ref_mut, reason = "API compatibility between trait and inherent fn")]
+    // #[gamma::skip(parameter.default_shadow, reason = "The requested byte count is unused by this permanently pending source")]
     pub async fn read_at_most_into(&mut self, _len: usize, _into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         future::pending::<()>().await;
         unreachable!();
@@ -118,7 +119,6 @@ impl Default for Pending {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Memory for Pending {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         self.reserve(min_bytes)
     }
@@ -126,7 +126,6 @@ impl Memory for Pending {
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl HasMemory for Pending {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn memory(&self) -> impl MemoryShared {
         self.memory()
     }
@@ -136,17 +135,15 @@ impl HasMemory for Pending {
 impl Read for Pending {
     type Error = Infallible;
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
+    // #[gamma::skip(parameter.default_shadow, reason = "The forwarded count is ignored by the inherent permanently pending read")]
     async fn read_at_most_into(&mut self, len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_at_most_into(len, into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_more_into(into).await
     }
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn read_any(&mut self) -> Result<BytesBuf, Infallible> {
         self.read_any().await
     }
@@ -156,7 +153,6 @@ impl Read for Pending {
 impl Write for Pending {
     type Error = Infallible;
 
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     async fn write(&mut self, data: BytesView) -> Result<(), Infallible> {
         self.write(data).await
     }

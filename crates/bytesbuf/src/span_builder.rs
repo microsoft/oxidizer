@@ -145,7 +145,6 @@ impl SpanBuilder {
     }
 
     /// How many more bytes of data fit into the span builder.
-    #[cfg_attr(test, mutants::skip)] // Lying about capacity is a great way to infinite loop.
     pub(crate) fn remaining_capacity(&self) -> usize {
         self.available_bytes as usize
     }
@@ -186,7 +185,6 @@ impl SpanBuilder {
     }
 
     /// References the available (unfilled) part of the span builder's memory capacity.
-    #[cfg_attr(test, mutants::skip)] // Risk of UB if this returns wrong slices.
     pub(crate) fn unfilled_slice_mut(&mut self) -> &mut [MaybeUninit<u8>] {
         // SAFETY: We are seeking past initialized memory, so at most we are at the end of our
         // memory block (which is still valid) but cannot exceed it in any way.
@@ -229,7 +227,6 @@ impl SpanBuilder {
     /// # Panics
     ///
     /// Panics if `count` is greater than the remaining capacity.
-    #[cfg_attr(test, mutants::skip)] // Mutating the bounds check produces invalid pointers.
     pub(crate) fn split_off_available(&mut self, count: NonZero<BlockSize>) -> Self {
         assert!(count.get() as usize <= self.remaining_capacity());
 

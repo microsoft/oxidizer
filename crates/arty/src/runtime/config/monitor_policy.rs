@@ -54,6 +54,7 @@ impl Default for MonitorPolicy {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Monitoring currently stores configuration without a public observable effect.
 mod tests {
     use super::*;
 
