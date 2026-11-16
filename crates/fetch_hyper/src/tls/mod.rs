@@ -6,6 +6,8 @@
 //! The only public symbol is [`TlsBackend`]; everything else is internal.
 
 mod connector;
+#[cfg(any(feature = "rustls", feature = "native-tls", test))]
+mod diagnostics;
 #[cfg(any(feature = "native-tls", test))]
 mod native_tls;
 

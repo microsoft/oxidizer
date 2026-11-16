@@ -90,6 +90,90 @@ async fn real_http_request_succeeds() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
+#[cfg_attr(miri, ignore = "TLS diagnostics use real loopback sockets and native cryptography")]
+#[tokio::test]
+async fn rustls_handshake_errors_keep_certificate_details_and_original_validation_errors() {
+    use std::error::Error;
+    use std::sync::Arc;
+
+    use fetch_tls::{TlsBackendBuilder, TlsOptions};
+    use rcgen::{CertificateParams, DnType, KeyPair};
+    use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+    use seatbelt::{Recovery, RecoveryKind};
+    use tokio::net::TcpListener;
+
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let mut roots = rustls::RootCertStore::empty();
+    let mut peers = Vec::new();
+    let mut endpoints = Vec::new();
+    for name in ["first.example.test", "second.example.test"] {
+        let key = KeyPair::generate().unwrap();
+        let mut params = CertificateParams::new([name.to_owned()]).unwrap();
+        params.distinguished_name.push(DnType::CommonName, name);
+        let certificate = params.self_signed(&key).unwrap();
+        roots.add(certificate.der().clone()).unwrap();
+        let server_config = rustls::ServerConfig::builder_with_provider(Arc::clone(&provider))
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![certificate.der().clone()],
+                PrivateKeyDer::from(PrivatePkcs8KeyDer::from(key.serialize_der())),
+            )
+            .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        endpoints.push(address);
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+        peers.push(tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            acceptor.accept(stream).await.unwrap_err();
+        }));
+    }
+    let verifier = rustls::client::WebPkiServerVerifier::builder_with_provider(Arc::new(roots), Arc::clone(&provider))
+        .build()
+        .unwrap();
+    let backend = TlsBackendBuilder::new()
+        .configure_rustls(provider, verifier)
+        .build_backend(TlsOptions::new_rustls())
+        .unwrap();
+    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(None), Clock::new_tokio(), options(&[]))
+        .body_builder(HttpBodyBuilder::new_fake())
+        .build(backend);
+    let request = |address| HttpRequestBuilder::new_fake().get(format!("https://{address}/")).build().unwrap();
+    let results: [_; 2] = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(handler.execute(request(endpoints[0])), handler.execute(request(endpoints[1])))
+    })
+    .await
+    .unwrap()
+    .into();
+
+    for ((result, address), (name, other_name)) in results.into_iter().zip(endpoints).zip([
+        ("first.example.test", "second.example.test"),
+        ("second.example.test", "first.example.test"),
+    ]) {
+        let error = result.unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains(&format!("remote_address={address}")), "{message}");
+        assert!(message.contains("tls_validation_name=\"127.0.0.1\""), "{message}");
+        assert!(message.contains("tls_sni_name=None"), "{message}");
+        assert!(message.contains(&format!("peer_certificate_subject=\"CN={name}\"")), "{message}");
+        assert!(message.contains(&format!("DNSName(\"{name}\")")), "{message}");
+        assert!(message.contains("peer_certificate_sha256="), "{message}");
+        assert!(!message.contains("peer_certificate_subject=unavailable"), "{message}");
+        assert!(!message.contains(other_name), "{message}");
+        assert_eq!(error.recovery().kind(), RecoveryKind::Never);
+
+        let mut source: &(dyn Error + 'static) = &error;
+        while !matches!(source.downcast_ref::<rustls::Error>(), Some(rustls::Error::InvalidCertificate(_))) {
+            source = source.source().unwrap();
+        }
+    }
+    for peer in peers {
+        peer.await.unwrap();
+    }
+}
+
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn https_only_filter_rejects_http_request() {

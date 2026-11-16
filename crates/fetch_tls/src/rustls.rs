@@ -56,7 +56,7 @@ impl RustlsOptions {
             .with_safe_default_protocol_versions()
             .map_err(BackendError::caused_by)?
             .dangerous()
-            .with_custom_certificate_verifier(verifier);
+            .with_custom_certificate_verifier(Arc::new(crate::certificate_diagnostics::DiagnosticVerifier(verifier)));
 
         let mut config = match (self.client_identity_resolver, shared.client_identity.as_ref()) {
             (Some(resolver), _) => Ok(builder.with_client_cert_resolver(resolver)),

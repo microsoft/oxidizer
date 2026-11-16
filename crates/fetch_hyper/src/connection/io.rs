@@ -6,6 +6,7 @@
 //! [`HyperIo`] is required. The [`Read`]/[`Write`] impls for `Pin<P>` come
 //! from `hyper` itself.
 
+use std::net::SocketAddr;
 use std::pin::Pin;
 
 use hyper::rt::{Read, Write};
@@ -23,6 +24,15 @@ use hyper_util::client::legacy::connect::{Connected, Connection};
 pub trait HyperIo: Read + Write + Send + Connection + 'static {}
 
 impl<T: Read + Write + Send + Connection + 'static> HyperIo for T {}
+
+/// The connected peer's socket address, supplied by a custom connector.
+///
+/// Attach this value through [`Connected::extra`] before the TLS handshake.
+/// The TLS transport uses it in handshake errors. Connectors that already
+/// expose hyper's [`HttpInfo`](hyper_util::client::legacy::connect::HttpInfo)
+/// do not need this extension.
+#[derive(Clone, Copy, Debug)]
+pub struct PeerAddr(pub SocketAddr);
 
 impl Connection for Pin<Box<dyn HyperIo>> {
     fn connected(&self) -> Connected {

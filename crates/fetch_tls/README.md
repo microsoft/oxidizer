@@ -31,6 +31,10 @@ The library provides environment-specific values, such as the rustls
 crypto provider and default certificate verifier. It also selects the
 backend when the application does not select one.
 
+The rustls certificate verifier selected by this builder keeps its validation decisions.
+Failed checks add unverified peer certificate details to the error.
+Rustls client configurations supplied directly are left unchanged.
+
 ## Cargo features
 
 * `rustls` enables the rustls backend. The application or client library
@@ -47,7 +51,7 @@ are unavailable. Building an automatic TLS backend returns [`BackendError`][__li
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_tls">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbTPYJ-LqZC8kbySegBD6GrN8bDvFGDZLqN_Mbf1Cnh80FpOFhZIGCaWZldGNoX3Rsc2UwLjUuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb_vcnc8dV48Mbfw9mQ3JfRv8bc6g1Q-4AE58bKUVmpYamRuNhZIGCaWZldGNoX3Rsc2UwLjUuMQ
  [__link0]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsOptions
  [__link1]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsOptionsBuilder
  [__link2]: https://docs.rs/fetch_tls/0.5.1/fetch_tls/?search=TlsBackendBuilder

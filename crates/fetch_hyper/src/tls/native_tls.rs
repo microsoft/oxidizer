@@ -13,9 +13,11 @@ use http::Uri;
 use hyper::rt::{Read, ReadBufCursor, Write};
 use hyper_util::client::legacy::connect::{Connected, Connection};
 use hyper_util::rt::TokioIo;
+use ohno::EnrichableExt;
 use seatbelt::RecoveryInfo;
 
 use crate::connection::hyper_connector_adapter::HyperConnectorAdapter;
+use crate::tls::diagnostics::{NATIVE_CERTIFICATE_UNAVAILABLE, context, remote_address};
 use crate::{Connect, HyperIo};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -275,13 +277,22 @@ where
         };
 
         let server_name = server_name(&self.backend, &req);
+        let name_override = req
+            .authority()
+            .and_then(|authority| self.backend.server_name_for(authority))
+            .map(str::to_owned);
+        let destination = req.clone();
         let connecting = self.http.call(req);
         let tls = self.tls.clone();
 
         Box::pin(async move {
             let stream = connecting.await.map_err(|error| Box::new(error) as BoxError)?;
             if is_https {
-                connect_https(tls, &server_name, stream).await
+                let remote = remote_address(&stream);
+                connect_https(tls, &server_name, stream, || {
+                    context(&destination, &server_name, name_override.as_deref(), remote)
+                })
+                .await
             } else {
                 Ok(NativeTlsStream::Http(stream))
             }
@@ -297,6 +308,7 @@ async fn connect_https<S: HyperIo + Unpin>(
     tls: tokio_native_tls::TlsConnector,
     server_name: &str,
     stream: S,
+    context: impl FnOnce() -> String + Send,
 ) -> Result<NativeTlsStream<S>, BoxError> {
     let error_kind = Arc::new(Mutex::new(None));
     let recording = RecordingIo {
@@ -306,15 +318,16 @@ async fn connect_https<S: HyperIo + Unpin>(
     match tls.connect(server_name, TokioIo::new(recording)).await {
         Ok(stream) => Ok(wrap_https_stream(stream)),
         Err(error) => {
+            let context = context();
             let recovery = error_kind
                 .lock()
                 .expect("handshake error recorder mutex must not be poisoned because recording does not execute user code")
                 .map_or_else(RecoveryInfo::never, RecoveryInfo::from);
-            Err(Box::new(http_extensions::HttpError::other(
-                error,
-                recovery,
-                crate::error_labels::LABEL_CONNECT,
-            )))
+            Err(Box::new(
+                http_extensions::HttpError::other(error, recovery, crate::error_labels::LABEL_CONNECT).enrich(format!(
+                    "{context}, tls_sni_name=unavailable (managed by native TLS), {NATIVE_CERTIFICATE_UNAVAILABLE}"
+                )),
+            ))
         }
     }
 }
@@ -888,6 +901,19 @@ mod tests {
         };
         peer.await.unwrap();
 
+        let message = error.to_string();
+        assert!(message.contains("request_hostname=\"localhost\""), "{message}");
+        assert!(message.contains(&format!("request_port={}", server.address.port())), "{message}");
+        assert!(message.contains("tls_validation_name=\"wrong.example.test\""), "{message}");
+        assert!(
+            message.contains("tls_server_name_override=Some(\"wrong.example.test\")"),
+            "{message}"
+        );
+        assert!(message.contains(&format!("remote_address={}", server.address)), "{message}");
+        assert!(message.contains("peer_certificate_subject=unavailable"), "{message}");
+        assert!(message.contains("peer_certificate_sans=unavailable"), "{message}");
+        assert!(message.contains("peer_certificate_sha256=unavailable"), "{message}");
+        assert!(error.source().unwrap().is::<native_tls::Error>());
         assert_eq!(
             error.downcast_ref::<http_extensions::HttpError>().unwrap().recovery().kind(),
             RecoveryKind::Never

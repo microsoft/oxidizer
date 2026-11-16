@@ -11,4 +11,4 @@ mod io;
 pub(crate) mod tracked_stream;
 
 pub use connect::Connect;
-pub use io::HyperIo;
+pub use io::{HyperIo, PeerAddr};

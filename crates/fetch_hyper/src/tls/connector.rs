@@ -3,6 +3,7 @@
 
 //! The internal `TLS` connector, dispatching to the configured backend.
 
+#[cfg(any(feature = "rustls", not(feature = "native-tls"), test))]
 use std::marker::PhantomData;
 use std::pin::Pin;
 #[cfg(any(feature = "rustls", test))]
@@ -21,6 +22,15 @@ use crate::connection::hyper_connector_adapter::HyperConnectorAdapter;
 use crate::tls::native_tls::NativeTlsConnector;
 use crate::{Connect, HyperIo};
 
+#[cfg(any(feature = "rustls", test))]
+#[derive(Clone)]
+pub(crate) struct RustlsConnector<C> {
+    config: Arc<rustls::ClientConfig>,
+    connector: C,
+    request_filter: RequestFilter,
+    supported_versions: Vec<Version>,
+}
+
 /// Wraps the `TLS` connector, dispatching to the active backend at runtime.
 pub(crate) enum TlsConnector<C, S>
 where
@@ -28,7 +38,7 @@ where
     S: HyperIo,
 {
     #[cfg(any(feature = "rustls", test))]
-    Rustls(hyper_rustls::HttpsConnector<HyperConnectorAdapter<C, S>>, PhantomData<fn() -> S>),
+    Rustls(RustlsConnector<C>, PhantomData<fn() -> S>),
 
     #[cfg(any(feature = "native-tls", test))]
     NativeTls(NativeTlsConnector<C, S>),
@@ -70,7 +80,12 @@ where
         match backend {
             #[cfg(any(feature = "rustls", test))]
             TlsBackend::Rustls(config) => Self::Rustls(
-                build_rustls_connector(Arc::unwrap_or_clone(config), connector, &request_filter, supported_versions),
+                RustlsConnector {
+                    config,
+                    connector,
+                    request_filter,
+                    supported_versions: supported_versions.to_vec(),
+                },
                 PhantomData,
             ),
             #[cfg(any(feature = "native-tls", test))]
@@ -146,13 +161,46 @@ where
         match self {
             #[cfg(any(feature = "rustls", test))]
             Self::Rustls(c, _) => {
-                let mut c = c.clone();
+                use std::sync::Mutex;
+
+                use ohno::EnrichableExt;
+
+                use crate::tls::diagnostics::{
+                    DiagnosticConnector, RUSTLS_CERTIFICATE_UNAVAILABLE, context, has_certificate_details, restore_rustls_source,
+                };
+
+                let destination: http::Uri = input.into();
+                let is_https = destination.scheme_str() == Some("https");
+                let sni_enabled = c.config.enable_sni;
+                let remote = Arc::new(Mutex::new(None));
+                let connector = DiagnosticConnector {
+                    inner: c.connector.clone(),
+                    remote: Arc::clone(&remote),
+                };
+                let mut c = build_rustls_connector((*c.config).clone(), connector, &c.request_filter, &c.supported_versions);
                 // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "hyper-rustls delegates readiness to HyperConnectorAdapter, which always returns Ready(Ok(()))")]
                 std::future::poll_fn(|cx| c.poll_ready(cx)).await.map_err(handle_tls_error)?;
-                c.call(input.into())
+                c.call(destination.clone())
                     .await
                     .map(|s| Box::pin(s) as Pin<Box<dyn HyperIo>>)
-                    .map_err(handle_tls_error)
+                    .map_err(|error| {
+                        let error = restore_rustls_source(error);
+                        let certificate_details = has_certificate_details(error.as_ref());
+                        let error = handle_tls_error(error);
+                        if !is_https {
+                            return error;
+                        }
+                        let name = destination.host().unwrap_or("").trim_start_matches('[').trim_end_matches(']');
+                        let sni_name = (sni_enabled && name.parse::<std::net::IpAddr>().is_err()).then_some(name);
+                        let remote = *remote.lock().expect("address recording runs no user code while holding the mutex");
+                        let context = format!("{}, tls_sni_name={sni_name:?}", context(&destination, name, None, remote));
+                        let context = if certificate_details {
+                            context
+                        } else {
+                            format!("{context}, {RUSTLS_CERTIFICATE_UNAVAILABLE}")
+                        };
+                        error.enrich(context)
+                    })
             }
             #[cfg(any(feature = "native-tls", test))]
             Self::NativeTls(c) => {

@@ -39,7 +39,7 @@ all-features = true
 
 [features]
 default = []
-rustls = ["dep:rustls"]
+rustls = ["dep:rustls", "dep:sha2", "dep:x509-parser"]
 native-tls = ["dep:native-tls"]
 
 [dependencies]
@@ -58,11 +58,15 @@ rustls = { workspace = true, features = [
     "std",
 ], default-features = false, optional = true }
 rustls-pki-types = { workspace = true, features = ["alloc", "std"] }
+sha2 = { workspace = true, optional = true }
+x509-parser = { workspace = true, optional = true }
 
 [dev-dependencies]
 insta = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
 rstest = { workspace = true }
+sha2 = { workspace = true }
+x509-parser = { workspace = true }
 # Tests always use both backends. This development dependency lets `cargo test`
 # work when no features are enabled.
 rustls = { workspace = true, features = ["tls12", "std", "aws-lc-rs"], default-features = false }

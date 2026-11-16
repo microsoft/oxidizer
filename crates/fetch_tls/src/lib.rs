@@ -24,6 +24,10 @@
 //! crypto provider and default certificate verifier. It also selects the
 //! backend when the application does not select one.
 //!
+//! The rustls certificate verifier selected by this builder keeps its validation decisions.
+//! Failed checks add unverified peer certificate details to the error.
+//! Rustls client configurations supplied directly are left unchanged.
+//!
 //! # Cargo features
 //!
 //! - `rustls` enables the rustls backend. The application or client library
@@ -55,7 +59,11 @@ mod native_tls;
 pub use native_tls::NativeTlsOptions;
 
 #[cfg(any(feature = "rustls", test))]
+mod certificate_diagnostics;
+#[cfg(any(feature = "rustls", test))]
 mod rustls;
+#[cfg(any(feature = "rustls", test))]
+pub use certificate_diagnostics::CertificateVerificationError;
 #[cfg(any(feature = "rustls", test))]
 pub use rustls::RustlsOptions;
 

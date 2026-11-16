@@ -33,13 +33,30 @@ The entry points are:
 
 The runtime is supplied by the caller via an [`anyspawn::Spawner`][__link6].
 
+## TLS failure diagnostics
+
+Handshake errors include the destination host and port, the TLS validation
+name, any applied name override, and the connected peer address when the
+connector exposes it. Custom connectors can attach [`PeerAddr`][__link7] to their
+connection metadata. Request credentials, paths, and queries are not included.
+
+Failed rustls certificate checks also include the peer certificate subject,
+subject alternative names, and SHA-256 fingerprint when the backend was built
+with `fetch_tls`. These details are unverified. Native TLS failures do not
+expose the peer certificate or the emitted server name indication. Certificate
+details are also unavailable for caller-supplied rustls configurations.
+Unavailable fields include a reason.
+
+Diagnostics do not disable certificate checks. The original validation error
+remains reachable through the error source chain.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_hyper">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb1PafKPRqQnMbycEo89Tdc1Ibs7VR1QL49eUbNVExL_GkLMNhZISCaGFueXNwYXduZjAuMTEuMIJrZmV0Y2hfaHlwZXJmMC4xMi4wgm1mZXRjaF9vcHRpb25zZTAuMi41gm9odHRwX2V4dGVuc2lvbnNmMC4xNS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbHXVyquymCdobQreUtBLji-kbuavvYLisDu0bWy6qPf738jlhZISCaGFueXNwYXduZjAuMTEuMIJrZmV0Y2hfaHlwZXJmMC4xMi4wgm1mZXRjaF9vcHRpb25zZTAuMi41gm9odHRwX2V4dGVuc2lvbnNmMC4xNS4w
  [__link0]: https://docs.rs/fetch_hyper/0.12.0/fetch_hyper/?search=HyperTransportBuilder
  [__link1]: https://docs.rs/fetch_hyper/0.12.0/fetch_hyper/?search=Connect
  [__link2]: https://docs.rs/fetch_options/0.2.5/fetch_options/?search=TransportOptions
@@ -47,3 +64,4 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link4]: https://docs.rs/http_extensions/0.15.0/http_extensions/?search=RequestHandler
  [__link5]: https://docs.rs/fetch_hyper/0.12.0/fetch_hyper/?search=HyperTransportBuilder::build
  [__link6]: https://docs.rs/anyspawn/0.11.0/anyspawn/?search=Spawner
+ [__link7]: https://docs.rs/fetch_hyper/0.12.0/fetch_hyper/?search=PeerAddr

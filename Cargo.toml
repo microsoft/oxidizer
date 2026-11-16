@@ -275,6 +275,7 @@ serde_json = { version = "1.0.145", default-features = false }
 serde_urlencoded = { version = "0.7.1", default-features = false }
 serial_test = { version = "4.0.1", default-features = false }
 sha1 = { version = "0.10.7", default-features = false }
+sha2 = { version = "0.11.0", default-features = false }
 sharded-slab = { version = "0.1.7", default-features = false }
 slab = { version = "0.4.12", default-features = false }
 slotmap = { version = "1.1.1", default-features = false }
@@ -323,6 +324,7 @@ widestring = { version = "1.2.1", default-features = false }
 windows = { version = "0.62.2", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
 wiremock = { version = "0.6.5", default-features = false }
+x509-parser = { version = "0.18.1", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 zerocopy = { version = "0.8.26", default-features = false }
 zeroize = { version = "1.9.0", default-features = false }

@@ -26,6 +26,23 @@
 //!
 //! The runtime is supplied by the caller via an [`anyspawn::Spawner`].
 //!
+//! # TLS failure diagnostics
+//!
+//! Handshake errors include the destination host and port, the TLS validation
+//! name, any applied name override, and the connected peer address when the
+//! connector exposes it. Custom connectors can attach [`PeerAddr`] to their
+//! connection metadata. Request credentials, paths, and queries are not included.
+//!
+//! Failed rustls certificate checks also include the peer certificate subject,
+//! subject alternative names, and SHA-256 fingerprint when the backend was built
+//! with `fetch_tls`. These details are unverified. Native TLS failures do not
+//! expose the peer certificate or the emitted server name indication. Certificate
+//! details are also unavailable for caller-supplied rustls configurations.
+//! Unavailable fields include a reason.
+//!
+//! Diagnostics do not disable certificate checks. The original validation error
+//! remains reachable through the error source chain.
+//!
 //! [`RequestHandler`]: http_extensions::RequestHandler
 
 mod builder;
@@ -41,7 +58,7 @@ mod tls;
 pub mod testing;
 
 pub use builder::{HyperTransport, HyperTransportBuilder};
-pub use connection::{Connect, HyperIo};
+pub use connection::{Connect, HyperIo, PeerAddr};
 
 // Installs a silent, always-interested global `tracing` subscriber before any
 // unit test in this crate runs. This keeps `tracing` emission paths executing
