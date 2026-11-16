@@ -15,7 +15,7 @@ use opentelemetry_sdk::logs::LoggerProviderBuilder;
 use performables::arc::Arc;
 
 use crate::file_writer::FileWriterOpener;
-use crate::worker::{WriterOpener, background_procesor};
+use crate::worker::{WriterOpener, background_processor};
 use crate::{DEFAULT_BUFFER_SIZE, DEFAULT_FLUSH_ACK_TIMEOUT, DEFAULT_FLUSH_INTERVAL, DEFAULT_QUEUE_CAPACITY};
 
 /// Creates a file log destination builder for the given path.
@@ -105,7 +105,7 @@ impl LogDestination for FileLogDestination {
                 .coerce::<dyn Fn(&Path) -> std::io::Result<Box<dyn Write + Send>> + Send + Sync>(|arc| arc)
         }
 
-        let processor = background_procesor(
+        let processor = background_processor(
             self.format_config,
             &file_opener(self.writer_opener, self.overwrite),
             &self.path,

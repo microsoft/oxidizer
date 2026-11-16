@@ -48,7 +48,7 @@ const MAX_LOG_DRAIN_PER_TICK: usize = 256;
 pub(crate) struct InvalidFlushInterval;
 
 /// Opens the writer eagerly and spawns the background worker thread.
-pub(crate) fn background_procesor(
+pub(crate) fn background_processor(
     format_config: LogFormatConfig,
     opener: &WriterOpener,
     path: &Path,
@@ -698,7 +698,7 @@ mod tests {
         let writer = Arc::new(Mutex::<_>::new(Some(writer)));
         let opener: WriterOpener = Arc::new(move |_: &Path| Ok(writer.lock().take().unwrap()))
             .coerce::<dyn Fn(&Path) -> io::Result<Box<dyn Write + Send>> + Send + Sync>(|arc| arc);
-        background_procesor(
+        background_processor(
             LogFormatConfig::minimal(),
             &opener,
             Path::new("unused"),

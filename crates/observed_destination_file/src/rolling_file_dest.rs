@@ -14,7 +14,7 @@ use observed_destination_core::{
 use performables::arc::Arc;
 
 use crate::file_writer::FileWriterOpener;
-use crate::worker::{WriterOpener, background_procesor};
+use crate::worker::{WriterOpener, background_processor};
 use crate::{DEFAULT_BUFFER_SIZE, DEFAULT_FLUSH_ACK_TIMEOUT, DEFAULT_FLUSH_INTERVAL, DEFAULT_QUEUE_CAPACITY};
 
 /// Creates a rolling file log destination builder for the given path.
@@ -158,7 +158,7 @@ impl LogDestination for RollingFileLogDestination {
                 .coerce::<dyn Fn(&Path) -> std::io::Result<Box<dyn Write + Send>> + Send + Sync>(|arc| arc)
         }
 
-        background_procesor(
+        background_processor(
             self.format_config,
             &rolling_opener(self.writer_opener, self.max_file_size, self.file_limit, self.compression),
             &self.path,
