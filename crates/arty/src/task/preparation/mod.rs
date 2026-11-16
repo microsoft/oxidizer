@@ -20,4 +20,5 @@ pub(crate) use remote::{RemoteFutureFactory, prepare_remote};
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public spawning cannot isolate preparation from registration and executor polling.
 mod tests;

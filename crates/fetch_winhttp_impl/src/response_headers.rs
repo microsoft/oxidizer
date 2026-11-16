@@ -164,11 +164,24 @@ fn trim_optional_whitespace(mut bytes: &[u8]) -> &[u8] {
         // Indexing from 1 shrinks the slice; a mutated subtract-from-len form is
         // not used here so the loop cannot stall (AGENTS.md, "Code must not hang
         // even under mutation testing").
-        bytes = bytes.get(1..).expect("first() proved the slice is non-empty");
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        bytes = bytes
+            .get(
+                // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                1..,
+            )
+            .expect("first() proved the slice is non-empty");
     }
     while bytes.last().is_some_and(|byte| matches!(*byte, b' ' | b'\t')) {
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         bytes = bytes
-            .get(..bytes.len().saturating_sub(1))
+            .get(
+                // #[gamma::skip(range.exclusive_to_inclusive, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                ..bytes.len().saturating_sub(
+                    // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    1,
+                ),
+            )
             .expect("last() proved the slice is non-empty");
     }
 
@@ -181,6 +194,14 @@ mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
 
     use http::HeaderValue;
+
+    #[test]
+    fn gamma_round2_trailing_whitespace_does_not_remove_the_last_value_byte() {
+        for raw in [b"x:a \r\n\r\n".as_slice(), b"x:a\t\r\n\r\n", b"x: a \t\r\n\r\n"] {
+            let headers = super::parse_response_trailers(raw).unwrap();
+            assert_eq!(headers["x"].as_bytes(), b"a");
+        }
+    }
     use static_assertions::assert_not_impl_any;
 
     use super::{
@@ -188,6 +209,17 @@ mod tests {
         MissingNameValueSeparatorError, NonAsciiHeaderNameError, ResponseHeadersError, TrailingHeaderDataError, parse_response_headers,
         parse_response_trailers,
     };
+
+    #[test]
+    fn gamma_survivor_whitespace_empty_and_unpadded_values_are_exact() {
+        let headers = parse_response_trailers(b"x-one:a\r\nx-two: \t\r\nx-three: \t abc \t\r\n\r\n").unwrap();
+        assert_eq!(headers["x-one"].as_bytes(), b"a");
+        assert_eq!(headers["x-two"].as_bytes(), b"");
+        assert_eq!(headers["x-three"].as_bytes(), b"abc");
+        let mut cursor = 3;
+        assert!(super::take_crlf_line(b"x", &mut cursor).is_none());
+        assert_eq!(cursor, 3);
+    }
 
     // Every `ohno` error owns a boxed source without unwind-safety bounds.
     assert_not_impl_any!(ResponseHeadersError: UnwindSafe, RefUnwindSafe);

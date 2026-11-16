@@ -14,6 +14,18 @@ use compressors::DecompressorLimits;
 use compressors::format::Format;
 use compressors::{Level, Resources};
 
+#[cfg(all(feature = "deflate", not(feature = "zlib")))]
+#[test]
+fn afternoon_raw_deflate_pool_restores_raw_headers_without_the_zlib_feature() {
+    let resources = Resources::new(GlobalPool::new()).with_pool_capacity(1);
+    let plain = b"raw deflate must retain its framing when a pooled decompressor is reset";
+    let compressed = compressors::format::compress(Format::Deflate, plain.as_slice(), &resources).unwrap();
+    for _ in 0..3 {
+        let decoded = compressors::format::decompress(Format::Deflate, compressed.clone(), &resources).unwrap();
+        assert_eq!(decoded.to_vec(), plain);
+    }
+}
+
 #[test]
 fn compression_levels_accept_exactly_the_portable_range() {
     for level in 0..=Level::MAX.get() {

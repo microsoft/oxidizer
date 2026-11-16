@@ -18,7 +18,8 @@ use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 use std::time::Duration;
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
+use arty::runtime::hook::Panic;
+use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 #[cfg(all(feature = "macros", feature = "test-util"))]
 use arty::task::Context;
 use arty::task::JoinError;
@@ -324,7 +325,7 @@ fn factory_and_poll_panics_return_errors_and_preserve_runtime_usability() {
         .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
-        .panic(PanicPolicy::ignore())
+        .on(Panic::IGNORE)
         .build()
         .unwrap();
     let factory = runtime.scheduler().spawn_anywhere((), |cx, ()| panic_factory(cx));

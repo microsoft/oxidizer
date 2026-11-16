@@ -77,6 +77,7 @@ ohno = { workspace = true, optional = true }
 performables = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 plurality = { workspace = true, features = ["std"], optional = true }
+scopeguard = { workspace = true }
 seismograph = { workspace = true, optional = true }
 seismograph_runtime = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
@@ -103,7 +104,6 @@ ohno = { path = "../ohno", features = ["app-err"] }
 performables = { path = "../performables", features = ["seismograph"] }
 pin-project = { workspace = true }
 plurality = { path = "../plurality", features = ["std"] }
-scopeguard = { workspace = true }
 seismograph = { path = "../seismograph", features = ["monitor"] }
 seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
 seismograph_runtime = { path = "../seismograph_runtime", features = ["test-util"] }
@@ -151,6 +151,10 @@ required-features = ["macros"]
 
 [[example]]
 name = "arty_io"
+required-features = ["macros"]
+
+[[example]]
+name = "arty_hooks"
 required-features = ["macros"]
 
 # >>> anvil-managed: anvil-lints

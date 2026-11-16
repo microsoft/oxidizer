@@ -103,10 +103,12 @@ impl EventTimestamp {
     #[must_use]
     #[inline]
     pub fn now() -> Self {
-        static ORIGIN: OnceLock<Instant> = OnceLock::new();
+        let elapsed = event_elapsed();
+        Self(Self::saturated_timestamp_ticks(elapsed.as_nanos()))
+    }
 
-        let elapsed = ORIGIN.get_or_init(Instant::now).elapsed();
-        Self(u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX))
+    fn saturated_timestamp_ticks(nanos: u128) -> u64 {
+        u64::try_from(nanos).unwrap_or(u64::MAX)
     }
 
     /// Returns the timestamp's clock ticks.
@@ -119,6 +121,45 @@ impl EventTimestamp {
     #[must_use]
     pub fn duration_since(self, earlier: Self) -> Duration {
         Duration::from_nanos(self.0.saturating_sub(earlier.0))
+    }
+}
+
+fn event_elapsed() -> Duration {
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    #[cfg(test)]
+    if let Some(elapsed) = TEST_EVENT_ELAPSED.get() {
+        return elapsed;
+    }
+    ORIGIN.get_or_init(Instant::now).elapsed()
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_EVENT_ELAPSED: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+mod november_clock_tests {
+    use super::{Duration, EventTimestamp, TEST_EVENT_ELAPSED};
+
+    #[test]
+    fn november_actual_event_clock_preserves_zero_exact_ticks_and_saturates_without_native_clock_observation() {
+        struct Restore(Option<Duration>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_EVENT_ELAPSED.set(self.0);
+            }
+        }
+        let _restore = Restore(TEST_EVENT_ELAPSED.get());
+        for (elapsed, ticks) in [
+            (Duration::ZERO, 0),
+            (Duration::from_nanos(37), 37),
+            (Duration::from_nanos(u64::MAX), u64::MAX),
+            (Duration::from_nanos(u64::MAX) + Duration::from_nanos(1), u64::MAX),
+        ] {
+            TEST_EVENT_ELAPSED.set(Some(elapsed));
+            assert_eq!(EventTimestamp::now().ticks(), ticks);
+        }
     }
 }
 
@@ -856,6 +897,13 @@ impl Record {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gamma_round2_timestamp_saturation_preserves_the_full_u64_boundary() {
+        assert_eq!(EventTimestamp::saturated_timestamp_ticks(37), 37);
+        assert_eq!(EventTimestamp::saturated_timestamp_ticks(u128::from(u64::MAX)), u64::MAX);
+        assert_eq!(EventTimestamp::saturated_timestamp_ticks(u128::from(u64::MAX) + 1), u64::MAX);
+    }
     use crate::recorder::alloc::{EventThreadId, HeapId, HeapKind};
     use crate::recorder::runtime::RuntimeId;
 

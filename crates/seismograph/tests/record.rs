@@ -42,6 +42,31 @@ fn object(kind: EventKind) -> Record {
     Record::object(kind, ObjectId::new(1))
 }
 
+#[cfg(feature = "test-util")]
+#[test]
+fn current_thread_events_excludes_other_recorders_and_retains_events() {
+    let _recording = Recording::start(Configuration {
+        general_events: Policy::all(false),
+        ..Default::default()
+    });
+    assert!(seismograph::recorder::current_thread_events().unwrap().is_empty());
+    seismograph::record(EventClass::General, || Some(object(EventKind::MutexAccess)));
+    let other_thread = std::thread::spawn(|| {
+        seismograph::record(EventClass::General, || Some(object(EventKind::MutexRelease)));
+        let events = seismograph::recorder::current_thread_events().unwrap();
+        assert_eq!(events.iter().map(|event| event.kind).collect::<Vec<_>>(), [EventKind::MutexRelease]);
+        events[0].thread_id
+    })
+    .join()
+    .unwrap();
+    for _ in 0..2 {
+        let events = seismograph::recorder::current_thread_events().unwrap();
+        assert_eq!(events.iter().map(|event| event.kind).collect::<Vec<_>>(), [EventKind::MutexAccess]);
+        assert_eq!(events[0].thread_id, seismograph::recorder::thread_id());
+        assert_ne!(events[0].thread_id, other_thread);
+    }
+}
+
 #[test]
 fn event_capacity_accepts_bounded_powers_of_two_including_constants() {
     const MINIMUM: EventBufferCapacity = EventBufferCapacity::new(64);
@@ -129,6 +154,63 @@ fn category_queries_follow_thread_suppression() {
     let after = observe();
 
     assert_eq!((before, suppressed, after), ((true, false), (false, false), (true, false)));
+}
+
+#[test]
+fn each_recording_category_alone_starts_a_session_and_invokes_its_builder() {
+    let enabled = Policy::all(false);
+    for (class, configuration) in [
+        (
+            EventClass::Allocation,
+            Configuration {
+                allocations: enabled,
+                ..Configuration::default()
+            },
+        ),
+        (
+            EventClass::General,
+            Configuration {
+                general_events: enabled,
+                ..Configuration::default()
+            },
+        ),
+        (
+            EventClass::ArcDereference,
+            Configuration {
+                arc_dereferences: enabled,
+                ..Configuration::default()
+            },
+        ),
+        (
+            EventClass::RuntimeTask,
+            Configuration {
+                runtime_tasks: enabled,
+                ..Configuration::default()
+            },
+        ),
+        (
+            EventClass::Io,
+            Configuration {
+                io: enabled,
+                ..Configuration::default()
+            },
+        ),
+        (
+            EventClass::Cache,
+            Configuration {
+                cache: enabled,
+                ..Configuration::default()
+            },
+        ),
+    ] {
+        let _recording = Recording::start(configuration);
+        let constructed = Cell::new(0);
+        seismograph::record(class, || {
+            constructed.set(constructed.get() + 1);
+            None
+        });
+        assert_eq!(constructed.get(), 1, "{class:?}");
+    }
 }
 
 #[test]

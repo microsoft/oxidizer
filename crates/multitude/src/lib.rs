@@ -507,6 +507,7 @@ mod from_in;
 mod internal;
 mod rc;
 pub mod strings;
+mod sync_fence;
 mod thin_smart_ptr_common;
 pub mod vec;
 

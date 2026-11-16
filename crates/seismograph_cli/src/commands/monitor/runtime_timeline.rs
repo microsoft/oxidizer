@@ -176,6 +176,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_survivor_timeline_bins_keep_zero_length_boundary_evidence() {
+        let window = Some(TimeWindow { start: 10, end: 30 });
+        assert_eq!(bins(&[Interval { start: 10, end: 10 }], window, 2), [Some(0.0), None]);
+        assert_eq!(bins(&[Interval { start: 20, end: 20 }], window, 2), [None, Some(0.0)]);
+        assert_eq!(bins(&[Interval { start: 30, end: 30 }], window, 2), [None, Some(0.0)]);
+        assert_eq!(
+            bins(&[Interval { start: 0, end: 0 }, Interval { start: 25, end: 30 }], window, 2),
+            [None, Some(0.5)]
+        );
+        assert_eq!(bins(&[Interval { start: 15, end: 20 }], window, 2), [Some(0.5), None]);
+        assert!(bins(&[Interval { start: 10, end: 20 }], window, 0).is_empty());
+        assert_eq!(
+            bins(&[Interval { start: 10, end: 10 }], Some(TimeWindow { start: 10, end: 10 }), 2),
+            [None, None]
+        );
+    }
+
+    #[test]
     fn median_is_exact_not_average_and_distinguishes_zero() {
         assert_eq!(
             (

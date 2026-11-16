@@ -51,6 +51,7 @@ pub fn templated_paq_impl(attr: &TokenStream, item: TokenStream) -> TokenStream 
     }
 
     // If attributes were passed via the attribute macro, parse and add them
+    // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "An added #[templated()] contributes no Darling options and is filtered from the original output; enum and union expansion do not inspect it.")]
     if !attr.is_empty() {
         // Create an attribute from the tokens and add it to the input's attributes
         let attribute = parse_quote! { #[templated(#attr)] };

@@ -36,7 +36,8 @@ where
     active_read: Option<Pin<Box<dyn Future<Output = Result<BytesBuf, S::Error>> + Send>>>,
 
     // Safety invariant: we can only touch this field if `active_read` is `None`.
-    inner: S,
+    // Separate storage keeps stream reborrows from invalidating the pending read.
+    inner: Box<S>,
 
     // This struct must remain pinned because `active_read` references `inner`.
     _require_pin: PhantomPinned,
@@ -49,7 +50,7 @@ where
     pub(crate) fn new(inner: S) -> Pin<Box<Self>> {
         Box::pin(Self {
             active_read: None,
-            inner,
+            inner: Box::new(inner),
             _require_pin: PhantomPinned,
         })
     }
@@ -63,7 +64,7 @@ where
         let mut unpinned = unsafe { Pin::into_inner_unchecked(self) };
 
         unpinned.active_read = None;
-        unpinned.inner
+        *unpinned.inner
     }
 }
 
@@ -80,7 +81,7 @@ where
         let mut active_read = if let Some(active_read) = this.active_read.take() {
             active_read
         } else {
-            let inner = &mut this.inner;
+            let inner = &mut *this.inner;
             let future = async move { inner.read_any().await };
             let boxed_future = Box::pin(future);
 
@@ -125,8 +126,11 @@ where
 {
     #[cfg_attr(coverage_nightly, coverage(off))] // No API contract to test.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(type_name::<Self>())
-            .field("inner", &self.inner)
+        let mut debug = f.debug_struct(type_name::<Self>());
+        if self.active_read.is_none() {
+            debug.field("inner", &self.inner);
+        }
+        debug
             .field("active_read.is_some()", &self.active_read.is_some())
             .finish_non_exhaustive()
     }
@@ -248,6 +252,30 @@ mod tests {
             YieldFuture::default().await;
             self.inner.read_any().await
         }
+    }
+
+    #[test]
+    fn formatting_pending_read_preserves_the_active_borrow() {
+        let contents = BytesView::copied_from_slice(b"Hello", &TransparentMemory::new());
+        let inner = YieldThenRead {
+            inner: FakeRead::builder().contents(contents).build(),
+        };
+        let mut stream = inner.into_futures_stream();
+        let mut cx = task::Context::from_waker(Waker::noop());
+
+        assert!(stream.as_mut().poll_next(&mut cx).is_pending());
+        let pending_debug = format!("{stream:?}");
+        assert!(pending_debug.contains("active_read.is_some(): true"));
+        assert!(!pending_debug.contains("inner:"));
+
+        let task::Poll::Ready(Some(Ok(mut data))) = stream.as_mut().poll_next(&mut cx) else {
+            panic!("the same read must complete after its first yield");
+        };
+        assert_eq!(data.len(), 5);
+        for expected in b"Hello" {
+            assert_eq!(data.get_byte(), *expected);
+        }
+        assert!(format!("{stream:?}").contains("inner:"));
     }
 
     #[test]

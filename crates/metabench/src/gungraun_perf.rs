@@ -51,6 +51,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gamma_survivor_section_sets_and_clears_thread_state() {
+        let lock = Mutex::new(());
+        assert!(!ACTIVE.get());
+        let section = SectionLock::acquire(&lock);
+        assert!(ACTIVE.get());
+        drop(section);
+        assert!(!ACTIVE.get());
+    }
+
+    #[test]
     fn sections_serialize_access_from_multiple_threads() {
         let lock = Mutex::new(());
         let start = Barrier::new(2);

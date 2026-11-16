@@ -16,7 +16,8 @@ use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::task::{Context as PollContext, Poll, Waker};
 use std::thread;
 
-use arty::runtime::{BlockingPoolPolicy, PanicPolicy, Runtime, WorkersPolicy};
+use arty::runtime::hook::Panic;
+use arty::runtime::{BlockingPoolPolicy, Runtime, WorkersPolicy};
 use arty::task::{Context, Scheduler};
 use arty::time::Clock;
 #[cfg(feature = "macros")]
@@ -434,7 +435,7 @@ fn dropping_another_runtime_from_a_worker_panics() {
     let caller = Runtime::builder()
         .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
-        .panic(PanicPolicy::ignore())
+        .on(Panic::IGNORE)
         .build()
         .unwrap();
     let retained = worker_scheduler(&target);

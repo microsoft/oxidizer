@@ -103,6 +103,24 @@ jobs:
       - name: Test no_std with serde
         run: cargo +1.95 test --package internity --no-default-features --features serde --test no_std_api --locked
 
+  feature-regressions:
+    name: "Isolated feature regressions (${{ matrix.package }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [compressors, fetch]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/anvil-setup
+        with:
+          group: none
+      - name: Install Rust
+        run: just anvil-toolchain-stable-install
+      - name: Test isolated feature combination
+        run: just test-feature-regressions --package "${{ matrix.package }}"
+
   rallocator-macos:
     name: "Rallocator macOS (${{ matrix.runner }})"
     strategy:
@@ -164,7 +182,7 @@ jobs:
   required-repository-checks:
     name: Required repository checks
     if: always()
-    needs: [release-script-tests, simd-no-std-arm, simd-no-std-x86, internity-32-bit-handles, internity-no-std-serde, rallocator-macos, metabench-native-contracts]
+    needs: [release-script-tests, simd-no-std-arm, simd-no-std-x86, internity-32-bit-handles, internity-no-std-serde, feature-regressions, rallocator-macos, metabench-native-contracts]
     runs-on: ubuntu-latest
     steps:
       - name: Verify repository checks
@@ -174,6 +192,7 @@ jobs:
           SIMD_NO_STD_X86: ${{ needs.simd-no-std-x86.result }}
           INTERNITY_32_BIT_HANDLES: ${{ needs.internity-32-bit-handles.result }}
           INTERNITY_NO_STD_SERDE: ${{ needs.internity-no-std-serde.result }}
+          FEATURE_REGRESSIONS: ${{ needs.feature-regressions.result }}
           RALLOCATOR_MACOS: ${{ needs.rallocator-macos.result }}
           METABENCH_NATIVE_CONTRACTS: ${{ needs.metabench-native-contracts.result }}
         run: |
@@ -195,6 +214,10 @@ jobs:
           fi
           if [[ "$INTERNITY_NO_STD_SERDE" != "success" ]]; then
             echo "::error::internity-no-std-serde concluded $INTERNITY_NO_STD_SERDE"
+            exit 1
+          fi
+          if [[ "$FEATURE_REGRESSIONS" != "success" ]]; then
+            echo "::error::feature-regressions concluded $FEATURE_REGRESSIONS"
             exit 1
           fi
           if [[ "$RALLOCATOR_MACOS" != "success" ]]; then

@@ -19,7 +19,8 @@ use seismograph_runtime::worker::WorkerRole;
 use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
-use crate::runtime::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, Runtime, WorkersPolicy};
+use crate::runtime::hook::Panic;
+use crate::runtime::{BlockingPoolPolicy, MonitorPolicy, Runtime, WorkersPolicy};
 
 struct RecorderGuard {
     _lock: MutexGuard<'static, ()>,
@@ -44,7 +45,7 @@ fn runtime(name: &str) -> Runtime {
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .name(name)
-        .panic(PanicPolicy::ignore())
+        .on(Panic::IGNORE)
         .build()
         .unwrap()
 }

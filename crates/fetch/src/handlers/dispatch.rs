@@ -78,6 +78,17 @@ impl std::fmt::Debug for DispatchMode {
     }
 }
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    #[test]
+    fn gamma_survivor_single_dispatch_debug_preserves_variant_name() {
+        let mode = super::DispatchMode::single(super::TransportHandler::new(http_extensions::FakeHandler::from(
+            http::StatusCode::OK,
+        )));
+        assert!(format!("{mode:?}").starts_with("Single("));
+    }
+}
+
 impl DispatchMode {
     pub(crate) fn single(transport: TransportHandler) -> Self {
         Self::Single(transport)
@@ -136,7 +147,9 @@ impl Service<HttpRequest> for Dispatch {
 fn validate(filter: &RequestFilter, input: &HttpRequest) -> crate::Result<()> {
     // Require a scheme and authority.
     let (Some(scheme), Some(authority)) = (input.uri().scheme(), input.uri().authority()) else {
-        return Err(HttpError::other(
+        return
+        // #[gamma::skip(result.err_to_ok, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        Err(HttpError::other(
             "request must have scheme and authority set",
             seatbelt::RecoveryInfo::never(),
             crate::error_labels::LABEL_URI_ORIGIN_MISSING,

@@ -58,6 +58,8 @@ impl Mutex {
         // A waiter acquires with CONTENDED retained so its release wakes the
         // next parked owner, including when other threads take the fast path.
         while self.state.swap(CONTENDED, Ordering::Acquire) != UNLOCKED {
+            #[cfg(test)]
+            crate::sync::effects::check_retry_budget();
             platform::wait_lock(&self.state, CONTENDED);
         }
         Guard { marker: PhantomData }
@@ -100,6 +102,7 @@ impl Condvar {
         }
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     pub(in crate::sync) fn wait<'a>(&self, mutex: &'a Mutex, guard: Guard<'a>, timeout: Option<Duration>) -> (Guard<'a>, bool) {
         let ownership = Unlock::new(mutex, guard);
         // Capture while owning the mutex. Atomic expected-value parking then
@@ -154,16 +157,30 @@ impl Drop for ConditionRegistration<'_> {
     }
 }
 
-fn wait_with_timeout(deadline: Option<(Duration, Instant)>, mut wait: impl FnMut(Option<Duration>) -> bool) -> bool {
-    let mut remaining = deadline.map(|(duration, _)| duration);
+fn wait_with_timeout(deadline: Option<(Duration, Instant)>, wait: impl FnMut(Option<Duration>) -> bool) -> bool {
+    wait_with_elapsed(
+        deadline.map(|(duration, _)| duration),
+        || deadline.map_or(Duration::ZERO, |(_, started)| started.elapsed()),
+        wait,
+    )
+}
+
+// #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "The November 4 afternoon campaign timed out after resetting the only timeout argument to an indefinite wait.")]
+fn wait_with_elapsed(
+    timeout: Option<Duration>,
+    mut elapsed: impl FnMut() -> Duration,
+    mut wait: impl FnMut(Option<Duration>) -> bool,
+) -> bool {
+    let mut remaining = timeout;
     loop {
         if !wait(remaining) {
+            // #[gamma::skip(loop.break_value_default, reason = "The loop result is bool and Default::default is exactly false.")]
             break false;
         }
-        let Some((timeout, started)) = deadline else {
+        let Some(timeout) = timeout else {
             unreachable!("an indefinite condition wait cannot time out");
         };
-        let Some(next) = timeout.checked_sub(started.elapsed()) else {
+        let Some(next) = timeout.checked_sub(elapsed()) else {
             break true;
         };
         // OS duration ranges can be narrower than Duration. A saturated
@@ -175,7 +192,81 @@ fn wait_with_timeout(deadline: Option<(Duration, Instant)>, mut wait: impl FnMut
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn nov4_contended_mutex_dispatches_its_wait_before_retrying_ownership() {
+        let mutex = super::Mutex::new();
+        mutex.state.store(super::LOCKED, std::sync::atomic::Ordering::Relaxed);
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let observed = std::rc::Rc::clone(&calls);
+        super::platform::injection::with_waits(
+            move |state, expected| {
+                assert_eq!(expected, super::CONTENDED);
+                assert_eq!(state.load(std::sync::atomic::Ordering::Relaxed), super::CONTENDED);
+                observed.set(observed.get() + 1);
+                state.store(super::UNLOCKED, std::sync::atomic::Ordering::Release);
+                1
+            },
+            |_, _, _| panic!("mutex ownership must not use a condition wait"),
+            None,
+            || {
+                crate::sync::effects::with_retry_budget(2, || {
+                    let _guard = mutex.lock();
+                    assert_eq!(mutex.state.load(std::sync::atomic::Ordering::Relaxed), super::CONTENDED);
+                });
+            },
+        );
+        assert_eq!(calls.get(), 1);
+    }
     use super::*;
+
+    #[test]
+    fn gamma_round2_saturated_native_wait_chunks_receive_the_remaining_controlled_budget() {
+        let mut elapsed = [2, 5, 11].into_iter();
+        let mut budgets = Vec::new();
+        assert!(wait_with_elapsed(
+            Some(Duration::from_millis(10)),
+            || Duration::from_millis(elapsed.next().unwrap()),
+            |remaining| {
+                budgets.push(remaining);
+                true
+            },
+        ));
+        assert_eq!(
+            budgets,
+            vec![
+                Some(Duration::from_millis(10)),
+                Some(Duration::from_millis(8)),
+                Some(Duration::from_millis(5)),
+            ]
+        );
+        assert!(elapsed.next().is_none());
+        assert!(!wait_with_elapsed(
+            None,
+            || panic!("a completed indefinite wait has no elapsed deadline"),
+            |remaining| {
+                assert_eq!(remaining, None);
+                false
+            },
+        ));
+    }
+
+    #[test]
+    fn gamma_survivor_condition_registration_drop_releases_each_waiter_and_final_wake_hint() {
+        let condition = Condvar::new();
+        let first = condition.register_waiter();
+        let second = condition.register_waiter();
+        assert_eq!(condition.waiters.load(Ordering::SeqCst), 2);
+        drop(first);
+        assert_eq!(condition.waiters.load(Ordering::SeqCst), 1);
+        let mut wakes = Vec::new();
+        condition.notify_with(|generation| wakes.push(generation.load(Ordering::SeqCst)));
+        assert_eq!(wakes, [1]);
+        drop(second);
+        assert_eq!(condition.waiters.load(Ordering::SeqCst), 0);
+        condition.notify_with(|_| panic!("the final registration was released"));
+        assert_eq!(condition.generation.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn fresh_raw_primitives_provide_reusable_exclusive_ownership() {

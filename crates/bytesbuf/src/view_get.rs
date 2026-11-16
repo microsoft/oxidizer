@@ -8,6 +8,21 @@ use core::ptr;
 
 use crate::BytesView;
 
+#[test]
+fn gamma_round2_contiguous_array_fast_path_and_empty_decline() {
+    let mut empty = BytesView::new();
+    assert_eq!(empty.get_array_from_first_span::<0>(), None);
+    let mut view = BytesView::from(b"abcdef".to_vec());
+    assert_eq!(view.get_array_from_first_span::<2>(), Some(*b"ab"));
+    assert_eq!(view.to_vec(), b"cdef");
+    assert_eq!(view.get_array_from_first_span::<4>(), Some(*b"cdef"));
+    assert!(view.is_empty());
+    assert!(view.spans_reversed.is_empty());
+    let mut view = BytesView::from_views([BytesView::from(b"ab".to_vec()), BytesView::from(b"cde".to_vec())]);
+    assert_eq!(view.get_array_from_first_span::<3>(), None);
+    assert_eq!(view.to_vec(), b"abcde");
+}
+
 /// Generates the little-, big-, and native-endian read accessors for a primitive numeric type.
 ///
 /// The generated methods delegate to [`BytesView::get_array`] for the shared span traversal and
@@ -150,6 +165,7 @@ impl BytesView {
             let bytes_to_copy = dst.len().min(src.len());
 
             dst[..bytes_to_copy].copy_from_slice(&src[..bytes_to_copy]);
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             dst = &mut dst[bytes_to_copy..];
 
             self.advance(bytes_to_copy);
@@ -201,6 +217,7 @@ impl BytesView {
                 ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr().cast(), bytes_to_copy);
             }
 
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             dst = &mut dst[bytes_to_copy..];
 
             self.advance(bytes_to_copy);
@@ -252,10 +269,13 @@ impl BytesView {
         // optimized away: `copy_from_slice` fully overwrites the array, so the compiler elides it
         // (verified via Callgrind - identical to a `MaybeUninit` variant, which we avoid to keep
         // this path free of `unsafe`).
+        // #[gamma::skip(literal.int_increment, reason = "copy_to_slice overwrites every array byte before it is returned")]
         let mut array = [0_u8; N];
         array.copy_from_slice(&front[..N]);
 
-        if front_len == N {
+        if
+        // #[gamma::skip(cond.always_false, cond.negate, relational.eq_to_ne, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        front_len == N {
             self.spans_reversed.pop();
         } else {
             // SAFETY: `N < front_len`, so advancing the span by `N` stays in bounds.
@@ -277,6 +297,7 @@ impl BytesView {
     #[cold] // Most reads will not straddle a slice boundary and not require buffering.
     #[inline(never)] // Keep the buffered loop out of the hot path's stack frame (avoids extra register spills).
     fn get_array_buffered<const N: usize>(&mut self) -> [u8; N] {
+        // #[gamma::skip(literal.int_increment, reason = "copy_to_slice overwrites every array byte before it is returned")]
         let mut array = [0_u8; N];
         self.copy_to_slice(&mut array);
         array

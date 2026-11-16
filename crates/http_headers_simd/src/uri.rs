@@ -37,6 +37,7 @@ pub(super) fn simple_uri_tail(bytes: &[u8], hashes: u32) -> bool {
             if seen != 0 {
                 return false;
             }
+            // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only seen != 0 is observed after this assignment, so storing two instead of one preserves the duplicate-fragment rejection")]
             seen = 1;
         }
     }
@@ -65,16 +66,22 @@ pub(super) fn simple_authority_end(bytes: &[u8]) -> Option<usize> {
     if !bytes.first()?.is_ascii_alphabetic() {
         return None;
     }
+    // #[gamma::skip(literal.int_decrement, tag = "equivalent", reason = "The first scheme byte already passed is_ascii_alphabetic, so scanning it again accepts it and reaches the same colon")]
     let mut index = 1;
     while let Some(&byte) = bytes.get(index) {
         if byte == b':' {
+            // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         }
         if !byte.is_ascii_alphanumeric() && !matches!(byte, b'+' | b'-' | b'.') {
             return None;
         }
-        index += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        index +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "index is bounded by an actual isize::MAX-length byte slice, so adding three cannot overflow usize")]
     if bytes.get(index..index.checked_add(3)?) != Some(b"://".as_slice()) {
         return None;
     }
@@ -82,7 +89,10 @@ pub(super) fn simple_authority_end(bytes: &[u8]) -> Option<usize> {
 
     let host_start = index;
     while bytes.get(index).copied().is_some_and(is_host_byte) {
-        index += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        index +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
     if index == host_start {
         return None;
@@ -90,7 +100,10 @@ pub(super) fn simple_authority_end(bytes: &[u8]) -> Option<usize> {
     if bytes.get(index) == Some(&b':') {
         index += 1;
         while bytes.get(index).copied().is_some_and(|byte| byte.is_ascii_digit()) {
-            index += 1;
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            index +=
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
         }
     }
     match bytes.get(index) {

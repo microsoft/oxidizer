@@ -195,6 +195,7 @@ impl AcceptRangesOwned {
         S: AsRef<str>,
     {
         let units = units.into_iter();
+        // #[gamma::skip(literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "The iterator hint affects only allocation; every unit is validated and appended independently")]
         let mut wire = String::with_capacity(units.size_hint().0.saturating_mul(8));
         let mut count = 0_usize;
         let mut has_none = false;
@@ -216,10 +217,14 @@ impl AcceptRangesOwned {
         if has_none && count != 1 {
             return Err(invalid_syntax(&FieldName::AcceptRanges));
         }
-        if wire == "bytes" {
+        if
+        // #[gamma::skip(cond.always_false, literal.str_to_empty, tag = "equivalent", reason = "Declining canonical bytes storage retains the identical validated wire; an empty wire was already rejected")]
+        wire == "bytes" {
             return Ok(Self::bytes());
         }
-        if wire == "none" {
+        if
+        // #[gamma::skip(cond.always_false, literal.str_to_empty, tag = "equivalent", reason = "Declining canonical none storage retains the same validated wire and has_none flag")]
+        wire == "none" {
             return Ok(Self::none());
         }
         let value = validated_units_value(wire);
@@ -352,6 +357,7 @@ impl Field for AcceptRanges {
         &FieldName::AcceptRanges
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -360,6 +366,7 @@ impl Field for AcceptRanges {
     }
 
     /// Validates and clones in a single pass over the field values.
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -407,9 +414,14 @@ fn accept_ranges_owned(values: Option<FieldLines<'_>>) -> Result<Option<AcceptRa
     let mut repeated = values.repeated();
     if let Some(first) = repeated.next()
         && repeated.next().is_none()
-        && let Some((units, none)) = scan_units(first.as_bytes())
+        && let Some((units, none)) = {
+            let bytes = first.as_bytes();
+            // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "Declining this optional unit scan leaves the complete repeated-line and comma-item validators over the same immutable field lines")]
+            scan_units(bytes)
+        }
     {
         validate_none_cardinality(units, none)?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The successful unit scanner accepts only comma/OWS-separated ASCII HTTP tokens, all valid field-value bytes")]
         let first_owned = first
             .try_to_field_value()
             .expect("scan_units accepts only token bytes, commas, spaces, and tabs, all valid in a field value");
@@ -420,6 +432,7 @@ fn accept_ranges_owned(values: Option<FieldLines<'_>>) -> Result<Option<AcceptRa
     }
 
     let none = validate_accept_ranges(&values)?;
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The initial list admission check already validated these immutable lines; repeated_owned repeats that same source validation")]
     let mut repeated = values.repeated_owned()?;
     let mut collected = repeated.next().map(|(_, first_owned)| FieldLinesIter::one(first_owned));
     for (_value, owned) in repeated {
@@ -437,7 +450,11 @@ impl TryFrom<FieldValue> for AcceptRangesOwned {
         if let Some(none) = canonical_unit(value.as_bytes()) {
             return Ok(Self { values: None, none });
         }
-        let none = if let Some((units, none)) = scan_units(value.as_bytes()) {
+        let none = if let Some((units, none)) = {
+            let bytes = value.as_bytes();
+            // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "None chooses validate_units_slow over the same already-owned immutable field value")]
+            scan_units(bytes)
+        } {
             validate_none_cardinality(units, none)?;
             none
         } else {
@@ -472,8 +489,11 @@ fn canonical_unit(bytes: &[u8]) -> Option<bool> {
 fn validate_accept_ranges(values: &FieldLines<'_>) -> Result<bool, DecodeError> {
     let mut repeated = values.repeated();
     let first = repeated.next().expect("untyped values always contain a field line");
+    let bytes = first.as_bytes();
     if repeated.next().is_none()
-        && let Some((units, none)) = scan_units(first.as_bytes())
+        && let Some((units, none)) =
+            // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "Declining this optional scan runs the complete repeated-line and comma-item validators over the identical values")]
+            scan_units(bytes)
     {
         validate_none_cardinality(units, none)?;
         return Ok(none);
@@ -486,7 +506,11 @@ fn validate_accept_ranges_repeated(values: &FieldLines<'_>) -> Result<bool, Deco
     let mut units = 0_usize;
     let mut none = false;
     for value in values.repeated() {
-        let Some((scanned, has_none)) = scan_units(value.as_bytes()) else {
+        let bytes = value.as_bytes();
+        let Some((scanned, has_none)) =
+            // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "None chooses validate_accept_ranges_slow, which validates and counts the same comma-separated token grammar")]
+            scan_units(bytes)
+        else {
             return validate_accept_ranges_slow(values);
         };
         units += scanned;
@@ -538,10 +562,14 @@ pub(super) fn validate_units_slow(bytes: &[u8]) -> Result<bool, DecodeError> {
 /// Returns `None` for anything unusual so the general implementation can
 /// decide between acceptance and the precise error it reports.
 pub(super) fn scan_units(bytes: &[u8]) -> Option<(usize, bool)> {
-    if bytes == b"bytes" {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The complete token-list scanner below computes the same one-unit non-none answer for bytes")]
+    bytes == b"bytes" {
         return Some((1, false));
     }
-    if bytes == b"none" {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The complete token-list scanner and is_none_unit below compute the same one-unit none answer")]
+    bytes == b"none" {
         return Some((1, true));
     }
     let mut rest = bytes;
@@ -549,12 +577,14 @@ pub(super) fn scan_units(bytes: &[u8]) -> Option<(usize, bool)> {
     let mut none = false;
     loop {
         while let [b' ' | b'\t', tail @ ..] = rest {
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             rest = tail;
         }
         let end = rest.iter().position(|byte| !TOKEN_BYTE[*byte as usize]).unwrap_or(rest.len());
         let (item, tail) = rest.split_at(end);
         rest = tail;
         while let [b' ' | b'\t', tail @ ..] = rest {
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             rest = tail;
         }
         if !item.is_empty() {
@@ -611,6 +641,34 @@ fn validate_range_unit(bytes: &[u8]) -> Result<(), DecodeError> {
 )]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn constructed_units_store_only_inter_unit_separators() {
+        for (units, expected) in [(vec!["items"], b"items".as_slice()), (vec!["items", "records"], b"items, records")] {
+            let value = super::AcceptRangesOwned::from_units(units).unwrap();
+            let stored: Vec<_> = value.values.as_ref().unwrap().iter().map(FieldValue::as_bytes).collect();
+            assert_eq!(stored, [expected]);
+        }
+    }
+
+    #[test]
+    fn gamma_nov6_none_unit_folds_each_ascii_case_bit() {
+        for bytes in [b"NONE", b"None", b"nOne", b"noNe", b"nonE"] {
+            assert!(super::is_none_unit(bytes), "{bytes:?}");
+        }
+        for bytes in [b"n/ne", b"no/e", b"nond", b"nnne"] {
+            assert!(!super::is_none_unit(bytes), "{bytes:?}");
+        }
+    }
+
+    #[test]
+    fn gamma_round2_slow_unit_validators_preserve_none_cardinality() {
+        for (wire, expected) in [(b"none".as_slice(), true), (b"bytes", false), (b"bytes,items", false)] {
+            assert_eq!(super::validate_units_slow(wire).unwrap(), expected);
+            let lines = crate::source::FieldLines::single(&crate::FieldName::AcceptRanges, wire);
+            assert_eq!(super::validate_accept_ranges_slow(&lines).unwrap(), expected);
+        }
+    }
+
     use super::{
         AcceptRanges, AcceptRangesOwned, accept_ranges_view, canonical_unit, is_none_unit, scan_units, validate_accept_ranges,
         validate_accept_ranges_slow, validate_none_cardinality, validate_units_slow,

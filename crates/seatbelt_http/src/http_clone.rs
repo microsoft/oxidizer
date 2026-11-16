@@ -35,6 +35,7 @@ impl HttpClone {
     /// Clone only safe methods (e.g. `GET`, `HEAD`, `OPTIONS`). This is the
     /// default.
     #[must_use]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "Derived Default selects the same fieldless SafeOnly variant.")]
     pub fn safe_only() -> Self {
         Self(Inner::SafeOnly)
     }

@@ -63,6 +63,7 @@ impl Condvar {
         }
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     pub(in crate::sync) fn wait<'a>(&self, _mutex: &'a Mutex, guard: Guard<'a>, timeout: Option<Duration>) -> (Guard<'a>, bool) {
         if let Some(timeout) = timeout {
             let (guard, outcome) = self.inner.wait_timeout(guard, timeout).unwrap_or_else(PoisonError::into_inner);

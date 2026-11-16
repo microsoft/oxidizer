@@ -82,6 +82,35 @@ use crate::discovery::Directory;
 use crate::monitor::{InstanceId, MonitorDescriptor, MonitorEndpoint, MonitorOwner};
 use crate::{Error, platform};
 
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct TestNativeSources {
+    entropy: fn(&mut [u8]) -> std_io::Result<()>,
+    directory: fn(&MonitorOwner) -> std_io::Result<platform::RegistryDirectory>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_NATIVE_SOURCES: std::cell::Cell<Option<TestNativeSources>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg_attr(all(coverage_nightly, windows), coverage(off))] // Windows OS entropy is replaced by controlled sources in unit tests.
+fn native_entropy(bytes: &mut [u8]) -> std_io::Result<()> {
+    #[cfg(test)]
+    if let Some(sources) = TEST_NATIVE_SOURCES.get() {
+        return (sources.entropy)(bytes);
+    }
+    getrandom::fill(bytes).map_err(std_io::Error::other)
+}
+
+fn native_registry_directory(owner: &MonitorOwner) -> std_io::Result<platform::RegistryDirectory> {
+    #[cfg(test)]
+    if let Some(sources) = TEST_NATIVE_SOURCES.get() {
+        return (sources.directory)(owner);
+    }
+    platform::current_directory(owner)
+}
+
 /// Cloneable monitor I/O capability. Construction performs no registry setup.
 ///
 /// This concrete type supplies built-in native and mocked implementations,
@@ -200,8 +229,9 @@ impl MonitorIo {
         self.checkpoint(IoOperation::InstanceId).map_err(Error::Io)?;
         match &self.core {
             Core::Native => {
+                // #[gamma::skip(literal.int_increment, reason = "getrandom fills all sixteen bytes or returns an error before the instance ID is constructed")]
                 let mut bytes = [0; 16];
-                getrandom::fill(&mut bytes).map_err(|source| Error::Io(std_io::Error::other(source)))?;
+                native_entropy(&mut bytes).map_err(Error::Io)?;
                 Ok(InstanceId::from_bytes(bytes))
             }
             #[cfg(any(test, feature = "test-util"))]
@@ -234,12 +264,16 @@ impl MonitorIo {
     /// Waits before retrying. Mocked waits yield execution without advancing the
     /// clock; only the controller advances mocked time.
     pub fn wait(&self, duration: Duration) {
-        self.record(IoOperation::Wait);
-        match &self.core {
+        self.wait_with(duration, |duration| match &self.core {
             Core::Native => std::thread::sleep(duration),
             #[cfg(any(test, feature = "test-util"))]
             Core::Mocked(runtime) => runtime.wait(),
-        }
+        });
+    }
+
+    fn wait_with(&self, duration: Duration, handoff: impl FnOnce(Duration)) {
+        self.record(IoOperation::Wait);
+        handoff(duration);
     }
 
     /// Publishes a descriptor by writing an exclusive temporary file and
@@ -356,7 +390,7 @@ impl MonitorIo {
         self.checkpoint(IoOperation::CreateDirectory)?;
         match &self.core {
             Core::Native => {
-                let directory = platform::current_directory(owner)?;
+                let directory = native_registry_directory(owner)?;
                 Ok((
                     directory.path,
                     DirectoryGuard::Native {
@@ -448,14 +482,43 @@ pub(crate) enum DirectoryGuard {
 }
 
 #[derive(Debug)]
-pub(crate) struct TemporaryDirectory(Option<tempfile::TempDir>);
+pub(crate) struct TemporaryDirectory<D: DirectoryCleanup = tempfile::TempDir>(Option<D>);
 
-impl Drop for TemporaryDirectory {
+pub(crate) trait DirectoryCleanup {
+    fn close(self) -> std_io::Result<()>;
+    fn report_failure(error: std_io::Error);
+}
+
+impl DirectoryCleanup for tempfile::TempDir {
+    // #[gamma::skip(fn_value.ok, reason = "native adapter: a valid TempDir and an observable explicit-close failure require filesystem resources; DirectoryCleanup ownership, close ordering, and error reporting are tested with injected directory owners, not claimed as coverage of this OS leaf")]
+    fn close(self) -> std_io::Result<()> {
+        self.close()
+    }
+
+    fn report_failure(error: std_io::Error) {
+        let report: fn(&std_io::Error) = report_directory_cleanup_failure;
+        #[cfg(test)]
+        let report = TEST_CLEANUP_REPORT.get().unwrap_or(report);
+        report(&error);
+    }
+}
+
+// #[gamma::skip(fn_value.unit, reason = "native diagnostic sink: this leaf writes to process stderr; injected DirectoryCleanup reporters test failure routing without redirecting process-wide stderr or spawning a process")]
+fn report_directory_cleanup_failure(error: &std_io::Error) {
+    eprintln!("seismograph: failed to remove temporary monitor registry: {error}");
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CLEANUP_REPORT: std::cell::Cell<Option<fn(&std_io::Error)>> = const { std::cell::Cell::new(None) };
+}
+
+impl<D: DirectoryCleanup> Drop for TemporaryDirectory<D> {
     fn drop(&mut self) {
         if let Some(directory) = self.0.take()
             && let Err(error) = directory.close()
         {
-            eprintln!("seismograph: failed to remove temporary monitor registry: {error}");
+            D::report_failure(error);
         }
     }
 }
@@ -485,6 +548,7 @@ impl Write for DescriptorFile {
         }
     }
 
+    // #[gamma::skip(fn_value.ok, reason = "std File::flush is an unbuffered no-op returning Ok, and mock::DescriptorFile::flush also unconditionally returns Ok; durability is a separate sync operation")]
     fn flush(&mut self) -> std_io::Result<()> {
         match self {
             Self::Native(file) => file.flush(),
@@ -522,7 +586,134 @@ impl std::error::Error for DescriptorCleanup {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn nov6_native_directory_cleanup_report_preserves_the_error_without_stderr_io() {
+        thread_local! {
+            static ERRORS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+        struct Restore(Option<fn(&std_io::Error)>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_CLEANUP_REPORT.set(self.0);
+            }
+        }
+        ERRORS.with_borrow_mut(Vec::clear);
+        let _restore = Restore(TEST_CLEANUP_REPORT.replace(Some(|error| {
+            ERRORS.with_borrow_mut(|errors| errors.push(error.to_string()));
+        })));
+        <tempfile::TempDir as DirectoryCleanup>::report_failure(std_io::Error::other("cleanup refused"));
+        assert_eq!(ERRORS.with_borrow(Clone::clone), ["cleanup refused"]);
+    }
+
     use super::*;
+
+    #[test]
+    fn november_actual_native_io_preserves_entropy_bytes_and_registry_errors_before_constructing_owners_without_native_observation() {
+        const BYTES: [u8; 16] = [3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59];
+        struct Reset(Option<TestNativeSources>);
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                TEST_NATIVE_SOURCES.set(self.0);
+            }
+        }
+        let reset = Reset(TEST_NATIVE_SOURCES.replace(Some(TestNativeSources {
+            entropy: |bytes| {
+                assert_eq!(bytes, &[0; 16]);
+                Err(std_io::Error::from_raw_os_error(5))
+            },
+            directory: |owner| {
+                assert_eq!(owner, &MonitorOwner::WindowsSid("in-memory-owner".into()));
+                Err(std_io::Error::from_raw_os_error(6))
+            },
+        })));
+        let native = MonitorIo::new_native();
+        let Error::Io(error) = native.instance_id().unwrap_err() else {
+            panic!("native entropy failures must remain I/O errors");
+        };
+        assert_eq!(error.raw_os_error(), Some(5));
+        let error = native
+            .current_directory(&MonitorOwner::WindowsSid("in-memory-owner".into()))
+            .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(6));
+        TEST_NATIVE_SOURCES.set(Some(TestNativeSources {
+            entropy: |bytes| {
+                assert_eq!(bytes, &[0; 16]);
+                bytes.copy_from_slice(&BYTES);
+                Ok(())
+            },
+            ..TEST_NATIVE_SOURCES.get().unwrap()
+        }));
+        assert_eq!(native.instance_id().unwrap(), InstanceId::from_bytes(BYTES));
+        drop(reset);
+    }
+
+    #[test]
+    fn november_actual_temporary_directory_drop_closes_owned_resources_once_and_reports_only_cleanup_failure_without_files() {
+        #[derive(Debug)]
+        struct Failure(std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>);
+        impl std::fmt::Display for Failure {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("injected directory cleanup failure")
+            }
+        }
+        impl std::error::Error for Failure {}
+
+        struct Owned {
+            events: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
+            failed: bool,
+        }
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                self.events.lock().unwrap().push("drop");
+            }
+        }
+        impl DirectoryCleanup for Owned {
+            fn close(self) -> std_io::Result<()> {
+                self.events.lock().unwrap().push("close");
+                if self.failed {
+                    Err(std_io::Error::other(Failure(std::sync::Arc::clone(&self.events))))
+                } else {
+                    Ok(())
+                }
+            }
+
+            fn report_failure(error: std_io::Error) {
+                assert_eq!(error.to_string(), "injected directory cleanup failure");
+                let failure = error.get_ref().unwrap().downcast_ref::<Failure>().unwrap();
+                failure.0.lock().unwrap().push("report");
+            }
+        }
+        for failed in [false, true] {
+            let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let directory = TemporaryDirectory(Some(Owned {
+                events: std::sync::Arc::clone(&events),
+                failed,
+            }));
+            drop(directory);
+            let expected = if failed {
+                &["close", "drop", "report"][..]
+            } else {
+                &["close", "drop"][..]
+            };
+            assert_eq!(*events.lock().unwrap(), expected);
+        }
+        drop(TemporaryDirectory::<Owned>(None));
+    }
+
+    #[test]
+    fn gamma_round2_wait_records_the_request_before_the_injected_handoff_without_advancing_time() {
+        let (io, control) = MonitorIo::new_mocked();
+        let before = io.instant();
+        assert_eq!(control.operations(), [IoOperation::Instant]);
+        let mut called = false;
+        io.wait_with(Duration::from_secs(37), |duration| {
+            called = true;
+            assert_eq!(duration, Duration::from_secs(37));
+            assert_eq!(control.operations(), [IoOperation::Instant, IoOperation::Wait]);
+        });
+        assert!(called);
+        assert_eq!(io.instant(), before);
+    }
 
     #[test]
     fn mocked_descriptor_flush_preserves_written_data() {

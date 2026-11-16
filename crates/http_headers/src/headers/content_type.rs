@@ -330,8 +330,10 @@ impl ContentTypeOwned {
     pub fn type_(&self) -> Result<&str, DecodeError> {
         component(
             self.value.as_bytes(),
-            usize::try_from(self.metadata.head().type_start).unwrap_or(usize::MAX)
-                ..usize::try_from(self.metadata.head().type_end).unwrap_or(usize::MAX),
+            (
+                // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "The initial media-type token always starts at byte zero in every validated metadata variant")]
+                widen_offset(self.metadata.head().type_start)
+            )..widen_offset(self.metadata.head().type_end),
         )
     }
 
@@ -352,8 +354,7 @@ impl ContentTypeOwned {
     pub fn subtype(&self) -> Result<&str, DecodeError> {
         component(
             self.value.as_bytes(),
-            usize::try_from(self.metadata.head().subtype_start).unwrap_or(usize::MAX)
-                ..usize::try_from(self.metadata.head().subtype_end).unwrap_or(usize::MAX),
+            widen_offset(self.metadata.head().subtype_start)..widen_offset(self.metadata.head().subtype_end),
         )
     }
 
@@ -445,8 +446,10 @@ impl<'a> ContentTypeView<'a> {
     pub fn type_(&self) -> Result<&'a str, DecodeError> {
         component(
             self.value.as_bytes(),
-            usize::try_from(self.metadata.head().type_start).unwrap_or(usize::MAX)
-                ..usize::try_from(self.metadata.head().type_end).unwrap_or(usize::MAX),
+            (
+                // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "The initial media-type token always starts at byte zero in every validated metadata variant")]
+                widen_offset(self.metadata.head().type_start)
+            )..widen_offset(self.metadata.head().type_end),
         )
     }
 
@@ -477,8 +480,7 @@ impl<'a> ContentTypeView<'a> {
     pub fn subtype(&self) -> Result<&'a str, DecodeError> {
         component(
             self.value.as_bytes(),
-            usize::try_from(self.metadata.head().subtype_start).unwrap_or(usize::MAX)
-                ..usize::try_from(self.metadata.head().subtype_end).unwrap_or(usize::MAX),
+            widen_offset(self.metadata.head().subtype_start)..widen_offset(self.metadata.head().subtype_end),
         )
     }
 
@@ -646,8 +648,8 @@ impl<'a> MediaTypeParameters<'a> {
     fn lazy(bytes: &'a [u8], head: ContentTypeHead) -> Self {
         Self {
             bytes,
-            scanner: ParameterScanner::new(bytes, usize::try_from(head.parameter_start).unwrap_or(usize::MAX)),
-            remaining: usize::try_from(head.parameter_count).unwrap_or(usize::MAX),
+            scanner: ParameterScanner::new(bytes, widen_offset(head.parameter_start)),
+            remaining: widen_offset(head.parameter_count),
         }
     }
 }
@@ -667,12 +669,17 @@ impl<'a> Iterator for MediaTypeParameters<'a> {
 }
 
 fn parse_metadata(bytes: &[u8]) -> Result<ContentTypeMetadata, DecodeError> {
-    if let Some(metadata) = common_metadata(bytes) {
+    if let Some(metadata) =
+        // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "Returning no cached metadata runs the complete prefix and parameter parser over the same validated wire representation")]
+        common_metadata(bytes)
+    {
         return Ok(metadata);
     }
     let mut head = parse_prefix(bytes)?;
-    for parameter in ParameterScanner::new(bytes, usize::try_from(head.parameter_start).unwrap_or(usize::MAX)) {
-        head.observe_parameter(&parameter?)?;
+    for parameter in ParameterScanner::new(bytes, widen_offset(head.parameter_start)) {
+        let parameter = parameter?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The count starts at zero and each validated parameter consumes at least three bytes with u32-bounded endpoints, so fewer than u32::MAX parameters can ever reach observe_parameter")]
+        head.observe_parameter(&parameter)?;
     }
     Ok(ContentTypeMetadata::Parsed(Box::new(head)))
 }
@@ -686,12 +693,15 @@ fn parse_metadata_with(bytes: &[u8], mode: crate::DecodeMode) -> Result<ContentT
         return Ok(metadata);
     }
     let mut head = parse_prefix_relaxed(bytes)?;
-    for parameter in ParameterScanner::new(bytes, usize::try_from(head.parameter_start).unwrap_or(usize::MAX)) {
-        head.observe_parameter(&parameter?)?;
+    for parameter in ParameterScanner::new(bytes, widen_offset(head.parameter_start)) {
+        let parameter = parameter?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The count starts at zero and each validated parameter consumes at least three bytes with u32-bounded endpoints, so fewer than u32::MAX parameters can ever reach observe_parameter")]
+        head.observe_parameter(&parameter)?;
     }
     Ok(ContentTypeMetadata::Parsed(Box::new(head)))
 }
 
+// #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The only fallible operations convert literal offsets at most 24 to u8; every recognized table entry fits")]
 fn common_metadata(bytes: &[u8]) -> Option<ContentTypeMetadata> {
     if bytes == b"application/json; charset=utf-8" {
         return Some(ContentTypeMetadata::ApplicationJsonUtf8);
@@ -743,6 +753,7 @@ fn common_parameter_head(
             },
             InlineParameter::EMPTY,
         ],
+        // #[gamma::skip(literal.int_decrement, tag = "equivalent", reason = "Leaving this one known parameter uncached only makes find_parameter use the complete scanner; parameter_count still preserves iteration and size hints")]
         inline_count: 1,
     }
 }
@@ -757,10 +768,12 @@ fn parse_prefix(bytes: &[u8]) -> Result<ContentTypeHead, DecodeError> {
     let subtype_range = take_token(bytes, &mut position)?;
     let parameter_start = position;
     Ok(ContentTypeHead {
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The first take_token starts at position zero and returns that unchanged start offset")]
         type_start: narrow_offset(type_range.start)?,
         type_end: narrow_offset(type_range.end)?,
         subtype_start: narrow_offset(subtype_range.start)?,
         subtype_end: narrow_offset(subtype_range.end)?,
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "parameter_start equals subtype_range.end, whose identical narrowing conversion succeeded immediately above")]
         parameter_start: narrow_offset(parameter_start)?,
         parameter_count: 0,
         inline_parameters: [InlineParameter::EMPTY; INLINE_PARAMETER_CAPACITY],
@@ -771,19 +784,23 @@ fn parse_prefix(bytes: &[u8]) -> Result<ContentTypeHead, DecodeError> {
 fn parse_prefix_relaxed(bytes: &[u8]) -> Result<ContentTypeHead, DecodeError> {
     let mut position = 0;
     let type_range = take_token(bytes, &mut position)?;
+    // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves skip_ows side effects and replaces its unit result with unit")]
     skip_ows(bytes, &mut position);
     if bytes.get(position) != Some(&b'/') {
         return Err(super::invalid_syntax(&FieldName::ContentType));
     }
     position += 1;
+    // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves skip_ows side effects and replaces its unit result with unit")]
     skip_ows(bytes, &mut position);
     let subtype_range = take_token(bytes, &mut position)?;
     let parameter_start = position;
     Ok(ContentTypeHead {
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The first take_token starts at position zero and returns that unchanged start offset")]
         type_start: narrow_offset(type_range.start)?,
         type_end: narrow_offset(type_range.end)?,
         subtype_start: narrow_offset(subtype_range.start)?,
         subtype_end: narrow_offset(subtype_range.end)?,
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "parameter_start equals subtype_range.end, whose identical narrowing conversion succeeded immediately above")]
         parameter_start: narrow_offset(parameter_start)?,
         parameter_count: 0,
         inline_parameters: [InlineParameter::EMPTY; INLINE_PARAMETER_CAPACITY],
@@ -793,7 +810,7 @@ fn parse_prefix_relaxed(bytes: &[u8]) -> Result<ContentTypeHead, DecodeError> {
 
 impl ContentTypeHead {
     fn observe_parameter(&mut self, parameter: &ParameterRange) -> Result<(), DecodeError> {
-        if usize::try_from(self.parameter_count).unwrap_or(usize::MAX) == usize::from(self.inline_count)
+        if widen_offset(self.parameter_count) == usize::from(self.inline_count)
             && usize::from(self.inline_count) < INLINE_PARAMETER_CAPACITY
             && let Some(compact) = InlineParameter::from_range(parameter)
         {
@@ -825,6 +842,7 @@ impl Iterator for ParameterScanner<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
+            // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves skip_ows side effects and replaces its unit result with unit")]
             skip_ows(self.bytes, &mut self.position);
             if self.position == self.bytes.len() {
                 return None;
@@ -833,7 +851,11 @@ impl Iterator for ParameterScanner<'_> {
                 self.position = self.bytes.len();
                 return Some(Err(super::invalid_syntax(&FieldName::ContentType)));
             }
-            self.position += 1;
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.position +=
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
+            // #[gamma::skip(call_result.default, tag = "equivalent", reason = "default_after preserves skip_ows side effects and replaces its unit result with unit")]
             skip_ows(self.bytes, &mut self.position);
             if self.position == self.bytes.len() || self.bytes.get(self.position) == Some(&b';') {
                 continue;
@@ -870,7 +892,10 @@ fn take_token(bytes: &[u8], position: &mut usize) -> Result<Range<usize>, Decode
         .get(*position)
         .is_some_and(|byte| TOKEN_BITS[usize::from(*byte >> 6)] & (1_u64 << (*byte & 63)) != 0)
     {
-        *position += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        *position +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
 
     if *position > start {
@@ -907,11 +932,15 @@ fn take_parameter_value(bytes: &[u8], position: &mut usize) -> Result<Range<usiz
     *position += 1;
     let mut escaped = false;
     while let Some(byte) = bytes.get(*position).copied() {
-        *position += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        *position +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
         if escaped {
             if !matches!(byte, b'\t' | b' '..=b'~' | 0x80..=0xff) {
                 return Err(super::invalid_syntax(&FieldName::ContentType));
             }
+            // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
             escaped = false;
         } else if byte == b'\\' {
             escaped = true;
@@ -926,7 +955,10 @@ fn take_parameter_value(bytes: &[u8], position: &mut usize) -> Result<Range<usiz
 
 fn skip_ows(bytes: &[u8], position: &mut usize) {
     while bytes.get(*position).is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
-        *position += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        *position +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
 }
 
@@ -950,13 +982,15 @@ fn find_parameter<'a>(bytes: &'a [u8], head: ContentTypeHead, name: &str) -> Res
             return Ok(Some(parameter.value));
         }
     }
-    if usize::try_from(head.parameter_count).unwrap_or(usize::MAX) <= usize::from(head.inline_count) {
+    if
+    // #[gamma::skip(cond.always_false, relational.le_to_lt, tag = "equivalent", reason = "When every parameter was already searched inline, rescanning and skipping exactly inline_count parameters yields no further items")]
+    widen_offset(head.parameter_count) <= usize::from(head.inline_count) {
         return Ok(None);
     }
-    for parameter in
-        ParameterScanner::new(bytes, usize::try_from(head.parameter_start).unwrap_or(usize::MAX)).skip(usize::from(head.inline_count))
-    {
-        let parameter = parameter_from_range(bytes, &parameter?)?;
+    for parameter in ParameterScanner::new(bytes, widen_offset(head.parameter_start)).skip(usize::from(head.inline_count)) {
+        let range = parameter?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "A successful ParameterScanner item has in-bounds u32 endpoints and an ASCII token name, so materializing its slices and UTF-8 name cannot fail")]
+        let parameter = parameter_from_range(bytes, &range)?;
         if validate::eq_ignore_ascii_case(parameter.name.as_bytes(), name.as_bytes()) {
             return Ok(Some(parameter.value));
         }
@@ -965,6 +999,11 @@ fn find_parameter<'a>(bytes: &'a [u8], head: ContentTypeHead, name: &str) -> Res
 }
 
 fn narrow_offset(offset: usize) -> Result<u32, DecodeError> {
+    #[cfg(test)]
+    if tests::FAIL_NARROW_OFFSET.get() == Some(offset) {
+        tests::FAIL_NARROW_OFFSET.set(None);
+        return Err(DecodeError::new(&FieldName::ContentType, DecodeErrorKind::InvalidNumber));
+    }
     u32::try_from(offset).map_err(|_overflow| DecodeError::new(&FieldName::ContentType, DecodeErrorKind::InvalidNumber))
 }
 
@@ -981,7 +1020,15 @@ fn narrow_parameter_range(name: Range<usize>, value: Range<usize>) -> Result<Par
 }
 
 fn widen_range(range: Range<u32>) -> Range<usize> {
-    usize::try_from(range.start).unwrap_or(usize::MAX)..usize::try_from(range.end).unwrap_or(usize::MAX)
+    widen_offset(range.start)..widen_offset(range.end)
+}
+
+#[inline]
+fn widen_offset(offset: u32) -> usize {
+    usize::try_from(offset).unwrap_or(
+        // #[gamma::skip(expr.decrement, tag = "equivalent", reason = "This fallback is unreachable: every u32 offset and count fits usize on supported 32-bit and 64-bit targets")]
+        usize::MAX,
+    )
 }
 
 fn parameter_from_inline(bytes: &[u8], range: InlineParameter) -> Result<MediaTypeParameterView<'_>, DecodeError> {
@@ -1000,7 +1047,62 @@ mod tests {
         reason = "tests classify parser outcomes without needing successful values"
     )]
 
+    std::thread_local! {
+        pub(super) static FAIL_NARROW_OFFSET: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    }
+
+    #[test]
+    fn gamma_afternoon_public_content_type_callers_propagate_each_narrowing_failure() {
+        use crate::Field;
+
+        for offset in [5, 6, 10] {
+            FAIL_NARROW_OFFSET.set(Some(offset));
+            let result = super::ContentTypeOwned::new("alpha", "beta");
+            let consumed = FAIL_NARROW_OFFSET.replace(None);
+            assert_eq!(consumed, None);
+            assert_eq!(result.unwrap_err().kind(), crate::DecodeErrorKind::InvalidNumber);
+        }
+        for (wire, mode, offsets) in [
+            ("alpha/beta", crate::DecodeMode::Strict, [5, 6, 10]),
+            ("alpha / beta", crate::DecodeMode::Relaxed, [5, 8, 12]),
+        ] {
+            for offset in offsets {
+                FAIL_NARROW_OFFSET.set(Some(offset));
+                let source = Source(crate::FieldValue::from_static(wire));
+                let result = super::ContentType::owned_with(&source, mode);
+                let consumed = FAIL_NARROW_OFFSET.replace(None);
+                assert_eq!(consumed, None, "{wire}/{offset}");
+                let error = result.unwrap_err();
+                assert_eq!(error.header(), &crate::FieldName::ContentType);
+                assert_eq!(error.kind(), crate::DecodeErrorKind::InvalidNumber);
+            }
+        }
+    }
+
     use std::slice;
+
+    #[test]
+    fn find_parameter_gamma_afternoon_propagates_corrupt_inline_and_lazy_metadata_errors() {
+        let bytes = b"a/b;p";
+        let mut head = super::parse_prefix(bytes).unwrap();
+        head.parameter_count = 1;
+        head.inline_count = 1;
+        head.inline_parameters[0] = super::InlineParameter {
+            name_start: 100,
+            name_end: 101,
+            value_start: 102,
+            value_end: 103,
+        };
+        assert_eq!(
+            super::find_parameter(bytes, head, "p").unwrap_err().kind(),
+            crate::DecodeErrorKind::InvalidSyntax
+        );
+        head.inline_count = 0;
+        assert_eq!(
+            super::find_parameter(bytes, head, "p").unwrap_err().kind(),
+            crate::DecodeErrorKind::InvalidSyntax
+        );
+    }
 
     use super::{
         ContentType, ContentTypeHead, ContentTypeMetadata, ContentTypeOwned, InlineParameter, ParameterRange, common_metadata, component,
@@ -1012,6 +1114,91 @@ mod tests {
     use crate::{DecodeErrorKind, DecodeMode, FieldName, FieldValue, TestSink};
 
     struct Source(FieldValue);
+
+    #[test]
+    fn gamma_round2_common_content_types_return_cached_metadata() {
+        for wire in [
+            b"application/json".as_slice(),
+            b"application/octet-stream",
+            b"text/html",
+            b"text/plain",
+            b"text/css",
+            b"application/javascript",
+            b"application/json; charset=utf-8",
+            b"text/html; charset=utf-8",
+        ] {
+            let metadata = super::common_metadata(wire).expect("these literals are recognized by the metadata cache itself");
+            let head = metadata.head();
+            let end = wire.iter().position(|byte| *byte == b';').unwrap_or(wire.len());
+            let slash = wire.iter().position(|byte| *byte == b'/').unwrap();
+            let slash = u32::try_from(slash).unwrap();
+            let end = u32::try_from(end).unwrap();
+            assert_eq!(
+                (head.type_start, head.type_end, head.subtype_start, head.subtype_end),
+                (0, slash, slash + 1, end)
+            );
+            assert_eq!(head.parameter_count, u32::from(wire.contains(&b';')));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_narrow_range_checks_the_end_without_allocating_payload() {
+        let overflow = usize::try_from(u32::MAX).unwrap().checked_add(1);
+        if let Some(overflow) = overflow {
+            assert_eq!(
+                super::narrow_range(0..overflow).unwrap_err().kind(),
+                crate::DecodeErrorKind::InvalidNumber
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_round2_parameter_scanner_errors_are_terminal_at_every_stage() {
+        for bytes in [
+            b"x".as_slice(),
+            b"xname=a",
+            b";@=a",
+            b";name",
+            b";name other=x",
+            b";name=",
+            b";name=@;next=x",
+            b";name=\"unterminated",
+        ] {
+            let mut scanner = super::ParameterScanner::new(bytes, 0);
+            assert!(scanner.next().unwrap().err().is_some(), "{bytes:?}");
+            assert!(scanner.next().is_none(), "{bytes:?}");
+            assert!(scanner.next().is_none(), "{bytes:?}");
+        }
+    }
+
+    #[test]
+    fn gamma_round2_inline_parameter_range_rejects_each_unrepresentable_endpoint() {
+        let overflow = u32::from(u16::MAX) + 1;
+        for range in [
+            ParameterRange {
+                name: 0..1,
+                value: overflow..overflow,
+            },
+            ParameterRange {
+                name: 0..1,
+                value: 2..overflow,
+            },
+        ] {
+            assert!(InlineParameter::from_range(&range).is_none());
+        }
+        let mut head = super::parse_prefix(b"a/b").unwrap();
+        head.observe_parameter(&ParameterRange {
+            name: 0..1,
+            value: overflow..overflow,
+        })
+        .unwrap();
+        head.observe_parameter(&ParameterRange { name: 0..1, value: 2..3 }).unwrap();
+        assert_eq!(head.parameter_count, 2);
+        assert_eq!(
+            head.inline_count, 0,
+            "an uncacheable first parameter must not shift later inline slots"
+        );
+    }
 
     impl FieldSource for Source {
         fn lines(&self, name: &'static FieldName) -> Option<FieldLines<'_>> {

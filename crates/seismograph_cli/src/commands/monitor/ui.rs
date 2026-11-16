@@ -1942,6 +1942,249 @@ fn recording_configuration_label(configuration: RecordingConfiguration) -> &'sta
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_survivor_missing_content_panes_keep_each_title_and_diagnostic() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let app = App::with_io(io);
+        let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+        let mut run = |kind| {
+            terminal
+                .draw(|frame| {
+                    let area = frame.area();
+                    let two = [Rect::new(0, 0, 80, 20), Rect::new(80, 0, 80, 20)];
+                    match kind {
+                        0 => draw_io(frame, &app.panels.rows, two, None, Some("specific source failure"), app.io_view),
+                        1 => draw_cache(frame, &app.panels.rows, two, None, Some("specific source failure"), app.cache_view),
+                        2 => draw_allocations(
+                            frame,
+                            &app.panels.rows,
+                            two,
+                            None,
+                            Some("specific source failure"),
+                            app.allocation_view,
+                        ),
+                        _ => draw_threads(
+                            frame,
+                            &app.panels.rows,
+                            [
+                                Rect::new(0, 0, 32, 20),
+                                Rect::new(32, 0, 32, 20),
+                                Rect::new(64, 0, 32, 20),
+                                Rect::new(96, 0, 32, 20),
+                                Rect::new(128, 0, 32, 20),
+                            ],
+                            None,
+                            Some("specific source failure"),
+                            app.thread_view,
+                        ),
+                    }
+                    assert_eq!(area.width, 160);
+                })
+                .unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+        };
+        for (kind, titles, diagnostic_count) in [
+            (0, &["I/O Resources", "Operations"][..], 2),
+            (1, &["Cache Tiers", "Outcomes"][..], 2),
+            (2, &["Allocation Hotspots", "Stack Trace"][..], 2),
+            (3, &["Threads", "Operations", "Related Threads", "Objects", "Stack Trace"][..], 5),
+        ] {
+            let text = run(kind);
+            for title in titles {
+                assert!(text.contains(title), "{title}: {text}");
+            }
+            assert_eq!(text.matches("specific source failure").count(), diagnostic_count);
+        }
+        assert_eq!(
+            io_resource_kind_label(seismograph::recorder::io::IoResourceKind::TcpStream),
+            "TCP stream"
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_capture_popup_spinner_uses_supplied_duration_and_clears_background() {
+        for (millis, marker) in [(149, "|"), (150, "/"), (300, "-"), (450, "\\")] {
+            let mut terminal = Terminal::new(TestBackend::new(80, 15)).unwrap();
+            terminal
+                .draw(|frame| {
+                    frame.render_widget(Paragraph::new("X".repeat(1200)), frame.area());
+                    App::draw_capture_popup(frame, Duration::from_millis(millis), CaptureStep::ALL[0]);
+                })
+                .unwrap();
+            let row = (0..80).map(|x| terminal.backend().buffer()[(x, 4)].symbol()).collect::<String>();
+            assert_eq!(terminal.backend().buffer()[(13, 4)].symbol(), marker, "{row}");
+            assert_ne!(terminal.backend().buffer()[(11, 9)].symbol(), "X");
+        }
+        let mut terminal = Terminal::new(TestBackend::new(80, 15)).unwrap();
+        terminal
+            .draw(|frame| App::draw_capture_popup(frame, Duration::MAX, CaptureStep::ALL[0]))
+            .unwrap();
+        assert_eq!(terminal.backend().buffer()[(13, 4)].symbol(), "\\");
+        for (height, phase_visible) in [(5, false), (6, true)] {
+            terminal = Terminal::new(TestBackend::new(80, height)).unwrap();
+            terminal
+                .draw(|frame| App::draw_capture_popup(frame, Duration::ZERO, CaptureStep::ALL[0]))
+                .unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>();
+            assert_eq!(text.contains("Phase 1 of"), phase_visible, "{height}: {text}");
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_info_unknown_configuration_keeps_identity_but_not_stale_statistics() {
+        let (io, _) = seismograph_protocol::io::MonitorIo::new_mocked();
+        let mut app = App::with_io(io);
+        let owner = seismograph_protocol::monitor::MonitorOwner::WindowsSid("S-1-5-21-1-2-3-1001".into());
+        let instance_id = seismograph_protocol::monitor::InstanceId::from_bytes([1; 16]);
+        let descriptor = seismograph_protocol::monitor::MonitorDescriptor {
+            name: "oracle-monitor".into(),
+            instance: Some("oracle-instance".into()),
+            process_id: 42,
+            instance_id,
+            endpoint: seismograph_protocol::monitor::MonitorEndpoint::for_instance(
+                std::path::Path::new(r"C:\registry"),
+                &owner,
+                42,
+                instance_id,
+            ),
+            owner,
+        };
+        app.screen = Screen::Connected {
+            descriptor,
+            recording: RecordingConfiguration::default(),
+            tab: MonitorTab::Info,
+            snapshot: None,
+        };
+        app.recorder_statistics = Some(RecorderStatistics {
+            thread_count: 17,
+            allocated_bytes: 987,
+            total_events: 21,
+            retained_events: 13,
+            lost_events: 8,
+            ..RecorderStatistics::default()
+        });
+        let mut terminal = Terminal::new(TestBackend::new(180, 50)).unwrap();
+        for unknown in [false, true] {
+            app.recording_unknown = unknown;
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            let output = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>();
+            assert!(output.contains("oracle-monitor"));
+            assert!(output.contains("oracle-instance"));
+            assert_eq!(
+                output.contains("Recording state UNKNOWN; waiting for authoritative server configuration."),
+                unknown
+            );
+            for label in ["PID", "OS owner", "Endpoint"] {
+                assert!(output.contains(label), "{label}");
+            }
+            assert_eq!(output.contains("Event ring buffer"), !unknown);
+            for label in [
+                "Telemetry threads",
+                "Telemetry memory total",
+                "Accepted telemetry events",
+                "Retained telemetry events",
+                "Overwritten telemetry events",
+            ] {
+                assert_eq!(output.contains(label), !unknown, "{label}: {output}");
+            }
+            if !unknown {
+                assert!(output.contains("17"));
+                assert!(output.contains("987 B"));
+                let positions = [
+                    "Telemetry threads",
+                    "Telemetry memory total",
+                    "Accepted telemetry events",
+                    "Retained telemetry events",
+                    "Overwritten telemetry events",
+                ]
+                .map(|label| output.find(label).unwrap());
+                assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+            }
+        }
+        app.screen = Screen::Offline {
+            path: "pending.seismograph".into(),
+            tab: MonitorTab::Io,
+            snapshot: None,
+        };
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let output = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(output.contains("Loading and decoding snapshot…"));
+        assert!(output.contains("Offline snapshot · read-only"));
+        for (height, row) in [(3, 2), (4, 3)] {
+            terminal = Terminal::new(TestBackend::new(80, height)).unwrap();
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            assert_eq!(terminal.backend().buffer()[(2, row)].symbol(), "O");
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_connected_footer_unknown_has_no_disabled_indicators() {
+        use super::{CaptureMode, Color, RecordingConfiguration, connected_footer};
+        let unknown = connected_footer(None, CaptureMode::Continue, Some("captured"), "pending");
+        assert_eq!(
+            &unknown.spans[..4].iter().map(|span| span.content.as_ref()).collect::<Vec<_>>(),
+            &[" F1", " help │", " Recording UNKNOWN: ", " │ pending │"]
+        );
+        assert!(!unknown.spans.iter().any(|span| span.style.fg == Some(Color::Red)));
+        assert_eq!(unknown.spans.last().unwrap().content, " captured");
+        let mut configuration = RecordingConfiguration::default();
+        configuration.allocations.enabled = true;
+        configuration.runtime_tasks.enabled = true;
+        let known = connected_footer(Some(configuration), CaptureMode::Continue, None, "done");
+        assert_eq!(known.spans[2].content, " A/E/X/R/I/C: ");
+        assert_eq!(
+            known.spans[3..9].iter().map(|span| span.content.as_ref()).collect::<String>(),
+            "A--R--"
+        );
+        assert_eq!(known.spans[3].style.fg, Some(Color::Green));
+        assert_eq!(known.spans[4].style.fg, Some(Color::Red));
+        assert_eq!(known.spans[9].content, " │ done │");
+    }
+
+    #[test]
+    fn gamma_survivor_duration_units_change_at_exact_thresholds() {
+        for (nanos, expected) in [
+            (0, "0ns"),
+            (999, "999ns"),
+            (1000, "1.00us"),
+            (1001, "1.00us"),
+            (1019, "1.01us"),
+            (999_999, "999.99us"),
+            (1_000_000, "1.00ms"),
+            (1_000_001, "1.00ms"),
+            (1_009_999, "1.00ms"),
+            (999_999_999, "999.99ms"),
+            (1_000_000_000, "1.00s"),
+            (1_009_999_999, "1.00s"),
+        ] {
+            assert_eq!(super::format_runtime_duration(nanos), expected, "{nanos}");
+        }
+    }
+
     use std::time::SystemTime;
 
     use ratatui::Terminal;

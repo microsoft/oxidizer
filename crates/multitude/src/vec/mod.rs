@@ -45,6 +45,92 @@ use crate::internal::arena_buf::ArenaBuf;
 use crate::internal::constants::buffer_freezable;
 use crate::{AllocError, Arena};
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn gamma_nov6_local_growth_preserves_exact_capacity_and_the_current_chunk() {
+        #[repr(align(32768))]
+        struct Wide {
+            _value: u8,
+        }
+
+        assert!(!buffer_freezable::<Wide>());
+        let arena = Arena::builder().max_normal_alloc(60 * 1024).build();
+        arena.refill(60 * 1024).unwrap();
+        let marker = arena.alloc(1_u8);
+        let next = core::ptr::from_ref(&*marker).addr() + 1;
+        let expected = (next + mem::align_of::<Wide>() - 1) & !(mem::align_of::<Wide>() - 1);
+        let chunk = arena.current().chunk_ptr();
+        assert!(chunk.is_some());
+        let mut values = arena.alloc_vec::<Wide>();
+        values.try_grow_to(1).unwrap();
+        assert_eq!(values.capacity(), 1);
+        assert!(!values.buf.has_freeze_prefix());
+        assert_eq!(values.as_ptr().addr(), expected);
+        assert_eq!(arena.current().chunk_ptr(), chunk);
+    }
+
+    #[test]
+    fn gamma_survivor_vector_iterator_lower_bound_reserves_exact_target() {
+        let arena = Arena::new();
+        let mut owned = arena.alloc_vec::<u8>();
+        owned.extend([1, 2, 3, 4, 5]);
+        assert_eq!(owned.buf.cap(), 5);
+        assert_eq!(owned.as_slice(), &[1, 2, 3, 4, 5]);
+        let mut borrowed = arena.alloc_vec::<u8>();
+        borrowed.extend([1_u8, 2, 3, 4, 5].iter());
+        assert_eq!(borrowed.buf.cap(), 5);
+        assert_eq!(borrowed.as_slice(), &[1, 2, 3, 4, 5]);
+        let mut checked = arena.alloc_vec::<u8>();
+        checked.try_extend_from_slice([1, 2, 3, 4, 5]).unwrap();
+        assert_eq!(checked.buf.cap(), 5);
+        assert_eq!(checked.as_slice(), &[1, 2, 3, 4, 5]);
+    }
+
+    #[cfg(feature = "stats")]
+    #[test]
+    fn gamma_survivor_vector_reclaim_exact_capacity_and_failure_state() {
+        let arena = Arena::builder().with_capacity(4096).build();
+        let mut values = arena.alloc_vec_with_capacity::<u64>(8);
+        values.extend_from_slice([1, 2, 3]);
+        let before = arena.current().wasted_tail_for_stats();
+        assert!(!values.reclaim_capacity_tail(8));
+        assert!(!values.reclaim_capacity_tail(9));
+        assert_eq!(values.capacity(), 8);
+        assert_eq!(arena.current().wasted_tail_for_stats(), before);
+        assert!(values.reclaim_capacity_tail(5));
+        assert_eq!(values.capacity(), 5);
+        assert_eq!(
+            arena.current().wasted_tail_for_stats(),
+            before + u32::try_from(3 * mem::size_of::<u64>()).unwrap()
+        );
+        assert_eq!(values.as_slice(), &[1, 2, 3]);
+        let _ = arena.alloc(7_u8);
+        let before = arena.current().wasted_tail_for_stats();
+        assert!(!values.reclaim_capacity_tail(3));
+        assert_eq!(values.capacity(), 5);
+        assert_eq!(arena.current().wasted_tail_for_stats(), before);
+        assert_eq!(values.as_slice(), &[1, 2, 3]);
+
+        let mut zero = arena.alloc_vec::<()>();
+        zero.push(());
+        assert!(!zero.reclaim_capacity_tail(0));
+        assert_eq!(zero.capacity(), usize::MAX);
+        assert_eq!(zero.len(), 1);
+
+        let small = Arena::builder().max_normal_alloc(4096).build();
+        let mut oversized = small.alloc_vec_with_capacity::<u8>(8192);
+        oversized.extend_from_slice([4, 5]);
+        let before = small.current().wasted_tail_for_stats();
+        assert!(!oversized.reclaim_capacity_tail(2));
+        assert_eq!(oversized.capacity(), 8192);
+        assert_eq!(oversized.as_slice(), &[4, 5]);
+        assert_eq!(small.current().wasted_tail_for_stats(), before);
+    }
+}
+
 mod basic;
 mod collect_in;
 mod drain;
@@ -148,7 +234,9 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         let old_cap = self.buf.cap();
         // Fast path: if our storage sits at the chunk's bump cursor and the
         // chunk has room, extend it in place with no copy and no relocation.
-        if old_cap > 0 {
+        if
+        // #[gamma::skip(cond.always_true, relational.gt_to_ge, reason = "An empty non-ZST buffer uses the dangling element-alignment address below CHUNK_ALIGN, while every live chunk cursor is at or above its nonnull CHUNK_ALIGN-aligned base; the extra in-place-growth attempt therefore returns false without mutation")]
+        old_cap > 0 {
             let elem = mem::size_of::<T>();
             let base = self.buf.as_ptr() as usize;
             if let (Some(old_bytes), Some(new_bytes)) = (old_cap.checked_mul(elem), new_cap.checked_mul(elem))

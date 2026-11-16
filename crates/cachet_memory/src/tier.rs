@@ -22,6 +22,22 @@ use thread_aware::ThreadAware;
 
 use crate::builder::InMemoryCacheBuilder;
 
+fn configure_initial_capacity<B>(builder: B, capacity: Option<usize>, configure: impl FnOnce(B, usize) -> B) -> B {
+    if let Some(capacity) = capacity {
+        configure(builder, capacity)
+    } else {
+        builder
+    }
+}
+
+fn configure_removal_listener<B>(builder: B, has_value_listener: bool, has_removal_observers: bool, configure: impl FnOnce(B) -> B) -> B {
+    if has_value_listener || has_removal_observers {
+        configure(builder)
+    } else {
+        builder
+    }
+}
+
 /// A concurrent in-memory cache tier.
 ///
 /// This cache provides:
@@ -149,9 +165,10 @@ where
             moka_builder = moka_builder.max_capacity(capacity);
         }
 
-        if let Some(capacity) = builder.initial_capacity {
-            moka_builder = moka_builder.initial_capacity(capacity);
-        }
+        // #[gamma::skip(stmt.delete_assign, tag = "equivalent", reason = "Initial capacity only reserves storage; omitting the allocation hint leaves the cache's contents, limits, and expiration policy unchanged.")]
+        moka_builder = configure_initial_capacity(moka_builder, builder.initial_capacity, |builder, capacity| {
+            builder.initial_capacity(capacity)
+        });
 
         if let Some(ttl) = builder.time_to_live {
             moka_builder = moka_builder.time_to_live(ttl);
@@ -167,8 +184,8 @@ where
 
         let value_listener = builder.eviction_listener;
         let removal_observers = builder.removal_observers;
-        if value_listener.is_some() || !removal_observers.is_empty() {
-            moka_builder = moka_builder.eviction_listener(move |key, entry: CacheEntry<V>, moka_cause| {
+        moka_builder = configure_removal_listener(moka_builder, value_listener.is_some(), !removal_observers.is_empty(), |builder| {
+            builder.eviction_listener(move |key, entry: CacheEntry<V>, moka_cause| {
                 let cause = crate::notification::from_moka(moka_cause);
                 for observer in &removal_observers {
                     observer(cause);
@@ -176,8 +193,8 @@ where
                 if let Some(listener) = &value_listener {
                     listener(key, entry.into_value(), cause);
                 }
-            });
-        }
+            })
+        });
 
         Self {
             inner: Arc::from_unaware(
@@ -227,6 +244,7 @@ impl<K, V> Expiry<K, CacheEntry<V>> for EntryExpiry {
         value.ttl()
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The only defaultable argument is the unused previous-expiry duration; expiration is recomputed exclusively from value.ttl().")]
     fn expire_after_update(
         &self,
         _key: &K,
@@ -240,6 +258,70 @@ impl<K, V> Expiry<K, CacheEntry<V>> for EntryExpiry {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_optional_capacity_configuration_forwards_the_exact_request_and_skips_an_absent_one() {
+        for requested in [None, Some(17), Some(131)] {
+            let mut capacities = Vec::new();
+            let result = super::configure_initial_capacity(43, requested, |builder, capacity| {
+                capacities.push(capacity);
+                assert_eq!(builder, 43);
+                47
+            });
+            assert_eq!(capacities, requested.into_iter().collect::<Vec<_>>());
+            assert_eq!(result, if requested.is_some() { 47 } else { 43 });
+        }
+    }
+
+    #[test]
+    fn gamma_round2_absent_removal_observers_do_not_register_an_empty_listener() {
+        assert_eq!(
+            super::configure_removal_listener(43, false, false, |_| panic!(
+                "no callback was requested, so no listener may be registered"
+            )),
+            43
+        );
+        let mut registrations = 0;
+        for (has_listener, has_observers) in [(true, false), (false, true), (true, true)] {
+            assert_eq!(
+                super::configure_removal_listener(43, has_listener, has_observers, |builder| {
+                    registrations += 1;
+                    assert_eq!(builder, 43);
+                    47
+                }),
+                47
+            );
+        }
+        assert_eq!(registrations, 3);
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "native tests cover backing cache construction; crossbeam-epoch violates Stacked Borrows"
+    )]
+    fn gamma_round2_builder_name_reaches_the_backing_cache() {
+        let cache = super::InMemoryCache::<u32, u32>::builder()
+            .name("round2 named cache")
+            .build_unchecked();
+        assert_eq!(cache.inner.name(), Some("round2 named cache"));
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore = "native tests cover cache removal; crossbeam-epoch violates Stacked Borrows")]
+    async fn gamma_round2_observer_without_value_listener_receives_explicit_removal() {
+        use std::sync::{Arc, Mutex};
+
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&observed);
+        let cache = super::InMemoryCache::<u32, u32>::builder()
+            .with_removal_observer(move |cause| captured.lock().unwrap().push(cause))
+            .build_unchecked();
+        cache.insert(1, cachet_tier::CacheEntry::new(53)).await.unwrap();
+        cache.invalidate(&1).await.unwrap();
+        cache.inner.run_pending_tasks().await;
+        assert_eq!(*observed.lock().unwrap(), [crate::RemovalCause::Explicit]);
+    }
+
     use std::time::SystemTime;
 
     use super::*;

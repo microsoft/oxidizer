@@ -8,8 +8,6 @@ use super::TaskInfo;
 use crate::runtime::shutdown::Shutdown;
 #[cfg(feature = "monitor")]
 use crate::runtime::shutdown::ShutdownState;
-#[cfg(feature = "monitor")]
-use crate::runtime::worker::blocking::PanicPolicy;
 use crate::task::preparation::BlockingTask;
 
 pub(crate) enum BlockingJob {
@@ -154,10 +152,7 @@ where
     fn run(&self) {
         let task = std::mem::replace(
             &mut *self.task.lock().expect("taking a blocking callback does not execute user code"),
-            BlockingTask {
-                pending: None,
-                panic_policy: PanicPolicy::Ignore,
-            },
+            BlockingTask { pending: None },
         );
         task.run(BlockingTaskEvents {
             info: Some(&self.info),

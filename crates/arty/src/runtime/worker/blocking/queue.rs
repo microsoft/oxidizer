@@ -334,7 +334,6 @@ mod tests {
             let (body, handle) = crate::task::preparation::prepare_blocking(
                 &pool,
                 move || drop(capture),
-                crate::runtime::worker::blocking::PanicPolicy::Ignore,
                 queue.monitoring.task::<()>(&crate::runtime::shutdown::Shutdown::default()),
             );
             assert!(queue.push(QueuedJob { body, shutdown: None }));
@@ -381,7 +380,6 @@ mod tests {
         let (body, handle) = crate::task::preparation::prepare_blocking(
             &pool,
             move || drop(capture),
-            crate::runtime::worker::blocking::PanicPolicy::Ignore,
             queue.monitoring.task::<()>(&crate::runtime::shutdown::Shutdown::default()),
         );
         assert!(queue.push(QueuedJob { body, shutdown: None }));

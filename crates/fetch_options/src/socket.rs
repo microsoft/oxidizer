@@ -3,12 +3,8 @@
 
 //! Socket-level tuning requests for outbound TCP connections.
 //!
-//! [`SocketOptions`] requests `TCP_NODELAY` and kernel send/receive buffer overrides. `None`
-//! requests no override; the transport and its lower layers choose the effective behavior.
-//!
-//! # Contents
-//!
-//! - [`SocketOptions`] - requested socket overrides.
+//! [`SocketOptions`] requests `TCP_NODELAY` and kernel buffer overrides. `None`
+//! lets the transport and its lower layers choose the value.
 //!
 //! # Example
 //!
@@ -20,16 +16,10 @@
 //!     .send_buffer_size(256 * 1024);
 //! ```
 //!
-//! # When to use
-//!
-//! Use these knobs for latency-sensitive small writes or high-throughput streaming connections.
-//!
-//! # Relationship to other modules
-//!
-//! Socket-owning transports consume [`SocketOptions`] alongside their transport-specific
-//! configuration. [`Http2Options`][crate::Http2Options] configures the protocol layer instead.
+//! A transport that owns sockets reads [`SocketOptions`].
+//! [`Http2Options`][crate::Http2Options] configures the protocol layer.
 
-/// Requested socket-level settings for outbound `TCP` connections.
+/// Requests socket settings for outbound `TCP` connections.
 ///
 /// Each field defaults to `None`, which requests no override from the transport.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -38,16 +28,16 @@ pub struct SocketOptions {
     /// Whether the Nagle algorithm is disabled (`TCP_NODELAY`).
     ///
     /// `Some(true)` requests immediate small writes at the cost of extra packets.
-    /// `None` requests no override; the transport's lower layer chooses the effective value.
+    /// `None` requests no override. The lower transport layer chooses the value.
     pub no_delay: Option<bool>,
     /// Size of the kernel receive buffer (`SO_RCVBUF`), in bytes.
     ///
-    /// `None` requests no override. The transport and kernel may accept, adjust, or reject the
+    /// `None` requests no override. The transport and kernel can accept, adjust, or reject the
     /// requested value.
     pub receive_buffer_size: Option<u32>,
     /// Size of the kernel send buffer (`SO_SNDBUF`), in bytes.
     ///
-    /// `None` requests no override. The transport and kernel may accept, adjust, or reject the
+    /// `None` requests no override. The transport and kernel can accept, adjust, or reject the
     /// requested value.
     pub send_buffer_size: Option<u32>,
 }
@@ -55,7 +45,7 @@ pub struct SocketOptions {
 impl SocketOptions {
     /// Sets whether the Nagle algorithm is disabled on connected sockets.
     ///
-    /// The default is `None`, which requests no override from the transport.
+    /// The default is `None`, which requests no override.
     ///
     /// # Examples
     ///
@@ -73,7 +63,7 @@ impl SocketOptions {
 
     /// Sets the kernel receive buffer size, in bytes.
     ///
-    /// The default is `None`, which requests no override. The transport and kernel may accept,
+    /// The default is `None`, which requests no override. The transport and kernel can accept,
     /// adjust, or reject the requested value.
     ///
     /// # Examples
@@ -92,7 +82,7 @@ impl SocketOptions {
 
     /// Sets the kernel send buffer size, in bytes.
     ///
-    /// The default is `None`, which requests no override. The transport and kernel may accept,
+    /// The default is `None`, which requests no override. The transport and kernel can accept,
     /// adjust, or reject the requested value.
     ///
     /// # Examples

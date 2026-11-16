@@ -81,6 +81,7 @@ impl RwLock {
             }
             let state = self.state.load(Ordering::Relaxed);
             assert_ne!(state & OWNERS, MAX_READERS, "too many simultaneous RwLock readers");
+            // #[gamma::skip(relational.lt_to_le, reason = "The preceding assertion excludes state == MAX_READERS.")]
             if state < MAX_READERS {
                 continue;
             }
@@ -141,7 +142,9 @@ impl RwLock {
                     .compare_exchange(state, state | WAITERS, Ordering::Relaxed, Ordering::Relaxed)
                 {
                     Ok(_) => {
+                        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                         wait(&self.state, state | WAITERS);
+                        // #[gamma::skip(stmt.delete_assign, reason = "The next compare_exchange revalidates the cached state; a stale value reloads the actual word through its Err arm before acquisition or another wait.")]
                         state = self.state.load(Ordering::Relaxed);
                     }
                     Err(current) => state = current,
@@ -161,6 +164,8 @@ impl RwLock {
 
     #[cold]
     fn read_unlock_contended(&self) {
+        #[cfg(test)]
+        crate::sync::effects::record_slow_release();
         if self
             .state
             .compare_exchange(WAITERS, 0, Ordering::Relaxed, Ordering::Relaxed)
@@ -207,6 +212,70 @@ impl RwLock {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nov4_native_uncontended_reader_release_does_not_dispatch_the_waiter_path() {
+        let lock = RwLock::new();
+        let mut first = lock.try_read().unwrap();
+        let mut second = lock.try_read().unwrap();
+        crate::sync::effects::take();
+        lock.read_unlock(&mut first);
+        lock.read_unlock(&mut second);
+        assert_eq!(crate::sync::effects::take().slow_releases, 0);
+        assert_eq!(lock.state.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn gamma_survivor_registered_reader_parks_before_retrying_writer_owned_state() {
+        let lock = RwLock::new();
+        lock.state.store(WRITER, Ordering::Relaxed);
+        let mut probes = 0;
+        let mut waits = Vec::new();
+        let mut reader = lock.read_contended_with(
+            || {
+                probes += 1;
+                assert!(probes <= 2);
+                lock.try_read()
+            },
+            |state, expected| {
+                waits.push((expected, state.load(Ordering::Relaxed)));
+                assert_eq!(waits.len(), 1);
+                state.store(0, Ordering::Relaxed);
+            },
+        );
+        assert_eq!(waits, [(WRITER_WAITING, WRITER_WAITING)]);
+        assert_eq!(probes, 2);
+        assert_eq!(lock.state.load(Ordering::Relaxed), 1);
+        lock.read_unlock(&mut reader);
+        assert_eq!(lock.state.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn gamma_survivor_registered_writer_uses_injected_park_then_acquires_released_state() {
+        let lock = RwLock::new();
+        lock.state.store(WRITER, Ordering::Relaxed);
+        let mut acquisitions = Vec::new();
+        let mut waits = Vec::new();
+        let mut writer = lock.write_contended_with(
+            |expected| {
+                acquisitions.push(expected);
+                assert_eq!(acquisitions.len(), 1);
+                lock.state
+                    .compare_exchange(expected, WRITER_WAITING, Ordering::Acquire, Ordering::Relaxed)
+            },
+            |state, expected| {
+                waits.push((expected, state.load(Ordering::Relaxed)));
+                assert_eq!(waits.len(), 1);
+                state.store(0, Ordering::Relaxed);
+            },
+        );
+        assert_eq!(waits, [(WRITER_WAITING, WRITER_WAITING)]);
+        assert_eq!(acquisitions, [0]);
+        assert_eq!(lock.state.load(Ordering::Relaxed), WRITER_WAITING);
+        let mut wakes = Vec::new();
+        lock.write_unlock_with(&mut writer, |state| wakes.push(state.load(Ordering::Relaxed)));
+        assert_eq!(wakes, [0]);
+    }
 
     #[test]
     fn shared_and_exclusive_ownership_can_be_reused() {

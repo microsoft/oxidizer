@@ -768,6 +768,7 @@ fn capture_signature(template: &PathTemplate<'_>) -> (Vec<Vec<String>>, Vec<bool
         match segment {
             Segment::Variable(variable) => {
                 let segments = variable.segments();
+                // #[gamma::skip(iter.any_to_all, reason = "The unchanged left alternative handles every non-singleton; any and all are identical for the remaining exactly-one-segment case")]
                 let is_reserved = segments.len() != 1 || segments.clone().any(|segment| matches!(segment, Segment::Rest));
                 paths.push(variable.field_path().split('.').map(str::to_owned).collect());
                 reserved.push(is_reserved);
@@ -966,9 +967,13 @@ fn qualified_type_path(path: &str, module: &str) -> TokenStream {
         module.split('.').collect()
     };
     let mut remainder = trimmed;
-    while let Some(rest) = remainder.strip_prefix("super::") {
+    while let Some(rest) = remainder.strip_prefix(
+        // #[gamma::skip(literal.str_to_empty, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        "super::",
+    ) {
         // Each `super::` steps up one package segment toward the common root.
         segments.pop();
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         remainder = rest;
     }
 
@@ -1168,6 +1173,19 @@ fn bridge_type_path(path: &str) -> TokenStream {
     type_path(&format!("super::{trimmed}"))
 }
 
+#[test]
+fn gamma_round2_bridge_paths_preserve_macro_roots_and_leading_space() {
+    for (input, expected) in [
+        ("  $crate::pb::Input", "$ crate :: pb :: Input"),
+        ("  crate::pb::Input", "crate :: pb :: Input"),
+        ("  ::external::Input", ":: external :: Input"),
+        ("  self::Input", "super :: Input"),
+        ("  Input", "super :: Input"),
+    ] {
+        assert_eq!(bridge_type_path(input).to_string(), expected);
+    }
+}
+
 /// Parses a fully-qualified Rust type path string into tokens, falling back to a
 /// `compile_error!` invocation if the string is not a valid token sequence.
 fn type_path(path: &str) -> TokenStream {
@@ -1223,6 +1241,45 @@ mod tests {
 
     fn rule(rpc: &str, http: HttpMethod, pattern: &str) -> HttpRule {
         HttpRule::new(rpc, http, template(pattern))
+    }
+
+    #[test]
+    fn gamma_round2_affix_signatures_keep_each_dotted_field_component() {
+        let parsed = PathTemplate::parse("/prefix-{outer.inner}.suffix/{tail=**}", Grammar::default().with_segment_affixes()).unwrap();
+        assert_eq!(
+            capture_signature(&parsed),
+            (
+                vec![vec!["outer".to_owned(), "inner".to_owned()], vec!["tail".to_owned()]],
+                vec![false, true]
+            )
+        );
+    }
+
+    #[test]
+    fn gamma_round2_captureless_variants_and_serviceless_transcoders_remain_unit_shaped() {
+        let variant = RouteVariant {
+            name: "Fetch".to_owned(),
+            signature: vec![],
+            enum_types: vec![],
+            reserved_expansions: vec![],
+            body: RequestBody::None,
+            response_body: ResponseBody::Whole,
+            response_body_default: None,
+        };
+        assert_eq!(variant_pattern(&variant).to_string(), "Route :: Fetch");
+        let output = generate_transcoder(&[]);
+        let file = syn::parse2::<syn::File>(output).unwrap();
+        let mut implementations = 0;
+        for item in file.items {
+            if let syn::Item::Impl(item) = item
+                && matches!(&*item.self_ty, syn::Type::Path(path) if path.path.is_ident("Transcoder"))
+            {
+                assert!(item.generics.params.is_empty());
+                assert!(item.generics.where_clause.is_none());
+                implementations += 1;
+            }
+        }
+        assert_eq!(implementations, 2);
     }
 
     #[test]

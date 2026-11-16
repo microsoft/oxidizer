@@ -16,7 +16,7 @@ use arty_executor::{CycleOutcome, Executor, TaskPlacement};
 use observed::Sink;
 use observed::enrichment::{Enrichment, EnrichmentEntry};
 
-use crate::support::{TaskBuilderExt as _, TaskOutcome};
+use super::support::{TaskBuilderExt as _, TaskOutcome};
 
 struct CountingWake(AtomicUsize);
 

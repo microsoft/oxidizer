@@ -23,6 +23,7 @@ pub(crate) fn push_string(bytes: &mut Vec<u8>, value: &str) -> Result<(), Error>
 
 pub(crate) fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    // #[gamma::skip(arith.mul_to_add, arith.mul_to_div, literal.int_decrement, literal.int_increment, literal.int_to_zero, reason = "this is only a capacity hint; push grows the string without changing its bytes")]
     let mut output = String::with_capacity(bytes.len() * 2);
     for &byte in bytes {
         output.push(DIGITS[(byte >> 4) as usize] as char);
@@ -89,6 +90,20 @@ impl<'a> SliceReader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nov6_u32_reader_preserves_each_distinct_byte_and_advances_exactly_four_bytes() {
+        let mut reader = SliceReader::new(&[0x12, 0x34, 0x56, 0x78, 0x9a]);
+        assert_eq!(reader.u32().unwrap(), 0x7856_3412);
+        assert_eq!(reader.u8().unwrap(), 0x9a);
+        reader.finish().unwrap();
+        for length in 0..4 {
+            assert!(matches!(
+                SliceReader::new(&[0x12, 0x34, 0x56][..length]).u32(),
+                Err(Error::InvalidDescriptor)
+            ));
+        }
+    }
 
     #[test]
     fn hexadecimal_encoding_uses_lowercase_digits() {

@@ -41,7 +41,87 @@ pub(crate) struct ArtifactDirectory {
     run: PathBuf,
     criterion: PathBuf,
     gungraun: PathBuf,
-    _active_locks: Vec<File>,
+    _active_locks: Vec<ActiveRunLock>,
+}
+
+#[derive(Debug)]
+enum ActiveRunLock {
+    Native {
+        _file: File,
+    },
+    #[cfg(test)]
+    InMemory,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct TestArtifactSources {
+    name: fn() -> Result<String, Error>,
+    create: fn(&Path) -> Result<(), Error>,
+    mark: fn(&Path) -> Result<ActiveRunLock, Error>,
+    prune: fn(&Path, &Path) -> Result<(), Error>,
+    write: fn(&Path, serde_json::Value) -> Result<(), Error>,
+    find: fn(&Path) -> Result<Vec<PathBuf>, Error>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_ARTIFACT_SOURCES: std::cell::Cell<Option<TestArtifactSources>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) fn with_in_memory_artifact_run<R>(run: impl FnOnce() -> R) -> R {
+    struct Restore(Option<TestArtifactSources>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_ARTIFACT_SOURCES.set(self.0);
+        }
+    }
+    let _restore = Restore(TEST_ARTIFACT_SOURCES.replace(Some(TestArtifactSources {
+        name: || Ok("in-memory-run".to_owned()),
+        create: |_| Ok(()),
+        mark: |_| Ok(ActiveRunLock::InMemory),
+        prune: |_, _| Ok(()),
+        write: |_, _| Ok(()),
+        find: |_| Ok(Vec::new()),
+    })));
+    run()
+}
+
+#[cfg(test)]
+pub(super) fn with_in_memory_artifact_creation_failure<R>(run: impl FnOnce() -> R) -> R {
+    with_in_memory_artifact_run(|| {
+        let mut sources = TEST_ARTIFACT_SOURCES
+            .get()
+            .expect("the enclosing artifact fixture installs its native observation source");
+        sources.name = || Err(Error::Metadata("injected artifact creation failure".to_owned()));
+        TEST_ARTIFACT_SOURCES.set(Some(sources));
+        run()
+    })
+}
+
+#[cfg(test)]
+pub(super) fn with_in_memory_json_sink<R>(write: fn(&Path, serde_json::Value) -> Result<(), Error>, run: impl FnOnce() -> R) -> R {
+    with_in_memory_artifact_run(|| {
+        let mut sources = TEST_ARTIFACT_SOURCES
+            .get()
+            .expect("the enclosing artifact fixture installs its native observation source");
+        sources.write = write;
+        TEST_ARTIFACT_SOURCES.set(Some(sources));
+        run()
+    })
+}
+
+#[cfg(test)]
+pub(super) fn with_in_memory_artifact_listing<R>(find: fn(&Path) -> Result<Vec<PathBuf>, Error>, run: impl FnOnce() -> R) -> R {
+    with_in_memory_artifact_run(|| {
+        let mut sources = TEST_ARTIFACT_SOURCES
+            .get()
+            .expect("the enclosing artifact fixture installs its native observation source");
+        sources.find = find;
+        TEST_ARTIFACT_SOURCES.set(Some(sources));
+        run()
+    })
 }
 
 #[derive(Deserialize, Serialize)]
@@ -59,44 +139,39 @@ struct EngineRunManifest {
 }
 
 impl ArtifactDirectory {
+    #[cfg(test)]
+    pub(crate) fn gamma_round2_in_memory_directory() -> Self {
+        Self {
+            root: PathBuf::from("unused-artifact-root"),
+            run: PathBuf::from("unused-artifact-root").join("run"),
+            criterion: PathBuf::from("unused-artifact-root").join("criterion"),
+            gungraun: PathBuf::from("unused-artifact-root").join("gungraun"),
+            _active_locks: Vec::new(),
+        }
+    }
+
     pub(crate) fn create(root: &Path) -> Result<Self, Error> {
-        Self::create_with_homes(root, env::var_os("CRITERION_HOME"), env::var_os("GUNGRAUN_HOME"))
+        Self::create_with_environment(root, |name| env::var_os(name), Self::create_with_homes)
+    }
+
+    fn create_with_environment(
+        root: &Path,
+        mut environment: impl FnMut(&str) -> Option<OsString>,
+        create: impl FnOnce(&Path, Option<OsString>, Option<OsString>) -> Result<Self, Error>,
+    ) -> Result<Self, Error> {
+        create(root, environment("CRITERION_HOME"), environment("GUNGRAUN_HOME"))
     }
 
     fn create_with_homes(root: &Path, criterion_home: Option<OsString>, gungraun_home: Option<OsString>) -> Result<Self, Error> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| Error::Metadata(error.to_string()))?
-            .as_nanos();
-        let sequence = RUN_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let run_name = format!("{timestamp}-{}-{sequence}", process::id());
-        let runs = root.join("runs");
-        let run = runs.join(&run_name);
-        let criterion_runs = criterion_home.map(|home| PathBuf::from(home).join(".metabench-runs"));
-        let gungraun_runs = gungraun_home.map(|home| PathBuf::from(home).join(".metabench-runs"));
-        let criterion = criterion_runs
-            .as_ref()
-            .map_or_else(|| run.join("criterion"), |runs| runs.join(&run_name));
-        let gungraun = gungraun_runs
-            .as_ref()
-            .map_or_else(|| run.join("gungraun"), |runs| runs.join(&run_name));
-        Self::create_private_run(&run)?;
-        let mut marked_runs = BTreeSet::from([run.clone()]);
-        let mut active_locks = vec![mark_run_active(&run)?];
-        Self::prune_owned_runs(&runs, &run)?;
-        for (owned_runs, current) in [
-            criterion_runs.as_deref().map(|runs| (runs, criterion.as_path())),
-            gungraun_runs.as_deref().map(|runs| (runs, gungraun.as_path())),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            if marked_runs.insert(current.to_owned()) {
-                Self::create_private_run(current)?;
-                active_locks.push(mark_run_active(current)?);
-            }
-            Self::prune_owned_runs(owned_runs, current)?;
-        }
+        let (run, criterion, gungraun, active_locks) = prepare_artifact_run(
+            root,
+            criterion_home,
+            gungraun_home,
+            artifact_run_name,
+            Self::create_private_run,
+            retain_active_run,
+            Self::prune_owned_runs,
+        )?;
         Ok(Self {
             root: root.to_owned(),
             run,
@@ -107,6 +182,10 @@ impl ArtifactDirectory {
     }
 
     fn create_private_run(path: &Path) -> Result<(), Error> {
+        #[cfg(test)]
+        if let Some(sources) = TEST_ARTIFACT_SOURCES.get() {
+            return (sources.create)(path);
+        }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|source| Error::ArtifactIo {
                 path: parent.to_owned(),
@@ -127,17 +206,38 @@ impl ArtifactDirectory {
     }
 
     fn prune_owned_runs(runs: &Path, current: &Path) -> Result<(), Error> {
-        let mut directories = fs::read_dir(runs)
+        #[cfg(test)]
+        if let Some(sources) = TEST_ARTIFACT_SOURCES.get() {
+            return (sources.prune)(runs, current);
+        }
+        Self::prune_owned_runs_with(
+            runs,
+            current,
+            |path| fs::read_dir(path),
+            run_may_be_active,
+            |path| fs::remove_dir_all(path),
+        )
+    }
+
+    fn prune_owned_runs_with<E: ArtifactEntry, I: IntoIterator<Item = io::Result<E>>>(
+        runs: &Path,
+        current: &Path,
+        entries: impl FnOnce(&Path) -> io::Result<I>,
+        mut active: impl FnMut(&Path) -> bool,
+        mut remove: impl FnMut(&Path) -> io::Result<()>,
+    ) -> Result<(), Error> {
+        let mut directories = entries(runs)
             .map_err(|source| Error::ArtifactIo {
                 path: runs.to_owned(),
                 source,
             })?
+            .into_iter()
             .filter_map(Result::ok)
             .filter_map(|entry| {
                 entry
-                    .file_type()
+                    .kind()
                     .ok()
-                    .filter(|file_type| file_type.is_dir() && !file_type.is_symlink())
+                    .filter(|file_type| *file_type == ArtifactKind::Directory)
                     .map(|_| entry.path())
             })
             .collect::<Vec<_>>();
@@ -145,10 +245,11 @@ impl ArtifactDirectory {
         let mut remove_count = directories.len().saturating_sub(RETAINED_RUN_DIRECTORIES);
         for directory in directories {
             if remove_count == 0 {
+                // #[gamma::skip(loop.break_to_continue, reason = "after the quota reaches zero every later iteration also immediately continues, making no more active checks or removals; remaining PathBuf values are dropped in order either way")]
                 break;
             }
-            if directory != current && !run_may_be_active(&directory) {
-                match fs::remove_dir_all(&directory) {
+            if directory != current && !active(&directory) {
+                match remove(&directory) {
                     Ok(()) => remove_count -= 1,
                     Err(source) if source.kind() == io::ErrorKind::NotFound => {}
                     Err(source) => return Err(Error::ArtifactIo { path: directory, source }),
@@ -187,6 +288,73 @@ impl ArtifactDirectory {
     }
 }
 
+fn artifact_run_name() -> Result<String, Error> {
+    #[cfg(test)]
+    if let Some(sources) = TEST_ARTIFACT_SOURCES.get() {
+        return (sources.name)();
+    }
+    run_name_with(SystemTime::now, &RUN_SEQUENCE, process::id)
+}
+
+fn retain_active_run(path: &Path) -> Result<ActiveRunLock, Error> {
+    #[cfg(test)]
+    if let Some(sources) = TEST_ARTIFACT_SOURCES.get() {
+        return (sources.mark)(path);
+    }
+    mark_run_active(path).map(|file| ActiveRunLock::Native { _file: file })
+}
+
+fn run_name_with(now: impl FnOnce() -> SystemTime, sequence: &AtomicU64, process_id: impl FnOnce() -> u32) -> Result<String, Error> {
+    let timestamp = now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| Error::Metadata(error.to_string()))?
+        .as_nanos();
+    let sequence = sequence.fetch_add(1, Ordering::Relaxed);
+    Ok(format!("{timestamp}-{}-{sequence}", process_id()))
+}
+
+type PreparedRun<L> = (PathBuf, PathBuf, PathBuf, Vec<L>);
+
+fn prepare_artifact_run<L>(
+    root: &Path,
+    criterion_home: Option<OsString>,
+    gungraun_home: Option<OsString>,
+    name: impl FnOnce() -> Result<String, Error>,
+    mut create: impl FnMut(&Path) -> Result<(), Error>,
+    mut mark: impl FnMut(&Path) -> Result<L, Error>,
+    mut prune: impl FnMut(&Path, &Path) -> Result<(), Error>,
+) -> Result<PreparedRun<L>, Error> {
+    let run_name = name()?;
+    let runs = root.join("runs");
+    let run = runs.join(&run_name);
+    let criterion_runs = criterion_home.map(|home| PathBuf::from(home).join(".metabench-runs"));
+    let gungraun_runs = gungraun_home.map(|home| PathBuf::from(home).join(".metabench-runs"));
+    let criterion = criterion_runs
+        .as_ref()
+        .map_or_else(|| run.join("criterion"), |runs| runs.join(&run_name));
+    let gungraun = gungraun_runs
+        .as_ref()
+        .map_or_else(|| run.join("gungraun"), |runs| runs.join(&run_name));
+    create(&run)?;
+    let mut marked_runs = BTreeSet::from([run.clone()]);
+    let mut active_locks = vec![mark(&run)?];
+    prune(&runs, &run)?;
+    for (owned_runs, current) in [
+        criterion_runs.as_deref().map(|runs| (runs, criterion.as_path())),
+        gungraun_runs.as_deref().map(|runs| (runs, gungraun.as_path())),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if marked_runs.insert(current.to_owned()) {
+            create(current)?;
+            active_locks.push(mark(current)?);
+        }
+        prune(owned_runs, current)?;
+    }
+    Ok((run, criterion, gungraun, active_locks))
+}
+
 pub(crate) fn write_run_manifest(
     manifest_root: &Path,
     artifact_root: &Path,
@@ -194,6 +362,18 @@ pub(crate) fn write_run_manifest(
     engine: &str,
     arguments: &[OsString],
     status: Option<ExitStatus>,
+) -> Result<(), Error> {
+    write_run_manifest_with(manifest_root, artifact_root, target, engine, arguments, status, write_json)
+}
+
+fn write_run_manifest_with(
+    manifest_root: &Path,
+    artifact_root: &Path,
+    target: &str,
+    engine: &str,
+    arguments: &[OsString],
+    status: Option<ExitStatus>,
+    write: impl FnOnce(&Path, &EngineRunManifest) -> Result<(), Error>,
 ) -> Result<(), Error> {
     let manifest = EngineRunManifest {
         target: target.to_owned(),
@@ -206,12 +386,22 @@ pub(crate) fn write_run_manifest(
         discovered_native_identities: Vec::new(),
         native_to_canonical: BTreeMap::new(),
     };
-    write_json(&manifest_root.join("manifests").join(format!("{engine}.json")), &manifest)
+    write(&manifest_root.join("manifests").join(format!("{engine}.json")), &manifest)
 }
 
 pub(crate) fn record_discovered_identities(manifest_root: &Path, engine: &str, results: &[NativeResult]) -> Result<(), Error> {
+    record_discovered_identities_with(manifest_root, engine, results, read_json::<EngineRunManifest>, write_json)
+}
+
+fn record_discovered_identities_with(
+    manifest_root: &Path,
+    engine: &str,
+    results: &[NativeResult],
+    read: impl FnOnce(&Path) -> Result<EngineRunManifest, Error>,
+    write: impl FnOnce(&Path, &EngineRunManifest) -> Result<(), Error>,
+) -> Result<(), Error> {
     let path = manifest_root.join("manifests").join(format!("{engine}.json"));
-    let mut manifest = read_json::<EngineRunManifest>(&path)?;
+    let mut manifest = read(&path)?;
     manifest.discovered_native_identities = results
         .iter()
         .map(|result| result.native_identity.clone())
@@ -222,7 +412,7 @@ pub(crate) fn record_discovered_identities(manifest_root: &Path, engine: &str, r
         .iter()
         .map(|result| (result.native_identity.clone(), result.identity.clone()))
         .collect();
-    write_json(&path, &manifest)
+    write(&path, &manifest)
 }
 
 #[derive(Debug, Deserialize)]
@@ -258,24 +448,55 @@ pub(crate) fn parse_criterion(
     identities: &[BenchmarkIdentity],
     unit: Option<&str>,
 ) -> Result<Vec<NativeResult>, Error> {
-    let paths = find_artifact_files(root, |path| {
-        path.file_name().is_some_and(|name| name == "benchmark.json")
-            && path.parent().and_then(Path::file_name).is_some_and(|name| name == "new")
-    })?;
+    parse_criterion_with(root, artifact_root, identities, unit, find_artifact_files, read_regular_file)
+}
+
+fn parse_criterion_with(
+    root: &Path,
+    artifact_root: &Path,
+    identities: &[BenchmarkIdentity],
+    unit: Option<&str>,
+    discover: impl FnOnce(&Path, fn(&Path) -> bool) -> Result<Vec<PathBuf>, Error>,
+    read: impl FnMut(&Path, u64, &str) -> Result<Vec<u8>, Error>,
+) -> Result<Vec<NativeResult>, Error> {
+    let paths = discover(root, criterion_artifact_path)?;
+    parse_criterion_paths(paths, artifact_root, identities, unit, read)
+}
+
+fn criterion_artifact_path(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == "benchmark.json")
+        && path.parent().and_then(Path::file_name).is_some_and(|name| name == "new")
+}
+
+fn parse_criterion_paths(
+    paths: Vec<PathBuf>,
+    artifact_root: &Path,
+    identities: &[BenchmarkIdentity],
+    unit: Option<&str>,
+    mut read: impl FnMut(&Path, u64, &str) -> Result<Vec<u8>, Error>,
+) -> Result<Vec<NativeResult>, Error> {
     let identities = CanonicalIdentityIndex::new(identities);
     let mut results = Vec::with_capacity(paths.len());
     for path in paths {
-        let metadata = read_json::<CriterionMetadata>(&path)?;
+        let metadata = read_json_with::<CriterionMetadata>(&path, &mut read)?;
         let native_identity = criterion_identity(&metadata);
         let identity = identities.resolve_criterion(&native_identity);
         let estimates_path = path.with_file_name("estimates.json");
-        let estimates = read_json::<CriterionEstimates>(&estimates_path)?;
+        let estimates = read_json_with::<CriterionEstimates>(&estimates_path, &mut read)?;
         let (statistic, estimate) = match estimates.slope {
             Some(slope) => ("slope", slope),
             None => ("mean", estimates.mean),
         };
         validate_criterion_estimate(&estimates_path, &estimate)?;
-        let mut metric = Metric::float("criterion", "time", estimate.point_estimate, MetricDirection::LowerIsBetter);
+        let mut metric = Metric::float(
+            {
+                // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, reason = "this engine argument affects only the display label; criterion/time, /time and xyzzy/time all render as Time, while TableMetric engine/rank fields are discarded")]
+                "criterion"
+            },
+            "time",
+            estimate.point_estimate,
+            MetricDirection::LowerIsBetter,
+        );
         metric.unit = unit.map(str::to_owned);
         metric.statistic = Some(statistic.to_owned());
         metric.confidence_level = Some(estimate.confidence_interval.confidence_level);
@@ -300,11 +521,30 @@ pub(crate) fn parse_criterion(
 }
 
 pub(crate) fn parse_gungraun(root: &Path, artifact_root: &Path, identities: &[BenchmarkIdentity]) -> Result<Vec<NativeResult>, Error> {
-    let paths = find_artifact_files(root, |path| path.file_name().is_some_and(|name| name == "summary.json"))?;
+    parse_gungraun_with(root, artifact_root, identities, find_artifact_files, read_regular_file)
+}
+
+fn parse_gungraun_with(
+    root: &Path,
+    artifact_root: &Path,
+    identities: &[BenchmarkIdentity],
+    discover: impl FnOnce(&Path, fn(&Path) -> bool) -> Result<Vec<PathBuf>, Error>,
+    read: impl FnMut(&Path, u64, &str) -> Result<Vec<u8>, Error>,
+) -> Result<Vec<NativeResult>, Error> {
+    let paths = discover(root, |path| path.file_name().is_some_and(|name| name == "summary.json"))?;
+    parse_gungraun_paths(paths, artifact_root, identities, read)
+}
+
+fn parse_gungraun_paths(
+    paths: Vec<PathBuf>,
+    artifact_root: &Path,
+    identities: &[BenchmarkIdentity],
+    mut read: impl FnMut(&Path, u64, &str) -> Result<Vec<u8>, Error>,
+) -> Result<Vec<NativeResult>, Error> {
     let identities = CanonicalIdentityIndex::new(identities);
     let mut results = Vec::new();
     for path in paths {
-        let contents = read_regular_file(&path, MAX_ARTIFACT_JSON_BYTES, "JSON")?;
+        let contents = read(&path, MAX_ARTIFACT_JSON_BYTES, "JSON")?;
         results.extend(parse_gungraun_summary(&contents, &path, artifact_root, &identities)?);
     }
     Ok(results)
@@ -353,6 +593,16 @@ struct PerfStatRecord {
 
 pub(crate) fn parse_perf(path: &Path, artifact_root: &Path, identity: String, native_identity: String) -> Result<NativeResult, Error> {
     let contents = read_artifact_text(path, "JSON")?;
+    parse_perf_text(&contents, path, artifact_root, identity, native_identity)
+}
+
+fn parse_perf_text(
+    contents: &str,
+    path: &Path,
+    artifact_root: &Path,
+    identity: String,
+    native_identity: String,
+) -> Result<NativeResult, Error> {
     let mut metrics = BTreeMap::new();
     for (index, line) in contents.lines().enumerate() {
         if line.trim().is_empty() {
@@ -428,6 +678,7 @@ fn split_csv_fields(line: &str) -> Vec<String> {
                     current.push('"');
                     chars.next();
                 } else {
+                    // #[gamma::skip(assign_value.default, reason = "bool Default is exactly the assigned false value")]
                     in_quotes = false;
                 }
             } else {
@@ -469,6 +720,16 @@ const VTUNE_EVENT_COUNT_COLUMN: &str = "Hardware Event Count:Self";
 /// convention, e.g. `INST_RETIRED.ANY,"1,234,567"`.
 pub(crate) fn parse_vtune(path: &Path, artifact_root: &Path, identity: String, native_identity: String) -> Result<NativeResult, Error> {
     let contents = read_artifact_text(path, "CSV")?;
+    parse_vtune_text(&contents, path, artifact_root, identity, native_identity)
+}
+
+fn parse_vtune_text(
+    contents: &str,
+    path: &Path,
+    artifact_root: &Path,
+    identity: String,
+    native_identity: String,
+) -> Result<NativeResult, Error> {
     let mut lines = contents.lines().enumerate();
     let (name_column, count_column, expected_field_count) = match lines.next() {
         Some((_, header)) => {
@@ -643,6 +904,7 @@ impl CanonicalIdentityIndex {
                 );
             }
             let (prefix, _) = candidate.rsplit_once('/')?;
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             candidate = prefix;
         }
     }
@@ -788,6 +1050,12 @@ fn snake_case(value: &str) -> String {
 }
 
 fn find_artifact_files(root: &Path, predicate: impl Fn(&Path) -> bool) -> Result<Vec<PathBuf>, Error> {
+    #[cfg(test)]
+    if let Some(sources) = TEST_ARTIFACT_SOURCES.get() {
+        let mut paths: Vec<_> = (sources.find)(root)?.into_iter().filter(|path| predicate(path)).collect();
+        paths.sort();
+        return Ok(paths);
+    }
     find_artifact_files_with_limits(
         root,
         predicate,
@@ -804,8 +1072,76 @@ struct DiscoveryLimits {
     artifacts: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ArtifactKind {
+    Directory,
+    File,
+    SymbolicLink,
+    Other,
+}
+
+trait ArtifactEntry {
+    fn path(&self) -> PathBuf;
+    fn kind(&self) -> io::Result<ArtifactKind>;
+}
+
+impl ArtifactEntry for fs::DirEntry {
+    fn path(&self) -> PathBuf {
+        self.path()
+    }
+
+    fn kind(&self) -> io::Result<ArtifactKind> {
+        classify_artifact(|| self.file_type())
+    }
+}
+
+trait ArtifactFileType {
+    fn is_symlink(&self) -> bool;
+    fn is_dir(&self) -> bool;
+    fn is_file(&self) -> bool;
+}
+
+impl ArtifactFileType for fs::FileType {
+    // #[gamma::skip(fn_value.bool_false, reason = "This leaf queries native filesystem metadata; scripted ArtifactFileType tests cover symlink rejection without creating filesystem fixtures")]
+    fn is_symlink(&self) -> bool {
+        self.is_symlink()
+    }
+
+    fn is_dir(&self) -> bool {
+        self.is_dir()
+    }
+
+    // #[gamma::skip(fn_value.bool_true, reason = "This leaf queries native filesystem metadata; scripted ArtifactFileType tests distinguish regular files from special entries without creating filesystem fixtures")]
+    fn is_file(&self) -> bool {
+        self.is_file()
+    }
+}
+
+fn classify_artifact<K: ArtifactFileType>(file_type: impl FnOnce() -> io::Result<K>) -> io::Result<ArtifactKind> {
+    let kind = file_type()?;
+    Ok(if kind.is_symlink() {
+        ArtifactKind::SymbolicLink
+    } else if kind.is_dir() {
+        ArtifactKind::Directory
+    } else if kind.is_file() {
+        ArtifactKind::File
+    } else {
+        ArtifactKind::Other
+    })
+}
+
 fn find_artifact_files_with_limits(root: &Path, predicate: impl Fn(&Path) -> bool, limits: DiscoveryLimits) -> Result<Vec<PathBuf>, Error> {
-    if !root.try_exists().map_err(|source| Error::ArtifactIo {
+    find_artifact_files_with_io(root, predicate, limits, Path::try_exists, |path| fs::read_dir(path))
+}
+
+fn find_artifact_files_with_io<E: ArtifactEntry, I: IntoIterator<Item = io::Result<E>>>(
+    root: &Path,
+    predicate: impl Fn(&Path) -> bool,
+    limits: DiscoveryLimits,
+    exists: impl FnOnce(&Path) -> io::Result<bool>,
+    mut entries: impl FnMut(&Path) -> io::Result<I>,
+) -> Result<Vec<PathBuf>, Error> {
+    if !exists(root).map_err(|source| Error::ArtifactIo {
         path: root.to_owned(),
         source,
     })? {
@@ -828,7 +1164,7 @@ fn find_artifact_files_with_limits(root: &Path, predicate: impl Fn(&Path) -> boo
                 message: "artifact directory nesting is too deep".to_owned(),
             });
         }
-        for entry in fs::read_dir(&directory).map_err(|source| Error::ArtifactIo {
+        for entry in entries(&directory).map_err(|source| Error::ArtifactIo {
             path: directory.clone(),
             source,
         })? {
@@ -836,14 +1172,15 @@ fn find_artifact_files_with_limits(root: &Path, predicate: impl Fn(&Path) -> boo
                 path: directory.clone(),
                 source,
             })?;
-            let file_type = entry.file_type().map_err(|source| Error::ArtifactIo {
+            let file_type = entry.kind().map_err(|source| Error::ArtifactIo {
                 path: entry.path(),
                 source,
             })?;
-            if file_type.is_symlink() {
+            // #[gamma::skip(cond.always_false, loop.delete_continue, reason = "SymbolicLink is a distinct ArtifactKind; falling through cannot enter either the Directory or File branch or invoke the predicate")]
+            if file_type == ArtifactKind::SymbolicLink {
                 continue;
             }
-            if file_type.is_dir() {
+            if file_type == ArtifactKind::Directory {
                 if directory_count + pending.len() + 1 > limits.directories {
                     return Err(Error::ArtifactFormat {
                         path: root.to_owned(),
@@ -851,7 +1188,7 @@ fn find_artifact_files_with_limits(root: &Path, predicate: impl Fn(&Path) -> boo
                     });
                 }
                 pending.push((entry.path(), depth + 1));
-            } else if file_type.is_file() && predicate(&entry.path()) {
+            } else if file_type == ArtifactKind::File && predicate(&entry.path()) {
                 paths.push(entry.path());
                 if paths.len() > limits.artifacts {
                     return Err(Error::ArtifactFormat {
@@ -867,37 +1204,88 @@ fn find_artifact_files_with_limits(root: &Path, predicate: impl Fn(&Path) -> boo
 }
 
 fn run_may_be_active(path: &Path) -> bool {
-    let Ok(marker) = OpenOptions::new().read(true).write(true).open(path.join(ACTIVE_RUN_MARKER)) else {
+    run_may_be_active_with(path, open_marker, File::try_lock)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "this private adapter preserves four independent std::fs::OpenOptions flags"
+)]
+struct MarkerAccess {
+    read: bool,
+    write: bool,
+    create: bool,
+    truncate: bool,
+}
+
+fn open_marker(path: &Path, access: MarkerAccess) -> io::Result<File> {
+    OpenOptions::new()
+        .read(access.read)
+        .write(access.write)
+        .create(access.create)
+        .truncate(access.truncate)
+        .open(path)
+}
+
+fn run_may_be_active_with<L, E>(
+    path: &Path,
+    open: impl FnOnce(&Path, MarkerAccess) -> io::Result<L>,
+    lock: impl FnOnce(&L) -> Result<(), E>,
+) -> bool {
+    let access = MarkerAccess {
+        read: true,
+        write: true,
+        create: false,
+        truncate: false,
+    };
+    let Ok(marker) = open(&path.join(ACTIVE_RUN_MARKER), access) else {
         return false;
     };
-    match marker.try_lock() {
+    match lock(&marker) {
         Ok(()) => false,
         Err(_) => true,
     }
 }
 
 fn mark_run_active(path: &Path) -> Result<File, Error> {
-    fs::create_dir_all(path).map_err(|source| Error::ArtifactIo {
+    mark_run_active_with(path, |path| fs::create_dir_all(path), open_marker, File::lock)
+}
+
+fn mark_run_active_with<L>(
+    path: &Path,
+    create: impl FnOnce(&Path) -> io::Result<()>,
+    open: impl FnOnce(&Path, MarkerAccess) -> io::Result<L>,
+    lock: impl FnOnce(&L) -> io::Result<()>,
+) -> Result<L, Error> {
+    create(path).map_err(|source| Error::ArtifactIo {
         path: path.to_owned(),
         source,
     })?;
     let marker = path.join(ACTIVE_RUN_MARKER);
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&marker)
-        .map_err(|source| Error::ArtifactIo {
-            path: marker.clone(),
-            source,
-        })?;
-    file.lock().map_err(|source| Error::ArtifactIo { path: marker, source })?;
+    let access = MarkerAccess {
+        read: true,
+        write: true,
+        create: true,
+        truncate: true,
+    };
+    let file = open(&marker, access).map_err(|source| Error::ArtifactIo {
+        path: marker.clone(),
+        source,
+    })?;
+    lock(&file).map_err(|source| Error::ArtifactIo { path: marker, source })?;
     Ok(file)
 }
 
 pub(crate) fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
-    let bytes = read_regular_file(path, MAX_ARTIFACT_JSON_BYTES, "JSON")?;
+    read_json_with(path, read_regular_file)
+}
+
+fn read_json_with<T: serde::de::DeserializeOwned>(
+    path: &Path,
+    read: impl FnOnce(&Path, u64, &str) -> Result<Vec<u8>, Error>,
+) -> Result<T, Error> {
+    let bytes = read(path, MAX_ARTIFACT_JSON_BYTES, "JSON")?;
     serde_json::from_slice(&bytes).map_err(|source| Error::ArtifactJson {
         path: path.to_owned(),
         source,
@@ -905,7 +1293,15 @@ pub(crate) fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T
 }
 
 fn read_artifact_text(path: &Path, format: &str) -> Result<String, Error> {
-    let bytes = read_regular_file(path, MAX_ARTIFACT_JSON_BYTES, format)?;
+    read_artifact_text_with(path, format, read_regular_file)
+}
+
+fn read_artifact_text_with(
+    path: &Path,
+    format: &str,
+    read: impl FnOnce(&Path, u64, &str) -> Result<Vec<u8>, Error>,
+) -> Result<String, Error> {
+    let bytes = read(path, MAX_ARTIFACT_JSON_BYTES, format)?;
     String::from_utf8(bytes).map_err(|source| Error::ArtifactIo {
         path: path.to_owned(),
         source: io::Error::new(io::ErrorKind::InvalidData, source),
@@ -913,39 +1309,203 @@ fn read_artifact_text(path: &Path, format: &str) -> Result<String, Error> {
 }
 
 pub(crate) fn read_regular_file(path: &Path, limit: u64, format: &str) -> Result<Vec<u8>, Error> {
-    let file = open_regular_file(path)?;
-    read_bounded_file(file, path, limit, format)
+    read_regular_file_with(path, limit, format, open_regular_file, read_bounded_file)
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RegularFileRequest {
+    read: bool,
+    #[cfg(unix)]
+    flags: i32,
+    #[cfg(windows)]
+    flags: u32,
+    #[cfg(windows)]
+    share: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RegularMetadata {
+    regular: bool,
+    length: u64,
+    #[cfg(windows)]
+    attributes: u32,
+}
+
+enum RegularFile {
+    Native(File),
+    #[cfg(test)]
+    Memory(io::Cursor<Vec<u8>>),
+}
+
+impl io::Read for RegularFile {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Native(file) => file.read(buf),
+            #[cfg(test)]
+            Self::Memory(bytes) => bytes.read(buf),
+        }
+    }
+}
+
+impl RegularFile {
+    fn metadata(&self) -> io::Result<RegularMetadata> {
+        match self {
+            Self::Native(file) => file.metadata().map(|metadata| RegularMetadata {
+                regular: metadata.is_file(),
+                length: metadata.len(),
+                #[cfg(windows)]
+                attributes: metadata.file_attributes(),
+            }),
+            #[cfg(test)]
+            Self::Memory(bytes) => Ok(RegularMetadata {
+                regular: true,
+                length: bytes.get_ref().len() as u64,
+                #[cfg(windows)]
+                attributes: 0,
+            }),
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_REGULAR_BYTES: std::cell::RefCell<Option<Vec<u8>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) fn with_in_memory_artifact<R>(contents: &[u8], run: impl FnOnce() -> R) -> R {
+    struct Restore(Option<Vec<u8>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_REGULAR_BYTES.set(self.0.take());
+        }
+    }
+    let _restore = Restore(TEST_REGULAR_BYTES.replace(Some(contents.to_vec())));
+    run()
+}
+
+#[cfg(test)]
+type TestRegularSource = fn(&Path) -> Vec<u8>;
+
+#[cfg(test)]
+thread_local! {
+    static TEST_REGULAR_SOURCE: std::cell::Cell<Option<TestRegularSource>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) fn with_in_memory_artifact_source<R>(source: fn(&Path) -> Vec<u8>, run: impl FnOnce() -> R) -> R {
+    struct Restore(Option<TestRegularSource>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_REGULAR_SOURCE.set(self.0);
+        }
+    }
+    let _restore = Restore(TEST_REGULAR_SOURCE.replace(Some(source)));
+    run()
+}
+
+fn read_regular_file_with<R>(
+    path: &Path,
+    limit: u64,
+    format: &str,
+    open: impl FnOnce(&Path) -> Result<R, Error>,
+    read: impl FnOnce(R, &Path, u64, &str) -> Result<Vec<u8>, Error>,
+) -> Result<Vec<u8>, Error> {
+    let file = open(path)?;
+    read(file, path, limit, format)
 }
 
 /// Admits the same regular-file handle later consumed by the bounded reader.
-fn open_regular_file(path: &Path) -> Result<File, Error> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        // Reject final links and avoid waiting for a FIFO writer before checking the file type.
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+fn open_regular_file(path: &Path) -> Result<RegularFile, Error> {
+    open_regular_file_with(
+        path,
+        |path, request| {
+            #[cfg(test)]
+            if let Some(source) = TEST_REGULAR_SOURCE.get() {
+                return Ok(RegularFile::Memory(io::Cursor::new(source(path))));
+            }
+            #[cfg(test)]
+            if let Some(bytes) = TEST_REGULAR_BYTES.with_borrow(Clone::clone) {
+                return Ok(RegularFile::Memory(io::Cursor::new(bytes)));
+            }
+            let mut options = OpenOptions::new();
+            options.read(request.read);
+            // #[gamma::skip(stmt.delete_call, reason = "this adapter applies native no-follow and nonblocking open flags; regular-file admission policy and requested flags are tested with scripted open and metadata operations without filesystem fixtures")]
+            #[cfg(any(unix, windows))]
+            options.custom_flags(request.flags);
+            #[cfg(windows)]
+            options.share_mode(request.share);
+            options.open(path).map(RegularFile::Native)
+        },
+        RegularFile::metadata,
+    )
+}
+
+#[cfg(test)]
+mod november6_file_type_tests {
+    use super::*;
+
+    struct Kind(bool, bool, bool);
+
+    impl ArtifactFileType for Kind {
+        fn is_symlink(&self) -> bool {
+            self.0
+        }
+        fn is_dir(&self) -> bool {
+            self.1
+        }
+        fn is_file(&self) -> bool {
+            self.2
+        }
     }
-    #[cfg(windows)]
-    {
-        // Inspect rather than follow reparse points, denying concurrent writes and path replacement.
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        const FILE_SHARE_READ: u32 = 1;
-        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).share_mode(FILE_SHARE_READ);
+
+    #[test]
+    fn november6_artifact_kind_preserves_symlink_priority_special_files_and_native_errors() {
+        for (kind, expected) in [
+            (Kind(true, false, false), ArtifactKind::SymbolicLink),
+            (Kind(true, true, true), ArtifactKind::SymbolicLink),
+            (Kind(false, true, false), ArtifactKind::Directory),
+            (Kind(false, false, true), ArtifactKind::File),
+            (Kind(false, false, false), ArtifactKind::Other),
+        ] {
+            assert_eq!(classify_artifact(|| Ok(kind)).unwrap(), expected);
+        }
+        assert_eq!(
+            classify_artifact::<Kind>(|| Err(io::Error::from_raw_os_error(5)))
+                .unwrap_err()
+                .raw_os_error(),
+            Some(5)
+        );
     }
-    let file = options.open(path).map_err(|source| Error::ArtifactIo {
+}
+
+fn open_regular_file_with<R>(
+    path: &Path,
+    open: impl FnOnce(&Path, RegularFileRequest) -> io::Result<R>,
+    metadata: impl FnOnce(&R) -> io::Result<RegularMetadata>,
+) -> Result<R, Error> {
+    let request = RegularFileRequest {
+        read: true,
+        #[cfg(unix)]
+        flags: libc::O_NOFOLLOW | libc::O_NONBLOCK,
+        #[cfg(windows)]
+        flags: 0x0020_0000,
+        #[cfg(windows)]
+        share: 1,
+    };
+    let file = open(path, request).map_err(|source| Error::ArtifactIo {
         path: path.to_owned(),
         source,
     })?;
-    let metadata = file.metadata().map_err(|source| Error::ArtifactIo {
+    let metadata = metadata(&file).map_err(|source| Error::ArtifactIo {
         path: path.to_owned(),
         source,
     })?;
     #[cfg(windows)]
     {
-        reject_windows_reparse_point(path, metadata.file_attributes())?;
+        reject_windows_reparse_point(path, metadata.attributes)?;
     }
-    if !metadata.is_file() {
+    if !metadata.regular {
         return Err(Error::ArtifactFormat {
             path: path.to_owned(),
             message: "artifact must be a regular file".to_owned(),
@@ -966,14 +1526,21 @@ fn reject_windows_reparse_point(path: &Path, attributes: u32) -> Result<(), Erro
     Ok(())
 }
 
-fn read_bounded_file(file: File, path: &Path, limit: u64, format: &str) -> Result<Vec<u8>, Error> {
-    let length = file
-        .metadata()
-        .map_err(|source| Error::ArtifactIo {
-            path: path.to_owned(),
-            source,
-        })?
-        .len();
+fn read_bounded_file(file: RegularFile, path: &Path, limit: u64, format: &str) -> Result<Vec<u8>, Error> {
+    read_bounded_file_with(file, path, limit, format, |file| file.metadata().map(|metadata| metadata.length))
+}
+
+fn read_bounded_file_with<R: io::Read>(
+    file: R,
+    path: &Path,
+    limit: u64,
+    format: &str,
+    length: impl FnOnce(&R) -> io::Result<u64>,
+) -> Result<Vec<u8>, Error> {
+    let length = length(&file).map_err(|source| Error::ArtifactIo {
+        path: path.to_owned(),
+        source,
+    })?;
     if length > limit {
         return Err(Error::ArtifactFormat {
             path: path.to_owned(),
@@ -992,7 +1559,11 @@ fn read_bounded_stream(reader: impl io::Read, path: &Path, limit: u64, format: &
             path: path.to_owned(),
             source,
         })?;
-    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
+    if u64::try_from(bytes.len()).unwrap_or(
+        // #[gamma::skip(expr.decrement, reason = "usize is at most 64 bits on supported Rust targets, so the byte-vector length always converts and this fallback is unreachable")]
+        u64::MAX,
+    ) > limit
+    {
         return Err(Error::ArtifactFormat {
             path: path.to_owned(),
             message: format!("{format} stream exceeds the {limit}-byte limit"),
@@ -1002,23 +1573,46 @@ fn read_bounded_stream(reader: impl io::Read, path: &Path, limit: u64, format: &
 }
 
 pub(crate) fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
+    #[cfg(test)]
+    if let Some(sources) = TEST_ARTIFACT_SOURCES.get() {
+        let value = serde_json::to_value(value).map_err(|source| Error::ArtifactJson {
+            path: path.to_owned(),
+            source,
+        })?;
+        return (sources.write)(path, value);
+    }
+    write_json_with(
+        path,
+        value,
+        |path| fs::create_dir_all(path),
+        |parent, prefix| tempfile::Builder::new().prefix(prefix).tempfile_in(parent),
+        |temporary| temporary.as_file().sync_all(),
+        |temporary, path| temporary.persist(path).map(|_| ()).map_err(|error| error.error),
+    )
+}
+
+fn write_json_with<W: io::Write>(
+    path: &Path,
+    value: &impl Serialize,
+    create_parent: impl FnOnce(&Path) -> io::Result<()>,
+    create_temporary: impl FnOnce(&Path, &str) -> io::Result<W>,
+    sync: impl FnOnce(&W) -> io::Result<()>,
+    persist: impl FnOnce(W, &Path) -> io::Result<()>,
+) -> Result<(), Error> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent).map_err(|source| Error::ArtifactIo {
+    create_parent(parent).map_err(|source| Error::ArtifactIo {
         path: parent.to_owned(),
         source,
     })?;
-    let mut temporary = tempfile::Builder::new()
-        .prefix(".metabench-")
-        .tempfile_in(parent)
-        .map_err(|source| Error::ArtifactIo {
-            path: parent.to_owned(),
-            source,
-        })?;
+    let mut temporary = create_temporary(parent, ".metabench-").map_err(|source| Error::ArtifactIo {
+        path: parent.to_owned(),
+        source,
+    })?;
     {
-        let mut writer = BufWriter::new(temporary.as_file_mut());
+        let mut writer = BufWriter::new(&mut temporary);
         serde_json::to_writer_pretty(&mut writer, value).map_err(|source| Error::ArtifactJson {
             path: path.to_owned(),
             source,
@@ -1028,19 +1622,1398 @@ pub(crate) fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Erro
             source,
         })?;
     }
-    temporary.as_file().sync_all().map_err(|source| Error::ArtifactIo {
+    sync(&temporary).map_err(|source| Error::ArtifactIo {
         path: path.to_owned(),
         source,
     })?;
-    temporary.persist(path).map(|_| ()).map_err(|error| Error::ArtifactIo {
+    persist(temporary, path).map_err(|source| Error::ArtifactIo {
         path: path.to_owned(),
-        source: error.error,
+        source,
     })
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn november_actual_artifact_directory_retains_both_home_owners_and_returns_preparation_errors_without_io() {
+        with_in_memory_artifact_run(|| {
+            let directory =
+                ArtifactDirectory::create_with_homes(Path::new("root"), Some("criterion-home".into()), Some("gungraun-home".into()))
+                    .unwrap();
+            assert_eq!(directory.root(), Path::new("root"));
+            assert_eq!(directory.path(), Path::new("root").join("runs").join("in-memory-run"));
+            assert_eq!(
+                directory.criterion_path(),
+                Path::new("criterion-home").join(".metabench-runs").join("in-memory-run")
+            );
+            assert_eq!(
+                directory.gungraun_path(),
+                Path::new("gungraun-home").join(".metabench-runs").join("in-memory-run")
+            );
+            let ArtifactDirectory { _active_locks: locks, .. } = directory;
+            assert_eq!(locks.len(), 3);
+            let mut sources = TEST_ARTIFACT_SOURCES.get().unwrap();
+            sources.name = || Err(Error::Metadata("injected run name failure".to_owned()));
+            TEST_ARTIFACT_SOURCES.set(Some(sources));
+            assert!(
+                matches!(ArtifactDirectory::create_with_homes(Path::new("root"), None, None), Err(Error::Metadata(message)) if message == "injected run name failure")
+            );
+        });
+    }
+
+    #[test]
+    fn november_actual_manifest_wrapper_publishes_exact_success_exit_status_and_command_line_without_files() {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt as _;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt as _;
+
+        thread_local! {
+            static VALUES: std::cell::RefCell<Vec<serde_json::Value>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+        struct Restore(Vec<serde_json::Value>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                VALUES.set(std::mem::take(&mut self.0));
+            }
+        }
+        let _restore = Restore(VALUES.take());
+        with_in_memory_artifact_run(|| {
+            let mut sources = TEST_ARTIFACT_SOURCES.get().unwrap();
+            sources.write = |path, value| {
+                assert_eq!(path, Path::new("run").join("manifests").join("criterion.json"));
+                VALUES.with_borrow_mut(|values| values.push(value));
+                Ok(())
+            };
+            TEST_ARTIFACT_SOURCES.set(Some(sources));
+            for status in [None, Some(ExitStatus::from_raw(0))] {
+                write_run_manifest(
+                    Path::new("run"),
+                    Path::new("artifacts"),
+                    "target",
+                    "criterion",
+                    &["--bench".into()],
+                    status,
+                )
+                .unwrap();
+            }
+            VALUES.with_borrow(|values| {
+                assert_eq!(values.len(), 2);
+                assert_eq!(values[0]["success"], false);
+                assert_eq!(values[0]["exit_code"], serde_json::Value::Null);
+                assert_eq!(values[1]["success"], true);
+                assert_eq!(values[1]["exit_code"], 0);
+                for value in values {
+                    assert_eq!(value["target"], "target");
+                    assert_eq!(value["engine"], "criterion");
+                    assert_eq!(value["command_line"], serde_json::json!(["--bench"]));
+                    assert_eq!(value["artifact_root"], "artifacts");
+                }
+            });
+        });
+    }
+
+    #[test]
+    fn november_regular_file_admission_preserves_exact_native_requests_metadata_errors_and_owned_resources() {
+        for case in ["open", "metadata", "not-file", "success"] {
+            let calls = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let path = Path::new("memory-only.json");
+            let result = open_regular_file_with(
+                path,
+                |actual, request| {
+                    assert_eq!(actual, path);
+                    assert!(request.read);
+                    #[cfg(windows)]
+                    assert_eq!((request.flags, request.share), (0x0020_0000, 1));
+                    #[cfg(unix)]
+                    assert_eq!(request.flags, libc::O_NOFOLLOW | libc::O_NONBLOCK);
+                    calls.borrow_mut().push("open");
+                    if case == "open" {
+                        Err(io::Error::from_raw_os_error(5))
+                    } else {
+                        Ok(MemoryMarker {
+                            calls: std::rc::Rc::clone(&calls),
+                        })
+                    }
+                },
+                |_| {
+                    assert_eq!(*calls.borrow(), ["open"]);
+                    calls.borrow_mut().push("metadata");
+                    if case == "metadata" {
+                        Err(io::Error::from_raw_os_error(6))
+                    } else {
+                        Ok(RegularMetadata {
+                            regular: case != "not-file",
+                            length: 3,
+                            #[cfg(windows)]
+                            attributes: 0,
+                        })
+                    }
+                },
+            );
+            if case == "success" {
+                let owner = result.unwrap();
+                assert_eq!(*calls.borrow(), ["open", "metadata"]);
+                drop(owner);
+            } else {
+                match result.unwrap_err() {
+                    Error::ArtifactIo { path: actual, source } => {
+                        assert_eq!(actual, path);
+                        assert_eq!(source.raw_os_error(), Some(if case == "open" { 5 } else { 6 }));
+                    }
+                    Error::ArtifactFormat { path: actual, message } => {
+                        assert_eq!(actual, path);
+                        assert_eq!(case, "not-file");
+                        assert_eq!(message, "artifact must be a regular file");
+                    }
+                    error => panic!("unexpected admission error: {error}"),
+                }
+            }
+            assert_eq!(
+                *calls.borrow(),
+                if case == "open" {
+                    vec!["open"]
+                } else {
+                    vec!["open", "metadata", "drop"]
+                }
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn november_regular_file_admission_rejects_reparse_attributes_before_file_kind_and_releases_owner() {
+        let calls = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let error = open_regular_file_with(
+            Path::new("memory-only"),
+            |_, _| {
+                Ok(MemoryMarker {
+                    calls: std::rc::Rc::clone(&calls),
+                })
+            },
+            |_| {
+                Ok(RegularMetadata {
+                    regular: true,
+                    length: 3,
+                    attributes: 0x400,
+                })
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, Error::ArtifactFormat { message, .. } if message == "artifact must not be a reparse point"));
+        assert_eq!(*calls.borrow(), ["drop"]);
+    }
+
+    #[test]
+    fn november_actual_regular_reader_preserves_the_exact_configured_limit_without_filesystem_io() {
+        with_in_memory_artifact(b"ABC", || {
+            assert_eq!(read_regular_file(Path::new("memory-only"), 3, "JSON").unwrap(), b"ABC");
+            assert!(matches!(
+                read_regular_file(Path::new("memory-only"), 2, "JSON"),
+                Err(Error::ArtifactFormat { message, .. }) if message == "JSON file is 3 bytes; limit is 2 bytes"
+            ));
+        });
+    }
+
+    #[test]
+    fn november_criterion_time_engine_literal_equivalence_preserves_every_serialized_metric_field() {
+        let expected = serde_json::to_value(Metric::float("criterion", "time", 17.0, MetricDirection::LowerIsBetter)).unwrap();
+        assert_eq!(expected["display_name"], "Time");
+        for engine in ["", "xyzzy"] {
+            assert_eq!(
+                serde_json::to_value(Metric::float(engine, "time", 17.0, MetricDirection::LowerIsBetter)).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[derive(Clone)]
+    struct MemoryEntry {
+        path: PathBuf,
+        kind: Result<ArtifactKind, io::ErrorKind>,
+    }
+
+    impl ArtifactEntry for MemoryEntry {
+        fn path(&self) -> PathBuf {
+            self.path.clone()
+        }
+
+        fn kind(&self) -> io::Result<ArtifactKind> {
+            self.kind.map_err(|kind| io::Error::new(kind, "entry type failure"))
+        }
+    }
+
+    #[derive(Debug)]
+    struct MemoryMarker {
+        calls: std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>,
+    }
+
+    impl Drop for MemoryMarker {
+        fn drop(&mut self) {
+            self.calls.borrow_mut().push("drop");
+        }
+    }
+
+    #[test]
+    fn november_active_run_probe_passes_exact_access_and_distinguishes_lock_outcomes() {
+        let run = Path::new("run");
+        for opened in [false, true] {
+            for busy in [false, true] {
+                let checked = std::cell::Cell::new(false);
+                let active = run_may_be_active_with(
+                    run,
+                    |path, access| {
+                        assert_eq!(path, run.join(ACTIVE_RUN_MARKER));
+                        assert_eq!(
+                            access,
+                            MarkerAccess {
+                                read: true,
+                                write: true,
+                                create: false,
+                                truncate: false
+                            }
+                        );
+                        if opened { Ok(17) } else { Err(io::ErrorKind::NotFound.into()) }
+                    },
+                    |marker| {
+                        assert_eq!(*marker, 17);
+                        checked.set(true);
+                        if busy { Err(()) } else { Ok(()) }
+                    },
+                );
+                assert_eq!(active, opened && busy);
+                assert_eq!(checked.get(), opened);
+            }
+        }
+    }
+
+    #[test]
+    fn november_active_run_creation_retains_lock_ownership_and_preserves_every_error_path() {
+        let run = Path::new("run");
+        for failure in 0..=3 {
+            let calls = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let result = mark_run_active_with(
+                run,
+                |path| {
+                    assert_eq!(path, run);
+                    calls.borrow_mut().push("create");
+                    if failure == 0 {
+                        Err(io::Error::new(io::ErrorKind::PermissionDenied, "create refused"))
+                    } else {
+                        Ok(())
+                    }
+                },
+                |path, access| {
+                    assert_eq!(path, run.join(ACTIVE_RUN_MARKER));
+                    assert_eq!(
+                        access,
+                        MarkerAccess {
+                            read: true,
+                            write: true,
+                            create: true,
+                            truncate: true
+                        }
+                    );
+                    calls.borrow_mut().push("open");
+                    if failure == 1 {
+                        Err(io::Error::new(io::ErrorKind::PermissionDenied, "open refused"))
+                    } else {
+                        Ok(MemoryMarker {
+                            calls: std::rc::Rc::clone(&calls),
+                        })
+                    }
+                },
+                |_| {
+                    calls.borrow_mut().push("lock");
+                    if failure == 2 {
+                        Err(io::Error::new(io::ErrorKind::PermissionDenied, "lock refused"))
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            if failure == 3 {
+                let marker = result.unwrap();
+                assert_eq!(*calls.borrow(), ["create", "open", "lock"]);
+                drop(marker);
+                assert_eq!(*calls.borrow(), ["create", "open", "lock", "drop"]);
+            } else {
+                let Error::ArtifactIo { path, source } = result.unwrap_err() else {
+                    panic!("original marker error must survive")
+                };
+                assert_eq!(
+                    path,
+                    if failure == 0 {
+                        run.to_owned()
+                    } else {
+                        run.join(ACTIVE_RUN_MARKER)
+                    }
+                );
+                assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
+                assert_eq!(source.to_string(), ["create refused", "open refused", "lock refused"][failure]);
+                assert_eq!(
+                    *calls.borrow(),
+                    [vec!["create"], vec!["create", "open"], vec!["create", "open", "lock", "drop"]][failure]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn november_retention_prunes_sorted_inactive_runs_and_counts_only_successful_removals() {
+        let runs = Path::new("runs");
+        let current = runs.join("00");
+        let checked = std::cell::RefCell::new(Vec::new());
+        let removed = std::cell::RefCell::new(Vec::new());
+        let mut entries = (0..24)
+            .rev()
+            .map(|index| {
+                Ok(MemoryEntry {
+                    path: runs.join(format!("{index:02}")),
+                    kind: Ok(ArtifactKind::Directory),
+                })
+            })
+            .collect::<Vec<_>>();
+        entries.extend([
+            Err(io::Error::other("unreadable directory entry")),
+            Ok(MemoryEntry {
+                path: runs.join("file"),
+                kind: Ok(ArtifactKind::File),
+            }),
+            Ok(MemoryEntry {
+                path: runs.join("link"),
+                kind: Ok(ArtifactKind::SymbolicLink),
+            }),
+            Ok(MemoryEntry {
+                path: runs.join("failed-type"),
+                kind: Err(io::ErrorKind::PermissionDenied),
+            }),
+        ]);
+        ArtifactDirectory::prune_owned_runs_with(
+            runs,
+            &current,
+            |path| {
+                assert_eq!(path, runs);
+                Ok(entries)
+            },
+            |path| {
+                checked.borrow_mut().push(path.to_owned());
+                path == runs.join("01")
+            },
+            |path| {
+                removed.borrow_mut().push(path.to_owned());
+                if path == runs.join("02") {
+                    Err(io::ErrorKind::NotFound.into())
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            *checked.borrow(),
+            (1..=6).map(|index| runs.join(format!("{index:02}"))).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            *removed.borrow(),
+            (2..=6).map(|index| runs.join(format!("{index:02}"))).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn november_retention_preserves_exact_listing_and_removal_errors() {
+        let runs = Path::new("runs");
+        let current = runs.join("23");
+        for listing_failure in [false, true] {
+            let removed = std::cell::RefCell::new(Vec::new());
+            let result = ArtifactDirectory::prune_owned_runs_with(
+                runs,
+                &current,
+                |_| {
+                    if listing_failure {
+                        Err(io::Error::new(io::ErrorKind::PermissionDenied, "listing refused"))
+                    } else {
+                        Ok((0..24)
+                            .map(|index| {
+                                Ok(MemoryEntry {
+                                    path: runs.join(format!("{index:02}")),
+                                    kind: Ok(ArtifactKind::Directory),
+                                })
+                            })
+                            .collect::<Vec<_>>())
+                    }
+                },
+                |_| false,
+                |path| {
+                    removed.borrow_mut().push(path.to_owned());
+                    Err(io::Error::new(io::ErrorKind::PermissionDenied, "removal refused"))
+                },
+            );
+            let Error::ArtifactIo { path, source } = result.unwrap_err() else {
+                panic!("original I/O error must be preserved")
+            };
+            assert_eq!(path, if listing_failure { runs.to_owned() } else { runs.join("00") });
+            assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
+            assert_eq!(
+                source.to_string(),
+                if listing_failure { "listing refused" } else { "removal refused" }
+            );
+            assert_eq!(*removed.borrow(), if listing_failure { Vec::new() } else { vec![runs.join("00")] });
+        }
+    }
+
+    #[test]
+    fn november_artifact_discovery_filters_kinds_and_sorts_exact_paths_in_memory() {
+        let root = Path::new("root");
+        let checked = std::cell::RefCell::new(Vec::new());
+        let mut entries = vec![
+            ("link.json", ArtifactKind::SymbolicLink),
+            ("z.json", ArtifactKind::File),
+            ("device.json", ArtifactKind::Other),
+            ("skip.txt", ArtifactKind::File),
+            ("a.json", ArtifactKind::File),
+        ]
+        .into_iter()
+        .map(|(name, kind)| {
+            Ok(MemoryEntry {
+                path: root.join(name),
+                kind: Ok(kind),
+            })
+        })
+        .collect::<Vec<_>>();
+        let paths = find_artifact_files_with_io(
+            root,
+            |path| {
+                checked.borrow_mut().push(path.to_owned());
+                path.extension().is_some_and(|extension| extension == "json")
+            },
+            DiscoveryLimits {
+                directories: 1,
+                artifacts: 2,
+            },
+            |path| {
+                assert_eq!(path, root);
+                Ok(true)
+            },
+            |path| {
+                assert_eq!(path, root);
+                Ok(std::mem::take(&mut entries))
+            },
+        )
+        .unwrap();
+        assert_eq!(paths, [root.join("a.json"), root.join("z.json")]);
+        assert_eq!(*checked.borrow(), [root.join("z.json"), root.join("skip.txt"), root.join("a.json")]);
+    }
+
+    #[test]
+    fn november_artifact_discovery_enforces_directory_and_file_limits_before_extra_io() {
+        let root = Path::new("root");
+        for limit in 0..=3 {
+            let visited = std::cell::RefCell::new(Vec::new());
+            let result = find_artifact_files_with_io(
+                root,
+                |_| true,
+                DiscoveryLimits {
+                    directories: limit,
+                    artifacts: 2,
+                },
+                |_| Ok(true),
+                |path| {
+                    visited.borrow_mut().push(path.to_owned());
+                    Ok(if path == root {
+                        vec![
+                            Ok(MemoryEntry {
+                                path: root.join("first"),
+                                kind: Ok(ArtifactKind::Directory),
+                            }),
+                            Ok(MemoryEntry {
+                                path: root.join("second"),
+                                kind: Ok(ArtifactKind::Directory),
+                            }),
+                        ]
+                    } else {
+                        vec![Ok(MemoryEntry {
+                            path: path.join("result.json"),
+                            kind: Ok(ArtifactKind::File),
+                        })]
+                    })
+                },
+            );
+            if limit == 3 {
+                assert_eq!(
+                    result.unwrap(),
+                    [root.join("first").join("result.json"), root.join("second").join("result.json")]
+                );
+                assert_eq!(*visited.borrow(), [root.to_owned(), root.join("second"), root.join("first")]);
+            } else {
+                let Error::ArtifactFormat { path, message } = result.unwrap_err() else {
+                    panic!("directory limit error")
+                };
+                assert_eq!(path, root);
+                assert_eq!(message, format!("artifact tree exceeds the limit of {limit} directories"));
+                assert_eq!(*visited.borrow(), if limit == 0 { Vec::new() } else { vec![root.to_owned()] });
+            }
+        }
+        for limit in [0, 1, 2] {
+            let result = find_artifact_files_with_io(
+                root,
+                |_| true,
+                DiscoveryLimits {
+                    directories: 1,
+                    artifacts: limit,
+                },
+                |_| Ok(true),
+                |_| {
+                    Ok(["a", "z"].map(|name| {
+                        Ok(MemoryEntry {
+                            path: root.join(name),
+                            kind: Ok(ArtifactKind::File),
+                        })
+                    }))
+                },
+            );
+            if limit == 2 {
+                assert_eq!(result.unwrap(), [root.join("a"), root.join("z")]);
+            } else {
+                let Error::ArtifactFormat { path, message } = result.unwrap_err() else {
+                    panic!("file limit error")
+                };
+                assert_eq!(path, root);
+                assert_eq!(message, format!("artifact tree exceeds the limit of {limit} matching files"));
+            }
+        }
+    }
+
+    #[test]
+    fn november_artifact_discovery_propagates_each_error_with_its_own_path() {
+        let root = Path::new("root");
+        let missing = find_artifact_files_with_io(
+            root,
+            |_| panic!("missing tree has no files"),
+            DiscoveryLimits {
+                directories: 0,
+                artifacts: 0,
+            },
+            |_| Ok(false),
+            |_| -> io::Result<Vec<io::Result<MemoryEntry>>> { panic!("missing tree must not be opened") },
+        )
+        .unwrap();
+        assert!(missing.is_empty());
+        for stage in 0..4 {
+            let result = find_artifact_files_with_io(
+                root,
+                |_| panic!("failed tree has no accepted files"),
+                DiscoveryLimits {
+                    directories: 1,
+                    artifacts: 1,
+                },
+                |_| {
+                    if stage == 0 {
+                        Err(io::Error::new(io::ErrorKind::PermissionDenied, "exists failure"))
+                    } else {
+                        Ok(true)
+                    }
+                },
+                |_| {
+                    if stage == 1 {
+                        Err(io::Error::new(io::ErrorKind::PermissionDenied, "listing failure"))
+                    } else if stage == 2 {
+                        Ok(vec![Err(io::Error::new(io::ErrorKind::PermissionDenied, "entry failure"))])
+                    } else {
+                        Ok(vec![Ok(MemoryEntry {
+                            path: root.join("entry"),
+                            kind: Err(io::ErrorKind::PermissionDenied),
+                        })])
+                    }
+                },
+            );
+            let Error::ArtifactIo { path, source } = result.unwrap_err() else {
+                panic!("I/O error must be preserved")
+            };
+            assert_eq!(path, if stage == 3 { root.join("entry") } else { root.to_owned() });
+            assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
+            assert_eq!(
+                source.to_string(),
+                ["exists failure", "listing failure", "entry failure", "entry type failure"][stage]
+            );
+        }
+    }
+
+    #[test]
+    fn november_artifact_discovery_depth_boundary_has_an_exact_error_without_directories() {
+        let root = Path::new("root");
+        for depth in [MAX_ARTIFACT_DIRECTORY_DEPTH, MAX_ARTIFACT_DIRECTORY_DEPTH + 1] {
+            let visited = std::cell::Cell::new(0);
+            let result = find_artifact_files_with_io(
+                root,
+                |_| true,
+                DiscoveryLimits {
+                    directories: 128,
+                    artifacts: 1,
+                },
+                |_| Ok(true),
+                |path| {
+                    visited.set(visited.get() + 1);
+                    Ok(vec![Ok(if path.components().count() - 1 < depth {
+                        MemoryEntry {
+                            path: path.join("d"),
+                            kind: Ok(ArtifactKind::Directory),
+                        }
+                    } else {
+                        MemoryEntry {
+                            path: path.join("summary.json"),
+                            kind: Ok(ArtifactKind::File),
+                        }
+                    })])
+                },
+            );
+            let mut deepest = root.to_owned();
+            for _ in 0..depth {
+                deepest.push("d");
+            }
+            if depth == MAX_ARTIFACT_DIRECTORY_DEPTH {
+                assert_eq!(result.unwrap(), [deepest.join("summary.json")]);
+            } else {
+                let Error::ArtifactFormat { path, message } = result.unwrap_err() else {
+                    panic!("depth error")
+                };
+                assert_eq!(path, deepest);
+                assert_eq!(message, "artifact directory nesting is too deep");
+            }
+            assert_eq!(visited.get(), MAX_ARTIFACT_DIRECTORY_DEPTH + 1);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_regular_file_admission_forwards_exact_reader_policy_and_open_failures() {
+        let path = Path::new("artifact.json");
+        let events = std::cell::RefCell::new(Vec::new());
+        let bytes = read_regular_file_with(
+            path,
+            3,
+            "JSON",
+            |input| {
+                assert_eq!(input, path);
+                events.borrow_mut().push("open");
+                Ok(17)
+            },
+            |handle, input, limit, format| {
+                assert_eq!(handle, 17);
+                assert_eq!(input, path);
+                assert_eq!(limit, 3);
+                assert_eq!(format, "JSON");
+                events.borrow_mut().push("read");
+                Ok(b"abc".to_vec())
+            },
+        )
+        .unwrap();
+        assert_eq!(bytes, b"abc");
+        assert_eq!(*events.borrow(), ["open", "read"]);
+        assert!(matches!(read_regular_file_with::<u8>(path, 3, "JSON",
+            |_| Err(Error::Metadata("admission refused".into())), |_, _, _, _| panic!("admission failed")),
+            Err(Error::Metadata(message)) if message == "admission refused"));
+    }
+
+    #[test]
+    fn gamma_round2_bounded_file_checks_metadata_and_stream_growth_without_native_files() {
+        let path = Path::new("artifact.json");
+        assert_eq!(
+            read_bounded_file_with(io::Cursor::new(b"abc"), path, 3, "JSON", |_| Ok(3)).unwrap(),
+            b"abc"
+        );
+        let mut reader = io::Cursor::new(b"abcd");
+        assert!(matches!(read_bounded_file_with(&mut reader, path, 3, "JSON", |_| Ok(4)),
+            Err(Error::ArtifactFormat { path: failed, message }) if failed == path && message == "JSON file is 4 bytes; limit is 3 bytes"));
+        assert_eq!(reader.position(), 0);
+        assert!(
+            matches!(read_bounded_file_with(io::Cursor::new(b"abcd"), path, 3, "JSON", |_| Ok(3)),
+            Err(Error::ArtifactFormat { path: failed, message }) if failed == path && message == "JSON stream exceeds the 3-byte limit")
+        );
+        let mut reader = io::Cursor::new(b"abc");
+        assert!(matches!(read_bounded_file_with(&mut reader, path, 3, "JSON",
+            |_| Err(io::Error::new(io::ErrorKind::PermissionDenied, "metadata refused"))),
+            Err(Error::ArtifactIo { path: failed, source }) if failed == path && source.kind() == io::ErrorKind::PermissionDenied && source.to_string() == "metadata refused"));
+        assert_eq!(reader.position(), 0);
+    }
+
+    #[test]
+    fn gamma_round2_artifact_environment_and_run_names_preserve_inputs_and_sequence() {
+        let events = std::cell::RefCell::new(Vec::new());
+        ArtifactDirectory::create_with_environment(
+            Path::new("root"),
+            |name| {
+                events.borrow_mut().push(name.to_owned());
+                Some(format!("home-{name}").into())
+            },
+            |root, criterion, gungraun| {
+                assert_eq!(root, Path::new("root"));
+                assert_eq!(criterion, Some("home-CRITERION_HOME".into()));
+                assert_eq!(gungraun, Some("home-GUNGRAUN_HOME".into()));
+                Ok(ArtifactDirectory::gamma_round2_in_memory_directory())
+            },
+        )
+        .unwrap();
+        assert_eq!(*events.borrow(), ["CRITERION_HOME", "GUNGRAUN_HOME"]);
+        let sequence = AtomicU64::new(7);
+        for expected in ["42000000000-17-7", "42000000000-17-8"] {
+            assert_eq!(
+                run_name_with(|| UNIX_EPOCH + std::time::Duration::from_secs(42), &sequence, || 17).unwrap(),
+                expected
+            );
+        }
+        assert_eq!(sequence.load(Ordering::Relaxed), 9);
+        assert!(
+            matches!(run_name_with(|| UNIX_EPOCH - std::time::Duration::from_secs(1), &sequence, || panic!("invalid time")),
+            Err(Error::Metadata(message)) if !message.is_empty())
+        );
+        assert_eq!(sequence.load(Ordering::Relaxed), 9);
+    }
+
+    #[test]
+    fn gamma_round2_artifact_creation_orders_homes_and_retains_each_distinct_lock() {
+        for (criterion_home, gungraun_home) in [
+            (None, None),
+            (Some("criterion home"), None),
+            (None, Some("gungraun home")),
+            (Some("criterion home"), Some("gungraun home")),
+            (Some("shared home"), Some("shared home")),
+        ] {
+            let events = std::cell::RefCell::new(Vec::new());
+            let (run, criterion, gungraun, locks) = prepare_artifact_run(
+                Path::new("root"),
+                criterion_home.map(OsString::from),
+                gungraun_home.map(OsString::from),
+                || Ok("fixed-run".into()),
+                |path| {
+                    events.borrow_mut().push(("create", path.to_owned(), None));
+                    Ok(())
+                },
+                |path| {
+                    events.borrow_mut().push(("mark", path.to_owned(), None));
+                    Ok(path.to_owned())
+                },
+                |runs, current| {
+                    events.borrow_mut().push(("prune", runs.to_owned(), Some(current.to_owned())));
+                    Ok(())
+                },
+            )
+            .unwrap();
+            let expected_run = Path::new("root").join("runs").join("fixed-run");
+            let expected_criterion = criterion_home.map_or_else(
+                || expected_run.join("criterion"),
+                |home| Path::new(home).join(".metabench-runs").join("fixed-run"),
+            );
+            let expected_gungraun = gungraun_home.map_or_else(
+                || expected_run.join("gungraun"),
+                |home| Path::new(home).join(".metabench-runs").join("fixed-run"),
+            );
+            assert_eq!(run, expected_run);
+            assert_eq!(criterion, expected_criterion);
+            assert_eq!(gungraun, expected_gungraun);
+            let mut expected = vec![
+                ("create", run.clone(), None),
+                ("mark", run.clone(), None),
+                ("prune", Path::new("root").join("runs"), Some(run.clone())),
+            ];
+            let mut expected_locks = vec![run];
+            for (home, current) in [(criterion_home, criterion), (gungraun_home, gungraun)] {
+                if let Some(home) = home {
+                    if !expected_locks.contains(&current) {
+                        expected.push(("create", current.clone(), None));
+                        expected.push(("mark", current.clone(), None));
+                        expected_locks.push(current.clone());
+                    }
+                    expected.push(("prune", Path::new(home).join(".metabench-runs"), Some(current)));
+                }
+            }
+            assert_eq!(*events.borrow(), expected);
+            assert_eq!(locks, expected_locks);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_artifact_creation_propagates_each_name_create_mark_and_prune_failure() {
+        let expected = [
+            "name", "create", "mark", "prune", "create", "mark", "prune", "create", "mark", "prune",
+        ];
+        for failing in 0..expected.len() {
+            let events = std::cell::RefCell::new(Vec::new());
+            let event = |name| {
+                let index = events.borrow().len();
+                events.borrow_mut().push(name);
+                if index == failing {
+                    Err(Error::Metadata(format!("phase {index}")))
+                } else {
+                    Ok(index)
+                }
+            };
+            let result = prepare_artifact_run(
+                Path::new("root"),
+                Some("criterion".into()),
+                Some("gungraun".into()),
+                || event("name").map(|_| "fixed".into()),
+                |_| event("create").map(|_| ()),
+                |_| event("mark"),
+                |_, _| event("prune").map(|_| ()),
+            );
+            assert!(matches!(result, Err(Error::Metadata(message)) if message == format!("phase {failing}")));
+            assert_eq!(*events.borrow(), expected[..=failing]);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_manifests_preserve_optional_status_and_discovered_identity_updates() {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt as _;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt as _;
+        let root = Path::new("run");
+        let make_manifest = || EngineRunManifest {
+            target: "bench".into(),
+            engine: "criterion".into(),
+            command_line: vec!["argument".into()],
+            engine_version: None,
+            artifact_root: "artifacts".into(),
+            success: true,
+            exit_code: Some(0),
+            discovered_native_identities: vec!["obsolete".into()],
+            native_to_canonical: BTreeMap::new(),
+        };
+        for status in [None, Some(ExitStatus::from_raw(0)), Some(ExitStatus::from_raw(1))] {
+            write_run_manifest_with(
+                root,
+                Path::new("artifacts"),
+                "bench",
+                "criterion",
+                &["case with spaces".into(), "".into()],
+                status,
+                |path, manifest| {
+                    assert_eq!(path, root.join("manifests").join("criterion.json"));
+                    assert_eq!(manifest.target, "bench");
+                    assert_eq!(manifest.engine, "criterion");
+                    assert_eq!(manifest.command_line, ["case with spaces", ""]);
+                    assert!(manifest.engine_version.is_none());
+                    assert_eq!(manifest.artifact_root, "artifacts");
+                    assert_eq!(manifest.success, status.is_some_and(|status| status.success()));
+                    assert_eq!(manifest.exit_code, status.and_then(|status| status.code()));
+                    assert!(manifest.discovered_native_identities.is_empty());
+                    assert!(manifest.native_to_canonical.is_empty());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        }
+        let results = [("b", "canonical-b"), ("a", "first-a"), ("a", "last-a")].map(|(native, canonical)| NativeResult {
+            identity: canonical.into(),
+            native_identity: native.into(),
+            source: "criterion".into(),
+            metrics: BTreeMap::new(),
+            raw_artifacts: vec![],
+        });
+        record_discovered_identities_with(
+            root,
+            "criterion",
+            &results,
+            |path| {
+                assert_eq!(path, root.join("manifests").join("criterion.json"));
+                Ok(make_manifest())
+            },
+            |path, manifest| {
+                assert_eq!(path, root.join("manifests").join("criterion.json"));
+                assert_eq!(manifest.discovered_native_identities, ["a", "b"]);
+                assert_eq!(
+                    manifest.native_to_canonical,
+                    BTreeMap::from([("a".into(), "last-a".into()), ("b".into(), "canonical-b".into())])
+                );
+                assert_eq!(manifest.command_line, ["argument"]);
+                assert!(manifest.success);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(matches!(record_discovered_identities_with(root, "criterion", &results,
+            |_| Err(Error::Metadata("manifest read refused".into())), |_, _| panic!("read failed")),
+            Err(Error::Metadata(message)) if message == "manifest read refused"));
+        assert!(matches!(write_run_manifest_with(root, root, "bench", "perf", &[], None,
+            |_, _| Err(Error::Metadata("manifest write refused".into()))), Err(Error::Metadata(message)) if message == "manifest write refused"));
+    }
+
+    #[test]
+    fn gamma_round2_native_artifact_discovery_errors_propagate_before_reading() {
+        let root = Path::new("artifacts");
+        assert!(matches!(parse_criterion_with(root, root, &[], None, |directory, predicate| {
+            assert_eq!(directory, root); assert!(predicate(&root.join("new").join("benchmark.json")));
+            assert!(!predicate(&root.join("base").join("benchmark.json")));
+            Err(Error::Metadata("criterion discovery refused".into()))
+        }, |_, _, _| panic!("discovery failed")), Err(Error::Metadata(message)) if message == "criterion discovery refused"));
+        assert!(matches!(parse_gungraun_with(root, root, &[], |directory, predicate| {
+            assert_eq!(directory, root); assert!(predicate(&root.join("summary.json"))); assert!(!predicate(&root.join("other.json")));
+            Err(Error::Metadata("gungraun discovery refused".into()))
+        }, |_, _, _| panic!("discovery failed")), Err(Error::Metadata(message)) if message == "gungraun discovery refused"));
+        assert!(
+            parse_criterion_with(root, root, &[], None, |_, _| Ok(vec![]), |_, _, _| panic!("no paths"))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            parse_gungraun_with(root, root, &[], |_, _| Ok(vec![]), |_, _, _| panic!("no paths"))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn gamma_round2_artifact_text_reader_forwards_exact_byte_limit_and_utf8_errors() {
+        let path = Path::new("counter.csv");
+        assert_eq!(
+            read_artifact_text_with(path, "CSV", |input, limit, format| {
+                assert_eq!(input, path);
+                assert_eq!(limit, 16 * 1024 * 1024);
+                assert_eq!(format, "CSV");
+                Ok("counter α".as_bytes().to_vec())
+            })
+            .unwrap(),
+            "counter α"
+        );
+        assert!(matches!(read_artifact_text_with(path, "CSV", |_, _, _| Ok(vec![0xff])),
+            Err(Error::ArtifactIo { path: failed, source }) if failed == path && source.kind() == io::ErrorKind::InvalidData));
+        assert!(
+            matches!(read_artifact_text_with(path, "CSV", |_, _, _| Err(Error::Metadata("read refused".into()))),
+            Err(Error::Metadata(message)) if message == "read refused")
+        );
+    }
+
+    #[test]
+    fn gamma_round2_atomic_json_writer_preserves_parent_prefix_bytes_and_commit_error_boundaries() {
+        struct MemoryTemporary {
+            bytes: Vec<u8>,
+            flush_error: bool,
+        }
+        impl io::Write for MemoryTemporary {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.bytes.extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                if self.flush_error {
+                    Err(io::Error::new(io::ErrorKind::BrokenPipe, "flush refused"))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        for path in [
+            PathBuf::from("report.json"),
+            Path::new("nested").join("report.json"),
+            PathBuf::new(),
+        ] {
+            let parent = if path.starts_with("nested") {
+                Path::new("nested")
+            } else {
+                Path::new(".")
+            };
+            for failing in [None, Some("mkdir"), Some("temporary"), Some("flush"), Some("sync"), Some("persist")] {
+                let events = std::cell::RefCell::new(Vec::new());
+                let result = write_json_with(
+                    &path,
+                    &serde_json::json!({"count": 17}),
+                    |directory| {
+                        assert_eq!(directory, parent);
+                        events.borrow_mut().push("mkdir");
+                        if failing == Some("mkdir") {
+                            Err(io::Error::new(io::ErrorKind::PermissionDenied, "mkdir refused"))
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    |directory, prefix| {
+                        assert_eq!(directory, parent);
+                        assert_eq!(prefix, ".metabench-");
+                        events.borrow_mut().push("temporary");
+                        if failing == Some("temporary") {
+                            Err(io::Error::new(io::ErrorKind::PermissionDenied, "temporary refused"))
+                        } else {
+                            Ok(MemoryTemporary {
+                                bytes: vec![],
+                                flush_error: failing == Some("flush"),
+                            })
+                        }
+                    },
+                    |temporary| {
+                        assert_eq!(temporary.bytes, b"{\n  \"count\": 17\n}");
+                        events.borrow_mut().push("sync");
+                        if failing == Some("sync") {
+                            Err(io::Error::new(io::ErrorKind::PermissionDenied, "sync refused"))
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    |temporary, destination| {
+                        assert_eq!(destination, path);
+                        assert_eq!(temporary.bytes, b"{\n  \"count\": 17\n}");
+                        events.borrow_mut().push("persist");
+                        if failing == Some("persist") {
+                            Err(io::Error::new(io::ErrorKind::PermissionDenied, "persist refused"))
+                        } else {
+                            Ok(())
+                        }
+                    },
+                );
+                if let Some(phase) = failing {
+                    assert!(matches!(result, Err(Error::ArtifactIo { path: failed, source })
+                        if failed == if matches!(phase, "mkdir" | "temporary") { parent } else { &path } && source.to_string() == format!("{phase} refused")));
+                    let expected: &[&str] = match phase {
+                        "mkdir" => &["mkdir"],
+                        "temporary" | "flush" => &["mkdir", "temporary"],
+                        "sync" => &["mkdir", "temporary", "sync"],
+                        "persist" => &["mkdir", "temporary", "sync", "persist"],
+                        _ => unreachable!(),
+                    };
+                    assert_eq!(*events.borrow(), expected);
+                } else {
+                    result.unwrap();
+                    assert_eq!(*events.borrow(), ["mkdir", "temporary", "sync", "persist"]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_atomic_json_writer_returns_serialization_error_before_sync_or_publication() {
+        struct Invalid;
+        impl Serialize for Invalid {
+            fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("serialization refused"))
+            }
+        }
+        assert!(
+            matches!(write_json_with(Path::new("invalid.json"), &Invalid, |_| Ok(()), |_, _| Ok(Vec::new()),
+            |_| panic!("serialization failed"), |_, _| panic!("serialization failed")),
+            Err(Error::ArtifactJson { path, source }) if path == Path::new("invalid.json") && source.to_string() == "serialization refused")
+        );
+    }
+
+    #[test]
+    fn gamma_round2_criterion_inputs_use_new_artifacts_and_preserve_units_and_metrics() {
+        let root = Path::new("artifacts");
+        let path = root.join("new").join("benchmark.json");
+        assert!(criterion_artifact_path(&path));
+        assert!(!criterion_artifact_path(&root.join("base").join("benchmark.json")));
+        assert!(!criterion_artifact_path(&root.join("new").join("estimates.json")));
+        let metadata = br#"{"group_id":"native","function_id":"case","value_str":"7","throughput":{"Bytes":123}}"#;
+        let estimate =
+            br#"{"mean":{"point_estimate":10,"confidence_interval":{"confidence_level":0.95,"lower_bound":9,"upper_bound":11}}}"#;
+        let mut read_paths = Vec::new();
+        let results = parse_criterion_paths(vec![path.clone()], root, &[], Some("ns"), |read_path, limit, format| {
+            read_paths.push(read_path.to_owned());
+            assert_eq!(limit, MAX_ARTIFACT_JSON_BYTES);
+            assert_eq!(format, "JSON");
+            Ok(if read_path == path { metadata.to_vec() } else { estimate.to_vec() })
+        })
+        .unwrap();
+        assert_eq!(read_paths, [path.clone(), path.with_file_name("estimates.json")]);
+        assert_eq!(results.len(), 1);
+        let result = &results[0];
+        assert_eq!(result.identity, "native/case/7");
+        assert_eq!(result.native_identity, "native/case/7");
+        assert_eq!(result.source, "criterion");
+        assert_eq!(result.raw_artifacts, ["new/benchmark.json", "new/estimates.json"]);
+        let time = &result.metrics["time"];
+        assert_eq!(time.value.as_f64().to_bits(), 10.0_f64.to_bits());
+        assert_eq!(time.unit.as_deref(), Some("ns"));
+        assert_eq!(time.statistic.as_deref(), Some("mean"));
+        assert_eq!(time.confidence_level, Some(0.95));
+        assert_eq!((time.lower_bound, time.upper_bound), (Some(9.0), Some(11.0)));
+        assert_eq!(time.display_name, "Time");
+        assert_eq!(
+            result.metrics["declared_throughput.bytes"].value.as_f64().to_bits(),
+            123.0_f64.to_bits()
+        );
+        assert_eq!(result.metrics["declared_throughput.bytes"].display_name, "Input bytes");
+        assert!(
+            matches!(parse_criterion_paths(vec![path.clone()], root, &[], None, |read_path, _, _| {
+            if read_path == path { Ok(metadata.to_vec()) } else { Err(Error::Metadata("estimates read failed".into())) }
+        }), Err(Error::Metadata(message)) if message == "estimates read failed")
+        );
+    }
+
+    #[test]
+    fn gamma_round2_gungraun_inputs_validate_read_policy_and_propagate_read_failure() {
+        let root = Path::new("artifacts");
+        let path = root.join("summary.json");
+        let results = parse_gungraun_paths(vec![path.clone()], root, &[], |read_path, limit, format| {
+            assert_eq!(read_path, path);
+            assert_eq!(limit, MAX_ARTIFACT_JSON_BYTES);
+            assert_eq!(format, "JSON");
+            Ok(GUNGRAUN_SUMMARY_FIXTURE.as_bytes().to_vec())
+        })
+        .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].source, "gungraun.callgrind");
+        assert_eq!(results[0].raw_artifacts, ["summary.json"]);
+        assert!(!results[0].metrics.is_empty());
+        assert!(
+            matches!(parse_gungraun_paths(vec![path], root, &[], |_, _, _| Err(Error::Metadata("summary read failed".into()))),
+            Err(Error::Metadata(message)) if message == "summary read failed")
+        );
+    }
+
+    #[test]
+    fn gamma_round2_perf_text_preserves_rows_identity_and_zero_counts() {
+        let root = Path::new("artifacts");
+        let path = root.join("perf.json");
+        let result = parse_perf_text(
+            "\n \t\n{\"counter-value\":0,\"event\":\"cycles:u\"}\n\n{\"counter-value\":\"12.5\",\"event\":\"instructions:u\"}\n",
+            &path,
+            root,
+            "canonical/case".into(),
+            "native::case".into(),
+        )
+        .unwrap();
+        assert_eq!(result.identity, "canonical/case");
+        assert_eq!(result.native_identity, "native::case");
+        assert_eq!(result.source, "perf");
+        assert_eq!(result.raw_artifacts, ["perf.json"]);
+        assert_eq!(result.metrics.len(), 2);
+        assert_eq!(result.metrics["cycles"].value.as_f64().to_bits(), 0.0_f64.to_bits());
+        assert_eq!(result.metrics["instructions"].value.as_f64().to_bits(), 12.5_f64.to_bits());
+        assert_eq!(result.metrics["cycles"].display_name, "HW Cycles");
+        assert_eq!(result.metrics["cycles"].direction, MetricDirection::LowerIsBetter);
+    }
+
+    #[test]
+    fn gamma_round2_perf_text_errors_keep_type_path_and_exact_diagnostic() {
+        let path = Path::new("perf.json");
+        for (contents, expected) in [
+            ("", "contains no perf event records"),
+            ("\n \t\n", "contains no perf event records"),
+            (
+                "{\"counter-value\":-1,\"event\":\"cycles:u\"}",
+                "line 1 event cycles:u has invalid counter value -1",
+            ),
+            (
+                "{\"counter-value\":\"NaN\",\"event\":\"cycles:u\"}",
+                "line 1 event cycles:u has invalid counter value NaN",
+            ),
+            (
+                "{\"counter-value\":\"inf\",\"event\":\"cycles:u\"}",
+                "line 1 event cycles:u has invalid counter value inf",
+            ),
+            (
+                "{\"counter-value\":null,\"event\":\"cycles:u\"}",
+                "line 1 event cycles:u has non-numeric counter value null",
+            ),
+            (
+                "{\"counter-value\":1,\"event\":\"cycles:u\"}\n{\"counter-value\":2,\"event\":\"cycles\"}",
+                "perf event cycles occurs more than once",
+            ),
+        ] {
+            assert!(
+                matches!(
+                    parse_perf_text(contents, path, Path::new(""), "case".into(), "native".into()),
+                    Err(Error::ArtifactFormat { path: failed, message }) if failed == path && message == expected
+                ),
+                "{contents}"
+            );
+        }
+        assert!(matches!(
+            parse_perf_text("not JSON", path, Path::new(""), "case".into(), "native".into()),
+            Err(Error::ArtifactJson { path: failed, .. }) if failed == path
+        ));
+    }
+
+    #[test]
+    fn gamma_round2_vtune_text_preserves_columns_aggregation_and_metric_source() {
+        let root = Path::new("artifacts");
+        let path = root.join("vtune.csv");
+        let result = parse_vtune_text(
+            "Samples,Hardware Event Count:Self,Hardware Event Type\nignored,\"1,234\",lowerCase\n \t\nignored,6,lowerCase\nignored,0,anotherEvent\n",
+            &path, root, "canonical/case".into(), "native::case".into(),
+        ).unwrap();
+        assert_eq!(result.identity, "canonical/case");
+        assert_eq!(result.native_identity, "native::case");
+        assert_eq!(result.source, "vtune");
+        assert_eq!(result.raw_artifacts, ["vtune.csv"]);
+        assert_eq!(result.metrics.len(), 2);
+        assert_eq!(result.metrics["lowerCase"].value.as_f64().to_bits(), 1_240.0_f64.to_bits());
+        assert_eq!(result.metrics["anotherEvent"].value.as_f64().to_bits(), 0.0_f64.to_bits());
+        assert_eq!(result.metrics["lowerCase"].display_name, "lowerCase");
+        assert_eq!(result.metrics["anotherEvent"].display_name, "anotherEvent");
+        assert_eq!(result.metrics["lowerCase"].direction, MetricDirection::LowerIsBetter);
+    }
+
+    #[test]
+    fn gamma_round2_vtune_text_rejects_empty_malformed_and_nonfinite_reports() {
+        let header = "Hardware Event Type,Hardware Event Count:Self";
+        let path = Path::new("vtune.csv");
+        for contents in [String::new(), header.to_owned(), format!("{header}\n \t\n")] {
+            assert!(matches!(
+                parse_vtune_text(&contents, path, Path::new(""), "case".into(), "native".into()),
+                Err(Error::ArtifactFormat { path: failed, message })
+                    if failed == path && message == "contains no vtune event records"
+            ));
+        }
+        for (row, expected) in [
+            ("cycles", "line 2 has 1 field(s); expected 2 matching the header"),
+            ("cycles,nope", "line 2 event cycles has non-numeric count nope"),
+            ("cycles,-1", "line 2 event cycles has invalid count -1"),
+            ("cycles,NaN", "line 2 event cycles has invalid count NaN"),
+            ("cycles,inf", "line 2 event cycles has invalid count inf"),
+            (
+                "cycles,1e308\ncycles,1e308",
+                "line 3 event cycles aggregate count inf is not finite",
+            ),
+        ] {
+            assert!(
+                matches!(
+                    parse_vtune_text(&format!("{header}\n{row}"), path, Path::new(""), "case".into(), "native".into()),
+                    Err(Error::ArtifactFormat { path: failed, message }) if failed == path && message == expected
+                ),
+                "{row}"
+            );
+        }
+        assert!(matches!(
+            parse_vtune_text("name,count", path, Path::new(""), "case".into(), "native".into()),
+            Err(Error::ArtifactFormat { path: failed, message })
+                if failed == path && message == "header is missing the \"Hardware Event Type\" or \"Hardware Event Count:Self\" column"
+        ));
+    }
+
+    #[test]
+    fn gamma_survivor_throughput_and_counter_shapes() {
+        use serde_json::json;
+
+        use super::*;
+        for (value, expected) in [
+            (json!({"Bytes": 7}), Some(("declared_throughput.bytes".into(), 7))),
+            (
+                json!({"ElementsAndBytes": {"elements": 3, "bytes": 8}}),
+                Some(("declared_throughput.elements_and_bytes".into(), 3)),
+            ),
+            (json!({"Other": {"elements": 3}}), None),
+            (json!({"ElementsAndBytes": {"bytes": 8}}), None),
+            (json!({"ElementsAndBytes": {"elements": "3"}}), None),
+            (json!({"Bytes": -1}), None),
+            (json!({"Bytes": 1.5}), None),
+            (json!({"Bytes": false}), None),
+            (json!({}), None),
+            (json!(null), None),
+        ] {
+            assert_eq!(parse_criterion_throughput(&value), expected, "{value}");
+        }
+        for value in [json!(null), json!({}), json!([]), json!(false)] {
+            assert_eq!(perf_counter_value(&value), None);
+        }
+        assert_eq!(perf_counter_value(&json!("17.5")), Some(17.5));
+        assert_eq!(split_csv_fields("x,\"a\"\"b\",z"), ["x", "a\"b", "z"]);
+        assert_eq!(snake_case("ElementsAndBytes"), "elements_and_bytes");
+    }
+
+    #[test]
+    fn gamma_survivor_identity_prefix_resolution() {
+        use super::*;
+        let index = CanonicalIdentityIndex {
+            criterion: BTreeMap::from([("native".into(), "canonical".into()), ("native/exact".into(), "specific".into())]),
+            gungraun: BTreeMap::new(),
+        };
+        assert_eq!(
+            index.resolve_registered_criterion("native/child/32"),
+            Some("canonical/child/32".into())
+        );
+        assert_eq!(index.resolve_registered_criterion("native/exact/32"), Some("specific/32".into()));
+        assert_eq!(index.resolve_registered_criterion("unregistered/child"), None);
+    }
+
+    #[test]
+    fn gamma_survivor_criterion_estimate_error_messages() {
+        use super::*;
+        let path = Path::new("estimate.json");
+        for (point, lower, upper, message) in [
+            (f64::NAN, 0.0, 1.0, "contains a non-finite Criterion estimate".to_owned()),
+            (1.0, 0.0, f64::INFINITY, "contains a non-finite Criterion estimate".to_owned()),
+            (
+                1.0,
+                -2.0,
+                -1.0,
+                "Criterion estimates must be non-negative; found -2..1..-1".to_owned(),
+            ),
+            (
+                1.0,
+                0.0,
+                -1.0,
+                "Criterion estimates must be non-negative; found 0..1..-1".to_owned(),
+            ),
+        ] {
+            let estimate = CriterionEstimate {
+                point_estimate: point,
+                confidence_interval: CriterionConfidenceInterval {
+                    confidence_level: 0.95,
+                    lower_bound: lower,
+                    upper_bound: upper,
+                },
+            };
+            assert!(matches!(validate_criterion_estimate(path, &estimate),
+                Err(Error::ArtifactFormat { path: failed, message: actual }) if failed == path && actual == message));
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_nonfinite_native_metrics_are_omitted() {
+        use super::*;
+        let mut metrics: MetricResults<String> = serde_json::from_value(serde_json::json!({
+            "finite": {"values": {"new": 1.5}},
+            "nonfinite": {"values": {"new": 2.5}}
+        }))
+        .unwrap();
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            metrics.0.get_mut("nonfinite").unwrap().values = EitherOrBoth::Left(GungraunMetric::Float(value));
+            let copied = copy_metrics("custom", &metrics);
+            assert_eq!(copied.len(), 1);
+            assert_eq!(copied["finite"].value, crate::report::MetricValue::Float(1.5));
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_bounded_stream_error_and_read_ahead() {
+        use super::*;
+        struct ScriptedReader {
+            remaining: usize,
+        }
+        impl io::Read for ScriptedReader {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if self.remaining == 0 {
+                    return Err(io::Error::new(io::ErrorKind::BrokenPipe, "scripted"));
+                }
+                let count = self.remaining.min(buf.len());
+                buf[..count].fill(b'x');
+                self.remaining -= count;
+                Ok(count)
+            }
+        }
+        let path = Path::new("in-memory.json");
+        assert!(matches!(read_bounded_stream(ScriptedReader { remaining: 4 }, path, 3, "JSON"),
+            Err(Error::ArtifactFormat { path: failed, message })
+                if failed == path && message == "JSON stream exceeds the 3-byte limit"));
+        assert!(matches!(read_bounded_stream(ScriptedReader { remaining: 0 }, path, 3, "JSON"),
+            Err(Error::ArtifactIo { path: failed, source })
+                if failed == path && source.kind() == io::ErrorKind::BrokenPipe));
+        assert_eq!(read_bounded_stream(&b"abc"[..], path, 3, "JSON").unwrap(), b"abc");
+    }
+
+    #[test]
+    fn gamma_survivor_artifact_paths_without_io() {
+        use super::*;
+        let directory = ArtifactDirectory {
+            root: "root".into(),
+            run: "run".into(),
+            criterion: "criterion".into(),
+            gungraun: "gungraun".into(),
+            _active_locks: vec![],
+        };
+        assert_eq!(directory.perf_path(17), Path::new("run").join("perf").join("17.jsonl"));
+    }
+
     use std::fmt::Write as _;
     #[cfg(unix)]
     use std::os::unix::fs::{PermissionsExt as _, symlink};
@@ -1091,7 +3064,7 @@ mod tests {
         let path = directory.path().join("artifact.json");
         fs::write(&path, b"null").unwrap();
         let file = open_regular_file(&path).unwrap();
-        assert_eq!(file.metadata().unwrap().len(), 4);
+        assert_eq!(file.metadata().unwrap().length, 4);
         #[cfg(unix)]
         {
             fs::write(&path, b"null      ").unwrap();

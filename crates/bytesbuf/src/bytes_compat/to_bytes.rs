@@ -63,6 +63,7 @@ impl BytesView {
             #[cfg(feature = "std")]
             TO_BYTES_SHARED.with(|x| x.observe(self.len()));
 
+            // #[gamma::skip(iter.first_to_last, reason = "The enclosing branch requires exactly one span")]
             Bytes::from_owner(self.spans_reversed.first().expect("we verified there is one span").clone())
         } else {
             // We must copy, as Bytes can only represent consecutive spans of data.

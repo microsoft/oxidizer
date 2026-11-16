@@ -181,6 +181,28 @@ mod tests {
 
     use super::{prepare, release_chunks, release_stacks};
 
+    #[test]
+    fn gamma_survivor_duplicate_native_sources_keep_exact_error_and_decode_progress() {
+        let source = || SourceSnapshot {
+            id: seismograph_rallocator::source::ID,
+            name: "native".into(),
+            schema_version: seismograph_rallocator::source::SCHEMA_VERSION,
+            data: include_bytes!("../../../tests/fixtures/captured-native-v4.bin").to_vec(),
+        };
+        let mut phases = Vec::new();
+        let result = super::prepare_with_progress(
+            DecodedSnapshot {
+                sources: vec![source(), source()],
+                ..DecodedSnapshot::default()
+            },
+            &mut |phase| {
+                phases.push(format!("{phase:?}"));
+            },
+        );
+        assert_eq!(result.err().unwrap(), "duplicate native allocator source");
+        assert_eq!(phases, ["DecodeAllocator"]);
+    }
+
     fn allocator_source(snapshot: &seismograph_rallocator::native::Snapshot) -> SourceSnapshot {
         let mut data = vec![0; seismograph_rallocator::encoded_len(snapshot).unwrap()];
         seismograph_rallocator::encode(snapshot, &mut data).unwrap();
