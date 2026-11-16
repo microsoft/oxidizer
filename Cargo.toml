@@ -438,6 +438,8 @@ codegen-units = 1
 # coverage builds.
 [profile.test]
 debug = "full"
+# Coverage configurations use isolated builds and cannot reuse these caches.
+incremental = false
 
 # No debug info for mutation testing to speed up compilation
 [profile.mutants]

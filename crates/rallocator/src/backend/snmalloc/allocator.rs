@@ -82,6 +82,7 @@ pub(super) unsafe fn reallocate_core(ptr: *mut u8, layout: Layout, new_size: usi
 #[cfg(test)]
 mod tests {
     use std::alloc::GlobalAlloc;
+    use std::ptr::NonNull;
 
     use super::*;
     use crate::Rallocator;
@@ -93,8 +94,7 @@ mod tests {
         let class = classes::CLASSES[index];
         let mut held = Vec::new();
         loop {
-            let pointer = thread::allocate(layout);
-            assert!(!pointer.is_null());
+            let pointer = NonNull::new(thread::allocate(layout)).unwrap().as_ptr();
             // SAFETY: The internal allocator grants the complete request class.
             unsafe { pointer.write_bytes(19, class.size) };
             held.push(pointer);
@@ -211,8 +211,7 @@ mod tests {
                     (8192, 8192, true),
                 ] {
                     let layout = Layout::from_size_align(old_size, 16).unwrap();
-                    let original = thread::allocate(layout);
-                    assert!(!original.is_null());
+                    let original = NonNull::new(thread::allocate(layout)).unwrap().as_ptr();
                     // SAFETY: The fixture owns all old_size writable requested bytes.
                     unsafe { original.write_bytes(97, old_size) };
                     let primed =
