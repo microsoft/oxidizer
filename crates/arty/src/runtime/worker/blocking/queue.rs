@@ -314,6 +314,71 @@ mod tests {
     }
 
     #[test]
+    fn blocking_worker_transitions_and_retirement_target_the_selected_slot() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-worker-transitions", 2));
+        let queue = Arc::new(Queue::default());
+        queue.add_worker();
+        let index = queue.add_worker();
+        queue.enable_monitoring(&runtime.handle());
+        assert!(queue.push(QueuedJob {
+            body: BlockingJob::Plain(Box::new(|| {})),
+            shutdown: None,
+        }));
+        let mut worker = BlockingWorkerMonitoring::default();
+        drop(queue.pop(index, &mut worker).unwrap());
+
+        worker.parked();
+        let parked = runtime.handle().capture(CaptureOptions::default()).unwrap();
+        worker.unparked();
+        let running = runtime.handle().capture(CaptureOptions::default()).unwrap();
+        queue.retire(index);
+        let retired = runtime.handle().capture(CaptureOptions::default()).unwrap();
+
+        assert_eq!(parked.workers[index].state, WorkerState::Parked);
+        assert_eq!(running.workers[index].state, WorkerState::Running);
+        assert_eq!(retired.workers[index].state, WorkerState::Stopped);
+        assert_ne!(retired.workers[0].state, WorkerState::Stopped);
+    }
+
+    #[test]
+    fn only_the_first_blocking_worker_collects_shared_queued_tasks() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-queue-owner", 2));
+        let queue = Arc::new(Queue::default());
+        queue.add_worker();
+        queue.add_worker();
+        queue.enable_monitoring(&runtime.handle());
+        assert!(queue.push(QueuedJob {
+            body: BlockingJob::Monitored(Arc::new(TestJob(TaskInfo::new::<()>(queue.monitoring.events().unwrap())))),
+            shutdown: None,
+        }));
+
+        let source = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-owner-requests", 1));
+        let worker = source.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        worker
+            .handle()
+            .register_task_provider(move |request| sender.send(request).unwrap())
+            .unwrap();
+        for index in [0, 1] {
+            let captured = std::thread::scope(|scope| {
+                let handle = source.handle();
+                let capture = scope.spawn(move || handle.capture(CaptureOptions::default()).unwrap());
+                let request = if testing_aids::is_mutation_testing() {
+                    receiver.recv().unwrap()
+                } else {
+                    receiver.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap()
+                };
+                queue.collect(index, request);
+                capture.join().unwrap()
+            });
+            assert_eq!(captured.tasks.len(), usize::from(index == 0));
+            assert_eq!(captured.workers[0].task_collection, TaskCollection::Complete);
+        }
+    }
+
+    #[test]
     fn dequeuing_or_stopping_releases_a_canceled_capture_outside_the_queue_lock() {
         struct Capture(Arc<Queue>, std::sync::mpsc::Sender<bool>);
 
