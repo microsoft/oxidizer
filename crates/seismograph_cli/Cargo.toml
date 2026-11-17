@@ -33,9 +33,9 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
-chrono = { workspace = true, features = ["clock"] }
 clap = { workspace = true, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"] }
 crossterm.workspace = true
+jiff = { workspace = true, default-features = true }
 performables = { workspace = true, features = ["seismograph"] }
 ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
 seismograph.workspace = true

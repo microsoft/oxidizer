@@ -10,9 +10,10 @@ use std::future::pending;
 use std::time::Duration;
 
 use layered::{Execute, Service, Stack};
+use observed_destination_core::MeterProviderBuilderExt;
+use observed_destination_stdout::stdout_metrics;
 use ohno::{AppError, app_err};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_stdout::MetricExporter;
 use seatbelt::ResilienceContext;
 use seatbelt::timeout::Timeout;
 use tick::Clock;
@@ -60,6 +61,7 @@ fn configure_telemetry() -> SdkMeterProvider {
     tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()
-        .with_periodic_exporter(MetricExporter::default())
+        .register(stdout_metrics())
+        .expect("the stdout destination only installs an exporter and does not reject the builder")
         .build()
 }

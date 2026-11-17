@@ -16,6 +16,8 @@ use fetch::HttpClient;
 use fetch::fake::FakeDeps;
 use fetch::telemetry::TelemetryAttributes;
 use http::StatusCode;
+use observed_destination_core::MeterProviderBuilderExt;
+use observed_destination_stdout::stdout_metrics;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use templated_uri::{BaseUri, EscapedString, Uri, templated};
@@ -39,7 +41,8 @@ async fn main() -> Result<(), ohno::AppError> {
 
     // Create an OpenTelemetry meter provider that writes metrics to stdout.
     let meter_provider = SdkMeterProvider::builder()
-        .with_periodic_exporter(opentelemetry_stdout::MetricExporter::default())
+        .register(stdout_metrics())
+        .expect("the stdout destination only installs an exporter and does not reject the builder")
         .build();
 
     // Use the custom meter provider instead of the global provider.

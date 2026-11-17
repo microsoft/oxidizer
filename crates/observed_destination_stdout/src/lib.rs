@@ -52,6 +52,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use std::fmt::Debug;
+use std::future::ready;
 use std::io::{Write, stdout};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -65,9 +66,9 @@ use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::{LogProcessor, LoggerProviderBuilder, SdkLogRecord};
-use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
-use opentelemetry_stdout::MetricExporter;
+use opentelemetry_sdk::metrics::{MeterProviderBuilder, Temporality};
 
 /// Creates a log destination that writes to stdout.
 ///
@@ -204,9 +205,8 @@ where
 
 /// Creates a metric destination that writes to stdout.
 ///
-/// The underlying implementation is the `opentelemetry_stdout` crate's
-/// `MetricExporter`, which is intended for debugging and development purposes,
-/// with an output format that can change.
+/// Each export writes the SDK's full [`ResourceMetrics`] debug representation.
+/// This text format is for debugging and development. It can change.
 ///
 /// Metrics are exported periodically, every 60 seconds by default. Set
 /// `OTEL_METRIC_EXPORT_INTERVAL` to configure the interval (in milliseconds). Recording a
@@ -242,7 +242,7 @@ pub fn stdout_metrics() -> StdoutMetricDestinationBuilder {
     StdoutMetricDestination::builder()
 }
 
-/// A metric destination that writes to stdout via the `OTel` stdout exporter.
+/// A metric destination that writes `OpenTelemetry` metric data to stdout.
 #[derive(bon::Builder, Debug)]
 #[builder(derive(Debug))]
 #[expect(
@@ -259,7 +259,42 @@ impl StdoutMetricDestination {
 
 impl MetricDestination for StdoutMetricDestination {
     fn register(self, builder: MeterProviderBuilder) -> DestinationResult<MeterProviderBuilder> {
-        Ok(Self::register_with_exporter(builder, MetricExporter::default()))
+        Ok(Self::register_with_exporter(
+            builder,
+            StdoutMetricExporter {
+                write: print_metric_export,
+            },
+        ))
+    }
+}
+
+// #[gamma::skip(fn_value.unit, tag = "native-boundary", reason = "Tests do not write to native stdout. Injected writers verify complete metric batches.")]
+#[cfg_attr(coverage_nightly, coverage(off))] // Native stdout boundary; tests inject the exporter writer.
+fn print_metric_export(text: &str) {
+    print!("{text}");
+}
+
+struct StdoutMetricExporter<F> {
+    write: F,
+}
+
+impl<F: Fn(&str) + Send + Sync + 'static> PushMetricExporter for StdoutMetricExporter<F> {
+    fn export(&self, metrics: &ResourceMetrics) -> impl Future<Output = OTelSdkResult> + Send {
+        (self.write)(&format!("{metrics:#?}\n"));
+        ready(Ok(()))
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        Ok(())
+    }
+
+    fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+        Ok(())
+    }
+
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "Both forms call the same default implementation.")]
+    fn temporality(&self) -> Temporality {
+        Temporality::default()
     }
 }
 
@@ -285,8 +320,7 @@ mod tests {
     use opentelemetry::logs::{LogRecord, Logger, LoggerProvider, Severity};
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
-    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
+    use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
     use performables::arc::Arc;
     use performables::sync::mutex::Mutex;
 
@@ -578,56 +612,39 @@ mod tests {
         const SCOPE_NAME: &str = "stdout";
         const METRIC_NAME: &str = "stdout_contract_requests";
 
-        fn matches_expected_batch(metrics: &ResourceMetrics) -> bool {
-            let service_name = metrics.resource().get(&opentelemetry::Key::from_static_str("service.name"));
-            let Some(opentelemetry::Value::String(service_name)) = service_name else {
-                return false;
-            };
-            if service_name.as_str() != SERVICE_NAME {
-                return false;
-            }
+        let output = RecordingWriter::default();
+        let exporter = StdoutMetricExporter {
+            write: {
+                let output = output.clone();
+                move |text: &str| output.clone().write_all(text.as_bytes()).unwrap()
+            },
+        };
+        exporter.force_flush().unwrap();
+        assert!(output.contents().is_empty());
+        let provider = SdkMeterProvider::builder()
+            .with_resource(Resource::builder_empty().with_service_name(SERVICE_NAME).build())
+            .with_reader(PeriodicReader::builder(exporter).with_interval(Duration::from_hours(1)).build())
+            .build();
+        let counter = provider.meter(SCOPE_NAME).u64_counter(METRIC_NAME).build();
+        counter.add(2, &[]);
+        provider.force_flush().unwrap();
 
-            let scope_metrics = metrics.scope_metrics().next().unwrap();
-            if scope_metrics.scope().name() != SCOPE_NAME {
-                return false;
-            }
-
-            let metric = scope_metrics.metrics().next().unwrap();
-            if metric.name() != METRIC_NAME {
-                return false;
-            }
-
-            let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() else {
-                return false;
-            };
-
-            let mut points = sum.data_points();
-            if points.next().is_none_or(|point| point.value() != 2) {
-                return false;
-            }
-            if points.next().is_some() {
-                return false;
-            }
-
-            true
+        let first = output.contents();
+        for expected in [SERVICE_NAME, SCOPE_NAME, METRIC_NAME, "value: 2"] {
+            assert!(first.contains(expected), "missing {expected} in {first}");
         }
+        assert_eq!(first.matches(METRIC_NAME).count(), 1);
 
-        let exporter = InMemoryMetricExporter::default();
-        let provider = StdoutMetricDestination::register_with_exporter(
-            SdkMeterProvider::builder().with_resource(Resource::builder_empty().with_service_name(SERVICE_NAME).build()),
-            exporter.clone(),
-        )
-        .build();
-
-        provider.meter(SCOPE_NAME).u64_counter(METRIC_NAME).build().add(2, &[]);
+        counter.add(3, &[]);
+        provider.force_flush().unwrap();
+        let second = output.contents();
+        assert!(second.contains("value: 5"), "{second}");
+        assert_eq!(second.matches(METRIC_NAME).count(), 2);
 
         provider.shutdown().unwrap();
-
-        let metrics = exporter.get_finished_metrics().unwrap();
-
-        assert!(
-            metrics.iter().any(matches_expected_batch),
-            "exported metrics did not match expected batch"
-        );
+        let stopped = output.contents();
+        counter.add(7, &[]);
+        assert!(provider.force_flush().is_err());
+        assert_eq!(output.contents(), stopped);
     }
 }
