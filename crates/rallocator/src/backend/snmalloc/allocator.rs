@@ -16,8 +16,9 @@ pub struct Snmalloc;
 
 impl crate::backend::Backend for Snmalloc {}
 
-impl Operations for Snmalloc {
-    #[inline]
+// SAFETY: Owner leases, request classes, and remote-return queues uphold
+// GlobalAlloc's contracts. Resize preparation keeps the original storage live.
+unsafe impl Operations for Snmalloc {
     unsafe fn allocate<const ZEROED: bool>(&self, layout: Layout) -> *mut u8 {
         if ZEROED {
             thread::allocate_zeroed(layout)

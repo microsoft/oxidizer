@@ -24,7 +24,21 @@ pub trait Backend: sealed::Operations {}
 pub(crate) mod sealed {
     use std::alloc::Layout;
 
-    pub trait Operations {
+    /// Native allocation operations trusted by the recording facade.
+    ///
+    /// # Safety
+    ///
+    /// `allocate`, `deallocate`, and `reallocate` must uphold the corresponding
+    /// [`GlobalAlloc`](std::alloc::GlobalAlloc) alignment, initialization,
+    /// resizing, and ownership contracts.
+    /// Successful `ZEROED` allocations must initialize every requested byte to zero.
+    /// Allocation or resize failure must leave any live input block unchanged.
+    /// Successful resizes must preserve the first `layout.size().min(new_size)` bytes.
+    /// Preparing a distinct replacement must keep the original live until
+    /// deallocation and return disjoint storage.
+    /// Operations must support ownership transfer between threads where the
+    /// backend's thread-safety guarantees allow it. Methods must not unwind.
+    pub unsafe trait Operations {
         /// # Safety
         /// The layout is valid and nonzero.
         unsafe fn allocate<const ZEROED: bool>(&self, layout: Layout) -> *mut u8;
@@ -41,9 +55,10 @@ pub(crate) mod sealed {
 
         /// Prepares and copies a resize without retiring the old block.
         ///
+        /// Both old and replacement storage stay live on success.
+        ///
         /// # Safety
         /// The pointer and requested size satisfy the same resize contract.
-        /// Both old and replacement storage stay live on success.
         unsafe fn prepare_reallocation(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8;
 
         fn publish_state(&self);

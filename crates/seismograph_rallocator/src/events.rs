@@ -101,6 +101,7 @@ impl Lifetime {
 
 fn remove_keys(pending: &mut HashMap<CorrelationKey, u64>, lifetime: &Lifetime, identity: u64) {
     for key in lifetime.keys {
+        // Retiring one lifetime must not erase a newer lifetime's mapping for this key.
         if pending.get(&key) == Some(&identity) {
             pending.remove(&key);
         }
@@ -164,6 +165,7 @@ pub fn callers(events: &Events) -> Callers {
         if event.kind == RuntimeKind::Deallocation {
             deallocated.insert(allocation_id);
         } else if resize.is_some() {
+            // Later events can retain the allocation key or use the new address as their key.
             lifetime.keys = [
                 (allocation.allocation_id, allocation.address),
                 (AllocationId::new(allocation.address.get()), allocation.address),

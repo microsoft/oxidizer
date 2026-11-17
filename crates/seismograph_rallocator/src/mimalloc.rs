@@ -1,8 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Bounded mimalloc observations. Capacity and used blocks are not application liveness.
+//! Bounded mimalloc observations.
 //!
+//! An allocator page holds equal-sized allocation blocks. A page bin is a queue
+//! of pages. Regular bins group pages by block size. The singleton bin holds
+//! variable-sized pages.
+//!
+//! An arena reserves a large virtual-memory range. An arena slice is a fixed-size
+//! part of that range. Arena-backed pages use one or more slices.
+//!
+//! Capacity and used blocks are not application liveness.
 //! Queued pages exclude pages already transferred to the abandoned index.
 //! A used block can await collection after a cross-thread free.
 //! Global atomics are read independently. Committed bytes describe allocator

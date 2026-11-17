@@ -134,19 +134,7 @@ fn good_size(size: usize) -> Option<usize> {
 }
 
 fn os_good_size(size: usize) -> Option<usize> {
-    // os.c:_mi_os_good_alloc_size uses progressively coarser OS sizes.
-    let alignment = if size < 512 * 1024 {
-        hal::page_size()
-    } else if size < 2 * 1024 * 1024 {
-        64 * 1024
-    } else if size < 8 * 1024 * 1024 {
-        256 * 1024
-    } else if size < 32 * 1024 * 1024 {
-        1024 * 1024
-    } else {
-        4 * 1024 * 1024
-    };
-    size.checked_add(alignment - 1).map(|size| size & !(alignment - 1))
+    hal::good_allocation_size(size, hal::page_size)
 }
 
 #[cfg(test)]

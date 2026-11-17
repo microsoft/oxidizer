@@ -607,7 +607,7 @@ unsafe fn collect(address: usize) {
 unsafe fn collect_force(address: usize) {
     // SAFETY: The caller owns all local lists.
     unsafe { collect(address) };
-    // SAFETY: The collection's mutable borrow ended.
+    // SAFETY: The collection's exclusive borrow ended.
     let state = unsafe { local(address) };
     if state.local_free == 0 {
         return;
@@ -732,7 +732,7 @@ unsafe fn map_abandoned(address: usize) {
 }
 
 /// # Safety
-/// The caller owns the abandoned page, with no remaining mutable local borrow.
+/// The caller owns the abandoned page, with no remaining exclusive local-state borrow.
 unsafe fn release_abandoned(address: usize, mut expected_head: usize) {
     loop {
         // SAFETY: The caller has sole page ownership.

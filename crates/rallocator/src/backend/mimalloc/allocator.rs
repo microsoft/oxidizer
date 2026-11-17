@@ -22,8 +22,10 @@ pub struct Mimalloc;
 
 impl crate::backend::Backend for Mimalloc {}
 
-impl Operations for Mimalloc {
-    #[inline]
+// SAFETY: Heap pages provide disjoint aligned blocks and clear zeroed requests.
+// The owner/remote-free protocol supports transfer between threads. Resize preparation
+// copies the retained prefix without releasing the original block.
+unsafe impl Operations for Mimalloc {
     unsafe fn allocate<const ZEROED: bool>(&self, layout: Layout) -> *mut u8 {
         heap::allocate::<ZEROED>(layout)
     }

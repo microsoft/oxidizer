@@ -66,7 +66,7 @@ fn reservation_layout(size: usize, alignment: usize, policy: Policy) -> Option<(
         return None;
     }
     let size = size.checked_add(SLICE - 1)? & !(SLICE - 1);
-    let size = good_allocation_size(size, policy.page_size)?;
+    let size = good_allocation_size(size, || policy.page_size)?;
     if isize::try_from(size).is_err() {
         return None;
     }
@@ -170,11 +170,12 @@ pub(super) fn is_in_threadpool() -> bool {
     platform::is_in_threadpool()
 }
 
-fn good_allocation_size(size: usize, page: usize) -> Option<usize> {
+pub(super) fn good_allocation_size(size: usize, page_size: impl FnOnce() -> usize) -> Option<usize> {
     // os.c bounds reservation waste with OS-page, 64-KiB, 256-KiB, 1-MiB,
     // and 4-MiB steps. Metadata prefixes participate in this rounding too.
+    // Query the page size lazily to preserve large-request initialization order.
     let alignment = if size < 512 * 1024 {
-        page
+        page_size()
     } else if size < 2 * 1024 * 1024 {
         SLICE
     } else if size < 8 * 1024 * 1024 {
@@ -250,12 +251,19 @@ mod tests {
 
     #[test]
     fn medium_reservations_round_to_one_mebibyte() {
-        assert_eq!(good_allocation_size(8 * 1024 * 1024 + SLICE, 4096), Some(9 * 1024 * 1024));
+        assert_eq!(good_allocation_size(8 * 1024 * 1024 + SLICE, || 4096), Some(9 * 1024 * 1024));
     }
 
     #[test]
     fn sub_two_mebibyte_reservations_round_to_whole_slices() {
-        assert_eq!(good_allocation_size(1024 * 1024 + 1, 4096), Some(1024 * 1024 + SLICE));
+        assert_eq!(good_allocation_size(1024 * 1024 + 1, || 4096), Some(1024 * 1024 + SLICE));
+    }
+
+    #[test]
+    fn large_os_rounding_does_not_query_page_policy() {
+        for size in [512 * 1024, usize::MAX] {
+            let _ = good_allocation_size(size, || panic!("large requests must not initialize the page-size policy"));
+        }
     }
 
     #[test]
@@ -303,8 +311,8 @@ mod tests {
     fn os_reservation_rounding_includes_the_metadata_prefix() {
         assert_eq!(
             (
-                good_allocation_size(4 * 1024 * 1024 + SLICE, 4096),
-                good_allocation_size(1024 * 1024 * 1024 + SLICE, 4096)
+                good_allocation_size(4 * 1024 * 1024 + SLICE, || 4096),
+                good_allocation_size(1024 * 1024 * 1024 + SLICE, || 4096)
             ),
             (Some(4 * 1024 * 1024 + 4 * SLICE), Some(1024 * 1024 * 1024 + 64 * SLICE))
         );

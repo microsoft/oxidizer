@@ -166,7 +166,9 @@ mod tests {
 
     impl Backend for Probe<'_> {}
 
-    impl Operations for Probe<'_> {
+    // SAFETY: The fixture uses System blocks and keeps both buffers live through
+    // preparation. Its phase checks enforce recording before retirement.
+    unsafe impl Operations for Probe<'_> {
         unsafe fn allocate<const ZEROED: bool>(&self, layout: Layout) -> *mut u8 {
             if ZEROED {
                 // SAFETY: The caller supplies a valid allocation layout.
