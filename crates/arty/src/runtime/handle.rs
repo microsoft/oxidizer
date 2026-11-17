@@ -286,6 +286,21 @@ fn panic_shutdown_from_worker(operation: &str) -> ! {
 // These checks inject worker failures or retain the private joiner after consuming the runtime.
 mod tests {
     #[test]
+    fn shutdown_preserves_monitor_errors_and_prefers_worker_errors() {
+        monitor_result(None, None).unwrap();
+        assert_eq!(
+            monitor_result(None, Some(Error::new("monitor"))).unwrap_err().to_string(),
+            "monitor"
+        );
+        assert_eq!(
+            monitor_result(Some(Error::new("worker")), Some(Error::new("monitor")))
+                .unwrap_err()
+                .to_string(),
+            "worker"
+        );
+    }
+
+    #[test]
     fn gamma_round2_worker_stop_disarms_drop_shutdown_before_reporting_the_programming_error() {
         let shutdown = crate::runtime::shutdown::Shutdown::default();
         let endpoint = worker_endpoint(

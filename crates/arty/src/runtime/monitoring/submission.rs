@@ -56,6 +56,7 @@ where
     {
         #[cfg(any(test, feature = "monitor"))]
         super::task::add_task_with_metadata::<Body, _, _, _, _>(tasks, future, placement, completion, self.parent, self.body_size);
+        // #[gamma::skip(stmt.delete_call, reason = "This branch is absent from Gamma's all-features builds; runtime-only integration tests exercise it.")]
         #[cfg(not(any(test, feature = "monitor")))]
         tasks.task(future).placement(placement).register(completion);
     }

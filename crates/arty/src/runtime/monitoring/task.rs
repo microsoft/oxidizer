@@ -41,6 +41,7 @@ pub(crate) struct CurrentTask(Option<TaskId>);
 
 impl Drop for CurrentTask {
     fn drop(&mut self) {
+        // #[gamma::skip(call_result.default, reason = "set_current returns unit; default_after preserves the thread-local update.")]
         set_current(self.0);
     }
 }

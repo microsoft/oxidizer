@@ -266,7 +266,7 @@ fn explicit_panic_policies_preserve_runtime_construction() {
         Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::SHUTDOWN),
         Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::IGNORE),
     ] {
-        let runtime = builder.build().unwrap();
+        let runtime = builder.monitor(MonitorPolicy::disabled()).build().unwrap();
 
         assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
         runtime.stop().unwrap();

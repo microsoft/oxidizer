@@ -77,6 +77,7 @@ impl PollObserver for WorkerDiagnostics {
         }
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "The observer deliberately ignores completion; the completion target records the outcome.")]
     fn poll_finished(&self, _completed: bool) {
         set_current(None);
         if let Some(poll) = self.poll.borrow_mut().take() {
@@ -177,6 +178,10 @@ mod tests {
         };
 
         assert!(current_events().is_some());
+        assert_eq!(
+            capture(&mut executor).workers[0].thread_id,
+            Some(seismograph::recorder::thread_id())
+        );
         assert!(!seismograph::recorder::without_recording(|| diagnostics.is_observed()));
         let completion = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
         let (_handle, sender) = completion.handle();
@@ -202,6 +207,8 @@ mod tests {
         assert_eq!(capture(&mut executor).workers[0].state, WorkerState::Running);
 
         diagnostics.inspection_failed(InspectionError::Panicked);
+        runtime.handle().capture_with_timeout(CaptureOptions::default()).unwrap();
+        diagnostics.collect(&mut executor, receiver.try_recv().unwrap());
         assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Failed);
         assert_eq!(capture(&mut executor).workers[0].task_collection, TaskCollection::Complete);
         diagnostics.poll_started(&());

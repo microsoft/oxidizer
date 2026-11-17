@@ -33,6 +33,7 @@ impl RuntimeDiagnostics {
     }
 
     pub(crate) fn finish(self) -> Result<(), Error> {
+        // #[gamma::skip(stmt.delete_call, reason = "Dropping self below also stops the registration through RuntimeRegistration::drop.")]
         self.registration.stopped();
         let error = self.monitor.last_error();
         drop(self);
@@ -44,4 +45,29 @@ impl RuntimeDiagnostics {
 #[display("the runtime monitor failed: {message}")]
 struct MonitorFailure {
     message: String,
+}
+
+#[cfg(all(test, not(miri)))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitor_connections_keep_named_runtimes_and_supply_an_empty_name_fallback() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        for (name, connection_name) in [("requests", "requests"), ("", "arty")] {
+            let diagnostics = RuntimeDiagnostics::start(&MonitorPolicy::enabled(), &RuntimeName::new(name), 1)
+                .unwrap()
+                .unwrap();
+
+            assert_eq!(diagnostics.monitor.descriptor().name, connection_name);
+            diagnostics.finish().unwrap();
+        }
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn an_unrepresentable_worker_count_returns_an_error() {
+        RuntimeDiagnostics::start(&MonitorPolicy::enabled(), &RuntimeName::default(), usize::MAX).unwrap_err();
+    }
 }

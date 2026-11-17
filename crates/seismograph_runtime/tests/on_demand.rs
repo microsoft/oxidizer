@@ -422,9 +422,40 @@ fn capture_rejects_each_invalid_budget_without_dispatching() {
             ..CaptureOptions::default()
         },
     ]
-    .map(|options| runtime.handle().capture(options).is_err());
+    .map(|options| {
+        #[cfg(feature = "test-util")]
+        runtime.handle().capture_with_timeout(options).unwrap_err();
+        runtime.handle().capture(options).is_err()
+    });
 
     assert_eq!(invalid, [true; 5]);
+}
+
+#[cfg(feature = "test-util")]
+#[test]
+fn simulated_timeout_preserves_the_request_limit_and_cancels_the_request() {
+    let _lock = RECORDING.lock().unwrap();
+    let runtime = register_runtime(RuntimeMetadata::new("simulated-timeout-limit", 1));
+    let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+    let pending = Arc::new(Mutex::new(None));
+    let received = Arc::clone(&pending);
+    worker
+        .handle()
+        .register_task_provider(move |request| *received.lock().unwrap() = Some(request))
+        .unwrap();
+
+    let snapshot = runtime
+        .handle()
+        .capture_with_timeout(CaptureOptions {
+            limit_per_worker: 1,
+            ..CaptureOptions::default()
+        })
+        .unwrap();
+    let request = pending.lock().unwrap().take().unwrap();
+
+    assert_eq!(snapshot.workers[0].task_collection, TaskCollection::TimedOut);
+    assert_eq!(request.limit(), 1);
+    assert!(request.is_canceled());
 }
 
 #[test]
