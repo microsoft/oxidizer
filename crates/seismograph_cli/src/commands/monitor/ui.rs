@@ -4,7 +4,8 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local};
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
@@ -1894,10 +1895,14 @@ fn snapshot_time_at(snapshot: &CapturedSnapshot, now: Instant) -> String {
     let (Some(captured_at), Some(captured_instant)) = (snapshot.captured_at, snapshot.captured_instant) else {
         return "capture time not recorded".into();
     };
-    let local: DateTime<Local> = captured_at.into();
+    let timestamp = match Timestamp::try_from(captured_at) {
+        Ok(timestamp) => timestamp,
+        Err(error) => return format!("capture time unavailable: {error}"),
+    };
+    let local = timestamp.to_zoned(TimeZone::system());
     format!(
         "{} ({})",
-        local.format("%H:%M:%S"),
+        local.strftime("%H:%M:%S"),
         format_age(now.saturating_duration_since(captured_instant))
     )
 }
@@ -4210,14 +4215,24 @@ mod tests {
         assert_eq!(format_age(Duration::from_secs(125)), "2m ago");
 
         let snapshot = representative_capture();
-        let local: DateTime<Local> = snapshot.captured_at.unwrap().into();
+        let local = Timestamp::try_from(snapshot.captured_at.unwrap())
+            .unwrap()
+            .to_zoned(TimeZone::system());
         let current = snapshot_time(&snapshot);
-        assert!(current.starts_with(&local.format("%H:%M:%S").to_string()));
+        assert!(current.starts_with(&local.strftime("%H:%M:%S").to_string()));
         assert!(current.ends_with(" ago)"));
         assert_eq!(
             snapshot_time_at(&snapshot, snapshot.captured_instant.unwrap() + Duration::from_secs(125)),
-            format!("{} (2m ago)", local.format("%H:%M:%S"))
+            format!("{} (2m ago)", local.strftime("%H:%M:%S"))
         );
+    }
+
+    #[test]
+    fn snapshot_time_reports_out_of_range_capture_time() {
+        let mut snapshot = representative_capture();
+        snapshot.captured_at = Some(std::time::UNIX_EPOCH + Duration::from_hours(70_389_528));
+        let formatted = snapshot_time_at(&snapshot, snapshot.captured_instant.unwrap());
+        assert!(formatted.starts_with("capture time unavailable:"), "{formatted}");
     }
 
     #[test]

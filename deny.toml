@@ -9,6 +9,10 @@ yanked = "deny"
 unmaintained = "all"
 # <<< anvil-managed: anvil-deny-advisories
 
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "Temporary for opentelemetry-stdout 0.33.1's unconditional chrono dependency. Direct uses now use jiff. Review by 2027-02-15." },
+]
+
 # >>> anvil-managed: anvil-deny-licenses
 [licenses]
 allow = [
