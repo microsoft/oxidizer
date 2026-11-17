@@ -4,7 +4,8 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local};
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
@@ -50,7 +51,9 @@ impl App {
     }
 
     pub(super) fn draw(&self, frame: &mut ratatui::Frame<'_>) {
-        self.draw_with_snapshot_time(frame, |snapshot| snapshot_time_at(snapshot, self.io.instant()));
+        self.draw_with_snapshot_time(frame, |snapshot| {
+            snapshot_time_at(snapshot, self.io.instant(), TimeZone::try_system())
+        });
     }
 
     fn draw_with_snapshot_time(&self, frame: &mut ratatui::Frame<'_>, format_snapshot_time: impl Fn(&CapturedSnapshot) -> String) {
@@ -1887,19 +1890,19 @@ fn key_style() -> Style {
 
 #[cfg(test)]
 fn snapshot_time(snapshot: &CapturedSnapshot) -> String {
-    snapshot_time_at(snapshot, Instant::now())
+    snapshot_time_at(snapshot, Instant::now(), Ok(TimeZone::UTC))
 }
 
-fn snapshot_time_at(snapshot: &CapturedSnapshot, now: Instant) -> String {
+fn snapshot_time_at(snapshot: &CapturedSnapshot, now: Instant, zone: Result<TimeZone, jiff::Error>) -> String {
     let (Some(captured_at), Some(captured_instant)) = (snapshot.captured_at, snapshot.captured_instant) else {
         return "capture time not recorded".into();
     };
-    let local: DateTime<Local> = captured_at.into();
-    format!(
-        "{} ({})",
-        local.format("%H:%M:%S"),
-        format_age(now.saturating_duration_since(captured_instant))
-    )
+    let local = zone.and_then(|zone| Timestamp::try_from(captured_at).map(|timestamp| timestamp.to_zoned(zone)));
+    let time = match local {
+        Ok(local) => local.strftime("%H:%M:%S").to_string(),
+        Err(error) => format!("capture time unavailable: {error}"),
+    };
+    format!("{} ({})", time, format_age(now.saturating_duration_since(captured_instant)))
 }
 
 fn format_age(age: Duration) -> String {
@@ -4205,19 +4208,31 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore = "requires the host realtime clock and local timezone")]
     fn snapshot_age_uses_compact_units() {
         assert_eq!(format_age(Duration::from_secs(125)), "2m ago");
 
         let snapshot = representative_capture();
-        let local: DateTime<Local> = snapshot.captured_at.unwrap().into();
         let current = snapshot_time(&snapshot);
-        assert!(current.starts_with(&local.format("%H:%M:%S").to_string()));
+        assert!(current.starts_with("00:00:00"));
         assert!(current.ends_with(" ago)"));
-        assert_eq!(
-            snapshot_time_at(&snapshot, snapshot.captured_instant.unwrap() + Duration::from_secs(125)),
-            format!("{} (2m ago)", local.format("%H:%M:%S"))
-        );
+        for (zone, expected) in [
+            (TimeZone::UTC, "00:00:00 (2m ago)"),
+            (TimeZone::fixed(jiff::tz::offset(9)), "09:00:00 (2m ago)"),
+        ] {
+            assert_eq!(
+                snapshot_time_at(&snapshot, snapshot.captured_instant.unwrap() + Duration::from_secs(125), Ok(zone)),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_time_reports_timezone_errors() {
+        let snapshot = representative_capture();
+        let rendered = snapshot_time_at(&snapshot, snapshot.captured_instant.unwrap(), TimeZone::get("invalid-zone"));
+
+        assert!(rendered.starts_with("capture time unavailable: "));
+        assert!(rendered.ends_with(" (0s ago)"));
     }
 
     #[test]

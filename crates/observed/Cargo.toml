@@ -55,7 +55,8 @@ criterion = { workspace = true }
 metabench = { path = "../metabench" }
 ohno = { path = "../ohno", features = ["test-util"] }
 opentelemetry = { workspace = true, features = ["logs"] }
-opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }
+observed_destination_core = { workspace = true }
+observed_destination_stdout = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
 static_assertions = { workspace = true }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }

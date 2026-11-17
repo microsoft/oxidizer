@@ -19,6 +19,8 @@ use std::sync::Arc;
 use data_privacy::{DataClass, classified};
 use observed::enrichment::{EnrichFnExt, EnrichFutureExt};
 use observed::{Enrichment, Sink, emit, event};
+use observed_destination_core::LoggerProviderBuilderExt;
+use observed_destination_stdout::stdout_logs;
 use opentelemetry::logs::LoggerProvider;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use taxonomy::MicrosoftEnterpriseDataTaxonomy as DC;
@@ -125,7 +127,8 @@ impl observed::processing::EventProcessor for SimpleLogProcessor {
 
 fn init_telemetry() -> (Sink, SdkLoggerProvider) {
     let provider = SdkLoggerProvider::builder()
-        .with_simple_exporter(opentelemetry_stdout::LogExporter::default())
+        .register(stdout_logs())
+        .expect("the stdout log destination has no fallible configuration")
         .build();
 
     let logger = provider.logger("example");
