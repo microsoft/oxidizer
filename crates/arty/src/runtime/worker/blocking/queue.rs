@@ -6,7 +6,12 @@
 //! immutable task-event context so submissions do not lock this queue for it.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Condvar, Mutex};
+#[cfg(not(all(test, feature = "test-util")))]
+use std::sync::Condvar;
+use std::sync::{Arc, Mutex};
+
+#[cfg(all(test, feature = "test-util"))]
+use tests::ScriptedCondvar as Condvar;
 
 #[cfg(any(test, feature = "monitor"))]
 use crate::runtime::monitoring::MonitoredBlockingJob;
@@ -99,6 +104,8 @@ impl Queue {
             slot.running = false;
         }
         loop {
+            #[cfg(all(test, feature = "test-util"))]
+            self.ready.check_progress();
             #[cfg(any(test, feature = "monitor"))]
             if worker.handle.is_none()
                 && let Some(registration) = &state.workers[index].registration
@@ -253,15 +260,67 @@ impl Queue {
     }
 }
 
-#[cfg(all(test, feature = "test-util"))]
+#[cfg(test)]
+#[cfg(feature = "test-util")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{LockResult, MutexGuard};
+
     use seismograph_runtime::RuntimeMetadata;
     use seismograph_runtime::snapshot::{CaptureOptions, TaskActivityState, TaskCollection, WorkerState};
     use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
 
     use super::*;
     use crate::runtime::monitoring::TaskInfo;
+
+    #[derive(Default)]
+    pub(super) struct ScriptedCondvar {
+        native: std::sync::Condvar,
+        script: Mutex<Option<WaitScript>>,
+        waiting: AtomicUsize,
+    }
+
+    struct WaitScript {
+        remaining_steps: usize,
+        on_wait: Box<dyn FnMut(&mut State) + Send>,
+    }
+
+    impl ScriptedCondvar {
+        fn script(&self, steps: usize, on_wait: impl FnMut(&mut State) + Send + 'static) {
+            *self.script.lock().unwrap() = Some(WaitScript {
+                remaining_steps: steps,
+                on_wait: Box::new(on_wait),
+            });
+        }
+
+        pub(super) fn check_progress(&self) {
+            if let Some(script) = self.script.lock().unwrap().as_mut() {
+                assert!(script.remaining_steps > 0, "an empty queue must wait instead of spinning");
+                script.remaining_steps -= 1;
+            }
+        }
+
+        pub(super) fn wait<'a>(&self, mut state: MutexGuard<'a, State>) -> LockResult<MutexGuard<'a, State>> {
+            if let Some(script) = self.script.lock().unwrap().as_mut() {
+                (script.on_wait)(&mut state);
+                return Ok(state);
+            }
+            self.native.wait(state)
+        }
+
+        pub(super) fn notify_one(&self) {
+            self.waiting
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |waiting| Some(waiting.saturating_sub(1)))
+                .unwrap();
+            self.native.notify_one();
+        }
+
+        pub(super) fn notify_all(&self) {
+            self.waiting.store(0, Ordering::SeqCst);
+            self.native.notify_all();
+        }
+    }
 
     struct TestJob(TaskInfo);
 
@@ -271,6 +330,128 @@ mod tests {
         }
 
         fn run(&self) {}
+    }
+
+    #[test]
+    fn a_stopped_queue_rejects_work_and_releases_the_rejected_callback() {
+        let queue = Arc::new(Queue::default());
+        let index = queue.add_worker();
+        queue.ready.script(1, |_| panic!("a stopped queue must not wait for more work"));
+        let capture = Arc::new(());
+        let lifetime = Arc::downgrade(&capture);
+        queue.stop();
+
+        assert!(!queue.push(QueuedJob {
+            body: BlockingJob::Plain(Box::new(move || drop(capture))),
+            shutdown: None,
+        }));
+
+        assert!(lifetime.upgrade().is_none());
+        assert!(queue.pop(index, &mut BlockingWorkerMonitoring::default()).is_none());
+    }
+
+    #[test]
+    fn stopping_the_queue_wakes_every_waiting_worker() {
+        let queue = Queue::default();
+        queue.ready.waiting.store(2, Ordering::SeqCst);
+
+        queue.stop();
+
+        assert_eq!(queue.ready.waiting.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn enabling_monitoring_wakes_every_waiting_worker() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("wake-monitoring-workers", 2));
+        let queue = Arc::new(Queue::default());
+        queue.add_worker();
+        queue.add_worker();
+        queue.ready.waiting.store(2, Ordering::SeqCst);
+
+        queue.enable_monitoring(&runtime.handle());
+
+        assert_eq!(queue.ready.waiting.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    #[cfg(not(miri))]
+    fn an_empty_queue_records_parking_and_resumes_for_new_work() {
+        use seismograph::recorder::event::EventKind;
+        use seismograph::recorder::{Configuration, Policy};
+
+        struct ResetRecorder;
+        impl Drop for ResetRecorder {
+            fn drop(&mut self) {
+                seismograph::recorder(Configuration::default());
+            }
+        }
+
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let _reset = ResetRecorder;
+        seismograph::recorder(Configuration {
+            runtime_tasks: Policy::all(false),
+            ..Configuration::default()
+        });
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-park-wakeup", 1));
+        let queue = Arc::new(Queue::default());
+        let index = queue.add_worker();
+        queue.enable_monitoring(&runtime.handle());
+        let (sent, received) = std::sync::mpsc::channel();
+        let mut callback = Some(BlockingJob::Plain(Box::new(move || sent.send(42).unwrap())));
+        queue.ready.script(2, move |state| {
+            state.jobs.push_back(QueuedJob {
+                body: callback.take().unwrap(),
+                shutdown: None,
+            });
+        });
+        let mut worker = BlockingWorkerMonitoring::default();
+
+        queue.pop(index, &mut worker).unwrap().body.run();
+
+        assert_eq!(received.try_recv().unwrap(), 42);
+        let captured = runtime.handle().capture(CaptureOptions::default()).unwrap();
+        assert_eq!(captured.workers[0].state, WorkerState::Running);
+        let bytes = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+        let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
+        let events: Vec<_> = snapshot
+            .events
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(event.kind, EventKind::WorkerParked | EventKind::WorkerUnparked)
+                    && event.runtime().is_some_and(|event| event.runtime_id == runtime.handle().id())
+            })
+            .map(|event| event.kind)
+            .collect();
+        assert_eq!(events, [EventKind::WorkerParked, EventKind::WorkerUnparked]);
+    }
+
+    #[test]
+    fn a_nonfirst_worker_collects_its_own_running_task() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("middle-blocking-worker", 3));
+        let queue = Arc::new(Queue::default());
+        for _ in 0..3 {
+            queue.add_worker();
+        }
+        queue.enable_monitoring(&runtime.handle());
+        queue.retire(0);
+        queue.retire(2);
+        let info = TaskInfo::new::<()>(queue.monitoring.events().unwrap());
+        let id = info.id();
+        assert!(queue.push(QueuedJob {
+            body: BlockingJob::Monitored(Arc::new(TestJob(info))),
+            shutdown: None,
+        }));
+        let mut worker = BlockingWorkerMonitoring::default();
+        let _running = queue.pop(1, &mut worker).unwrap();
+
+        let captured = runtime.handle().capture(CaptureOptions::default()).unwrap();
+
+        assert_eq!(captured.tasks.len(), 1);
+        assert_eq!(captured.tasks[0].id, id);
+        assert_eq!(captured.tasks[0].activity.unwrap().state, TaskActivityState::Running);
     }
 
     #[test]
@@ -518,6 +699,9 @@ mod tests {
         let mut worker = BlockingWorkerMonitoring::default();
         drop(queue.pop(index, &mut worker).unwrap());
 
+        queue
+            .ready
+            .script(2, |_| panic!("capture cleanup stops the queue before it can wait"));
         assert!(queue.pop(index, &mut worker).is_none());
 
         assert!(received.try_recv().unwrap());

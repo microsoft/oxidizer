@@ -231,3 +231,27 @@ impl BlockingWorkerMonitoring {
         outcome
     }
 }
+
+#[cfg(all(test, feature = "test-util"))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_monitored_callback_runs_and_delivers_its_result() {
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("blocking-callback-result", 1));
+        let worker = runtime.register_worker(seismograph_runtime::worker::WorkerMetadata::new(
+            seismograph_runtime::worker::WorkerRole::Blocking,
+        ));
+        let monitoring = BlockingPoolMonitoring::default();
+        monitoring.enable(worker.handle().task_events());
+        let shutdown = Shutdown::default();
+        let pool = crate::task::handle::JoinHandlePool::new(shutdown.clone());
+        let (body, handle) = crate::task::preparation::prepare_blocking(&pool, || 42, monitoring.task::<()>(&shutdown));
+
+        body.run();
+
+        assert_eq!(handle.join().unwrap(), 42);
+    }
+}

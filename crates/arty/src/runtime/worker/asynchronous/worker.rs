@@ -718,6 +718,15 @@ mod tests {
         let executor_shutdown = worker_executor(&worker).shutdown();
         worker.shutdown.begin(ShutdownCause::panic(&"worker shutdown cause"));
         worker.begin_shutdown();
+        let started = executor_shutdown.is_triggered();
+        // Release the executor before asserting so broken shutdown cannot strand test cleanup.
+        LocalWorker::clear_scheduler();
+        executor_shutdown.trigger(ShutdownCause::default());
+        drop(worker);
+        if !started {
+            drop(RuntimeDriverHost::uninstall());
+        }
+        assert!(started);
         assert_eq!(
             executor_shutdown.cause().as_error().unwrap().to_string(),
             "runtime shutdown was caused by a task panic: worker shutdown cause"

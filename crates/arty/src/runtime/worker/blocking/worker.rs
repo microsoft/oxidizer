@@ -397,6 +397,22 @@ mod tests {
     }
 
     #[test]
+    fn shutting_down_a_pool_closes_its_queue_even_without_workers() {
+        let mut pool = joinable_pool(0);
+        assert!(pool.execute(|| {}));
+        assert_eq!(pool.queued_count(), 1);
+        let queue = std::sync::Arc::clone(&pool.receiver);
+
+        pool.shutdown_and_join();
+
+        assert!(!queue.push(super::QueuedJob {
+            body: super::BlockingJob::Plain(Box::new(|| {})),
+            shutdown: None,
+        }));
+        assert!(!pool.execute(|| {}));
+    }
+
+    #[test]
     fn gamma_survivor_private_blocking_pool_tracks_queued_active_and_joined_workers_without_timers() {
         let mut pool = joinable_pool(1);
         assert_eq!(
