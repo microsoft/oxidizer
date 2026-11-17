@@ -176,9 +176,9 @@ http_extensions = { path = "../http_extensions", features = ["test-util", "json"
 hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
-ohno = { path = "../ohno", features = ["test-util", "app-err"] }
 observed_destination_core = { workspace = true }
 observed_destination_stdout = { workspace = true }
+ohno = { path = "../ohno", features = ["test-util", "app-err"] }
 opentelemetry_sdk = { workspace = true, features = [
     "metrics",
     "testing",

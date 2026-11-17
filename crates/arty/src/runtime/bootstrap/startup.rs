@@ -160,6 +160,44 @@ mod tests {
     use std::thread::ThreadId;
 
     #[test]
+    fn monitor_start_failure_returns_before_starting_async_workers() {
+        use seismograph_protocol::io::{IoOperation, MonitorIo};
+
+        let (io, control) = MonitorIo::new_mocked();
+        control.fail_next(
+            IoOperation::CreateDirectory,
+            std::io::Error::other("runtime monitor startup failed"),
+        );
+        let started = std::cell::Cell::new(false);
+        let hardware = fake_hardware(1);
+        let result = crate::runtime::monitoring::RuntimeDiagnostics::with_test_io(io, || {
+            prepare_workers(
+                RuntimeConfig {
+                    name: crate::runtime::config::RuntimeName::default(),
+                    workers_policy: WorkersPolicy::exactly(1),
+                    stack_size: NonZero::new(16_384).unwrap(),
+                    blocking_pool_policy: BlockingPoolPolicy::shared(),
+                    monitor_options: MonitorPolicy::enabled().into(),
+                    hook_registrations: Vec::new(),
+                },
+                &InactiveClock::new_isolated(),
+                &ThreadBuilder::default(),
+                &hardware.processors(),
+                |_| None,
+                |_| started.set(true),
+            )
+        });
+
+        let error = result.err().unwrap();
+        assert!(!started.get());
+        let mut source: &dyn std::error::Error = &error;
+        while let Some(inner) = source.source() {
+            source = inner;
+        }
+        assert_eq!(source.to_string(), "runtime monitor startup failed");
+    }
+
+    #[test]
     fn nov4_startup_passes_the_selected_stack_size_to_each_native_worker_request() {
         let hardware = many_cpus::SystemHardware::fake(HardwareBuilder::from_counts(NonZero::new(2).unwrap(), NonZero::new(1).unwrap()));
         for environment in [None, Some("32769")] {
