@@ -41,7 +41,7 @@ fn build_with_processors(
         prepared.shutdown,
     );
     let dispatcher_client = DispatcherClient::new(dispatcher);
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     dispatcher_client.set_diagnostics(
         prepared
             .diagnostics
@@ -54,7 +54,7 @@ fn build_with_processors(
     }
     let worker_joiner = WorkerJoiner::new(join_handles);
     let runtime = Runtime::with_dispatcher(dispatcher_client, worker_joiner);
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     let runtime = {
         let mut runtime = runtime;
         runtime.set_diagnostics(prepared.diagnostics);
@@ -66,7 +66,7 @@ fn build_with_processors(
 struct PreparedWorkers<W> {
     workers: Vec<W>,
     shutdown: Shutdown,
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>,
 }
 
@@ -92,7 +92,7 @@ fn prepare_workers<W>(
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     let (diagnostics, monitor_options) = {
         let diagnostics = crate::runtime::monitoring::RuntimeDiagnostics::start(monitor_options.policy(), &name, worker_count)?;
         let mut monitor_options = monitor_options;
@@ -119,7 +119,7 @@ fn prepare_workers<W>(
     Ok(PreparedWorkers {
         workers,
         shutdown,
-        #[cfg(feature = "monitor")]
+        #[cfg(any(test, feature = "monitor"))]
         diagnostics,
     })
 }

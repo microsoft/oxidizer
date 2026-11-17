@@ -6,8 +6,12 @@ use crate::runtime::config::MonitorPolicy;
 /// Worker-owned monitoring configuration derived from the runtime policy.
 #[derive(Clone, Debug)]
 pub(crate) struct MonitorOptions {
+    #[cfg_attr(
+        not(any(test, feature = "monitor")),
+        expect(dead_code, reason = "The policy is only read when monitoring is compiled in.")
+    )]
     policy: MonitorPolicy,
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     runtime: Option<seismograph_runtime::RuntimeHandle>,
 }
 
@@ -18,16 +22,17 @@ impl MonitorOptions {
     }
 
     /// Returns the policy retained by this worker.
+    #[cfg(any(test, feature = "monitor"))]
     pub(crate) const fn policy(&self) -> &MonitorPolicy {
         &self.policy
     }
 
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn set_runtime(&mut self, runtime: Option<seismograph_runtime::RuntimeHandle>) {
         self.runtime = runtime;
     }
 
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn runtime(&self) -> Option<&seismograph_runtime::RuntimeHandle> {
         self.runtime.as_ref()
     }
@@ -43,7 +48,7 @@ impl From<MonitorPolicy> for MonitorOptions {
     fn from(policy: MonitorPolicy) -> Self {
         Self {
             policy,
-            #[cfg(feature = "monitor")]
+            #[cfg(any(test, feature = "monitor"))]
             runtime: None,
         }
     }

@@ -7,9 +7,9 @@ use arty_executor::{TaskCompletion, TaskPlacement, TaskSet};
 
 /// Captures submission metadata before a task crosses threads.
 pub(crate) struct TaskMonitoring<Body, S = ()> {
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     parent: Option<seismograph::recorder::runtime::TaskId>,
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     body_size: S,
     marker: PhantomData<fn() -> (Body, S)>,
 }
@@ -27,12 +27,12 @@ impl<Body: 'static> TaskMonitoring<Body> {
 
 impl<Body, S> TaskMonitoring<Body, S> {
     fn new(body_size: S) -> Self {
-        #[cfg(not(feature = "monitor"))]
+        #[cfg(not(any(test, feature = "monitor")))]
         drop(body_size);
         Self {
-            #[cfg(feature = "monitor")]
+            #[cfg(any(test, feature = "monitor"))]
             parent: super::task::current_task(),
-            #[cfg(feature = "monitor")]
+            #[cfg(any(test, feature = "monitor"))]
             body_size,
             marker: PhantomData,
         }
@@ -45,7 +45,7 @@ where
     S: Fn() -> usize + 'static,
 {
     #[cfg_attr(
-        not(feature = "monitor"),
+        not(any(test, feature = "monitor")),
         expect(clippy::unused_self, reason = "Submission metadata is empty when monitoring is compiled out.")
     )]
     pub(crate) fn register<F, R, T>(self, tasks: &TaskSet, future: F, placement: TaskPlacement, completion: T)
@@ -54,9 +54,9 @@ where
         R: 'static,
         T: TaskCompletion<R>,
     {
-        #[cfg(feature = "monitor")]
+        #[cfg(any(test, feature = "monitor"))]
         super::task::add_task_with_metadata::<Body, _, _, _, _>(tasks, future, placement, completion, self.parent, self.body_size);
-        #[cfg(not(feature = "monitor"))]
+        #[cfg(not(any(test, feature = "monitor")))]
         tasks.task(future).placement(placement).register(completion);
     }
 }
@@ -71,7 +71,8 @@ where
     TaskMonitoring::<Body>::capture().register(tasks, future, placement, completion);
 }
 
-#[cfg(all(test, feature = "monitor"))]
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::pin::Pin;
 

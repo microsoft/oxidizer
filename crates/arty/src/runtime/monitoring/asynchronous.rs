@@ -106,6 +106,7 @@ fn collection_status(result: Result<InspectionStatus, InspectionError>) -> TaskC
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     #[cfg(all(feature = "test-util", not(miri)))]
     use std::sync::mpsc;
@@ -164,7 +165,11 @@ mod tests {
                         })
                         .unwrap()
                 });
-                let request = receiver.recv_timeout(TEST_TIMEOUT).unwrap();
+                let request = if testing_aids::is_mutation_testing() {
+                    receiver.recv().unwrap()
+                } else {
+                    receiver.recv_timeout(TEST_TIMEOUT).unwrap()
+                };
                 assert!(diagnostics.is_observed());
                 diagnostics.collect(executor, request);
                 captured.join().unwrap()

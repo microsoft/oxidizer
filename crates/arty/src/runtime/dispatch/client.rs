@@ -26,12 +26,12 @@ pub(crate) struct DispatcherClient {
 }
 
 impl DispatcherClient {
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn set_diagnostics(&self, runtime: Option<seismograph_runtime::RuntimeHandle>) {
         self.core.set_diagnostics(runtime);
     }
 
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn register_task_provider(&self, thread: ThreadId, handle: &seismograph_runtime::worker::WorkerHandle) {
         self.core.register_task_provider(thread, handle);
     }

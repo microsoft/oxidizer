@@ -25,6 +25,10 @@
 /// ```
 #[derive(Debug, Clone)]
 pub struct MonitorPolicy {
+    #[cfg_attr(
+        not(any(test, feature = "monitor")),
+        expect(dead_code, reason = "The policy is only read when monitoring is compiled in.")
+    )]
     enabled: bool,
 }
 
@@ -41,6 +45,7 @@ impl MonitorPolicy {
         Self { enabled: false }
     }
 
+    #[cfg(any(test, feature = "monitor"))]
     pub(crate) const fn is_enabled(&self) -> bool {
         self.enabled
     }

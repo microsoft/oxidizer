@@ -8,7 +8,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
-#[cfg(feature = "monitor")]
+#[cfg(any(test, feature = "monitor"))]
 use crate::runtime::monitoring::MonitoredBlockingJob;
 use crate::runtime::monitoring::{BlockingJob, BlockingPoolMonitoring, BlockingWorkerMonitoring};
 
@@ -19,11 +19,11 @@ pub(super) struct QueuedJob {
 
 #[derive(Default)]
 struct WorkerSlot {
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     running: bool,
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     registration: Option<seismograph_runtime::worker::WorkerRegistration>,
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     current: Option<Arc<dyn MonitoredBlockingJob>>,
 }
 
@@ -32,7 +32,7 @@ struct State {
     jobs: VecDeque<QueuedJob>,
     workers: Vec<WorkerSlot>,
     stopped: bool,
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     runtime: Option<seismograph_runtime::RuntimeHandle>,
 }
 
@@ -66,40 +66,40 @@ impl Queue {
             .lock()
             .expect("a blocking queue operation must not panic while holding its lock");
         let index = state.workers.len();
-        #[cfg(feature = "monitor")]
+        #[cfg(any(test, feature = "monitor"))]
         let registration = state.runtime.as_ref().map(|runtime| self.register_worker(runtime, index));
         let slot = WorkerSlot::default();
-        #[cfg(feature = "monitor")]
+        #[cfg(any(test, feature = "monitor"))]
         let slot = WorkerSlot { registration, ..slot };
         state.workers.push(slot);
         index
     }
 
     #[cfg_attr(
-        not(feature = "monitor"),
+        not(any(test, feature = "monitor")),
         expect(
             clippy::needless_pass_by_ref_mut,
             reason = "The worker handle is assigned only when monitoring is compiled in."
         )
     )]
     pub(super) fn pop(&self, index: usize, worker: &mut BlockingWorkerMonitoring) -> Option<QueuedJob> {
-        #[cfg(not(feature = "monitor"))]
+        #[cfg(not(any(test, feature = "monitor")))]
         let _ = index;
         // Drop the previous job after the queue guard, including on early return.
-        #[cfg(feature = "monitor")]
+        #[cfg(any(test, feature = "monitor"))]
         let mut previous;
         let mut state = self
             .state
             .lock()
             .expect("a blocking queue operation must not panic while holding its lock");
-        #[cfg(feature = "monitor")]
+        #[cfg(any(test, feature = "monitor"))]
         {
             let slot = &mut state.workers[index];
             previous = slot.current.take();
             slot.running = false;
         }
         loop {
-            #[cfg(feature = "monitor")]
+            #[cfg(any(test, feature = "monitor"))]
             if worker.handle.is_none()
                 && let Some(registration) = &state.workers[index].registration
             {
@@ -108,7 +108,7 @@ impl Queue {
                 worker.handle = Some(handle);
             }
             if let Some(job) = state.jobs.pop_front() {
-                #[cfg(feature = "monitor")]
+                #[cfg(any(test, feature = "monitor"))]
                 if worker.handle.is_some() {
                     state.workers[index].running = true;
                     state.workers[index].current = job.body.monitoring().cloned();
@@ -118,7 +118,7 @@ impl Queue {
             if state.stopped {
                 return None;
             }
-            #[cfg(feature = "monitor")]
+            #[cfg(any(test, feature = "monitor"))]
             if previous.is_some() {
                 drop(state);
                 drop(previous.take());
@@ -146,16 +146,16 @@ impl Queue {
     }
 
     #[cfg_attr(
-        not(feature = "monitor"),
+        not(any(test, feature = "monitor")),
         expect(
             clippy::unused_self,
             reason = "There is no worker registration to retire when monitoring is compiled out."
         )
     )]
     pub(super) fn retire(&self, index: usize) {
-        #[cfg(not(feature = "monitor"))]
+        #[cfg(not(any(test, feature = "monitor")))]
         let _ = index;
-        #[cfg(feature = "monitor")]
+        #[cfg(any(test, feature = "monitor"))]
         {
             let mut state = self
                 .state
@@ -167,7 +167,7 @@ impl Queue {
         }
     }
 
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     pub(super) fn enable_monitoring(self: &Arc<Self>, runtime: &seismograph_runtime::RuntimeHandle) {
         let mut state = self
             .state
@@ -192,7 +192,7 @@ impl Queue {
         self.ready.notify_all();
     }
 
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     fn register_worker(
         self: &Arc<Self>,
         runtime: &seismograph_runtime::RuntimeHandle,
@@ -213,7 +213,7 @@ impl Queue {
         registration
     }
 
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     fn collect(&self, index: usize, request: seismograph_runtime::task::TaskRequest) {
         use seismograph_runtime::snapshot::{TaskActivityState, TaskCollection};
 
@@ -253,7 +253,8 @@ impl Queue {
     }
 }
 
-#[cfg(all(test, feature = "monitor", feature = "test-util"))]
+#[cfg(all(test, feature = "test-util"))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use seismograph_runtime::RuntimeMetadata;
     use seismograph_runtime::snapshot::{CaptureOptions, TaskActivityState, TaskCollection, WorkerState};

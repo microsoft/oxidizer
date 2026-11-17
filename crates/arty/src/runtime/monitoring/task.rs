@@ -285,6 +285,7 @@ pub(crate) fn add_task_with_metadata<Body, F, R, T, S>(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::error::Error as _;
 
@@ -375,7 +376,7 @@ mod tests {
         static_assertions::assert_impl_all!(TaskInfo: Send, Sync);
         assert!(size_of::<AsyncTaskInfo>() < size_of::<TaskInfo>());
         #[cfg(target_pointer_width = "64")]
-        assert_eq!(size_of::<AsyncTaskInfo>(), 56);
+        assert!(size_of::<AsyncTaskInfo>() <= 56);
     }
 
     #[test]

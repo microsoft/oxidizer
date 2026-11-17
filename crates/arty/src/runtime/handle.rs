@@ -56,7 +56,7 @@ pub struct Runtime {
     scheduler: RuntimeScheduler,
     worker_joiner: WorkerJoiner,
     shutdown_on_drop: bool,
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>,
 }
 
@@ -141,7 +141,7 @@ impl Runtime {
     /// Returns `None` when monitoring is disabled. Capture from a diagnostic
     /// thread, not from an Arty worker that must answer the collection request.
     /// This does not change the process-wide recorder.
-    #[cfg(all(feature = "monitor", test, not(miri)))]
+    #[cfg(all(test, not(miri)))]
     #[must_use]
     pub(crate) fn diagnostics(&self) -> Option<seismograph_runtime::RuntimeHandle> {
         self.diagnostics
@@ -212,7 +212,7 @@ impl Runtime {
     }
 
     #[cfg_attr(
-        not(feature = "monitor"),
+        not(any(test, feature = "monitor")),
         expect(
             clippy::needless_pass_by_ref_mut,
             reason = "monitoring consumes the diagnostic registration after workers stop"
@@ -220,20 +220,20 @@ impl Runtime {
     )]
     fn wait(&mut self) -> Result<(), Error> {
         let wait_error = self.worker_joiner.join().err();
-        #[cfg(feature = "monitor")]
+        #[cfg(any(test, feature = "monitor"))]
         let monitor_error = self.diagnostics.take().and_then(|diagnostics| diagnostics.finish().err());
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
             return Err(Error::shutdown_failure(error));
         }
-        #[cfg(feature = "monitor")]
+        #[cfg(any(test, feature = "monitor"))]
         {
             monitor_result(wait_error, monitor_error)
         }
-        #[cfg(not(feature = "monitor"))]
+        #[cfg(not(any(test, feature = "monitor")))]
         wait_error.map_or(Ok(()), Err)
     }
 
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn set_diagnostics(&mut self, diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>) {
         self.diagnostics = diagnostics;
     }
@@ -243,7 +243,7 @@ impl Runtime {
             scheduler: RuntimeScheduler::new(dispatcher),
             worker_joiner,
             shutdown_on_drop: true,
-            #[cfg(feature = "monitor")]
+            #[cfg(any(test, feature = "monitor"))]
             diagnostics: None,
         }
     }
@@ -268,7 +268,7 @@ impl Drop for Runtime {
     }
 }
 
-#[cfg(feature = "monitor")]
+#[cfg(any(test, feature = "monitor"))]
 #[cfg_attr(coverage_nightly, coverage(off))] // Native monitor error forwarding does not justify a fault-injection fixture.
 fn monitor_result(worker_error: Option<Error>, monitor_error: Option<Error>) -> Result<(), Error> {
     worker_error.or(monitor_error).map_or(Ok(()), Err)

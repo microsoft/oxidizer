@@ -79,7 +79,7 @@
 //!   [`ClockControl`](crate::time::ClockControl).
 //!   Enable it in dev-dependencies, not production dependencies.
 
-#[cfg(all(test, feature = "macros", feature = "monitor", not(miri)))]
+#[cfg(all(test, feature = "macros", not(miri)))]
 extern crate self as arty;
 
 use arty_io_core as _;

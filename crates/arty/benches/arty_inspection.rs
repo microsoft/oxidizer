@@ -13,6 +13,8 @@
 //!
 //! `collecting` requests a process snapshot, then waits 10 ms before the next
 //! request. It includes collection but not a requested poll-measurement window.
+//! This fixed pause leaves gaps between requests instead of keeping collection
+//! continuously active. It is a probe load, not a model of a particular client.
 //! `recording` enables all runtime events without backtraces. Neither mode
 //! represents the cost of a disconnected, idle monitor.
 //!
@@ -95,6 +97,8 @@ struct Case {
     runtime: Runtime,
     handles: Vec<JoinHandle<()>>,
     collector: Option<thread::JoinHandle<()>>,
+    // The flag requests shutdown without publishing other data. Joining the
+    // collector makes its relaxed capture count visible before the final read.
     stop: Arc<AtomicBool>,
     captures: Arc<AtomicU64>,
 }

@@ -72,7 +72,7 @@ pub(crate) enum SystemCommand {
     AccessIo { access: QueuedIoAccess },
 
     /// Copies task descriptions from native executor storage between cycles.
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     #[debug("Inspect")]
     Inspect { request: seismograph_runtime::task::TaskRequest },
     /// Appends one worker-local runtime hook.

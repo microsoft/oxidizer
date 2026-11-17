@@ -16,7 +16,7 @@ use seismograph_runtime::snapshot::{
     CaptureOptions, Runtime as RuntimeSnapshot, RuntimeState, TaskActivityState, TaskCollection, TaskMetricsScope,
 };
 use seismograph_runtime::worker::WorkerRole;
-use testing_aids::TEST_TIMEOUT;
+use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 use thread_aware::Unaware;
 
 use crate::runtime::hook::Panic;
@@ -48,6 +48,14 @@ fn runtime(name: &str) -> Runtime {
         .on(Panic::IGNORE)
         .build()
         .unwrap()
+}
+
+fn receive<T>(receiver: &mpsc::Receiver<T>) -> T {
+    if is_mutation_testing() {
+        receiver.recv().unwrap()
+    } else {
+        receiver.recv_timeout(TEST_TIMEOUT).unwrap()
+    }
 }
 
 fn runtimes() -> Vec<RuntimeSnapshot> {
@@ -87,8 +95,8 @@ fn monitor_policy_defaults_to_enabled() {
     let stopped = runtimes().into_iter().find(|runtime| runtime.id == diagnostics.id()).unwrap().state;
 
     assert_eq!(
-        (workers, active.name.as_str(), active.state, stopped),
-        (1, "arty", RuntimeState::Running, RuntimeState::Stopped)
+        (workers, active.configured_workers, active.name.as_str(), active.state, stopped),
+        (1, 1, "arty", RuntimeState::Running, RuntimeState::Stopped)
     );
 }
 
@@ -113,6 +121,31 @@ async fn test_macro_can_enable_monitoring(cx: crate::task::Context) {
     let _recording = RecorderGuard::new();
     assert!(super::task::current_events().is_some());
     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
+}
+
+#[test]
+fn empty_runtime_names_preserve_worker_names_with_either_monitor_policy() {
+    let _recording = RecorderGuard::new();
+    for policy in [MonitorPolicy::disabled(), MonitorPolicy::enabled()] {
+        let runtime = Runtime::builder().name("").monitor(policy).build().unwrap();
+        let names = runtime
+            .scheduler()
+            .block_on(async |cx| {
+                let asynchronous = std::thread::current().name().unwrap().to_owned();
+                let blocking = cx
+                    .scheduler()
+                    .spawn_blocking(|| std::thread::current().name().unwrap().to_owned())
+                    .await
+                    .unwrap();
+                (asynchronous, blocking)
+            })
+            .unwrap();
+        if let Some(diagnostics) = runtime.diagnostics() {
+            assert_eq!(diagnostics.capture(CaptureOptions::default()).unwrap().name, "");
+        }
+        runtime.stop().unwrap();
+        assert_eq!(names, ("-async-0".to_owned(), "-blocking-0".to_owned()));
+    }
 }
 
 #[test]
@@ -152,7 +185,7 @@ fn local_and_remote_tasks_are_collected_without_recording() {
                 .await
                 .unwrap();
         });
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    receive(&ready);
 
     let snapshot = capture(&runtime);
     runtime.stop().unwrap();
@@ -198,7 +231,7 @@ fn task_identity_survives_repeated_collection_and_recording_changes() {
             Poll::<()>::Pending
         })
     });
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    receive(&ready);
     let first = capture(&runtime);
     runtime.scheduler().block_on(async |_| ()).unwrap();
 
@@ -240,10 +273,10 @@ fn queued_and_running_blocking_tasks_come_from_native_pool_storage() {
     let (release, released) = mpsc::channel();
     let first = runtime.scheduler().spawn_blocking(move || {
         started.send(()).unwrap();
-        released.recv_timeout(TEST_TIMEOUT).unwrap();
+        receive(&released);
         1
     });
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    receive(&ready);
     let second = runtime.scheduler().spawn_blocking(|| 2);
 
     let snapshot = capture(&runtime);
@@ -284,19 +317,19 @@ fn draining_queued_blocking_tasks_does_not_report_worker_resumes() {
     let (release, released) = mpsc::channel();
     let first = runtime.scheduler().spawn_blocking(move || {
         started.send(seismograph::recorder::thread_id()).unwrap();
-        released.recv_timeout(TEST_TIMEOUT).unwrap();
+        receive(&released);
     });
-    let thread_id = ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    let thread_id = receive(&ready);
     let second = runtime.scheduler().spawn_blocking(|| ());
     let third = runtime.scheduler().spawn_blocking(|| ());
     let (started, ready) = mpsc::channel();
     let (finish, finished) = mpsc::channel();
     let last = runtime.scheduler().spawn_blocking(move || {
         started.send(()).unwrap();
-        finished.recv_timeout(TEST_TIMEOUT).unwrap();
+        receive(&finished);
     });
     release.send(()).unwrap();
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    receive(&ready);
     let runtime_snapshot = capture(&runtime);
     let bytes = seismograph::snapshot(SnapshotOptions::default()).unwrap();
     let snapshot = seismograph::snapshot::decode(bytes.as_bytes()).unwrap();
@@ -370,10 +403,10 @@ fn recording_enabled_during_blocking_execution_reports_real_outcomes() {
         let (release, released) = mpsc::channel();
         let running = runtime.scheduler().spawn_blocking(move || {
             started.send(()).unwrap();
-            released.recv_timeout(TEST_TIMEOUT).unwrap();
+            receive(&released);
             assert!(!panics, "recorded blocking panic");
         });
-        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        receive(&ready);
         let queued = stops.then(|| runtime.scheduler().spawn_blocking(|| panic!("canceled function must not run")));
         seismograph::recorder(Configuration {
             runtime_tasks: Policy::all(false),
@@ -442,14 +475,14 @@ fn recording_enabled_during_an_async_poll_reports_real_outcomes() {
             Unaware((started, released, panics, stops)),
             |_, Unaware((started, released, panics, stops))| async move {
                 started.send(()).unwrap();
-                released.recv_timeout(TEST_TIMEOUT).unwrap();
+                receive(&released);
                 if stops {
                     pending::<()>().await;
                 }
                 assert!(!panics, "recorded async panic");
             },
         );
-        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        receive(&ready);
         seismograph::recorder(Configuration {
             runtime_tasks: Policy::all(false),
             ..Configuration::default()
@@ -525,7 +558,7 @@ fn recording_reports_real_async_and_blocking_outcomes() {
         started.send(()).unwrap();
         pending::<()>().await;
     });
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    receive(&ready);
 
     runtime.stop().unwrap();
     assert!(canceled.join().unwrap_err().is_shutdown());
@@ -589,8 +622,8 @@ fn native_tasks_reuse_their_recorded_spawn_timestamp_and_identity() {
         started.send(()).unwrap();
         released.recv().unwrap();
     });
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    receive(&ready);
+    receive(&ready);
 
     let native = capture(&runtime);
     release.send(()).unwrap();
@@ -681,7 +714,7 @@ fn async_task_sizes_precede_wrapping_and_erasure() {
             })
         });
         for _ in 0..3 {
-            ready.recv_timeout(TEST_TIMEOUT).unwrap();
+            receive(&ready);
         }
         let native = capture(runtime);
         release.send(()).unwrap();
@@ -752,7 +785,7 @@ fn queued_remote_children_retain_their_recorded_parent() {
             anywhere.await.unwrap();
         });
     for _ in 0..2 {
-        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        receive(&ready);
     }
     let native = capture(&runtime);
     runtime.stop().unwrap();
@@ -793,10 +826,10 @@ fn blocking_children_retain_their_recorded_parent() {
     let parent = runtime.scheduler().spawn_blocking(move || {
         let child = scheduler.spawn_blocking(|| 42);
         started.send(child).unwrap();
-        released.recv_timeout(TEST_TIMEOUT).unwrap();
+        receive(&released);
         panic!("recorded parent panic");
     });
-    let child = ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    let child = receive(&ready);
     let native = capture(&runtime);
     release.send(()).unwrap();
     assert!(parent.join().unwrap_err().is_panic());
@@ -843,7 +876,7 @@ fn collection_reports_the_native_task_limit_instead_of_claiming_completeness() {
         started.send(()).unwrap();
         pending::<()>().await;
     }));
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    receive(&ready);
 
     let snapshot = capture(&runtime);
     runtime.stop().unwrap();
@@ -862,9 +895,9 @@ fn a_blocked_async_worker_times_out_and_can_answer_a_later_request() {
         .scheduler()
         .spawn_anywhere(Unaware((started, released)), |_, Unaware((started, released))| async move {
             started.send(()).unwrap();
-            released.recv_timeout(TEST_TIMEOUT).unwrap();
+            receive(&released);
         });
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    receive(&ready);
 
     let blocked = runtime
         .diagnostics()
@@ -922,9 +955,9 @@ fn shutdown_records_cancellation_for_a_queued_blocking_function() {
     let (release, released) = mpsc::channel();
     let running = runtime.scheduler().spawn_blocking(move || {
         started.send(()).unwrap();
-        released.recv_timeout(TEST_TIMEOUT).unwrap();
+        receive(&released);
     });
-    ready.recv_timeout(TEST_TIMEOUT).unwrap();
+    receive(&ready);
     let queued = runtime.scheduler().spawn_blocking(|| panic!("a canceled function must not run"));
     let snapshot = capture(&runtime);
     let id = snapshot
@@ -1011,7 +1044,7 @@ fn task_sizes_describe_user_futures_before_runtime_wrapping() {
         })
         .unwrap();
     for _ in 0..3 {
-        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        receive(&ready);
     }
 
     let snapshot = capture(&runtime);
@@ -1045,15 +1078,19 @@ fn growing_pool(name: &str, policy: BlockingPoolPolicy, expected_blocking_worker
                 let (released, changed) = &*release;
                 let mut released = released.lock().unwrap();
                 while !*released {
-                    let waited = changed.wait_timeout(released, TEST_TIMEOUT).unwrap();
-                    assert!(!waited.1.timed_out(), "the test must release its blocking functions");
-                    released = waited.0;
+                    if is_mutation_testing() {
+                        released = changed.wait(released).unwrap();
+                    } else {
+                        let waited = changed.wait_timeout(released, TEST_TIMEOUT).unwrap();
+                        assert!(!waited.1.timed_out(), "the test must release its blocking functions");
+                        released = waited.0;
+                    }
                 }
             })
         })
         .collect::<Vec<_>>();
     for _ in 0..2 {
-        ready.recv_timeout(TEST_TIMEOUT).unwrap();
+        receive(&ready);
     }
 
     let snapshot = capture(&runtime);

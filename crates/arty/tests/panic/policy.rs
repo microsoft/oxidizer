@@ -241,6 +241,7 @@ fn assert_panic_cause_precedes_join_notification(observe_panic: bool) {
 fn blocking_panics_do_not_run_hooks_or_start_shutdown() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<Panic, _>::new(Unaware(Arc::clone(&calls)), |event, data| {
             data.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

@@ -69,7 +69,7 @@ pub(crate) struct DispatcherCore {
     next_async_worker_index: AtomicUsize,
 
     remote_results: JoinHandlePool,
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     diagnostics: std::sync::OnceLock<seismograph_runtime::RuntimeHandle>,
 }
 
@@ -105,12 +105,12 @@ impl DispatcherCore {
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
             remote_results: JoinHandlePool::new(shutdown),
-            #[cfg(feature = "monitor")]
+            #[cfg(any(test, feature = "monitor"))]
             diagnostics: std::sync::OnceLock::new(),
         })
     }
 
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn set_diagnostics(&self, runtime: Option<seismograph_runtime::RuntimeHandle>) {
         if let Some(runtime) = runtime {
             self.diagnostics
@@ -119,7 +119,7 @@ impl DispatcherCore {
         }
     }
 
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     pub(crate) fn register_task_provider(&self, thread: ThreadId, handle: &seismograph_runtime::worker::WorkerHandle) {
         let index = self
             .worker_index(thread)
@@ -139,7 +139,7 @@ impl DispatcherCore {
 
     pub(crate) fn stop_inner(&self, cause: ShutdownCause) -> ShutdownCause {
         self.shutdown().begin(cause);
-        #[cfg(feature = "monitor")]
+        #[cfg(any(test, feature = "monitor"))]
         if let Some(runtime) = self.diagnostics.get() {
             runtime.stopping();
         }
@@ -592,7 +592,7 @@ mod tests {
         assert_eq!(drain_system(&worker2_rx).len(), 0);
     }
 
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     #[test]
     fn dispatcher_stop_updates_its_registered_runtime() {
         use seismograph_runtime::snapshot::{CaptureOptions, RuntimeState};
@@ -614,7 +614,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "monitor")]
+    #[cfg(any(test, feature = "monitor"))]
     #[test]
     fn a_closed_worker_command_channel_reports_collection_failure() {
         use seismograph_runtime::snapshot::{CaptureOptions, TaskCollection};

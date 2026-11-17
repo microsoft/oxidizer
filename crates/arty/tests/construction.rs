@@ -17,6 +17,7 @@ use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 #[cfg(test)]
 fn indexed_worker_names(builder: RuntimeBuilder, policy: BlockingPoolPolicy) -> (String, Vec<String>) {
     let runtime = builder
+        .monitor(MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(3))
         .blocking_pool(policy.max(4))
         .build()
@@ -155,7 +156,11 @@ fn default_worker_names_use_arty() {
 
 #[test]
 fn default_runtime_shares_blocking_pool() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .unwrap();
 
     let names = worker_names(&runtime);
     assert_eq!(names[0].1, names[1].1);
@@ -176,7 +181,7 @@ fn runtime_name_is_copied_and_replaces_the_previous_name() {
             .workers(WorkersPolicy::exactly(2))
             .blocking_pool(policy.max(1));
         drop(name);
-        let runtime = builder.build().unwrap();
+        let runtime = builder.monitor(MonitorPolicy::disabled()).build().unwrap();
 
         assert_eq!(
             worker_names(&runtime),

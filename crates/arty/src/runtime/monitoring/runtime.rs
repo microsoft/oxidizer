@@ -19,7 +19,8 @@ impl RuntimeDiagnostics {
             return Ok(None);
         }
         let workers = u32::try_from(workers).map_err(Error::new)?;
-        let builder = Monitor::builder().name(name.as_str());
+        let monitor_name = if name.as_str().is_empty() { "arty" } else { name.as_str() };
+        let builder = Monitor::builder().name(monitor_name);
         #[cfg(test)]
         let builder = builder.io(seismograph_protocol::io::MonitorIo::new_mocked().0);
         let monitor = builder.start().map_err(Error::new)?;

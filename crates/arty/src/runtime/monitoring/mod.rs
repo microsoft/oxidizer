@@ -2,33 +2,41 @@
 // Licensed under the MIT License.
 
 //! Private task monitoring and native task inspection.
+//!
+//! The runtime owns its monitor connection and registration until its workers stop.
+//! Each async worker owns a worker registration and its current poll state.
+//! Blocking queues own worker registrations and share an event context for submissions.
+//! Async completion targets own their task metadata. A blocking callback and its
+//! inspection metadata share one allocation so inspection can find queued and running tasks.
+//! Handles provide access to these registrations but do not own runtime shutdown.
 
-#[cfg(feature = "monitor")]
+#[cfg(any(test, feature = "monitor"))]
 mod asynchronous;
 mod blocking;
-#[cfg(feature = "monitor")]
+#[cfg(any(test, feature = "monitor"))]
 mod runtime;
 mod submission;
-#[cfg(feature = "monitor")]
+#[cfg(any(test, feature = "monitor"))]
 mod task;
 
 #[cfg(test)]
-#[cfg(all(feature = "monitor", not(miri)))]
+#[cfg(not(miri))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 
 // Hold for the full lifetime of tests that use the process registry or recorder.
-#[cfg(all(test, feature = "monitor"))]
+#[cfg(test)]
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-#[cfg(feature = "monitor")]
+#[cfg(any(test, feature = "monitor"))]
 pub(crate) use asynchronous::WorkerDiagnostics;
-#[cfg(feature = "monitor")]
+#[cfg(any(test, feature = "monitor"))]
 pub(crate) use blocking::MonitoredBlockingJob;
 pub(crate) use blocking::{BlockingJob, BlockingPoolMonitoring, BlockingTaskEvents, BlockingTaskMonitoring, BlockingWorkerMonitoring};
-#[cfg(feature = "monitor")]
+#[cfg(any(test, feature = "monitor"))]
 pub(crate) use runtime::RuntimeDiagnostics;
 pub(crate) use submission::{TaskMonitoring, add_task};
-#[cfg(feature = "monitor")]
+#[cfg(any(test, feature = "monitor"))]
 pub(crate) use task::TaskInfo;
-#[cfg(all(test, feature = "monitor"))]
+#[cfg(test)]
 pub(crate) use task::current_task;
