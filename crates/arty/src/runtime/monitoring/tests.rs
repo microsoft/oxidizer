@@ -968,6 +968,7 @@ fn shutdown_records_cancellation_for_a_queued_blocking_function() {
         .id;
 
     control.request_stop();
+    let stopping = capture(&runtime).state;
     release.send(()).unwrap();
     runtime.stop().unwrap();
     running.join().unwrap();
@@ -997,7 +998,10 @@ fn shutdown_records_cancellation_for_a_queued_blocking_function() {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!((canceled.is_shutdown(), outcomes), (true, vec![EventKind::TaskCanceled]));
+    assert_eq!(
+        (stopping, canceled.is_shutdown(), outcomes),
+        (RuntimeState::Stopping, true, vec![EventKind::TaskCanceled])
+    );
 }
 
 #[test]

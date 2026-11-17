@@ -354,25 +354,15 @@ mod tests {
             shutdown: None,
         }));
 
-        let source = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-owner-requests", 1));
-        let worker = source.register_worker(WorkerMetadata::new(WorkerRole::Core));
-        let (sender, receiver) = std::sync::mpsc::channel();
-        worker
-            .handle()
-            .register_task_provider(move |request| sender.send(request).unwrap())
-            .unwrap();
         for index in [0, 1] {
-            let captured = std::thread::scope(|scope| {
-                let handle = source.handle();
-                let capture = scope.spawn(move || handle.capture(CaptureOptions::default()).unwrap());
-                let request = if testing_aids::is_mutation_testing() {
-                    receiver.recv().unwrap()
-                } else {
-                    receiver.recv_timeout(testing_aids::TEST_TIMEOUT).unwrap()
-                };
-                queue.collect(index, request);
-                capture.join().unwrap()
-            });
+            let source = seismograph_runtime::register_runtime(RuntimeMetadata::new("blocking-owner-requests", 1));
+            let worker = source.register_worker(WorkerMetadata::new(WorkerRole::Core));
+            let queue = Arc::clone(&queue);
+            worker
+                .handle()
+                .register_task_provider(move |request| queue.collect(index, request))
+                .unwrap();
+            let captured = source.handle().capture(CaptureOptions::default()).unwrap();
             assert_eq!(captured.tasks.len(), usize::from(index == 0));
             assert_eq!(captured.workers[0].task_collection, TaskCollection::Complete);
         }

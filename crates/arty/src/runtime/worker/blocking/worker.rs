@@ -683,6 +683,24 @@ mod tests {
 
     #[cfg(any(test, feature = "monitor"))]
     #[test]
+    fn joined_workers_stop_while_the_queue_is_still_owned() {
+        use seismograph_runtime::RuntimeMetadata;
+        use seismograph_runtime::snapshot::{CaptureOptions, WorkerState};
+
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(RuntimeMetadata::new("joined-blocking-workers", 2));
+        let mut pool = joinable_pool(2);
+        pool.receiver.enable_monitoring(&runtime.handle());
+
+        pool.shutdown_and_join();
+        let snapshot = runtime.handle().capture(CaptureOptions::default()).unwrap();
+
+        assert_eq!(snapshot.workers.len(), 2);
+        assert!(snapshot.workers.iter().all(|worker| worker.state == WorkerState::Stopped));
+    }
+
+    #[cfg(any(test, feature = "monitor"))]
+    #[test]
     fn a_closed_pool_does_not_register_workers_when_monitoring_is_enabled() {
         let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
         let pool = Pool::new(RuntimeName::default(), None, Some(limit(1)));
