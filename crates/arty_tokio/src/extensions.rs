@@ -138,8 +138,9 @@ pub trait TokioCompatExt: private::Sealed {
     /// An existing Tokio context is never replaced.
     ///
     /// If you supply a borrowed handle, keep its Tokio runtime alive while Arty
-    /// tasks use Tokio. If you supply an owned runtime, Arty owns it until
-    /// shutdown starts.
+    /// tasks use Tokio. If you supply an owned runtime, Arty releases it after
+    /// [`Runtime::stop`](arty::runtime::Runtime::stop) or runtime destruction
+    /// finishes waiting for the workers.
     ///
     /// This crate does not support current-thread Tokio runtimes. If you supply
     /// one, you are responsible for full interoperability with Arty.

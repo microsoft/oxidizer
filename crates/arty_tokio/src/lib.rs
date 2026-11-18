@@ -52,7 +52,9 @@
 //! the handle.
 //!
 //! If you supply an owned runtime or use [`TokioCompatExt::tokio_compat`], Arty
-//! drops the owned Tokio runtime when Arty shuts down.
+//! drops the owned Tokio runtime after
+//! [`Runtime::stop`](arty::runtime::Runtime::stop) or runtime destruction
+//! finishes waiting for the workers.
 //!
 //! This crate does not support current-thread Tokio runtimes. If you supply
 //! one, you are responsible for full interoperability with Arty.

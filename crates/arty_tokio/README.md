@@ -55,7 +55,9 @@ runtime alive while Arty tasks use Tokio. Each Arty worker stores a clone of
 the handle.
 
 If you supply an owned runtime or use [`TokioCompatExt::tokio_compat`][__link4], Arty
-drops the owned Tokio runtime when Arty shuts down.
+drops the owned Tokio runtime after
+[`Runtime::stop`][__link5] or runtime destruction
+finishes waiting for the workers.
 
 This crate does not support current-thread Tokio runtimes. If you supply
 one, you are responsible for full interoperability with Arty.
@@ -66,7 +68,7 @@ an enabled time driver. Networking and I/O resources require the applicable
 Tokio features and an enabled I/O driver. Configure these drivers when you
 build an explicit Tokio runtime.
 Tokio tasks run on Tokio workers. They do not receive
-[`arty::task::Context`][__link5] or keep Arty thread-aware state.
+[`arty::task::Context`][__link6] or keep Arty thread-aware state.
 
 Do not call `tokio::task::block_in_place`, `Runtime::block_on`, or
 `Handle::block_on` from an Arty worker. `LocalSet` and `spawn_local` are not
@@ -78,10 +80,11 @@ integrated with Arty.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb_bZpi5sF6c4bPUsIDrpV4FwbrzH9fdknEW0bpTKxkVSNjdhhZIKCZGFydHllMC42LjGCamFydHlfdG9raW9lMC4yLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQblJY_zOW2G8YbsuD-ndQHjJUb3aR56ALBFYkbNP6UG1ouBm9hZIKCZGFydHllMC42LjGCamFydHlfdG9raW9lMC4yLjE
  [__link0]: https://crates.io/crates/arty/0.6.1
  [__link1]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat
  [__link2]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat_with
  [__link3]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat_with
  [__link4]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat
- [__link5]: https://docs.rs/arty/0.6.1/arty/?search=task::Context
+ [__link5]: https://docs.rs/arty/0.6.1/arty/?search=runtime::Runtime::stop
+ [__link6]: https://docs.rs/arty/0.6.1/arty/?search=task::Context
