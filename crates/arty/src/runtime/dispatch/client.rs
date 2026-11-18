@@ -109,7 +109,7 @@ impl DispatcherClient {
 
 impl fmt::Debug for DispatcherClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DispatcherClient")
+        f.debug_struct(std::any::type_name::<Self>())
             .field("worker_count", &self.workers().into_iter().len())
             .finish_non_exhaustive()
     }

@@ -9,7 +9,7 @@ Io {
         },
         ..
     },
-    dispatcher: DispatcherClient {
+    dispatcher: arty::runtime::dispatch::client::DispatcherClient {
         worker_count: 2,
         ..
     },
