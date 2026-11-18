@@ -127,16 +127,17 @@ fn works_with_non_debug_data() {
         inner: TransparentMemory,
     }
 
+    let reserve_fn: fn(&NotDebug, usize) -> BytesBuf = |data, min_bytes| data.inner.reserve(min_bytes);
     let provider = CallbackMemory::new(
         NotDebug {
             inner: TransparentMemory::new(),
         },
-        |data: &NotDebug, min_bytes| data.inner.reserve(min_bytes),
+        reserve_fn,
     );
 
     assert!(Memory::reserve(&provider, 64).capacity() >= 64);
 
     // `CallbackMemory` is still `Debug` even though its data is not.
     let rendered = format!("{provider:?}");
-    assert!(rendered.contains("CallbackMemory"));
+    assert_eq!(rendered, format!("CallbackMemory {{ reserve_fn: {reserve_fn:?}, .. }}"));
 }
