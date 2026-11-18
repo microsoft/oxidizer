@@ -33,7 +33,7 @@ impl<'a, F> TaskBuilder<'a, F> {
     }
 }
 
-impl<'a, F, I> TaskBuilder<'a, F, I> {
+impl<F, I> TaskBuilder<'_, F, I> {
     /// Sets the observed context for task polling, cleanup, and lifecycle events.
     ///
     /// By default, the task has no captured context.
