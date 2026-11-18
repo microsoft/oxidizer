@@ -125,6 +125,16 @@ impl ThreadAware for PanicCount {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
+#[derive(Clone)]
+struct InitSignal {
+    calls: PanicCount,
+    initialized: mpsc::Sender<()>,
+}
+
+impl ThreadAware for InitSignal {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
 struct CloneCount(Arc<AtomicUsize>);
 
 impl Clone for CloneCount {
@@ -433,23 +443,22 @@ fn panic_callbacks_share_one_borrowed_event() {
 #[test]
 fn control_worker_init_runs_once_on_every_worker() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
-    let (control, workers, scheduler) = runtime
-        .scheduler()
-        .block_on(async |cx| {
-            (
-                cx.control().clone(),
-                cx.control().workers().into_iter().cloned().collect::<Vec<_>>(),
-                cx.scheduler().clone(),
-            )
-        })
-        .unwrap();
+    let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
+    let (initialized, initialization) = mpsc::channel();
 
-    control.on(HookFn::<WorkerInit, _>::new(PanicCount(Arc::clone(&calls)), |_event, data| {
-        data.0.fetch_add(1, Ordering::SeqCst);
-    }));
-    for worker in workers {
-        scheduler.spawn_at(&worker, (), |()| async {}).join().unwrap();
+    control.on(HookFn::<WorkerInit, _>::new(
+        InitSignal {
+            calls: PanicCount(Arc::clone(&calls)),
+            initialized,
+        },
+        |_event, data| {
+            data.calls.0.fetch_add(1, Ordering::SeqCst);
+            data.initialized.send(()).unwrap();
+        },
+    ));
+    for _ in control.workers() {
+        initialization.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 
     assert_eq!(calls.load(Ordering::SeqCst), 2);

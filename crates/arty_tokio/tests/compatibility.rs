@@ -7,6 +7,11 @@
 
 mod support;
 
+use std::sync::mpsc;
+use std::time::Duration;
+
+use arty::core::{Thread, ThreadAware};
+use arty::runtime::hook::{HookFn, WorkerInit};
 use arty::runtime::{Runtime, WorkersPolicy};
 use arty::task::Context;
 use arty_tokio::TokioCompatExt as _;
@@ -16,6 +21,24 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::runtime::{Builder, Handle};
 
 assert_impl_all!(arty_tokio::TokioHandle: Send, Sync, Default);
+
+#[derive(Clone)]
+struct InitSignal(mpsc::Sender<()>);
+
+impl ThreadAware for InitSignal {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
+fn wait_for_worker_initialization(cx: &Context) {
+    let (initialized, initialization) = mpsc::channel();
+    cx.control()
+        .on(HookFn::<WorkerInit, _>::new(InitSignal(initialized), |_event, signal| {
+            signal.0.send(()).unwrap();
+        }));
+    for _ in cx.control().workers() {
+        initialization.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+}
 
 async fn worker_runtime_ids(cx: &Context) -> Vec<String> {
     let tasks = cx
@@ -117,6 +140,7 @@ fn first_control_initialization_wins_with_different_runtimes() {
         .block_on(async |cx| {
             cx.control().tokio_compat_with(first.handle());
             cx.control().tokio_compat_with(second.handle());
+            wait_for_worker_initialization(&cx);
             worker_runtime_ids(&cx).await
         })
         .unwrap();
@@ -169,6 +193,7 @@ fn runtime_control_supports_tokio_on_every_worker() {
         .scheduler()
         .block_on(async |cx| {
             cx.control().tokio_compat_with(tokio.handle());
+            wait_for_worker_initialization(&cx);
             worker_runtime_ids(&cx).await
         })
         .unwrap();
