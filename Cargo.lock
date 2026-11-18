@@ -265,6 +265,8 @@ dependencies = [
  "plurality 0.2.4",
  "scopeguard",
  "seismograph",
+ "seismograph_protocol",
+ "seismograph_runtime",
  "static_assertions",
  "testing_aids",
  "thread_aware",

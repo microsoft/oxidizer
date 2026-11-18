@@ -43,6 +43,7 @@ opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics"] }
 
 [dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 performables = { path = "../performables", default-features = false }
 static_assertions.workspace = true
 

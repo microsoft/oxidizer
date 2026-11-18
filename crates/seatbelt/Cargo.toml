@@ -82,8 +82,8 @@ http = { workspace = true }
 insta = { workspace = true, features = ["json"] }
 jiff = { workspace = true, default-features = true, features = ["serde"] }
 layered = { path = "../layered", features = ["tower-service", "dynamic-service"] }
-observed_destination_core = { path = "../observed_destination_core" }
-observed_destination_stdout = { path = "../observed_destination_stdout" }
+observed_destination_core = { workspace = true }
+observed_destination_stdout = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
 opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }

@@ -71,6 +71,6 @@ async fn main() -> Result<(), ohno::AppError> {
 fn initialize_meter_provider() -> SdkMeterProvider {
     SdkMeterProvider::builder()
         .register(stdout_metrics())
-        .expect("the stdout destination only installs an exporter and does not reject the builder")
+        .expect("the stdout metric destination has no fallible configuration")
         .build()
 }

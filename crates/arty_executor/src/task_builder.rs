@@ -87,6 +87,33 @@ where
     /// Registration does not wake the executor owner. The caller must arrange an
     /// [`execute_cycle`](crate::Executor::execute_cycle) after registration.
     pub fn register(self, completion: impl TaskCompletion<F::Output>) {
-        self.shared.add_task(self.future, self.metadata, completion, self.inspector);
+        self.shared.add_task(
+            self.future,
+            self.metadata,
+            completion,
+            crate::inspection::FutureInspector(self.inspector),
+        );
+    }
+}
+
+impl<F, I> TaskBuilder<'_, F, I>
+where
+    F: IntoFuture + 'static,
+    F::Output: 'static,
+{
+    /// Registers a task whose inspector borrows its future and completion target.
+    ///
+    /// The callback replaces any configured inspector. It runs only during
+    /// explicit inspection or observed polls. The completion target stores
+    /// metadata inline with the task and receives terminal results as usual.
+    #[cfg(feature = "inspection")]
+    pub fn register_with_inspection<T, D, J>(self, completion: T, inspect: J)
+    where
+        T: TaskCompletion<F::Output>,
+        D: 'static,
+        J: Fn(&F::IntoFuture, &T, crate::TaskState) -> Option<D> + 'static,
+    {
+        self.shared
+            .add_task(self.future, self.metadata, completion, crate::inspection::InspectWith::new(inspect));
     }
 }

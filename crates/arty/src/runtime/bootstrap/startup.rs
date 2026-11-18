@@ -25,7 +25,7 @@ fn build_with_processors(
     thread_builder: &ThreadBuilder,
     available: &ProcessorSet,
 ) -> Result<Runtime, Error> {
-    let (workers, shutdown) = prepare_workers(
+    let prepared = prepare_workers(
         processor_config,
         clock,
         thread_builder,
@@ -33,19 +33,41 @@ fn build_with_processors(
         |name| std::env::var(name).ok(),
         asynchronous::start,
     )?;
+    let workers = prepared.workers;
 
     let dispatcher = DispatcherCore::new(
         NonEmpty::from_vec(workers.iter().map(|worker| worker.endpoint().clone()).collect())
             .expect("the number is either hardcoded or validated in the builder, so can never be zero"),
-        shutdown,
+        prepared.shutdown,
     );
     let dispatcher_client = DispatcherClient::new(dispatcher);
+    #[cfg(any(test, feature = "monitor"))]
+    dispatcher_client.set_diagnostics(
+        prepared
+            .diagnostics
+            .as_ref()
+            .map(crate::runtime::monitoring::RuntimeDiagnostics::handle),
+    );
     let mut join_handles = Vec::with_capacity(workers.len());
     for worker in workers {
         join_handles.push(worker.activate(dispatcher_client.clone()));
     }
     let worker_joiner = WorkerJoiner::new(join_handles);
-    Ok(Runtime::with_dispatcher(dispatcher_client, worker_joiner))
+    let runtime = Runtime::with_dispatcher(dispatcher_client, worker_joiner);
+    #[cfg(any(test, feature = "monitor"))]
+    let runtime = {
+        let mut runtime = runtime;
+        runtime.set_diagnostics(prepared.diagnostics);
+        runtime
+    };
+    Ok(runtime)
+}
+
+struct PreparedWorkers<W> {
+    workers: Vec<W>,
+    shutdown: Shutdown,
+    #[cfg(any(test, feature = "monitor"))]
+    diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>,
 }
 
 fn prepare_workers<W>(
@@ -55,12 +77,13 @@ fn prepare_workers<W>(
     available: &ProcessorSet,
     environment: impl FnOnce(&str) -> Option<String>,
     mut start: impl FnMut(asynchronous::StartOptions) -> W,
-) -> Result<(Vec<W>, Shutdown), Error> {
+) -> Result<PreparedWorkers<W>, Error> {
     let name = processor_config.name;
     name.validate()?;
     let processors = processor_config.workers_policy.select(available)?;
 
-    let mut workers = Vec::with_capacity(processors.len());
+    let worker_count = processors.len();
+    let mut workers = Vec::with_capacity(worker_count);
 
     // Respect the RUST_MIN_STACK environment variable if set and larger than the configured stack size.
     let stack_size = select_stack_size(processor_config.stack_size, environment);
@@ -69,6 +92,13 @@ fn prepare_workers<W>(
     let shutdown = Shutdown::default();
     let io_runtime = IoRuntime::new(observed::Sink::noop());
     let blocking_pools = processor_config.blocking_pool_policy.into_pools(name.clone())?;
+    #[cfg(any(test, feature = "monitor"))]
+    let (diagnostics, monitor_options) = {
+        let diagnostics = crate::runtime::monitoring::RuntimeDiagnostics::start(monitor_options.policy(), &name, worker_count)?;
+        let mut monitor_options = monitor_options;
+        monitor_options.set_runtime(diagnostics.as_ref().map(crate::runtime::monitoring::RuntimeDiagnostics::handle));
+        (diagnostics, monitor_options)
+    };
 
     for (worker_index, processor) in processors.into_iter().enumerate() {
         workers.push(start(asynchronous::StartOptions {
@@ -86,7 +116,12 @@ fn prepare_workers<W>(
         }));
     }
 
-    Ok((workers, shutdown))
+    Ok(PreparedWorkers {
+        workers,
+        shutdown,
+        #[cfg(any(test, feature = "monitor"))]
+        diagnostics,
+    })
 }
 
 fn select_stack_size(configured: std::num::NonZeroUsize, environment: impl FnOnce(&str) -> Option<String>) -> usize {
@@ -125,10 +160,48 @@ mod tests {
     use std::thread::ThreadId;
 
     #[test]
+    fn monitor_start_failure_returns_before_starting_async_workers() {
+        use seismograph_protocol::io::{IoOperation, MonitorIo};
+
+        let (io, control) = MonitorIo::new_mocked();
+        control.fail_next(
+            IoOperation::CreateDirectory,
+            std::io::Error::other("runtime monitor startup failed"),
+        );
+        let started = std::cell::Cell::new(false);
+        let hardware = fake_hardware(1);
+        let result = crate::runtime::monitoring::RuntimeDiagnostics::with_test_io(io, || {
+            prepare_workers(
+                RuntimeConfig {
+                    name: crate::runtime::config::RuntimeName::default(),
+                    workers_policy: WorkersPolicy::exactly(1),
+                    stack_size: NonZero::new(16_384).unwrap(),
+                    blocking_pool_policy: BlockingPoolPolicy::shared(),
+                    monitor_options: MonitorPolicy::enabled().into(),
+                    hook_registrations: Vec::new(),
+                },
+                &InactiveClock::new_isolated(),
+                &ThreadBuilder::default(),
+                &hardware.processors(),
+                |_| None,
+                |_| started.set(true),
+            )
+        });
+
+        let error = result.err().unwrap();
+        assert!(!started.get());
+        let mut source: &dyn std::error::Error = &error;
+        while let Some(inner) = source.source() {
+            source = inner;
+        }
+        assert_eq!(source.to_string(), "runtime monitor startup failed");
+    }
+
+    #[test]
     fn nov4_startup_passes_the_selected_stack_size_to_each_native_worker_request() {
         let hardware = many_cpus::SystemHardware::fake(HardwareBuilder::from_counts(NonZero::new(2).unwrap(), NonZero::new(1).unwrap()));
         for environment in [None, Some("32769")] {
-            let (requests, shutdown) = prepare_workers(
+            let prepared = prepare_workers(
                 RuntimeConfig {
                     name: crate::runtime::config::RuntimeName::default(),
                     workers_policy: WorkersPolicy::at_most(2),
@@ -147,6 +220,8 @@ mod tests {
                 |request| request,
             )
             .unwrap();
+            let requests = prepared.workers;
+            let shutdown = prepared.shutdown;
             assert_eq!(requests.len(), 2);
             assert!(
                 requests
@@ -260,7 +335,7 @@ mod tests {
         let hardware = fake_hardware(PROCESSORS);
         let runtime = runtime_with_processors(
             WorkersPolicy::exactly(WORKERS),
-            MonitorPolicy::enabled().into(),
+            MonitorPolicy::disabled().into(),
             &hardware.processors(),
         );
         let cx = runtime.scheduler().block_on(async |cx| cx).unwrap();

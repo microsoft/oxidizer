@@ -63,19 +63,19 @@ struct RequestIdContext {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
     let (sink, provider, exporter) = init_telemetry();
 
     handle_request(&sink, HttpRoute("/users".to_owned())).await;
 
-    provider.force_flush()?;
-    let logs = exporter.get_emitted_logs()?;
-    provider.shutdown()?;
-    for log in logs {
-        println!("{log:#?}");
+    provider.force_flush().expect("the in-memory exporter must flush recorded logs");
+    for log in exporter
+        .get_emitted_logs()
+        .expect("the in-memory exporter must return recorded logs")
+    {
+        println!("{:?}", log.record);
     }
-
-    Ok(())
+    provider.shutdown().expect("the in-memory exporter must shut down");
 }
 
 const EXAMPLE_DC: DataClass = DataClass::new("example", "public");

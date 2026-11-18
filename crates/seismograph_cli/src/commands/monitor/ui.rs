@@ -51,7 +51,9 @@ impl App {
     }
 
     pub(super) fn draw(&self, frame: &mut ratatui::Frame<'_>) {
-        self.draw_with_snapshot_time(frame, |snapshot| snapshot_time_at(snapshot, self.io.instant()));
+        self.draw_with_snapshot_time(frame, |snapshot| {
+            snapshot_time_at(snapshot, self.io.instant(), TimeZone::try_system())
+        });
     }
 
     fn draw_with_snapshot_time(&self, frame: &mut ratatui::Frame<'_>, format_snapshot_time: impl Fn(&CapturedSnapshot) -> String) {
@@ -1926,27 +1928,21 @@ fn key_style() -> Style {
     Style::default().fg(KEY_COLOR).add_modifier(Modifier::BOLD)
 }
 
-fn snapshot_time_at(snapshot: &CapturedSnapshot, now: Instant) -> String {
-    snapshot_time_with_timezone(snapshot, now, TimeZone::try_system)
+#[cfg(test)]
+fn snapshot_time(snapshot: &CapturedSnapshot) -> String {
+    snapshot_time_at(snapshot, Instant::now(), Ok(TimeZone::UTC))
 }
 
-fn snapshot_time_with_timezone(
-    snapshot: &CapturedSnapshot,
-    now: Instant,
-    timezone: impl FnOnce() -> Result<TimeZone, jiff::Error>,
-) -> String {
+fn snapshot_time_at(snapshot: &CapturedSnapshot, now: Instant, zone: Result<TimeZone, jiff::Error>) -> String {
     let (Some(captured_at), Some(captured_instant)) = (snapshot.captured_at, snapshot.captured_instant) else {
         return "capture time not recorded".into();
     };
-    let local = match Timestamp::try_from(captured_at).and_then(|timestamp| timezone().map(|zone| timestamp.to_zoned(zone))) {
-        Ok(local) => local,
-        Err(error) => return format!("capture time unavailable: {error}"),
+    let local = zone.and_then(|zone| Timestamp::try_from(captured_at).map(|timestamp| timestamp.to_zoned(zone)));
+    let time = match local {
+        Ok(local) => local.strftime("%H:%M:%S").to_string(),
+        Err(error) => format!("capture time unavailable: {error}"),
     };
-    format!(
-        "{} ({})",
-        local.strftime("%H:%M:%S"),
-        format_age(now.saturating_duration_since(captured_instant))
-    )
+    format!("{} ({})", time, format_age(now.saturating_duration_since(captured_instant)))
 }
 
 fn format_age(age: Duration) -> String {
@@ -3494,7 +3490,7 @@ mod tests {
         capture.captured_at = None;
         capture.captured_instant = None;
         assert_eq!(
-            snapshot_time_with_timezone(&capture, now, || panic!("missing metadata must not require the host timezone")),
+            snapshot_time_at(&capture, now, TimeZone::get("invalid-zone")),
             "capture time not recorded"
         );
     }
@@ -4261,22 +4257,35 @@ mod tests {
         assert_eq!(format_age(Duration::from_secs(125)), "2m ago");
 
         let mut snapshot = representative_capture();
+        let current = snapshot_time(&snapshot);
+        assert!(current.starts_with("00:00:00"));
+        assert!(current.ends_with(" ago)"));
         let now = snapshot.captured_instant.unwrap() + Duration::from_secs(125);
+        for (zone, expected) in [
+            (TimeZone::UTC, "00:00:00 (2m ago)"),
+            (TimeZone::fixed(jiff::tz::offset(9)), "09:00:00 (2m ago)"),
+        ] {
+            assert_eq!(snapshot_time_at(&snapshot, now, Ok(zone)), expected);
+        }
         for (captured_at, expected) in [
             (std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(3_661), "03:01:01 (2m ago)"),
             (std::time::SystemTime::UNIX_EPOCH - Duration::from_secs(3_661), "00:58:59 (2m ago)"),
         ] {
             snapshot.captured_at = Some(captured_at);
             assert_eq!(
-                snapshot_time_with_timezone(&snapshot, now, || Ok(TimeZone::fixed(jiff::tz::Offset::from_hours(2).unwrap()))),
+                snapshot_time_at(&snapshot, now, Ok(TimeZone::fixed(jiff::tz::Offset::from_hours(2).unwrap()))),
                 expected
             );
         }
-        snapshot.captured_at = Some(std::time::SystemTime::UNIX_EPOCH);
-        assert_eq!(
-            snapshot_time_with_timezone(&snapshot, now, || Ok(TimeZone::UTC)),
-            "00:00:00 (2m ago)"
-        );
+    }
+
+    #[test]
+    fn snapshot_time_reports_timezone_errors() {
+        let snapshot = representative_capture();
+        let rendered = snapshot_time_at(&snapshot, snapshot.captured_instant.unwrap(), TimeZone::get("invalid-zone"));
+
+        assert!(rendered.starts_with("capture time unavailable: "));
+        assert!(rendered.ends_with(" (0s ago)"));
     }
 
     #[test]
@@ -4285,15 +4294,12 @@ mod tests {
         let now = snapshot.captured_instant.unwrap();
         let out_of_range = std::time::SystemTime::from(Timestamp::MAX) + Duration::from_secs(1);
         snapshot.captured_at = Some(out_of_range);
-        assert!(
-            snapshot_time_with_timezone(&snapshot, now, || panic!("invalid timestamps must not require the host timezone"))
-                .starts_with("capture time unavailable: ")
-        );
+        assert!(snapshot_time_at(&snapshot, now, Ok(TimeZone::UTC)).starts_with("capture time unavailable: "));
 
         snapshot.captured_at = Some(std::time::SystemTime::UNIX_EPOCH);
         let error = Timestamp::try_from(out_of_range).unwrap_err();
-        let expected = format!("capture time unavailable: {error}");
-        assert_eq!(snapshot_time_with_timezone(&snapshot, now, || Err(error)), expected);
+        let expected = format!("capture time unavailable: {error} (0s ago)");
+        assert_eq!(snapshot_time_at(&snapshot, now, Err(error)), expected);
     }
 
     #[test]
