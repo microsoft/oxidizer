@@ -25,7 +25,7 @@ impl Clone for TokioSupport {
         Self {
             handle: self.handle.clone(),
             owned_runtime: None,
-            runtime: self.runtime.clone(),
+            runtime: Weak::clone(&self.runtime),
         }
     }
 }
@@ -61,6 +61,10 @@ impl TokioSupport {
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "tokio_compat documents runtime creation failure as a panic because its extension contract cannot return Result"
+    )]
     fn handle(&self) -> Option<Handle> {
         if let Some(handle) = &self.handle {
             return Some(handle.clone());

@@ -31,9 +31,9 @@ impl ThreadAware for WorkerInitProbe {
 }
 
 struct WorkerInitObservation {
-    callback_thread: ThreadId,
-    event_thread: ThreadId,
-    relocated_thread: ThreadId,
+    callback: ThreadId,
+    event: ThreadId,
+    relocated: ThreadId,
 }
 
 #[test]
@@ -49,9 +49,9 @@ fn worker_init_runs_once_per_worker() {
             |event, data| {
                 data.observed
                     .send(WorkerInitObservation {
-                        callback_thread: std::thread::current().id(),
-                        event_thread: event.thread().id(),
-                        relocated_thread: data.destination.unwrap(),
+                        callback: std::thread::current().id(),
+                        event: event.thread().id(),
+                        relocated: data.destination.unwrap(),
                     })
                     .unwrap();
             },
@@ -61,10 +61,10 @@ fn worker_init_runs_once_per_worker() {
 
     let observations = (0..2).map(|_| observations.try_recv().unwrap()).collect::<Vec<_>>();
     assert_eq!(observations.len(), 2);
-    assert_ne!(observations[0].event_thread, observations[1].event_thread);
+    assert_ne!(observations[0].event, observations[1].event);
     for observation in observations {
-        assert_eq!(observation.callback_thread, observation.event_thread);
-        assert_eq!(observation.relocated_thread, observation.event_thread);
+        assert_eq!(observation.callback, observation.event);
+        assert_eq!(observation.relocated, observation.event);
     }
     runtime.stop().unwrap();
 }

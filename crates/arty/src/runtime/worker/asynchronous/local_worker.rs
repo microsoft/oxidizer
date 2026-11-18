@@ -257,7 +257,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::config::RuntimeName;
-    use crate::runtime::dispatch::DispatcherCore;
+    use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::shutdown::Shutdown;
     use crate::runtime::testing::worker_endpoint;
     use crate::runtime::worker::asynchronous::SpawnCommand;
@@ -276,6 +276,10 @@ mod tests {
         }
     }
 
+    fn test_dispatcher(endpoints: NonEmpty<WorkerEndpoint>, shutdown: Shutdown) -> Arc<DispatcherCore> {
+        DispatcherCore::new(endpoints, shutdown, Vec::new())
+    }
+
     #[test]
     fn panic_without_installed_scheduler_defaults_to_shutdown() {
         let (action, panic) = LocalWorker::on_panic(Box::new(42_u32));
@@ -291,7 +295,7 @@ mod tests {
             let wakes = std::sync::Arc::new(CountingWake::default());
             let shutdown = Shutdown::default();
             let (commands, command_rx) = crate::runtime::worker::asynchronous::command_channel();
-            let core = DispatcherCore::new(
+            let core = test_dispatcher(
                 NonEmpty::new(worker_endpoint(
                     commands,
                     Waker::from(std::sync::Arc::clone(&wakes)),
@@ -299,7 +303,6 @@ mod tests {
                     Worker::new(Pool::new(RuntimeName::default(), None, None), shutdown.clone()),
                 )),
                 shutdown.clone(),
-                Vec::new(),
             );
             let dispatcher = DispatcherClient::new(Arc::clone(&core));
             let io = crate::io::Io::new(
@@ -339,10 +342,9 @@ mod tests {
                 Poll::Ready(Ok((7, true)))
             );
             let nested_registered_locally = command_rx.spawn_receiver().try_recv().is_err();
-
             let other_thread = ThreadBuilder::default().build(std::thread::current().id());
             let (other_tx, other_rx) = crate::runtime::worker::asynchronous::command_channel();
-            let other_core = DispatcherCore::new(
+            let other_core = test_dispatcher(
                 NonEmpty::new(worker_endpoint(
                     other_tx,
                     Waker::noop().clone(),
@@ -350,12 +352,10 @@ mod tests {
                     Worker::new(Pool::new(RuntimeName::default(), None, None), Shutdown::default()),
                 )),
                 Shutdown::default(),
-                Vec::new(),
             );
             let _remote = other_core.spawn_relocating(&other_thread, |_| async { 9 });
             let other_owner_queued = matches!(other_rx.spawn_receiver().try_recv(), Ok(SpawnCommand { .. }));
             let other_owner_not_registered = !executor.has_tasks();
-
             shutdown.begin(ShutdownCause::default());
             let before = wakes.0.load(Ordering::Relaxed);
             let mut rejected = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 11 }));

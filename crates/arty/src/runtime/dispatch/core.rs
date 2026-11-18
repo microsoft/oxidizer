@@ -415,7 +415,11 @@ mod tests {
         first.waker = Waker::from(std::sync::Arc::clone(&counter));
         let (second, _second_rx) = endpoint(&threads[1]);
         let (third, _third_rx) = endpoint(&threads[2]);
-        let core = DispatcherCore::new(NonEmpty::from_vec(vec![first, second, third]).unwrap(), Shutdown::default(), Vec::new());
+        let core = DispatcherCore::new(
+            NonEmpty::from_vec(vec![first, second, third]).unwrap(),
+            Shutdown::default(),
+            Vec::new(),
+        );
         let selected: Vec<_> = (0..7).map(|_| usize::from(core.next_worker_index())).collect();
         assert_eq!(selected, [0, 1, 2, 0, 1, 2, 0]);
         core.access_io(WorkerIndex(0), Box::new(|_| {})).unwrap();

@@ -438,6 +438,7 @@ mod tests {
                 tail: vec![endpoint(destination.clone())],
             },
             shutdown,
+            Vec::new(),
         ));
         let wakes = StdArc::new(DriverWake::default());
         let (clock, driver) = InactiveClock::new_isolated().activate(Waker::from(StdArc::clone(&wakes)));
@@ -467,6 +468,7 @@ mod tests {
                 Arc::clone(&blocking.0),
             )),
             Shutdown::default(),
+            Vec::new(),
         ));
         let worker = test_worker(
             (commands, receiver),
