@@ -40,7 +40,6 @@ struct WorkerInitObservation {
 fn worker_init_runs_once_per_worker() {
     let (observed, observations) = mpsc::channel();
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .on(HookFn::<WorkerInit, _>::new(
             WorkerInitProbe {
@@ -75,7 +74,6 @@ fn builder_retains_worker_init_data_until_shutdown() {
     let calls = Arc::new(AtomicUsize::new(0));
     let lifetime = Arc::downgrade(&calls);
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(2))
         .on(HookFn::<WorkerInit, _>::new(PanicCount(calls), |_event, data| {
             data.0.fetch_add(1, Ordering::SeqCst);
@@ -444,11 +442,7 @@ fn panic_callbacks_share_one_borrowed_event() {
 
 #[test]
 fn control_worker_init_runs_once_on_every_worker() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(2))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     let control = runtime.scheduler().block_on(async |cx| cx.control().clone()).unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let (initialized, initialization) = mpsc::channel();
@@ -521,11 +515,7 @@ impl ThreadAware for BlockingDrop {
 
 #[test]
 fn retained_worker_init_data_is_released_during_shutdown() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let lifetime = Arc::new(());
     let weak = Arc::downgrade(&lifetime);
 
@@ -549,11 +539,7 @@ fn retained_worker_init_data_is_released_during_shutdown() {
 
 #[test]
 fn request_stop_does_not_drop_retained_hook_data() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let (started, drop_started) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let control = runtime
