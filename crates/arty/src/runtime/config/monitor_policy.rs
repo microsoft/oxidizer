@@ -94,14 +94,19 @@ impl Default for MonitorPolicy {
 }
 
 #[cfg(any(test, feature = "monitor"))]
+// #[gamma::skip(fn_value.bool_true, reason = "Mutation tests always run in a test executable, where this function must return true.")]
 fn is_test_environment() -> bool {
-    if cfg!(any(test, doctest, miri)) {
+    if
+    // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, reason = "Mutation tests cannot exercise this compile-time condition outside a test build.")]
+    cfg!(any(test, doctest, miri)) {
         return true;
     }
 
     let Ok(executable) = std::env::current_exe() else {
+        // #[gamma::skip(literal.bool_flip, reason = "Mutation tests cannot make current_exe fail without changing the environment probe.")]
         return false;
     };
+    // #[gamma::skip(bool_expr.negate, call.replace_with_default, call_result.default, reason = "Mutation tests always use a test executable; the pure path classifier is tested separately.")]
     is_cargo_test_executable(&executable)
 }
 
