@@ -396,7 +396,6 @@ mod tests {
     #[test]
     fn ignored_task_worker_stop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
-            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .on(crate::runtime::hook::Panic::IGNORE)
             .build()
@@ -450,7 +449,6 @@ mod tests {
     #[test]
     fn ignored_task_worker_drop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
-            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .on(crate::runtime::hook::Panic::IGNORE)
             .build()
@@ -559,7 +557,6 @@ mod tests {
 
     fn single_worker_runtime() -> Runtime {
         Runtime::builder()
-            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .blocking_pool(crate::runtime::BlockingPoolPolicy::shared().max(1))
             .build()

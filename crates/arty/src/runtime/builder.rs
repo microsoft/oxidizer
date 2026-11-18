@@ -87,11 +87,15 @@ impl RuntimeBuilder {
 
     /// Sets the runtime's monitoring configuration.
     ///
-    /// The default is [`MonitorPolicy::enabled`]. The `monitor` Cargo feature
-    /// enables the Seismograph dependencies that monitoring needs.
-    /// Building an enabled runtime starts a local connection for the Seismograph CLI.
-    /// Task collection runs on request. This does not enable event recording or
-    /// change which tasks run. See the [monitoring guide](crate::runtime#monitoring).
+    /// The default is [`MonitorPolicy::auto`]. It disables monitoring for tests,
+    /// doctests, documentation examples, and Miri. It enables monitoring in
+    /// other environments. This automatic selection can change in future releases.
+    ///
+    /// The `monitor` Cargo feature enables the Seismograph dependencies that
+    /// monitoring needs. Building an enabled runtime starts a local connection
+    /// for the Seismograph CLI. Task collection runs on request. This does not
+    /// enable event recording or change which tasks run. See the
+    /// [monitoring guide](crate::runtime#monitoring).
     ///
     /// # Examples
     ///
@@ -265,7 +269,7 @@ mod tests {
         assert_eq!(builder.config.workers_policy, WorkersPolicy::exactly(2));
         assert_eq!(builder.config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
         assert_eq!(builder.config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
-        assert!(builder.config.monitor_options.policy().is_enabled());
+        assert!(!builder.config.monitor_options.policy().is_enabled());
     }
 
     #[test]
@@ -284,7 +288,7 @@ mod tests {
         assert_eq!(builder.config.workers_policy, WorkersPolicy::exactly(2));
         assert_eq!(builder.config.stack_size, NonZeroUsize::new(1024 * 1024).unwrap());
         assert_eq!(builder.config.blocking_pool_policy, BlockingPoolPolicy::shared().max(1));
-        assert!(builder.config.monitor_options.policy().is_enabled());
+        assert!(!builder.config.monitor_options.policy().is_enabled());
     }
 
     #[test]
