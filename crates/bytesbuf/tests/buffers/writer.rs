@@ -79,7 +79,7 @@ fn sufficient_capacity_not_extended() {
 }
 
 #[test]
-fn empty_buffer_small_write_reserves_initial_size() {
+fn empty_buffer_small_write_grows_and_preserves_data() {
     let memory = TestMemory::new();
     let buf = BytesBuf::new();
     assert_eq!(buf.capacity(), 0);
@@ -87,26 +87,28 @@ fn empty_buffer_small_write_reserves_initial_size() {
     let mut writer = buf.into_writer(&memory);
     writer.write_all(b"hello").unwrap();
 
-    let buf = writer.into_inner();
-    assert!(buf.capacity() >= 4096, "expected capacity >= 4096, got {}", buf.capacity());
+    let mut buf = writer.into_inner();
+    assert!(buf.capacity() >= b"hello".len());
+    assert_eq!(buf.consume_all(), b"hello".as_slice());
 }
 
 #[test]
-fn empty_buffer_large_write_reserves_growth_size() {
+fn empty_buffer_large_write_grows_and_preserves_data() {
     let memory = TestMemory::new();
     let buf = BytesBuf::new();
 
-    let payload = vec![0u8; 4096 + 1];
+    let payload = vec![7u8; 8193];
 
     let mut writer = buf.into_writer(&memory);
     writer.write_all(&payload).unwrap();
 
-    let buf = writer.into_inner();
-    assert!(buf.capacity() >= 65536, "expected capacity >= 65536, got {}", buf.capacity());
+    let mut buf = writer.into_inner();
+    assert!(buf.capacity() >= payload.len());
+    assert_eq!(buf.consume_all(), payload.as_slice());
 }
 
 #[test]
-fn non_empty_buffer_reserves_growth_size() {
+fn non_empty_buffer_grows_and_preserves_existing_data() {
     let memory = TestMemory::new();
     let mut buf = memory.reserve(16);
     buf.put_slice([1; 16]);
@@ -116,11 +118,8 @@ fn non_empty_buffer_reserves_growth_size() {
     let mut writer = buf.into_writer(&memory);
     writer.write_all(b"more data").unwrap();
 
-    let buf = writer.into_inner();
-    assert!(
-        buf.capacity() >= 16 + 65536,
-        "expected capacity >= {}, got {}",
-        16 + 65536,
-        buf.capacity()
-    );
+    let mut buf = writer.into_inner();
+    let expected = [&[1; 16][..], b"more data"].concat();
+    assert!(buf.capacity() >= expected.len());
+    assert_eq!(buf.consume_all(), expected.as_slice());
 }

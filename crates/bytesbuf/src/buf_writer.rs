@@ -83,3 +83,66 @@ impl<M: Memory> Write for BytesBufWriter<M> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // Exact reservation thresholds are private policy rather than part of the public writer contract.
+    use super::*;
+    use crate::mem::testing::TransparentMemory;
+
+    #[test]
+    fn empty_buffer_small_write_reserves_initial_size() {
+        let memory = TransparentMemory::new();
+        let buf = BytesBuf::new();
+        assert_eq!(buf.capacity(), 0);
+
+        let mut writer = buf.into_writer(&memory);
+        writer.write_all(b"hello").unwrap();
+
+        let buf = writer.into_inner();
+        assert!(
+            buf.capacity() >= INITIAL_RESERVATION_BYTES,
+            "expected capacity >= {}, got {}",
+            INITIAL_RESERVATION_BYTES,
+            buf.capacity()
+        );
+    }
+
+    #[test]
+    fn empty_buffer_large_write_reserves_growth_size() {
+        let memory = TransparentMemory::new();
+        let buf = BytesBuf::new();
+        let payload = vec![0u8; INITIAL_RESERVATION_BYTES + 1];
+
+        let mut writer = buf.into_writer(&memory);
+        writer.write_all(&payload).unwrap();
+
+        let buf = writer.into_inner();
+        assert!(
+            buf.capacity() >= GROWTH_RESERVATION_BYTES,
+            "expected capacity >= {}, got {}",
+            GROWTH_RESERVATION_BYTES,
+            buf.capacity()
+        );
+    }
+
+    #[test]
+    fn non_empty_buffer_reserves_growth_size() {
+        let memory = TransparentMemory::new();
+        let mut buf = memory.reserve(16);
+        buf.put_slice([1; 16]);
+        assert_eq!(buf.remaining_capacity(), 0);
+        assert!(buf.capacity() > 0);
+
+        let mut writer = buf.into_writer(&memory);
+        writer.write_all(b"more data").unwrap();
+
+        let buf = writer.into_inner();
+        assert!(
+            buf.capacity() >= 16 + GROWTH_RESERVATION_BYTES,
+            "expected capacity >= {}, got {}",
+            16 + GROWTH_RESERVATION_BYTES,
+            buf.capacity()
+        );
+    }
+}

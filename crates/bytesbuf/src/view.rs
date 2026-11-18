@@ -1145,6 +1145,47 @@ mod tests {
     // The size assertion includes the private BufferIdentity layout.
     use super::*;
 
+    #[test]
+    fn hash_write_sequence_uses_private_block_size() {
+        #[derive(Default)]
+        struct RecordingHasher {
+            writes: Vec<Vec<u8>>,
+        }
+
+        impl Hasher for RecordingHasher {
+            fn finish(&self) -> u64 {
+                0
+            }
+
+            fn write(&mut self, bytes: &[u8]) {
+                self.writes.push(bytes.to_vec());
+            }
+        }
+
+        // Cover empty input, exact hashing-block boundaries, and partial final blocks.
+        for len in [
+            0,
+            1,
+            HASH_BLOCK_BYTES - 1,
+            HASH_BLOCK_BYTES,
+            HASH_BLOCK_BYTES + 1,
+            HASH_BLOCK_BYTES * 2,
+            HASH_BLOCK_BYTES * 2 + 2,
+            HASH_BLOCK_BYTES * 3 + 8,
+        ] {
+            let content: Vec<u8> = (0..=u8::MAX).cycle().take(len).collect();
+            let view = BytesView::from(content.clone());
+            let mut hasher = RecordingHasher::default();
+            view.hash(&mut hasher);
+
+            // Write the length prefix, then chunks of at most HASH_BLOCK_BYTES bytes.
+            // An exact block boundary must not add an empty trailing write.
+            let mut expected = vec![len.to_ne_bytes().to_vec()];
+            expected.extend(content.chunks(HASH_BLOCK_BYTES).map(<[u8]>::to_vec));
+            assert_eq!(hasher.writes, expected, "unexpected hash write sequence for len {len}");
+        }
+    }
+
     #[cfg(feature = "seismograph")]
     #[test]
     fn gamma_survivor_append_transfers_or_clears_identity_by_content() {

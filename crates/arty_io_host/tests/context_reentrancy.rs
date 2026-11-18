@@ -20,6 +20,8 @@ thread_local! {
     static HOST: RefCell<Option<Rc<DriverHost>>> = const { RefCell::new(None) };
 }
 
+/// Acts as both context and driver so either callback can request the same context again.
+/// The flag selects initialization or cycle execution as the point of overlapping access.
 #[derive(Clone)]
 struct TestContext {
     during_initialization: bool,
@@ -69,6 +71,8 @@ impl Driver for TestContext {
     }
 }
 
+/// Installs a thread-local host so callbacks can reach it without a host argument.
+/// Retrieves the context after the rejected callback request to check that ordinary access still works.
 fn exercise_retrieval(during_initialization: bool) -> Vec<String> {
     let thread = ThreadBuilder::default().build(std::thread::current().id());
     let runtime = IoRuntime::new(Sink::noop());
