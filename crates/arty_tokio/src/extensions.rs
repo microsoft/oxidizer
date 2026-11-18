@@ -228,6 +228,7 @@ mod tests {
 
         drop(support);
 
+        worker.enter();
         assert!(worker.handle().is_none());
         assert!(matches!(*runtime.lock().unwrap(), RuntimeState::ShutDown));
     }
