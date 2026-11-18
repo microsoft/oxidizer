@@ -203,6 +203,24 @@ fn runtime_control_supports_tokio_on_every_worker() {
 }
 
 #[test]
+fn runtime_control_default_supports_tokio_on_every_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+
+    let contexts = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            cx.control().tokio_compat();
+            wait_for_worker_initialization(&cx);
+            worker_runtime_ids(&cx).await
+        })
+        .unwrap();
+
+    assert_eq!(contexts.len(), 2);
+    assert_eq!(contexts[0], contexts[1]);
+    stop_bounded(runtime);
+}
+
+#[test]
 fn tokio_compat_includes_tasks_and_in_memory_io() {
     let tokio = Builder::new_multi_thread().enable_all().build().unwrap();
     let runtime = Runtime::builder()

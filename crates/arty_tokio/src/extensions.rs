@@ -213,6 +213,7 @@ mod tests {
         assert!(worker.owned_runtime.is_none());
         drop(support);
         assert!(worker.runtime.upgrade().is_none());
+        assert!(worker.handle().is_none());
     }
 
     #[test]
