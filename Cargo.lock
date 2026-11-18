@@ -3724,8 +3724,6 @@ dependencies = [
  "criterion",
  "data_privacy",
  "metabench",
- "observed_destination_core",
- "observed_destination_stdout",
  "observed_macros",
  "ohno 0.5.4",
  "opentelemetry",

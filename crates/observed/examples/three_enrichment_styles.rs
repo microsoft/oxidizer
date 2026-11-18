@@ -19,10 +19,8 @@ use std::sync::Arc;
 use data_privacy::{DataClass, classified};
 use observed::enrichment::{EnrichFnExt, EnrichFutureExt};
 use observed::{Enrichment, Sink, emit, event};
-use observed_destination_core::LoggerProviderBuilderExt;
-use observed_destination_stdout::stdout_logs;
 use opentelemetry::logs::LoggerProvider;
-use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
 use taxonomy::MicrosoftEnterpriseDataTaxonomy as DC;
 
 #[path = "support/taxonomy.rs"]
@@ -65,12 +63,19 @@ struct RequestIdContext {
 }
 
 #[tokio::main]
-async fn main() {
-    let (sink, provider) = init_telemetry();
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (sink, provider, exporter) = init_telemetry();
 
     handle_request(&sink, HttpRoute("/users".to_owned())).await;
 
-    let _ = provider.shutdown();
+    provider.force_flush()?;
+    let logs = exporter.get_emitted_logs()?;
+    provider.shutdown()?;
+    for log in logs {
+        println!("{log:#?}");
+    }
+
+    Ok(())
 }
 
 const EXAMPLE_DC: DataClass = DataClass::new("example", "public");
@@ -125,11 +130,9 @@ impl observed::processing::EventProcessor for SimpleLogProcessor {
     }
 }
 
-fn init_telemetry() -> (Sink, SdkLoggerProvider) {
-    let provider = SdkLoggerProvider::builder()
-        .register(stdout_logs())
-        .expect("the stdout destination only installs a processor and does not reject the builder")
-        .build();
+fn init_telemetry() -> (Sink, SdkLoggerProvider, InMemoryLogExporter) {
+    let exporter = InMemoryLogExporter::default();
+    let provider = SdkLoggerProvider::builder().with_simple_exporter(exporter.clone()).build();
 
     let logger = provider.logger("example");
     let processor = SimpleLogProcessor {
@@ -141,5 +144,5 @@ fn init_telemetry() -> (Sink, SdkLoggerProvider) {
         .processors(vec![Arc::new(processor)])
         .build();
 
-    (sink, provider)
+    (sink, provider, exporter)
 }

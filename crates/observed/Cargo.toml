@@ -53,8 +53,6 @@ tick = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 metabench = { path = "../metabench" }
-observed_destination_core = { path = "../observed_destination_core" }
-observed_destination_stdout = { path = "../observed_destination_stdout" }
 ohno = { path = "../ohno", features = ["test-util"] }
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
