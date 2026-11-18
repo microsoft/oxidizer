@@ -144,9 +144,10 @@ ASCII case and to the parameters of the `Content-Type`:
 
 An empty list covers no `Content-Type`, so the middleware logs no body of that direction.
 
-The middleware does not redact the bodies that it logs. It logs the bytes that pass through it,
-so if a layer after it in the tuple decompresses the request or compresses the response, as the
-server layer of `http_compression` does, it logs the compressed bytes.
+The middleware does not redact the bodies that it logs. It does not log a body whose
+`Content-Encoding` names a coding other than `identity`, because the text of compressed bytes
+cannot be read. To log the bodies that the server layer of `http_compression` compresses or
+decompresses, put this layer after that layer in the tuple.
 
 The middleware copies the bytes of a logged request body while the handler reads the body, so
 the events show the bytes that the handler read before the request ended. The middleware does
@@ -207,7 +208,7 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbqdQtUnHvhvobe8l53XWmP1wbtM6gBeC4nbEbzD_lYsTwkg9hZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbL8y7t2iMScAbKEC6exPDuTUbNRUpPhZwPacbTPw2Ke_ICCVhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
  [__link0]: https://crates.io/crates/observed/0.30.1
  [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
  [__link10]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::body_size_limit

@@ -9,7 +9,7 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{COMPLETE, Capture, Captured, DURATION, Echoing, PUBLIC, duration, server};
+use common::{COMPLETE, Capture, Captured, DURATION, Echoing, PUBLIC, StopAt, duration, server};
 use data_privacy::RedactionEngine;
 use future_assert::FutureTestExt;
 use http::header::RETRY_AFTER;
@@ -161,4 +161,18 @@ fn each_processor_redacts_headers_with_its_own_redactor() {
             [Some(Value::from("")), Some(Value::from(""))]
         ]
     );
+}
+
+#[test]
+fn processor_that_stops_at_header_visits_no_later_field() {
+    let stop = StopAt::new("http.request.header.");
+    server(common::stop_sink(&stop))
+        .request_header_data_classes([(REQUEST_ID, PUBLIC), (TAG, PUBLIC)])
+        .response_header_data_classes([(REQUEST_ID, PUBLIC)])
+        .layer(Echoing(StatusCode::OK))
+        .execute(get(&[(REQUEST_ID, b"7"), (TAG, b"a")]))
+        .unwrap_ready()
+        .unwrap();
+
+    assert_eq!(stop.after_stop(), Some(vec![]));
 }

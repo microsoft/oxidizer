@@ -12,7 +12,7 @@ use std::task::Poll;
 use bytesbuf::BytesView;
 use common::{ABANDONED, COMPLETE, Capture, Captured, DURATION, ERROR, Echoing, Step, data, duration, poll_frame, scripted, server};
 use future_assert::FutureTestExt;
-use http::header::CONTENT_TYPE;
+use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use http::{HeaderValue, Method, StatusCode, Version};
 use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest};
 use http_telemetry::{Telemetry, TelemetryLayer};
@@ -124,6 +124,22 @@ fn body_is_logged_when_media_types_cover_content_type() {
     assert_eq!(
         rows.map(|(types, content_type, _)| (types, content_type, logged(types, content_type))),
         rows
+    );
+}
+
+#[test]
+fn body_is_logged_only_without_content_coding() {
+    let logged = |coding: &'static str| {
+        let mut request = request(Method::GET, "application/json", HttpBodyBuilder::new_fake().text("chunk"));
+        request.headers_mut().insert(CONTENT_ENCODING, HeaderValue::from_static(coding));
+        let (body, capture) = respond(logging(&["application/json"]), request);
+        read_to_end(body);
+        capture.single().log(BODY).cloned()
+    };
+
+    assert_eq!(
+        [logged("gzip"), logged("identity"), logged("Identity")],
+        [None, Some(Value::from("chunk")), Some(Value::from("chunk"))]
     );
 }
 

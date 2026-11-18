@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use http::HeaderMap;
-use http::header::CONTENT_TYPE;
+use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use http_headers::headers::{MediaRange, MediaRangeKind};
 
 /// A configured media type is not valid.
@@ -33,7 +33,8 @@ impl MediaTypes {
             .map(Self)
     }
 
-    /// Whether the types cover the `Content-Type` of `headers`.
+    /// Whether the types cover the `Content-Type` of `headers`, and `headers` name no content coding other than
+    /// `identity`.
     pub(crate) fn matches(&self, headers: &HeaderMap) -> bool {
         if self.0.is_empty() {
             return false;
@@ -42,14 +43,20 @@ impl MediaTypes {
             return false;
         };
         let (type_, subtype) = (range.type_().as_str(), range.subtype().as_str());
-        self.0
+        let covered = self
+            .0
             .iter()
             .any(|entry| entry.type_().eq_ignore_ascii_case(type_) && entry.subtype().eq_ignore_ascii_case(subtype))
             || type_.eq_ignore_ascii_case("text")
             || (type_.eq_ignore_ascii_case("application")
                 && subtype
                     .rsplit_once('+')
-                    .is_some_and(|(_, suffix)| suffix.eq_ignore_ascii_case("json") || suffix.eq_ignore_ascii_case("xml")))
+                    .is_some_and(|(_, suffix)| suffix.eq_ignore_ascii_case("json") || suffix.eq_ignore_ascii_case("xml")));
+        covered
+            && headers
+                .get_all(CONTENT_ENCODING)
+                .iter()
+                .all(|coding| coding.as_bytes().eq_ignore_ascii_case(b"identity"))
     }
 }
 

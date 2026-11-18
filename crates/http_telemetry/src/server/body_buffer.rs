@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The buffer that keeps the start of a request or response body.
+//! The buffer that keeps the request or response body up to the configured limit in bytes.
 
 use std::sync::Arc;
 

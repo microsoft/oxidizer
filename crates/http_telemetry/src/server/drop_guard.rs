@@ -60,7 +60,6 @@ pub(crate) struct RouteValues {
     pub(crate) path_and_query: PathAndQuery,
 }
 
-/// The values of the configured headers of the request and of the response.
 pub(crate) struct RequestAndResponseHeaders {
     pub(crate) request: Option<HeaderValues>,
     pub(crate) response: Option<HeaderValues>,

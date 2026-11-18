@@ -277,6 +277,61 @@ pub(crate) fn probe_sink(probe: &Probe) -> Sink {
         .build()
 }
 
+/// Stops the visit of the fields of `http.server.request.complete` at the first field whose log key starts with a
+/// prefix. It records the log key of each field that the visit still reaches after that field.
+#[derive(Clone)]
+pub(crate) struct StopAt {
+    prefix: &'static str,
+    after_stop: Arc<Mutex<Option<Vec<&'static str>>>>,
+}
+
+impl StopAt {
+    pub(crate) fn new(prefix: &'static str) -> Self {
+        Self {
+            prefix,
+            after_stop: Arc::default(),
+        }
+    }
+
+    /// The log keys of the fields that the visit reached after the stop, or `None` if the visit did not stop.
+    pub(crate) fn after_stop(&self) -> Option<Vec<&'static str>> {
+        self.after_stop.lock().unwrap().clone()
+    }
+}
+
+impl EventProcessor for StopAt {
+    fn is_interested(&self, description: &EventDescription) -> bool {
+        description.name() == COMPLETE
+    }
+
+    fn process(&self, event: &EventView<'_>) {
+        let mut after_stop = self.after_stop.lock().unwrap();
+        let _ = event.visit_fields(&mut |descriptor: &FieldDescriptor, _: &FieldValueFn<'_>| {
+            let key = descriptor.log().map_or_else(|| descriptor.field_name(), |log| log.key());
+            if let Some(after) = after_stop.as_mut() {
+                after.push(key);
+            } else if key.starts_with(self.prefix) {
+                *after_stop = Some(Vec::new());
+            } else {
+                return ControlFlow::Continue(());
+            }
+            ControlFlow::Break(())
+        });
+    }
+
+    fn flush(&self) -> Result<(), FlushError> {
+        Ok(())
+    }
+}
+
+/// A sink whose one processor is `stop`.
+pub(crate) fn stop_sink(stop: &StopAt) -> Sink {
+    Sink::builder(SinkId::new("stop"))
+        .clock(SimpleClock::new_frozen())
+        .processors(vec![Arc::new(stop.clone())])
+        .build()
+}
+
 /// A request with `method` and `version`, and an empty body.
 pub(crate) fn request(method: Method, version: Version) -> HttpRequest {
     Request::builder()

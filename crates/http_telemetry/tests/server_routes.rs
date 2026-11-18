@@ -10,7 +10,7 @@ mod common;
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use common::{COMPLETE, Capture, Captured, DURATION, PUBLIC, duration, server};
+use common::{COMPLETE, Capture, Captured, DURATION, PUBLIC, StopAt, duration, server};
 use data_privacy::RedactionEngine;
 use future_assert::FutureTestExt;
 use http::{Method, StatusCode};
@@ -194,4 +194,17 @@ fn each_processor_redacts_parameter_with_its_own_redactor() {
         [printing, erasing].map(|capture| capture.single().log("http.route.parameter.book").cloned()),
         [Some(Value::from("rust")), Some(Value::from(""))]
     );
+}
+
+#[test]
+fn processor_that_stops_at_parameter_visits_no_later_field() {
+    let stop = StopAt::new("http.route.parameter.");
+    routed(common::stop_sink(&stop))
+        .route_parameter_data_classes([("book", PUBLIC), ("review", PUBLIC)])
+        .layer(common::responding(StatusCode::OK))
+        .execute(common::get_to("/books/rust/reviews/42"))
+        .unwrap_ready()
+        .unwrap();
+
+    assert_eq!(stop.after_stop(), Some(vec![]));
 }
