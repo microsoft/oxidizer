@@ -232,37 +232,21 @@ You can enable these features in `Cargo.toml`:
   `dev-dependencies`.
 * `serde` adds serialization through [serde][__link41].
 * `fmt` adds the [`fmt`][__link42] module and formats such as ISO 8601 and RFC 2822.
-* `fast-instant` lets each clock clone select a lower-overhead,
-  lower-precision instant source on Linux and Windows. Timer scheduling stays
-  precise. Other platforms use [`std::time::Instant::now`][__link43]. Precise reads
-  remain the default.
+* `fast-stopwatch` adds [`Stopwatch::new_fast`][__link43]. This constructor uses a
+  lower-overhead, lower-precision instant source on Linux and Windows.
+  Other platforms use [`std::time::Instant::now`][__link44].
 
-### Fast instant contract
+### Fast stopwatch
 
-Fast instant reads are disabled by default. Each clock clone has its own
-setting. Values do not decrease, but consecutive reads can be equal. The
-platform defines their precision. A stopwatch keeps the source setting of
-its clock.
-
-This option does not affect `system_time()`, controlled clocks, or precise
-timer scheduling. On an unsupported platform, it keeps the standard instant
-source.
-
-### Using precise and fast clocks together
-
-A component can create a fast clone from an existing [`Clock`][__link44]. It does not
-need a separate application dependency. The original clock stays precise:
+Use a fast stopwatch only if measurements show that elapsed-time reads are
+a performance bottleneck. Values do not decrease, but consecutive reads can
+be equal. The platform defines their precision.
 
 ```rust
-use tick::Clock;
+use tick::{SimpleClock, Stopwatch};
 
-fn process(clock: &Clock) {
-    let fast_clock = clock.clone().with_fast_instant(true);
-
-    let decision_time = clock.instant();
-    let telemetry_time = fast_clock.instant();
-    // Use precise time for logic and fast time for debug data.
-}
+let stopwatch = Stopwatch::new_fast(SimpleClock::new_system());
+let elapsed = stopwatch.elapsed();
 ```
 
 ## More examples
@@ -276,7 +260,7 @@ show more uses of these types.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbvr6nKxKRpLMbfOLXvPnaRFIbB4FRhucNEsMbRWsFUYFpzDhhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjKCZHRpY2tlMC45LjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbXqrEIYZMYTYbVN9FnzOFuOMbO9Oy5obUAmsbyG47RXnsoTFhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjKCZHRpY2tlMC45LjE
  [__link0]: https://docs.rs/tick/0.9.1/tick/runtime/index.html
  [__link1]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
  [__link10]: https://docs.rs/tick/0.9.1/tick/?search=Error
@@ -315,8 +299,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link40]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
  [__link41]: https://serde.rs/
  [__link42]: https://docs.rs/tick/0.9.1/tick/fmt/index.html
- [__link43]: https://doc.rust-lang.org/stable/std/?search=time::Instant::now
- [__link44]: https://docs.rs/tick/0.9.1/tick/?search=Clock
+ [__link43]: https://docs.rs/tick/0.9.1/tick/?search=Stopwatch::new_fast
+ [__link44]: https://doc.rust-lang.org/stable/std/?search=time::Instant::now
  [__link45]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
  [__link5]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
  [__link6]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl

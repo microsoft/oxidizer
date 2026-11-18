@@ -60,10 +60,6 @@ use crate::timers::TimerKey;
 /// clones also share controlled time. A timer or time change through one clone
 /// is visible through the others.
 ///
-/// With the `fast-instant` feature, each clone has its own instant-read
-/// setting. Precise and fast clones still share timers. Timer scheduling always
-/// uses the precise driver source.
-///
 /// ```
 /// use tick::Clock;
 ///
@@ -265,44 +261,6 @@ impl Clock {
     #[must_use]
     pub fn new_frozen_at(time: impl Into<SystemTime>) -> Self {
         crate::ClockControl::new_at(time).to_clock()
-    }
-
-    /// Selects lower-overhead [`Instant`] reads where supported.
-    ///
-    /// The setting applies only to this clock value. A clone can use a different
-    /// setting. A stopwatch keeps the setting of its source clock.
-    ///
-    /// On Linux and Windows, this option uses a lower-precision source. The
-    /// platform defines its resolution. On Windows, the resolution is normally
-    /// 10 to 16 milliseconds. Other platforms use [`Instant::now`].
-    ///
-    /// Timer scheduling still uses the precise driver source. This option does
-    /// not affect controlled clocks.
-    ///
-    /// # Performance
-    ///
-    /// Enable fast instant reads only if measurements show that
-    /// [`Clock::instant`] is a performance bottleneck. Otherwise, use the
-    /// default precise source.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tick::Clock;
-    ///
-    /// # fn configure_clock(clock: Clock) {
-    /// let precise_clock = clock;
-    /// let fast_clock = precise_clock.clone().with_fast_instant(true);
-    ///
-    /// let precise_watch = precise_clock.stopwatch();
-    /// let fast_watch = fast_clock.stopwatch();
-    /// # }
-    /// ```
-    #[cfg(any(feature = "fast-instant", test))]
-    #[must_use]
-    pub fn with_fast_instant(mut self, enabled: bool) -> Self {
-        self.time = self.time.with_fast_instant(enabled);
-        self
     }
 
     /// Returns the current system time.
@@ -564,19 +522,6 @@ mod tests {
             format!("{:?}", clock.state.register_driver(std::task::Waker::noop().clone())),
             "Some(1)"
         );
-    }
-
-    #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
-    #[test]
-    fn private_simple_clock_state_tracks_fast_instant_configuration() {
-        // The selected private `TimeKind` variant is not observable through public behavior.
-        let precise_clock = Clock::new_system_frozen();
-        let fast_clock = precise_clock.clone().with_fast_instant(true);
-
-        assert!(!precise_clock.simple_clock().uses_fast_instant());
-        assert!(fast_clock.simple_clock().uses_fast_instant());
-        _ = precise_clock.instant();
-        _ = fast_clock.instant();
     }
 
     #[test]

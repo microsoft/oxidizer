@@ -8,7 +8,9 @@ use crate::SimpleClock;
 /// A stopwatch that measures elapsed time.
 ///
 /// Create a `Stopwatch` from [`Clock::stopwatch()`][crate::Clock::stopwatch],
-/// [`SimpleClock::stopwatch()`], or [`Stopwatch::new()`].
+/// [`SimpleClock::stopwatch()`], or [`Stopwatch::new()`]. With the
+/// `fast-stopwatch` feature, [`Stopwatch::new_fast()`] uses a lower-precision
+/// source with lower overhead.
 ///
 /// # Examples
 ///
@@ -25,16 +27,26 @@ use crate::SimpleClock;
 /// ```
 #[derive(Debug)]
 pub struct Stopwatch {
-    clock: SimpleClock,
-    start: Instant,
+    source: StopwatchSource,
+}
+
+#[derive(Debug)]
+enum StopwatchSource {
+    Clock {
+        clock: SimpleClock,
+        start: Instant,
+    },
+    #[cfg(any(feature = "fast-stopwatch", test))]
+    Fast {
+        start: crate::fast_stopwatch::Timestamp,
+    },
 }
 
 impl Stopwatch {
     /// Creates a stopwatch with the precision of the supplied clock.
     ///
     /// The source can be a [`Clock`][crate::Clock] or a [`SimpleClock`].
-    /// A controlled source follows controlled time. A fast source uses its
-    /// lower-precision instant source.
+    /// A controlled source follows controlled time.
     ///
     /// You can use [`Clock::stopwatch()`][crate::Clock::stopwatch] or
     /// [`SimpleClock::stopwatch()`] as a shorter form.
@@ -56,12 +68,60 @@ impl Stopwatch {
     pub fn new(source: impl AsRef<SimpleClock>) -> Self {
         let clock = source.as_ref().clone();
         let start = clock.instant();
-        Self { clock, start }
+        Self {
+            source: StopwatchSource::Clock { clock, start },
+        }
+    }
+
+    /// Creates a stopwatch with lower-overhead instant reads.
+    ///
+    /// The source can be a [`Clock`][crate::Clock] or a [`SimpleClock`]. A
+    /// controlled source follows controlled time.
+    ///
+    /// For a system source on Linux and Windows, this constructor uses a
+    /// lower-precision source. The platform defines its resolution. On Windows,
+    /// the resolution is normally 10 to 16 milliseconds. Other platforms use
+    /// [`Instant::now`].
+    ///
+    /// Use this constructor only if measurements show that [`Stopwatch::elapsed`]
+    /// is a performance bottleneck. Otherwise, use [`Stopwatch::new`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "fast-stopwatch")] {
+    /// use tick::{SimpleClock, Stopwatch};
+    ///
+    /// let stopwatch = Stopwatch::new_fast(SimpleClock::new_system());
+    /// let elapsed = stopwatch.elapsed();
+    /// # let _ = elapsed;
+    /// # }
+    /// ```
+    #[cfg(any(feature = "fast-stopwatch", test))]
+    #[must_use]
+    pub fn new_fast(source: impl AsRef<SimpleClock>) -> Self {
+        let clock = source.as_ref().clone();
+        if clock.is_system() {
+            return Self {
+                source: StopwatchSource::Fast {
+                    start: crate::fast_stopwatch::now(),
+                },
+            };
+        }
+
+        let start = clock.instant();
+        Self {
+            source: StopwatchSource::Clock { clock, start },
+        }
     }
 
     /// Returns the elapsed time since the stopwatch was created.
     #[must_use]
     pub fn elapsed(&self) -> Duration {
-        self.clock.instant().saturating_duration_since(self.start)
+        match &self.source {
+            StopwatchSource::Clock { clock, start } => clock.instant().saturating_duration_since(*start),
+            #[cfg(any(feature = "fast-stopwatch", test))]
+            StopwatchSource::Fast { start } => crate::fast_stopwatch::now().elapsed_since(*start),
+        }
     }
 }

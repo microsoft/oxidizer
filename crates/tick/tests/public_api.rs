@@ -69,19 +69,15 @@ fn system_clock_instant_uses_the_system_instant_domain() {
     assert!(system_instant.duration_since(clock_instant) < Duration::from_secs(10));
 }
 
-#[cfg(feature = "fast-instant")]
+#[cfg(feature = "fast-stopwatch")]
+#[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
 #[test]
-fn system_clocks_can_toggle_fast_instant_retrieval() {
-    let precise = SimpleClock::new_system();
-    let precise_instant = precise.instant();
-    let fast = precise.with_fast_instant(true);
-    let fast_first = fast.instant();
-    let fast_second = fast.instant();
-    let precise_again = fast.with_fast_instant(false);
+fn fast_stopwatch_reports_non_decreasing_elapsed_time() {
+    let stopwatch = Stopwatch::new_fast(SimpleClock::new_system());
+    let first = stopwatch.elapsed();
+    let second = stopwatch.elapsed();
 
-    assert!(precise_instant <= Instant::now());
-    assert!(fast_second >= fast_first);
-    assert!(precise_again.instant() <= Instant::now());
+    assert!(second >= first);
 }
 
 #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.

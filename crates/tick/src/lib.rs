@@ -251,40 +251,24 @@
 //!   `dev-dependencies`.
 //! - `serde` adds serialization through [serde](https://serde.rs/).
 //! - `fmt` adds the [`fmt`] module and formats such as ISO 8601 and RFC 2822.
-//! - `fast-instant` lets each clock clone select a lower-overhead,
-//!   lower-precision instant source on Linux and Windows. Timer scheduling stays
-//!   precise. Other platforms use [`std::time::Instant::now`]. Precise reads
-//!   remain the default.
+//! - `fast-stopwatch` adds [`Stopwatch::new_fast`]. This constructor uses a
+//!   lower-overhead, lower-precision instant source on Linux and Windows.
+//!   Other platforms use [`std::time::Instant::now`].
 //!
-//! ## Fast instant contract
+//! ## Fast stopwatch
 //!
-//! Fast instant reads are disabled by default. Each clock clone has its own
-//! setting. Values do not decrease, but consecutive reads can be equal. The
-//! platform defines their precision. A stopwatch keeps the source setting of
-//! its clock.
-//!
-//! This option does not affect `system_time()`, controlled clocks, or precise
-//! timer scheduling. On an unsupported platform, it keeps the standard instant
-//! source.
-//!
-//! ## Using precise and fast clocks together
-//!
-//! A component can create a fast clone from an existing [`Clock`]. It does not
-//! need a separate application dependency. The original clock stays precise:
+//! Use a fast stopwatch only if measurements show that elapsed-time reads are
+//! a performance bottleneck. Values do not decrease, but consecutive reads can
+//! be equal. The platform defines their precision.
 //!
 //! ```
 //! # fn main() {
-//! # #[cfg(feature = "fast-instant")] {
-//! use tick::Clock;
+//! # #[cfg(feature = "fast-stopwatch")] {
+//! use tick::{SimpleClock, Stopwatch};
 //!
-//! fn process(clock: &Clock) {
-//!     let fast_clock = clock.clone().with_fast_instant(true);
-//!
-//!     let decision_time = clock.instant();
-//!     let telemetry_time = fast_clock.instant();
-//!     // Use precise time for logic and fast time for debug data.
-//! #   let _ = (decision_time, telemetry_time);
-//! }
+//! let stopwatch = Stopwatch::new_fast(SimpleClock::new_system());
+//! let elapsed = stopwatch.elapsed();
+//! # let _ = elapsed;
 //! # }
 //! # }
 //! ```
@@ -299,8 +283,8 @@ mod clock;
 mod clock_control;
 mod delay;
 mod error;
-#[cfg(any(feature = "fast-instant", test))]
-mod fast_instant;
+#[cfg(any(feature = "fast-stopwatch", test))]
+mod fast_stopwatch;
 
 #[cfg(any(feature = "fmt", test))]
 pub mod fmt;

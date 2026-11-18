@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::FutureExt as _;
 use thread_aware::{Relocator, ThreadAware, ThreadBuilder};
 use tick::runtime::InactiveClock;
-use tick::{Clock, ClockControl, Delay, FutureExt as _, SimpleClock, Timer};
+use tick::{Clock, ClockControl, Delay, FutureExt as _, SimpleClock, Stopwatch, Timer};
 
 #[derive(Debug)]
 struct WakeCounter(AtomicUsize);
@@ -186,23 +186,22 @@ fn simple_clock_observes_controlled_time() {
     assert_eq!(clock.system_time(), start + Duration::from_secs(5));
 }
 
-#[cfg(feature = "fast-instant")]
-#[test]
-fn controlled_simple_clock_ignores_fast_instant_configuration() {
-    let control = ClockControl::new();
-    let clock = control.to_simple_clock();
-    let configured = clock.clone().with_fast_instant(true);
-
-    control.advance(Duration::from_secs(1));
-
-    assert_eq!(configured.instant(), clock.instant());
-}
-
 #[test]
 fn controlled_simple_clock_stopwatch_observes_controlled_time() {
     let control = ClockControl::new();
     let clock = control.to_simple_clock();
     let watch = clock.stopwatch();
+
+    control.advance(Duration::from_secs(1));
+
+    assert_eq!(watch.elapsed(), Duration::from_secs(1));
+}
+
+#[cfg(feature = "fast-stopwatch")]
+#[test]
+fn fast_stopwatch_observes_controlled_time() {
+    let control = ClockControl::new();
+    let watch = Stopwatch::new_fast(control.to_simple_clock());
 
     control.advance(Duration::from_secs(1));
 

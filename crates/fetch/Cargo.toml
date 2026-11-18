@@ -69,7 +69,6 @@ seismograph = [
     "anyspawn?/seismograph",
     "bytesbuf/seismograph",
     "performables/seismograph",
-    "tick/seismograph",
 ]
 test-util = ["tick/test-util", "http_extensions/test-util"]
 compression-gzip = ["dep:compressors", "dep:http_compression", "http_compression/gzip"]
