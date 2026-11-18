@@ -18,9 +18,9 @@ An experimental Rust global allocator for NUMA and mostly thread-local workloads
 We use it to experiment with allocation hinting, compile-time configuration,
 and runtime telemetry through `seismograph`.
 
-For now, it is a shameless Rust port of
-[snmalloc][__link0], but the implementation has
-changed before and will probably change again.
+The default backend is a Rust port of [snmalloc][__link0].
+An experimental Rust port of [mimalloc][__link1]
+is also available.
 
 ## Why use it
 
@@ -28,7 +28,7 @@ The design targets allocation-heavy multithreaded and thread-per-core
 workloads: keep ordinary allocations local and amortize cross-thread frees.
 Built-in Seismograph integration can record allocation events and expose
 allocator state for diagnosing memory use. Enable recording through
-[`seismograph::recorder()`][__link1]
+[`seismograph::recorder()`][__link2]
 when diagnostics are needed.
 
 ## Usage
@@ -37,18 +37,32 @@ Add the dependency:
 
 ```toml
 [dependencies]
-rallocator = "0.2"
+rallocator = "0.4"
 ```
 
-Call [`rallocator!`][__link2] once in your executable to install the global allocator:
+Call [`rallocator!`][__link3] once in your executable to install the global allocator:
 
 ```rust
 rallocator::rallocator!();
 ```
 
-Compile-time allocator configuration has historically been cumbersome to
-express in a manually declared `#[global_allocator]` static. The macro provides
-an installation facade that can be extended with configuration options later.
+Select a backend at compile time with `rallocator!(backend = snmalloc)` or
+`rallocator!(backend = mimalloc)`. The default remains snmalloc.
+The macro installs [`Rallocator`][__link4] with the selected backend.
+An allocation must return to the backend that created it.
+Both backends record allocation events and provide Seismograph state snapshots.
+State observations can be incomplete or stale. Allocator capacity is not application-live memory.
+
+With allocation recording enabled, [`Rallocator`][__link5] records allocations, successful
+resizes, and frees. A resize is one event with the previous and new addresses
+and requested sizes. In-place size changes also produce this event.
+Failed resizes and calls that keep both the address and size produce no event.
+For a move, recording completes before the old block becomes reusable.
+A resize keeps one view-local lifetime in Seismograph instead of adding a new allocation.
+
+```rust
+rallocator::rallocator!(backend = mimalloc);
+```
 
 
 <hr/>
@@ -56,7 +70,10 @@ an installation facade that can be extended with configuration options later.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbA5kLf_QRxBobNIEVKfwWQqEbWHO4Khw32P0bShTZ4JBR1WBhZIGCanJhbGxvY2F0b3JlMC40LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbC8Y1TJO1Sg8bwEdgFkYejY8bzx67V7D_17MbmjZtsqiOsjthZIGCanJhbGxvY2F0b3JlMC40LjA
  [__link0]: https://github.com/microsoft/snmalloc
- [__link1]: https://docs.rs/seismograph/latest/seismograph/fn.recorder.html
- [__link2]: https://docs.rs/rallocator/0.4.0/rallocator/macro.rallocator.html
+ [__link1]: https://github.com/microsoft/mimalloc
+ [__link2]: https://docs.rs/seismograph/latest/seismograph/fn.recorder.html
+ [__link3]: https://docs.rs/rallocator/0.4.0/rallocator/macro.rallocator.html
+ [__link4]: https://docs.rs/rallocator/0.4.0/rallocator/?search=Rallocator
+ [__link5]: https://docs.rs/rallocator/0.4.0/rallocator/?search=Rallocator

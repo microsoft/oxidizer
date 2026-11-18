@@ -227,7 +227,7 @@ fn gamma_survivor_codec_overwrites_poison_and_preserves_borrowed_fields() {
     let mut output = vec![0xa5; length];
     assert_eq!(encode(&snapshot, &mut output).unwrap(), length);
     assert_eq!(decode(&output).unwrap(), snapshot);
-    assert_eq!(&output[..12], b"RALLOCV4\x04\0\0\0");
+    assert_eq!(&output[..12], b"RALLOCV4\x05\0\x01\0");
     let metadata = Snapshot {
         owners: Vec::new(),
         ..snapshot
@@ -276,7 +276,7 @@ fn gamma_survivor_codec_errors_have_exact_context() {
     let good = bytes(&fixture());
     for (kind, message) in [
         (ErrorKind::InvalidMagic, "the magic bytes are invalid"),
-        (ErrorKind::UnsupportedSchema(9), "schema 9 is unsupported; expected schema 3 or 4"),
+        (ErrorKind::UnsupportedSchema(9), "schema 9 is unsupported by this decoder"),
         (ErrorKind::Truncated, "the payload ended before all fields were available"),
         (ErrorKind::LengthMismatch, "the buffer length does not match the encoded payload"),
         (
@@ -292,8 +292,8 @@ fn gamma_survivor_codec_errors_have_exact_context() {
             ErrorKind::Truncated => invalid.truncate(11),
             ErrorKind::LengthMismatch => invalid.push(0),
             ErrorKind::LengthOverflow => invalid[46..50].copy_from_slice(&65537_u32.to_le_bytes()),
-            ErrorKind::Malformed => invalid[10] = 1,
-            ErrorKind::DuplicateOwner => unreachable!(),
+            ErrorKind::Malformed => invalid[11] = 1,
+            ErrorKind::DuplicateOwner | ErrorKind::UnsupportedBackend(_) => unreachable!(),
         }
         let error = decode(&invalid).unwrap_err();
         assert_eq!(error.kind(), kind);
@@ -393,12 +393,12 @@ fn recording_independent_publication_uses_round_and_lease_freshness() {
 }
 
 #[test]
-fn historical_session_tagged_schema_three_remains_readable() {
-    let expected = fixture();
-    let mut encoded = bytes(&expected);
-    encoded[8..10].copy_from_slice(&3_u16.to_le_bytes());
-
-    assert_eq!(decode(&encoded).unwrap(), expected);
+fn previous_native_schemas_are_rejected() {
+    let mut encoded = bytes(&fixture());
+    for version in 0..seismograph_rallocator::source::SCHEMA_VERSION {
+        encoded[8..10].copy_from_slice(&version.to_le_bytes());
+        assert_eq!(decode(&encoded).unwrap_err().kind(), ErrorKind::UnsupportedSchema(version));
+    }
 }
 
 #[test]
@@ -509,7 +509,7 @@ fn strict_flags_schema_reserved_and_source_tags() {
     for (offset, value, expected) in [
         (0, 0, ErrorKind::InvalidMagic),
         (8, 1, ErrorKind::UnsupportedSchema(1)),
-        (10, 1, ErrorKind::Malformed),
+        (10, 0, ErrorKind::Malformed),
         (44, 2, ErrorKind::Malformed),
         (45, 2, ErrorKind::Malformed),
         (595 + 16, 2, ErrorKind::Malformed),
@@ -539,10 +539,7 @@ fn malformed_payload_diagnostics_explain_the_rejection() {
     zero_owner[595..603].fill(0);
     let cases = [
         (decode(&invalid_magic).unwrap_err(), "the magic bytes are invalid"),
-        (
-            decode(&unsupported_schema).unwrap_err(),
-            "schema 7 is unsupported; expected schema 3 or 4",
-        ),
+        (decode(&unsupported_schema).unwrap_err(), "schema 7 is unsupported by this decoder"),
         (decode(&[]).unwrap_err(), "the payload ended before all fields were available"),
         (
             encode(&fixture(), &mut []).unwrap_err(),
