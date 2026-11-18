@@ -397,7 +397,10 @@ mod tests {
         assert!(matches!(rx.system_receiver().try_recv().unwrap(), SystemCommand::AccessIo { .. }));
         assert_eq!(counter.0.load(Ordering::Relaxed), 1);
         let client = DispatcherClient::new(core);
-        assert_eq!(format!("{client:?}"), std::any::type_name::<DispatcherClient>());
+        assert_eq!(
+            format!("{client:?}"),
+            format!("{} {{ worker_count: 3, .. }}", std::any::type_name::<DispatcherClient>())
+        );
     }
 
     fn endpoint(thread: &Thread) -> (WorkerEndpoint, CommandReceiver) {
