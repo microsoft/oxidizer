@@ -1,19 +1,23 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::sync::{Arc, Mutex, Weak};
+
 use arty::runtime::hook::{HookFn, WorkerInit};
 use arty::runtime::{RuntimeBuilder, RuntimeControl};
 use thread_aware::ThreadAware;
-use tokio::runtime::Handle;
+use tokio::runtime::{Handle, Runtime};
 
 use crate::TokioHandle;
 
 #[derive(ThreadAware)]
 struct TokioSupport {
     #[thread_aware(skip)]
-    handle: Handle,
+    handle: Option<Handle>,
     #[thread_aware(skip)]
-    owned_runtime: Option<tokio::runtime::Runtime>,
+    owned_runtime: Option<Arc<Mutex<Option<Runtime>>>>,
+    #[thread_aware(skip)]
+    runtime: Weak<Mutex<Option<Runtime>>>,
 }
 
 impl Clone for TokioSupport {
@@ -21,14 +25,65 @@ impl Clone for TokioSupport {
         Self {
             handle: self.handle.clone(),
             owned_runtime: None,
+            runtime: self.runtime.clone(),
         }
     }
 }
 
 impl Drop for TokioSupport {
     fn drop(&mut self) {
-        if let Some(runtime) = self.owned_runtime.take() {
+        let Some(owned_runtime) = self.owned_runtime.take() else {
+            return;
+        };
+        let runtime = owned_runtime.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        if let Some(runtime) = runtime {
             runtime.shutdown_background();
+        }
+    }
+}
+
+impl TokioSupport {
+    fn new() -> Self {
+        let owned_runtime = Arc::new(Mutex::new(None));
+        Self {
+            handle: None,
+            runtime: Arc::downgrade(&owned_runtime),
+            owned_runtime: Some(owned_runtime),
+        }
+    }
+
+    fn from_handle(tokio: TokioHandle) -> Self {
+        let owned_runtime = Arc::new(Mutex::new(tokio.owned_runtime));
+        Self {
+            handle: Some(tokio.handle),
+            runtime: Arc::downgrade(&owned_runtime),
+            owned_runtime: Some(owned_runtime),
+        }
+    }
+
+    fn handle(&self) -> Option<Handle> {
+        if let Some(handle) = &self.handle {
+            return Some(handle.clone());
+        }
+        let owned_runtime = self.runtime.upgrade()?;
+        let mut owned_runtime = owned_runtime.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        Some(
+            owned_runtime
+                .get_or_insert_with(|| Runtime::new().unwrap_or_else(|error| panic!("failed to create the default Tokio runtime: {error}")))
+                .handle()
+                .clone(),
+        )
+    }
+
+    fn enter(&self) {
+        if Handle::try_current().is_ok() {
+            return;
+        }
+
+        // The worker thread owns this context until it exits. Tokio drops the
+        // thread-local handle during thread teardown.
+        if let Some(handle) = self.handle() {
+            std::mem::forget(handle.enter());
         }
     }
 }
@@ -44,12 +99,16 @@ pub trait TokioCompatExt: private::Sealed {
 
     /// Enters a new default Tokio runtime context on each applicable Arty
     /// worker.
-    fn tokio_compat(self) -> Self::Output
-    where
-        Self: Sized,
-    {
-        self.tokio_compat_with(TokioHandle::default())
-    }
+    ///
+    /// If a Tokio context already exists, this method does not create another
+    /// runtime.
+    ///
+    /// # Panics
+    ///
+    /// Panics if Tokio cannot create the runtime. To handle this failure,
+    /// create the runtime with [`tokio::runtime::Builder::build`], then pass it
+    /// to [`tokio_compat_with`](Self::tokio_compat_with).
+    fn tokio_compat(self) -> Self::Output;
 
     /// Enters the Tokio runtime context on each applicable Arty worker.
     ///
@@ -57,50 +116,45 @@ pub trait TokioCompatExt: private::Sealed {
     /// on that worker, even if they supply a different Tokio runtime.
     /// An existing Tokio context is never replaced.
     ///
-    /// If you supply a borrowed handle, keep its Tokio runtime alive while
-    /// Arty tasks use Tokio. If you supply an owned runtime, Arty owns it until
+    /// If you supply a borrowed handle, keep its Tokio runtime alive while Arty
+    /// tasks use Tokio. If you supply an owned runtime, Arty owns it until
     /// shutdown starts.
-    /// For a current-thread runtime, also run
-    /// [`Runtime::block_on`](tokio::runtime::Runtime::block_on) on another thread
-    /// while Arty tasks use Tokio. Entering its handle does not drive Tokio
-    /// tasks, timers, or I/O.
+    ///
+    /// This crate does not support current-thread Tokio runtimes. If you supply
+    /// one, you are responsible for full interoperability with Arty.
     fn tokio_compat_with(self, tokio: impl Into<TokioHandle>) -> Self::Output;
 }
 
 impl TokioCompatExt for RuntimeBuilder {
     type Output = Self;
 
+    fn tokio_compat(self) -> Self::Output {
+        self.on(worker_init(TokioSupport::new()))
+    }
+
     fn tokio_compat_with(self, tokio: impl Into<TokioHandle>) -> Self::Output {
-        self.on(worker_init(tokio.into()))
+        self.on(worker_init(TokioSupport::from_handle(tokio.into())))
     }
 }
 
 impl TokioCompatExt for &RuntimeControl {
     type Output = ();
 
+    fn tokio_compat(self) {
+        self.on(worker_init(TokioSupport::new()));
+    }
+
     fn tokio_compat_with(self, tokio: impl Into<TokioHandle>) {
-        self.on(worker_init(tokio.into()));
+        self.on(worker_init(TokioSupport::from_handle(tokio.into())));
     }
 }
 
-fn worker_init(tokio: TokioHandle) -> HookFn<WorkerInit, TokioSupport> {
-    HookFn::new(
-        TokioSupport {
-            handle: tokio.handle,
-            owned_runtime: tokio.owned_runtime,
-        },
-        enter_worker,
-    )
+fn worker_init(tokio: TokioSupport) -> HookFn<WorkerInit, TokioSupport> {
+    HookFn::new(tokio, enter_worker)
 }
 
 fn enter_worker(_event: &mut WorkerInit, tokio: &TokioSupport) {
-    if Handle::try_current().is_ok() {
-        return;
-    }
-
-    // The worker thread owns this context until it exits. Tokio drops the
-    // thread-local handle during thread teardown.
-    std::mem::forget(tokio.handle.enter());
+    tokio.enter();
 }
 
 mod private {
@@ -110,4 +164,30 @@ mod private {
 
     impl Sealed for RuntimeBuilder {}
     impl Sealed for &RuntimeControl {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TokioSupport;
+
+    #[test]
+    fn default_support_does_not_create_another_runtime_inside_tokio() {
+        let existing = tokio::runtime::Runtime::new().unwrap();
+        let _entered = existing.enter();
+        let support = TokioSupport::new();
+
+        support.enter();
+
+        assert!(support.owned_runtime.as_ref().unwrap().lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn worker_clone_does_not_own_the_runtime_state() {
+        let support = TokioSupport::new();
+        let worker = support.clone();
+
+        assert!(worker.owned_runtime.is_none());
+        drop(support);
+        assert!(worker.runtime.upgrade().is_none());
+    }
 }

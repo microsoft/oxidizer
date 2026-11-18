@@ -51,13 +51,11 @@
 //! runtime alive while Arty tasks use Tokio. Each Arty worker stores a clone of
 //! the handle.
 //!
-//! If you supply an owned runtime or use [`TokioHandle::default`], Arty drops
-//! the owned Tokio runtime when Arty shuts down.
+//! If you supply an owned runtime or use [`TokioCompatExt::tokio_compat`], Arty
+//! drops the owned Tokio runtime when Arty shuts down.
 //!
-//! For a current-thread Tokio runtime, the application must also run
-//! [`Runtime::block_on`] on another thread while Arty tasks use Tokio.
-//! Keeping that runtime alive or entering its handle does not drive its tasks,
-//! timers, or I/O. Without `Runtime::block_on`, those operations can stall.
+//! This crate does not support current-thread Tokio runtimes. If you supply
+//! one, you are responsible for full interoperability with Arty.
 //!
 //! After setup, Arty tasks can use Tokio task spawning and libraries that
 //! require a Tokio runtime context. Timers require the Tokio `time` feature and
@@ -82,15 +80,16 @@ pub use extensions::TokioCompatExt;
 /// Convert an owned or borrowed Tokio [`Handle`] from an application-owned
 /// runtime. The value is opaque and its [`Debug`] output does not
 /// expose runtime details.
-/// [`Default`] creates and owns a new runtime through [`Runtime::new`].
 ///
-/// Convert an owned runtime to let Arty keep it alive:
+/// Create a runtime explicitly to handle creation failure or configure its
+/// drivers, then convert it to let Arty keep it alive:
 ///
 /// ```
 /// use arty_tokio::TokioHandle;
 ///
-/// let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
-/// let _handle = TokioHandle::from(runtime);
+/// let runtime = tokio::runtime::Builder::new_multi_thread().build()?;
+/// let handle = TokioHandle::from(runtime);
+/// # Ok::<(), std::io::Error>(())
 /// ```
 #[derive(derive_more::Debug)]
 pub struct TokioHandle {
@@ -98,16 +97,6 @@ pub struct TokioHandle {
     handle: Handle,
     #[debug(ignore)]
     owned_runtime: Option<Runtime>,
-}
-
-impl Default for TokioHandle {
-    fn default() -> Self {
-        let runtime = Runtime::new().unwrap_or_else(|error| panic!("failed to create the default Tokio runtime: {error}"));
-        Self {
-            handle: runtime.handle().clone(),
-            owned_runtime: Some(runtime),
-        }
-    }
 }
 
 impl From<Runtime> for TokioHandle {

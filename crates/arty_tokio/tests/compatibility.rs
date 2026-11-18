@@ -20,7 +20,7 @@ use support::stop_bounded;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::runtime::{Builder, Handle};
 
-assert_impl_all!(arty_tokio::TokioHandle: Send, Sync, Default);
+assert_impl_all!(arty_tokio::TokioHandle: Send, Sync);
 
 #[derive(Clone)]
 struct InitSignal(mpsc::Sender<()>);
@@ -252,20 +252,4 @@ fn tokio_join_handles_keep_native_panic_semantics() {
 fn tokio_handle_debug_is_opaque() {
     let tokio = Builder::new_multi_thread().build().unwrap();
     assert_eq!(format!("{:?}", arty_tokio::TokioHandle::from(tokio.handle())), "TokioHandle { .. }");
-}
-
-#[test]
-fn current_thread_runtime_works_when_the_application_drives_it() {
-    let tokio = Builder::new_current_thread().enable_all().build().unwrap();
-    let runtime = Runtime::builder()
-        .workers(WorkersPolicy::exactly(1))
-        .tokio_compat_with(tokio.handle())
-        .build()
-        .unwrap();
-    let task = runtime
-        .scheduler()
-        .spawn_anywhere((), |_, ()| async { tokio::spawn(async { 42 }).await.unwrap() });
-
-    assert_eq!(tokio.block_on(task).unwrap(), 42);
-    stop_bounded(runtime);
 }

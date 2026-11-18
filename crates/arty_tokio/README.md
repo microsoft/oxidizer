@@ -54,13 +54,11 @@ If you supply a Tokio handle, the application owns its runtime. Keep that
 runtime alive while Arty tasks use Tokio. Each Arty worker stores a clone of
 the handle.
 
-If you supply an owned runtime or use [`TokioHandle::default`][__link4], Arty drops
-the owned Tokio runtime when Arty shuts down.
+If you supply an owned runtime or use [`TokioCompatExt::tokio_compat`][__link4], Arty
+drops the owned Tokio runtime when Arty shuts down.
 
-For a current-thread Tokio runtime, the application must also run
-[`Runtime::block_on`][__link5] on another thread while Arty tasks use Tokio.
-Keeping that runtime alive or entering its handle does not drive its tasks,
-timers, or I/O. Without `Runtime::block_on`, those operations can stall.
+This crate does not support current-thread Tokio runtimes. If you supply
+one, you are responsible for full interoperability with Arty.
 
 After setup, Arty tasks can use Tokio task spawning and libraries that
 require a Tokio runtime context. Timers require the Tokio `time` feature and
@@ -68,7 +66,7 @@ an enabled time driver. Networking and I/O resources require the applicable
 Tokio features and an enabled I/O driver. Configure these drivers when you
 build an explicit Tokio runtime.
 Tokio tasks run on Tokio workers. They do not receive
-[`arty::task::Context`][__link6] or keep Arty thread-aware state.
+[`arty::task::Context`][__link5] or keep Arty thread-aware state.
 
 Do not call `tokio::task::block_in_place`, `Runtime::block_on`, or
 `Handle::block_on` from an Arty worker. `LocalSet` and `spawn_local` are not
@@ -80,11 +78,10 @@ integrated with Arty.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty_tokio">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbhePaY4dAE3EbdnmFggCZIQwbYPgTTSGNRKkbpw9iOdzGxGxhZIOCZGFydHllMC42LjGCamFydHlfdG9raW9lMC4yLjGCZXRva2lvZjEuNTQuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb_bZpi5sF6c4bPUsIDrpV4FwbrzH9fdknEW0bpTKxkVSNjdhhZIKCZGFydHllMC42LjGCamFydHlfdG9raW9lMC4yLjE
  [__link0]: https://crates.io/crates/arty/0.6.1
  [__link1]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat
  [__link2]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat_with
  [__link3]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat_with
- [__link4]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioHandle::default
- [__link5]: https://docs.rs/tokio/1.54.1/tokio/?search=runtime::Runtime::block_on
- [__link6]: https://docs.rs/arty/0.6.1/arty/?search=task::Context
+ [__link4]: https://docs.rs/arty_tokio/0.2.1/arty_tokio/?search=TokioCompatExt::tokio_compat
+ [__link5]: https://docs.rs/arty/0.6.1/arty/?search=task::Context
