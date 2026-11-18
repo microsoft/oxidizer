@@ -23,6 +23,19 @@ mod tests {
     use seismograph_protocol::transport::{Connection, Listener};
     use seismograph_protocol::{Error, read_request, read_response, write_request, write_response};
 
+    #[test]
+    fn protocol_frames_reject_every_other_version() {
+        let mut bytes = Vec::new();
+        write_request(&mut bytes, 42, &Request::Hello).unwrap();
+        let version = u16::from_le_bytes([bytes[4], bytes[5]]);
+        assert_eq!(version, 9);
+        assert_eq!(read_request(&mut bytes.as_slice()).unwrap(), (42, Request::Hello));
+        for unsupported in (0..version).chain([version + 1, u16::MAX]) {
+            bytes[4..6].copy_from_slice(&unsupported.to_le_bytes());
+            assert!(matches!(read_request(&mut bytes.as_slice()), Err(Error::UnsupportedVersion)));
+        }
+    }
+
     fn descriptor(io: &MonitorIo) -> (Directory, MonitorDescriptor) {
         let directory = Directory::current(io).unwrap();
         let owner = io.current_owner().unwrap();

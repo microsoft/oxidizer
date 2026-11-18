@@ -85,8 +85,8 @@ fn invalid_panic_setting(expr: &Expr) -> darling::Error {
 }
 
 impl Args {
-    fn runtime(&self, runtime_path: &TokenStream, clock: Option<&Ident>, test: bool) -> syn::Result<TokenStream> {
-        let monitor = self.monitor.or_else(|| test.then_some(MonitorSetting::Disabled));
+    fn runtime(&self, runtime_path: &TokenStream, clock: Option<&Ident>) -> syn::Result<TokenStream> {
+        let monitor = self.monitor;
         if self.workers.is_none() && clock.is_none() && monitor.is_none() && self.panic.is_none() {
             return Ok(quote!(#runtime_path::runtime::Runtime::new()));
         }
@@ -134,7 +134,7 @@ mod gamma_round2 {
             workers: None,
         };
         let clock = parse_quote!(clock);
-        let output = args.runtime(&quote!(::arty), Some(&clock), false).unwrap();
+        let output = args.runtime(&quote!(::arty), Some(&clock)).unwrap();
         assert_eq!(
             output.to_string(),
             quote!(
@@ -301,7 +301,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let result_binding = Ident::new("__arty_result", Span::mixed_site());
     let shutdown_binding = Ident::new("__arty_shutdown", Span::mixed_site());
     let value_binding = Ident::new("__arty_value", Span::mixed_site());
-    let runtime = match args.runtime(&runtime_path, clock.as_ref().map(|_| &clock_binding), test) {
+    let runtime = match args.runtime(&runtime_path, clock.as_ref().map(|_| &clock_binding)) {
         Ok(runtime) => runtime,
         Err(error) => return fail(error),
     };

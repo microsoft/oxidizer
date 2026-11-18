@@ -49,9 +49,7 @@ fn test_preserves_attributes() {
     #[should_panic(expected = "original payload")]
     #[::core::prelude::v1::test]
     fn fails() {
-        let __arty_runtime = ::arty::runtime::Runtime::builder()
-            .monitor(::arty::runtime::MonitorPolicy::disabled())
-            .build()
+        let __arty_runtime = ::arty::runtime::Runtime::new()
             .expect("failed to create the runtime for the entry point");
         let __arty_result = __arty_runtime
             .scheduler()
@@ -124,7 +122,6 @@ fn all_workers_selects_all_available_processors() {
         fn run() {
             let __arty_runtime = ::arty::runtime::Runtime::builder()
                 .workers(::arty::runtime::WorkersPolicy::all())
-                .monitor(::arty::runtime::MonitorPolicy::disabled())
                 .build()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
@@ -153,7 +150,6 @@ fn controlled_test_can_select_all_workers() {
             let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
             let __arty_runtime = ::arty::runtime::Runtime::builder()
                 .workers(::arty::runtime::WorkersPolicy::all())
-                .monitor(::arty::runtime::MonitorPolicy::disabled())
                 .clock(::core::clone::Clone::clone(&__arty_clock_control))
                 .build()
                 .expect("failed to create the runtime for the entry point");
@@ -228,7 +224,6 @@ fn controlled_test_without_workers_uses_the_runtime_default() {
         fn run() {
             let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
             let __arty_runtime = ::arty::runtime::Runtime::builder()
-                .monitor(::arty::runtime::MonitorPolicy::disabled())
                 .clock(::core::clone::Clone::clone(&__arty_clock_control))
                 .build()
                 .expect("failed to create the runtime for the entry point");
@@ -351,7 +346,6 @@ fn test_panic_settings_are_forwarded_exactly() {
             #[::core::prelude::v1::test]
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
                     .on(::arty::runtime::hook::Panic::#constant)
                     .build()
                     .expect("failed to create the runtime for the entry point");
@@ -433,7 +427,6 @@ fn worker_literals_are_not_limited_to_the_macro_hosts_pointer_width() {
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
                     .workers(::arty::runtime::WorkersPolicy::exactly(#workers))
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime

@@ -135,7 +135,6 @@ pub(super) fn draw_threads(frame: &mut ratatui::Frame<'_>, mouse: &MouseRows, ar
     frame.render_widget(shell.title_bottom(footer), area);
     let empty = match live.availability {
         Availability::Waiting => Some("Waiting for live recorder counters..."),
-        Availability::Unsupported => Some("Thread/class counters unavailable on this server.\nRebuild the application to enable them."),
         Availability::Supported if live.threads.is_empty() => Some("No recording threads in this session."),
         Availability::Supported => None,
     };
@@ -478,7 +477,7 @@ mod tests {
             .collect::<String>();
         assert!(text.contains("Collecting rate baseline"));
 
-        baseline.availability = Availability::Unsupported;
+        baseline.availability = Availability::Waiting;
         terminal
             .draw(|frame| {
                 let mouse = MouseRows::default();
@@ -493,7 +492,7 @@ mod tests {
             .iter()
             .map(ratatui::buffer::Cell::symbol)
             .collect::<String>();
-        assert!(text.contains("unavailable"));
+        assert!(text.contains("Waiting for live recorder counters"));
 
         let mut released = live();
         released.threads[0].statistics.event_capacity = 0;

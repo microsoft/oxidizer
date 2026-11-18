@@ -48,6 +48,7 @@ assert_not_impl_any!(Error: From<io::Error>, From<Box<dyn StdError + Send + Sync
 
 const _: fn(usize) -> WorkersPolicy = WorkersPolicy::exactly;
 const _: fn(usize) -> WorkersPolicy = WorkersPolicy::at_most;
+const _: fn() -> MonitorPolicy = MonitorPolicy::auto;
 const _: fn() -> MonitorPolicy = MonitorPolicy::enabled;
 const _: fn() -> MonitorPolicy = MonitorPolicy::disabled;
 const _: fn(&JoinError) -> Option<ShutdownCause> = JoinError::shutdown_cause;

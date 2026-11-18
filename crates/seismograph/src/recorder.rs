@@ -784,6 +784,18 @@ fn cached_thread_id_with(next_thread_id: &AtomicU64) -> ThreadId {
     ThreadId::new(id)
 }
 
+/// Converts a return address for lookup without changing its recorded identity.
+pub(crate) const fn symbol_lookup_address(address: Address) -> Address {
+    #[cfg(windows)]
+    {
+        Address::new(address.get().saturating_sub(1))
+    }
+    #[cfg(not(windows))]
+    {
+        address
+    }
+}
+
 /// Runs synchronous work without recording events on this thread.
 ///
 /// Nested calls remain suppressed until the outer call returns. Recording is
@@ -3609,6 +3621,16 @@ mod tests {
     #[test]
     fn zero_initialized_policy_uses_default_sampling() {
         assert_eq!(decode_sampling(0), EventSampling::ALL);
+    }
+
+    #[test]
+    fn symbol_lookup_address_preserves_recorded_identity_semantics() {
+        let address = Address::new(0x1000);
+        #[cfg(windows)]
+        assert_eq!(symbol_lookup_address(address), Address::new(0x0fff));
+        #[cfg(not(windows))]
+        assert_eq!(symbol_lookup_address(address), address);
+        assert_eq!(symbol_lookup_address(Address::new(0)), Address::new(0));
     }
 
     struct LateTelemetryUser;

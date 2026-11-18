@@ -6,7 +6,7 @@ use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::{
-    Arc, Mutex,
+    Arc,
     atomic::{AtomicUsize, Ordering},
 };
 use std::{io, ptr};
@@ -49,53 +49,40 @@ impl Drop for KnownFolder {
     }
 }
 
-enum Key {
-    Native(HKEY),
-    #[cfg(test)]
-    Injected {
-        closes: Arc<AtomicUsize>,
-        result: u32,
-        errors: Arc<Mutex<Vec<i32>>>,
-    },
+struct Key {
+    handle: HKEY,
+    close: unsafe extern "system" fn(HKEY) -> u32,
+    report_error: fn(u32),
 }
 
 impl Key {
-    const fn handle(&self) -> HKEY {
-        match self {
-            Self::Native(handle) => *handle,
-            #[cfg(test)]
-            Self::Injected { .. } => ptr::null_mut(),
+    const fn new(handle: HKEY) -> Self {
+        Self {
+            handle,
+            close: RegCloseKey,
+            report_error: record_close_error,
         }
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))] // A valid, exclusively owned native key cannot produce a close error.
-    fn record_close_error(&self, result: u32) {
-        match self {
-            Self::Native(_) => eprintln!(
-                "seismograph: failed to close profile registry key: {}",
-                io::Error::from_raw_os_error(result.cast_signed())
-            ),
-            #[cfg(test)]
-            Self::Injected { errors, .. } => errors.lock().unwrap().push(result.cast_signed()),
-        }
+    const fn handle(&self) -> HKEY {
+        self.handle
     }
+}
+// #[gamma::skip(fn_value.unit, parameter.default_shadow, tag = "native-boundary", reason = "This sink only writes impossible owned-key close failures to native stderr; deterministic tests verify release, exact error codes and error dispatch through injected callbacks")]
+#[cfg_attr(coverage_nightly, coverage(off))] // A valid, exclusively owned native key cannot produce a close error.
+fn record_close_error(result: u32) {
+    eprintln!(
+        "seismograph: failed to close profile registry key: {}",
+        io::Error::from_raw_os_error(result.cast_signed())
+    );
 }
 
 impl Drop for Key {
     fn drop(&mut self) {
-        let result = match self {
-            Self::Native(handle) => {
-                // SAFETY: this key was opened by RegOpenKeyExW and is owned here.
-                unsafe { RegCloseKey(*handle) }
-            }
-            #[cfg(test)]
-            Self::Injected { closes, result, .. } => {
-                closes.fetch_add(1, Ordering::Relaxed);
-                *result
-            }
-        };
+        // SAFETY: This key owns the handle and its matching close operation.
+        let result = unsafe { (self.close)(self.handle) };
         if result != 0 {
-            self.record_close_error(result);
+            (self.report_error)(result);
         }
     }
 }
@@ -205,7 +192,7 @@ fn registry_directories_for(owner: MonitorOwner, base: io::Result<PathBuf>, elev
             let result = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, name.as_ptr(), reserved, access, &raw mut key) };
             (result, key)
         },
-        Key::Native,
+        Key::new,
         |key, index, name, length| {
             // SAFETY: key is open, name/length are valid buffers, and optional outputs are null.
             unsafe {
@@ -514,22 +501,38 @@ mod tests {
 
     #[test]
     fn november_owned_registry_keys_close_once_and_report_exactly_nonzero_close_statuses() {
+        thread_local! {
+            static CLOSE: std::cell::Cell<(HKEY, u32, usize)> = const { std::cell::Cell::new((ptr::null_mut(), 0, 0)) };
+            static ERRORS: std::cell::RefCell<Vec<i32>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+
+        extern "system" fn close(handle: HKEY) -> u32 {
+            CLOSE.with(|state| {
+                let (_, result, calls) = state.get();
+                state.set((handle, result, calls + 1));
+                result
+            })
+        }
+
+        fn report_error(result: u32) {
+            ERRORS.with(|errors| errors.borrow_mut().push(result.cast_signed()));
+        }
+
         for result in [0_u32, 1, 2, u32::MAX] {
-            let closes = Arc::new(AtomicUsize::new(0));
-            let errors = Arc::new(Mutex::new(Vec::new()));
-            let key = Key::Injected {
-                closes: Arc::clone(&closes),
-                result,
-                errors: Arc::clone(&errors),
-            };
-            assert_eq!(closes.load(Ordering::Relaxed), 0);
-            assert!(errors.lock().unwrap().is_empty());
+            let handle = ptr::without_provenance_mut(0x1234);
+            CLOSE.set((ptr::null_mut(), result, 0));
+            ERRORS.with(|errors| errors.borrow_mut().clear());
+            let mut key = Key::new(handle);
+            key.close = close;
+            key.report_error = report_error;
+            assert_eq!(key.handle(), handle);
+            assert_eq!(CLOSE.get().2, 0);
+            ERRORS.with(|errors| assert!(errors.borrow().is_empty()));
             drop(key);
-            assert_eq!(closes.load(Ordering::Relaxed), 1);
-            assert_eq!(
-                *errors.lock().unwrap(),
-                if result == 0 { vec![] } else { vec![result.cast_signed()] }
-            );
+            assert_eq!((CLOSE.get().0, CLOSE.get().2), (handle, 1));
+            ERRORS.with(|errors| {
+                assert_eq!(*errors.borrow(), if result == 0 { vec![] } else { vec![result.cast_signed()] });
+            });
         }
     }
 

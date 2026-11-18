@@ -70,10 +70,12 @@
 //!
 //! - `rt`: Enables the runtime, task, and I/O APIs.
 //! - `macros`: Enables [`main`] and [`test`]. It also enables `rt`.
-//! - `monitor`: Connects runtime workers and tasks to Seismograph. An enabled
-//!   [`MonitorPolicy`](crate::runtime::MonitorPolicy) starts a local connection for
-//!   the Seismograph CLI. Task collection runs on request. Event recording stays
-//!   off until an application or the CLI enables it. This feature also forwards
+//! - `monitor`: Connects runtime workers and tasks to Seismograph. The default
+//!   [`MonitorPolicy`](crate::runtime::MonitorPolicy) disables monitoring for
+//!   tests, doctests, documentation examples, and Miri. It enables monitoring
+//!   in other environments. An enabled policy starts a local connection for the
+//!   Seismograph CLI. Task collection runs on request. Event recording stays off
+//!   until an application or the CLI enables it. This feature also forwards
 //!   monitoring support for `performables` when `performables` is enabled.
 //! - `test-util`: Enables testing utilities, including
 //!   [`ClockControl`](crate::time::ClockControl).
@@ -109,7 +111,7 @@ use arty_io_core as _;
 /// - `workers = all` starts one async worker per available processor.
 /// - `monitor = enabled` or `monitor = disabled` selects whether the runtime
 ///   starts a local Seismograph monitor when the `monitor` feature is present.
-///   The default is `enabled`.
+///   The default uses [`MonitorPolicy::auto`](crate::runtime::MonitorPolicy::auto).
 /// - `panic = shutdown` or `panic = ignore` selects whether the runtime stops
 ///   after Arty catches a task panic. The default is `shutdown`.
 ///
@@ -201,8 +203,9 @@ pub use arty_macros::main;
 ///
 /// Enable `macros` to use this attribute. The [`main`] attribute's `workers`,
 /// `monitor`, and `panic` options also apply.
-/// By default, a test uses one worker, disables monitoring, and stops its
-/// runtime after Arty catches a task panic.
+/// By default, a test uses one worker and the automatic monitor policy. The
+/// automatic policy disables monitoring in tests. It also works under Miri.
+/// The test runtime stops after Arty catches a task panic.
 /// To test monitoring, use `monitor = enabled`.
 ///
 /// # Simulated time
