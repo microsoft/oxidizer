@@ -197,6 +197,19 @@ fn controlled_simple_clock_stopwatch_observes_controlled_time() {
     assert_eq!(watch.elapsed(), Duration::from_secs(1));
 }
 
+#[test]
+fn stopwatch_restart_returns_elapsed_time_and_starts_a_new_interval() {
+    let control = ClockControl::new();
+    let mut watch = control.to_simple_clock().stopwatch();
+
+    control.advance(Duration::from_secs(1));
+    assert_eq!(watch.restart(), Duration::from_secs(1));
+    assert_eq!(watch.elapsed(), Duration::ZERO);
+
+    control.advance(Duration::from_secs(2));
+    assert_eq!(watch.elapsed(), Duration::from_secs(2));
+}
+
 #[cfg(feature = "fast-stopwatch")]
 #[test]
 fn fast_stopwatch_observes_controlled_time() {

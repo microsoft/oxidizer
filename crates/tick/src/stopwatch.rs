@@ -124,4 +124,45 @@ impl Stopwatch {
             StopwatchSource::Fast { start } => crate::fast_stopwatch::now().elapsed_since(*start),
         }
     }
+
+    /// Returns the elapsed time and starts a new interval.
+    ///
+    /// This method reads the time source once. The reading ends the current
+    /// interval and starts the next interval.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "test-util")]
+    /// # {
+    /// use std::time::Duration;
+    ///
+    /// use tick::{ClockControl, Stopwatch};
+    ///
+    /// let control = ClockControl::new();
+    /// let mut stopwatch = Stopwatch::new(control.to_simple_clock());
+    ///
+    /// control.advance(Duration::from_secs(2));
+    /// assert_eq!(stopwatch.restart(), Duration::from_secs(2));
+    /// assert_eq!(stopwatch.elapsed(), Duration::ZERO);
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn restart(&mut self) -> Duration {
+        match &mut self.source {
+            StopwatchSource::Clock { clock, start } => {
+                let now = clock.instant();
+                let elapsed = now.saturating_duration_since(*start);
+                *start = now;
+                elapsed
+            }
+            #[cfg(any(feature = "fast-stopwatch", test))]
+            StopwatchSource::Fast { start } => {
+                let now = crate::fast_stopwatch::now();
+                let elapsed = now.elapsed_since(*start);
+                *start = now;
+                elapsed
+            }
+        }
+    }
 }

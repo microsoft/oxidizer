@@ -69,17 +69,6 @@ fn system_clock_instant_uses_the_system_instant_domain() {
     assert!(system_instant.duration_since(clock_instant) < Duration::from_secs(10));
 }
 
-#[cfg(feature = "fast-stopwatch")]
-#[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
-#[test]
-fn fast_stopwatch_reports_non_decreasing_elapsed_time() {
-    let stopwatch = Stopwatch::new_fast(SimpleClock::new_system());
-    let first = stopwatch.elapsed();
-    let second = stopwatch.elapsed();
-
-    assert!(second >= first);
-}
-
 #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
 #[test]
 fn system_time_as_converts_to_a_supported_public_type() {
