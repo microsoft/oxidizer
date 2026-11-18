@@ -395,6 +395,9 @@ pub struct Runtime {
     /// Active and retired worker metadata.
     pub workers: Vec<Worker>,
     /// Spawn metadata for tasks that have not reached a terminal state.
+    ///
+    /// Captures contain at most one row per task identity, sorted by identity.
+    /// If worker responses contain both queued and running observations, the capture keeps the running observation.
     pub tasks: Vec<Task>,
 }
 

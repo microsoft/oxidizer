@@ -105,7 +105,7 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let mut message = String::from("Hello");
     /// runtime
     ///     .scheduler()
@@ -135,7 +135,10 @@ impl RuntimeScheduler {
         // is destroyed. The final sender is dropped after those fields, including on
         // cancellation or panic. Receiving the result alone is not a destruction guarantee.
         let factory = unsafe { std::mem::transmute::<BoxedFutureFactory<'a, R>, BoxedFutureFactory<'static, R>>(factory) };
-        futures::executor::block_on(self.dispatcher.spawn(factory)).map_err(Error::new)
+        let task = self
+            .dispatcher
+            .spawn(factory, crate::runtime::monitoring::TaskMonitoring::with_body_size(size_of::<F>()));
+        futures::executor::block_on(task).map_err(Error::new)
     }
 
     /// Lets the runtime choose a worker for an async task and relocates its data.
@@ -160,7 +163,7 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let task = runtime
     ///     .scheduler()
     ///     .spawn_anywhere(String::from("Arty"), |_, name| async move { name.len() });
@@ -175,7 +178,7 @@ impl RuntimeScheduler {
     /// use arty::runtime::Runtime;
     ///
     /// struct SendOnly(u32);
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let task = runtime
     ///     .scheduler()
     ///     .spawn_anywhere((), |_, ()| async { SendOnly(42) });
@@ -190,11 +193,14 @@ impl RuntimeScheduler {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.dispatcher.spawn(move |cx| {
-            let mut data = data;
-            data.relocate(None, cx.thread());
-            future_factory(cx, data)
-        })
+        self.dispatcher.spawn(
+            move |cx| {
+                let mut data = data;
+                data.relocate(None, cx.thread());
+                future_factory(cx, data)
+            },
+            crate::runtime::monitoring::TaskMonitoring::capture(),
+        )
     }
 
     /// Runs a function on a thread from a blocking pool.
@@ -218,7 +224,7 @@ impl RuntimeScheduler {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let task = runtime.scheduler().spawn_blocking(|| 6 * 7);
     /// assert_eq!(futures::executor::block_on(task)?, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -417,6 +423,7 @@ mod tests {
     #[test]
     fn scoped_poll_panic_is_joined_after_borrowed_future_destruction() {
         let runtime = Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .on(crate::runtime::hook::Panic::IGNORE)
             .build()

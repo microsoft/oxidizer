@@ -8,6 +8,7 @@
 
 mod local_worker;
 mod pools;
+mod queue;
 mod worker;
 
 pub(crate) use local_worker::LocalWorker;

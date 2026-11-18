@@ -27,7 +27,11 @@ use testing_aids::TEST_TIMEOUT;
 use thread_aware::Unaware;
 
 fn runtime(workers: usize) -> Runtime {
-    Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
+    Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(workers))
+        .build()
+        .unwrap()
 }
 
 fn worker_scheduler(runtime: &Runtime) -> Scheduler {
@@ -97,6 +101,7 @@ fn assert_blocking_pool_limit(max_threads: usize) {
     const QUEUED_TASK_COUNT: usize = 6;
 
     let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(max_threads))
         .build()
@@ -173,6 +178,7 @@ fn the_last_processor_setting_replaces_invalid_and_previous_counts() {
         WorkersPolicy::default(),
     ] {
         let runtime = Runtime::builder()
+            .monitor(arty::runtime::MonitorPolicy::disabled())
             .workers(previous)
             .workers(WorkersPolicy::at_most(1))
             .build()
@@ -191,6 +197,7 @@ fn zero_stack_size_is_rejected_by_the_setter() {
 #[test]
 fn resource_setters_preserve_worker_count_and_pool_policy() {
     let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .blocking_pool(BlockingPoolPolicy::per_worker())
         .workers(WorkersPolicy::at_most(1))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
@@ -273,6 +280,7 @@ fn nested_block_on_rejects_the_factory_before_submission() {
 fn worker_context_belongs_to_one_runtime_and_rejects_nested_block_on() {
     completes_without_deadlock(|| {
         let first = Runtime::builder()
+            .monitor(arty::runtime::MonitorPolicy::disabled())
             .workers(WorkersPolicy::exactly(1))
             .blocking_pool(BlockingPoolPolicy::shared().max(1))
             .build()
@@ -375,6 +383,7 @@ fn configured_clock_control_remains_the_worker_time_source() {
 
     let control = ClockControl::new();
     let runtime = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .clock(control.clone())
         .build()
@@ -424,6 +433,7 @@ fn stopping_one_runtime_does_not_stop_another() {
 fn dropping_another_runtime_from_a_worker_panics() {
     let target = runtime(1);
     let caller = Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .on(Panic::IGNORE)
         .build()
@@ -505,7 +515,7 @@ fn rejected_remote_joins_report_shutdown_then_reject_repolling() {
 mod entry_points {
     use arty::task::Context;
 
-    #[arty::main(workers = 1)]
+    #[arty::main(workers = 1, monitor = disabled)]
     async fn application_error(_cx: Context) -> Result<(), &'static str> {
         Err("application")
     }

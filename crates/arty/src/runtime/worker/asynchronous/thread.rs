@@ -148,7 +148,12 @@ impl ThreadEntry {
 
         let signal = Arc::new(asynchronous::Signal::default());
         let worker_waker = asynchronous::Signal::waker(&signal);
-        let blocking_worker = blocking::Worker::new(blocking_pools.pool_for_worker(worker_index), shutdown);
+        let blocking_pool = blocking_pools.pool_for_worker(worker_index);
+        #[cfg(any(test, feature = "monitor"))]
+        if let Some(runtime) = monitor_options.runtime() {
+            blocking_pool.enable_monitoring(runtime);
+        }
+        let blocking_worker = blocking::Worker::new(blocking_pool, shutdown);
 
         endpoint_tx
             .send(Endpoint {
@@ -173,7 +178,7 @@ impl ThreadEntry {
             io,
             clock,
             asynchronous::WorkerSignal(signal),
-            monitor_options,
+            &monitor_options,
             hook_registrations,
         );
 

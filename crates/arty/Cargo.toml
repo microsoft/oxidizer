@@ -36,7 +36,13 @@ all-features = true
 [features]
 default = ["rt", "macros", "monitor"]
 macros = ["rt", "dep:arty_macros"]
-monitor = ["dep:seismograph", "seismograph/monitor", "performables?/seismograph"]
+monitor = [
+    "dep:seismograph",
+    "dep:seismograph_runtime",
+    "arty_executor?/inspection",
+    "seismograph/monitor",
+    "performables?/seismograph",
+]
 rt = [
     "dep:arty_executor",
     "dep:arty_io_host",
@@ -73,12 +79,13 @@ pin-project = { workspace = true, optional = true }
 plurality = { workspace = true, features = ["std"], optional = true }
 scopeguard = { workspace = true }
 seismograph = { workspace = true, optional = true }
+seismograph_runtime = { workspace = true, optional = true }
 thread_aware = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware_core = { workspace = true, features = ["std"] }
 tick = { workspace = true }
 
 [dev-dependencies]
-arty_executor = { path = "../arty_executor" }
+arty_executor = { path = "../arty_executor", features = ["inspection"] }
 arty_io_host = { path = "../arty_io_host" }
 arty_macros = { path = "../arty_macros" }
 bolero = { workspace = true, features = ["std"] }
@@ -98,6 +105,8 @@ performables = { path = "../performables", features = ["seismograph"] }
 pin-project = { workspace = true }
 plurality = { path = "../plurality", features = ["std"] }
 seismograph = { path = "../seismograph", features = ["monitor"] }
+seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
+seismograph_runtime = { path = "../seismograph_runtime", features = ["test-util"] }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", features = ["std", "derive", "test-utils"] }
@@ -119,6 +128,16 @@ required-features = ["rt"]
 
 [[bench]]
 name = "arty_contention"
+harness = false
+required-features = ["rt"]
+
+[[bench]]
+name = "arty_inspection"
+harness = false
+required-features = ["rt"]
+
+[[bench]]
+name = "arty_spawn_allocations"
 harness = false
 required-features = ["rt"]
 
