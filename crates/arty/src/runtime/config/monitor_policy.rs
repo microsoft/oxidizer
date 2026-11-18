@@ -96,17 +96,23 @@ impl Default for MonitorPolicy {
 #[cfg(any(test, feature = "monitor"))]
 // #[gamma::skip(fn_value.bool_true, reason = "Mutation tests always run in a test executable, where this function must return true.")]
 fn is_test_environment() -> bool {
-    if
-    // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, reason = "Mutation tests cannot exercise this compile-time condition outside a test build.")]
-    cfg!(any(test, doctest, miri)) {
+    // #[gamma::skip(call_result.default, reason = "Mutation tests always run in a test executable, where the injected compile-time value is true.")]
+    // #[gamma::skip(bool_expr.negate, reason = "Mutation tests compile this expression as true and cannot observe the opposite build configuration.")]
+    is_test_environment_with(cfg!(any(test, doctest, miri)), std::env::current_exe)
+}
+
+#[cfg(any(test, feature = "monitor"))]
+fn is_test_environment_with(
+    compile_time_test_environment: bool,
+    current_executable: impl FnOnce() -> std::io::Result<std::path::PathBuf>,
+) -> bool {
+    if compile_time_test_environment {
         return true;
     }
 
-    let Ok(executable) = std::env::current_exe() else {
-        // #[gamma::skip(literal.bool_flip, reason = "Mutation tests cannot make current_exe fail without changing the environment probe.")]
+    let Ok(executable) = current_executable() else {
         return false;
     };
-    // #[gamma::skip(bool_expr.negate, call.replace_with_default, call_result.default, reason = "Mutation tests always use a test executable; the pure path classifier is tested separately.")]
     is_cargo_test_executable(&executable)
 }
 
@@ -153,6 +159,20 @@ mod tests {
     }
 
     #[test]
+    fn environment_detection_uses_compile_time_test_context() {
+        assert!(is_test_environment_with(true, || {
+            Err(std::io::Error::other("the executable probe must not run"))
+        }));
+    }
+
+    #[test]
+    fn environment_detection_treats_an_unavailable_executable_as_not_a_test() {
+        assert!(!is_test_environment_with(false, || {
+            Err(std::io::Error::other("current executable unavailable"))
+        }));
+    }
+
+    #[test]
     fn cargo_test_executables_are_test_environments() {
         let integration_test = std::path::Path::new("target")
             .join("debug")
@@ -163,12 +183,11 @@ mod tests {
             .join("doctest")
             .join("rustdoctest012345")
             .join("rust_out");
+        let application = std::path::Path::new("target").join("debug").join("application");
 
-        assert!(is_cargo_test_executable(&integration_test));
-        assert!(is_cargo_test_executable(&doctest));
-        assert!(!is_cargo_test_executable(
-            std::path::Path::new("target").join("debug").join("application").as_path()
-        ));
+        assert!(is_test_environment_with(false, || Ok(integration_test)));
+        assert!(is_test_environment_with(false, || Ok(doctest)));
+        assert!(!is_test_environment_with(false, || Ok(application)));
     }
 
     #[test]
