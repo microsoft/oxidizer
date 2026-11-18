@@ -794,6 +794,129 @@ fn remote_lines(observation: &Observation) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_survivor_native_capacity_units_and_rounding_boundaries() {
+        use super::bytes;
+        for (value, expected) in [
+            (0, "0 B"),
+            (1023, "1023 B"),
+            (1024, "1.00 KiB"),
+            (1025, "1.00 KiB"),
+            (1536, "1.50 KiB"),
+            (1546, "1.51 KiB"),
+            (1_048_576, "1.00 MiB"),
+            (1_073_741_824, "1.00 GiB"),
+            (1_099_511_627_776, "1.00 TiB"),
+            (1_125_899_906_842_624, "1.00 PiB"),
+            (1_152_921_504_606_846_976, "1.00 EiB"),
+            (1_180_591_620_717_411_303_424, "1024.00 EiB"),
+        ] {
+            assert_eq!(bytes(value), expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_native_navigation_reconciles_and_resets_dependents() {
+        use super::{Depth, KeyCode, Navigation};
+        let mut snapshot = crate::native_view::fixture::snapshot();
+        let selected = snapshot.owners[0].id;
+        let mut nav = Navigation {
+            root: 2,
+            selected_owner: Some(selected),
+            subsystem: 4,
+            class: 5,
+            scroll: 17,
+            ..Navigation::default()
+        };
+        snapshot.owners.swap(0, 1);
+        assert!(nav.key(KeyCode::Enter, Some(&snapshot)));
+        assert_eq!((nav.root, nav.depth, nav.scroll), (3, Depth::Subsystems, 0));
+        nav.depth = Depth::Root;
+        nav.scroll = 17;
+        assert!(nav.key(KeyCode::Down, Some(&snapshot)));
+        assert_eq!((nav.root, nav.subsystem, nav.class, nav.scroll), (4, 0, 0, 0));
+        nav.depth = Depth::Classes;
+        nav.class = 3;
+        nav.scroll = 17;
+        assert!(nav.key(KeyCode::PageDown, None));
+        assert_eq!((nav.class, nav.scroll), (8, 0));
+        nav.class = seismograph_rallocator::native::CLASS_COUNT - 1;
+        nav.key(KeyCode::Down, None);
+        assert_eq!(nav.class, seismograph_rallocator::native::CLASS_COUNT - 1);
+        nav.depth = Depth::Detail;
+        nav.scroll = 3;
+        assert!(nav.key(KeyCode::PageDown, None));
+        assert_eq!(nav.scroll, 8);
+        assert!(!nav.key(KeyCode::Char('x'), None));
+    }
+
+    #[test]
+    fn gamma_survivor_native_layout_boundaries_and_missing_owner_evidence_are_exact() {
+        for (width, height, left, body_y) in [
+            (57, 32, 18, 11),
+            (58, 32, 18, 11),
+            (59, 32, 19, 11),
+            (74, 32, 34, 11),
+            (75, 32, 34, 11),
+            (80, 15, 34, 10),
+        ] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| draw(frame, &MouseRows::default(), frame.area(), None, None, Navigation::default()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer[(left + 2, body_y)].symbol(), "M", "{width}x{height}");
+            let row = |y| (0..width).map(|x| buffer[(x, y)].symbol()).collect::<String>();
+            assert!(row(1).contains("OS reserved  — [Unknown]"));
+            assert!(row(2).contains("OS → Global backend → Owner frontends"));
+        }
+        let mut snapshot = crate::native_view::fixture::snapshot();
+        let root_nav = Navigation {
+            root: 2,
+            ..Navigation::default()
+        };
+        let mut terminal = Terminal::new(TestBackend::new(100, 18)).unwrap();
+        terminal
+            .draw(|frame| draw_owner(frame, &MouseRows::default(), frame.area(), &snapshot, &snapshot.owners[0], root_nav))
+            .unwrap();
+        let first = (0..100).map(|x| terminal.backend().buffer()[(x, 1)].symbol()).collect::<String>();
+        assert!(first.contains(&owner_overview(&snapshot, &snapshot.owners[0])[0]));
+        let title = (0..100).map(|x| terminal.backend().buffer()[(x, 0)].symbol()).collect::<String>();
+        assert!(!title.contains("Esc ‹"));
+        let mut nav = Navigation {
+            root: 2,
+            depth: Depth::Subsystems,
+            ..Navigation::default()
+        };
+        for (width, right_x) in [(80, 22), (32, 22), (31, 21)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 18)).unwrap();
+            terminal
+                .draw(|frame| draw_owner(frame, &MouseRows::default(), frame.area(), &snapshot, &snapshot.owners[0], nav))
+                .unwrap();
+            assert_eq!(terminal.backend().buffer()[(right_x + 2, 0)].symbol(), "O");
+        }
+        nav.depth = Depth::Classes;
+        let owner = snapshot.owners[0];
+        snapshot.owners[0].observation = None;
+        let mut terminal = Terminal::new(TestBackend::new(80, 18)).unwrap();
+        terminal
+            .draw(|frame| draw_classes(frame, &MouseRows::default(), frame.area(), &snapshot, &snapshot.owners[0], nav))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(0, 0)].fg, Color::Cyan);
+        assert_eq!((1..8).map(|x| buffer[(x, 1)].symbol()).collect::<String>(), "Unknown");
+        for width in [63, 64] {
+            terminal = Terminal::new(TestBackend::new(width, 18)).unwrap();
+            terminal
+                .draw(|frame| draw_classes(frame, &MouseRows::default(), frame.area(), &snapshot, &owner, nav))
+                .unwrap();
+            let row = (0..if width == 64 { 24 } else { 18 })
+                .map(|x| terminal.backend().buffer()[(x, 1)].symbol())
+                .collect::<String>();
+            assert_eq!(row.contains(" · "), width == 64, "{row}");
+        }
+    }
+
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 

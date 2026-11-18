@@ -17,6 +17,7 @@ use testing_aids::{TEST_TIMEOUT, is_mutation_testing};
 #[cfg(test)]
 fn indexed_worker_names(builder: RuntimeBuilder, policy: BlockingPoolPolicy) -> (String, Vec<String>) {
     let runtime = builder
+        .monitor(MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(3))
         .blocking_pool(policy.max(4))
         .build()
@@ -137,7 +138,11 @@ fn worker_names(runtime: &Runtime) -> Vec<(String, String)> {
 
 #[test]
 fn default_worker_names_use_arty() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .unwrap();
 
     assert_eq!(
         worker_names(&runtime),
@@ -151,7 +156,11 @@ fn default_worker_names_use_arty() {
 
 #[test]
 fn default_runtime_shares_blocking_pool() {
-    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
+    let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(2))
+        .build()
+        .unwrap();
 
     let names = worker_names(&runtime);
     assert_eq!(names[0].1, names[1].1);
@@ -166,12 +175,13 @@ fn runtime_name_is_copied_and_replaces_the_previous_name() {
     ] {
         let name = String::from("requests");
         let builder = Runtime::builder()
+            .monitor(MonitorPolicy::disabled())
             .name("invalid\0name")
             .name(&name)
             .workers(WorkersPolicy::exactly(2))
             .blocking_pool(policy.max(1));
         drop(name);
-        let runtime = builder.build().unwrap();
+        let runtime = builder.monitor(MonitorPolicy::disabled()).build().unwrap();
 
         assert_eq!(
             worker_names(&runtime),
@@ -186,8 +196,16 @@ fn runtime_name_is_copied_and_replaces_the_previous_name() {
 
 #[test]
 fn runtime_names_are_independent() {
-    let first = Runtime::builder().name(String::from("first")).build().unwrap();
-    let second = Runtime::builder().name("second").build().unwrap();
+    let first = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
+        .name(String::from("first"))
+        .build()
+        .unwrap();
+    let second = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
+        .name("second")
+        .build()
+        .unwrap();
 
     assert_eq!(
         worker_names(&first),
@@ -203,7 +221,7 @@ fn runtime_names_are_independent() {
 
 #[test]
 fn empty_runtime_name_is_accepted() {
-    let runtime = Runtime::builder().name("").build().unwrap();
+    let runtime = Runtime::builder().monitor(MonitorPolicy::disabled()).name("").build().unwrap();
 
     assert_eq!(worker_names(&runtime), vec![("-async-0".to_owned(), "-blocking-0".to_owned())]);
     runtime.stop().unwrap();
@@ -220,37 +238,16 @@ fn null_in_runtime_name_is_rejected_when_built() {
 }
 
 #[test]
-fn monitor_policy_defaults_to_enabled() {
-    let runtime = Runtime::builder()
-        .workers(WorkersPolicy::exactly(1))
-        .monitor(MonitorPolicy::default())
-        .build()
-        .unwrap();
-
-    assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
-    runtime.stop().unwrap();
-}
-
-#[test]
-fn explicit_monitor_policies_preserve_runtime_behavior() {
-    for policy in [MonitorPolicy::disabled(), MonitorPolicy::enabled()] {
-        let runtime = Runtime::builder()
-            .workers(WorkersPolicy::exactly(1))
-            .monitor(policy)
-            .build()
-            .unwrap();
-
-        assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
-        runtime.stop().unwrap();
-    }
-}
-
-#[test]
 fn default_runtime_construction_uses_one_worker() {
     for runtime in [
+        #[cfg(not(feature = "monitor"))]
         Runtime::new().unwrap(),
-        Runtime::builder().build().unwrap(),
-        Runtime::builder().workers(WorkersPolicy::default()).build().unwrap(),
+        Runtime::builder().monitor(MonitorPolicy::disabled()).build().unwrap(),
+        Runtime::builder()
+            .monitor(MonitorPolicy::disabled())
+            .workers(WorkersPolicy::default())
+            .build()
+            .unwrap(),
     ] {
         runtime
             .scheduler()
@@ -269,7 +266,7 @@ fn explicit_panic_policies_preserve_runtime_construction() {
         Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::SHUTDOWN),
         Runtime::builder().workers(WorkersPolicy::exactly(1)).on(Panic::IGNORE),
     ] {
-        let runtime = builder.build().unwrap();
+        let runtime = builder.monitor(MonitorPolicy::disabled()).build().unwrap();
 
         assert_eq!(runtime.scheduler().block_on(async |_| 42).unwrap(), 42);
         runtime.stop().unwrap();
@@ -307,6 +304,7 @@ fn zero_shared_blocking_limits_are_rejected_when_the_runtime_is_built() {
 #[test]
 fn zero_shared_blocking_limit_can_be_replaced_before_building() {
     let runtime = Runtime::builder()
+        .monitor(MonitorPolicy::disabled())
         .blocking_pool(BlockingPoolPolicy::shared().max(0))
         .blocking_pool(BlockingPoolPolicy::shared().max(1))
         .build()

@@ -36,6 +36,9 @@ pub mod arc;
 pub mod sync;
 
 mod error;
+#[cfg(test)]
+#[cfg(feature = "seismograph")]
+mod gamma_round2_telemetry;
 mod telemetry;
 
 pub use error::Error;

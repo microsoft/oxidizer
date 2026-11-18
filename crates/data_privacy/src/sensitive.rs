@@ -81,12 +81,14 @@ where
     fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter) -> std::fmt::Result {
         let v = &self.value;
 
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only the prefix written by Cursor is read; the initial contents of unwritten bytes are never exposed.")]
         let mut local_buf = [0u8; STACK_BUFFER_SIZE];
         let amount = {
             let mut cursor = std::io::Cursor::new(&mut local_buf[..]);
             if std::io::Write::write_fmt(&mut cursor, format_args!("{v:?}")).is_ok() {
                 cursor.position() as usize
             } else {
+                // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Both len + 1 and len + 2 exceed the fixed buffer length and select the identical fallback.")]
                 local_buf.len() + 1 // force fallback case on write errors
             }
         };
@@ -114,12 +116,14 @@ where
     fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter) -> std::fmt::Result {
         let v = &self.value;
 
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only the prefix written by Cursor is read; the initial contents of unwritten bytes are never exposed.")]
         let mut local_buf = [0u8; STACK_BUFFER_SIZE];
         let amount = {
             let mut cursor = std::io::Cursor::new(&mut local_buf[..]);
             if std::io::Write::write_fmt(&mut cursor, format_args!("{v}")).is_ok() {
                 cursor.position() as usize
             } else {
+                // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Both len + 1 and len + 2 exceed the fixed buffer length and select the identical fallback.")]
                 local_buf.len() + 1 // force fallback case on write errors
             }
         };

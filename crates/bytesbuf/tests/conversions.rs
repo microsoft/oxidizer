@@ -6,6 +6,9 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 #[cfg(feature = "bytes-compat")]
+use core::sync::atomic as sync_fence;
+
+#[cfg(feature = "bytes-compat")]
 use bytesbuf::mem;
 
 mod support;

@@ -114,6 +114,22 @@ mod tests {
     use crate::transform::testing::MockCodec;
 
     #[test]
+    fn gamma_survivor_private_transform_adapter_debug_names_every_type_and_inner_tier() {
+        let adapter = TransformAdapter::from_boxed(
+            MockCache::<u64, u64>::new(),
+            Box::new(TransformEncoder::infallible(|key: &u32| u64::from(*key))),
+            Box::new(TransformCodec::new(
+                |value: &u16| Ok::<_, std::convert::Infallible>(u64::from(*value)),
+                |value: u64| Ok::<_, std::convert::Infallible>(u16::try_from(value).unwrap()),
+            )),
+        );
+        let output = format!("{adapter:?}");
+        for label in ["inner: MockCache", "K: \"u32\"", "KT: \"u64\"", "V: \"u16\"", "VT: \"u64\""] {
+            assert!(output.contains(label), "{output}");
+        }
+    }
+
+    #[test]
     fn transform_adapter_debug() {
         let codec = TransformCodec::new(
             |v: &String| v.parse::<i32>(),

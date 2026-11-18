@@ -62,6 +62,7 @@ impl Relocator {
         (source, self.destination.clone())
     }
 
+    // #[gamma::skip(parameter.default_shadow, reason = "Both callers pass source_numa_node = 0, which is already its default value.")]
     fn new(source_numa_node: u32, destination_numa_node: u32) -> Self {
         let builder = THREAD_BUILDER.get_or_init(ThreadBuilder::default);
         Self {
@@ -74,12 +75,6 @@ impl Relocator {
 
     fn source_thread_id() -> ThreadId {
         *SOURCE_THREAD_ID.get_or_init(|| {
-            #[cfg(miri)]
-            {
-                return thread::current().id();
-            }
-
-            #[cfg(not(miri))]
             thread::spawn(|| thread::current().id())
                 .join()
                 .expect("source thread only reads its own ID and cannot panic")
@@ -106,7 +101,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)]
     fn between_threads_uses_distinct_threads_on_the_same_numa_node() {
         let mut relocation = Relocation {
             had_source: false,
@@ -123,7 +117,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)]
     fn between_numa_nodes_uses_distinct_numa_nodes() {
         let mut relocation = Relocation {
             had_source: false,

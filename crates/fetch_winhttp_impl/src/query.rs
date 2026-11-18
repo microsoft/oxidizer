@@ -108,6 +108,7 @@ const fn raw_trailers_query_flags() -> u32 {
 }
 
 pub(crate) fn query_status_code(bindings: &BindingsFacade, request: RawHandle) -> Result<u32, QueryError> {
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "a successful numeric WinHTTP query overwrites the entire DWORD; failures return before reading it, and other returned byte lengths are rejected")]
     let mut status_code = 0_u32;
     let mut byte_len = DWORD_BYTES;
     let buffer = NonNull::from(&mut status_code).cast();
@@ -140,6 +141,7 @@ pub(crate) fn query_raw_trailers(bindings: &BindingsFacade, request: RawHandle) 
 }
 
 pub(crate) fn query_protocol_used(bindings: &BindingsFacade, request: RawHandle) -> Result<Version, QueryError> {
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "a successful protocol option query overwrites the entire DWORD; failures return before reading it, and other returned byte lengths are rejected")]
     let mut protocol_mask = 0_u32;
     let mut byte_len = DWORD_BYTES;
     let buffer = NonNull::from(&mut protocol_mask).cast();
@@ -245,6 +247,82 @@ mod tests {
     use crate::bindings::{BindingsFacade, MockBindings};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::mocks::raw_handle;
+
+    #[test]
+    fn gamma_survivor_raw_header_second_query_errors_and_length_diagnostics() {
+        let mut bindings = MockBindings::new();
+        bindings.expect_query_headers().returning(|_, _, buffer, byte_len| {
+            if buffer.is_none() {
+                *byte_len = 4;
+                Err(WinHttpError::new(122, WinHttpOperation::QueryHeaders))
+            } else {
+                Err(WinHttpError::new(5, WinHttpOperation::QueryHeaders))
+            }
+        });
+        let error = query_raw_headers(&BindingsFacade::mock(Arc::new(bindings)), raw_handle(3)).unwrap_err();
+        assert!(error.to_string().contains("Win32 error 5"));
+        let mut bindings = MockBindings::new();
+        bindings.expect_query_headers().returning(|_, _, buffer, byte_len| {
+            if buffer.is_none() {
+                *byte_len = 4;
+                Err(WinHttpError::new(122, WinHttpOperation::QueryHeaders))
+            } else {
+                *byte_len = 5;
+                Ok(())
+            }
+        });
+        let error = query_raw_headers(&BindingsFacade::mock(Arc::new(bindings)), raw_handle(3)).unwrap_err();
+        assert!(error.to_string().contains("wire-encoded headers"), "{error}");
+        assert!(error.to_string().contains("5 bytes"), "{error}");
+        let mut bindings = MockBindings::new();
+        bindings.expect_query_option().returning(|_, _, buffer, byte_len| {
+            assert_eq!(*byte_len, 4);
+            // SAFETY: query_protocol_used supplies an initialized, writable DWORD.
+            unsafe {
+                buffer.unwrap().cast::<u32>().as_ptr().write(0);
+            }
+            Ok(())
+        });
+        bindings.expect_query_headers().returning(|_, _, buffer, byte_len| {
+            if buffer.is_none() {
+                *byte_len = 4;
+                Err(WinHttpError::new(122, WinHttpOperation::QueryHeaders))
+            } else {
+                *byte_len = 6;
+                Ok(())
+            }
+        });
+        let error = query_protocol_used(&BindingsFacade::mock(Arc::new(bindings)), raw_handle(3)).unwrap_err();
+        assert!(error.to_string().contains("HTTP version"), "{error}");
+        assert!(error.to_string().contains("6 bytes"), "{error}");
+    }
+
+    #[test]
+    fn gamma_survivor_legacy_header_query_rejects_odd_size_and_native_failure() {
+        for odd in [true, false] {
+            let mut bindings = MockBindings::new();
+            bindings.expect_query_headers().returning(move |_, _, buffer, byte_len| {
+                if buffer.is_none() {
+                    *byte_len = if odd { 3 } else { 4 };
+                    Err(WinHttpError::new(122, WinHttpOperation::QueryHeaders))
+                } else {
+                    Err(WinHttpError::new(5, WinHttpOperation::QueryHeaders))
+                }
+            });
+            let error = super::query_header_string(
+                &BindingsFacade::mock(Arc::new(bindings)),
+                raw_handle(3),
+                WINHTTP_QUERY_VERSION,
+                "HTTP version",
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(if odd { "odd UTF-16 byte length: 3" } else { "Win32 error 5" })
+            );
+        }
+    }
 
     // The routing enumeration wraps errors that retain user-erased source state.
     assert_not_impl_any!(QueryError: UnwindSafe, RefUnwindSafe);

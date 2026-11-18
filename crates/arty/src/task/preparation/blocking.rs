@@ -5,10 +5,15 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use arty_executor::TaskCompletion;
 
+use crate::runtime::monitoring::{BlockingJob, BlockingTaskEvents, BlockingTaskMonitoring};
 use crate::task::handle::{JoinHandle, JoinHandlePool, Sender};
 use crate::task::preparation::discard_panicking_drop;
 
-pub(crate) fn prepare_blocking<F, R>(result_pool: &JoinHandlePool, body: F) -> (impl FnOnce() + Send + 'static, JoinHandle<R>)
+pub(crate) fn prepare_blocking<F, R>(
+    result_pool: &JoinHandlePool,
+    body: F,
+    monitoring: BlockingTaskMonitoring,
+) -> (BlockingJob, JoinHandle<R>)
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
@@ -17,11 +22,11 @@ where
     let task = BlockingTask {
         pending: Some((body, result_tx)),
     };
-    (move || task.run(), handle)
+    (monitoring.prepare(task), handle)
 }
 
-struct BlockingTask<F, R: Send + 'static> {
-    pending: Option<(F, Sender<R>)>,
+pub(crate) struct BlockingTask<F, R: Send + 'static> {
+    pub(crate) pending: Option<(F, Sender<R>)>,
 }
 
 impl<F, R> BlockingTask<F, R>
@@ -29,13 +34,15 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    fn run(mut self) {
+    pub(crate) fn run(mut self, monitoring: BlockingTaskEvents<'_>) {
         let (body, result_tx) = self.pending.take().expect("a blocking task is consumed exactly once");
         match catch_unwind(AssertUnwindSafe(body)) {
             Ok(result) => {
+                monitoring.completed();
                 result_tx.completed(result);
             }
             Err(panic) => {
+                monitoring.panicked();
                 result_tx.panicked(panic, None);
             }
         }

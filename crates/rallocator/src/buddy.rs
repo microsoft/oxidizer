@@ -18,7 +18,12 @@ impl Nodes {
     unsafe fn read(self, address: usize) -> (usize, usize, bool) {
         match self {
             // SAFETY: The address is a registered node owned by this tree.
-            Self::Map(map) => unsafe { map.children(address) },
+            Self::Map(map) => unsafe {
+                map.children(
+                    // #[gamma::skip(expr.increment, reason = "Map nodes are chunk-aligned; adding one stays in the same pagemap entry")]
+                    address,
+                )
+            },
             Self::Inline => {
                 let pointer = address as *const usize;
                 // SAFETY: The owned inline node contains two initialized words.
@@ -37,7 +42,12 @@ impl Nodes {
     unsafe fn write(self, address: usize, left: usize, right: usize, red: bool) {
         match self {
             // SAFETY: This registered node and its aligned links belong to the tree.
-            Self::Map(map) => unsafe { map.set_children(address, left, right, red) },
+            Self::Map(map) => unsafe {
+                map.set_children(
+                    // #[gamma::skip(expr.increment, reason = "Map nodes are chunk-aligned; adding one stays in the same pagemap entry")]
+                    address, left, right, red,
+                );
+            },
             Self::Inline => {
                 let pointer = address as *mut usize;
                 // SAFETY: The node exclusively owns two writable metadata words.
@@ -93,20 +103,27 @@ impl Nodes {
         let (l, r, c) = unsafe { self.read(h) };
         // SAFETY: Recoloring leaves the owned root's links intact.
         unsafe { self.color(h, !c) };
-        // SAFETY: Both helpers accept null children and owned tree nodes.
-        let red = unsafe { self.red(l) };
-        // SAFETY: Only the child's color changes; null children are ignored.
-        unsafe { self.color(l, !red) };
-        // SAFETY: Both helpers accept null children and owned tree nodes.
-        let red = unsafe { self.red(r) };
-        // SAFETY: Only the child's color changes; null children are ignored.
-        unsafe { self.color(r, !red) };
+        // #[gamma::skip(cond.always_true, literal.int_increment, reason = "Children are null or aligned addresses, never one; red(null) is false and color(null) does nothing")]
+        if l != 0 {
+            // SAFETY: This child belongs to the exclusive tree.
+            let red = unsafe { self.red(l) };
+            // SAFETY: Only the child's color changes.
+            unsafe { self.color(l, !red) };
+        }
+        // #[gamma::skip(cond.always_true, literal.int_increment, reason = "Children are null or aligned addresses, never one; red(null) is false and color(null) does nothing")]
+        if r != 0 {
+            // SAFETY: This child belongs to the exclusive tree.
+            let red = unsafe { self.red(r) };
+            // SAFETY: Only the child's color changes.
+            unsafe { self.color(r, !red) };
+        }
     }
 
     unsafe fn balance(self, mut h: usize) -> usize {
         // SAFETY: Standard left-leaning RB transformations preserve node ownership.
         let (l, r, _) = unsafe { self.read(h) };
         // SAFETY: Both links are owned nodes or null leaves.
+        // #[gamma::skip(logical.and_remove_right, reason = "If both children are red, an extra left rotation makes the old root and its left child consecutive red left links; the immediately following right rotation exactly restores the original links and colors before the same flip")]
         if unsafe { self.red(r) } && !unsafe { self.red(l) } {
             // SAFETY: The red right child satisfies left-rotation preconditions.
             h = unsafe { self.rotate_left(h) };
@@ -126,6 +143,7 @@ impl Nodes {
         // SAFETY: Rotations preserve the root's node ownership.
         let (l, r, _) = unsafe { self.read(h) };
         // SAFETY: Both child links belong to the exclusive tree.
+        // #[gamma::skip(logical.and_remove_left, reason = "After the preceding fixups a red right child implies a red left child: a left rotation installs a red left link, a right rotation installs two red children, and without either rotation the first condition already excluded an isolated red right link")]
         if unsafe { self.red(l) } && unsafe { self.red(r) } {
             // SAFETY: Both children are red, satisfying the color-flip precondition.
             unsafe { self.flip(h) };
@@ -141,6 +159,7 @@ impl Nodes {
         }
         // SAFETY: The nonempty subtree is initialized and exclusively owned.
         let (mut l, mut r, c) = unsafe { self.read(h) };
+        // #[gamma::skip(relational.lt_to_le, reason = "A newly inserted owned block is distinct from every block already in the tree")]
         if address < h {
             // SAFETY: The distinct key belongs in the left subtree.
             l = unsafe { self.insert(l, address) };
@@ -159,6 +178,7 @@ impl Nodes {
         unsafe { self.flip(h) };
         // SAFETY: Color changes leave this live root and its links intact.
         let (l, r, c) = unsafe { self.read(h) };
+        // #[gamma::skip(logical.and_remove_left, literal.int_increment, reason = "Both callers enter only with a nonnull black left 2-node in a valid equal-black-height tree, so its right sibling is necessarily nonnull; every node address is aligned and therefore never one")]
         if r != 0 && {
             // SAFETY: The nonnull right child is an owned node.
             let child = unsafe { self.read(r).0 };
@@ -182,6 +202,7 @@ impl Nodes {
         unsafe { self.flip(h) };
         // SAFETY: The root remains initialized and owned.
         let l = unsafe { self.read(h).0 };
+        // #[gamma::skip(logical.and_remove_left, literal.int_increment, reason = "The sole caller enters only with a nonnull black right 2-node in a valid equal-black-height tree, so its left sibling is necessarily nonnull; every node address is aligned and therefore never one")]
         if l != 0 && {
             // SAFETY: This nonnull left child belongs to the tree.
             let child = unsafe { self.read(l).0 };
@@ -251,6 +272,7 @@ impl Nodes {
                 h = unsafe { self.rotate_right(h) };
             }
             // SAFETY: The possibly rotated root remains initialized.
+            // #[gamma::skip(logical.and_remove_left, reason = "Deletion's key-present precondition is preserved across rotations; on this key>=root path an absent right subtree therefore implies that the present key equals the root")]
             if key == h && unsafe { self.read(h).1 } == 0 {
                 return 0;
             }
@@ -293,19 +315,27 @@ impl Nodes {
             }
             // SAFETY: Every traversed node belongs to the exclusive tree.
             let (l, r, _) = unsafe { self.read(h) };
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            // #[gamma::skip(relational.lt_to_le, reason = "Equality already returned true before reading the child links")]
             h = if key < h { l } else { r };
         }
         false
     }
 
-    unsafe fn remove(self, root: &mut usize, key: usize) {
-        // SAFETY: key is present; the mutable root grants exclusive tree access.
-        let (l, r, _) = unsafe { self.read(*root) };
+    unsafe fn prepare_remove(self, root: usize) {
+        // SAFETY: The caller exclusively owns this initialized nonempty tree root.
+        let (l, r, _) = unsafe { self.read(root) };
         // SAFETY: Root links refer to owned nodes or null leaves.
+        // #[gamma::skip(logical.and_remove_right, reason = "The caller supplies a valid left-leaning tree before deletion: a red right child cannot exist without a red left child, so a black left child already proves that the right child is black")]
         if !unsafe { self.red(l) } && !unsafe { self.red(r) } {
             // SAFETY: The deletion algorithm temporarily reddens this owned root.
-            unsafe { self.color(*root, true) };
+            unsafe { self.color(root, true) };
         }
+    }
+
+    unsafe fn remove(self, root: &mut usize, key: usize) {
+        // SAFETY: key is present; the mutable root grants exclusive tree access.
+        unsafe { self.prepare_remove(*root) };
         // SAFETY: The key is present in the exclusively owned tree.
         *root = unsafe { self.delete(*root, key) };
         // SAFETY: The resulting root is a live node or null.
@@ -320,6 +350,7 @@ impl Nodes {
         // SAFETY: Each traversed node is initialized and exclusively owned.
         while unsafe { self.read(h).0 } != 0 {
             // SAFETY: The loop condition established a nonnull left child.
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             h = unsafe { self.read(h).0 };
         }
         // SAFETY: The located minimum is present in this tree.
@@ -365,15 +396,18 @@ impl<const MIN: usize, const MAX: usize> Buddy<MIN, MAX> {
         budget: &mut usize,
     ) -> seismograph_rallocator::native::Ranges {
         let mut result = seismograph_rallocator::native::Ranges::EMPTY;
+        // #[gamma::skip(iter.min_to_max, reason = "empty_above is at most MAX and every class at or above it is empty; visiting those classes only rewrites zero counts and consumes no walk budget")]
         for bits in MIN..self.empty_above.min(MAX) {
             let entry = &self.entries[bits];
             result.counts[bits] = entry.cache.iter().filter(|address| **address != 0).count() as u64;
+            // #[gamma::skip(literal.int_increment, reason = "Every pending entry is written before length makes it eligible to pop")]
             let mut pending = [0usize; CAPACITY];
             let mut length = usize::from(entry.root != 0);
             pending[0] = entry.root;
             while length != 0 {
                 if *budget == 0 {
                     result.complete = false;
+                    // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                     break;
                 }
                 *budget -= 1;
@@ -386,6 +420,7 @@ impl<const MIN: usize, const MAX: usize> Buddy<MIN, MAX> {
                     if child != 0 {
                         if length == pending.len() {
                             result.complete = false;
+                            // #[gamma::skip(loop.break_to_continue, reason = "The full pending stack is unchanged when this branch continues; every remaining child is either null or encounters the same full stack, and complete=false then exits the outer walk")]
                             break;
                         }
                         pending[length] = child;
@@ -414,7 +449,13 @@ impl<const MIN: usize, const MAX: usize> Buddy<MIN, MAX> {
             let merge = present
                 && match nodes {
                     // SAFETY: Presence proves both buddies are registered and owned.
-                    Nodes::Map(map) => unsafe { map.can_merge(address, 1 << bits) },
+                    Nodes::Map(map) => unsafe {
+                        map.can_merge(
+                            // #[gamma::skip(expr.increment, reason = "Both the block and its buddy are chunk-aligned; adding one selects the same boundary-marker entry")]
+                            address,
+                            1 << bits,
+                        )
+                    },
                     Nodes::Inline => true,
                 };
             if merge {
@@ -447,6 +488,7 @@ impl<const MIN: usize, const MAX: usize> Buddy<MIN, MAX> {
     /// All nodes in this buddy remain registered / committed as appropriate.
     /// `bits` is in MIN..MAX, and caller has exclusive access to this range.
     pub(crate) unsafe fn take(&mut self, nodes: Nodes, bits: usize) -> usize {
+        // #[gamma::skip(logical.or_remove_right, relational.ge_to_gt, reason = "empty_above never exceeds MAX; equality with empty_above can only inspect empty classes and preserves the same zero result and empty bound")]
         if bits >= self.empty_above || bits >= MAX {
             return 0;
         }
@@ -455,6 +497,7 @@ impl<const MIN: usize, const MAX: usize> Buddy<MIN, MAX> {
         let mut address = unsafe { nodes.smallest(&mut entry.root) };
         // Preserve buddy.h's selection AND its cache-replacement order.
         for slot in &mut entry.cache {
+            // #[gamma::skip(logical.or_remove_left, relational.gt_to_ge, literal.int_increment, reason = "Candidates are null or aligned nonzero addresses, never one; removing the zero check only omits no-op zero/zero swaps because every nonzero slot already exceeds zero, and equal-address swaps are no-ops")]
             if address == 0 || *slot > address {
                 std::mem::swap(slot, &mut address);
             }
@@ -545,8 +588,184 @@ impl<const MIN: usize, const MAX: usize> Buddy<MIN, MAX> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_inline_node_words_have_exact_boundaries_and_color_bit() {
+        let mut storage = [0x1111_2222_3333_4444_u128; 4];
+        let address = storage.as_mut_ptr().addr() + 16;
+        // SAFETY: The middle initialized u128 is aligned and exclusively owns both node words.
+        unsafe { super::Nodes::Inline.write(address, 0x2000, 0x3000, true) };
+        assert_eq!(storage[0], 0x1111_2222_3333_4444);
+        assert_eq!(
+            storage[1].to_ne_bytes(),
+            [0x2001_usize.to_ne_bytes(), 0x3000_usize.to_ne_bytes()].concat().as_slice()
+        );
+        assert_eq!(storage[2], 0x1111_2222_3333_4444);
+        // SAFETY: Both node words were initialized above and remain live in this storage.
+        assert_eq!(unsafe { super::Nodes::Inline.read(address) }, (0x2000, 0x3000, true));
+    }
     use super::*;
     use crate::hal;
+
+    #[test]
+    fn color_flip_preserves_null_leaf_links() {
+        let mut storage = [0_usize; 2];
+        let address = storage.as_mut_ptr().expose_provenance();
+        let nodes = Nodes::Inline;
+        for expected_red in [true, false] {
+            // SAFETY: The leaf exclusively owns two initialized, aligned node words.
+            unsafe { nodes.flip(address) };
+            // SAFETY: Flipping the color retains the live node and both initialized links.
+            assert_eq!(unsafe { nodes.read(address) }, (0, 0, expected_red));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_take_preserves_empty_bounds_and_the_last_class_sentinel() {
+        let mut buddy = Buddy::<4, 8>::new();
+        for bits in [4, 5, 6, 7, 8] {
+            // SAFETY: The empty buddy owns no nodes, so rejected/empty requests dereference no storage.
+            assert_eq!(unsafe { buddy.take(Nodes::Inline, bits) }, 0);
+            assert_eq!(buddy.empty_above, 4);
+        }
+        let mut storage = [0_u128; 32];
+        let base = storage.as_mut_ptr().addr().next_multiple_of(128);
+        // SAFETY: This aligned 128-byte block lies entirely in exclusively owned initialized storage.
+        assert_eq!(unsafe { buddy.add(Nodes::Inline, base, 7) }, 0);
+        // SAFETY: The buddy exclusively owns the one committed block.
+        assert_eq!(unsafe { buddy.take(Nodes::Inline, 7) }, base);
+        assert_eq!(buddy.empty_above, 8);
+        // SAFETY: No nodes remain; the last size class must return without descending past MAX.
+        assert_eq!(unsafe { buddy.take(Nodes::Inline, 7) }, 0);
+        assert_eq!(buddy.empty_above, 8);
+    }
+
+    #[test]
+    fn gamma_round2_split_rejoin_and_full_coalescence_preserve_exact_blocks() {
+        let mut storage = [0_u128; 64];
+        let base = storage.as_mut_ptr().addr().next_multiple_of(256);
+        let mut buddy = Buddy::<4, 8>::new();
+        // SAFETY: The aligned 128-byte block lies within the initialized, exclusively owned storage.
+        assert_eq!(unsafe { buddy.add(Nodes::Inline, base, 7) }, 0);
+        // SAFETY: A 16-byte request splits the currently owned 128-byte block.
+        assert_eq!(unsafe { buddy.take(Nodes::Inline, 4) }, base);
+        // SAFETY: Every retained node is live within the same immutable backing.
+        let retained = unsafe { buddy.validate(Nodes::Inline) };
+        assert_eq!(retained, [(base + 16, 4), (base + 32, 5), (base + 64, 6)]);
+        // SAFETY: The taken 16-byte block is returned once and can merge with its retained siblings.
+        assert_eq!(unsafe { buddy.add(Nodes::Inline, base, 4) }, 0);
+        // SAFETY: Rejoining must restore exactly the original block and class.
+        assert_eq!(unsafe { buddy.validate(Nodes::Inline) }, [(base, 7)]);
+        // SAFETY: The adjacent aligned 128-byte block is disjoint and exclusively transferred once.
+        assert_eq!(unsafe { buddy.add(Nodes::Inline, base + 128, 7) }, base);
+        // SAFETY: The merged full-size block was returned, leaving no retained nodes.
+        assert!(unsafe { buddy.validate(Nodes::Inline) }.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_remove_preparation_recolors_only_black_two_nodes() {
+        let mut storage = [0_u128; 12];
+        let base = storage.as_mut_ptr().addr();
+        let nodes = Nodes::Inline;
+        let root = base + 64;
+        for (left, right, left_red, expected_root_red) in [(0, 0, false, true), (base, base + 128, false, true), (base, 0, true, false)] {
+            for (address, l, r, red) in [(base, 0, 0, left_red), (base + 128, 0, 0, false), (root, left, right, false)] {
+                // SAFETY: Every disjoint two-word node lies within initialized, exclusively owned storage.
+                unsafe { nodes.write(address, l, r, red) };
+            }
+            // SAFETY: Each fixture is a valid exclusively owned nonempty LLRB root.
+            unsafe { nodes.prepare_remove(root) };
+            // SAFETY: Preparation retains all live links and changes only the root color.
+            assert_eq!(unsafe { nodes.read(root) }, (left, right, expected_root_red));
+            // SAFETY: Child nodes remain live and must retain their exact prior colors.
+            assert_eq!(unsafe { nodes.read(base) }, (0, 0, left_red));
+            // SAFETY: The initialized right node remains unchanged even when absent from the root.
+            assert_eq!(unsafe { nodes.read(base + 128) }, (0, 0, false));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_bounded_observation_visits_the_leaf_before_the_deeper_left_subtree() {
+        let mut storage = [0_u128; 18];
+        let base = storage.as_mut_ptr().addr();
+        let nodes = Nodes::Inline;
+        let root = base + 128;
+        let left = base + 64;
+        let right = base + 256;
+        for (address, l, r, red) in [
+            (base, 0, 0, false),
+            (base + 96, 0, 0, false),
+            (left, base, base + 96, true),
+            (right, 0, 0, false),
+            (root, left, right, false),
+        ] {
+            // SAFETY: Each disjoint, aligned 16-byte node lies in the initialized, exclusively owned storage.
+            unsafe { nodes.write(address, l, r, red) };
+        }
+        let mut buddy = Buddy::<4, 8>::new();
+        buddy.entries[4].root = root;
+        buddy.empty_above = 5;
+        // SAFETY: The five immutable nodes form an ordered, black-height-balanced LLRB tree.
+        assert_eq!(unsafe { buddy.validate(nodes) }.len(), 5);
+        let mut budget = 10;
+        // SAFETY: The valid inline tree remains exclusively owned and backed throughout traversal.
+        let observed = unsafe { buddy.observe_with_pending::<2>(nodes, &mut budget) };
+        assert!(observed.complete);
+        assert_eq!(observed.counts[4], 5);
+        assert_eq!(observed.counts.iter().sum::<u64>(), 5);
+        assert_eq!(budget, 5);
+        let mut budget = 10;
+        // SAFETY: Reducing only the pending capacity cannot invalidate the immutable backed nodes.
+        let partial = unsafe { buddy.observe_with_pending::<1>(nodes, &mut budget) };
+        assert!(!partial.complete);
+        assert_eq!(partial.counts[4], 1);
+        assert_eq!(budget, 9);
+    }
+
+    #[test]
+    fn gamma_survivor_inline_tree_removal_and_bounded_observation() {
+        use std::alloc::{GlobalAlloc, Layout, System};
+
+        let layout = Layout::from_size_align(4096, 4096).unwrap();
+        // SAFETY: This fresh allocation provides aligned storage for disjoint inline nodes.
+        let pointer = unsafe { System.alloc(layout) };
+        assert!(!pointer.is_null());
+        for multiplier in [1, 7, 13, 31] {
+            let mut buddy = Buddy::<4, 12>::new();
+            let mut expected = std::collections::BTreeSet::new();
+            for index in 0..64 {
+                let address = pointer.addr() + ((index * multiplier) % 64) * 32;
+                expected.insert(address);
+                // SAFETY: Each disjoint 16-byte node is transferred once, with its sibling withheld.
+                assert_eq!(unsafe { buddy.add(Nodes::Inline, address, 4) }, 0);
+                // SAFETY: All tree nodes remain in exclusively owned, live backing.
+                assert_eq!(unsafe { buddy.validate(Nodes::Inline) }.len(), index + 1);
+            }
+            let mut budget = 0;
+            // SAFETY: The buddy exclusively owns stable initialized nodes.
+            let partial = unsafe { buddy.observe(Nodes::Inline, &mut budget) };
+            assert!(!partial.complete);
+            assert_eq!(partial.counts[4], 3);
+            let mut budget = 100;
+            // SAFETY: Same immutable, fully backed tree.
+            let complete = unsafe { buddy.observe(Nodes::Inline, &mut budget) };
+            assert!(complete.complete);
+            assert_eq!(complete.counts[4], 64);
+            assert_eq!(budget, 39);
+            for remaining in (0..64).rev() {
+                // SAFETY: Each take transfers one currently owned block.
+                let address = unsafe { buddy.take(Nodes::Inline, 4) };
+                assert!(expected.remove(&address));
+                // SAFETY: Only remaining buddy-owned nodes are inspected.
+                assert_eq!(unsafe { buddy.validate(Nodes::Inline) }.len(), remaining);
+            }
+            assert!(expected.is_empty());
+            // SAFETY: The now-empty buddy accepts an in-range request without dereferencing storage.
+            assert_eq!(unsafe { buddy.take(Nodes::Inline, 4) }, 0);
+            assert_eq!(buddy.empty_above, 4);
+        }
+        // SAFETY: No tree or node access survives the exact backing deallocation.
+        unsafe { System.dealloc(pointer, layout) };
+    }
 
     #[test]
     fn bounded_observation_counts_cached_and_tree_ranges_without_mutation() {

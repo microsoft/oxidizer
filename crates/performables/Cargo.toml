@@ -58,7 +58,7 @@ alloc_tracker.workspace = true
 criterion.workspace = true
 many_cpus.workspace = true
 metabench.workspace = true
-seismograph = { path = "../seismograph", features = ["monitor"] }
+seismograph = { path = "../seismograph", features = ["test-util"] }
 seismograph_protocol = { path = "../seismograph_protocol" }
 serde = { workspace = true, features = ["std"] }
 static_assertions.workspace = true

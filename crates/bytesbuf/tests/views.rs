@@ -3,6 +3,8 @@
 
 //! View construction, reads, ranges, and lifetime handling.
 
+use core::sync::atomic as sync_fence;
+
 use bytesbuf::mem;
 
 // Shared fixture for integration tests and private unit tests.

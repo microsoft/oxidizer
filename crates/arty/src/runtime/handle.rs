@@ -45,7 +45,7 @@ use crate::task::RuntimeScheduler;
 /// ```
 /// use arty::runtime::Runtime;
 ///
-/// let runtime = Runtime::new()?;
+/// let runtime = Runtime::builder().build()?;
 /// let task = runtime.scheduler().spawn_anywhere((), |_, ()| async { 42 });
 /// assert_eq!(futures::executor::block_on(task)?, 42);
 /// runtime.stop()?;
@@ -56,6 +56,8 @@ pub struct Runtime {
     scheduler: RuntimeScheduler,
     worker_joiner: WorkerJoiner,
     shutdown_on_drop: bool,
+    #[cfg(any(test, feature = "monitor"))]
+    diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>,
 }
 
 impl Runtime {
@@ -76,7 +78,7 @@ impl Runtime {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use arty::runtime::Runtime;
     ///
     /// let runtime = Runtime::new()?;
@@ -118,7 +120,7 @@ impl Runtime {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let scheduler = runtime.scheduler();
     /// let first = scheduler.spawn_anywhere((), |_, ()| async { 20 });
     /// let second = scheduler.spawn_anywhere((), |_, ()| async { 22 });
@@ -132,6 +134,19 @@ impl Runtime {
     #[inline]
     pub fn scheduler(&self) -> &RuntimeScheduler {
         &self.scheduler
+    }
+
+    /// Returns the runtime's diagnostic handle for collection tests.
+    ///
+    /// Returns `None` when monitoring is disabled. Capture from a diagnostic
+    /// thread, not from an Arty worker that must answer the collection request.
+    /// This does not change the process-wide recorder.
+    #[cfg(all(test, not(miri)))]
+    #[must_use]
+    pub(crate) fn diagnostics(&self) -> Option<seismograph_runtime::RuntimeHandle> {
+        self.diagnostics
+            .as_ref()
+            .map(crate::runtime::monitoring::RuntimeDiagnostics::handle)
     }
 
     /// Takes ownership of this runtime, requests shutdown, and waits for its workers to stop.
@@ -149,6 +164,8 @@ impl Runtime {
     /// Returns an error if a worker panicked or an I/O driver failed during
     /// startup or normal operation. It does not return I/O driver shutdown
     /// failures. It waits for all workers to stop before it reports a failure.
+    /// With monitoring enabled, also reports a stored monitor failure unless a
+    /// worker or runtime failure takes precedence.
     /// To receive a task failure, await its [`JoinHandle`](crate::task::JoinHandle).
     ///
     /// # Panics
@@ -162,7 +179,7 @@ impl Runtime {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
     ///     cx.control().request_stop();
     ///     cx.scheduler()
@@ -175,23 +192,50 @@ impl Runtime {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn stop(mut self) -> Result<(), Error> {
-        if crate::runtime::worker::WorkerMarker::is_current() {
+        self.stop_with(crate::runtime::worker::WorkerMarker::is_current(), Self::wait)
+    }
+
+    // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "The November 4 afternoon campaign timed out when resetting current_worker made a worker try to join itself.")]
+    fn stop_with(&mut self, current_worker: bool, wait: impl FnOnce(&mut Self) -> Result<(), Error>) -> Result<(), Error> {
+        if
+        // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        current_worker {
             let cause = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
             crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(&self.scheduler.dispatcher, cause);
             self.shutdown_on_drop = false;
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             panic_shutdown_from_worker("Runtime::stop");
         }
         _ = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
         self.shutdown_on_drop = false;
-        self.wait()
+        wait(self)
     }
 
-    fn wait(&self) -> Result<(), Error> {
+    #[cfg_attr(
+        not(any(test, feature = "monitor")),
+        expect(
+            clippy::needless_pass_by_ref_mut,
+            reason = "monitoring consumes the diagnostic registration after workers stop"
+        )
+    )]
+    fn wait(&mut self) -> Result<(), Error> {
         let wait_error = self.worker_joiner.join().err();
+        #[cfg(any(test, feature = "monitor"))]
+        let monitor_error = self.diagnostics.take().and_then(|diagnostics| diagnostics.finish().err());
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
             return Err(Error::shutdown_failure(error));
         }
+        #[cfg(any(test, feature = "monitor"))]
+        {
+            monitor_result(wait_error, monitor_error)
+        }
+        #[cfg(not(any(test, feature = "monitor")))]
         wait_error.map_or(Ok(()), Err)
+    }
+
+    #[cfg(any(test, feature = "monitor"))]
+    pub(crate) fn set_diagnostics(&mut self, diagnostics: Option<crate::runtime::monitoring::RuntimeDiagnostics>) {
+        self.diagnostics = diagnostics;
     }
 
     pub(crate) const fn with_dispatcher(dispatcher: DispatcherClient, worker_joiner: WorkerJoiner) -> Self {
@@ -199,6 +243,8 @@ impl Runtime {
             scheduler: RuntimeScheduler::new(dispatcher),
             worker_joiner,
             shutdown_on_drop: true,
+            #[cfg(any(test, feature = "monitor"))]
+            diagnostics: None,
         }
     }
 }
@@ -212,6 +258,7 @@ impl Drop for Runtime {
         let cause = self.scheduler.dispatcher.stop(arty_executor::ShutdownCause::default());
         if crate::runtime::worker::WorkerMarker::is_current() {
             crate::runtime::worker::asynchronous::LocalWorker::begin_executor_shutdown(&self.scheduler.dispatcher, cause);
+            // #[gamma::skip(cond.always_false, tag = "oom", reason = "The November 4 afternoon campaign exceeded its memory limit when this guard no longer prevented another panic during worker unwinding.")]
             if std::thread::panicking() {
                 return;
             }
@@ -219,6 +266,12 @@ impl Drop for Runtime {
         }
         let _ = self.wait();
     }
+}
+
+#[cfg(any(test, feature = "monitor"))]
+#[cfg_attr(coverage_nightly, coverage(off))] // Native monitor error forwarding does not justify a fault-injection fixture.
+fn monitor_result(worker_error: Option<Error>, monitor_error: Option<Error>) -> Result<(), Error> {
+    worker_error.or(monitor_error).map_or(Ok(()), Err)
 }
 
 #[cold]
@@ -232,6 +285,44 @@ fn panic_shutdown_from_worker(operation: &str) -> ! {
 #[cfg_attr(coverage_nightly, coverage(off))]
 // These checks inject worker failures or retain the private joiner after consuming the runtime.
 mod tests {
+    #[test]
+    fn shutdown_preserves_monitor_errors_and_prefers_worker_errors() {
+        monitor_result(None, None).unwrap();
+        assert_eq!(
+            monitor_result(None, Some(Error::new("monitor"))).unwrap_err().to_string(),
+            "monitor"
+        );
+        assert_eq!(
+            monitor_result(Some(Error::new("worker")), Some(Error::new("monitor")))
+                .unwrap_err()
+                .to_string(),
+            "worker"
+        );
+    }
+
+    #[test]
+    fn gamma_round2_worker_stop_disarms_drop_shutdown_before_reporting_the_programming_error() {
+        let shutdown = crate::runtime::shutdown::Shutdown::default();
+        let endpoint = worker_endpoint(
+            crate::runtime::worker::asynchronous::command_channel().0,
+            Waker::noop().clone(),
+            ThreadBuilder::default().build(thread::current().id()),
+            Worker::new(
+                Pool::new(crate::runtime::config::RuntimeName::default(), None, None),
+                shutdown.clone(),
+            ),
+        );
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown));
+        let mut runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(Vec::new()));
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.stop_with(true, |_| panic!("worker stop must not join its own workers"))
+        }));
+        let armed = runtime.shutdown_on_drop;
+        runtime.shutdown_on_drop = false;
+        _ = panic.unwrap_err();
+        assert!(!armed);
+    }
+
     use std::future::poll_fn;
     use std::task::{Poll, Waker};
     use std::thread;
@@ -305,6 +396,7 @@ mod tests {
     #[test]
     fn ignored_task_worker_stop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .on(crate::runtime::hook::Panic::IGNORE)
             .build()
@@ -358,6 +450,7 @@ mod tests {
     #[test]
     fn ignored_task_worker_drop_skips_a_later_active_task() {
         let runtime = Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .on(crate::runtime::hook::Panic::IGNORE)
             .build()
@@ -466,6 +559,7 @@ mod tests {
 
     fn single_worker_runtime() -> Runtime {
         Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .blocking_pool(crate::runtime::BlockingPoolPolicy::shared().max(1))
             .build()

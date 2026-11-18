@@ -429,6 +429,7 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
         let mut hook = Some(after_first_copy);
         let readers = core::array::from_fn(|i| {
             let reader = Shard::snapshot_locked(&guards[i]);
+            // #[gamma::skip(literal.int_increment, tag = "test-seam", reason = "Production supplies an empty callback; moving this test-only hook from the first to the second copy does not change the fully read-locked snapshot.")]
             if i == 0 {
                 hook.take().expect("callback runs once after the first shard")();
             }
@@ -445,6 +446,73 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
 #[cfg(test)]
 mod tests {
     use super::{NUM_SHARDS, ThreadedLexicon};
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn gamma_survivor_threaded_deserialize_forwards_exact_entry_hint() {
+        struct EmptyHint(usize);
+
+        impl<'de> serde::de::SeqAccess<'de> for EmptyHint {
+            type Error = serde::de::value::Error;
+
+            fn next_element_seed<T: serde::de::DeserializeSeed<'de>>(&mut self, _: T) -> Result<Option<T::Value>, Self::Error> {
+                Ok(None)
+            }
+
+            fn size_hint(&self) -> Option<usize> {
+                Some(self.0)
+            }
+        }
+
+        let per_shard = super::MIN_PREALLOCATED_STRINGS_PER_SHARD;
+        let hint = NUM_SHARDS * per_shard;
+        let deserializer = serde::de::value::SeqAccessDeserializer::new(EmptyHint(hint));
+        let lexicon = <ThreadedLexicon as serde::Deserialize>::deserialize(deserializer).unwrap();
+        for shard in &lexicon.0.shards {
+            let (table, offsets, bytes) = shard.capacities();
+            assert!(table >= per_shard);
+            assert_eq!(offsets, per_shard + 1);
+            assert_eq!(bytes, 0);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_constructor_capacity_forwarding_and_empty_allocations() {
+        let empty = ThreadedLexicon::new();
+        assert!(empty.0.shards.iter().all(|shard| shard.capacities() == (0, 1, 0)));
+        let hinted = ThreadedLexicon::with_capacity_for_size_hint(NUM_SHARDS * super::MIN_PREALLOCATED_STRINGS_PER_SHARD);
+        assert!(hinted.0.shards.iter().all(|shard| shard.capacities().2 == 0));
+        for (strings, bytes) in [(0, 0), (NUM_SHARDS, NUM_SHARDS)] {
+            let lexicon = ThreadedLexicon::with_capacity(strings, bytes);
+            for shard in &lexicon.0.shards {
+                let (table, offsets, buffer) = shard.capacities();
+                assert_eq!(offsets, strings.div_ceil(NUM_SHARDS) + 1);
+                assert_eq!(buffer, bytes.div_ceil(NUM_SHARDS));
+                if strings == 0 {
+                    assert_eq!(table, 0);
+                }
+            }
+            let custom = ThreadedLexicon::with_capacity_and_hasher(strings, bytes, rustc_hash::FxBuildHasher);
+            for shard in &custom.0.shards {
+                let (_, offsets, buffer) = shard.capacities();
+                assert_eq!(offsets, strings.div_ceil(NUM_SHARDS) + 1);
+                assert_eq!(buffer, bytes.div_ceil(NUM_SHARDS));
+            }
+        }
+        let custom = ThreadedLexicon::with_hasher(rustc_hash::FxBuildHasher);
+        assert!(custom.0.shards.iter().all(|shard| shard.capacities() == (0, 1, 0)));
+    }
+
+    #[test]
+    fn gamma_survivor_snapshot_hook_runs_after_first_copy_exactly_once() {
+        use core::cell::Cell;
+
+        let lexicon = ThreadedLexicon::new();
+        let calls = Cell::new(0);
+        let reader = lexicon.0.build_reader_with_hook(|| calls.set(calls.get() + 1));
+        assert_eq!(calls.get(), 1);
+        assert_eq!(crate::Reader::len(&reader), 0);
+    }
     use crate::Reader;
 
     #[test]

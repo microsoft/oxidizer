@@ -14,6 +14,7 @@ use performables::arc::Arc;
 use thread_aware::{Thread, ThreadAware};
 
 use crate::runtime::hook::HookRegistration;
+use crate::runtime::monitoring::TaskMonitoring;
 use crate::runtime::shutdown::{Shutdown, ShutdownState};
 use crate::runtime::worker::asynchronous::{CommandSender, LocalWorker, QueuedFactory, QueuedIoAccess, SpawnCommand, SystemCommand};
 use crate::runtime::worker::blocking::Worker;
@@ -68,10 +69,13 @@ pub(crate) struct DispatcherCore {
     next_async_worker_index: AtomicUsize,
 
     remote_results: JoinHandlePool,
+    #[cfg(any(test, feature = "monitor"))]
+    diagnostics: std::sync::OnceLock<seismograph_runtime::RuntimeHandle>,
 }
 
 impl DispatcherCore {
     pub(crate) fn new(worker_endpoints: NonEmpty<WorkerEndpoint>, shutdown: Shutdown) -> Arc<Self> {
+        // #[gamma::skip(iter.first_to_last, reason = "The following assertion requires every endpoint to have the same owner.")]
         let owner = worker_endpoints.first().thread.owner();
         assert!(
             worker_endpoints.iter().all(|endpoint| endpoint.thread.owner() == owner),
@@ -101,11 +105,44 @@ impl DispatcherCore {
             worker_indices,
             next_async_worker_index: AtomicUsize::new(0),
             remote_results: JoinHandlePool::new(shutdown),
+            #[cfg(any(test, feature = "monitor"))]
+            diagnostics: std::sync::OnceLock::new(),
         })
+    }
+
+    #[cfg(any(test, feature = "monitor"))]
+    pub(crate) fn set_diagnostics(&self, runtime: Option<seismograph_runtime::RuntimeHandle>) {
+        if let Some(runtime) = runtime {
+            self.diagnostics
+                .set(runtime)
+                .expect("bootstrap sets runtime diagnostics exactly once");
+        }
+    }
+
+    #[cfg(any(test, feature = "monitor"))]
+    pub(crate) fn register_task_provider(&self, thread: ThreadId, handle: &seismograph_runtime::worker::WorkerHandle) {
+        let index = self
+            .worker_index(thread)
+            .expect("worker diagnostics use a registered runtime thread");
+        let endpoint = &self.worker_endpoints[usize::from(index)];
+        let commands = endpoint.commands.system_sender().clone();
+        let waker = endpoint.waker.clone();
+        handle
+            .register_task_provider(move |request| {
+                if commands.send(SystemCommand::Inspect { request }).is_ok() {
+                    waker.wake_by_ref();
+                }
+                // A failed send drops the request and reports collection failure.
+            })
+            .expect("bootstrap registers providers before their workers can stop");
     }
 
     pub(crate) fn stop_inner(&self, cause: ShutdownCause) -> ShutdownCause {
         self.shutdown().begin(cause);
+        #[cfg(any(test, feature = "monitor"))]
+        if let Some(runtime) = self.diagnostics.get() {
+            runtime.stopping();
+        }
         let cause = self.shutdown().cause().unwrap_or_default();
         // Shutdown stores the cause independently. This atomic only elects the
         // broadcaster. Observing `true` does not mean notification is complete.
@@ -127,13 +164,14 @@ impl DispatcherCore {
         WorkerIndex(self.next_async_worker_index.fetch_add(1, Ordering::Relaxed) % self.worker_endpoints.len())
     }
 
-    pub(crate) fn spawn<FF, F, R>(&self, future_factory: FF) -> JoinHandle<R>
+    pub(crate) fn spawn<FF, F, R, S>(&self, future_factory: FF, monitoring: TaskMonitoring<F, S>) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
+        S: Fn() -> usize + Send + 'static,
     {
-        self.enqueue(self.next_worker_index(), TaskPlacement::Any, future_factory)
+        self.enqueue(self.next_worker_index(), TaskPlacement::Any, future_factory, monitoring)
     }
 
     pub(crate) fn spawn_relocating<FF, F, R>(&self, source: &Thread, future_factory: FF) -> JoinHandle<R>
@@ -187,6 +225,7 @@ impl DispatcherCore {
     }
 
     pub(crate) fn owns(&self, thread: &Thread) -> bool {
+        // #[gamma::skip(iter.first_to_last, reason = "Construction asserts that every endpoint has the same owner.")]
         self.worker_endpoints.first().thread.owner() == thread.owner()
     }
 
@@ -201,6 +240,7 @@ impl DispatcherCore {
         let send_result = endpoint.commands.system_sender().send(SystemCommand::AccessIo {
             access: QueuedIoAccess::new(access),
         });
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         endpoint.waker.wake_by_ref();
         send_result.map_err(|_error| self.runtime_shutting_down_error())
     }
@@ -262,7 +302,7 @@ impl DispatcherCore {
         F: Future<Output = R> + 'static,
         R: Send + 'static,
     {
-        self.enqueue(worker_index, TaskPlacement::SameThread, future_factory)
+        self.enqueue(worker_index, TaskPlacement::SameThread, future_factory, TaskMonitoring::capture())
     }
 
     /// Records the execution worker so a successful result can relocate when its join is polled.
@@ -273,14 +313,22 @@ impl DispatcherCore {
         R: ThreadAware + 'static,
     {
         let source = self.worker_endpoints[usize::from(worker_index)].thread.clone();
-        self.enqueue(worker_index, placement, future_factory).relocate_result_from(source)
+        self.enqueue(worker_index, placement, future_factory, TaskMonitoring::capture())
+            .relocate_result_from(source)
     }
 
-    fn enqueue<FF, F, R>(&self, worker_index: WorkerIndex, placement: TaskPlacement, future_factory: FF) -> JoinHandle<R>
+    fn enqueue<FF, F, R, S>(
+        &self,
+        worker_index: WorkerIndex,
+        placement: TaskPlacement,
+        future_factory: FF,
+        monitoring: TaskMonitoring<F, S>,
+    ) -> JoinHandle<R>
     where
         FF: FnOnce(Context) -> F + Send + 'static,
         F: Future<Output = R> + 'static,
         R: Send + 'static,
+        S: Fn() -> usize + Send + 'static,
     {
         if let Some(join_handle) = JoinHandle::try_from_shutdown(self.shutdown()) {
             drop(future_factory);
@@ -290,7 +338,7 @@ impl DispatcherCore {
             .worker_endpoints
             .get(usize::from(worker_index))
             .expect("worker index must identify a registered runtime worker");
-        let (future_factory, join_handle) = prepare_remote(&self.remote_results, future_factory, placement);
+        let (future_factory, join_handle) = prepare_remote(&self.remote_results, future_factory, placement, monitoring);
 
         // A worker can close its channel before this send if shutdown already
         // reached that worker. The join handle detects the disconnection.
@@ -320,6 +368,37 @@ mod tests {
     use crate::runtime::dispatch::{DispatcherClient, test_threads};
     use crate::runtime::worker::asynchronous::{CommandReceiver, command_channel};
     use crate::runtime::worker::blocking::Pool;
+
+    #[test]
+    fn gamma_survivor_private_dispatch_starts_at_worker_zero_and_wakes_io_destination() {
+        use std::sync::atomic::AtomicUsize;
+        use std::task::{Wake, Waker};
+
+        #[derive(Default)]
+        struct Counter(AtomicUsize);
+        impl Wake for Counter {
+            fn wake(self: std::sync::Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+            fn wake_by_ref(self: &std::sync::Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let threads = test_threads(3);
+        let counter = std::sync::Arc::new(Counter::default());
+        let (mut first, rx) = endpoint(&threads[0]);
+        first.waker = Waker::from(std::sync::Arc::clone(&counter));
+        let (second, _second_rx) = endpoint(&threads[1]);
+        let (third, _third_rx) = endpoint(&threads[2]);
+        let core = DispatcherCore::new(NonEmpty::from_vec(vec![first, second, third]).unwrap(), Shutdown::default());
+        let selected: Vec<_> = (0..7).map(|_| usize::from(core.next_worker_index())).collect();
+        assert_eq!(selected, [0, 1, 2, 0, 1, 2, 0]);
+        core.access_io(WorkerIndex(0), Box::new(|_| {})).unwrap();
+        assert!(matches!(rx.system_receiver().try_recv().unwrap(), SystemCommand::AccessIo { .. }));
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+        let client = DispatcherClient::new(core);
+        assert_eq!(format!("{client:?}"), std::any::type_name::<DispatcherClient>());
+    }
 
     fn endpoint(thread: &Thread) -> (WorkerEndpoint, CommandReceiver) {
         let (commands, command_rx) = command_channel();
@@ -355,9 +434,15 @@ mod tests {
 
         let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default());
 
-        dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
+        dispatcher.spawn(
+            |_| async move { unreachable!("we do not expect the task to be executed") },
+            TaskMonitoring::capture(),
+        );
 
-        dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
+        dispatcher.spawn(
+            |_| async move { unreachable!("we do not expect the task to be executed") },
+            TaskMonitoring::capture(),
+        );
 
         assert_eq!(drain_spawn(&worker_rx).len(), 2);
     }
@@ -374,9 +459,15 @@ mod tests {
 
         let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default());
 
-        dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
+        dispatcher.spawn(
+            |_| async move { unreachable!("we do not expect the task to be executed") },
+            TaskMonitoring::capture(),
+        );
 
-        dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
+        dispatcher.spawn(
+            |_| async move { unreachable!("we do not expect the task to be executed") },
+            TaskMonitoring::capture(),
+        );
 
         assert_eq!(drain_spawn(&worker1_rx).len(), 1);
         assert_eq!(drain_spawn(&worker2_rx).len(), 1);
@@ -391,7 +482,10 @@ mod tests {
         let dispatcher = DispatcherCore::new(NonEmpty::from_vec(vec![worker1, worker2]).unwrap(), Shutdown::default());
 
         for _ in 0..4 {
-            dispatcher.spawn(|_| async move { unreachable!("we do not expect the task to be executed") });
+            dispatcher.spawn(
+                |_| async move { unreachable!("we do not expect the task to be executed") },
+                TaskMonitoring::capture(),
+            );
         }
 
         assert_eq!(drain_spawn(&worker1_rx).len(), 2);
@@ -462,7 +556,7 @@ mod tests {
         let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint(&threads[0]).0), Shutdown::default());
         dispatcher.stop_inner(ShutdownError::new(Error::worker_panicked()).into());
 
-        let mut join = pin!(dispatcher.spawn(|_| async {}));
+        let mut join = pin!(dispatcher.spawn(|_| async {}, TaskMonitoring::capture()));
         let Poll::Ready(Err(error)) = join.as_mut().poll(&mut task::Context::from_waker(Waker::noop())) else {
             panic!("shutdown rejection must be immediately ready");
         };
@@ -498,6 +592,48 @@ mod tests {
         assert_eq!(drain_system(&worker2_rx).len(), 0);
     }
 
+    #[cfg(any(test, feature = "monitor"))]
+    #[test]
+    fn dispatcher_stop_updates_its_registered_runtime() {
+        use seismograph_runtime::snapshot::{CaptureOptions, RuntimeState};
+
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("dispatcher-stop", 1));
+        let threads = test_threads(1);
+        let (worker, _worker_rx) = endpoint(&threads[0]);
+        let core = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default());
+        let client = DispatcherClient::new(core);
+        client.set_diagnostics(None);
+        client.set_diagnostics(Some(runtime.handle()));
+
+        client.stop(ShutdownCause::default());
+
+        assert_eq!(
+            runtime.handle().capture(CaptureOptions::default()).unwrap().state,
+            RuntimeState::Stopping
+        );
+    }
+
+    #[cfg(any(test, feature = "monitor"))]
+    #[test]
+    fn a_closed_worker_command_channel_reports_collection_failure() {
+        use seismograph_runtime::snapshot::{CaptureOptions, TaskCollection};
+        use seismograph_runtime::worker::{WorkerMetadata, WorkerRole};
+
+        let _monitoring = crate::runtime::monitoring::TEST_LOCK.lock().unwrap();
+        let runtime = seismograph_runtime::register_runtime(seismograph_runtime::RuntimeMetadata::new("closed-worker-channel", 1));
+        let threads = test_threads(1);
+        let (endpoint, receiver) = endpoint(&threads[0]);
+        let dispatcher = DispatcherCore::new(NonEmpty::new(endpoint), Shutdown::default());
+        let worker = runtime.register_worker(WorkerMetadata::new(WorkerRole::Core));
+        dispatcher.register_task_provider(threads[0].id(), &worker.handle());
+        drop(receiver);
+
+        let snapshot = runtime.handle().capture(CaptureOptions::default()).unwrap();
+        assert!(snapshot.tasks.is_empty());
+        assert_eq!(snapshot.workers[0].task_collection, TaskCollection::Failed);
+    }
+
     #[test]
     fn spawn_after_command_channel_closed_returns_disconnected_join_handle() {
         // After a worker closes its command channel during shutdown, later
@@ -516,7 +652,7 @@ mod tests {
         // Close the command channel.
         drop(command_rx);
 
-        let join_handle = dispatcher.spawn(|_| async move {});
+        let join_handle = dispatcher.spawn(|_| async move {}, TaskMonitoring::capture());
         let join_handle = pin!(join_handle);
 
         let mut cx = task::Context::from_waker(Waker::noop());

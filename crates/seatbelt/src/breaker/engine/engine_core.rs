@@ -56,6 +56,15 @@ enum State {
 
 impl State {
     fn enter(&mut self, now: Instant, settings: &EngineOptions) -> EnterCircuitResult {
+        self.enter_with(now, settings, Probes::allow_probe)
+    }
+
+    fn enter_with(
+        &mut self,
+        now: Instant,
+        settings: &EngineOptions,
+        mut allow_probe: impl FnMut(&mut Probes, Instant) -> AllowProbeResult,
+    ) -> EnterCircuitResult {
         match self {
             Self::Closed { .. } => EnterCircuitResult::Accepted {
                 mode: ExecutionMode::Normal,
@@ -63,7 +72,7 @@ impl State {
             Self::Open { open_until, stats } => {
                 if now >= *open_until {
                     let mut probes = Probes::new(&settings.probes);
-                    let allow = probes.allow_probe(now);
+                    let allow = allow_probe(&mut probes, now);
                     stats.record_allow_result(allow);
 
                     *self = Self::HalfOpen {
@@ -77,7 +86,7 @@ impl State {
                 }
             }
             Self::HalfOpen { probes, stats: info } => {
-                let allow = probes.allow_probe(now);
+                let allow = allow_probe(probes, now);
                 info.record_allow_result(allow);
                 EnterCircuitResult::from(allow)
             }
@@ -226,6 +235,60 @@ mod tests {
     use super::*;
     use crate::breaker::engine::probing::ProbesOptions;
     use crate::breaker::{AbandonedPolicy, HealthMetricsBuilder};
+
+    #[test]
+    fn gamma_round2_open_to_half_open_retains_the_rejected_initial_probe_in_its_statistics() {
+        use crate::breaker::engine::probing::{HealthProbeOptions, ProbeOptions};
+
+        let now = Clock::new_frozen().instant();
+        let mut settings = create_test_settings();
+        settings.probes = ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(
+            Duration::from_secs(2),
+            0.5,
+            0.5,
+            AbandonedPolicy::default(),
+        ))]);
+        let mut state = State::Open {
+            open_until: now,
+            stats: Stats::new(now),
+        };
+        let mut decisions = 0;
+        assert!(matches!(
+            state.enter_with(now, &settings, |_, sampled_at| {
+                decisions += 1;
+                assert_eq!(sampled_at, now);
+                AllowProbeResult::Rejected
+            }),
+            EnterCircuitResult::Rejected
+        ));
+        assert_eq!(decisions, 1);
+        let State::HalfOpen { stats, .. } = state else {
+            panic!("an expired open state must construct its configured probe");
+        };
+        assert_eq!(stats.rejected, 1);
+    }
+
+    #[test]
+    fn gamma_survivor_half_open_rejections_increment_private_statistics_for_every_denied_probe() {
+        let control = ClockControl::new();
+        let engine = EngineCore::new(create_test_settings(), control.to_clock());
+        open_engine(&engine);
+        control.advance(Duration::from_secs(5));
+        assert!(matches!(
+            engine.enter(),
+            EnterCircuitResult::Accepted {
+                mode: ExecutionMode::Probe
+            }
+        ));
+        for expected in 1..=2 {
+            assert!(matches!(engine.enter(), EnterCircuitResult::Rejected));
+            let state = engine.state.lock().unwrap();
+            let State::HalfOpen { stats, .. } = &*state else {
+                panic!("an in-progress probe must leave the engine half-open");
+            };
+            assert_eq!(stats.rejected, expected);
+        }
+    }
 
     fn create_test_settings() -> EngineOptions {
         EngineOptions {

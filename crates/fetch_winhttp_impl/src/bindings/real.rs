@@ -6,16 +6,40 @@ use std::ptr::{NonNull, null, null_mut};
 
 use widestring::U16CStr;
 use windows::Win32::Foundation::{ERROR_IO_PENDING, ERROR_SUCCESS, GetLastError};
+use windows::Win32::Networking::WinHttp::{WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_OPEN_REQUEST_FLAGS};
+#[cfg(not(test))]
 use windows::Win32::Networking::WinHttp::{
-    WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_OPEN_REQUEST_FLAGS, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
-    WinHttpQueryHeaders, WinHttpQueryOption, WinHttpReadDataEx, WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetOption,
-    WinHttpSetStatusCallback, WinHttpSetTimeouts, WinHttpWriteData,
+    WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest, WinHttpQueryHeaders, WinHttpQueryOption, WinHttpReadDataEx,
+    WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetOption, WinHttpSetTimeouts, WinHttpWriteData,
 };
-use windows::core::{Error as WindowsError, PCWSTR};
+use windows::core::{Error as WindowsError, PCWSTR, link};
+
+#[cfg(not(test))]
+use self::set_status_callback_raw as WinHttpSetStatusCallback;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test-only native call interception and forwarding.
+#[path = "real_calls.rs"]
+mod calls;
+#[cfg(test)]
+use calls::{
+    close_handle as WinHttpCloseHandle, connect as WinHttpConnect, open as WinHttpOpen, open_request as WinHttpOpenRequest,
+    query_headers as WinHttpQueryHeaders, query_option as WinHttpQueryOption, read_data_ex as WinHttpReadDataEx,
+    receive_response as WinHttpReceiveResponse, send_request as WinHttpSendRequest, set_option as WinHttpSetOption,
+    set_status_callback as WinHttpSetStatusCallback, set_timeouts as WinHttpSetTimeouts, write_data as WinHttpWriteData,
+};
 
 use super::{Bindings, StatusCallback, WINHTTP_READ_DATA_EX_FLAG_FILL_BUFFER};
 use crate::error::{Result, WinHttpError, WinHttpOperation};
 use crate::handle::RawHandle;
+
+// WinHTTP can return -1 instead of a callable address. Keep the return value raw.
+link!("winhttp.dll" "system" "WinHttpSetStatusCallback" fn set_status_callback_raw(
+    handle: *mut c_void,
+    callback: StatusCallback,
+    notification_flags: u32,
+    reserved: usize,
+) -> *mut c_void);
 
 #[derive(Clone, Copy, Debug, Default)]
 /// Discharges the [`Bindings`] contract against the live WinHTTP API.
@@ -54,16 +78,12 @@ impl RealBindings {
         RawHandle::new(handle).ok_or_else(error)
     }
 
-    fn callback_result(callback_address: Option<usize>, operation: WinHttpOperation) -> Result<()> {
+    fn callback_result(callback_address: usize, operation: WinHttpOperation) -> Result<()> {
         Self::callback_result_with(callback_address, || Self::error_from_last_error(operation))
     }
 
-    fn callback_result_with(callback_address: Option<usize>, error: impl FnOnce() -> WinHttpError) -> Result<()> {
-        if callback_address == Some(usize::MAX) {
-            Err(error())
-        } else {
-            Ok(())
-        }
+    fn callback_result_with(callback_address: usize, error: impl FnOnce() -> WinHttpError) -> Result<()> {
+        if callback_address == usize::MAX { Err(error()) } else { Ok(()) }
     }
 
     /// Interprets a Win32 status code returned by value rather than through
@@ -113,16 +133,12 @@ unsafe impl Bindings for RealBindings {
         )
     }
 
-    #[expect(
-        clippy::fn_to_numeric_cast_any,
-        reason = "the WinHTTP failure sentinel is the function-pointer bit pattern usize::MAX"
-    )]
     unsafe fn set_status_callback(&self, handle: RawHandle, callback: StatusCallback, notification_flags: u32) -> Result<()> {
         // SAFETY: the typed handle is non-null, the callback has the required
         // system ABI, and the reserved parameter is zero as required.
         let previous = unsafe { WinHttpSetStatusCallback(handle.as_ptr(), callback, notification_flags, 0) };
 
-        Self::callback_result(previous.map(|callback| callback as usize), WinHttpOperation::SetStatusCallback)
+        Self::callback_result(previous.addr(), WinHttpOperation::SetStatusCallback)
     }
 
     unsafe fn connect(&self, session: RawHandle, host: &U16CStr, port: u16) -> Result<RawHandle> {
@@ -277,8 +293,8 @@ mod tests {
 
     #[test]
     fn callback_sentinel_path_captures_failure() {
-        let error = RealBindings::callback_result_with(Some(usize::MAX), || WinHttpError::new(5678, WinHttpOperation::SetStatusCallback))
-            .unwrap_err();
+        let error =
+            RealBindings::callback_result_with(usize::MAX, || WinHttpError::new(5678, WinHttpOperation::SetStatusCallback)).unwrap_err();
 
         assert_eq!(error.code(), 5678);
         assert_eq!(error.operation(), WinHttpOperation::SetStatusCallback);
@@ -318,7 +334,7 @@ mod tests {
 
     #[test]
     fn ordinary_callback_result_succeeds() {
-        RealBindings::callback_result_with(None, || WinHttpError::new(1, WinHttpOperation::SetStatusCallback)).unwrap();
+        RealBindings::callback_result_with(0, || WinHttpError::new(1, WinHttpOperation::SetStatusCallback)).unwrap();
     }
 
     #[test]
@@ -333,11 +349,11 @@ mod tests {
         // thread's own last-error slot, which this thread reads back below.
         unsafe { SetLastError(WIN32_ERROR(REGISTRATION_FAILURE)) };
 
-        let error = RealBindings::callback_result(Some(usize::MAX), WinHttpOperation::SetStatusCallback).unwrap_err();
+        let error = RealBindings::callback_result(usize::MAX, WinHttpOperation::SetStatusCallback).unwrap_err();
 
         assert_eq!(error.code(), REGISTRATION_FAILURE);
         assert_eq!(error.operation(), WinHttpOperation::SetStatusCallback);
 
-        RealBindings::callback_result(None, WinHttpOperation::SetStatusCallback).unwrap();
+        RealBindings::callback_result(0, WinHttpOperation::SetStatusCallback).unwrap();
     }
 }

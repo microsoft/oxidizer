@@ -35,6 +35,86 @@ fn ordered(mut events: Vec<Event>) -> Vec<Event> {
 }
 
 #[test]
+fn gamma_survivor_projection_distinguishes_orphans_pairing_and_input_identity() {
+    let mut ignored = event(EventKind::TaskSpawned, 1, 7, 0);
+    ignored.payload = EventPayload::Object(seismograph::recorder::event::ObjectId::new(1));
+    let runtime = Events {
+        total_events: 11,
+        lost_events: 3,
+        events: ordered(vec![
+            ignored,
+            event(EventKind::TaskSpawned, 1, 7, 0),
+            event(EventKind::Deallocation, 1, 9, 90),
+            event(EventKind::Allocation, 1, 7, 70),
+            event(EventKind::Deallocation, 1, 9, 90),
+            event(EventKind::Allocation, 2, 7, 70),
+        ]),
+        threads: vec![
+            ThreadLog {
+                thread_id: ThreadId::new(7),
+                name: "owner".into(),
+                total_events: 2,
+                lost_events: 1,
+            },
+            ThreadLog {
+                thread_id: ThreadId::new(9),
+                name: "remote".into(),
+                total_events: 2,
+                lost_events: 0,
+            },
+        ],
+        ..Default::default()
+    };
+    let projected = seismograph_rallocator::events::callers(&runtime);
+    assert_eq!((projected.total_events, projected.lost_events, projected.events.len()), (11, 3, 4));
+    assert_eq!(
+        projected
+            .events
+            .iter()
+            .map(|event| (event.allocation_id, event.thread_log_id, event.allocation_recorded))
+            .collect::<Vec<_>>(),
+        [(3, 9, false), (4, 7, true), (4, 7, true), (6, 7, true)]
+    );
+    assert_eq!(projected.threads[0].allocated_histogram[5], 2);
+    assert_eq!(projected.threads[0].live_histogram[5], 1);
+    assert_eq!(projected.threads[1].live_histogram[5], 0);
+    assert_eq!(projected.events[1].call_stack, [0x5678]);
+    assert_eq!(projected.events[2].event_thread_id, 90);
+}
+
+#[test]
+fn gamma_survivor_field_adapters_preserve_nondefault_values() {
+    use seismograph_rallocator::callers::{AddressLookup, AddressLookupFields, Callers, CallersFields, ThreadName, ThreadNameFields};
+    let callers = Callers::from_fields(CallersFields {
+        session_id: 13,
+        total_events: 17,
+        lost_events: 19,
+        threads: Vec::new(),
+        events: Vec::new(),
+        thread_names: vec![ThreadName::from_fields(ThreadNameFields {
+            thread_id: 23,
+            name: "worker".into(),
+        })],
+    });
+    assert_eq!((callers.session_id, callers.total_events, callers.lost_events), (13, 17, 19));
+    assert_eq!(
+        (callers.thread_names[0].thread_id, callers.thread_names[0].name.as_str()),
+        (23, "worker")
+    );
+    let address = AddressLookup::from_fields(AddressLookupFields {
+        address: 29,
+        symbol: Some("symbol".into()),
+        filename: Some("source.rs".into()),
+        line: Some(31),
+        column: Some(37),
+    });
+    assert_eq!((address.address, address.line, address.column), (29, Some(31), Some(37)));
+    assert_eq!(
+        (address.symbol.as_deref(), address.filename.as_deref()),
+        (Some("symbol"), Some("source.rs"))
+    );
+}
+#[test]
 fn caller_projection_preserves_all_known_heap_kinds_and_ignores_nonallocation_kinds() {
     let mut events = Vec::new();
     for (id, kind) in [(1, HeapKind::General), (2, HeapKind::Bump), (3, HeapKind::Thread)] {

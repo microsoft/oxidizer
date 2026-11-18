@@ -7,6 +7,7 @@ use crate::BytesView;
 
 impl Read for BytesView {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        // #[gamma::skip(cond.always_false, reason = "For an empty view to_read is zero; copying an empty prefix is a no-op and the same Ok(0) is returned")]
         if self.is_empty() {
             return Ok(0);
         }

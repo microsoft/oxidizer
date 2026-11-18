@@ -182,7 +182,9 @@ pub fn conflicts(root: &Node) -> Vec<String> {
             ConflictAction::Visit(node, component) => {
                 let parent_len = prefix.len();
                 prefix.push_str(&component);
+                // #[gamma::skip(call_result.default, reason = "Conflict collection still executes and its result is unit")]
                 check_bucket(&node.exact, &prefix, false, &mut conflicts);
+                // #[gamma::skip(call_result.default, reason = "Conflict collection still executes and its result is unit")]
                 check_bucket(&node.rest, &prefix, true, &mut conflicts);
 
                 pending.push(ConflictAction::Truncate(parent_len));
@@ -313,6 +315,7 @@ pub fn affix_edges_in_match_order(node: &Node) -> Vec<(&(String, String), &Node)
 
 /// The specificity of an affix edge: longer literal prefix+suffix wins.
 fn affix_specificity(prefix: &str, suffix: &str) -> usize {
+    // #[gamma::skip(expr.increment, reason = "Both String lengths are at most isize::MAX so their sum plus one fits usize; this private result is used only to compare affix weights, and adding the same one preserves every comparison and tie")]
     prefix.len() + suffix.len()
 }
 
@@ -368,7 +371,18 @@ pub(crate) fn field_name(joined: &str) -> String {
     } else {
         let sanitized: String = joined
             .chars()
-            .map(|c| if c == '_' || c.is_ascii_alphanumeric() { c } else { '_' })
+            // #[gamma::skip(logical.or_remove_left, reason = "An underscore rejected by the predicate is replaced with the identical underscore")]
+            .map(|c| {
+                if c ==
+                    // #[gamma::skip(literal.char_to_distinct, reason = "The distinct replacement x is already ASCII alphanumeric, and a rejected underscore is replaced by the identical underscore")]
+                    '_'
+                    || c.is_ascii_alphanumeric()
+                {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         format!("_f_{sanitized}")
     }

@@ -121,6 +121,22 @@ mod tests {
     use super::*;
     use crate::testing::PanickingStream;
 
+    #[test]
+    fn gamma_survivor_tracked_stream_preserves_write_vectored_capability() {
+        let (inner, _) = tokio::io::duplex(64);
+        let inner = hyper_util::rt::TokioIo::new(inner);
+        let capability = hyper::rt::Write::is_write_vectored(&inner);
+        let now = tick::Clock::new_frozen().instant();
+        let stream = TrackedStream {
+            inner,
+            base_uri: BaseUri::from_static("https://example.test"),
+            info: ConnectionInfo::new(move || now, PoolIndex::new(0), None),
+            connection_duration: None,
+            connected: Connected::new(),
+        };
+        assert_eq!(hyper::rt::Write::is_write_vectored(&stream), capability);
+    }
+
     fn frozen_info(pool_index: usize) -> ConnectionInfo {
         ConnectionInfo::new(std::time::Instant::now, PoolIndex::new(pool_index), None)
     }

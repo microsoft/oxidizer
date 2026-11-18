@@ -214,6 +214,7 @@ pub(crate) fn expand_named(
     let wire_variants: Vec<syn::Ident> = (0..wire.len())
         .map(|index| fresh_ident(hygiene, &format!("__field{index}")))
         .collect();
+    // #[gamma::skip(range.exclusive_to_inclusive, expr.increment, tag = "equivalent", reason = "The quote repetition zips these indices with exactly wire.len() wire_variants, so an extra trailing index is never emitted.")]
     let index_lits: Vec<_> = (0..wire.len() as u64).map(proc_macro2::Literal::u64_unsuffixed).collect();
 
     // (accepted name, variant) pairs, including aliases, for the shared byte matcher.
@@ -517,6 +518,7 @@ pub(crate) fn expand_tuple(
     };
 
     if container.transparent {
+        // #[gamma::skip(iter.first_to_last, tag = "equivalent", reason = "Transparent tuple validation requires exactly one field, so the first and last plan are identical.")]
         let plan = plans.first().expect("transparent tuple validation requires one field");
         if plan.attrs.skip || plan.attrs.default.is_some() || is_phantom_data(&plan.ty) {
             return Err(Error::new_spanned(

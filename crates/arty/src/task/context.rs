@@ -161,6 +161,7 @@ impl Context {
 }
 
 impl ThreadAware for Context {
+    // #[gamma::skip(parameter.default_shadow, reason = "The source argument is unused; the stored coordinate supplies the actual source.")]
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
         if self.inner.thread == *destination {
             return;
@@ -176,6 +177,7 @@ impl ThreadAware for Context {
         inner.scheduler.relocate_to_worker(destination, worker_index);
         inner.thread = destination.clone();
         inner.clock.relocate(Some(&source), destination);
+        // #[gamma::skip(option.some_to_none, reason = "Io::relocate ignores its source argument and resolves only destination ownership.")]
         inner.io.relocate(Some(&source), destination);
     }
 }

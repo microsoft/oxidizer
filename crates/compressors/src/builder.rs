@@ -104,6 +104,7 @@ impl CompressorBuilder<()> {
     /// Starts configuring a compressor whose format has not been chosen yet.
     #[must_use]
     #[inline]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "The constructor body is already exactly Self::default()")]
     pub fn new() -> Self {
         Self::default()
     }
@@ -234,6 +235,7 @@ impl DecompressorBuilder<()> {
     /// Starts configuring a decompressor whose format has not been chosen yet.
     #[must_use]
     #[inline]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "The constructor body is already exactly Self::default()")]
     pub fn new() -> Self {
         Self::default()
     }

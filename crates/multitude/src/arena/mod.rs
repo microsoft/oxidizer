@@ -11,6 +11,9 @@ use core::ptr::NonNull;
 use allocator_api2::alloc::{Allocator, Global};
 
 use crate::AllocError;
+
+#[cfg(test)]
+mod gamma_survivor_state;
 use crate::arena_builder::ArenaBuilder;
 #[cfg(feature = "stats")]
 use crate::arena_stats::ArenaStats;
@@ -331,6 +334,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// the first refill consumes the cached chunk.
     pub(crate) fn preallocate_one(&self, class: SizeClass) -> Result<(), AllocError> {
         self.provider.preallocate(class)?;
+        // #[gamma::skip(relational.gt_to_ge, reason = "At equality this only writes the same SizeClass back to its Cell")]
         if class > self.next_class.get() {
             self.next_class.set(class);
         }
@@ -445,10 +449,12 @@ impl<A: Allocator + Clone> Arena<A> {
     /// assert_eq!(*arena.alloc(8), 8);
     /// ```
     pub fn reset(&mut self) {
+        // #[gamma::skip(cond.always_true, reason = "With no shared references and no retired chunks, reset_slow clears an empty list and executes the identical rewind, marker reset, and reset accounting")]
         if self.local_shared_count.get() != 0 {
             self.reset_slow();
             return;
         }
+        // #[gamma::skip(cond.always_true, reason = "The shared count is zero here; with an empty retired list reset_slow executes the identical rewind, marker reset, and reset accounting")]
         if !self.retired_local.is_empty() {
             self.reset_slow();
             return;
@@ -570,6 +576,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     #[expect(clippy::unused_self, reason = "signature must match the cfg(test) arm, which reads a field")]
     pub(crate) fn chunk_align_cap(&self) -> usize {
+        // #[gamma::skip(expr.decrement, reason = "Only alignment rejection reads this production cap or its half; Rust alignments are powers of two, so CHUNK_ALIGN minus one and its truncated half reject exactly the same alignments as the original power-of-two boundaries")]
         CHUNK_ALIGN
     }
 
@@ -668,6 +675,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[cold]
     #[inline(never)]
     // Skipped because a no-op refill makes allocation retry loops infinite.
+    // #[gamma::skip(fn_value.ok, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     pub(crate) fn refill(&self, min_payload: usize) -> Result<(), AllocError> {
         // Reconcile the surplus on the old chunk before its mutator is
         // dropped/retired so the chunk's atomic refcount equals the number of

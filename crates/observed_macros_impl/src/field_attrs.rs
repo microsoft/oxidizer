@@ -14,6 +14,26 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Attribute, Error, Expr, Ident, LitStr, Meta, Result, Token};
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use syn::parse_quote;
+
+    use super::mentions_any_type_param;
+
+    #[test]
+    fn gamma_survivor_generic_scan_is_monotone_through_nested_groups() {
+        let params = [parse_quote!(T)];
+        assert!(mentions_any_type_param(&parse_quote!(Wrapper<(T, u32)>), &params));
+        assert!(mentions_any_type_param(&parse_quote!((u32, Wrapper<T>)), &params));
+        assert!(!mentions_any_type_param(&parse_quote!(Wrapper<(U, u32)>), &params));
+        assert!(!mentions_any_type_param(&parse_quote!(T), &[]));
+        assert!(mentions_any_type_param(
+            &parse_quote!(Wrapper<T>),
+            &[parse_quote!(T), parse_quote!(U)]
+        ));
+    }
+}
+
 /// Log-signal routing for a field, controlled by the `#[dimension(...)]`
 /// attribute's `log` setting.
 #[derive(Default)]
@@ -83,6 +103,7 @@ enum DimensionItem {
 impl Parse for DimensionItem {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         if input.peek(LitStr) {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "peek proves the exact LitStr token parsed here.")]
             let lit = input.parse::<LitStr>()?;
             return Err(Error::new_spanned(
                 lit,
@@ -95,6 +116,7 @@ impl Parse for DimensionItem {
         if key == "log" {
             input.parse::<Token![=]>()?;
             if input.peek(LitStr) {
+                // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "peek proves the exact LitStr token parsed here.")]
                 return Ok(Self::LogRename(input.parse::<LitStr>()?.value()));
             }
             let value: Ident = input.parse()?;
@@ -107,6 +129,7 @@ impl Parse for DimensionItem {
         if key == "metric" {
             // `metric` is a bare opt-in (own-name key); `metric = "..."` names the key.
             if input.peek(Token![=]) {
+                // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "peek proves the exact equals token parsed here.")]
                 input.parse::<Token![=]>()?;
                 return Ok(Self::MetricNamed(input.parse::<LitStr>()?.value()));
             }
@@ -231,6 +254,7 @@ fn parse_if_none(attr: &Attribute) -> Result<IfNone> {
     };
     attr.parse_args_with(|input: ParseStream<'_>| {
         if input.peek(LitStr) {
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "peek proves the exact LitStr token parsed here.")]
             return Ok(IfNone::Fill(Cow::Owned(input.parse::<LitStr>()?.value())));
         }
         let key: Ident = input.parse()?;
@@ -346,6 +370,7 @@ pub(crate) fn option_inner_type(ty: &syn::Type) -> Option<&syn::Type> {
     if type_path.qself.is_some() {
         return None;
     }
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "This type comes from a parsed event field; Syn requires parsed type paths to contain at least one segment.")]
     let last_segment = type_path.path.segments.last()?;
     if last_segment.ident != "Option" {
         return None;
@@ -404,6 +429,7 @@ pub(crate) fn is_borrowed_str(ty: &syn::Type) -> bool {
 /// `where String: Clone`, which the compiler resolves on its own.
 #[must_use]
 pub(crate) fn mentions_any_type_param(ty: &syn::Type, params: &[Ident]) -> bool {
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "With no parameter names, walking tokens cannot set found and still returns false.")]
     if params.is_empty() {
         return false;
     }
@@ -412,7 +438,9 @@ pub(crate) fn mentions_any_type_param(ty: &syn::Type, params: &[Ident]) -> bool 
     // `Vec<Wrapper<T>>`, and `&'a T` alike.
     for token in quote::ToTokens::to_token_stream(ty) {
         walk_tokens(&token, params, &mut found);
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "found is monotonic; scanning remaining tokens cannot turn a match back into false.")]
         if found {
+            // #[gamma::skip(loop.break_to_continue, loop.delete_break, tag = "equivalent", reason = "found is monotonic; scanning remaining tokens cannot turn a match back into false.")]
             break;
         }
     }
@@ -427,6 +455,7 @@ fn walk_tokens(token: &proc_macro2::TokenTree, params: &[Ident], found: &mut boo
         proc_macro2::TokenTree::Group(group) => {
             for inner in group.stream() {
                 walk_tokens(&inner, params, found);
+                // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "found is monotonic; walking remaining group tokens preserves the final true result.")]
                 if *found {
                     return;
                 }

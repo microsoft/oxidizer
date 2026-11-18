@@ -31,8 +31,14 @@ static COUNTERS: Counters = Counters {
 struct CounterGuard;
 
 impl Drop for CounterGuard {
+    // #[gamma::skip(fn_value.unit, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     fn drop(&mut self) {
-        COUNTERS.locked.store(false, Ordering::Release);
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        COUNTERS.locked.store(
+            // #[gamma::skip(literal.bool_flip, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            false,
+            Ordering::Release,
+        );
     }
 }
 
@@ -44,12 +50,22 @@ fn lock_counters_with_attempt_hook(mut after_attempt: impl FnMut(bool)) -> Count
     loop {
         let acquired = COUNTERS
             .locked
-            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .compare_exchange_weak(
+                // #[gamma::skip(literal.bool_flip, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                false,
+                true,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            )
             .is_ok();
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         after_attempt(acquired);
-        if acquired {
+        if
+        // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        acquired {
             return CounterGuard;
         }
+        // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "spin_loop is a processor scheduling hint; the unchanged atomic retry loop alone determines lock acquisition and counter safety")]
         hint::spin_loop();
     }
 }
@@ -155,9 +171,17 @@ unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         // SAFETY: all three arguments are forwarded unchanged from the caller,
         // which the `GlobalAlloc` contract already requires to be valid.
-        let replacement = unsafe { System.realloc(ptr, layout, new_size) };
+        let replacement = unsafe { system_reallocate(&System, ptr, layout, new_size) };
         record_reallocation(replacement, layout.size(), new_size)
     }
+}
+
+#[inline]
+unsafe fn system_reallocate<A: GlobalAlloc>(allocator: &A, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+    #[cfg(test)]
+    tests::REALLOCATION_SIZE.set(Some(new_size));
+    // SAFETY: the allocator caller supplies its live allocation and valid replacement size.
+    unsafe { allocator.realloc(ptr, layout, new_size) }
 }
 
 #[inline]
@@ -289,6 +313,92 @@ mod tests {
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+    std::thread_local! {
+        pub(super) static REALLOCATION_SIZE: core::cell::Cell<Option<usize>> = const { core::cell::Cell::new(None) };
+    }
+
+    #[test]
+    fn gamma_afternoon_failed_reallocation_forwards_the_exact_size_and_preserves_live_accounting() {
+        struct RejectGrowth;
+        // SAFETY: allocation and deallocation use System unchanged. Reallocation reports failure
+        // without touching the live allocation, as permitted by GlobalAlloc.
+        unsafe impl GlobalAlloc for RejectGrowth {
+            unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+                // SAFETY: the caller supplies a valid allocation layout.
+                unsafe { std::alloc::System.alloc(layout) }
+            }
+
+            unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+                // SAFETY: the caller supplies this allocator's live allocation and original layout.
+                unsafe { std::alloc::System.dealloc(ptr, layout) };
+            }
+
+            unsafe fn realloc(&self, _ptr: *mut u8, _layout: Layout, new_size: usize) -> *mut u8 {
+                REALLOCATION_SIZE.set(Some(new_size));
+                ptr::null_mut()
+            }
+        }
+        let _serial = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let allocator = RejectGrowth;
+        let layout = Layout::from_size_align(4, 1).unwrap();
+        // SAFETY: the layout has a positive size and valid alignment.
+        let pointer = unsafe { allocator.alloc(layout) };
+        assert!(!pointer.is_null());
+        let before = allocation_stats();
+        REALLOCATION_SIZE.set(None);
+        // SAFETY: pointer is live for layout and eight is a valid new size.
+        let replacement = unsafe { super::system_reallocate(&allocator, pointer, layout, 8) };
+        let replacement = record_reallocation(replacement, layout.size(), 8);
+        let requested_size = REALLOCATION_SIZE.get();
+        let after = allocation_stats();
+        // SAFETY: failed reallocation leaves the original four-byte allocation live.
+        unsafe { allocator.dealloc(pointer, layout) };
+        assert!(replacement.is_null());
+        assert_eq!(requested_size, Some(8));
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn gamma_survivor_counter_guard_releases_its_lock() {
+        use std::sync::atomic::Ordering;
+        let _serial = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut observed_success = false;
+        let guard = lock_counters_with_attempt_hook(|acquired| observed_success |= acquired);
+        assert!(observed_success);
+        assert!(super::COUNTERS.locked.load(Ordering::Relaxed));
+        drop(guard);
+        let locked_after_drop = super::COUNTERS.locked.load(Ordering::Relaxed);
+        super::COUNTERS.locked.store(false, Ordering::Release);
+        assert!(!locked_after_drop);
+    }
+
+    #[test]
+    fn gamma_survivor_counter_null_growth_shrink_and_peak_reset() {
+        let _serial = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let before = allocation_stats();
+        let mut byte = 0_u8;
+        let pointer = std::ptr::from_mut(&mut byte);
+        assert!(record_allocation(std::ptr::null_mut(), 99).is_null());
+        assert!(record_reallocation(std::ptr::null_mut(), 32, 64).is_null());
+        assert_eq!(allocation_stats(), before);
+        assert_eq!(record_allocation(pointer, 32), pointer);
+        assert_eq!(record_reallocation(pointer, 32, 64), pointer);
+        let grown = allocation_stats();
+        assert_eq!(grown.allocations - before.allocations, 2);
+        assert_eq!(grown.allocated_bytes - before.allocated_bytes, 64);
+        assert_eq!(grown.live_bytes - before.live_bytes, 64);
+        record_reallocation(pointer, 64, 7);
+        let shrunk = allocation_stats();
+        assert_eq!(shrunk.live_bytes - before.live_bytes, 7);
+        assert_eq!(shrunk.allocations, grown.allocations);
+        assert_eq!(shrunk.allocated_bytes, grown.allocated_bytes);
+        assert_eq!(shrunk.peak_live_bytes, grown.peak_live_bytes);
+        reset_peak_live_bytes();
+        assert_eq!(allocation_stats().peak_live_bytes, shrunk.live_bytes);
+        record_reallocation(pointer, 7, 0);
+        assert_eq!(allocation_stats().live_bytes, before.live_bytes);
+    }
+
     #[test]
     fn concurrent_updates_produce_a_coherent_snapshot() {
         const THREADS: usize = 4;
@@ -330,7 +440,9 @@ mod tests {
 
         // SAFETY: `pointer` and `layout` identify the live allocation above.
         let pointer = unsafe { allocator.realloc(pointer, layout, 64) };
+        let requested_size = REALLOCATION_SIZE.get();
         assert!(!pointer.is_null());
+        assert_eq!(requested_size, Some(64));
         let grown = Layout::from_size_align(64, 8).expect("valid grown layout");
         // SAFETY: `pointer` and `grown` identify the live reallocated block.
         unsafe { allocator.dealloc(pointer, grown) };

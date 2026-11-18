@@ -3,6 +3,8 @@
 
 //! Buffer construction, writes, and standard I/O adapters.
 
+use core::sync::atomic as sync_fence;
+
 use bytesbuf::mem;
 
 // Shared fixture for integration tests and private unit tests.

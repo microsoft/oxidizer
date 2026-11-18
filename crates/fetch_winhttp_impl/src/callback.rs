@@ -7,9 +7,8 @@ use std::ptr::{NonNull, with_exposed_provenance_mut};
 use windows::Win32::Networking::WinHttp::{
     ERROR_WINHTTP_OPERATION_CANCELLED, WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER,
     WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
-    WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
-    WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
-    WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+    WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+    WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
 };
 
 use crate::context::{ActiveOperation, CompletionResult, OperationBuffer, OperationKind, RequestContext};
@@ -55,6 +54,7 @@ pub(crate) unsafe extern "system" fn status_callback(
     // publishes that provenance with `expose_provenance` before the address is
     // handed to WinHTTP, which is what makes this reconstruction address the
     // context allocation rather than carry no provenance at all.
+    // #[gamma::skip(match_arm.never_matches, tag = "equivalent", reason = "without the zero arm, with_exposed_provenance_mut(0) still produces the same null pointer")]
     let context = match context {
         0 => std::ptr::null_mut(),
         value => with_exposed_provenance_mut::<RequestContext>(value),
@@ -114,10 +114,6 @@ pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u
         return;
     };
 
-    #[expect(
-        clippy::match_same_arms,
-        reason = "HANDLE_CREATED is decoded explicitly while unsupported statuses are ignored"
-    )]
     // Required co-edit: every status this match acts on must also appear in
     // `DISPATCHED_STATUSES` (session.rs) or, for awaited operation completions,
     // in `OperationKind::ALL` (context.rs). Those lists drive the test that
@@ -161,7 +157,6 @@ pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u
             // ends with this statement, which mutates only atomics.
             unsafe { context.as_ref() }.mark_connected();
         }
-        WINHTTP_CALLBACK_STATUS_HANDLE_CREATED => {}
         WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING => {
             // SAFETY: close_context requires the exact into_raw pointer of the
             // installed context, sole reclamation authority, and no concurrent
@@ -316,6 +311,7 @@ fn decode_read(status: u32, status_info: *mut c_void, status_info_len: u32, buff
 /// `status_info` must be null or readable for `status_info_len` initialized
 /// bytes, and must stay valid and unmodified until this function returns.
 unsafe fn read_status_info<T: Copy>(status_info: *mut c_void, status_info_len: u32) -> Option<T> {
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "this private function is instantiated only for u32 and WINHTTP_ASYNC_RESULT; both sizes fit u32 on every supported Windows target")]
     let expected_len = u32::try_from(size_of::<T>()).ok()?;
 
     if status_info.is_null() || status_info_len != expected_len || !status_info.addr().is_multiple_of(align_of::<T>()) {
@@ -402,6 +398,167 @@ mod tests {
     use super::{decode_success, dispatch_completion, status_callback};
     use crate::context::{CompletionResult, OperationBuffer, OperationKind, RequestContext};
     use crate::mocks::{complete, drive, finish, installed, status_info_len};
+
+    #[test]
+    fn november4_handle_closing_delivers_cancellation_before_reclaiming_event_storage() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::task::{Context, Poll, Wake, Waker};
+
+        use events_once::RawReceiver;
+        use windows::Win32::Networking::WinHttp::ERROR_WINHTTP_OPERATION_CANCELLED;
+
+        struct ReceiveOnWake {
+            receiver: Mutex<Option<RawReceiver<CompletionResult>>>,
+            result: Mutex<Option<CompletionResult>>,
+            disconnected: AtomicBool,
+        }
+        impl Wake for ReceiveOnWake {
+            fn wake(self: Arc<Self>) {
+                self.wake_by_ref();
+            }
+
+            fn wake_by_ref(self: &Arc<Self>) {
+                let Some(mut receiver) = self.receiver.lock().unwrap().take() else {
+                    return;
+                };
+                match std::pin::Pin::new(&mut receiver).poll(&mut Context::from_waker(Waker::noop())) {
+                    Poll::Ready(Ok(result)) => *self.result.lock().unwrap() = Some(result),
+                    Poll::Ready(Err(_)) => self.disconnected.store(true, Ordering::SeqCst),
+                    Poll::Pending => *self.receiver.lock().unwrap() = Some(receiver),
+                }
+            }
+        }
+
+        let (guard, context, contexts, session, closes) = installed();
+        let wake = Arc::new(ReceiveOnWake {
+            receiver: Mutex::new(None),
+            result: Mutex::new(None),
+            disconnected: AtomicBool::new(false),
+        });
+        // SAFETY: installed pins this context until its final callback; no
+        // operation is active, and the receiver is consumed during that
+        // callback's synchronous wake, before the context is reclaimed.
+        let context_ref = unsafe { &*context };
+        // SAFETY: installed keeps this allocation pinned through the final callback.
+        let context_pin = unsafe { std::pin::Pin::new_unchecked(context_ref) };
+        // SAFETY: this idle slot remains pinned until the synchronous wake destroys the receiver.
+        let mut receiver = unsafe { context_pin.arm(OperationKind::SendRequest, OperationBuffer::none()) };
+        let waker = Waker::from(Arc::clone(&wake));
+        assert!(
+            std::pin::Pin::new(&mut receiver)
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        *wake.receiver.lock().unwrap() = Some(receiver);
+        drop(guard);
+        drop(session);
+        // SAFETY: this is the only final callback, with no overlapping access;
+        // the synchronous waker destroys the receiver before reclamation.
+        unsafe { crate::mocks::closing(context) };
+        assert!(!wake.disconnected.load(Ordering::SeqCst));
+        assert!(wake.receiver.lock().unwrap().is_none());
+        let result = wake.result.lock().unwrap().take().unwrap();
+        let CompletionResult::Error { error, .. } = result else {
+            panic!("closing an armed operation must deliver its cancellation");
+        };
+        assert_eq!(error.code(), ERROR_WINHTTP_OPERATION_CANCELLED);
+        assert_eq!(error.operation(), crate::error::WinHttpOperation::SendRequest);
+        assert_eq!(contexts.lock().unwrap().len(), 0);
+        assert_eq!(closes.request.load(Ordering::SeqCst), 1);
+        assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
+        assert_eq!(closes.session.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn gamma_round2_request_error_reports_the_received_payload_length() {
+        let (mut guard, context, contexts, session, closes) = installed();
+        let operation = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
+        // SAFETY: installed owns this live context; a null status payload is
+        // permitted and no other notification is in flight.
+        unsafe { complete(context, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, null_mut(), 7) };
+        let error = drive(operation).unwrap().into_failure("SendRequest");
+        assert!(error.to_string().contains('7'), "{error}");
+        assert!(error.to_string().contains("status"), "{error}");
+        // SAFETY: the operation finished and this is the only final callback.
+        unsafe { finish(guard, context, &contexts, session, &closes) };
+    }
+
+    #[test]
+    fn gamma_survivor_malformed_completion_preserves_exact_status_and_length() {
+        for status in [
+            WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+            WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,
+            WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+            WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
+            0x1234,
+        ] {
+            let buffer = OperationBuffer::write(BytesView::copied_from_slice(b"payload", &GlobalPool::new()), 7);
+            // SAFETY: the payload is null and the declared length is readable vacuously; decode rejects null without reading.
+            let result = unsafe { decode_success(status, null_mut(), 9, buffer) };
+            let CompletionResult::InvalidStatusInfo {
+                status: actual_status,
+                len,
+                ..
+            } = result
+            else {
+                panic!("wrong buffer or missing payload must be invalid");
+            };
+            assert_eq!(actual_status, status);
+            assert_eq!(len, 9);
+        }
+        let buffer = OperationBuffer::read(bytesbuf::BytesBuf::new(), 42, 0);
+        let result = super::decode_read(WINHTTP_CALLBACK_STATUS_READ_COMPLETE, null_mut(), 1, buffer);
+        assert!(matches!(
+            result,
+            CompletionResult::InvalidStatusInfo {
+                status: WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
+                len: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn gamma_survivor_status_payload_rejects_null_wrong_size_and_alignment() {
+        // SAFETY: null is explicitly admitted, and is checked before dereferencing.
+        assert!(unsafe { super::read_status_info::<u32>(null_mut(), 4) }.is_none());
+        let mut bytes = [0_u32; 2];
+        let pointer = (&raw mut bytes).cast::<c_void>();
+        // SAFETY: this initialized array is readable for eight bytes.
+        let wrong_size = unsafe { super::read_status_info::<u32>(pointer, 8) };
+        assert!(wrong_size.is_none());
+        let misaligned = pointer.wrapping_byte_add(1);
+        // SAFETY: four initialized bytes remain readable at this misaligned address.
+        let wrong_alignment = unsafe { super::read_status_info::<u32>(misaligned, 4) };
+        assert!(wrong_alignment.is_none());
+    }
+
+    #[test]
+    fn gamma_survivor_status_callback_round_trips_installed_context_address() {
+        use windows::Win32::Networking::WinHttp::{
+            WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
+        };
+
+        let (guard, context, contexts, session, closes) = installed();
+        let address = context.expose_provenance();
+        // SAFETY: installed owns this live context; finish delivers the only reclaiming notification.
+        let context_ref = unsafe { &*context };
+        // SAFETY: the context remains live and this sequential callback carries no payload.
+        unsafe {
+            status_callback(null_mut(), address, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, null_mut(), 0);
+        }
+        assert_eq!(context_ref.cold_connect_state(), crate::context::ColdConnectState::Connecting);
+        // SAFETY: the preceding callback has returned and this live-context callback carries no payload.
+        unsafe {
+            status_callback(null_mut(), address, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, null_mut(), 0);
+        }
+        assert_eq!(context_ref.cold_connect_state(), crate::context::ColdConnectState::Connected);
+        // SAFETY: both callbacks have returned and this is the sole terminal cleanup.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
+    }
 
     #[test]
     fn null_context_callbacks_do_nothing() {

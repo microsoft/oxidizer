@@ -273,6 +273,34 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_survivor_help_bullets_indentation_and_entry_spacing_are_exact() {
+        use super::super::help_content::{Entry, Section};
+        static SECTION: Section = Section {
+            heading: "Heading",
+            entries: &[
+                Entry {
+                    keyword: "First",
+                    explanation: "one",
+                },
+                Entry {
+                    keyword: "Next",
+                    explanation: "two",
+                },
+            ],
+        };
+        let lines = super::styled_lines(&[&SECTION], 20)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(lines, ["Heading", "", "  * First", "    one", "", "  * Next", "    two"]);
+        let lines = super::styled_lines(&[&SECTION], 3)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(&lines[..6], ["Hea", "din", "g", "", "* F", "  i"]);
+    }
+
     use std::collections::HashSet;
     use std::sync::Arc;
     use std::time::Instant;
@@ -286,6 +314,40 @@ mod tests {
     use super::super::filter::FilterSpec;
     use super::super::filter_index::FilterIndex;
     use super::*;
+
+    #[test]
+    fn gamma_survivor_help_popup_centers_and_pages_at_wide_and_tiny_boundaries() {
+        for (width, height, first_x, first_y, page) in [(120, 30, 5, 1, 26), (120, 2, 5, 0, 1), (1, 1, 0, 0, 1)] {
+            let help = Help::new(Context::Browser, false);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| help.draw(frame)).unwrap();
+            assert_eq!(help.page.get(), page);
+            assert_ne!(terminal.backend().buffer()[(first_x, first_y)].symbol(), " ");
+            if first_x != 0 {
+                assert_eq!(terminal.backend().buffer()[(first_x - 1, first_y)].symbol(), " ");
+            }
+            if width == 120 && height == 30 {
+                assert_ne!(terminal.backend().buffer()[(114, first_y)].symbol(), " ");
+                assert_eq!(terminal.backend().buffer()[(115, first_y)].symbol(), " ");
+            }
+            let expected_width = if width == 1 {
+                1
+            } else if height < 3 {
+                110
+            } else {
+                108
+            };
+            assert_eq!(
+                help.maximum.get(),
+                styled_lines(&help.document, expected_width).len().saturating_sub(page)
+            );
+            assert_eq!(help.scroll.get(), 0);
+        }
+        let help = Help::new(Context::Browser, false);
+        let mut terminal = Terminal::new(TestBackend::new(1, 0)).unwrap();
+        terminal.draw(|frame| help.draw(frame)).unwrap();
+        assert_eq!(help.page.get(), 1);
+    }
 
     fn snapshot() -> Box<super::super::data::CapturedSnapshot> {
         Arc::new(FilterIndex::new(

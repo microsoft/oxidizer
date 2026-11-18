@@ -48,7 +48,9 @@ pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Selection {
         return Selection::Identity;
     }
 
-    if !headers.contains_key(ACCEPT_ENCODING) {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "Without Accept-Encoding, quality_for returns None for every coding and identity_acceptable returns true, so the complete selection also returns Identity")]
+    !headers.contains_key(ACCEPT_ENCODING) {
         return Selection::Identity;
     }
 
@@ -86,7 +88,9 @@ pub(crate) fn select(headers: &HeaderMap, offered: &[Format]) -> Selection {
 
 /// Returns whether the client permits a response without a content coding.
 pub(crate) fn identity_acceptable(headers: &HeaderMap) -> bool {
-    if !headers.contains_key(ACCEPT_ENCODING) {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "With no field lines both quality lookups return None, so the final explicit_identity.is_none_or expression also accepts identity")]
+    !headers.contains_key(ACCEPT_ENCODING) {
         return true;
     }
 
@@ -149,6 +153,7 @@ fn quality_for(headers: &HeaderMap, token: &str, wildcard_use: Wildcard) -> Opti
 
         for entry in value.split(',') {
             let mut parts = entry.split(';');
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "str::split always yields a first element, including the empty string for empty input")]
             let name = parts.next()?.trim();
 
             let quality = parts.next().map_or(Some(Quality::MAX), |weight| {
@@ -209,6 +214,15 @@ mod tests {
     use http::HeaderValue;
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_selection_empty_offer_and_unnameable_first_format() {
+        assert_eq!(select(&headers("identity;q=0,*;q=0"), &[]), Selection::Identity);
+        assert_eq!(
+            select(&headers("*"), &[Format::Deflate, Format::Gzip]),
+            Selection::Format(Format::Gzip)
+        );
+    }
 
     fn headers(value: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();

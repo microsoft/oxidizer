@@ -206,6 +206,7 @@ impl Field for AccessControlAllowCredentials {
     }
 
     #[inline]
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -221,6 +222,7 @@ impl Field for AccessControlAllowCredentials {
         }
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The only defaultable argument is forwarded to view_with whose mode is unused; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, mode: crate::DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -228,6 +230,7 @@ impl Field for AccessControlAllowCredentials {
         Self::view_with(source, mode).map(|view| view.map(|_| AccessControlAllowCredentialsOwned))
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused owned value is a unit struct with exactly one value; generic &mut S has no Default implementation")]
     fn insert<S>(sink: &mut S, _value: Self::Owned) -> Result<(), InsertError>
     where
         S: FieldSink + ?Sized,
@@ -256,6 +259,7 @@ impl TryFrom<FieldValue> for AccessControlAllowCredentialsOwned {
 }
 #[inline]
 fn is_credentials_true(bytes: &[u8]) -> bool {
+    // #[gamma::skip(logical.or_remove_left, tag = "equivalent", reason = "The complete OWS-trimming fallback also accepts exactly true without surrounding whitespace")]
     bytes == b"true" || is_trimmed_credentials_true(bytes)
 }
 
