@@ -42,6 +42,9 @@ enum StopwatchSource {
     },
 }
 
+#[cfg(all(test, any(target_os = "linux", windows), not(miri)))]
+mod tests;
+
 impl Stopwatch {
     /// Creates a stopwatch with the precision of the supplied clock.
     ///

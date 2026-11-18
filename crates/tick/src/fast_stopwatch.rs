@@ -7,13 +7,18 @@ use std::time::Duration;
 #[cfg(any(miri, not(any(target_os = "linux", windows))))]
 use std::time::Instant;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Timestamp(
     #[cfg(all(any(target_os = "linux", windows), not(miri)))] Duration,
     #[cfg(any(miri, not(any(target_os = "linux", windows))))] Instant,
 );
 
 impl Timestamp {
+    #[cfg(all(test, any(target_os = "linux", windows), not(miri)))]
+    pub(crate) const fn for_test(value: Duration) -> Self {
+        Self(value)
+    }
+
     pub(crate) fn elapsed_since(self, start: Self) -> Duration {
         #[cfg(all(any(target_os = "linux", windows), not(miri)))]
         {
@@ -27,7 +32,7 @@ impl Timestamp {
     }
 }
 
-#[cfg(all(target_os = "linux", not(miri)))]
+#[cfg(all(target_os = "linux", not(miri), not(test)))]
 fn platform_time() -> Duration {
     let mut timestamp = std::mem::MaybeUninit::<libc::timespec>::uninit();
 
@@ -43,7 +48,7 @@ fn platform_time() -> Duration {
     Duration::new(seconds, nanoseconds)
 }
 
-#[cfg(all(windows, not(miri)))]
+#[cfg(all(windows, not(miri), not(test)))]
 // #[gamma::skip(fn_value.default, tag = "adapter", reason = "This thin adapter reads the real monotonic platform clock; deterministic tests cover elapsed subtraction, and live-clock assertions violate the test policy.")]
 fn platform_time() -> Duration {
     // SAFETY: GetTickCount64 has no safety requirements.
@@ -51,6 +56,7 @@ fn platform_time() -> Duration {
 }
 
 #[must_use]
+#[cfg(not(all(test, any(target_os = "linux", windows), not(miri))))]
 pub(crate) fn now() -> Timestamp {
     #[cfg(all(any(target_os = "linux", windows), not(miri)))]
     {
@@ -61,6 +67,12 @@ pub(crate) fn now() -> Timestamp {
     {
         Timestamp(Instant::now())
     }
+}
+
+#[must_use]
+#[cfg(all(test, any(target_os = "linux", windows), not(miri)))]
+pub(crate) const fn now() -> Timestamp {
+    Timestamp(Duration::ZERO)
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
