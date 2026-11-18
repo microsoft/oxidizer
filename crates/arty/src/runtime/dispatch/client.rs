@@ -192,7 +192,7 @@ mod tests {
         let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown.clone()));
         let runtime = IoRuntime::new(Sink::noop());
         let expected = format!("Io {{ runtime: {runtime:?}, dispatcher: {dispatcher:?}, thread: {thread:?} }}");
-        let io = Io::new(runtime, dispatcher, thread.clone());
+        let io = Io::new(runtime, dispatcher, thread);
         assert_eq!(format!("{io:?}"), expected);
         let worker_shutdown = shutdown;
         let worker = std::thread::spawn(move || {
