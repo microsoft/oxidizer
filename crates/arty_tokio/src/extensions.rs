@@ -189,7 +189,11 @@ mod private {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
     use super::{RuntimeState, TokioSupport};
+    use crate::TokioHandle;
 
     #[test]
     fn default_support_does_not_create_another_runtime_inside_tokio() {
@@ -226,5 +230,29 @@ mod tests {
 
         assert!(worker.handle().is_none());
         assert!(matches!(*runtime.lock().unwrap(), RuntimeState::ShutDown));
+    }
+
+    #[test]
+    fn owned_runtime_drop_does_not_wait_for_blocking_tasks() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (started, task_started) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        runtime.spawn_blocking(move || {
+            started.send(()).unwrap();
+            released.recv().unwrap();
+        });
+        task_started.recv_timeout(Duration::from_secs(5)).unwrap();
+        let support = TokioSupport::from_handle(TokioHandle::from(runtime));
+        let (completed, completion) = mpsc::sync_channel(1);
+        let drop_thread = std::thread::spawn(move || {
+            drop(support);
+            completed.send(()).unwrap();
+        });
+
+        let result = completion.recv_timeout(Duration::from_secs(1));
+        release.send(()).unwrap();
+        drop_thread.join().unwrap();
+
+        result.unwrap();
     }
 }
