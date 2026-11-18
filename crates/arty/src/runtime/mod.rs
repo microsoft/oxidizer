@@ -44,15 +44,16 @@
 //!   default thread limits can change. Use [`BlockingPoolPolicy::max`] to set
 //!   a maximum.
 //! - The clock follows real time.
-//! - [`MonitorPolicy::default`] starts a local Seismograph monitor when the
-//!   `monitor` feature is present. Task collection runs on request. This does
-//!   not enable event recording.
+//! - [`MonitorPolicy::default`] uses [`MonitorPolicy::auto`]. It disables
+//!   monitoring for tests, doctests, documentation examples, and Miri. It
+//!   enables monitoring in other environments when the `monitor` feature is
+//!   present. The exact automatic selection can change in future releases.
+//!   Task collection runs on request. This does not enable event recording.
 //! - Without a [`Panic`](hook::Panic) hook, the runtime stops after Arty
 //!   catches a panic while it creates or polls an async task.
 //! - A blocking function panic returns through its join handle without
 //!   stopping the runtime.
 //!
-//! The [`test`](crate::test) attribute disables monitoring by default.
 //! See [`main`](crate::main) and [`test`](crate::test) for their other defaults.
 //!
 //! ## Monitoring
@@ -60,7 +61,8 @@
 //! A monitor is a local connection through which the Seismograph CLI can
 //! collect diagnostics. Each enabled runtime owns one connection and removes it
 //! after its workers stop. [`RuntimeBuilder::name`] sets the displayed runtime name.
-//! Use [`MonitorPolicy::disabled`] to run without this connection or task inspection.
+//! Use [`MonitorPolicy::enabled`] or [`MonitorPolicy::disabled`] to override the
+//! automatic selection.
 //!
 //! Collection reads live async tasks and queued or running blocking functions
 //! from their native storage. Each request limits the number of tasks per worker.

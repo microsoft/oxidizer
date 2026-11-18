@@ -120,7 +120,6 @@ async fn panic_with_payload(payload: u8) {
 fn panic_hook_covers_async_user_panics_only() {
     let count = Arc::new(AtomicUsize::new(0));
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<Panic, _>::new(
             PanicProbe {
@@ -161,7 +160,6 @@ fn panic_hook_covers_async_user_panics_only() {
 #[test]
 fn panic_hook_selects_shutdown_from_the_payload() {
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<Panic, _>::new((), |event, ()| {
             if event.payload().downcast_ref::<u32>() != Some(&2) {
@@ -194,11 +192,7 @@ fn panic_hook_selects_shutdown_from_the_payload() {
 
 #[test]
 fn control_appends_panic_hooks_in_registration_order() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
 
     let order = SharedLog(Arc::new(Mutex::new(Vec::new())));
@@ -251,11 +245,7 @@ fn control_appends_panic_hooks_in_registration_order() {
 
 #[test]
 fn control_registration_applies_before_local_spawn() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
 
     runtime
@@ -278,11 +268,7 @@ fn control_registration_applies_before_local_spawn() {
 
 #[test]
 fn worker_registration_relocates_and_runs_on_every_worker() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(2))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap();
     let (installed, installations) = mpsc::channel();
     let (observed, observations) = mpsc::channel();
 
@@ -346,7 +332,6 @@ fn worker_registration_relocates_and_runs_on_every_worker() {
 fn panic_callbacks_share_one_borrowed_event() {
     let addresses = EventAddresses(Arc::new(Mutex::new(Vec::new())));
     let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
         .workers(WorkersPolicy::exactly(1))
         .on(HookFn::<Panic, _>::new(addresses.clone(), |event, data| {
             let address = std::ptr::from_mut(event).addr();
@@ -378,11 +363,7 @@ fn panic_callbacks_share_one_borrowed_event() {
 
 #[test]
 fn control_ignores_registration_after_shutdown_starts() {
-    let runtime = Runtime::builder()
-        .monitor(arty::runtime::MonitorPolicy::disabled())
-        .workers(WorkersPolicy::exactly(1))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
     let control = support::runtime_control(&runtime);
     let clones = Arc::new(AtomicUsize::new(0));
 

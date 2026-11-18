@@ -85,8 +85,8 @@ fn invalid_panic_setting(expr: &Expr) -> darling::Error {
 }
 
 impl Args {
-    fn runtime(&self, runtime_path: &TokenStream, clock: Option<&Ident>, test: bool) -> syn::Result<TokenStream> {
-        let monitor = self.monitor.or_else(|| test.then_some(MonitorSetting::Disabled));
+    fn runtime(&self, runtime_path: &TokenStream, clock: Option<&Ident>) -> syn::Result<TokenStream> {
+        let monitor = self.monitor;
         if self.workers.is_none() && clock.is_none() && monitor.is_none() && self.panic.is_none() {
             return Ok(quote!(#runtime_path::runtime::Runtime::new()));
         }
@@ -134,7 +134,7 @@ mod gamma_round2 {
             workers: None,
         };
         let clock = parse_quote!(clock);
-        let output = args.runtime(&quote!(::arty), Some(&clock), false).unwrap();
+        let output = args.runtime(&quote!(::arty), Some(&clock)).unwrap();
         assert_eq!(
             output.to_string(),
             quote!(
@@ -301,7 +301,7 @@ fn entrypoint(args: TokenStream, item: TokenStream, test: bool) -> TokenStream {
     let result_binding = Ident::new("__arty_result", Span::mixed_site());
     let shutdown_binding = Ident::new("__arty_shutdown", Span::mixed_site());
     let value_binding = Ident::new("__arty_value", Span::mixed_site());
-    let runtime = match args.runtime(&runtime_path, clock.as_ref().map(|_| &clock_binding), test) {
+    let runtime = match args.runtime(&runtime_path, clock.as_ref().map(|_| &clock_binding)) {
         Ok(runtime) => runtime,
         Err(error) => return fail(error),
     };
@@ -422,9 +422,7 @@ mod tests {
         #[should_panic(expected = "original payload")]
         #[::core::prelude::v1::test]
         fn fails() {
-            let __arty_runtime = ::arty::runtime::Runtime::builder()
-                .monitor(::arty::runtime::MonitorPolicy::disabled())
-                .build()
+            let __arty_runtime = ::arty::runtime::Runtime::new()
                 .expect("failed to create the runtime for the entry point");
             let __arty_result = __arty_runtime
                 .scheduler()
@@ -497,7 +495,6 @@ mod tests {
             fn run() {
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
                     .workers(::arty::runtime::WorkersPolicy::all())
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
                     .build()
                     .expect("failed to create the runtime for the entry point");
                 let __arty_result = __arty_runtime
@@ -526,7 +523,6 @@ mod tests {
                 let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
                     .workers(::arty::runtime::WorkersPolicy::all())
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
@@ -601,7 +597,6 @@ mod tests {
             fn run() {
                 let __arty_clock_control = ::arty::runtime::__private::ClockControl::new();
                 let __arty_runtime = ::arty::runtime::Runtime::builder()
-                    .monitor(::arty::runtime::MonitorPolicy::disabled())
                     .clock(::core::clone::Clone::clone(&__arty_clock_control))
                     .build()
                     .expect("failed to create the runtime for the entry point");
@@ -724,7 +719,6 @@ mod tests {
                 #[::core::prelude::v1::test]
                 fn run() {
                     let __arty_runtime = ::arty::runtime::Runtime::builder()
-                        .monitor(::arty::runtime::MonitorPolicy::disabled())
                         .on(::arty::runtime::hook::Panic::#constant)
                         .build()
                         .expect("failed to create the runtime for the entry point");

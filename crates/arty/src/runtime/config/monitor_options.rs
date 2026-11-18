@@ -66,8 +66,8 @@ mod tests {
     assert_not_impl_any!(MonitorOptions: Copy);
 
     #[test]
-    fn default_options_enable_monitoring() {
-        assert!(MonitorOptions::default().policy().is_enabled());
+    fn default_options_disable_monitoring_in_tests() {
+        assert!(!MonitorOptions::default().policy().is_enabled());
     }
 
     #[test]
