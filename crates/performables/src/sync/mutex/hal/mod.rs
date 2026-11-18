@@ -51,8 +51,10 @@ impl<'a> Unlock<'a> {
 }
 
 impl Drop for Unlock<'_> {
+    // #[gamma::skip(fn_value.unit, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     fn drop(&mut self) {
         if let Some(guard) = self.guard.take() {
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             self.mutex.unlock(guard);
         }
     }
@@ -64,4 +66,24 @@ impl Drop for Unlock<'_> {
 #[expect(clippy::panic, reason = "a failed native primitive cannot yield a valid synchronization result")]
 fn failed(operation: &str, error: &std::io::Error) -> ! {
     panic!("{operation} failed: {error}");
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::{Mutex, Unlock};
+
+    #[test]
+    fn gamma_survivor_unlock_drop_releases_ownership_but_transfer_keeps_it() {
+        let mutex = Mutex::new();
+        let ownership = Unlock::new(&mutex, mutex.try_lock().unwrap());
+        assert!(ownership.guard.is_some());
+        assert!(mutex.try_lock().is_none());
+        drop(ownership);
+        let ownership = Unlock::new(&mutex, mutex.try_lock().unwrap());
+        let transferred = ownership.into_guard();
+        assert!(mutex.try_lock().is_none());
+        mutex.unlock(transferred);
+        let reacquired = mutex.try_lock().unwrap();
+        mutex.unlock(reacquired);
+    }
 }

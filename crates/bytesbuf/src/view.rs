@@ -359,6 +359,7 @@ impl BytesView {
         // common when peeking a header at the front of a multi-span view - the result is just a
         // sub-slice of that one span, needing no cross-span accounting.
         if let Some(first) = self.spans_reversed.last()
+            // #[gamma::skip(relational.le_to_lt, reason = "A range ending exactly at the first-span boundary is also handled identically by the general range path")]
             && required_len <= first.len() as usize
         {
             #[expect(
@@ -367,6 +368,7 @@ impl BytesView {
             )]
             let (start, end) = (bytes_until_range as BlockSize, required_len as BlockSize);
 
+            // #[gamma::skip(literal.int_decrement, literal.int_increment, reason = "Capacities zero, one, and two all fit inline; exactly one span is pushed")]
             let mut spans_reversed = SmallVec::with_capacity(1);
             spans_reversed.push(first.slice(start..end));
 
@@ -391,6 +393,7 @@ impl BytesView {
         let mut spans_until_range: usize = 0;
         let mut spans_in_range: usize = 0;
         let mut bytes_to_skip_in_first_relevant_span: BlockSize = 0;
+        // #[gamma::skip(literal.int_increment, reason = "Every nonempty validated range visits a relevant span and overwrites this initial value before use")]
         let mut bytes_to_leave_in_last_relevant_span: BlockSize = 0;
 
         {
@@ -401,6 +404,7 @@ impl BytesView {
                 let bytes_in_span = span.len();
                 let bytes_in_span_usize = bytes_in_span as usize;
 
+                // #[gamma::skip(logical.and_remove_left, relational.gt_to_ge, reason = "Stored spans are nonempty, so bytes_in_span <= bytes_until_range already implies bytes_until_range is positive")]
                 if pass1_bytes_until_range > 0 && bytes_in_span_usize <= pass1_bytes_until_range {
                     // This entire span is uninteresting for us - skip.
                     spans_until_range = spans_until_range
@@ -481,6 +485,7 @@ impl BytesView {
             let mut bytes_to_even_consider = span.len();
 
             // If this is nonzero, we must be looking at the last relevant span.
+            // #[gamma::skip(cond.always_true, relational.gt_to_ge, reason = "The added zero-tail case subtracts zero and resets an already-zero counter")]
             if bytes_to_leave_in_last_relevant_span > 0 {
                 bytes_to_even_consider = bytes_to_even_consider
                     .checked_sub(bytes_to_leave_in_last_relevant_span)
@@ -500,14 +505,18 @@ impl BytesView {
             // Simply put - it is the first if it can supply all the remaining bytes.
             let is_first_span = bytes_remaining_in_range <= max_take_bytes as usize;
 
+            // #[gamma::skip(logical.and_remove_right, relational.gt_to_ge, reason = "With no leading skip, the first-span branch slices the identical prefix, subtracts the identical byte count, and resets an already-zero skip")]
             if is_first_span && bytes_to_skip_in_first_relevant_span > 0 {
                 let remainder_in_span = bytes_to_even_consider
                     .checked_sub(bytes_to_skip_in_first_relevant_span)
                     .expect("somehow ended up with negative bytes remaining in span - only possible if the math is wrong");
 
+                // #[gamma::skip(stmt.delete_assign, iter.min_to_max, reason = "At the first logical span the remaining range length is exactly the trimmed span remainder, so both min operands are equal")]
                 max_take_bytes = max_take_bytes.min(remainder_in_span);
 
+                // #[gamma::skip(stmt.delete_assign, reason = "The first logical span is the last reverse iteration; this remaining-byte counter is never subsequently read")]
                 bytes_remaining_in_range = bytes_remaining_in_range
+                    // #[gamma::skip(expr.decrement, reason = "The first logical span is the last reverse iteration; this remaining-byte counter is never subsequently read")]
                     .checked_sub(max_take_bytes as usize)
                     .expect("somehow ended up with negative bytes remaining - only possible if the math is wrong");
 
@@ -516,6 +525,7 @@ impl BytesView {
                     .checked_add(max_take_bytes)
                     .expect("overflowing usize is impossible because we are calculating slice within usize-bounded range");
 
+                // #[gamma::skip(stmt.delete_assign, literal.int_increment, reason = "This is the last reverse iteration and the skip counter is never subsequently read")]
                 bytes_to_skip_in_first_relevant_span = 0;
 
                 slice_spans.push(span.slice(start..end));
@@ -571,10 +581,15 @@ impl BytesView {
         while !self.is_empty() {
             let slice = self.first_slice();
             f(slice);
-            self.advance(slice.len());
+            // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.advance(
+                // #[gamma::skip(expr.decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                slice.len(),
+            );
         }
     }
 
+    // #[gamma::skip(fn_value.empty_collection, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     /// References the first slice of bytes in the byte sequence.
     ///
     /// Returns an empty slice if the view is over a zero-sized byte sequence.
@@ -921,6 +936,7 @@ impl PartialEq for BytesView {
             debug_assert!(self_offset <= self_span.len(), "guarded by min() above to never exceed span length");
             if self_offset == self_span.len() {
                 self_span_idx -= 1;
+                // #[gamma::skip(assign_value.default, reason = "usize::default is exactly the assigned zero offset")]
                 self_offset = 0;
             }
 
@@ -931,6 +947,7 @@ impl PartialEq for BytesView {
             );
             if other_offset == other_span.len() {
                 other_span_idx -= 1;
+                // #[gamma::skip(assign_value.default, reason = "usize::default is exactly the assigned zero offset")]
                 other_offset = 0;
             }
 
@@ -1035,6 +1052,7 @@ impl Hash for BytesView {
         // standard library hashes byte slices.
         self.len.hash(state);
 
+        // #[gamma::skip(literal.int_increment, reason = "Only initialized block prefixes are hashed; each emitted byte has first been overwritten by copy_from_slice")]
         let mut block = [0_u8; HASH_BLOCK_BYTES];
         let mut filled = 0_usize;
 
@@ -1048,19 +1066,28 @@ impl Hash for BytesView {
                 // copying it through the stack buffer. The resulting `write` call carries exactly
                 // the same bytes as the buffered path would, so the canonical call sequence is
                 // preserved while avoiding a copy of large contiguous spans.
+                // #[gamma::skip(cond.always_false, relational.ge_to_gt, reason = "The buffered path emits the identical fixed-size block writes when the direct-write optimization is bypassed")]
                 if filled == 0 && remaining.len() >= HASH_BLOCK_BYTES {
                     let (full_block, rest) = remaining.split_at(HASH_BLOCK_BYTES);
                     state.write(full_block);
+                    // #[gamma::skip(stmt.delete_assign, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
                     remaining = rest;
+                    // #[gamma::skip(loop.delete_continue, reason = "filled remains zero and the general path either copies the next block or performs an empty copy, preserving the canonical write sequence")]
                     continue;
                 }
 
-                let take = (HASH_BLOCK_BYTES - filled).min(remaining.len());
+                let take = (HASH_BLOCK_BYTES - filled).min(
+                    // #[gamma::skip(expr.decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    remaining.len(),
+                );
                 block[filled..filled + take].copy_from_slice(&remaining[..take]);
                 filled += take;
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 remaining = &remaining[take..];
 
-                if filled == HASH_BLOCK_BYTES {
+                if
+                // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                filled == HASH_BLOCK_BYTES {
                     state.write(&block);
                     filled = 0;
                 }
@@ -1136,6 +1163,21 @@ mod tests {
         reason = "This is all fine in test code"
     )]
 
+    #[cfg(feature = "seismograph")]
+    #[test]
+    fn gamma_survivor_append_transfers_or_clears_identity_by_content() {
+        let mut view = super::BytesView::from(vec![1, 2]);
+        let original = view.identity.get_or_allocate();
+        view.append(super::BytesView::new());
+        assert_eq!(view.identity.get_or_allocate(), original);
+        let mut empty = super::BytesView::new();
+        empty.append(view);
+        assert_eq!(empty.identity.get_or_allocate(), original);
+        empty.append(super::BytesView::from(vec![3]));
+        assert_ne!(empty.identity.get_or_allocate(), original);
+        assert_eq!(empty, [1, 2, 3].as_slice());
+    }
+
     use std::pin::pin;
     use std::thread;
 
@@ -1146,6 +1188,15 @@ mod tests {
     use super::*;
     use crate::BytesBuf;
     use crate::mem::testing::{TestMemoryBlock, TransparentMemory, std_alloc_block};
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "assertion failed: !span.is_empty()")]
+    fn gamma_round2_view_constructor_rejects_an_empty_internal_span() {
+        let view = BytesView::from(vec![41]);
+        let empty = view.spans_reversed[0].slice_checked(0..0).unwrap();
+        let _ = BytesView::from_spans([empty]);
+    }
 
     assert_impl_all!(BytesView: Send, Sync, Eq);
 

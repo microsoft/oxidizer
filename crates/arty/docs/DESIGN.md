@@ -51,7 +51,7 @@ shutdown.
 
 ## Supporting services
 
-The runtime has three supporting service groups:
+The runtime has four supporting service groups:
 
 - Blocking pools run blocking functions outside async workers. The runtime can
   use one shared pool or one pool per worker. A running function can delay
@@ -61,6 +61,11 @@ The runtime has three supporting service groups:
   The [I/O guide](IO.md) describes driver roles, access rules, failures, and
   shutdown.
 - Worker clocks wake tasks when their timers expire.
+- Monitoring owns one Seismograph connection and runtime registration per enabled
+  runtime. Workers collect live tasks from native storage on request. Event
+  recording is process-wide and separate from each runtime's connection.
+  The [runtime API documentation](https://docs.rs/arty/latest/arty/runtime/index.html)
+  describes collection and recording.
 
 ## Shutdown and failure
 
@@ -70,6 +75,7 @@ It also discards queued blocking functions.
 
 Worker code requests shutdown without waiting.
 Calling `Runtime::stop` or dropping the `Runtime` value waits for workers to stop.
+The runtime then closes its monitoring connection and stops its registration.
 If a runtime failure caused shutdown, runtime and task errors retain it.
 Use `Error::source` to read that underlying failure.
 

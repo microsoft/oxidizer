@@ -139,7 +139,7 @@ unsafe impl<A: Allocator + Clone + Send + Sync + 'static> BlockRefDynamic for Ar
             return;
         }
         // Ensure we observe all writes from other threads before tearing down.
-        atomic::fence(atomic::Ordering::Acquire);
+        crate::sync_fence::fence(atomic::Ordering::Acquire);
         // SAFETY: The state was created via `Box::leak`, this is the last
         // outstanding reference (refcount just dropped to zero), and the
         // pointer has not been freed yet.
@@ -173,5 +173,24 @@ mod tests {
         });
         let state_ptr = NonNull::from(&mut *state);
         let _ = <ArenaBlockState<Global> as BlockRefDynamic>::clone(state_ptr);
+    }
+}
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use alloc::format;
+
+    use super::*;
+
+    #[test]
+    fn gamma_survivor_block_state_debug_preserves_type_field_and_refcount() {
+        let arena = Arena::new();
+        let state = ArenaBlockState {
+            _arc: arena.alloc_uninit_slice_arc::<u8>(1),
+            ref_count: AtomicUsize::new(1),
+        };
+        assert_eq!(format!("{state:?}"), "ArenaBlockState { ref_count: 1, .. }");
+        state.ref_count.store(3, atomic::Ordering::Relaxed);
+        assert_eq!(format!("{state:?}"), "ArenaBlockState { ref_count: 3, .. }");
     }
 }

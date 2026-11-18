@@ -379,6 +379,7 @@ impl EnrichmentTransfer {
 
     /// Layers `entries` onto every captured chain as a single new node.
     fn push_entries(&mut self, entries: &Arc<[EnrichmentEntry]>) {
+        // #[gamma::skip(cond.always_false, reason = "With no slots the following loop performs no work.")]
         if self.slots.is_empty() {
             return;
         }
@@ -402,6 +403,73 @@ impl std::fmt::Debug for EnrichmentTransfer {
 #[cfg(test)]
 mod coverage_tests {
     use super::*;
+
+    #[test]
+    fn gamma_round2_reusable_node_is_cached_and_adopts_the_new_parent() {
+        let slot = Slot::new();
+        let entries = Arc::from(vec![EnrichmentEntry::unclassified("child", 2_i64)]);
+        let mut cached = None;
+        let previous = slot.push_reusable(&entries, &mut cached);
+        assert!(previous.is_none());
+        assert!(Arc::ptr_eq(cached.as_ref().unwrap(), &slot.current().unwrap()));
+        drop(slot.replace(previous));
+        assert!(cached.as_ref().unwrap().parent.is_none());
+        let parent_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("parent", 1_i64)]));
+        let parent = slot.current().unwrap();
+        let previous = slot.push_reusable(&entries, &mut cached);
+        assert!(Arc::ptr_eq(cached.as_ref().unwrap().parent.as_ref().unwrap(), &parent));
+        assert!(Arc::ptr_eq(&slot.current().unwrap(), cached.as_ref().unwrap()));
+        drop(slot.replace(previous));
+        drop(parent_guard);
+        assert!(slot.current().is_none());
+    }
+
+    #[test]
+    fn gamma_round2_pushed_guard_restores_every_slot_after_reusing_unique_nodes() {
+        let first = Slot::new();
+        let second = Slot::new();
+        let entries = Arc::from(vec![EnrichmentEntry::unclassified("child", 2_i64)]);
+        let mut state = PushState::new(entries, [first.clone(), second.clone()]);
+        for _ in 0..2 {
+            drop(state.apply());
+            assert!(first.current().is_none());
+            assert!(second.current().is_none());
+            assert!(state.previous_heads.is_empty());
+            assert!(state.slots.iter().all(|slot| slot.node.as_ref().unwrap().parent.is_none()));
+        }
+    }
+
+    #[test]
+    fn gamma_round2_owned_transfer_restores_the_overwritten_chain_head() {
+        let slot = Slot::new();
+        let captured_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("captured", 1_i64)]));
+        let captured = slot.current().unwrap();
+        let mut transfer = EnrichmentTransfer::default();
+        transfer.add_slot(&slot);
+        drop(captured_guard);
+        let current_guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("current", 2_i64)]));
+        let current = slot.current().unwrap();
+        let applied = transfer.apply_owned();
+        assert!(Arc::ptr_eq(&slot.current().unwrap(), &captured));
+        drop(applied);
+        assert!(Arc::ptr_eq(&slot.current().unwrap(), &current));
+        drop(current_guard);
+        assert!(slot.current().is_none());
+    }
+
+    #[test]
+    fn gamma_survivor_empty_push_owns_no_slots_and_merged_duplicate_slots_restore_original_head() {
+        let slot = Slot::new();
+        let mut empty = PushState::new(Arc::from(Vec::new()), [slot.clone()]);
+        assert!(empty.slots.is_empty());
+        drop(empty.apply());
+        assert!(slot.current().is_none());
+        let first = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("first", 1_i64)]));
+        let second = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("second", 2_i64)]));
+        assert_eq!(slot.current().unwrap().entries[0].key().as_str(), "second");
+        drop(Guard::merge([first, second]));
+        assert!(slot.current().is_none());
+    }
 
     struct TestEnrichment(&'static str);
 

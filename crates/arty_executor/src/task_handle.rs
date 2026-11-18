@@ -206,6 +206,7 @@ impl std::fmt::Debug for TaskHandle {
 }
 
 #[cfg(test)]
+// Public task handles do not expose raw ownership, reference counts, or internal formatting.
 mod tests {
     use plurality::MultiPool;
     use static_assertions::assert_not_impl_any;

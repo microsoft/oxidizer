@@ -28,7 +28,9 @@ pub(crate) fn hash_bytes_64(bytes: &[u8]) -> u64 {
     let len = bytes.len();
     let (mut left, mut right) = (SEED1, SEED2);
 
-    if len <= 16 {
+    if
+    // #[gamma::skip(relational.le_to_lt, literal.int_decrement, tag = "equivalent", reason = "At exactly sixteen bytes the long branch has no complete prefix chunk and XORs the same first and last eight bytes as the short branch.")]
+    len <= 16 {
         if len >= 8 {
             left ^= read_u64(&bytes[..8]);
             right ^= read_u64(&bytes[len - 8..]);
@@ -61,6 +63,12 @@ pub(crate) fn hash_bytes_64(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::hash_bytes_64;
+
+    #[test]
+    fn gamma_survivor_single_byte_hash_includes_the_byte() {
+        assert_eq!(hash_bytes_64(&[0]), 5_448_590_020_104_574_886);
+        assert_ne!(hash_bytes_64(&[1]), hash_bytes_64(&[0]));
+    }
 
     #[test]
     fn matches_published_64_bit_fx_fixtures() {

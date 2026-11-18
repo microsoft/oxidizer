@@ -139,6 +139,7 @@ impl Parse for Target {
         let criterion = if input.peek(token::Brace) {
             let configured;
             braced!(configured in input);
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "parsing all remaining balanced tokens as TokenStream2 is infallible")]
             CriterionRegistration::Configured(configured.parse()?)
         } else {
             CriterionRegistration::Default(input.parse()?)
@@ -146,17 +147,20 @@ impl Parse for Target {
         input.parse::<Token![,]>()?;
 
         let native_options = if next_field_is(input, "gungraun") {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "next_field_is verified the same identifier on a fork without consuming input")]
             expect_field(input, "gungraun")?;
             input.parse::<Token![=]>()?;
             let native_options;
             braced!(native_options in input);
             input.parse::<Token![,]>()?;
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "parsing all remaining balanced tokens as TokenStream2 is infallible")]
             native_options.parse()?
         } else {
             TokenStream2::new()
         };
 
         let groups: Vec<Group> = if next_field_is(input, "benchmarks") {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "next_field_is verified the same identifier on a fork without consuming input")]
             expect_field(input, "benchmarks")?;
             input.parse::<Token![=]>()?;
             let benchmarks;
@@ -194,6 +198,7 @@ impl Parse for Target {
         }
 
         let allocator = if input.peek(Token![,]) {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "peek verified the next token is a comma; parsing that same token cannot fail")]
             input.parse::<Token![,]>()?;
             if input.is_empty() {
                 None
@@ -202,6 +207,7 @@ impl Parse for Target {
                 input.parse::<Token![=]>()?;
                 let allocator = Some(input.parse()?);
                 if input.peek(Token![,]) {
+                    // #[gamma::skip(try.propagate_to_unwrap, reason = "peek verified the next token is a comma; parsing that same token cannot fail")]
                     input.parse::<Token![,]>()?;
                 }
                 allocator
@@ -384,12 +390,107 @@ mod tests {
 
     use super::{Target, expand_target};
 
+    #[test]
+    fn november_multiple_native_group_registrations_preserve_each_exact_group_kind_and_benchmark_association() {
+        let output = expand(quote! {
+            criterion = c,
+            groups = {
+                FIRST { benchmarks = [ONE, TWO] },
+                SECOND { benchmarks = [THREE] }
+            }
+        })
+        .unwrap();
+        for (group, benchmarks) in [("FIRST", &["ONE", "TWO"][..]), ("SECOND", &["THREE"][..])] {
+            let native = super::native_ident("group", group);
+            for benchmark in benchmarks {
+                let expected = format!("{benchmark}.__in_gungraun_group(stringify!({native}))");
+                assert_eq!(output.matches(&expected).count(), 2, "{expected}");
+                for wrong_kind in ["", "xyzzy"] {
+                    let wrong = super::native_ident(wrong_kind, group);
+                    assert!(!output.contains(&format!("{benchmark}.__in_gungraun_group(stringify!({wrong}))")));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gamma_round2_identity_registration_uses_the_declared_native_group() {
+        let output = expand(quote!(criterion = c, groups = { NAMED { benchmarks = [ONE, TWO] } })).unwrap();
+        let native_group = super::native_ident("group", "NAMED");
+        for identity in ["ONE", "TWO"] {
+            assert!(output.contains(&format!("{identity}.__in_gungraun_group(stringify!({native_group}))")));
+        }
+    }
+
     fn compact(tokens: &proc_macro2::TokenStream) -> String {
         tokens.to_string().split_whitespace().collect()
     }
 
     fn expand(input: proc_macro2::TokenStream) -> syn::Result<String> {
         syn::parse2::<Target>(input).map(|target| compact(&expand_target(target, &quote!(::metabench))))
+    }
+
+    #[test]
+    fn gamma_survivor_target_group_diagnostics() {
+        for (input, expected) in [
+            (
+                "G { benchmarks = [ID], benchmarks = [OTHER] }",
+                "`benchmarks` may only be specified once",
+            ),
+            ("G { benchmarks = 1 }", "`benchmarks` must be an array of identity names"),
+            ("G { benchmarks = [\"ID\"] }", "`benchmark identity` must be a Rust identifier"),
+            (
+                "G { benchmarks = [a::ID] }",
+                "`benchmark identity` must be a single Rust identifier",
+            ),
+        ] {
+            assert_eq!(syn::parse_str::<super::Group>(input).err().unwrap().to_string(), expected);
+        }
+        for option in [
+            "gungraun_config",
+            "gungraun_compare_by_id",
+            "gungraun_max_parallel",
+            "gungraun_teardown",
+        ] {
+            let input = format!("G {{ benchmarks = [ID], {option} = true, {option} = false }}");
+            assert_eq!(
+                syn::parse_str::<super::Group>(&input).err().unwrap().to_string(),
+                "group option may only be specified once"
+            );
+        }
+        for input in ["", "G { benchmarks = }", "G { benchmarks = [ID, 1] }"] {
+            assert!(syn::parse_str::<super::Group>(input).is_err());
+        }
+        for input in [
+            "criterion, benchmarks = [ID]",
+            "criterion = , benchmarks = [ID]",
+            "criterion = c, gungraun = {} benchmarks = [ID]",
+            "criterion = c, gungraun {}, benchmarks = [ID]",
+            "criterion = c, benchmarks [ID]",
+            "criterion = c, benchmarks = [1]",
+            "criterion = c, groups {}",
+            "criterion = c, groups = { G {} }",
+            "criterion = c, unknown = {}",
+            "criterion = c, benchmarks = [ID], allocator",
+            "criterion = c, benchmarks = [ID], allocator =",
+        ] {
+            assert!(syn::parse_str::<Target>(input).is_err(), "{input}");
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_target_generated_names_and_trailing_comma() {
+        let output = expand(quote!(criterion = c, groups = { G { benchmarks = [ONE, TWO] } }, allocator = A,)).unwrap();
+        let key = "G:ONE:TWO";
+        for (kind, prefix) in [("identities", "const"), ("probes", "const"), ("target", "mod")] {
+            let name = super::support_ident(kind, key);
+            assert!(output.contains(&format!("{prefix}{name}")), "{kind}");
+        }
+        let group = super::native_ident("group", "G");
+        let module = super::support_ident("group_module", "G");
+        assert!(output.contains(&format!("stringify!({group})")));
+        assert!(output.contains(&format!("mod{module}")));
+        assert!(output.contains("allocator=A"));
     }
 
     #[test]

@@ -25,7 +25,9 @@ impl MyService {
     }
 
     pub fn get_value(&self) -> &str {
+        // #[gamma::skip(stmt.delete_call, literal.str_to_empty, literal.str_to_xyzzy, tag = "equivalent", reason = "This fixture helper ignores its argument and only reads an immutable scalar field without side effects.")]
         self.unsupported("aa");
+        // #[gamma::skip(stmt.delete_call, tag = "equivalent", reason = "The fixture helper has an empty const body and returns unit.")]
         Self::unsupported2();
         &self.value
     }

@@ -11,7 +11,7 @@ mod cleanup;
 mod deferred_task;
 mod remote;
 
-pub(crate) use blocking::prepare_blocking;
+pub(crate) use blocking::{BlockingTask, prepare_blocking};
 pub(crate) use cleanup::discard_panicking_drop;
 #[cfg(test)]
 use deferred_task::DeferredTask;
@@ -20,4 +20,5 @@ pub(crate) use remote::{RemoteFutureFactory, prepare_remote};
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public spawning cannot isolate preparation from registration and executor polling.
 mod tests;

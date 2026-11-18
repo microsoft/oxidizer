@@ -28,6 +28,7 @@ impl HeadersBuilder for http::response::Builder {
 }
 
 pub(crate) fn try_content_length_header(builder: &mut impl HeadersBuilder, content_length: u64) -> bool {
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "for zero, both the static HeaderValue and HeaderValue::from(0_u64) encode exactly the bytes 0 and use the same insertion helper")]
     if content_length == 0 {
         try_header(builder, http::header::CONTENT_LENGTH, CONTENT_LENGTH_ZERO)
     } else {

@@ -143,6 +143,7 @@ impl fmt::Debug for Io {
 }
 
 impl ThreadAware for Io {
+    // #[gamma::skip(parameter.default_shadow, reason = "The source coordinate is deliberately unused; relocation resolves ownership from the destination.")]
     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
         if self.dispatcher.owns(destination) {
             self.thread = destination.clone();
@@ -176,6 +177,7 @@ fn panic_context(error: &Error) -> ! {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+// This teardown check installs a private worker marker on an otherwise external thread.
 mod tests {
     use std::cell::RefCell;
     use std::error::Error as _;
@@ -273,7 +275,10 @@ mod tests {
 
     #[test]
     fn blocking_marker_io_lookup_survives_scheduler_slot_teardown() {
-        let runtime = crate::runtime::Runtime::new().unwrap();
+        let runtime = crate::runtime::Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
+            .build()
+            .unwrap();
         let context = runtime.scheduler().block_on(async |cx| cx).unwrap();
         let scheduler = context.scheduler().clone();
         let io = context.io().clone();

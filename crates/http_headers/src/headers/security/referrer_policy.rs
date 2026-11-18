@@ -464,6 +464,7 @@ impl Field for ReferrerPolicy {
         &FieldName::ReferrerPolicy
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -472,15 +473,20 @@ impl Field for ReferrerPolicy {
             return Ok(None);
         };
         lines.validate_custom_source()?;
+        // #[gamma::skip(literal.bool_flip, tag = "equivalent", reason = "FieldLines is nonempty and the first iteration always overwrites this flag before it is read")]
         let mut all_recognized = false;
+        // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_true, assign_value.default, tag = "equivalent", reason = "These changes only decline the whole-line recognition shortcut; comma_items below validates the same retained values")]
         for value in lines.repeated() {
             if recognize_referrer_policy(super::super::trim_ows(value.as_bytes())).is_none() {
                 all_recognized = false;
                 break;
             }
+            // #[gamma::skip(stmt.delete_assign, literal.bool_flip, tag = "equivalent", reason = "Leaving this flag false declines only the whole-line shortcut; the complete comma-item validator still runs")]
             all_recognized = true;
         }
-        if all_recognized {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "Declining the shortcut runs the complete token validator over the same nonempty field lines")]
+        all_recognized {
             return Ok(Some(ReferrerPolicyView { values: lines }));
         }
 
@@ -495,6 +501,7 @@ impl Field for ReferrerPolicy {
         Ok(Some(ReferrerPolicyView { values: lines }))
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -503,15 +510,20 @@ impl Field for ReferrerPolicy {
             return Ok(None);
         };
         lines.validate_custom_source()?;
+        // #[gamma::skip(literal.bool_flip, tag = "equivalent", reason = "FieldLines is nonempty and the first iteration always overwrites this flag before it is read")]
         let mut all_recognized = false;
+        // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_true, assign_value.default, tag = "equivalent", reason = "These changes only decline whole-line recognition; the fallback validates and counts the same retained tokens")]
         for value in lines.repeated() {
             if recognize_referrer_policy(super::super::trim_ows(value.as_bytes())).is_none() {
                 all_recognized = false;
                 break;
             }
+            // #[gamma::skip(stmt.delete_assign, literal.bool_flip, tag = "equivalent", reason = "Leaving this flag false declines only the whole-line shortcut; the complete comma-item validator still runs")]
             all_recognized = true;
         }
-        let count = if all_recognized {
+        let count = if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "A recognized whole line is one token; counting comma_items instead produces the same positive count")]
+        all_recognized {
             lines.len()
         } else {
             let mut count = 0_usize;
@@ -525,7 +537,10 @@ impl Field for ReferrerPolicy {
             return Err(DecodeError::new(&FieldName::ReferrerPolicy, DecodeErrorKind::MissingValue));
         }
         let mut copied = FieldLinesIter::empty();
-        for (_value, owned) in lines.repeated_owned()? {
+        for (_value, owned) in
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "validate_custom_source above already admits these immutable lines; repeated_owned repeats the same source check")]
+            lines.repeated_owned()?
+        {
             copied.push(owned);
         }
         Ok(Some(ReferrerPolicyOwned { values: copied }))
@@ -545,7 +560,9 @@ impl TryFrom<FieldValue> for ReferrerPolicyOwned {
     type Error = DecodeError;
 
     fn try_from(value: FieldValue) -> Result<Self, Self::Error> {
-        if recognize_referrer_policy(super::super::trim_ows(value.as_bytes())).is_some() {
+        if
+        // #[gamma::skip(call.replace_with_default, call_result.default, cond.always_false, tag = "equivalent", reason = "The complete comma-item validator below accepts the same recognized policy and retains the identical FieldValue")]
+        recognize_referrer_policy(super::super::trim_ows(value.as_bytes())).is_some() {
             return Ok(Self {
                 values: FieldLinesIter::one(value),
             });
@@ -554,6 +571,7 @@ impl TryFrom<FieldValue> for ReferrerPolicyOwned {
         let mut count = 0_usize;
         for item in CommaItems::new(value.as_bytes()) {
             parse_referrer_policy_token(item)?;
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "This is one immutable field-value slice: the token count cannot exceed its isize::MAX-bounded byte length, so adding one cannot overflow usize")]
             count = increment_item_count(count)?;
         }
         if count == 0 {
@@ -580,6 +598,10 @@ fn parse_referrer_policy_token(bytes: &[u8]) -> Result<ReferrerPolicyTokenView<'
 }
 
 fn increment_item_count(count: usize) -> Result<usize, DecodeError> {
+    #[cfg(test)]
+    if tests::FAIL_NEXT_ITEM_COUNT.replace(false) {
+        return Err(DecodeError::new(&FieldName::ReferrerPolicy, DecodeErrorKind::InvalidNumber));
+    }
     count
         .checked_add(1)
         .ok_or_else(|| DecodeError::new(&FieldName::ReferrerPolicy, DecodeErrorKind::InvalidNumber))
@@ -595,10 +617,15 @@ fn recognize_referrer_policy(bytes: &[u8]) -> Option<ReferrerPolicyValue> {
             b's' if bytes == b"same-origin" => Some(ReferrerPolicyValue::SameOrigin),
             _ => None,
         },
+        // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "The complete no-referrer-when-downgrade literal on the right necessarily starts with no-")]
         26 if bytes.starts_with(b"no-") && bytes == b"no-referrer-when-downgrade" => Some(ReferrerPolicyValue::NoReferrerWhenDowngrade),
+        // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "The complete origin literal on the right necessarily has first byte o")]
         6 if bytes[0] == b'o' && bytes == b"origin" => Some(ReferrerPolicyValue::Origin),
+        // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "The complete origin-when-cross-origin literal on the right necessarily has first byte o")]
         24 if bytes[0] == b'o' && bytes == b"origin-when-cross-origin" => Some(ReferrerPolicyValue::OriginWhenCrossOrigin),
+        // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "The complete strict-origin literal on the right necessarily has first byte s")]
         13 if bytes[0] == b's' && bytes == b"strict-origin" => Some(ReferrerPolicyValue::StrictOrigin),
+        // #[gamma::skip(logical.and_remove_left, tag = "equivalent", reason = "The complete unsafe-url literal on the right necessarily has first byte u")]
         10 if bytes[0] == b'u' && bytes == b"unsafe-url" => Some(ReferrerPolicyValue::UnsafeUrl),
         _ => None,
     }
@@ -637,14 +664,22 @@ impl<'a> Iterator for CommaItems<'a> {
             if let Some(relative) = self.bytes[self.position..].iter().position(|byte| *byte == b',') {
                 let end = self.position + relative;
                 let item = super::super::trim_ows(&self.bytes[self.start..end]);
-                self.position = end + 1;
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                self.position =
+                // #[gamma::skip(arith.add_to_mul, arith.add_to_sub, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                end +
+                // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                1;
                 self.start = self.position;
                 if item.is_empty() {
                     continue;
                 }
                 return Some(item);
             }
-            self.finished = true;
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.finished =
+            // #[gamma::skip(literal.bool_flip, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            true;
             let item = super::super::trim_ows(&self.bytes[self.start..]);
             if !item.is_empty() {
                 return Some(item);
@@ -657,6 +692,32 @@ impl<'a> Iterator for CommaItems<'a> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    std::thread_local! {
+        pub(super) static FAIL_NEXT_ITEM_COUNT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    #[test]
+    fn gamma_afternoon_public_referrer_policy_decoders_propagate_item_count_failure() {
+        use crate::sink::{EncodedValues, FieldSink};
+        use crate::{FieldName, FieldValue, TestSink};
+
+        let mut lines = TestSink::new();
+        lines
+            .set_values(
+                &FieldName::ReferrerPolicy,
+                EncodedValues::single(FieldValue::from_static("no-referrer, same-origin")),
+            )
+            .unwrap();
+        FAIL_NEXT_ITEM_COUNT.set(true);
+        let result = super::ReferrerPolicy::view(&lines);
+        assert!(!FAIL_NEXT_ITEM_COUNT.get());
+        assert_eq!(result.unwrap_err().kind(), crate::DecodeErrorKind::InvalidNumber);
+        FAIL_NEXT_ITEM_COUNT.set(true);
+        let result = super::ReferrerPolicy::owned(&lines);
+        assert!(!FAIL_NEXT_ITEM_COUNT.get());
+        assert_eq!(result.unwrap_err().kind(), crate::DecodeErrorKind::InvalidNumber);
+    }
+
     use super::{
         CommaItems, ReferrerPolicy, ReferrerPolicyOwned, ReferrerPolicyTokenView, ReferrerPolicyValue, increment_item_count,
         parse_referrer_policy_token, recognize_referrer_policy,

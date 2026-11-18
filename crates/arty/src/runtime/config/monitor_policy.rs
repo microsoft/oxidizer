@@ -8,11 +8,13 @@
 /// The enabled policy is the default.
 ///
 /// The `monitor` Cargo feature enables the Seismograph dependencies that
-/// monitoring needs. This choice does not start a monitor or add task measurements.
+/// monitoring needs. Building an enabled runtime starts a local monitor.
+/// Task collection and poll timing run only when requested. This policy does
+/// not enable event recording or install an allocator.
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use arty::runtime::{MonitorPolicy, Runtime};
 ///
 /// let runtime = Runtime::builder()
@@ -21,9 +23,12 @@
 /// runtime.stop()?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[repr(transparent)]
 #[derive(Debug, Clone)]
 pub struct MonitorPolicy {
+    #[cfg_attr(
+        not(any(test, feature = "monitor")),
+        expect(dead_code, reason = "The policy is only read when monitoring is compiled in.")
+    )]
     enabled: bool,
 }
 
@@ -40,7 +45,7 @@ impl MonitorPolicy {
         Self { enabled: false }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "monitor"))]
     pub(crate) const fn is_enabled(&self) -> bool {
         self.enabled
     }
@@ -54,6 +59,7 @@ impl Default for MonitorPolicy {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Monitoring currently stores configuration without a public observable effect.
 mod tests {
     use super::*;
 

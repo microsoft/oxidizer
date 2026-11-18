@@ -68,6 +68,18 @@ unsafe fn inc_count(refcount: *mut AtomicU32) -> u32 {
     }
 }
 
+#[cfg(test)]
+#[cfg(not(loom))]
+#[test]
+fn gamma_survivor_private_rc_increment_returns_exact_previous_count() {
+    for old in [1, 7, (u32::MAX / 2) - 1] {
+        let mut count = AtomicU32::new(old);
+        // SAFETY: this local counter has exclusive single-thread access.
+        assert_eq!(unsafe { inc_count(&raw mut count) }, old);
+        assert_eq!(count.load(crate::atomic::Ordering::Relaxed), old + 1);
+    }
+}
+
 #[cfg(loom)]
 #[inline]
 unsafe fn inc_count(refcount: *mut AtomicU32) -> u32 {
@@ -269,3 +281,20 @@ impl<T: ?Sized, A: Allocator> Drop for Rc<T, A> {
 }
 
 impl_handle_common_unsized!(Rc);
+
+#[cfg(all(test, not(loom)))]
+#[test]
+fn nov4_rc_clone_checks_the_actual_increment_result_at_the_overflow_boundary() {
+    use crate::atomic::Ordering::Relaxed;
+
+    let pool = crate::Pool::<u32>::new();
+    let value = pool.alloc_rc(17);
+    // SAFETY: this test is the sole owner and restores the artificial count
+    // before the initialized slot's ordinary destructor can run.
+    let count = unsafe { &*refcount_ptr(value.slot) };
+    count.store(i32::MAX as u32, Relaxed);
+    let requested = crate::test_hooks::abort_was_requested(|| drop(value.clone()));
+    count.store(1, Relaxed);
+    assert!(requested);
+    assert_eq!(*value, 17);
+}

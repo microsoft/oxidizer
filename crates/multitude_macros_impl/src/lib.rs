@@ -28,6 +28,10 @@ use syn::{Data, DataEnum, DeriveInput, Field, Fields, GenericParam, Generics, Id
 
 mod attrs;
 
+#[cfg(test)]
+#[path = "gamma_survivor_generator.rs"]
+mod gamma_survivor_tests;
+
 use attrs::{ContainerAttrs, DefaultValue, FieldAttrs, RenameRule, parse_container, parse_field, parse_variant};
 
 /// Generates an implementation of `DeserializeIn` using `root_path`.
@@ -65,6 +69,7 @@ fn collect_identifiers(tokens: TokenStream2, identifiers: &mut HashSet<String>) 
 fn fresh_internal_ident(identifiers: &HashSet<String>, base: &str) -> Ident {
     let mut candidate = base.to_owned();
     while identifiers.contains(&candidate) {
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         candidate.push('_');
     }
     Ident::new(&candidate, Span::mixed_site())
@@ -164,6 +169,7 @@ fn expand(input: &DeriveInput, default_root: &Path) -> syn::Result<TokenStream2>
                 "serde `transparent` is supported only for structs",
             ));
         };
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "The unchanged struct fields and rename rule were already successfully parsed into all_fields before entering the transparent validation branch")]
         let fields = fields_info(&data.fields, container.rename_all)?;
         if fields.iter().filter(|field| !field.attrs.skip).count() != 1 {
             return Err(syn::Error::new_spanned(
@@ -217,7 +223,11 @@ fn expand(input: &DeriveInput, default_root: &Path) -> syn::Result<TokenStream2>
 fn fresh_lifetime(input: &DeriveInput, base: &str) -> Lifetime {
     let used: HashSet<_> = input.generics.lifetimes().map(|param| param.lifetime.ident.to_string()).collect();
     let mut name = base.to_owned();
-    while used.contains(name.trim_start_matches('\'')) {
+    while
+    // #[gamma::skip(cond.negate, tag = "outofmem", reason = "November 4 campaign: this mutation exceeded the memory limit")]
+    // #[gamma::skip(literal.char_to_distinct, literal.char_to_nul, reason = "Fresh-name bases and their underscore suffixes contain no leading apostrophe, x, or NUL; Lifetime adds the apostrophe only after this loop")]
+    used.contains(name.trim_start_matches('\'')) {
+        // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         name.push('_');
     }
     Lifetime::new(&format!("'{name}"), Span::call_site())
@@ -271,6 +281,7 @@ fn bounded_generics(
             || (info.attrs.skip && info.attrs.default.is_none() && container.default.is_none())
         {
             let key = ty.to_token_stream().to_string();
+            // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, reason = "This private deduplication discriminator only needs to differ from serde, custom, and arena")]
             if seen.insert((key, "default")) {
                 where_clause.predicates.push(parse_quote!(#ty: ::core::default::Default));
             }
@@ -280,10 +291,15 @@ fn bounded_generics(
         }
         let key = ty.to_token_stream().to_string();
         let flavor = if info.attrs.via_serde {
+            // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, reason = "This private deduplication discriminator only needs to differ from default, custom, and arena")]
             "serde"
-        } else if info.attrs.serde_with.is_some() || info.attrs.multitude_with.is_some() {
+        } else if
+        // #[gamma::skip(cond.negate, reason = "This condition only partitions private deduplication labels custom and arena; negating it swaps those two distinct labels consistently, preserving all key equalities and the separate actual-attribute decisions that add bounds")]
+        info.attrs.serde_with.is_some() || info.attrs.multitude_with.is_some() {
+            // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, reason = "This private deduplication discriminator only needs to differ from default, serde, and arena")]
             "custom"
         } else {
+            // #[gamma::skip(literal.str_to_empty, literal.str_to_xyzzy, reason = "This private deduplication discriminator only needs to differ from default, serde, and custom")]
             "arena"
         };
         if seen.insert((key, flavor)) {
@@ -483,6 +499,7 @@ fn construct_custom_variant(enum_name: &Ident, variant: &Ident, fields: &Fields)
             #enum_name::#variant {}
         },
         Fields::Named(fields) if fields.named.len() == 1 => {
+            // #[gamma::skip(iter.first_to_last, tag = "equivalent", reason = "The enclosing match guard requires exactly one named field, so first and last select the same field")]
             let field = fields
                 .named
                 .first()
@@ -492,6 +509,7 @@ fn construct_custom_variant(enum_name: &Ident, variant: &Ident, fields: &Fields)
         }
         Fields::Named(fields) => {
             let field_names = fields.named.iter().map(|field| field.ident.as_ref().expect("named field"));
+            // #[gamma::skip(range.exclusive_to_inclusive, reason = "Quote repetition is bounded by the zipped field_names iterator, so an extra trailing index is never emitted")]
             let indexes = (0..fields.named.len()).map(syn::Index::from);
             quote!(#enum_name::#variant { #(#field_names: __value.#indexes),* })
         }
@@ -534,6 +552,7 @@ fn visitor_definition(
 fn field_enum(name: &Ident, infos: &[FieldInfo<'_>], deny_unknown: bool, names: &InternalNames) -> syn::Result<TokenStream2> {
     let serde = &names.serde;
     let fields_const = format_ident!("{name}_FIELDS");
+    // #[gamma::skip(range.exclusive_to_inclusive, expr.increment, reason = "Only indices from infos.enumerate are used; an extra identifier at the end of this private vector is never emitted")]
     let variants: Vec<_> = (0..infos.len()).map(|index| format_ident!("Field{index}")).collect();
     let declared_variants: Vec<_> = infos
         .iter()
@@ -710,6 +729,7 @@ fn named_visitor(
     let container_default_fields: Vec<_> = infos
         .iter()
         .enumerate()
+        // #[gamma::skip(logical.and_remove_right, reason = "The collected fields are used only inside the following Some(container.default) branch, where the omitted container-default predicate is already true; the None branch discards this collection without emitting tokens")]
         .filter(|(_, info)| info.attrs.default.is_none() && container.default.is_some())
         .collect();
     let default_setup = if let Some(container_default) = &container.default {
@@ -1123,6 +1143,7 @@ fn struct_tokens(
     names: &InternalNames,
 ) -> syn::Result<TokenStream2> {
     let serde = &names.serde;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "The sole caller already successfully parsed these same struct fields and the same container rename rule into all_fields before constructing this visitor")]
     let infos = fields_info(fields, container.rename_all)?;
     let type_name = container.rename.clone().unwrap_or_else(|| input.ident.to_string());
     let name = &input.ident;
@@ -1244,6 +1265,7 @@ fn variants_info(data: &DataEnum, rename_all: Option<RenameRule>) -> syn::Result
     data.variants
         .iter()
         .map(|variant| {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "The sole caller is reached only after expand successfully parsed every enum variant's unchanged attributes while collecting all_fields")]
             let attrs = parse_variant(&variant.attrs)?;
             if (attrs.default.is_some() && !attrs.skip) || attrs.via_serde {
                 return Err(syn::Error::new_spanned(
@@ -1262,6 +1284,7 @@ fn variants_info(data: &DataEnum, rename_all: Option<RenameRule>) -> syn::Result
 
 fn variant_enum(name: &Ident, infos: &[VariantInfo<'_>], names: &InternalNames) -> syn::Result<TokenStream2> {
     let serde = &names.serde;
+    // #[gamma::skip(range.exclusive_to_inclusive, expr.increment, reason = "Only indices from infos.enumerate are used; an extra identifier at the end of this private vector is never emitted")]
     let variants: Vec<_> = (0..infos.len()).map(|index| format_ident!("Variant{index}")).collect();
     let declared_variants: Vec<_> = infos
         .iter()

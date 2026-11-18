@@ -64,8 +64,6 @@ windows-sys = { workspace = true, optional = true, features = ["Win32_System_Sys
 alloc_tracker = { workspace = true }
 
 #external
-chrono = { workspace = true, features = ["clock"] }
-chrono-tz = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 futures = { workspace = true, features = ["default", "executor", "futures-executor"] }
 jiff = { workspace = true, default-features = true }
@@ -101,10 +99,6 @@ required-features = ["test-util"]
 [[example]]
 name = "data"
 required-features = ["test-util", "serde", "tokio"]
-
-[[example]]
-name = "interop_chrono"
-required-features = ["test-util"]
 
 [[example]]
 name = "interop_time"

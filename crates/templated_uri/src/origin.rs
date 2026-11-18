@@ -229,6 +229,7 @@ impl std::str::FromStr for Origin {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let uri: http::Uri = s.parse().map_err(UriError::from)?;
         let scheme = uri.scheme().ok_or_else(|| UriError::invalid_uri("missing scheme"))?.clone();
+        // #[gamma::skip(try.propagate_to_unwrap, literal.str_to_empty, literal.str_to_xyzzy, tag = "equivalent", reason = "A successfully parsed http::Uri with a scheme must also have an authority; the preceding scheme check excludes relative forms.")]
         let authority = uri.authority().ok_or_else(|| UriError::invalid_uri("missing authority"))?.clone();
         Ok(Self::from_parts(scheme, authority))
     }

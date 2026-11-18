@@ -125,6 +125,7 @@ impl Default for WorkersPolicy {
 
 fn sorted_singletons(processors: &ProcessorSet) -> Vec<ProcessorSet> {
     let mut processors: Vec<_> = processors.decompose().into_iter().collect();
+    // #[gamma::skip(iter.first_to_last, reason = "decompose produces singleton processor sets, whose first and last processor are identical.")]
     processors.sort_by_key(|processor| processor.processors().first().id());
     processors
 }
@@ -173,6 +174,7 @@ enum WorkersPolicyKind {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Public runtime construction cannot inject processor sets or inspect unused placements.
 mod tests {
     use many_cpus::SystemHardware;
     use many_cpus::fake::HardwareBuilder;

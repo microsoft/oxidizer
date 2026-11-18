@@ -214,11 +214,13 @@ impl AccessControlAllowOriginOwned {
         reason = "validated components and String formatting cannot violate field-value invariants"
     )]
     pub fn from_parts(scheme: OriginScheme, host: OriginHost<'_>, port: Option<u16>) -> Result<Self, DecodeError> {
+        // #[gamma::skip(literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "These are initial String capacity estimates; host serialization grows the String independently")]
         let host_capacity = match host {
             OriginHost::Domain(domain) => domain.as_str().len(),
             OriginHost::Ipv4(_) => 15,
             OriginHost::Ipv6(_) => 41,
         };
+        // #[gamma::skip(arith.add_to_mul, literal.int_decrement, literal.int_increment, literal.int_to_zero, literal.int_to_one, tag = "equivalent", reason = "The scheme-length expression is only a capacity hint; writing scheme, host and port determines the complete value")]
         let mut serialized = String::with_capacity(host_capacity.saturating_add(scheme.as_str().len() + 9));
         serialized.push_str(scheme.as_str());
         serialized.push_str("://");
@@ -233,6 +235,7 @@ impl AccessControlAllowOriginOwned {
                 ParsedOriginHost::Ipv4(address)
             }
             OriginHost::Ipv6(address) => {
+                // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "The IPv6 serializer overwrites every byte of its returned prefix; unused initialized bytes are never included in the origin")]
                 let mut buffer = [0; 39];
                 serialized.push('[');
                 serialized.push_str(serialize_ipv6(address, &mut buffer));
@@ -630,6 +633,7 @@ impl Field for AccessControlAllowOrigin {
     }
 
     #[inline]
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -651,6 +655,7 @@ impl Field for AccessControlAllowOrigin {
 
     /// Parses straight into owned storage, since the serialized origin a view
     /// borrows is not kept.
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -689,7 +694,10 @@ impl TryFrom<FieldValue> for AccessControlAllowOriginOwned {
 #[inline]
 fn parse_allow_origin_value(value: FieldValueRef<'_>) -> Result<(ParsedOrigin, &str), DecodeError> {
     let range = trimmed_range(value.as_bytes());
-    let serialized = visible_ascii_str(value, range.clone()).map_or_else(
+    let fast_range = range.clone();
+    // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "None uses semantic_str to validate and borrow the identical visible ASCII slice; the optional shortcut does not change retained offsets")]
+    let shortcut = visible_ascii_str(value, fast_range);
+    let serialized = shortcut.map_or_else(
         || semantic_str(&FieldName::AccessControlAllowOrigin, value.as_bytes(), range.clone()),
         Ok,
     )?;
@@ -780,20 +788,27 @@ fn valid_domain_label(label: &[u8]) -> bool {
 
 /// Splits a serialized origin at its first `://` and validates the scheme.
 fn split_scheme(origin: &[u8]) -> Option<(&[u8], &[u8])> {
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Starting at one skips only the first byte; the unchanged final lowercase-ASCII check already proves that byte belongs to CLASS_SCHEME")]
     let mut index = 0_usize;
     while let Some(&byte) = origin.get(index) {
         if byte == b':' {
+            // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         }
         if BYTE_CLASS[usize::from(byte)] & CLASS_SCHEME == 0 {
             return None;
         }
-        index += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        index +=
+        // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        1;
     }
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "index is bounded by the byte slice length, at most isize::MAX; adding three therefore cannot overflow usize")]
     let rest = index.checked_add(3)?;
     if !origin.first().is_some_and(u8::is_ascii_lowercase) || origin.get(index..rest) != Some(b"://".as_slice()) {
         return None;
     }
+    // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "The successful get(index..rest) comparison above proves index and rest are both within the origin slice")]
     Some((origin.get(..index)?, origin.get(rest..)?))
 }
 
@@ -801,7 +816,9 @@ fn parse_serialized_authority(authority: &[u8], scheme: &[u8]) -> Option<(Parsed
     let (&first, rest) = authority.split_first()?;
 
     if first == b'[' {
-        if rest
+        if
+        // #[gamma::skip(cond.always_false, iter.any_to_all, bitwise.and_to_or, literal.int_increment, tag = "equivalent", reason = "The following bracket split, canonical IPv6 parser, and strict port-suffix parser independently validate every authority byte; this prefilter can only decline a shortcut")]
+        rest
             .iter()
             .any(|byte| BYTE_CLASS[usize::from(*byte)] & CLASS_AUTHORITY == 0 && *byte != b':')
         {
@@ -810,6 +827,7 @@ fn parse_serialized_authority(authority: &[u8], scheme: &[u8]) -> Option<(Parsed
         let close = rest.iter().position(|byte| *byte == b']')?;
         let (host, suffix) = rest.split_at(close);
         let address = parse_serialized_ipv6(host)?;
+        // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "split_at(close) leaves the located closing bracket as suffix[0], so suffix has at least one byte and get(1..) cannot fail")]
         let port = parse_serialized_port_suffix(suffix.get(1..)?, scheme)?;
         return Some((ParsedOriginHost::Ipv6(address), close + 2, port));
     }
@@ -819,7 +837,9 @@ fn parse_serialized_authority(authority: &[u8], scheme: &[u8]) -> Option<(Parsed
         if BYTE_CLASS[usize::from(byte)] & CLASS_AUTHORITY != 0 {
             continue;
         }
-        if byte != b':' || colon.is_some() {
+        if
+        // #[gamma::skip(logical.or_remove_right, tag = "equivalent", reason = "Keeping only the last colon leaves any earlier colon inside host, which parse_serialized_host necessarily rejects as neither a domain nor IPv4")]
+        byte != b':' || colon.is_some() {
             return None;
         }
         colon = Some(index);
@@ -846,7 +866,12 @@ fn parse_serialized_port_suffix(suffix: &[u8], scheme: &[u8]) -> Option<Option<u
 }
 
 fn parse_serialized_port(port: &[u8], scheme: &[u8]) -> Option<u16> {
-    if port.is_empty() || port.len() > 5 || (port.len() > 1 && port.first() == Some(&b'0')) {
+    if port.is_empty()
+        || port.len() >
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "A six-digit nonzero-leading decimal is at least 100000 and fails u16 conversion; leading-zero forms remain rejected and larger lengths still return before arithmetic")]
+        5
+        || (port.len() > 1 && port.first() == Some(&b'0'))
+    {
         return None;
     }
     let mut value = 0_u32;
@@ -868,13 +893,16 @@ fn parse_serialized_host(host: &[u8]) -> Option<ParsedOriginHost> {
         Some((&b'.', head)) => head,
         _ => host,
     };
-    if host.is_empty() || host.len() > 253 {
+    if
+    // #[gamma::skip(logical.or_remove_left, tag = "equivalent", reason = "An empty host reaches parsed_label_classes with an empty label, yielding false numeric/domain classes and therefore None")]
+    host.is_empty() || host.len() > 253 {
         return None;
     }
     let mut label_count = 0_usize;
     let mut all_numeric = true;
     let mut valid_ipv4 = true;
     let mut valid_domain = true;
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "A successful IPv4 result has exactly four labels and overwrites all four octets; domain results do not retain this array")]
     let mut octets = [0; 4];
     let mut start = 0_usize;
     let mut common = u8::MAX;
@@ -893,6 +921,7 @@ fn parse_serialized_host(host: &[u8]) -> Option<ParsedOriginHost> {
         valid_domain &= domain;
         label_count = label_count.saturating_add(1);
         start = index.saturating_add(1);
+        // #[gamma::skip(stmt.delete_assign, tag = "equivalent", reason = "Without this reset common accumulates earlier labels; a lost digit/domain class already cleared all_numeric/valid_domain, and IPv4 octets are returned only when every label remained numeric")]
         common = u8::MAX;
     }
     let label = host.get(start..).unwrap_or_default();
@@ -917,11 +946,17 @@ fn parse_serialized_host(host: &[u8]) -> Option<ParsedOriginHost> {
 /// `common` is the intersection of the byte classes of every byte in `label`.
 fn parsed_label_classes(label: &[u8], common: u8) -> (bool, Option<u8>, bool) {
     let (Some(&first), Some(&last)) = (label.first(), label.last()) else {
+        // #[gamma::skip(return_value.default, tag = "equivalent", reason = "The tuple default is exactly (false, None, false), the value already returned for an empty label")]
         return (false, None, false);
     };
 
     let numeric = common & CLASS_DIGIT != 0;
-    let ipv4 = if numeric && label.len() <= 3 && (label.len() == 1 || first != b'0') {
+    let ipv4 = if numeric
+        && label.len() <=
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "A four-digit nonzero-leading decimal cannot fit u8; leading-zero labels still fail the unchanged canonicality check")]
+        3
+        && (label.len() == 1 || first != b'0')
+    {
         let mut value = 0_u32;
         for &byte in label {
             value = value * 10 + u32::from(byte.wrapping_sub(b'0'));
@@ -941,7 +976,9 @@ fn parsed_label_classes(label: &[u8], common: u8) -> (bool, Option<u8>, bool) {
 #[inline(never)] // Keep IPv6 parsing and formatting off the domain-origin stack.
 fn parse_serialized_ipv6(address: &[u8]) -> Option<Ipv6Addr> {
     // Canonical hexadecimal IPv6 has at most eight four-digit groups and seven colons.
-    if address.is_empty()
+    if
+    // #[gamma::skip(logical.or_remove_left, logical.or_remove_right, logical.or_to_and, literal.int_increment, tag = "equivalent", reason = "The following UTF-8 conversion, standard IPv6 parser, and exact canonical reserialization comparison reject every empty, oversized, or non-hex address that bypasses this prefilter")]
+    address.is_empty()
         || address.len() > 39
         || address
             .iter()
@@ -951,6 +988,7 @@ fn parse_serialized_ipv6(address: &[u8]) -> Option<Ipv6Addr> {
     }
     let text = http_headers_simd::ascii_str(address).expect("serialized IPv6 bytes are ASCII");
     let parsed = Ipv6Addr::from_str(text).ok()?;
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "serialize_ipv6 overwrites every byte in the returned prefix; the unwritten array tail is never read")]
     let mut buffer = [0; 39];
     (serialize_ipv6(parsed, &mut buffer).as_bytes() == address).then_some(parsed)
 }
@@ -961,13 +999,29 @@ fn serialize_ipv6(address: Ipv6Addr, serialized: &mut [u8; 39]) -> &str {
     let mut longest_len = 1_usize;
     let mut index = 0_usize;
     while index < segments.len() {
-        if segments[index] != 0 {
-            index += 1;
+        if
+        // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        segments[index] != 0 {
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            index +=
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
+            // #[gamma::skip(loop.delete_continue, tag = "equivalent", reason = "After incrementing past this nonzero segment, falling through scans the same next zero run as the next outer iteration; another nonzero or end only produces a discarded zero-length run")]
             continue;
         }
         let start = index;
-        while index < segments.len() && segments[index] == 0 {
-            index += 1;
+        while
+        // #[gamma::skip(cond.negate, relational.lt_to_gt, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        index < segments.len() &&
+        // #[gamma::skip(relational.eq_to_ne, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        segments[index] ==
+        // #[gamma::skip(literal.int_increment, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        0
+        {
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            index +=
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
         }
         let len = index - start;
         if len > longest_len {
@@ -1042,6 +1096,109 @@ fn semantic_str<'a>(name: &'static FieldName, bytes: &'a [u8], range: Range<usiz
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_nov6_mixed_domain_and_ipv4_labels_preserve_the_host_kind() {
+        assert!(matches!(
+            super::parse_serialized_host(b"123.example"),
+            Some(super::ParsedOriginHost::Domain)
+        ));
+        assert_eq!(
+            super::parse_serialized_host(b"192.0.2.7"),
+            Some(super::ParsedOriginHost::Ipv4(std::net::Ipv4Addr::new(192, 0, 2, 7)))
+        );
+    }
+
+    #[test]
+    fn gamma_afternoon_origin_display_propagates_invalid_retained_bounds() {
+        use std::fmt;
+
+        let mut origin = super::AccessControlAllowOriginOwned::wildcard();
+        origin.parsed.start = 2;
+        let mut output = String::new();
+        fmt::write(&mut output, format_args!("{origin}")).unwrap_err();
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_origin_cache_distinguishes_invalid_from_unrecognized() {
+        assert_eq!(super::common_http_origin(b"https://example.test"), Some(true));
+        assert_eq!(super::common_http_origin(b"http://a..example"), Some(false));
+        assert_eq!(super::common_http_origin(b"https://a..example"), Some(false));
+        assert_eq!(super::common_http_origin(b"http://1.2.3.4"), None);
+        assert_eq!(super::common_http_origin(b"https://example.test:9"), None);
+    }
+
+    #[test]
+    fn gamma_round2_serialized_origin_scanners_validate_each_character_class() {
+        for byte in u8::MIN..=u8::MAX {
+            assert_eq!(
+                super::valid_domain_label(&[byte]),
+                byte.is_ascii_lowercase() || byte.is_ascii_digit()
+            );
+            assert_eq!(
+                super::parse_serialized_port(&[byte], b"https"),
+                byte.is_ascii_digit().then(|| u16::from(byte - b'0'))
+            );
+        }
+        for (scheme, valid) in [
+            (b"http://host".as_slice(), true),
+            (b"h1+.-://host", true),
+            (b"1http://host", false),
+            (b"x!://host", false),
+            (b"x_://host", false),
+            (b"://host", false),
+            (b"x:", false),
+        ] {
+            assert_eq!(super::split_scheme(scheme).is_some(), valid, "{scheme:?}");
+        }
+        for (label, valid) in [
+            (b"a".as_slice(), true),
+            (b"z".as_slice(), true),
+            (b"9".as_slice(), true),
+            (b"-a".as_slice(), false),
+            (b"a-".as_slice(), false),
+            (b"@".as_slice(), false),
+            (b"{".as_slice(), false),
+        ] {
+            assert_eq!(super::valid_domain_label(label), valid, "{label:?}");
+        }
+        assert!(super::valid_domain_label(&[b'a'; 63]));
+        assert!(!super::valid_domain_label(&[b'a'; 64]));
+        for label in [b"0".as_slice(), b"255", b"256", b"999", b"0001", b"9999", b"a", b""] {
+            let common = label
+                .iter()
+                .fold(u8::MAX, |common, byte| common & super::BYTE_CLASS[usize::from(*byte)]);
+            let (numeric, ipv4, domain) = super::parsed_label_classes(label, common);
+            assert_eq!(numeric, !label.is_empty() && label.iter().all(u8::is_ascii_digit));
+            let expected = match label {
+                b"0" => Some(0),
+                b"255" => Some(255),
+                _ => None,
+            };
+            assert_eq!(ipv4, expected, "{label:?}");
+            assert_eq!(domain, !label.is_empty());
+        }
+        for bytes in [b"".as_slice(), b"[::1]", b"::g", b"::\xff", b"0000::1", b"::FFFF"] {
+            assert!(super::parse_serialized_ipv6(bytes).is_none(), "{bytes:?}");
+        }
+        for address in [std::net::Ipv6Addr::LOCALHOST, std::net::Ipv6Addr::UNSPECIFIED] {
+            assert_eq!(super::parse_serialized_ipv6(address.to_string().as_bytes()), Some(address));
+        }
+        assert!(super::parse_serialized_host(b"").is_none());
+        assert!(super::parse_serialized_host(&[b'a'; 254]).is_none());
+        let host = [vec![b'a'; 63], vec![b'b'; 63], vec![b'c'; 63], vec![b'd'; 62]].join(&b'.');
+        assert_eq!(host.len(), 254);
+        assert!(super::parse_serialized_host(&host).is_none());
+        assert!(super::parse_serialized_host(b"999.1.1.1").is_none());
+        assert!(super::parse_serialized_host(b"1.2.3.4").is_some());
+        for authority in [b"host@bad".as_slice(), b"host@9", b"host:1:2", b"[::1]x", b"[::1]:bad"] {
+            assert!(super::parse_serialized_authority(authority, b"https").is_none(), "{authority:?}");
+        }
+        for authority in [b"[::1]".as_slice(), b"[::1]:9"] {
+            assert!(super::parse_serialized_authority(authority, b"https").is_some(), "{authority:?}");
+        }
+        assert_eq!(super::parse_serialized_port(b"9", b"https"), Some(9));
+    }
     use super::{
         AccessControlAllowOrigin, AccessControlAllowOriginOwned, OriginKind, ParsedOrigin, common_http_origin, semantic_str, split_scheme,
         valid_domain_label, valid_h16_sequence, visible_ascii_str,

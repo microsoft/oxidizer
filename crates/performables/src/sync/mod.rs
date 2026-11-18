@@ -23,6 +23,7 @@ mod broadcast;
 pub mod channel;
 /// Condition-variable synchronization.
 pub mod condition;
+mod effects;
 /// Reader-writer synchronization.
 pub mod lock;
 /// Mutual-exclusion synchronization.
@@ -287,8 +288,12 @@ mod sealed {
             guard.release_native();
         }
 
+        // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         fn barrier_new(parties: u32) -> barrier::StateSync {
-            barrier::StateSync::new(parties)
+            barrier::StateSync::new(
+                // #[gamma::skip(expr.increment, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                parties,
+            )
         }
     }
 

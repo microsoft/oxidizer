@@ -35,6 +35,7 @@ impl Pools {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test scaffolding is not runtime behavior.
+// Pool allocation and shared ownership identity are not exposed by public schedulers.
 mod tests {
     use super::*;
 

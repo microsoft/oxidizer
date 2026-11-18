@@ -79,7 +79,9 @@ impl BenchmarkArguments {
 
         let mut native = Punctuated::new();
         if input.peek(Token![,]) {
+            // #[gamma::skip(try.propagate_to_unwrap, reason = "peek verified the next token is a comma; parsing that same token cannot fail")]
             input.parse::<Token![,]>()?;
+            // #[gamma::skip(cond.always_true, reason = "parse_terminated on an empty stream produces the same empty native argument list")]
             if !input.is_empty() {
                 for argument in Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)? {
                     push_native_argument(&mut native, argument)?;
@@ -121,6 +123,7 @@ fn push_native_argument(native: &mut Punctuated<MetaNameValue, Token![,]>, argum
             format!("`{source_name}` may only be specified once"),
         ));
     }
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the whitelist above accepts exactly the three paths that native_argument handles successfully")]
     native.push(native_argument(argument)?);
     Ok(())
 }
@@ -418,9 +421,17 @@ fn expand_benchmark(arguments: BenchmarkArguments, mut function: ItemFn, metaben
 /// Adapter calls resolve directly to the preserved function even when its name
 /// matches a generated argument or collector-control local.
 pub fn benchmark(arguments: TokenStream2, item: TokenStream2) -> Result<TokenStream2> {
+    benchmark_with_resolver(arguments, item, metabench_path)
+}
+
+fn benchmark_with_resolver(
+    arguments: TokenStream2,
+    item: TokenStream2,
+    resolve: impl FnOnce() -> Result<TokenStream2>,
+) -> Result<TokenStream2> {
     reject_if_too_complex(&arguments)?;
     let arguments = parse2(arguments)?;
-    let metabench = metabench_path()?;
+    let metabench = resolve()?;
     let function = parse2(item)?;
     expand_benchmark(arguments, function, &metabench)
 }
@@ -433,6 +444,24 @@ mod tests {
 
     use super::{BenchmarkArguments, adapter_signature, expand_benchmark, partition_attributes};
 
+    #[test]
+    fn gamma_round2_item_parse_errors_follow_successful_dependency_resolution() {
+        let mut resolved = false;
+        let error = super::benchmark_with_resolver(
+            quote!(IDENTITY, GROUP, "name"),
+            quote!(
+                struct NotAFunction;
+            ),
+            || {
+                resolved = true;
+                Ok(quote!(::metabench))
+            },
+        )
+        .unwrap_err();
+        assert!(resolved);
+        assert_eq!(error.to_string(), "expected `fn`");
+    }
+
     fn compact(tokens: &proc_macro2::TokenStream) -> String {
         tokens.to_string().split_whitespace().collect()
     }
@@ -441,6 +470,121 @@ mod tests {
         let arguments = syn::parse2::<BenchmarkArguments>(arguments)?;
         let function = syn::parse2::<ItemFn>(function)?;
         expand_benchmark(arguments, function, &quote!(::metabench)).map(|tokens| compact(&tokens))
+    }
+
+    #[test]
+    fn gamma_survivor_benchmark_argument_diagnostics() {
+        for (input, expected) in [
+            (
+                "identity = ID, group_name = \"g\", group_name = \"h\", benchmark_name = \"b\"",
+                "`group_name` may only be specified once",
+            ),
+            (
+                "identity = ID, group_name = \"g\", benchmark_name = \"b\", benchmark_name = \"c\"",
+                "`benchmark_name` may only be specified once",
+            ),
+            (
+                "group_name = \"g\", benchmark_name = \"b\"",
+                "unexpected end of input, missing `identity`",
+            ),
+            (
+                "identity = ID, benchmark_name = \"b\"",
+                "unexpected end of input, missing `group_name`",
+            ),
+            (
+                "ID, group_name = \"g\", \"b\"",
+                "positional and named benchmark arguments cannot be mixed",
+            ),
+            (
+                "ID, \"g\", benchmark_name = \"b\"",
+                "positional and named benchmark arguments cannot be mixed",
+            ),
+            ("ID, group_name, \"b\"", ""),
+            (
+                "ID, \"g\", \"b\", gungraun_setup = setup, gungraun_setup = other",
+                "`gungraun_setup` may only be specified once",
+            ),
+            (
+                "ID, \"g\", \"b\", gungraun_teardown = teardown, gungraun_teardown = other",
+                "`gungraun_teardown` may only be specified once",
+            ),
+            ("ID, \"g\", \"b\", unsupported = 1", "unsupported benchmark option"),
+            (
+                "ID, \"g\", \"b\", gungraun_teardown = teardown, unsupported = 1",
+                "unsupported benchmark option",
+            ),
+        ] {
+            let result = syn::parse_str::<BenchmarkArguments>(input);
+            if expected.is_empty() {
+                result.unwrap();
+            } else {
+                assert_eq!(result.err().unwrap().to_string(), expected, "{input}");
+            }
+        }
+        for input in ["identity = ID, group_name =", "ID,", "ID, \"g\", 1", "ID, \"g\", \"b\", x"] {
+            assert!(syn::parse_str::<BenchmarkArguments>(input).is_err(), "{input}");
+        }
+        syn::parse_str::<BenchmarkArguments>("ID, \"g\", \"b\",").unwrap();
+        let invalid: syn::MetaNameValue = syn::parse_quote!(unknown = 1);
+        assert_eq!(
+            super::native_argument(invalid).err().unwrap().to_string(),
+            "unsupported benchmark option"
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_benchmark_native_names_and_attributes() {
+        let output = expand(
+            quote!(ID, "g", "b"),
+            quote!(
+                fn workload() {}
+            ),
+        )
+        .unwrap();
+        let adapter = super::native_ident("benchmark", "ID");
+        let group = super::native_ident("group", "ID");
+        assert!(output.contains(&format!("fn{adapter}(")));
+        assert!(output.contains(&format!("stringify!({group})")));
+        assert!(output.contains("gungraun::library_benchmark]"));
+        assert!(!output.contains("gungraun::library_benchmark()]"));
+        let output = expand(
+            quote!(ID, "g", "b", gungraun_setup = setup, gungraun_teardown = teardown),
+            quote!(
+                fn workload() {}
+            ),
+        )
+        .unwrap();
+        assert!(output.contains("library_benchmark(setup=setup,teardown=teardown)"));
+        for function in [
+            quote!(
+                #[cfg_attr(unix)]
+                fn f() {}
+            ),
+            quote!(
+                #[cfg_attr(unix, cfg_attr(windows))]
+                fn f() {}
+            ),
+            quote!(
+                #[cfg_attr(unix, x =)]
+                fn f() {}
+            ),
+            quote!(
+                async fn f() {}
+            ),
+        ] {
+            let error = expand(quote!(ID, "g", "b"), function).unwrap_err();
+            assert!(!error.to_string().is_empty());
+        }
+        let meta: syn::Meta = syn::parse_quote!(cfg_attr(unix));
+        assert_eq!(
+            super::partition_meta(&meta).err().unwrap().to_string(),
+            "`cfg_attr` requires a condition and at least one attribute"
+        );
+        let attributes: ItemFn = syn::parse_quote!(
+            #[cfg_attr(unix)]
+            fn f() {}
+        );
+        assert!(partition_attributes(attributes.attrs).is_err());
     }
 
     fn assert_same_syntax(actual: &impl ToTokens, expected: &impl ToTokens) {

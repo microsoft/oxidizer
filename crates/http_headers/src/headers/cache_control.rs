@@ -223,7 +223,10 @@ impl CacheControlOwned {
     pub fn directives(&self) -> impl Iterator<Item = CacheDirectiveView<'_>> {
         self.values
             .iter()
-            .flat_map(|value| DirectiveItems::new(value.as_bytes(), true))
+            .flat_map(|value| {
+                // #[gamma::skip(literal.bool_flip, tag = "equivalent", reason = "The following filter_map(Result::ok) discards empty-item projection errors exactly as skip_empty discards empty members")]
+                DirectiveItems::new(value.as_bytes(), true)
+            })
             .filter_map(Result::ok)
             .filter_map(|item| parse_directive(item).ok())
     }
@@ -413,6 +416,7 @@ impl Field for CacheControl {
         &FieldName::CacheControl
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn view_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::View<'_>>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -428,6 +432,7 @@ impl Field for CacheControl {
         Ok(Some(CacheControlView { values: lines, summary }))
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "equivalent", reason = "The unused decode mode is the only defaultable parameter; generic &S has no Default bound")]
     fn owned_with<S>(source: &S, _mode: crate::DecodeMode) -> Result<Option<Self::Owned>, DecodeError>
     where
         S: FieldSource + ?Sized,
@@ -438,7 +443,10 @@ impl Field for CacheControl {
         lines.validate_list_item_limit(b',', true)?;
         let mut summary = CacheSummary::default();
         let mut copied = SmallVec::new();
-        for (value_index, (value, owned)) in lines.repeated_owned()?.enumerate() {
+        for (value_index, (value, owned)) in
+            // #[gamma::skip(try.propagate_to_unwrap, tag = "equivalent", reason = "validate_list_item_limit above already validated this same immutable FieldLines source, so repeated_owned cannot fail admission again")]
+            lines.repeated_owned()?.enumerate()
+        {
             observe_directives(value.as_bytes(), value_index, &mut summary)?;
             copied.push(owned);
         }
@@ -458,7 +466,9 @@ fn observe_directives(bytes: &[u8], value_index: usize, summary: &mut CacheSumma
     // Quoted directive values are rare, and the prescan for them lowers to a
     // vectorised byte search, so it costs far less than watching every byte of
     // the split for a quote would.
-    if bytes.contains(&b'"') {
+    if
+    // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "The quote-aware directive iterator also handles unquoted input and produces the same directive summary")]
+    bytes.contains(&b'"') {
         return observe_quoted_directives(bytes, value_index, summary);
     }
     for item in bytes.split(|byte| *byte == b',') {
@@ -523,7 +533,9 @@ fn validate_outgoing(header: FieldValueRef<'_>) -> Result<CacheSummary, DecodeEr
     let mut summary = CacheSummary::default();
     for item in DirectiveItems::new(header.as_bytes(), false) {
         let item = item?;
-        if item.is_empty() {
+        if
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "parse_directive_parts below independently rejects the same empty item as InvalidSyntax because an empty directive name is not an HTTP token")]
+        item.is_empty() {
             return Err(super::invalid_syntax(&FieldName::CacheControl));
         }
         summary.observe(parse_directive_parts(item)?);
@@ -689,6 +701,7 @@ impl CacheControlBuilder {
     /// # Ok::<(), http_headers::DecodeError>(())
     /// ```
     pub fn build(self) -> Result<CacheControlOwned, DecodeError> {
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "An empty builder still produces an empty wire value, which CacheControlOwned::try_from rejects with the identical InvalidSyntax error")]
         if self.directives.is_empty() {
             return Err(DecodeError::new(&FieldName::CacheControl, DecodeErrorKind::InvalidSyntax));
         }
@@ -768,6 +781,7 @@ fn write_decimal<W>(writer: &mut W, mut value: u64) -> Result<(), InsertError>
 where
     W: FieldValueWriter,
 {
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Decimal rendering overwrites every byte in the returned suffix; untouched leading storage bytes are never emitted")]
     let mut storage = [0_u8; 20];
     let mut start = storage.len();
     loop {
@@ -859,8 +873,18 @@ fn project_directive(bytes: &[u8]) -> Result<DirectiveParts<'_>, DecodeError> {
     if bytes.is_empty() {
         return Err(super::invalid_syntax(&FieldName::CacheControl));
     }
-    if bytes.get(7) == Some(&b'=') && bytes.get(..7).is_some_and(|name| eq_ignore_ascii_case_scalar(name, b"max-age")) {
+    if
+    // #[gamma::skip(cond.always_false, literal.int_decrement, literal.int_to_one, literal.int_to_zero, range.exclusive_to_inclusive, call.replace_with_default, call_result.default, tag = "equivalent", reason = "These mutations only decline max-age recognition: shorter offsets cannot match its seven-byte name and an extended comparison slice has the wrong length; the general directive parser preserves the same projection")]
+    bytes.get(
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Testing byte eight instead can only decline max-age recognition; an extra equals sign fails delta-seconds validation in both parsers")]
+        7
+    ) == Some(&b'=')
+        &&
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "An eight-byte prefix cannot equal the seven-byte max-age literal, so this only declines the shortcut; the preceding get(7) test is not guarded")]
+        bytes.get(..7).is_some_and(|name| eq_ignore_ascii_case_scalar(name, b"max-age"))
+    {
         let value = &bytes[8..];
+        // #[gamma::skip(literal.bool_flip, tag = "equivalent", reason = "Only validation is observed here; computing an additional optional seconds value cannot change whether the directive value is valid")]
         validate_directive_value(value, false)?;
         return Ok(DirectiveParts {
             name: &bytes[..7],
@@ -869,6 +893,7 @@ fn project_directive(bytes: &[u8]) -> Result<DirectiveParts<'_>, DecodeError> {
             delta_seconds: None,
         });
     }
+    // #[gamma::skip(call.replace_with_default, call_result.default, match_guard.always_false, option.some_to_none, tag = "equivalent", reason = "Rejecting a bare-directive shortcut reaches token validation and classify_directive with the same name and kind")]
     let bare_kind = match bytes.len() {
         6 if eq_ignore_ascii_case_scalar(bytes, b"public") => Some(DirectiveKind::Other),
         7 if eq_ignore_ascii_case_scalar(bytes, b"private") => Some(DirectiveKind::Other),
@@ -905,6 +930,7 @@ fn project_directive(bytes: &[u8]) -> Result<DirectiveParts<'_>, DecodeError> {
             return Err(DecodeError::new(&FieldName::CacheControl, DecodeErrorKind::InvalidToken));
         }
         let value = &bytes[equals + 1..];
+        // #[gamma::skip(literal.bool_flip, tag = "equivalent", reason = "Only validation is observed here; computing an additional optional seconds value cannot change whether the directive value is valid")]
         validate_directive_value(value, false)?;
         (name, Some(value))
     } else {
@@ -937,7 +963,13 @@ fn parse_directive_parts(bytes: &[u8]) -> Result<DirectiveParts<'_>, DecodeError
     if bytes.is_empty() {
         return Err(super::invalid_syntax(&FieldName::CacheControl));
     }
-    if bytes.get(7) == Some(&b'=') && bytes.get(..7).is_some_and(|name| eq_ignore_ascii_case_scalar(name, b"max-age")) {
+    if
+    // #[gamma::skip(cond.always_false, literal.int_decrement, literal.int_to_one, literal.int_to_zero, range.exclusive_to_inclusive, call.replace_with_default, call_result.default, tag = "equivalent", reason = "These mutations only decline max-age recognition: shorter offsets cannot match its seven-byte name and an extended comparison slice has the wrong length; the general parser independently classifies max-age and parses its delta seconds")]
+    bytes.get(7) == Some(&b'=')
+        &&
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "An eight-byte prefix cannot equal the seven-byte max-age literal, so this only declines the shortcut; the preceding get(7) test is not guarded")]
+        bytes.get(..7).is_some_and(|name| eq_ignore_ascii_case_scalar(name, b"max-age"))
+    {
         let value = &bytes[8..];
         return Ok(DirectiveParts {
             name: &bytes[..7],
@@ -949,6 +981,7 @@ fn parse_directive_parts(bytes: &[u8]) -> Result<DirectiveParts<'_>, DecodeError
     // Bare directives are a closed set in practice, and grouping the literals
     // by length turns recognition into one length test plus one comparison,
     // which is cheaper than the byte-at-a-time token scan below.
+    // #[gamma::skip(call.replace_with_default, call_result.default, match_guard.always_false, option.some_to_none, tag = "equivalent", reason = "Rejecting a bare-directive shortcut reaches token validation and classify_directive with the same name and kind")]
     let bare_kind = match bytes.len() {
         6 if eq_ignore_ascii_case_scalar(bytes, b"public") => Some(DirectiveKind::Other),
         7 if eq_ignore_ascii_case_scalar(bytes, b"private") => Some(DirectiveKind::Other),
@@ -1012,6 +1045,7 @@ fn classify_directive(name: &[u8]) -> DirectiveKind {
 }
 
 fn validate_directive_value(bytes: &[u8], parse_seconds: bool) -> Result<Option<u64>, DecodeError> {
+    // #[gamma::skip(iter.first_to_last, tag = "equivalent", reason = "Quoted validation requires both boundary quotes and token validation rejects every quote; choosing by the last quote therefore accepts and rejects exactly the same values")]
     if bytes.first() == Some(&b'"') {
         validate_quoted_value(bytes, parse_seconds)
     } else {
@@ -1049,10 +1083,13 @@ fn validate_quoted_value(bytes: &[u8], parse_seconds: bool) -> Result<Option<u64
             if !matches!(byte, b'\t' | b' '..=b'~' | 0x80..=0xff) {
                 return Err(super::invalid_syntax(&FieldName::CacheControl));
             }
+            // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
             escaped = false;
+            // #[gamma::skip(stmt.delete_assign, tag = "equivalent", reason = "The preceding backslash already cleared seconds; removing this second clear cannot restore a parsed number")]
             seconds = None;
         } else if byte == b'\\' {
             escaped = true;
+            // #[gamma::skip(stmt.delete_assign, tag = "equivalent", reason = "The next escaped byte clears seconds independently; if no byte follows, the unterminated escape is rejected")]
             seconds = None;
         } else if !matches!(byte, b'\t' | b' ' | b'!' | b'#'..=b'[' | b']'..=b'~' | 0x80..=0xff) {
             return Err(super::invalid_syntax(&FieldName::CacheControl));
@@ -1073,6 +1110,7 @@ fn validate_quoted_value(bytes: &[u8], parse_seconds: bool) -> Result<Option<u64
 }
 
 fn valid_directive_value(bytes: &[u8]) -> bool {
+    // #[gamma::skip(literal.bool_flip, tag = "equivalent", reason = "The optional parsed-seconds payload is discarded by is_ok, and enabling that computation does not change validation success")]
     validate_directive_value(bytes, false).is_ok()
 }
 
@@ -1108,13 +1146,16 @@ impl<'a> Iterator for DirectiveItems<'a> {
     type Item = Result<&'a [u8], DecodeError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.finished {
+        if
+        // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+        self.finished {
             return None;
         }
         let mut quoted = false;
         let mut escaped = false;
         while let Some(byte) = self.bytes.get(self.position).copied() {
             if escaped {
+                // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
                 escaped = false;
             } else if quoted && byte == b'\\' {
                 escaped = true;
@@ -1129,10 +1170,15 @@ impl<'a> Iterator for DirectiveItems<'a> {
                 }
                 return Some(Ok(item));
             }
-            self.position += 1;
+            // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.position +=
+            // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            1;
         }
         self.finished = true;
-        if quoted || escaped {
+        if
+        // #[gamma::skip(logical.or_remove_right, tag = "equivalent", reason = "escaped becomes true only within a quoted string, and an escaped quote cannot close that string")]
+        quoted || escaped {
             Some(Err(DecodeError::new(&FieldName::CacheControl, DecodeErrorKind::UnterminatedQuote)))
         } else {
             let item = super::trim_ows(&self.bytes[self.start..]);
@@ -1149,6 +1195,29 @@ mod tests {
         reason = "tests classify parser outcomes without needing successful values"
     )]
 
+    #[test]
+    fn gamma_nov6_seven_byte_extension_is_not_max_age() {
+        let parts = super::parse_directive_parts(b"unknown=37").unwrap();
+        assert!(matches!(parts.kind, super::DirectiveKind::Other));
+        assert_eq!(parts.name, b"unknown");
+        assert_eq!(parts.value, Some(b"37".as_slice()));
+        assert_eq!(parts.delta_seconds, None);
+    }
+
+    #[test]
+    fn project_directive_gamma_afternoon_propagates_invalid_values_on_both_projection_paths() {
+        for bytes in [b"max-age=".as_slice(), b"custom=", b"max-age=\"x\"junk", b"custom=\"x\"junk"] {
+            let error = super::project_directive(bytes).err().unwrap();
+            assert_eq!(error.header(), &crate::FieldName::CacheControl);
+            assert_eq!(error.kind(), crate::DecodeErrorKind::InvalidSyntax);
+        }
+        assert!(
+            super::validate_directive_value(b"unquoted\"", false).is_err(),
+            "a closing quote does not make an unquoted prefix a quoted-string"
+        );
+        assert_eq!(super::validate_directive_value(b"\"18446744073709551620\"", true).unwrap(), None);
+    }
+
     use std::time::Duration;
 
     use super::{
@@ -1156,6 +1225,72 @@ mod tests {
         observe_directives, observe_quoted_directives, parse_directive, parse_directive_parts, project_directive, validate_directive_value,
     };
     use crate::DecodeError;
+
+    #[test]
+    fn gamma_round2_directive_shortcuts_return_the_complete_helper_projection() {
+        for wire in [
+            b"public".as_slice(),
+            b"private",
+            b"no-cache",
+            b"no-store",
+            b"immutable",
+            b"no-transform",
+            b"only-if-cached",
+            b"must-revalidate",
+            b"proxy-revalidate",
+            b"custom",
+        ] {
+            for parts in [parse_directive_parts(wire).unwrap(), project_directive(wire).unwrap()] {
+                assert_eq!(parts.name, wire);
+                assert_eq!(parts.value, None);
+                assert_eq!(parts.delta_seconds, None);
+                assert_eq!(matches!(parts.kind, DirectiveKind::NoCache), wire == b"no-cache");
+                assert_eq!(matches!(parts.kind, DirectiveKind::Other), wire != b"no-cache");
+            }
+        }
+        let wire = b"max-age=123";
+        for (parts, delta) in [
+            (parse_directive_parts(wire).unwrap(), Some(123)),
+            (project_directive(wire).unwrap(), None),
+        ] {
+            assert_eq!(parts.name, b"max-age");
+            assert_eq!(parts.value, Some(b"123".as_slice()));
+            assert!(matches!(parts.kind, DirectiveKind::MaxAge));
+            assert_eq!(parts.delta_seconds, delta);
+        }
+    }
+
+    #[test]
+    fn gamma_round2_directive_projection_retains_unusual_names_and_empty_slots() {
+        for wire in [b"max-agx=7".as_slice(), b"max-ageX", b"no-cache=token", b"extension=\"9\""] {
+            let parts = project_directive(wire).unwrap();
+            let (name, value) = wire
+                .iter()
+                .position(|byte| *byte == b'=')
+                .map_or((wire, None), |index| (&wire[..index], Some(&wire[index + 1..])));
+            assert_eq!(parts.name, name);
+            assert_eq!(parts.value, value);
+            assert_eq!(parts.delta_seconds, None);
+            assert_eq!(matches!(parts.kind, DirectiveKind::NoCache), name == b"no-cache");
+            assert_eq!(matches!(parts.kind, DirectiveKind::MaxAge), name == b"max-age");
+        }
+        let parts = parse_directive_parts(b"max-age=\"123\"").unwrap();
+        assert_eq!(parts.value, Some(b"\"123\"".as_slice()));
+        assert_eq!(parts.delta_seconds, Some(123));
+        let parts = parse_directive_parts(b"x-age=\"123\"").unwrap();
+        assert_eq!(parts.delta_seconds, None);
+        assert!(!super::eq_ignore_ascii_case_scalar(b"max-ag", b"max-age"));
+    }
+
+    #[test]
+    fn gamma_round2_quoted_directive_requires_both_delimiters_and_checks_overflow() {
+        for wire in [b"".as_slice(), b"\"", b"a\"", b"1\"", b"\"a", b"\"a\"x", b"\"a\\\""] {
+            assert!(super::validate_quoted_value(wire, false).is_err(), "{wire:?}");
+        }
+        assert_eq!(super::validate_quoted_value(b"\"18446744073709551616\"", true).unwrap(), None);
+        assert_eq!(super::validate_quoted_value(b"\"\\1\"", true).unwrap(), None);
+        assert_eq!(super::validate_quoted_value(b"\"1\\2\"", true).unwrap(), None);
+    }
 
     /// The quote-free split is a shortcut around the general item walk, so
     /// both have to reach the same summary and the same diagnostic.

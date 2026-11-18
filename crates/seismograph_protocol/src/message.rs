@@ -27,10 +27,7 @@ pub struct RecordingConfiguration {
     pub runtime_tasks: RecordingPolicy,
     /// I/O primitive operation recording policy.
     pub io: RecordingPolicy,
-    /// Cache operation recording policy, included in recorder activity and dedicated cache messages.
-    ///
-    /// The legacy fixed-size recording block used by `Hello`, `SetRecording`, and recorder
-    /// statistics does not contain this field.
+    /// Cache operation recording policy.
     pub cache: RecordingPolicy,
     /// Events retained by each participating thread.
     pub event_capacity_per_thread: u32,
@@ -164,7 +161,7 @@ pub struct ThreadRecorderStatistics {
 /// after a destructive buffer operation that only partially succeeds.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RecorderActivity {
-    /// Legacy ring-based counters, including all six recording policies.
+    /// Ring-based counters, including all six recording policies.
     ///
     /// Unlike `class_events`, these counters exclude released rings and are not
     /// monotonic. Use class counters for live event rates.
@@ -188,9 +185,7 @@ pub struct RecorderActivity {
 pub enum Request {
     /// Identifies an OS-authorized connection and reads the current configuration.
     Hello,
-    /// Changes process-wide non-cache recording configuration.
-    ///
-    /// Cache recording is changed independently with [`Request::SetCacheRecording`].
+    /// Changes the complete process-wide recording configuration.
     SetRecording(RecordingConfiguration),
     /// Changes cache-event recording configuration.
     SetCacheRecording(RecordingPolicy),
@@ -201,20 +196,12 @@ pub enum Request {
     /// Reads cache-event recording configuration.
     ReadCacheRecording,
     /// Reads the server's `seismograph` crate semantic version after the handshake.
-    ///
-    /// Legacy servers close the connection without a response to this request.
-    /// The fixed-size [`Response::Hello`] remains unchanged for legacy clients.
     ReadServerVersion,
     /// Captures events, stops every recording class, and releases event buffers.
-    ///
-    /// Additive request: legacy servers close without responding. Never substitute
-    /// the legacy `Release` disposition, which resumes recording.
     CaptureSnapshotAndStop,
     /// Empties server event buffers without a snapshot, preserving recording policies.
     ClearEventBuffers,
     /// Reads live per-class and per-thread recorder counters without a snapshot.
-    ///
-    /// Legacy servers close the connection without responding.
     ReadRecorderActivity,
 }
 
@@ -245,17 +232,16 @@ pub enum Response {
     Error(String),
 }
 
-pub(crate) fn encode_request(request: &Request) -> Result<(u16, Vec<u8>), Error> {
-    Ok(match request {
+pub(crate) fn encode_request(request: &Request) -> (u16, Vec<u8>) {
+    match request {
         Request::Hello => (1, Vec::new()),
-        Request::SetRecording(configuration) => {
-            validate_legacy_recording(*configuration)?;
-            (2, encode_recording(*configuration))
-        }
+        Request::SetRecording(configuration) => (2, encode_recording(*configuration)),
         Request::CaptureSnapshot(options) => (3, vec![encode_event_buffer_disposition(options.event_buffers)]),
         Request::ReadRecorderStatistics => (4, Vec::new()),
         Request::SetCacheRecording(policy) => {
+            // #[gamma::skip(literal.int_decrement, literal.int_increment, literal.int_to_one, literal.int_to_zero, reason = "Vec capacity is only a hint; encoding appends the same six bytes")]
             let mut payload = Vec::with_capacity(6);
+            // #[gamma::skip(call_result.default, reason = "encode_recording_policy returns unit and default_after preserves its writes")]
             encode_recording_policy(&mut payload, *policy);
             (5, payload)
         }
@@ -264,7 +250,7 @@ pub(crate) fn encode_request(request: &Request) -> Result<(u16, Vec<u8>), Error>
         Request::CaptureSnapshotAndStop => (8, Vec::new()),
         Request::ClearEventBuffers => (9, Vec::new()),
         Request::ReadRecorderActivity => (10, Vec::new()),
-    })
+    }
 }
 
 pub(crate) fn decode_request(kind: u16, payload: &[u8]) -> Result<Request, Error> {
@@ -288,8 +274,9 @@ pub(crate) fn decode_request(kind: u16, payload: &[u8]) -> Result<Request, Error
 pub(crate) fn encode_response(response: &Response) -> Result<(u16, Cow<'_, [u8]>), Error> {
     match response {
         Response::Hello { instance_id, recording } => {
-            validate_legacy_recording(*recording)?;
-            let mut payload = Vec::with_capacity(50);
+            // Capacity is an allocation hint; Vec growth preserves the wire bytes.
+            // #[gamma::skip(literal)]
+            let mut payload = Vec::with_capacity(56);
             payload.extend_from_slice(&instance_id.as_bytes());
             payload.extend_from_slice(&encode_recording(*recording));
             Ok((101, Cow::Owned(payload)))
@@ -297,13 +284,14 @@ pub(crate) fn encode_response(response: &Response) -> Result<(u16, Cow<'_, [u8]>
         Response::Acknowledged => Ok((102, Cow::Borrowed(&[]))),
         Response::Snapshot(bytes) => Ok((103, Cow::Borrowed(bytes))),
         Response::RecorderStatistics(statistics) => {
-            validate_legacy_recording(statistics.recording)?;
             let payload = encode_statistics(*statistics);
             Ok((104, Cow::Owned(payload)))
         }
         Response::RecorderActivity(activity) => Ok((107, Cow::Owned(encode_activity(activity)?))),
         Response::CacheRecording(policy) => {
+            // #[gamma::skip(literal.int_decrement, literal.int_increment, literal.int_to_one, literal.int_to_zero, reason = "Vec capacity is only a hint; encoding appends the same six bytes")]
             let mut payload = Vec::with_capacity(6);
+            // #[gamma::skip(call_result.default, reason = "encode_recording_policy returns unit and default_after preserves its writes")]
             encode_recording_policy(&mut payload, *policy);
             Ok((105, Cow::Owned(payload)))
         }
@@ -326,9 +314,10 @@ pub(crate) fn encode_response(response: &Response) -> Result<(u16, Cow<'_, [u8]>
 pub(crate) fn decode_response(kind: u16, payload: &[u8]) -> Result<Response, Error> {
     match kind {
         101 => {
-            if payload.len() != 50 {
+            if payload.len() != 56 {
                 return Err(Error::InvalidMessage);
             }
+            // #[gamma::skip(literal.int_increment, reason = "copy_from_slice overwrites all sixteen elements before the instance is read")]
             let mut instance = [0; 16];
             instance.copy_from_slice(&payload[..16]);
             Ok(Response::Hello {
@@ -361,7 +350,9 @@ pub(crate) fn decode_response(kind: u16, payload: &[u8]) -> Result<Response, Err
 }
 
 fn encode_statistics(statistics: RecorderStatistics) -> Vec<u8> {
-    let mut payload = Vec::with_capacity(82);
+    // Capacity is an allocation hint; Vec growth preserves the wire bytes.
+    // #[gamma::skip(literal)]
+    let mut payload = Vec::with_capacity(88);
     push_u64(&mut payload, statistics.thread_count);
     push_u64(&mut payload, statistics.total_events);
     push_u64(&mut payload, statistics.retained_events);
@@ -373,24 +364,35 @@ fn encode_statistics(statistics: RecorderStatistics) -> Vec<u8> {
 }
 
 fn decode_statistics(payload: &[u8]) -> Result<RecorderStatistics, Error> {
-    if payload.len() != 82 {
+    if payload.len() != 88 {
         return Err(Error::InvalidMessage);
     }
     let mut reader = SliceReader::new(payload);
     let statistics = RecorderStatistics {
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact 88-byte payload check guarantees this fixed-width read")]
         thread_count: reader.u64()?,
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact 88-byte payload check guarantees this fixed-width read")]
         total_events: reader.u64()?,
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact 88-byte payload check guarantees this fixed-width read")]
         retained_events: reader.u64()?,
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact 88-byte payload check guarantees this fixed-width read")]
         lost_events: reader.u64()?,
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact 88-byte payload check guarantees this fixed-width read")]
         event_capacity_per_thread: reader.u64()?,
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "the exact 88-byte payload check guarantees this fixed-width read")]
         allocated_bytes: reader.u64()?,
-        recording: decode_recording(reader.take(34)?)?,
+        recording: decode_recording(
+            reader
+                .take(40)
+                .expect("the 88-byte payload contains 48 counter bytes and 40 policy bytes"),
+        )?,
     };
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "six u64 reads and a 40-byte take consume exactly the checked 88-byte payload")]
     reader.finish()?;
     Ok(statistics)
 }
 
-// Legacy statistics, cache policy, session, six class counts, and thread count.
+// Statistics, session, six class counts, and thread count.
 const ACTIVITY_HEADER_BYTES: usize = 148;
 // Five counters, the retired flag, and the length prefix of an empty name.
 const ACTIVITY_THREAD_MIN_BYTES: usize = 43;
@@ -401,17 +403,62 @@ fn activity_size(activity: &RecorderActivity) -> Result<usize, Error> {
         size.checked_add(ACTIVITY_THREAD_MIN_BYTES + thread.name.len())
             .ok_or(Error::MessageTooLarge)
     })?;
-    u32::try_from(size).map_err(|_error| Error::MessageTooLarge)?;
+    finish_activity_size(size)
+}
+
+fn finish_activity_size(size: usize) -> Result<usize, Error> {
+    crate::message_length(size)?;
     Ok(size)
 }
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use super::*;
+
+    #[test]
+    fn nov6_activity_size_rejects_the_first_invalid_wire_length() {
+        assert_eq!(finish_activity_size(u32::MAX as usize).unwrap(), u32::MAX as usize);
+        #[cfg(target_pointer_width = "64")]
+        assert!(matches!(finish_activity_size(u32::MAX as usize + 1), Err(Error::MessageTooLarge)));
+    }
+
+    #[test]
+    fn nov6_activity_decode_accepts_the_exact_minimum_thread_extent() {
+        let mut activity = RecorderActivity::default();
+        activity.threads.push(ThreadRecorderStatistics::default());
+        let bytes = encode_activity(&activity).unwrap();
+        assert_eq!(
+            decode_activity_with(&bytes, ACTIVITY_THREAD_MIN_BYTES, Vec::try_reserve_exact).unwrap(),
+            activity
+        );
+        assert!(matches!(
+            decode_activity_with(&bytes, ACTIVITY_THREAD_MIN_BYTES - 1, Vec::try_reserve_exact),
+            Err(Error::InvalidMessage)
+        ));
+    }
+
+    #[test]
+    fn gamma_survivor_activity_size_matches_fixed_header_and_thread_name_bytes() {
+        let mut activity = RecorderActivity::default();
+        assert_eq!(activity_size(&activity).unwrap(), 148);
+        activity.threads.push(ThreadRecorderStatistics::default());
+        assert_eq!(activity_size(&activity).unwrap(), 191);
+        activity.threads[0].name = "é".into();
+        assert_eq!(activity_size(&activity).unwrap(), 193);
+        activity.threads[0].name = "x".repeat(65_536);
+        assert!(matches!(activity_size(&activity), Err(Error::MessageTooLarge)));
+    }
+}
+
 fn encode_activity(activity: &RecorderActivity) -> Result<Vec<u8>, Error> {
-    let thread_count = u32::try_from(activity.threads.len()).map_err(|_error| Error::MessageTooLarge)?;
+    encode_activity_with_count(activity, activity.threads.len())
+}
+
+fn encode_activity_with_count(activity: &RecorderActivity, thread_count: usize) -> Result<Vec<u8>, Error> {
+    let thread_count = crate::message_length(thread_count)?;
     activity_size(activity)?;
     let mut payload = encode_statistics(activity.statistics);
     decode_statistics(&payload)?;
-    encode_recording_policy(&mut payload, activity.statistics.recording.cache);
-    decode_recording_policy(&payload[82..88])?;
     push_u64(&mut payload, activity.session_id);
     for count in [
         activity.class_events.allocations,
@@ -431,15 +478,30 @@ fn encode_activity(activity: &RecorderActivity) -> Result<Vec<u8>, Error> {
         push_u64(&mut payload, thread.lost_events);
         push_u64(&mut payload, thread.event_capacity);
         payload.push(u8::from(thread.retired));
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "activity_size already validated every immutable thread name against the identical u16 length bound")]
         push_string(&mut payload, &thread.name)?;
     }
     Ok(payload)
 }
 
 fn decode_activity(payload: &[u8]) -> Result<RecorderActivity, Error> {
+    decode_activity_with(
+        payload,
+        payload.len().saturating_sub(
+            // #[gamma::skip(expr.decrement, reason = "a smaller header reservation only relaxes this first bound; decode_activity_with independently checks the exact remaining thread extent before reserving")]
+            ACTIVITY_HEADER_BYTES,
+        ),
+        Vec::try_reserve_exact,
+    )
+}
+
+fn decode_activity_with(
+    payload: &[u8],
+    maximum: usize,
+    reserve: impl FnOnce(&mut Vec<ThreadRecorderStatistics>, usize) -> Result<(), std::collections::TryReserveError>,
+) -> Result<RecorderActivity, Error> {
     let mut reader = SliceReader::new(payload);
-    let mut statistics = decode_statistics(reader.take(82)?)?;
-    statistics.recording.cache = decode_recording_policy(reader.take(6)?)?;
+    let statistics = decode_statistics(reader.take(88)?)?;
     let session_id = reader.u64()?;
     let class_events = EventClassCounts {
         allocations: reader.u64()?,
@@ -449,13 +511,18 @@ fn decode_activity(payload: &[u8]) -> Result<RecorderActivity, Error> {
         io: reader.u64()?,
         cache: reader.u64()?,
     };
-    let thread_count = usize::try_from(reader.u32()?).map_err(|_error| Error::MessageTooLarge)?;
-    let minimum_thread_bytes = thread_count.checked_mul(ACTIVITY_THREAD_MIN_BYTES).ok_or(Error::InvalidMessage)?;
+    let advertised_threads = reader.u32()?;
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "u32 always fits usize on the 32-bit and 64-bit std platforms supported by this protocol; the preceding reader error remains fallible")]
+    let thread_count = usize::try_from(advertised_threads).map_err(|_error| Error::MessageTooLarge)?;
+    let minimum_thread_bytes = thread_count
+        .checked_mul(ACTIVITY_THREAD_MIN_BYTES)
+        .filter(|bytes| *bytes <= maximum)
+        .ok_or(Error::InvalidMessage)?;
     if minimum_thread_bytes > payload.len().saturating_sub(ACTIVITY_HEADER_BYTES) {
         return Err(Error::InvalidMessage);
     }
     let mut threads = Vec::new();
-    threads.try_reserve_exact(thread_count).map_err(|_error| Error::MessageTooLarge)?;
+    reserve(&mut threads, thread_count).map_err(|_error| Error::MessageTooLarge)?;
     for _ in 0..thread_count {
         let thread_id = reader.u64()?;
         let total_events = reader.u64()?;
@@ -486,30 +553,34 @@ fn decode_activity(payload: &[u8]) -> Result<RecorderActivity, Error> {
     })
 }
 
-fn validate_legacy_recording(configuration: RecordingConfiguration) -> Result<(), Error> {
-    if configuration.cache != RecordingPolicy::default() {
-        return Err(Error::InvalidMessage);
-    }
-    Ok(())
-}
-
 fn encode_recording(configuration: RecordingConfiguration) -> Vec<u8> {
-    let mut encoded = Vec::with_capacity(34);
+    // Capacity is an allocation hint; Vec growth preserves the wire bytes.
+    // #[gamma::skip(literal)]
+    let mut encoded = Vec::with_capacity(40);
     push_u32(&mut encoded, configuration.event_capacity_per_thread);
+    // #[gamma::skip(call_result.default, reason = "encode_recording_policy returns unit and default_after preserves its writes")]
     encode_recording_policy(&mut encoded, configuration.allocations);
+    // #[gamma::skip(call_result.default, reason = "encode_recording_policy returns unit and default_after preserves its writes")]
     encode_recording_policy(&mut encoded, configuration.general_events);
+    // #[gamma::skip(call_result.default, reason = "encode_recording_policy returns unit and default_after preserves its writes")]
     encode_recording_policy(&mut encoded, configuration.arc_dereferences);
+    // #[gamma::skip(call_result.default, reason = "encode_recording_policy returns unit and default_after preserves its writes")]
     encode_recording_policy(&mut encoded, configuration.runtime_tasks);
+    // #[gamma::skip(call_result.default, reason = "encode_recording_policy returns unit and default_after preserves its writes")]
     encode_recording_policy(&mut encoded, configuration.io);
+    encode_recording_policy(&mut encoded, configuration.cache);
     encoded
 }
 
 fn decode_recording(payload: &[u8]) -> Result<RecordingConfiguration, Error> {
-    if payload.len() != 34 {
+    if payload.len() != 40 {
         return Err(Error::InvalidMessage);
     }
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding length check proves the sliced prefix contains exactly four bytes")]
     let capacity = u32::from_le_bytes(payload[..4].try_into().map_err(|_error| Error::InvalidMessage)?);
-    if !(MIN_EVENT_CAPACITY_PER_THREAD..=MAX_EVENT_CAPACITY_PER_THREAD).contains(&capacity) || !capacity.is_power_of_two() {
+    let minimum = { MIN_EVENT_CAPACITY_PER_THREAD };
+    let maximum = { MAX_EVENT_CAPACITY_PER_THREAD };
+    if !(minimum..=maximum).contains(&capacity) || !capacity.is_power_of_two() {
         return Err(Error::InvalidMessage);
     }
     Ok(RecordingConfiguration {
@@ -518,7 +589,7 @@ fn decode_recording(payload: &[u8]) -> Result<RecordingConfiguration, Error> {
         arc_dereferences: decode_recording_policy(&payload[16..22])?,
         runtime_tasks: decode_recording_policy(&payload[22..28])?,
         io: decode_recording_policy(&payload[28..34])?,
-        cache: RecordingPolicy::default(),
+        cache: decode_recording_policy(&payload[34..40])?,
         event_capacity_per_thread: capacity,
     })
 }
@@ -533,6 +604,7 @@ fn decode_recording_policy(payload: &[u8]) -> Result<RecordingPolicy, Error> {
     if payload.len() != 6 || payload[..2].iter().any(|value| *value > 1) {
         return Err(Error::InvalidMessage);
     }
+    // #[gamma::skip(try.propagate_to_unwrap, reason = "the preceding length check proves the sliced sampling field contains exactly four bytes")]
     let sampling_one_in = u32::from_le_bytes(payload[2..6].try_into().map_err(|_error| Error::InvalidMessage)?);
     if sampling_one_in == 0 || sampling_one_in > MAX_EVENT_SAMPLING_ONE_IN {
         return Err(Error::InvalidMessage);
@@ -564,9 +636,69 @@ const fn decode_event_buffer_disposition(encoded: u8) -> Result<EventBufferDispo
 #[cfg(test)]
 mod tests {
     #[test]
+    fn activity_decoder_rejects_a_short_thread_extent_before_attempting_reservation() {
+        let activity = RecorderActivity {
+            threads: vec![ThreadRecorderStatistics::default()],
+            ..RecorderActivity::default()
+        };
+        let mut payload = encode_activity(&activity).unwrap();
+        payload.pop();
+        assert!(matches!(
+            decode_activity_with(&payload, usize::MAX, |_, _| panic!("a truncated thread must not reserve memory")),
+            Err(Error::InvalidMessage)
+        ));
+    }
+
+    #[test]
+    fn november_activity_scalar_admission_and_reservation_errors_are_preserved_without_large_fixtures() {
+        if let Some(too_large) = (u32::MAX as usize).checked_add(1) {
+            assert!(matches!(finish_activity_size(too_large), Err(Error::MessageTooLarge)));
+            assert!(matches!(
+                encode_activity_with_count(&RecorderActivity::default(), too_large),
+                Err(Error::MessageTooLarge)
+            ));
+        }
+        let activity = activity_fixture();
+        let mut payload = encode_activity(&activity).unwrap();
+        let result = decode_activity_with(&payload, usize::MAX, |threads, count| {
+            assert!(threads.is_empty());
+            assert_eq!(count, 2);
+            Err(Vec::<ThreadRecorderStatistics>::new().try_reserve_exact(usize::MAX).unwrap_err())
+        });
+        assert!(matches!(result, Err(Error::MessageTooLarge)));
+        payload[ACTIVITY_HEADER_BYTES - 4..ACTIVITY_HEADER_BYTES].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(matches!(
+            decode_activity_with(&payload, u32::MAX as usize, |_, _| panic!(
+                "unrepresentable 32-bit extent must be rejected before reserving"
+            )),
+            Err(Error::InvalidMessage)
+        ));
+    }
+
+    #[test]
+    fn november_recording_capacity_boundary_neighbors_are_rejected_by_the_power_of_two_contract() {
+        for capacity in [
+            MIN_EVENT_CAPACITY_PER_THREAD - 1,
+            MIN_EVENT_CAPACITY_PER_THREAD,
+            MIN_EVENT_CAPACITY_PER_THREAD + 1,
+            MAX_EVENT_CAPACITY_PER_THREAD - 1,
+            MAX_EVENT_CAPACITY_PER_THREAD,
+            MAX_EVENT_CAPACITY_PER_THREAD + 1,
+        ] {
+            let mut payload = encode_recording(RecordingConfiguration::default());
+            payload[..4].copy_from_slice(&capacity.to_le_bytes());
+            if [MIN_EVENT_CAPACITY_PER_THREAD, MAX_EVENT_CAPACITY_PER_THREAD].contains(&capacity) {
+                assert_eq!(decode_recording(&payload).unwrap().event_capacity_per_thread, capacity);
+            } else {
+                assert!(matches!(decode_recording(&payload), Err(Error::InvalidMessage)));
+            }
+        }
+    }
+
+    #[test]
     fn lifecycle_requests_are_additive_and_reject_payloads() {
         for (tag, request) in [(8, super::Request::CaptureSnapshotAndStop), (9, super::Request::ClearEventBuffers)] {
-            assert_eq!(super::encode_request(&request).unwrap(), (tag, Vec::new()));
+            assert_eq!(super::encode_request(&request), (tag, Vec::new()));
             assert_eq!(super::decode_request(tag, &[]).unwrap(), request);
             super::decode_request(tag, &[0]).unwrap_err();
             super::decode_request(tag, &[1, 2]).unwrap_err();
@@ -636,7 +768,7 @@ mod tests {
         let mut bytes = Vec::new();
         write_request(&mut bytes, 40, &Request::ReadRecorderActivity).unwrap();
         assert_eq!(read_request(&mut bytes.as_slice()).unwrap(), (40, Request::ReadRecorderActivity));
-        assert_eq!(encode_request(&Request::ReadRecorderActivity).unwrap(), (10, Vec::new()));
+        assert_eq!(encode_request(&Request::ReadRecorderActivity), (10, Vec::new()));
         for payload in [&[0][..], &[1, 2][..]] {
             decode_request(10, payload).unwrap_err();
         }
@@ -742,20 +874,19 @@ mod tests {
     }
 
     #[test]
-    fn hello_wire_payload_is_identical_to_the_legacy_fixture() {
-        // Legacy kind 101: 16-byte identity, u32 capacity, five 6-byte policies.
-        let legacy = [
+    fn hello_wire_payload_contains_the_complete_recording_configuration() {
+        let expected = [
             9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0,
-            0, 0, 0, 0, 1, 0, 0, 0,
+            0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0,
         ];
         let response = Response::Hello {
             instance_id: InstanceId::from_bytes([9; 16]),
             recording: RecordingConfiguration::default(),
         };
         let (kind, payload) = encode_response(&response).unwrap();
-        assert_eq!((kind, payload.as_ref()), (101, legacy.as_slice()));
-        assert_eq!(decode_response(101, &legacy).unwrap(), response);
-        let mut extended = legacy.to_vec();
+        assert_eq!((kind, payload.as_ref()), (101, expected.as_slice()));
+        assert_eq!(decode_response(101, &expected).unwrap(), response);
+        let mut extended = expected.to_vec();
         extended.push(0);
         decode_response(101, &extended).unwrap_err();
     }
@@ -830,7 +961,7 @@ mod tests {
 
     #[test]
     fn recording_configuration_rejects_invalid_sampling_denominators() {
-        for offset in [6, 12, 18, 24, 30] {
+        for offset in [6, 12, 18, 24, 30, 36] {
             for sampling in [0_u32, MAX_EVENT_SAMPLING_ONE_IN + 1] {
                 let mut payload = encode_recording(RecordingConfiguration::default());
                 payload[offset..offset + 4].copy_from_slice(&sampling.to_le_bytes());
@@ -872,7 +1003,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_recording_message_sizes_remain_stable() {
+    fn recording_messages_include_all_six_policies() {
         let configuration = RecordingConfiguration::default();
         let hello_response = Response::Hello {
             instance_id: InstanceId::from_bytes([1; 16]),
@@ -892,12 +1023,12 @@ mod tests {
                 statistics.len(),
                 decode_recording(&encode_recording(configuration)).unwrap().cache,
             ),
-            (34, 50, 82, RecordingPolicy::default())
+            (40, 56, 88, RecordingPolicy::default())
         );
     }
 
     #[test]
-    fn legacy_recording_messages_reject_cache_policy_instead_of_discarding_it() {
+    fn complete_configuration_preserves_the_cache_policy_in_every_message() {
         let configuration = RecordingConfiguration {
             cache: RecordingPolicy {
                 enabled: true,
@@ -906,36 +1037,27 @@ mod tests {
             ..RecordingConfiguration::default()
         };
 
-        assert!(matches!(
-            write_request(&mut Vec::new(), 1, &Request::SetRecording(configuration)),
-            Err(Error::InvalidMessage)
-        ));
-        assert!(matches!(
-            write_response(
-                &mut Vec::new(),
-                1,
-                &Response::Hello {
-                    instance_id: InstanceId::from_bytes([1; 16]),
-                    recording: configuration,
-                },
-            ),
-            Err(Error::InvalidMessage)
-        ));
-        assert!(matches!(
-            write_response(
-                &mut Vec::new(),
-                1,
-                &Response::RecorderStatistics(RecorderStatistics {
-                    recording: configuration,
-                    ..RecorderStatistics::default()
-                }),
-            ),
-            Err(Error::InvalidMessage)
-        ));
+        let request = Request::SetRecording(configuration);
+        let (kind, payload) = encode_request(&request);
+        assert_eq!(decode_request(kind, &payload).unwrap(), request);
+        for response in [
+            Response::Hello {
+                instance_id: InstanceId::from_bytes([1; 16]),
+                recording: configuration,
+            },
+            Response::RecorderStatistics(RecorderStatistics {
+                recording: configuration,
+                ..RecorderStatistics::default()
+            }),
+        ] {
+            let (kind, payload) = encode_response(&response).unwrap();
+            assert_eq!(decode_response(kind, &payload).unwrap(), response);
+        }
+        decode_recording(&encode_recording(configuration)[..34]).unwrap_err();
     }
 
     #[test]
-    fn legacy_recording_block_has_stable_wire_layout() {
+    fn complete_recording_block_has_exact_wire_layout() {
         let configuration = RecordingConfiguration {
             event_capacity_per_thread: 1_024,
             allocations: RecordingPolicy {
@@ -969,7 +1091,7 @@ mod tests {
         assert_eq!(
             encode_recording(configuration),
             [
-                0, 4, 0, 0, 1, 0, 2, 0, 0, 0, 0, 1, 4, 0, 0, 0, 1, 1, 8, 0, 0, 0, 0, 0, 16, 0, 0, 0, 1, 0, 32, 0, 0, 0,
+                0, 4, 0, 0, 1, 0, 2, 0, 0, 0, 0, 1, 4, 0, 0, 0, 1, 1, 8, 0, 0, 0, 0, 0, 16, 0, 0, 0, 1, 0, 32, 0, 0, 0, 0, 0, 1, 0, 0, 0,
             ]
         );
     }
@@ -1040,7 +1162,7 @@ mod tests {
 
     #[test]
     fn fixed_size_messages_reject_every_adjacent_invalid_length() {
-        for (kind, expected_len) in [(1, 32_usize), (3, 1), (4, 0), (6, 0)] {
+        for (kind, expected_len) in [(1, 0_usize), (2, 40), (3, 1), (4, 0), (6, 0)] {
             for len in [expected_len.saturating_sub(1), expected_len + 1] {
                 if len != expected_len {
                     assert!(matches!(decode_request(kind, &vec![0; len]), Err(Error::InvalidMessage)));
@@ -1048,7 +1170,7 @@ mod tests {
             }
         }
 
-        for (kind, expected_len) in [(101, 50_usize), (102, 0), (104, 82)] {
+        for (kind, expected_len) in [(101, 56_usize), (102, 0), (104, 88)] {
             for len in [expected_len.saturating_sub(1), expected_len + 1] {
                 if len != expected_len {
                     assert!(
@@ -1057,6 +1179,20 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn hello_rejects_every_truncated_instance_and_recording_field() {
+        let response = Response::Hello {
+            instance_id: InstanceId::from_bytes([1; 16]),
+            recording: RecordingConfiguration::default(),
+        };
+        let (kind, payload) = encode_response(&response).unwrap();
+        assert_eq!(decode_response(kind, &payload).unwrap(), response);
+
+        for length in 0..payload.len() {
+            assert!(matches!(decode_response(kind, &payload[..length]), Err(Error::InvalidMessage)));
         }
     }
 

@@ -44,21 +44,46 @@
 //!   default thread limits can change. Use [`BlockingPoolPolicy::max`] to set
 //!   a maximum.
 //! - The clock follows real time.
-//! - [`MonitorPolicy::default`] enables monitoring in the runtime configuration.
-//!   This choice does not start a monitor or add task measurements.
-//! - [`PanicPolicy::default`] stops the runtime after Arty catches a panic
-//!   while it creates or polls a task, or runs a blocking function.
+//! - [`MonitorPolicy::default`] starts a local Seismograph monitor when the
+//!   `monitor` feature is present. Task collection runs on request. This does
+//!   not enable event recording.
+//! - Without a [`Panic`](hook::Panic) hook, the runtime stops after Arty
+//!   catches a panic while it creates or polls an async task.
+//! - A blocking function panic returns through its join handle without
+//!   stopping the runtime.
 //!
 //! The [`test`](crate::test) attribute disables monitoring by default.
 //! See [`main`](crate::main) and [`test`](crate::test) for their other defaults.
 //!
-//! ## Policy types
+//! ## Monitoring
+//!
+//! A monitor is a local connection through which the Seismograph CLI can
+//! collect diagnostics. Each enabled runtime owns one connection and removes it
+//! after its workers stop. [`RuntimeBuilder::name`] sets the displayed runtime name.
+//! Use [`MonitorPolicy::disabled`] to run without this connection or task inspection.
+//!
+//! Collection reads live async tasks and queued or running blocking functions
+//! from their native storage. Each request limits the number of tasks per worker.
+//! A blocked async worker can time out. The result reports incomplete collection
+//! rather than treating missing tasks as an empty worker.
+//!
+//! Poll timing runs only during a requested measurement interval or event recording.
+//! Completed tasks are not kept in a second task registry.
+//! History that was not recorded stays unknown. A blocking function that started
+//! before observation has no measured start time for that call.
+//!
+//! Monitor connections are separate, but the recorder and diagnostic sources are
+//! process-wide. Recording, clearing event buffers, and snapshot capture through
+//! one connection can affect or include other runtimes in the same process.
+//! Monitor startup does not change recorder configuration or install an allocator.
+//!
+//! ## Configuration types
 //!
 //! - [`WorkersPolicy`] selects how many async workers run and which processors they use.
 //! - [`BlockingPoolPolicy`] selects a shared or per-worker blocking pool and
 //!   sets its thread limit.
-//! - [`PanicPolicy`] selects whether the runtime stops after Arty catches a panic.
 //! - [`MonitorPolicy`] selects the monitoring configuration.
+//! - [`hook`] provides panic hooks.
 //!
 //! [`RuntimeBuilder::stack_size`] sets the async worker stack size.
 //! [`RuntimeBuilder::name`] sets the name used in async and blocking thread names.
@@ -134,22 +159,26 @@ mod control;
 pub(crate) mod dispatch;
 mod error;
 mod handle;
+pub mod hook;
+pub(crate) mod monitoring;
 mod shutdown;
 mod shutdown_cause;
+#[cfg(test)]
+pub(crate) mod testing;
 pub(crate) mod worker;
 mod workers;
 
 #[doc(inline)]
 pub use builder::RuntimeBuilder;
 #[doc(inline)]
-pub use config::{BlockingPoolPolicy, MonitorPolicy, PanicPolicy, WorkersPolicy};
+pub use config::{BlockingPoolPolicy, MonitorPolicy, WorkersPolicy};
 #[doc(inline)]
 pub use control::RuntimeControl;
 #[doc(inline)]
 pub use error::Error;
 #[doc(inline)]
 pub use handle::Runtime;
-pub(crate) use shutdown::{Shutdown, ShutdownStart, ShutdownState};
+pub(crate) use shutdown::{Shutdown, ShutdownState};
 #[doc(inline)]
 pub use shutdown_cause::ShutdownCause;
 #[doc(inline)]
@@ -189,6 +218,7 @@ pub mod __private {
 
     #[cfg(test)]
     #[cfg_attr(coverage_nightly, coverage(off))]
+    // Public macro calls cannot inject the private errors used by these panic-boundary checks.
     mod tests {
         use std::fmt;
 

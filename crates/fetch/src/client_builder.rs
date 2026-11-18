@@ -520,10 +520,23 @@ impl Aware {
 mod tests {
     use http::StatusCode;
     use http_extensions::{HttpBodyBuilder, HttpBodyOptions};
+    use opentelemetry::metrics::NoopMeterProvider;
 
     use crate::fake::FakeDeps;
     use crate::options::{ConnectionIdleTimeout, ConnectionPoolOptions, Http2Options};
     use crate::{HttpClient, HttpClientBuilder};
+
+    #[test]
+    fn gamma_round2_name_and_meter_are_forwarded_to_resilience_context() {
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).name("gamma_round2_pipeline");
+        let before = format!("{:?}", builder.resilience_context);
+        assert!(before.contains("name: \"gamma_round2_pipeline\""), "{before}");
+        assert!(before.contains("meter: None"), "{before}");
+        let builder = builder.meter_provider(NoopMeterProvider::new());
+        let after = format!("{:?}", builder.resilience_context);
+        assert!(after.contains("meter: Some("), "{after}");
+        assert!(after.contains("name: \"gamma_round2_pipeline\""), "{after}");
+    }
 
     static_assertions::assert_impl_all!(HttpClientBuilder: Send, Sync, Clone);
 

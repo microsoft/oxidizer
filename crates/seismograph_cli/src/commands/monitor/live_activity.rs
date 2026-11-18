@@ -6,38 +6,18 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::time::{Duration, Instant};
 
-use seismograph_protocol::message::{EventClassCounts, RecorderActivity, RecorderStatistics, ThreadRecorderStatistics};
+use seismograph_protocol::message::{EventClassCounts, RecorderActivity, ThreadRecorderStatistics};
 
 pub(super) const CLASS_LABELS: [&str; 6] = ["Allocations", "General", "Arc deref", "Runtime", "I/O", "Cache"];
 const HISTORY_LENGTH: usize = 120;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) enum RecorderUpdate {
-    Detailed(RecorderActivity),
-    Legacy(RecorderStatistics),
-}
-
-impl RecorderUpdate {
-    pub(super) const fn statistics(&self) -> RecorderStatistics {
-        match self {
-            Self::Detailed(activity) => activity.statistics,
-            Self::Legacy(statistics) => *statistics,
-        }
-    }
-}
-
-impl From<RecorderStatistics> for RecorderUpdate {
-    fn from(statistics: RecorderStatistics) -> Self {
-        Self::Legacy(statistics)
-    }
-}
+pub(super) type RecorderUpdate = RecorderActivity;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) enum Availability {
     #[default]
     Waiting,
     Supported,
-    Unsupported,
 }
 
 #[derive(Clone, Debug)]
@@ -113,13 +93,6 @@ impl LiveActivity {
         self.availability = Availability::Supported;
         self.stale = false;
         reset
-    }
-
-    pub(super) fn unsupported(&mut self) {
-        *self = Self {
-            availability: Availability::Unsupported,
-            ..Self::default()
-        };
     }
 }
 
@@ -250,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn histories_are_bounded_and_unavailable_servers_do_not_report_empty_recording() {
+    fn histories_are_bounded() {
         let mut live = LiveActivity::default();
         let start = Instant::now();
         for count in 0..130 {
@@ -260,10 +233,5 @@ mod tests {
             (live.samples.len(), live.threads[0].history.len()),
             (HISTORY_LENGTH, HISTORY_LENGTH)
         );
-        live.stale = true;
-        live.unsupported();
-        assert_eq!(live.availability, Availability::Unsupported);
-        assert!(live.samples.is_empty() && live.threads.is_empty());
-        assert!(!live.stale);
     }
 }

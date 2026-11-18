@@ -42,6 +42,7 @@ impl<'a> RouterContext<'a> {
     /// Use [`RouterContext::with_attempt`] to override these values when the
     /// request is part of a multi-attempt flow.
     #[must_use]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "Self::default() and inferred Default::default() call the same RouterContext implementation")]
     pub fn new() -> Self {
         Self::default()
     }

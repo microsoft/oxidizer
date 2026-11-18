@@ -5,12 +5,13 @@
 
 use std::pin::Pin;
 use std::ptr::from_ref;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering, fence};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll, Waker};
 use std::thread::{Thread, current, park, park_timeout};
 use std::time::Duration;
 
+use crate::sync::effects::fence;
 use crate::sync::raw_mutex::RawMutex as Mutex;
 use crate::sync::slot_list::SlotList;
 use crate::sync::wait_queue::Timeout;
@@ -116,26 +117,45 @@ impl State {
         self.notify_from(self.state.load(Ordering::Relaxed));
     }
 
-    fn notify_from(&self, mut state: u32) {
+    // #[gamma::skip(parameter.default_shadow, reason = "The initial state is only a CAS hint; a stale EMPTY reloads the actual state through the failed CAS before deciding whether to deliver or store a permit.")]
+    fn notify_from(&self, state: u32) {
+        self.notify_from_with(state, || self.notify_waiter());
+    }
+
+    // #[gamma::skip(parameter.default_shadow, reason = "The initial state is only a CAS hint; the failed CAS reloads a current WAITING or PERMIT state.")]
+    fn notify_from_with(&self, mut state: u32, mut notify_waiter: impl FnMut() -> bool) {
         loop {
             if state == WAITING {
-                if self.notify_waiter() {
+                if
+                // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                notify_waiter() {
                     return;
                 }
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                // #[gamma::skip(assign_value.default, reason = "EMPTY is a valid stale hint after failed waiter delivery; the next CAS either publishes the permit or reloads current state.")]
                 state = self.state.load(Ordering::Relaxed);
                 continue;
             }
             // Even a coalesced notification publishes writes to the consumer.
-            match self
-                .state
-                .compare_exchange_weak(state, PERMIT, Ordering::Release, Ordering::Relaxed)
-            {
+            match self.state.compare_exchange_weak(
+                // #[gamma::skip(expr.increment, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                state,
+                PERMIT,
+                Ordering::Release,
+                Ordering::Relaxed,
+            ) {
                 Ok(_) => return,
-                Err(current) => state = current,
+                Err(current) => {
+                    // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "The November 4 afternoon campaign timed out because removing this update repeatedly retried compare_exchange with stale state.")]
+                    state =
+                // #[gamma::skip(assign_value.default, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                current;
+                }
             }
         }
     }
 
+    // #[gamma::skip(fn_value.bool_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     #[cold]
     fn notify_waiter(&self) -> bool {
         // The relaxed header read observed WAITING's release publication.
@@ -165,7 +185,9 @@ impl State {
     fn enqueue_with(&self, waiter: &Arc<Waiter>, mut before_register: impl FnMut()) {
         let mut queue = self.queue.get_or_init(|| Box::new(Mutex::new(SlotList::new()))).lock();
         loop {
-            if self.try_take() {
+            if
+            // #[gamma::skip(cond.always_false, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+            self.try_take() {
                 waiter.notified.store(true, Ordering::Release);
                 return;
             }
@@ -265,16 +287,24 @@ impl<M: Mode> Notify<M> {
     /// even when its duration cannot be added to an [`std::time::Instant`].
     #[must_use]
     pub fn wait_timeout(&self, timeout: Duration) -> bool {
+        self.wait_timeout_with(timeout, |deadline| self.wait_contended(deadline))
+    }
+
+    fn wait_timeout_with(&self, timeout: Duration, wait: impl FnOnce(Option<Timeout>) -> bool) -> bool {
         if self.try_wait() {
             true
         } else if timeout.is_zero() {
             self.record(EventKind::NotifyContention);
             false
         } else {
-            self.wait_contended(Some(Timeout::new(timeout)))
+            wait(
+                // #[gamma::skip(option.some_to_none, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                Some(Timeout::new(timeout)),
+            )
         }
     }
 
+    // #[gamma::skip(parameter.default_shadow, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     #[cold]
     fn wait_contended(&self, deadline: Option<Timeout>) -> bool {
         self.wait_contended_with(deadline, Timeout::elapsed, |remaining| match remaining {
@@ -291,6 +321,7 @@ impl<M: Mode> Notify<M> {
     ) -> bool {
         let waiter = Arc::new(Waiter {
             notified: AtomicBool::new(false),
+            // #[gamma::skip(expr.decrement, reason = "enqueue overwrites the position if linked; if a permit wins the race both maximum indices remain outside any representable Vec capacity.")]
             position: AtomicUsize::new(usize::MAX),
             target: Target::Thread(current()),
         });
@@ -300,6 +331,7 @@ impl<M: Mode> Notify<M> {
             waiter,
         };
         self.record(EventKind::NotifyContention);
+        // #[gamma::skip(bool_expr.negate, tag = "equivalent", reason = "Every loop exit returns from the enclosing function, so negating the loop result can never run.")]
         loop {
             if registration.waiter.notified.load(Ordering::Acquire) {
                 // Successful consumption disarms cancellation's notification handoff.
@@ -312,8 +344,10 @@ impl<M: Mode> Notify<M> {
                 let Some(remaining) = deadline.remaining_after(elapsed(&deadline)) else {
                     return false;
                 };
+                // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 park(Some(remaining));
             } else {
+                // #[gamma::skip(stmt.delete_call, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
                 park(None);
             }
         }
@@ -372,6 +406,7 @@ impl NotifyWait<'_> {
     /// then await if no work is available. Enabling twice does not register twice.
     #[inline]
     pub fn enable(&mut self) -> bool {
+        // #[gamma::skip(logical.or_remove_right, reason = "A completed wait retains either received=true or its notified waiter, so the subsequent checks still return true without registering again.")]
         if self.received || self.completed {
             return true;
         }
@@ -450,10 +485,201 @@ impl Drop for Registration<'_> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn nov4_injected_native_wait_distinguishes_delivery_from_expiry() {
+        let notify = Notify::<Sync>::new();
+        let parks = Cell::new(0);
+        assert!(notify.wait_contended_with(
+            None,
+            |_| panic!("an indefinite wait must not sample a timeout"),
+            |_| {
+                parks.set(parks.get() + 1);
+                assert_eq!(parks.get(), 1);
+                notify.notify_one();
+            },
+        ));
+        assert_eq!(parks.get(), 1);
+        assert!(!notify.try_wait());
+        assert!(!notify.wait_contended_with(
+            Some(Timeout::new(Duration::ZERO)),
+            |_| Duration::ZERO,
+            |_| panic!("an expired wait must not park"),
+        ));
+        assert!(!notify.try_wait());
+        assert!(notify.state().queue.get().unwrap().lock().is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_notification_retries_waiter_delivery_instead_of_overwriting_a_new_waiting_registration() {
+        let state = super::State::new();
+        state.state.store(super::WAITING, Ordering::Relaxed);
+        let mut deliveries = 0;
+        state.notify_from_with(super::WAITING, || {
+            deliveries += 1;
+            assert!(deliveries <= 2);
+            if deliveries == 1 {
+                state.state.store(super::WAITING, Ordering::Relaxed);
+                false
+            } else {
+                state.state.store(super::EMPTY, Ordering::Relaxed);
+                true
+            }
+        });
+        assert_eq!(deliveries, 2);
+        assert_eq!(state.state.load(Ordering::Relaxed), super::EMPTY);
+    }
+
+    #[test]
+    fn gamma_round2_timeout_dispatch_only_skips_waiting_for_an_empty_zero_budget() {
+        for budget in [Duration::ZERO, Duration::from_millis(7)] {
+            let notify = Notify::<Sync>::new();
+            let mut calls = 0;
+            let completed = notify.wait_timeout_with(budget, |deadline| {
+                calls += 1;
+                assert_eq!(deadline.unwrap().remaining_after(Duration::ZERO), Some(budget));
+                true
+            });
+            assert_eq!(completed, !budget.is_zero());
+            assert_eq!(calls, usize::from(!budget.is_zero()));
+        }
+        let notify = Notify::<Sync>::new();
+        notify.notify_one();
+        assert!(notify.wait_timeout_with(Duration::ZERO, |_| panic!("an available permit must not enter the wait path")));
+    }
+
+    #[test]
+    fn gamma_round2_injected_parking_preserves_success_after_a_spurious_return() {
+        let notify = super::Notify::<super::Async>::new();
+        let mut parks = 0;
+        let received = notify.wait_contended_with(
+            None,
+            |_| panic!("an unbounded wait does not sample elapsed time"),
+            |remaining| {
+                assert!(remaining.is_none());
+                parks += 1;
+                assert!(parks <= 2);
+                if parks == 2 {
+                    notify.notify_one();
+                }
+            },
+        );
+        assert!(received);
+        assert_eq!(parks, 2);
+        assert!(!notify.try_wait());
+    }
+
     use std::cell::Cell;
     use std::time::Instant;
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_notify_stale_cached_states_reload_after_cancel_and_failed_compare_exchange() {
+        for retained in [false, true] {
+            let notify = Notify::<Async>::new();
+            let mut wait = notify.wait_async();
+            assert!(Pin::new(&mut wait).poll(&mut Context::from_waker(Waker::noop())).is_pending());
+            drop(wait);
+            if retained {
+                notify.notify_one();
+            }
+            notify.state().notify_from(WAITING);
+            assert!(notify.try_wait());
+            assert!(!notify.try_wait());
+            notify.notify_one();
+            notify.state().notify_from(EMPTY);
+            assert!(notify.try_wait());
+            assert!(!notify.try_wait());
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_native_notification_uses_injected_park_and_disarms_consumed_registration() {
+        #[cfg(feature = "seismograph")]
+        crate::gamma_round2_telemetry::enable_recording();
+        #[cfg(feature = "seismograph")]
+        let count = crate::gamma_round2_telemetry::recorded_test_events;
+        #[cfg(feature = "seismograph")]
+        let before = (
+            count(seismograph::recorder::event::EventKind::NotifyContention),
+            count(seismograph::recorder::event::EventKind::NotifyAccess),
+        );
+        let notify = Notify::<Sync>::new();
+        let mut parked = 0;
+        assert!(notify.wait_contended_with(
+            None,
+            |_| panic!("an untimed wait must not query elapsed time"),
+            |remaining| {
+                assert!(remaining.is_none());
+                parked += 1;
+                assert_eq!(parked, 1);
+                notify.notify_one();
+            }
+        ));
+        assert_eq!(parked, 1);
+        assert!(
+            !notify.try_wait(),
+            "a consumed registration must not forward its notification as a new permit"
+        );
+        assert!(notify.state().queue.get().unwrap().lock().is_empty());
+        assert_eq!(notify.state().state.load(Ordering::Relaxed), EMPTY);
+        #[cfg(feature = "seismograph")]
+        assert_eq!(
+            (
+                count(seismograph::recorder::event::EventKind::NotifyContention) - before.0,
+                count(seismograph::recorder::event::EventKind::NotifyAccess) - before.1,
+            ),
+            (1, 1)
+        );
+    }
+
+    #[test]
+    fn gamma_survivor_notify_queue_metadata_resets_after_selection_and_last_cancellation() {
+        let state = State::new();
+        let waiter = || {
+            Arc::new(Waiter {
+                notified: AtomicBool::new(false),
+                position: AtomicUsize::new(usize::MAX),
+                target: Target::Task(Mutex::new(Some(Waker::noop().clone()))),
+            })
+        };
+        let first = waiter();
+        let second = waiter();
+        state.enqueue(&first);
+        state.enqueue(&second);
+        assert_eq!(state.state.load(Ordering::Acquire), WAITING);
+        assert!(!state.try_take());
+        state.notify_one();
+        assert!(first.notified.load(Ordering::Acquire));
+        assert_eq!(first.position.load(Ordering::Relaxed), usize::MAX);
+        assert!(!second.notified.load(Ordering::Acquire));
+        assert_eq!(state.state.load(Ordering::Acquire), WAITING);
+        state.cancel(&second);
+        assert_eq!(second.position.load(Ordering::Relaxed), usize::MAX);
+        assert_eq!(state.state.load(Ordering::Acquire), EMPTY);
+        state.cancel(&first);
+        assert!(state.try_take());
+        assert!(!state.try_take());
+        let reserved = waiter();
+        state.notify_one();
+        state.enqueue(&reserved);
+        assert!(reserved.notified.load(Ordering::Acquire));
+        assert_eq!(state.state.load(Ordering::Acquire), EMPTY);
+    }
+
+    #[test]
+    fn gamma_survivor_notify_racing_permit_registration_keeps_unqueued_position_sentinel() {
+        let notify = Notify::<Async>::new();
+        notify.notify_one();
+        let mut future = notify.wait_async();
+        future.register_contended();
+        let waiter = future.waiter.as_ref().unwrap();
+        assert!(waiter.notified.load(Ordering::Acquire));
+        assert_eq!(waiter.position.load(Ordering::Relaxed), usize::MAX);
+        assert!(future.enable());
+        assert!(Pin::new(&mut future).poll(&mut Context::from_waker(Waker::noop())).is_ready());
+        assert!(!notify.try_wait());
+    }
 
     #[test]
     fn forced_expiry_removes_a_registered_wait_without_losing_later_notifications() {

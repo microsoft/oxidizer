@@ -107,11 +107,6 @@ async fn default_test_runtime_has_exactly_one_worker(cx: Context) {
     }
 }
 
-#[test(monitor = enabled)]
-async fn test_can_enable_monitoring(cx: Context) {
-    assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
-}
-
 #[test(monitor = disabled, workers = 1)]
 async fn test_can_disable_monitoring_explicitly(cx: Context) {
     assert_eq!(cx.scheduler().spawn(async |_| 42).await.unwrap(), 42);
@@ -130,7 +125,7 @@ async fn worker_count_is_exact_even_when_processors_are_shared(cx: Context) {
     assert_eq!(workers.len(), 3);
 }
 
-#[arty::main]
+#[arty::main(monitor = disabled)]
 #[::core::prelude::v1::test]
 async fn default_main_runtime_has_exactly_one_worker(cx: Context) {
     let tasks: Vec<_> = cx

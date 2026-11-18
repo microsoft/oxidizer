@@ -4,6 +4,10 @@
 use syn::punctuated::Punctuated;
 use syn::{Attribute, LitStr, Path, WherePredicate};
 
+#[cfg(test)]
+#[path = "gamma_survivor_attrs.rs"]
+mod gamma_survivor_tests;
+
 #[derive(Clone)]
 pub(crate) enum DefaultValue {
     Trait,
@@ -120,7 +124,9 @@ fn parse_rename(meta: syn::meta::ParseNestedMeta<'_>, target: &mut Option<String
         if target.is_some() {
             return Err(meta.error("duplicate serde deserialize rename"));
         }
-        *target = Some(meta.value()?.parse::<LitStr>()?.value());
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "The preceding equals-token peek guarantees meta.value succeeds")]
+        let value = meta.value()?;
+        *target = Some(value.parse::<LitStr>()?.value());
         return Ok(());
     }
     meta.parse_nested_meta(|nested| {
@@ -140,7 +146,9 @@ fn parse_rename(meta: syn::meta::ParseNestedMeta<'_>, target: &mut Option<String
 
 fn parse_default(meta: syn::meta::ParseNestedMeta<'_>) -> syn::Result<DefaultValue> {
     if meta.input.peek(syn::Token![=]) {
-        let value = meta.value()?.parse::<LitStr>()?;
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "The preceding equals-token peek guarantees meta.value succeeds")]
+        let tokens = meta.value()?;
+        let value = tokens.parse::<LitStr>()?;
         Ok(DefaultValue::Path(value.parse()?))
     } else {
         Ok(DefaultValue::Trait)
@@ -152,7 +160,9 @@ fn parse_rule(meta: syn::meta::ParseNestedMeta<'_>, target: &mut Option<RenameRu
         if target.is_some() {
             return Err(meta.error("duplicate serde deserialize rename rule"));
         }
-        *target = Some(RenameRule::parse(&meta.value()?.parse::<LitStr>()?)?);
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "The preceding equals-token peek guarantees meta.value succeeds")]
+        let value = meta.value()?;
+        *target = Some(RenameRule::parse(&value.parse::<LitStr>()?)?);
         return Ok(());
     }
     meta.parse_nested_meta(|nested| {
@@ -322,7 +332,9 @@ pub(crate) fn parse_container(attrs: &[Attribute]) -> syn::Result<ContainerAttrs
                     return Err(meta.error("this serde container representation is not supported by `DeserializeIn`"));
                 } else if meta.path.is_ident("bound") {
                     let deserialize = if meta.input.peek(syn::Token![=]) {
-                        Some(meta.value()?.parse::<LitStr>()?)
+                        // #[gamma::skip(try.propagate_to_unwrap, reason = "The preceding equals-token peek guarantees meta.value succeeds")]
+                        let value = meta.value()?;
+                        Some(value.parse::<LitStr>()?)
                     } else {
                         let mut deserialize = None;
                         meta.parse_nested_meta(|nested| {

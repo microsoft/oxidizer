@@ -48,6 +48,7 @@ pub trait FromQuery<'q>: DecodeFields<'q> {
     // Wide/scalar selection changes performance only; scan implementations are
     // checked differentially at their threshold.
     fn from_query_with(input: &'q str, limits: QueryLimits) -> Result<Self, Error> {
+        // #[gamma::skip(cond.always_false, cond.always_true, cond.negate, relational.ge_to_gt, relational.ge_to_le, reason = "Both parser specializations preserve values, borrowing, error offsets, and limits; this condition selects only their scanning strategy")]
         if input.len() >= INPUT_SIMD_THRESHOLD {
             parse::<Self, true>(input, limits)
         } else {

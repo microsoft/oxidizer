@@ -51,7 +51,8 @@ static INVARIANT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 assert_impl_all!(Io: Clone, Send, ThreadAware);
 assert_not_impl_any!(Io: UnwindSafe, RefUnwindSafe);
-assert_impl_all!(RuntimeBuilder: Send, Sync);
+assert_impl_all!(RuntimeBuilder: Send);
+assert_not_impl_any!(RuntimeBuilder: Sync);
 
 #[derive(Debug)]
 struct IoError(String);
@@ -559,7 +560,11 @@ impl<M: Marker> Driver for TestDriver<M> {
 }
 
 fn runtime(workers: usize) -> Runtime {
-    Runtime::builder().workers(WorkersPolicy::exactly(workers)).build().unwrap()
+    Runtime::builder()
+        .monitor(arty::runtime::MonitorPolicy::disabled())
+        .workers(WorkersPolicy::exactly(workers))
+        .build()
+        .unwrap()
 }
 
 fn worker_schedulers(runtime: &Runtime, workers: usize) -> Vec<Scheduler> {

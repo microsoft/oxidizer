@@ -7,7 +7,6 @@
 //!
 //! `cargo +1.95.0 run -p seismograph_rallocator --example native_snapshot`
 //! `cargo +1.95.0 run -p seismograph_cli -- view native-demo.seismograph`
-//! `cargo +1.95.0 run -p seismograph_cli -- snapshot html native-demo.seismograph`
 
 use seismograph::recorder::alloc::{Allocation, AllocationId, EventThreadId, HeapId, HeapKind};
 use seismograph::recorder::event::{Address, EventClass, Record};

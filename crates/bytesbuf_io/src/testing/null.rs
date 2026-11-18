@@ -45,6 +45,7 @@ impl Null {
         clippy::unused_async_trait_impl,
         reason = "API compatibility between trait and inherent fn"
     )]
+    // #[gamma::skip(parameter.default_shadow, reason = "A null source ignores the requested byte count and always returns the input buffer unchanged")]
     pub async fn read_at_most_into(&mut self, _len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         Ok((0, into))
     }
@@ -133,6 +134,7 @@ impl Default for Null {
 impl Read for Null {
     type Error = Infallible;
 
+    // #[gamma::skip(parameter.default_shadow, reason = "The forwarded count is ignored by the inherent null-source read")]
     async fn read_at_most_into(&mut self, len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         self.read_at_most_into(len, into).await
     }

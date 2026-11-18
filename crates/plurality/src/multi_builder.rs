@@ -39,6 +39,7 @@ impl MultiPoolBuilder<Global> {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
+            // #[gamma::skip(expr.increment, reason = "Every slot stride is a multiple of four, so byte targets 4096 and 4097 produce the same integer quotient and power-of-two slot count.")]
             sizing: ChunkSizing::Bytes(DEFAULT_CHUNK_BYTES),
             max_chunks: None,
             max_layouts: None,
