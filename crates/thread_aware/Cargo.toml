@@ -58,6 +58,10 @@ required-features = ["derive", "std"]
 name = "transfer_pass"
 required-features = ["derive", "std"]
 
+[[test]]
+name = "gamma_survivor_closures"
+required-features = ["std"]
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

@@ -120,3 +120,61 @@ impl Error for JsonError {
         Some(&self.source)
     }
 }
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use alloc::format;
+    use alloc::string::String;
+    use core::fmt::Write;
+
+    use super::*;
+
+    struct FailingWriter {
+        remaining: usize,
+        prefix: String,
+    }
+
+    impl fmt::Write for FailingWriter {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            if self.remaining == 0 {
+                return Err(fmt::Error);
+            }
+            self.remaining -= 1;
+            self.prefix.push_str(s);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_json_error_exact_resource_labels_and_fmt_errors() {
+        for (resource, label) in [
+            (DeserializationResource::Depth, "nesting depth"),
+            (DeserializationResource::SequenceLength, "sequence length"),
+            (DeserializationResource::MapLength, "map length"),
+            (DeserializationResource::StringLength, "string length"),
+            (DeserializationResource::ByteStringLength, "byte string length"),
+        ] {
+            let source = serde_json::from_str::<u8>("!").unwrap_err();
+            let source_text = format!("{source}");
+            let error = JsonError::new(source, Some(LimitExceeded::new(resource, 17)));
+            let output = format!("{error}");
+            assert!(output.starts_with(&format!("JSON deserialization exceeded the {label} limit of 17")));
+            assert!(output.ends_with(&format!("\n\nCaused by:\n{source_text}")));
+            for remaining in 0..5 {
+                let mut writer = FailingWriter {
+                    remaining,
+                    prefix: String::new(),
+                };
+                write!(&mut writer, "{error}").expect_err("the fixture rejects this formatting stage");
+            }
+        }
+        let error = JsonError::from(serde_json::from_str::<u8>("!").unwrap_err());
+        assert!(format!("{error}").starts_with("JSON deserialization failed"));
+        let mut writer = FailingWriter {
+            remaining: 0,
+            prefix: String::new(),
+        };
+        write!(&mut writer, "{error}").expect_err("the writer rejects its first write");
+        assert!(writer.prefix.is_empty());
+    }
+}

@@ -48,6 +48,7 @@ impl BasePath {
         if self.inner.query().is_some() {
             return Err(UriError::invalid_uri("the path must not contain a query string"));
         }
+        // #[gamma::skip(logical.and_remove_left, string.starts_with_to_ends_with, tag = "equivalent", reason = "A parsed PathAndQuery without a query either starts with slash or is the asterisk form; the latter also fails ends_with slash.")]
         if !(path_str.starts_with('/') && path_str.ends_with('/')) {
             return Err(UriError::invalid_uri("the path must start and end with a slash"));
         }
@@ -67,6 +68,7 @@ impl BasePath {
         let base = self.as_str();
         let other_str = other.as_str();
         let path_str = other_str.trim_start_matches('/');
+        // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "With no suffix the general path reconstructs the same validated base path.")]
         if path_str.is_empty() {
             return Ok(self.inner.clone());
         }
@@ -79,6 +81,7 @@ impl BasePath {
         // slash-trimmed `path_str` means exactly one leading slash was trimmed, so
         // `"/" + path_str == other_str` (`path_str` is always a suffix of `other_str`, so the
         // subtraction never underflows).
+        // #[gamma::skip(cond.always_false, literal.str_to_empty, literal.str_to_xyzzy, tag = "equivalent", reason = "Disabling this root-path clone optimization reconstructs the identical validated path through the general join.")]
         if base == "/" && other_str.len().saturating_sub(path_str.len()) == 1 {
             return Ok(other.clone());
         }
@@ -86,6 +89,7 @@ impl BasePath {
         // buffer once and skips the formatting machinery, and the resulting `String` is
         // donated to `PathAndQuery::try_from` without a re-copy. This is the request hot-path
         // join used when reusing an already-rendered path (see `Uri::to_http_uri`).
+        // #[gamma::skip(arith.add_to_mul, tag = "equivalent", reason = "Only the allocation hint changes; push_str writes the same complete base and path regardless of spare capacity.")]
         let mut full_path = String::with_capacity(base.len() + path_str.len());
         full_path.push_str(base);
         full_path.push_str(path_str);
@@ -118,6 +122,7 @@ impl BasePath {
     /// also returned if the joined result is not a valid path-and-query.
     pub(crate) fn join_rendered(&self, other: &crate::PathAndQuery) -> Result<PathAndQuery, UriError> {
         let base = self.as_str();
+        // #[gamma::skip(arith.add_to_mul, tag = "equivalent", reason = "Only the allocation hint changes; render_into writes the same complete path regardless of spare capacity.")]
         let mut buf = String::with_capacity(base.len() + other.render_capacity_hint());
         buf.push_str(base);
 

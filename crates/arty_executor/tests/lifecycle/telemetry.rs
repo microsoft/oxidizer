@@ -10,6 +10,15 @@ use observed_testing::{TEST_ID, test_emitter};
 use super::support::TaskBuilderExt as _;
 
 #[test]
+fn gamma_survivor_default_placement_has_exact_any_label() {
+    let (sink, processor) = test_emitter(TEST_ID);
+    let executor = Executor::builder().sink(sink).build();
+    let _completion = executor.tasks().task(async {}).register_test();
+
+    assert_eq!(processor.single_event().dimensions(), [("placement".to_owned(), "any".into())]);
+}
+
+#[test]
 fn lifecycle_events_include_placement_and_poll_count() {
     let (sink, processor) = test_emitter(TEST_ID);
     let mut executor = Executor::builder().sink(sink).build();

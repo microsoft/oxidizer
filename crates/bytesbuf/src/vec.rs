@@ -19,6 +19,7 @@ impl From<Vec<u8>> for BytesView {
     ///
     /// This operation is always zero-copy, though does cost a small dynamic allocation.
     fn from(value: Vec<u8>) -> Self {
+        // #[gamma::skip(cond.always_false, reason = "VecBlockIterator yields no blocks for an empty vector, so the general path constructs the identical empty view")]
         if value.is_empty() {
             return Self::new();
         }
@@ -117,7 +118,7 @@ unsafe impl BlockRefDynamic for VecBlock {
 
         // Ensure that we have observed all writes into the block from other threads.
         // On x86 this does nothing but on weaker memory models writes could be delayed.
-        atomic::fence(atomic::Ordering::Acquire);
+        crate::sync_fence::fence(atomic::Ordering::Acquire);
 
         // SAFETY: No more references exist, we can resurrect the object inside a Box and drop.
         drop(unsafe { Box::from_raw(state_ptr.as_ptr()) });
@@ -193,15 +194,54 @@ impl Iterator for VecBlockIterator {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let blocks_remaining = self.remaining.len().div_ceil(BlockSize::MAX as usize);
+        let blocks_remaining = vector_block_count(self.remaining.len());
         (blocks_remaining, Some(blocks_remaining))
     }
+}
+
+fn vector_block_count(remaining: usize) -> usize {
+    remaining.div_ceil(BlockSize::MAX as usize)
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gamma_round2_vector_block_count_is_exact_at_the_maximum_block_boundary() {
+        let maximum = BlockSize::MAX as usize;
+        assert_eq!(vector_block_count(0), 0);
+        assert_eq!(vector_block_count(maximum - 1), 1);
+        assert_eq!(vector_block_count(maximum), 1);
+        for (bytes, expected) in [
+            maximum.checked_add(1).map(|bytes| (bytes, 2)),
+            maximum.checked_mul(2).map(|bytes| (bytes, 2)),
+            maximum
+                .checked_mul(2)
+                .and_then(|bytes| bytes.checked_add(1))
+                .map(|bytes| (bytes, 3)),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert_eq!(vector_block_count(bytes), expected);
+        }
+    }
+
+    #[test]
+    fn gamma_survivor_vec_state_balances_every_clone() {
+        let state = NonNull::from(Box::leak(Box::new(VecBlock::new(vec![2, 3, 5]))));
+        // SAFETY: The leaked Box was transferred into one dynamic owned reference.
+        assert_eq!(unsafe { state.as_ref() }.ref_count.load(atomic::Ordering::Relaxed), 1);
+        let clone = <VecBlock as BlockRefDynamic>::clone(state);
+        // SAFETY: Both state handles retain the backing.
+        assert_eq!(unsafe { state.as_ref() }.ref_count.load(atomic::Ordering::Relaxed), 2);
+        <VecBlock as BlockRefDynamic>::drop(clone);
+        // SAFETY: The original reference remains live.
+        assert_eq!(unsafe { state.as_ref() }.ref_count.load(atomic::Ordering::Relaxed), 1);
+        <VecBlock as BlockRefDynamic>::drop(state);
+    }
 
     #[test]
     fn vec_into_view() {

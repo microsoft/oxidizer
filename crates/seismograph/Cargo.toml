@@ -36,6 +36,7 @@ monitor = ["dep:seismograph_protocol"]
 test-util = ["monitor", "seismograph_protocol/test-util"]
 
 [dependencies]
+backtrace = { workspace = true, features = ["std"] }
 seismograph_protocol = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -44,6 +45,10 @@ windows-sys = { workspace = true, features = ["Win32_System_Diagnostics_Debug"] 
 [dev-dependencies]
 seismograph_protocol = { path = "../seismograph_protocol", features = ["test-util"] }
 tempfile = { workspace = true }
+
+[[test]]
+name = "snapshot_symbols"
+required-features = ["test-util"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

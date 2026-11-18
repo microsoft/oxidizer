@@ -10,6 +10,41 @@ use syn::{Data, DeriveInput, Error, Fields, Path, Type};
 
 use crate::attrs::{ContainerAttrs, DefaultValue, FieldAttrs};
 
+#[cfg(test)]
+mod gamma_survivor_tests {
+    use syn::parse_quote;
+
+    use super::{is_phantom_data, validate_transparent_container};
+    use crate::attrs::ContainerAttrs;
+
+    #[test]
+    fn gamma_survivor_phantom_data_requires_an_unqualified_type_path() {
+        assert!(is_phantom_data(&parse_quote!(::core::marker::PhantomData<u32>)));
+        assert!(!is_phantom_data(&parse_quote!(<T as Trait>::PhantomData)));
+    }
+
+    #[test]
+    fn gamma_survivor_transparent_validation_rejects_non_structs() {
+        let container = ContainerAttrs {
+            transparent: true,
+            ..ContainerAttrs::default()
+        };
+        assert_eq!(
+            validate_transparent_container(
+                &parse_quote!(
+                    enum Example {
+                        A,
+                    }
+                ),
+                &container
+            )
+            .unwrap_err()
+            .to_string(),
+            "serde `transparent` is supported only for structs"
+        );
+    }
+}
+
 /// Shared expansion context: the resolved `internity::de` root, parsed container
 /// attributes, the target type name, and the generated interner generic name.
 #[derive(Clone, Copy)]
@@ -144,9 +179,7 @@ pub(crate) fn transparent_serialize_target(plan: &NamedPlan) -> bool {
 }
 
 pub(crate) fn transparent_other_expr(plan: &NamedPlan) -> TokenStream2 {
-    if plan.attrs.skip {
-        skip_default_expr(&plan.attrs)
-    } else if let Some(default) = &plan.attrs.default {
+    if let Some(default) = &plan.attrs.default {
         default_value_expr(default)
     } else {
         quote!(::core::default::Default::default())

@@ -379,6 +379,20 @@ impl<'a> IntoIterator for &'a mut EncodedValues {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_afternoon_single_values_stay_inline_and_spill_reservations_cover_the_next_value() {
+        let mut values = super::EncodedValues::new();
+        values.try_reserve(2).unwrap();
+        assert!(values.rest.capacity() >= 1);
+        assert!(values.is_empty());
+        values.push(crate::FieldValue::from_static("first"));
+        assert!(values.first.is_some());
+        assert!(values.rest.is_empty());
+        values.push(crate::FieldValue::from_static("second"));
+        assert_eq!(values.rest.len(), 1);
+        assert_eq!(values.len(), 2);
+    }
+
     use std::cell::Cell;
 
     use super::EncodedValues;

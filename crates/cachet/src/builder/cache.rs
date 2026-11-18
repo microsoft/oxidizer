@@ -380,6 +380,16 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[cfg(feature = "memory")]
+    fn gamma_round2_memory_builder_installs_an_eviction_hook_only_when_requested() {
+        let clock = tick::Clock::new_frozen();
+        let plain = crate::Cache::builder::<i32, i32>(clock.clone()).memory_with(|builder| builder);
+        assert!(plain.eviction_hook.is_none());
+        let observed = crate::Cache::builder::<i32, i32>(clock).memory_with(super::InMemoryCacheBuilder::with_eviction_telemetry);
+        assert!(observed.eviction_hook.is_some());
+    }
+
     use super::*;
 
     #[test]

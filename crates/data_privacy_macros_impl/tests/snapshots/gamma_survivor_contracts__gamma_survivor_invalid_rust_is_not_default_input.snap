@@ -1,0 +1,37 @@
+---
+source: crates/data_privacy_macros_impl/tests/gamma_survivor_contracts.rs
+expression: diagnostics
+---
+- - classified
+  - ""
+  - "unexpected end of input, expected `struct`"
+- - redacted_debug
+  - ""
+  - "unexpected end of input, expected one of: `struct`, `enum`, `union`"
+- - redacted_display
+  - ""
+  - "unexpected end of input, expected one of: `struct`, `enum`, `union`"
+- - classified
+  - enum
+  - "expected `struct`"
+- - redacted_debug
+  - enum
+  - "unexpected end of input, expected identifier"
+- - redacted_display
+  - enum
+  - "unexpected end of input, expected identifier"
+- - classified
+  - struct
+  - "unexpected end of input, expected identifier"
+- - redacted_debug
+  - struct
+  - "unexpected end of input, expected identifier"
+- - redacted_display
+  - struct
+  - "unexpected end of input, expected identifier"
+- - classified attribute
+  - "123"
+  - expected identifier
+- - classified attribute
+  - "Privacy ::"
+  - "unexpected end of input, expected identifier"

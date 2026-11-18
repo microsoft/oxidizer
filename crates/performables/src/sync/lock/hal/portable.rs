@@ -56,6 +56,7 @@ impl RwLock {
         }
     }
 
+    // #[gamma::skip(fn_value.unit, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
     #[expect(clippy::unused_self, reason = "the portable owning guard retains its native lock")]
     pub(in crate::sync::lock) fn read_unlock(&self, guard: &mut ReadGuard<'_>) {
         drop(guard.inner.take());
@@ -87,6 +88,34 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_portable_guards_retain_and_explicitly_release_native_ownership() {
+        let lock = RwLock::new();
+        let mut reader = lock.try_read().unwrap();
+        let mut second = lock.read();
+        assert!(reader.inner.is_some());
+        assert!(second.inner.is_some());
+        assert!(lock.try_write().is_none());
+        lock.read_unlock(&mut reader);
+        assert!(reader.inner.is_none());
+        assert!(lock.try_write().is_none());
+        lock.read_unlock(&mut second);
+        assert!(second.inner.is_none());
+
+        let mut writer = lock.try_write().unwrap();
+        assert!(writer.inner.is_some());
+        assert!(lock.try_read().is_none());
+        assert!(lock.try_write().is_none());
+        lock.write_unlock(&mut writer);
+        assert!(writer.inner.is_none());
+        let mut next = lock.write();
+        assert!(next.inner.is_some());
+        assert!(lock.try_read().is_none());
+        lock.write_unlock(&mut next);
+        assert!(next.inner.is_none());
+        assert!(lock.try_read().is_some());
+    }
 
     #[test]
     fn fallback_preserves_ownership_and_poison_recovery() {

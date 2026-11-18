@@ -11,7 +11,7 @@
 use std::alloc::{GlobalAlloc, Layout};
 use std::sync::Mutex;
 
-use rallocator::Rallocator;
+use GLOBAL as Rallocator;
 use seismograph::recorder::alloc::Allocation;
 use seismograph::recorder::event::EventKind;
 use seismograph::recorder::{Configuration, Policy, without_recording};
@@ -38,7 +38,7 @@ impl Drop for Recording {
     }
 }
 
-#[expect(clippy::unwrap_used, reason = "Test capture failures must fail the scenario")]
+#[expect(clippy::unwrap_used, clippy::panic, reason = "Test captures require readable snmalloc state")]
 fn events() -> Vec<(EventKind, Allocation)> {
     let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
     without_recording(|| {
@@ -48,8 +48,12 @@ fn events() -> Vec<(EventKind, Allocation)> {
             .iter()
             .find(|source| source.id == seismograph_rallocator::source::ID)
         {
-            assert_eq!(source.schema_version, 4);
-            let allocator = seismograph_rallocator::decode(&source.data).unwrap();
+            assert_eq!(source.schema_version, seismograph_rallocator::snapshot::SCHEMA_VERSION);
+            let snapshot = seismograph_rallocator::snapshot::decode(&source.data).unwrap();
+            let seismograph_rallocator::snapshot::BackendState::Snmalloc(state) = snapshot.backend else {
+                panic!("snmalloc must publish snmalloc state")
+            };
+            let allocator = seismograph_rallocator::native::Snapshot::from((snapshot.header, state));
             assert!(allocator.owner_count >= allocator.owners.len() as u64);
             assert!(allocator.global.local_limit_bytes > 0);
             assert!(allocator.owners.iter().all(|owner| {
@@ -73,6 +77,26 @@ fn at_address(events: &[(EventKind, Allocation)], pointer: *mut u8) -> Vec<(Even
             .iter()
             .copied()
             .filter(|(_, allocation)| allocation.address.get() == pointer.addr() as u64)
+            .collect()
+    })
+}
+
+#[expect(clippy::unwrap_used, reason = "Test captures must encode and decode successfully")]
+fn operations_at(pointer: *mut u8) -> Vec<seismograph::recorder::event::Event> {
+    let snapshot = seismograph::snapshot(seismograph::snapshot::SnapshotOptions::default()).unwrap();
+    without_recording(|| {
+        let decoded = seismograph::snapshot::decode(snapshot.as_bytes()).unwrap();
+        let address = pointer.addr() as u64;
+        decoded
+            .events
+            .events
+            .into_iter()
+            .filter(|event| {
+                event.allocation().is_some_and(|allocation| allocation.address.get() == address)
+                    || event
+                        .reallocation()
+                        .is_some_and(|resize| resize.old_address.get() == address || resize.new_address.get() == address)
+            })
             .collect()
     })
 }
@@ -322,33 +346,42 @@ fn realloc_preserves_native_pointer_rules_and_records_successful_layout_changes(
             assert!(failed.is_null());
             assert_eq!(std::slice::from_raw_parts(replacement, 17), &[42; 17]);
         }
-        let before_free = events();
-        let records = at_address(&before_free, original);
-        assert_eq!(records.len(), 3);
+        let records = operations_at(original);
         assert_eq!(
-            records
-                .iter()
-                .map(|(kind, allocation)| (*kind, allocation.size))
-                .collect::<Vec<_>>(),
-            vec![
-                (EventKind::Allocation, 17),
-                (EventKind::Deallocation, 17),
-                (EventKind::Allocation, 18)
-            ]
+            records.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            [EventKind::Allocation, EventKind::Reallocation]
         );
+        let resize = records[1].reallocation().unwrap();
+        assert_eq!(
+            (resize.old_size, resize.new_size, resize.old_address.get(), resize.new_address.get()),
+            (17, 18, original.addr() as u64, original.addr() as u64)
+        );
+        assert!(records.iter().all(|event| !event.call_stack.is_empty()));
         let moved = Rallocator.realloc(replacement, grown_layout, 4097);
         assert!(!moved.is_null());
         assert_ne!(moved, original);
         assert_eq!(std::slice::from_raw_parts(moved, 17), &[42; 17]);
         Rallocator.dealloc(moved, Layout::from_size_align(4097, 8).unwrap());
-        let final_events = events();
-        let old_records = at_address(&final_events, original);
-        assert_eq!(old_records.len(), 4);
-        assert_eq!((old_records[3].0, old_records[3].1.size), (EventKind::Deallocation, 18));
-        let new_records = at_address(&final_events, moved);
+        let old_records = operations_at(original);
+        assert_eq!(
+            old_records.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            [EventKind::Allocation, EventKind::Reallocation, EventKind::Reallocation]
+        );
+        let moved_resize = old_records[2].reallocation().unwrap();
+        assert_eq!(
+            (
+                moved_resize.old_size,
+                moved_resize.new_size,
+                moved_resize.old_address.get(),
+                moved_resize.new_address.get()
+            ),
+            (18, 4097, original.addr() as u64, moved.addr() as u64)
+        );
+        let new_records = operations_at(moved);
         assert_eq!(new_records.len(), 2);
-        assert_eq!(new_records[0].1, new_records[1].1);
-        assert_eq!(new_records[0].1.size, 4097);
+        assert_eq!(new_records[0].reallocation(), Some(moved_resize));
+        assert_eq!(new_records[1].kind, EventKind::Deallocation);
+        assert_eq!(new_records[1].allocation().unwrap().size, 4097);
     }
 }
 
@@ -369,19 +402,16 @@ fn disabled_and_failed_operations_emit_nothing_but_enabled_resizes_and_frees_do(
         Rallocator.dealloc(resized, Layout::from_size_align(18, 8).unwrap());
         let too_large = Layout::from_size_align((1_usize << 46) + 1, 8).unwrap();
         assert!(Rallocator.alloc(too_large).is_null());
-        let records = at_address(&events(), pointer);
-        assert_eq!(records.len(), 3);
+        assert!(Rallocator.alloc_zeroed(too_large).is_null());
+        assert!(at_address(&events(), std::ptr::null_mut()).is_empty());
+        let records = operations_at(pointer);
         assert_eq!(
-            records
-                .iter()
-                .map(|(kind, allocation)| (*kind, allocation.size))
-                .collect::<Vec<_>>(),
-            vec![
-                (EventKind::Deallocation, 17),
-                (EventKind::Allocation, 18),
-                (EventKind::Deallocation, 18)
-            ]
+            records.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            [EventKind::Reallocation, EventKind::Deallocation]
         );
+        let resize = records[0].reallocation().unwrap();
+        assert_eq!((resize.old_size, resize.new_size), (17, 18));
+        assert_eq!(records[1].allocation().unwrap().size, 18);
     }
 }
 

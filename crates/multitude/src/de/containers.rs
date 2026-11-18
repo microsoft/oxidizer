@@ -10,7 +10,7 @@
     reason = "Serde visitor names describe collection roles, and explicit deserializer lifetimes clarify recursive bounds"
 )]
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::{BTreeMap, BTreeSet, TryReserveError};
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 use core::cmp::Reverse;
@@ -29,6 +29,12 @@ const fn overlong_array_length(length: usize) -> usize {
 
 const fn vec_needs_reserve(length: usize, capacity: usize) -> bool {
     length == capacity
+}
+
+fn vec_try_reserve<T>(values: &mut Vec<T>, additional: usize) -> Result<(), TryReserveError> {
+    #[cfg(test)]
+    tests::LAST_VEC_RESERVATION.set(Some(additional));
+    values.try_reserve(additional)
 }
 
 impl<'de, T: ?Sized, A: Allocator + Clone> DeserializeIn<'de, A> for PhantomData<T> {
@@ -442,8 +448,9 @@ where
                     values.try_reserve(capacity).map_err(S::Error::custom)?;
                 }
                 while let Some(value) = sequence.next_element_seed(DeserializeInSeed::<T, A>::new(self.arena))? {
+                    // #[gamma::skip(cond.always_true, reason = "Vec::try_reserve(1) is a no-op whenever one free slot already exists")]
                     if vec_needs_reserve(values.len(), values.capacity()) {
-                        values.try_reserve(1).map_err(S::Error::custom)?;
+                        vec_try_reserve(&mut values, 1).map_err(S::Error::custom)?;
                     }
                     values.push(value);
                 }

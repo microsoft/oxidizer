@@ -46,6 +46,7 @@ pub enum ConnectionKeepAlive {
 impl ConnectionKeepAlive {
     /// Disables keep-alive. Equivalent to [`ConnectionKeepAlive::Disabled`].
     #[must_use]
+    // #[gamma::skip(fn_value.default, tag = "equivalent", reason = "the derived Default implementation selects the same Disabled variant")]
     pub fn disabled() -> Self {
         Self::Disabled
     }

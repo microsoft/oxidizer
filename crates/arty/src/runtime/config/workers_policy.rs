@@ -125,6 +125,7 @@ impl Default for WorkersPolicy {
 
 fn sorted_singletons(processors: &ProcessorSet) -> Vec<ProcessorSet> {
     let mut processors: Vec<_> = processors.decompose().into_iter().collect();
+    // #[gamma::skip(iter.first_to_last, reason = "decompose produces singleton processor sets, whose first and last processor are identical.")]
     processors.sort_by_key(|processor| processor.processors().first().id());
     processors
 }

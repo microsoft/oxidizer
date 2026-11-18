@@ -23,7 +23,7 @@ use core::mem;
 use core::ptr::{self, NonNull};
 #[cfg(feature = "stats")]
 use core::sync::atomic::AtomicU32;
-use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering, fence};
+use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 use allocator_api2::alloc::Allocator;
 
@@ -31,6 +31,11 @@ use super::chunk_alloc::chunk_alloc_size;
 use super::chunk_provider::ChunkProvider;
 use super::constants::{CHUNK_ALIGN, refcount_overflow_abort};
 use crate::AllocError;
+use crate::sync_fence::fence;
+
+#[cfg(test)]
+#[path = "gamma_survivor_chunk.rs"]
+mod gamma_survivor;
 
 /// A bump-allocation chunk whose allocations can outlive the arena.
 ///
@@ -58,6 +63,18 @@ pub(crate) struct Chunk<A: Allocator + Clone> {
     /// chunk borrows and keeps fat-pointer provenance over the full
     /// allocation. Bump allocations grow up from the front.
     data: [UnsafeCell<u8>],
+}
+
+fn credited_refcount(previous: usize, additional: usize) -> Option<usize> {
+    previous.checked_add(additional)
+}
+
+#[test]
+fn gamma_round2_refcount_credit_accepts_the_exact_maximum_and_rejects_overflow() {
+    assert_eq!(credited_refcount(1, 0), Some(1));
+    assert_eq!(credited_refcount(1, 7), Some(8));
+    assert_eq!(credited_refcount(usize::MAX - 7, 7), Some(usize::MAX));
+    assert_eq!(credited_refcount(usize::MAX - 7, 8), None);
 }
 
 impl<A: Allocator + Clone> Chunk<A> {
@@ -305,7 +322,9 @@ impl<A: Allocator + Clone> Chunk<A> {
             return;
         }
         let prev = self.ref_count.fetch_add(n, Ordering::Relaxed);
-        if prev.checked_add(n).is_none() {
+        #[cfg(test)]
+        crate::sync_fence::trace::record(Ordering::Relaxed);
+        if credited_refcount(prev, n).is_none() {
             overflow();
         }
     }
@@ -324,6 +343,8 @@ impl<A: Allocator + Clone> Chunk<A> {
             return;
         }
         let prev = self.ref_count.fetch_sub(n, Ordering::Release);
+        #[cfg(test)]
+        crate::sync_fence::trace::record(Ordering::Release);
         debug_assert!(prev >= n, "refund_refs underflow: prev={prev} n={n}");
     }
 
@@ -632,6 +653,23 @@ mod tests {
     }
 
     // The test configuration turns pre-credit overflow into a panic.
+    #[test]
+    fn gamma_nov4_precredit_accepts_the_exact_maximum_through_its_overflow_check() {
+        let chunk = Chunk::<Global>::allocate(Arc::new(Global), Weak::new(), 64).expect("a 64-byte test chunk must fit");
+        // SAFETY: This test owns the fresh chunk's only reference.
+        let header = unsafe { chunk.as_ref() };
+        header.set_ref_count_for_test(usize::MAX - 7);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            header.pre_credit_refs(7);
+        }));
+        let count = header.ref_count.load(Ordering::Relaxed);
+        header.set_ref_count_for_test(0);
+        // SAFETY: The counter is restored to zero and the chunk remains exclusively owned.
+        unsafe { Chunk::destroy(chunk) };
+        assert!(result.is_ok(), "an exact usize::MAX refcount is not an overflow");
+        assert_eq!(count, usize::MAX);
+    }
+
     #[test]
     #[should_panic(expected = "refcount overflow")]
     fn pre_credit_refs_overflow_triggers_abort_guard() {

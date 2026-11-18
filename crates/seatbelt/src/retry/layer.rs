@@ -478,6 +478,16 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamma_round2_retry_type_state_transition_preserves_unavailable_handling() {
+        for enabled in [false, true] {
+            let context = create_test_context();
+            let layer = RetryLayer::new("round2".into(), &context).handle_unavailable(enabled);
+            let transitioned = layer.into_state::<Set, NotSet>();
+            assert_eq!(transitioned.handle_unavailable, enabled);
+        }
+    }
+
     use std::fmt::Debug;
     use std::sync::atomic::{AtomicU32, Ordering};
 

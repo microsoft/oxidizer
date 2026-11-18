@@ -11,6 +11,14 @@ use super::request_body::RequestBody;
 use super::response_body::ResponseBody;
 use super::route::Route;
 
+#[test]
+fn gamma_round2_path_fields_split_dots_and_deduplicate_across_affix_bindings() {
+    let template = |path| PathTemplate::parse(path, http_path_template::Grammar::default().with_segment_affixes()).unwrap();
+    let rule = HttpRule::new("Get", HttpMethod::GET, template("/v/{outer.inner}/{outer.inner}"))
+        .add_binding(Binding::new(HttpMethod::GET, template("/x/pre-{other.key}.json/{outer.inner}")));
+    assert_eq!(rule.path_variable_field_paths(), [["outer", "inner"], ["other", "key"]]);
+}
+
 /// A declarative HTTP binding for a single gRPC method, mirroring
 /// [`google.api.HttpRule`](https://github.com/googleapis/googleapis/blob/master/google/api/http.proto).
 ///
@@ -117,6 +125,7 @@ impl HttpRule {
     /// then each additional binding). `None` for a route that returns the whole
     /// message or whose default is unknown (e.g. a manually built rule).
     pub(crate) fn response_body_defaults(&self) -> Vec<Option<String>> {
+        // #[gamma::skip(arith.add_to_mul, literal.int_decrement, literal.int_increment, reason = "This private vector's capacity hint is discarded after iteration; all primary and additional defaults are still pushed in the same order")]
         let mut defaults = Vec::with_capacity(1 + self.additional_bindings.len());
         defaults.push(self.response_body_default.clone());
         for binding in &self.additional_bindings {
@@ -243,6 +252,7 @@ impl HttpRule {
             ..
         } = self;
 
+        // #[gamma::skip(arith.add_to_mul, literal.int_decrement, literal.int_increment, reason = "This private lowering vector's capacity is discarded by its consumers; every primary and additional route is still pushed in order")]
         let mut routes = Vec::with_capacity(1 + additional_bindings.len());
         routes.push(Route::new(rpc.clone(), method, pattern, body, response_body));
         for binding in additional_bindings {

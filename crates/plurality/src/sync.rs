@@ -212,3 +212,18 @@ impl<T: ?Sized, A: Allocator> Drop for Arc<T, A> {
 }
 
 impl_handle_common_unsized!(Arc);
+
+#[cfg(all(test, not(loom)))]
+#[test]
+fn nov4_arc_clone_dispatches_the_overflow_policy_with_the_actual_previous_count() {
+    let pool = crate::Pool::<u32>::new();
+    let value = pool.alloc_arc(19);
+    // SAFETY: this test is the sole owner and restores the artificial count
+    // before the initialized slot's ordinary destructor can run.
+    let count = unsafe { &*refcount_ptr(value.slot) };
+    count.store(i32::MAX as u32, Relaxed);
+    let requested = crate::test_hooks::abort_was_requested(|| drop(value.clone()));
+    count.store(1, Relaxed);
+    assert!(requested);
+    assert_eq!(*value, 19);
+}

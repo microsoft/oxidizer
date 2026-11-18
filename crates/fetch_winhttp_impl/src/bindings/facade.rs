@@ -108,3 +108,11 @@ unsafe impl Bindings for BindingsFacade {
         unsafe fn close_handle(handle: RawHandle) -> Result<()>;
     }
 }
+
+#[cfg(test)]
+mod gamma_survivor_tests {
+    #[test]
+    fn gamma_survivor_real_facade_debug_does_not_call_native_bindings() {
+        assert_eq!(format!("{:?}", super::BindingsFacade::real()), "BindingsFacade::Real");
+    }
+}

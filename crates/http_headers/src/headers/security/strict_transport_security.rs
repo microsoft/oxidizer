@@ -538,15 +538,18 @@ impl StrictTransportSecurityBuilder {
         }) {
             return Err(super::super::invalid_syntax(&FieldName::StrictTransportSecurity));
         }
-        let capacity = "max-age=".len()
-            + decimal_len(self.max_age.as_secs())
-            + usize::from(self.include_subdomains) * "; includeSubDomains".len()
-            + usize::from(self.preload) * "; preload".len()
-            + self
-                .extensions
-                .iter()
-                .map(|extension| 2 + extension.name.len() + extension.value.as_ref().map_or(0, |value| 1 + value.len()))
-                .sum::<usize>();
+        // #[gamma::skip(arith.add_to_mul, arith.mul_to_add, arith.mul_to_div, literal.str_to_empty, literal.str_to_xyzzy, literal.int_decrement, literal.int_increment, literal.int_to_zero, call.replace_with_default, call_result.default, tag = "equivalent", reason = "Only initial String capacity uses these positive-size estimates; all directives are written independently, and changing a multiplication to division retains a nonzero literal denominator")]
+        let capacity =
+            "max-age=".len() + decimal_len(self.max_age.as_secs()) + usize::from(self.include_subdomains) * "; includeSubDomains".len();
+        // #[gamma::skip(arith.add_to_mul, arith.mul_to_add, arith.mul_to_div, literal.str_to_empty, literal.str_to_xyzzy, literal.int_decrement, literal.int_increment, literal.int_to_zero, tag = "equivalent", reason = "These nonnegative terms only reserve initial String capacity; independent writes produce every directive even when the estimate is too small, and the division denominator remains nonzero")]
+        let capacity = (
+            // #[gamma::skip(arith.add_to_sub, tag = "equivalent", reason = "The existing prefix contributes at least nine bytes, so subtracting the at-most-nine-byte preload term cannot underflow; independent appends still produce identical text")]
+            capacity + usize::from(self.preload) * "; preload".len()
+        ) + self
+            .extensions
+            .iter()
+            .map(|extension| 2 + extension.name.len() + extension.value.as_ref().map_or(0, |value| 1 + value.len()))
+            .sum::<usize>();
         let mut wire = String::with_capacity(capacity);
         write!(wire, "max-age={}", self.max_age.as_secs()).expect("writing to a String is infallible");
         if self.include_subdomains {
@@ -708,21 +711,28 @@ impl TryFrom<FieldValue> for StrictTransportSecurityOwned {
 }
 
 fn parse_hsts(bytes: &[u8]) -> Result<HstsSummary, DecodeError> {
-    if bytes == b"max-age=31536000; includeSubDomains" {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The canonical scanner and full directive parser compute the identical age and flags for this recognized literal")]
+    bytes == b"max-age=31536000; includeSubDomains" {
         return Ok(HstsSummary {
             max_age: Duration::from_hours(8_760),
             include_subdomains: true,
             preload: false,
         });
     }
-    if bytes == b"max-age=63072000; includeSubDomains; preload" {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The canonical scanner and full directive parser compute the identical age and flags for this recognized literal")]
+    bytes == b"max-age=63072000; includeSubDomains; preload" {
         return Ok(HstsSummary {
             max_age: Duration::from_hours(17_520),
             include_subdomains: true,
             preload: true,
         });
     }
-    if let Some(summary) = parse_canonical_hsts(bytes) {
+    if let Some(summary) =
+        // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "None declines only canonical parsing; the full directive parser recognizes the same validated directives and summary")]
+        parse_canonical_hsts(bytes)
+    {
         return Ok(summary);
     }
     parse_hsts_directives(bytes)
@@ -738,10 +748,13 @@ fn parse_canonical_hsts(bytes: &[u8]) -> Option<HstsSummary> {
     while let Some((&byte, tail)) = rest.split_first() {
         let digit = byte.wrapping_sub(b'0');
         if digit > 9 {
+            // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         }
         max_age = max_age.checked_mul(10)?.checked_add(u64::from(digit))?;
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only digit_count == 0 is observed; doubling the count of an isize::MAX-bounded slice cannot overflow usize")]
         digit_count += 1;
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         rest = tail;
     }
     if digit_count == 0 {
@@ -753,6 +766,7 @@ fn parse_canonical_hsts(bytes: &[u8]) -> Option<HstsSummary> {
     loop {
         rest = trim_start_ows(rest);
         if rest.is_empty() {
+            // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         }
         rest = trim_start_ows(rest.strip_prefix(b";")?);
@@ -782,8 +796,10 @@ fn parse_canonical_hsts(bytes: &[u8]) -> Option<HstsSummary> {
 fn trim_start_ows(mut bytes: &[u8]) -> &[u8] {
     while let Some((first, rest)) = bytes.split_first() {
         if !matches!(first, b' ' | b'\t') {
+            // #[gamma::skip(loop.break_to_continue, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
             break;
         }
+        // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
         bytes = rest;
     }
     bytes
@@ -794,7 +810,10 @@ fn parse_hsts_directives(bytes: &[u8]) -> Result<HstsSummary, DecodeError> {
     let mut include_subdomains = false;
     let mut preload = false;
     for item in HstsItems::new(bytes) {
-        if let Some(seconds) = parse_unquoted_max_age(item) {
+        if let Some(seconds) =
+            // #[gamma::skip(call.replace_with_default, call_result.default, tag = "equivalent", reason = "The following split/name/decimal parser recognizes the same unquoted max-age and duplicate policy")]
+            parse_unquoted_max_age(item)
+        {
             if max_age.is_some() {
                 return Err(super::super::invalid_syntax(&FieldName::StrictTransportSecurity));
             }
@@ -857,13 +876,17 @@ fn parse_hsts_directive(bytes: &[u8]) -> Result<HstsDirectiveView<'_>, DecodeErr
 }
 
 fn parse_delta_seconds(bytes: &[u8]) -> Result<u64, DecodeError> {
-    if bytes.is_empty() {
+    if
+    // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "The unquoted decimal parser below independently rejects the empty slice with the identical InvalidNumber error")]
+    bytes.is_empty() {
         return Err(DecodeError::new(
             &FieldName::StrictTransportSecurity,
             DecodeErrorKind::InvalidNumber,
         ));
     }
-    if bytes.first() != Some(&b'"') {
+    if
+    // #[gamma::skip(iter.first_to_last, tag = "equivalent", reason = "Valid quoted numbers have quotes at both ends and valid unquoted numbers at neither; either path rejects a mismatched quote as InvalidNumber")]
+    bytes.first() != Some(&b'"') {
         return validate::decimal_u64(bytes)
             .ok_or_else(|| DecodeError::new(&FieldName::StrictTransportSecurity, DecodeErrorKind::InvalidNumber));
     }
@@ -893,6 +916,7 @@ fn parse_delta_seconds(bytes: &[u8]) -> Result<u64, DecodeError> {
             .checked_mul(10)
             .and_then(|current| current.checked_add(u64::from(byte - b'0')))
             .ok_or_else(|| DecodeError::new(&FieldName::StrictTransportSecurity, DecodeErrorKind::InvalidNumber))?;
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "Only digits == 0 is observed; doubling a per-byte count cannot overflow usize for an isize-bounded byte slice")]
         digits += 1;
         index += 1;
     }
@@ -925,6 +949,7 @@ fn valid_quoted_string(bytes: &[u8]) -> bool {
             if !matches!(byte, b'\t' | b' '..=b'~' | 0x80..=0xff) {
                 return false;
             }
+            // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
             escaped = false;
         } else if *byte == b'\\' {
             escaped = true;
@@ -962,6 +987,7 @@ impl<'a> Iterator for HstsItems<'a> {
             let mut escaped = false;
             while let Some(byte) = self.bytes.get(self.position).copied() {
                 if escaped {
+                    // #[gamma::skip(assign_value.default, tag = "equivalent", reason = "false is exactly bool::default(); the assignment still executes")]
                     escaped = false;
                 } else if quoted && byte == b'\\' {
                     escaped = true;
@@ -969,14 +995,20 @@ impl<'a> Iterator for HstsItems<'a> {
                     quoted = !quoted;
                 } else if !quoted && byte == b';' {
                     let item = super::super::trim_ows(&self.bytes[self.start..self.position]);
-                    self.position += 1;
+                    // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    self.position +=
+                    // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                    1;
                     self.start = self.position;
                     if item.is_empty() {
                         continue;
                     }
                     return Some(item);
                 }
-                self.position += 1;
+                // #[gamma::skip(stmt.delete_assign, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                self.position +=
+                // #[gamma::skip(literal.int_decrement, tag = "timeout", reason = "November 4 campaign: this mutation exceeded the test timeout")]
+                1;
             }
             self.finished = true;
             let item = super::super::trim_ows(&self.bytes[self.start..]);
@@ -991,6 +1023,48 @@ impl<'a> Iterator for HstsItems<'a> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[test]
+    fn gamma_round2_hsts_canonical_scanner_reports_only_complete_canonical_forms() {
+        for (wire, age, subdomains, preload) in [
+            (b"max-age=123".as_slice(), 123, false, false),
+            (b"max-age=9", 9, false, false),
+            (b"max-age=123 \t", 123, false, false),
+            (b"max-age=123 ; \tincludeSubDomains", 123, true, false),
+            (b"max-age=123; preload", 123, false, true),
+            (b"max-age=123; preload; includeSubDomains", 123, true, true),
+        ] {
+            let summary = super::parse_canonical_hsts(wire).unwrap();
+            assert_eq!(summary.max_age.as_secs(), age, "{wire:?}");
+            assert_eq!(summary.include_subdomains, subdomains);
+            assert_eq!(summary.preload, preload);
+        }
+        for wire in [
+            b"max-age=".as_slice(),
+            b"max-age=:",
+            b"max-age=18446744073709551616",
+            b"max-age=1; preload; preload",
+            b"max-age=1; includeSubDomains; includeSubDomains",
+            b"max-age=1; preloads",
+            b"max-age=1; includesubdomains",
+        ] {
+            assert!(super::parse_canonical_hsts(wire).is_none(), "{wire:?}");
+        }
+        for wire in [b"a\"".as_slice(), b"\"", b""] {
+            assert!(!super::valid_quoted_string(wire));
+        }
+        assert!(super::valid_quoted_string(b"\"\""));
+        assert_eq!(super::parse_delta_seconds(b"\"\\1\\2\"").unwrap(), 12);
+        assert_eq!(super::parse_delta_seconds(b"17").unwrap(), 17);
+        assert!(super::known_hsts_name(b"max-age"));
+        assert_eq!(
+            super::HstsItems::new(b"max-age=1\\; preload").collect::<Vec<_>>(),
+            [b"max-age=1\\".as_slice(), b"preload"]
+        );
+        assert_eq!(
+            super::parse_delta_seconds(b"").unwrap_err().kind(),
+            crate::DecodeErrorKind::InvalidNumber
+        );
+    }
     use std::time::Duration;
 
     use super::{

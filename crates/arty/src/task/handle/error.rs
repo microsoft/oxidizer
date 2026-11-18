@@ -44,7 +44,7 @@ use crate::runtime::ShutdownCause;
 /// ```
 /// use arty::runtime::Runtime;
 ///
-/// let runtime = Runtime::new()?;
+/// let runtime = Runtime::builder().build()?;
 /// let error = runtime.scheduler().block_on(async |cx| {
 ///     cx.control().request_stop();
 ///     cx.scheduler()
@@ -101,7 +101,7 @@ impl JoinError {
     /// ```
     /// use arty::runtime::Runtime;
     ///
-    /// let runtime = Runtime::new()?;
+    /// let runtime = Runtime::builder().build()?;
     /// let error = runtime.scheduler().block_on(async |cx| {
     ///     cx.control().request_stop();
     ///     cx.scheduler()

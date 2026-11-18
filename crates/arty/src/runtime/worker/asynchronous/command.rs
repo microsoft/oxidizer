@@ -71,6 +71,10 @@ pub(crate) enum SystemCommand {
     #[debug("AccessIo")]
     AccessIo { access: QueuedIoAccess },
 
+    /// Copies task descriptions from native executor storage between cycles.
+    #[cfg(any(test, feature = "monitor"))]
+    #[debug("Inspect")]
+    Inspect { request: seismograph_runtime::task::TaskRequest },
     /// Appends one worker-local runtime hook.
     #[debug("RegisterHook")]
     RegisterHook { hook: HookRegistration, source: Option<Thread> },
@@ -142,6 +146,20 @@ mod tests {
     use arty_executor::{Executor, TaskPlacement};
 
     use super::*;
+
+    #[test]
+    fn gamma_survivor_private_commands_keep_distinct_debug_labels() {
+        assert_eq!(format!("{:?}", SystemCommand::Shutdown), "Shutdown");
+        assert_eq!(
+            format!(
+                "{:?}",
+                SystemCommand::AccessIo {
+                    access: QueuedClosure::new(Box::new(|_| {}))
+                }
+            ),
+            "AccessIo"
+        );
+    }
     use crate::task::preparation::prepare_remote;
 
     struct PanicWake(AtomicBool);
@@ -151,6 +169,26 @@ mod tests {
             self.0.store(true, Ordering::Release);
             panic!("queued join cancellation notification");
         }
+    }
+
+    #[test]
+    fn gamma_survivor_queued_closure_disposes_panicking_capture_payload_without_unwinding() {
+        struct Payload(Arc<AtomicUsize>);
+        impl Drop for Payload {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                panic!("queued capture panic payload");
+            }
+        }
+        struct Capture(Arc<AtomicUsize>);
+        impl Drop for Capture {
+            fn drop(&mut self) {
+                std::panic::panic_any(Payload(Arc::clone(&self.0)));
+            }
+        }
+        let drops = Arc::new(AtomicUsize::new(0));
+        std::panic::catch_unwind(|| drop(QueuedClosure::new(Capture(Arc::clone(&drops))))).unwrap();
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
     }
 
     struct PanicOnDrop(Arc<AtomicUsize>);
@@ -165,6 +203,7 @@ mod tests {
     #[test]
     fn queued_factory_into_inner_returns_the_factory() {
         let runtime = crate::runtime::Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
@@ -185,7 +224,12 @@ mod tests {
     #[test]
     fn queued_factory_disposal_contains_join_notification_panic() {
         let result_pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
-        let (factory, join) = prepare_remote(&result_pool, |_| async { 42 }, TaskPlacement::Any);
+        let (factory, join) = prepare_remote(
+            &result_pool,
+            |_| async { 42 },
+            TaskPlacement::Any,
+            crate::runtime::monitoring::TaskMonitoring::capture(),
+        );
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
         let waker = Waker::from(Arc::clone(&wake));

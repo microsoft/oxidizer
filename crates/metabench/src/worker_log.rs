@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{self, Read as _, Seek as _, Write as _};
+use std::io::{self, Read as _};
 #[cfg(unix)]
 use std::os::fd::AsRawFd as _;
 #[cfg(windows)]
@@ -35,9 +35,85 @@ const DRAIN_BUDGET: usize = 262_144;
 
 /// Owns a merged output pipe and a bounded raw tail, without a reader thread.
 pub(crate) struct WorkerLog {
-    pub(crate) file: File,
-    reader: io::PipeReader,
+    pub(crate) file: LogFile,
+    reader: LogReader,
     output: OutputTail,
+}
+
+pub(crate) enum LogFile {
+    Native(File),
+    #[cfg(test)]
+    Memory(std::rc::Rc<std::cell::RefCell<io::Cursor<Vec<u8>>>>),
+    #[cfg(test)]
+    Scripted(Box<dyn LogStorage>),
+}
+
+#[cfg(test)]
+pub(crate) trait LogStorage: io::Write + io::Seek {}
+#[cfg(test)]
+impl<T: io::Write + io::Seek> LogStorage for T {}
+
+enum LogReader {
+    Native(io::PipeReader),
+    #[cfg(test)]
+    Memory(io::Cursor<Vec<u8>>),
+}
+
+impl io::Write for LogFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Native(file) => file.write(buf),
+            #[cfg(test)]
+            Self::Memory(file) => file.borrow_mut().write(buf),
+            #[cfg(test)]
+            Self::Scripted(file) => file.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Native(file) => file.flush(),
+            #[cfg(test)]
+            Self::Memory(file) => file.borrow_mut().flush(),
+            #[cfg(test)]
+            Self::Scripted(file) => file.flush(),
+        }
+    }
+}
+
+impl io::Seek for LogFile {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        match self {
+            Self::Native(file) => file.seek(pos),
+            #[cfg(test)]
+            Self::Memory(file) => file.borrow_mut().seek(pos),
+            #[cfg(test)]
+            Self::Scripted(file) => file.seek(pos),
+        }
+    }
+}
+
+#[cfg(test)]
+impl LogFile {
+    pub(crate) fn native_file(&self) -> &File {
+        match self {
+            Self::Native(file) => file,
+            Self::Memory(_) | Self::Scripted(_) => panic!("a native fixture must own its native file"),
+        }
+    }
+}
+
+fn prepare_output_pipe<R, W>(
+    open: impl FnOnce() -> io::Result<(R, W)>,
+    prepare: impl FnOnce(&R) -> io::Result<()>,
+    clone: impl FnOnce(&W) -> io::Result<W>,
+    attach: impl FnOnce(W, W),
+) -> io::Result<R> {
+    let (reader, writer) = open()?;
+    prepare(&reader)?;
+    let stdout = clone(&writer)?;
+    attach(stdout, writer);
+    Ok(reader)
 }
 
 struct OutputTail {
@@ -59,6 +135,7 @@ impl OutputTail {
         if self.eof {
             return Ok((true, false));
         }
+        // #[gamma::skip(literal.int_increment, reason = "Read initializes exactly the returned prefix; drain_with only retains that prefix and ignores initial buffer contents")]
         let mut bytes = [0; 8_192];
         let mut had_output = false;
         for _ in 0..DRAIN_BUDGET / bytes.len() {
@@ -95,16 +172,35 @@ impl OutputTail {
 
 impl WorkerLog {
     pub(crate) fn new(file: File, command: &mut Command) -> io::Result<Self> {
-        let (reader, writer) = io::pipe()?;
-        #[cfg(not(windows))]
-        prepare_reader(&reader)?;
-        command.stdout(writer.try_clone()?);
-        command.stderr(writer);
+        // #[gamma::skip(try.propagate_to_unwrap, reason = "this adapter constructs native pipe ends; prepare_output_pipe error and ownership policy is tested with scripted owned values without pipes or subprocesses")]
+        let reader = prepare_output_pipe(
+            io::pipe,
+            |reader| {
+                #[cfg(not(windows))]
+                prepare_reader(reader)?;
+                #[cfg(windows)]
+                let _ = reader;
+                Ok(())
+            },
+            io::PipeWriter::try_clone,
+            |stdout, stderr| {
+                command.stdout(stdout).stderr(stderr);
+            },
+        )?;
         Ok(Self {
-            file,
-            reader,
+            file: LogFile::Native(file),
+            reader: LogReader::Native(reader),
             output: OutputTail::new(),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn in_memory(bytes: Vec<u8>, file: std::rc::Rc<std::cell::RefCell<io::Cursor<Vec<u8>>>>) -> Self {
+        Self {
+            file: LogFile::Memory(file),
+            reader: LogReader::Memory(io::Cursor::new(bytes)),
+            output: OutputTail::new(),
+        }
     }
 
     pub(crate) fn release_command_writers(command: &mut Command) {
@@ -116,17 +212,25 @@ impl WorkerLog {
     ///
     /// Returns whether EOF was reached and whether any bytes were consumed.
     pub(crate) fn drain(&mut self) -> io::Result<(bool, bool)> {
-        self.output.drain_with(|bytes| read_available(&mut self.reader, bytes))
+        self.output.drain_with(|bytes| match &mut self.reader {
+            LogReader::Native(reader) => read_available(reader, bytes),
+            #[cfg(test)]
+            LogReader::Memory(reader) => reader.read(bytes),
+        })
     }
 
     pub(crate) fn persist(&mut self) -> io::Result<()> {
-        self.file.rewind()?;
-        if self.output.truncated {
-            self.file.write_all(TRUNCATION)?;
+        Self::persist_output(&self.output, &mut self.file)
+    }
+
+    fn persist_output(output: &OutputTail, writer: &mut (impl io::Write + io::Seek)) -> io::Result<()> {
+        writer.rewind()?;
+        if output.truncated {
+            writer.write_all(TRUNCATION)?;
         }
-        let (first, second) = self.output.tail.as_slices();
-        self.file.write_all(first)?;
-        self.file.write_all(second)?;
+        let (first, second) = output.tail.as_slices();
+        writer.write_all(first)?;
+        writer.write_all(second)?;
         Ok(())
     }
 
@@ -166,6 +270,7 @@ fn read_available_unix(reader: &mut io::PipeReader, bytes: &mut [u8]) -> io::Res
 
 #[cfg(windows)]
 fn read_available_windows(reader: &mut io::PipeReader, bytes: &mut [u8]) -> io::Result<usize> {
+    // #[gamma::skip(literal.int_increment, reason = "PeekNamedPipe overwrites available on success; on failure its value is not read")]
     let mut available = 0;
     // SAFETY: reader owns the live anonymous pipe handle. The only non-null
     // output pointer addresses a writable u32; the zero-length buffer is null.
@@ -173,28 +278,254 @@ fn read_available_windows(reader: &mut io::PipeReader, bytes: &mut [u8]) -> io::
         PeekNamedPipe(
             reader.as_raw_handle(),
             ptr::null_mut(),
-            0,
+            {
+                // #[gamma::skip(literal.int_increment, reason = "PeekNamedPipe documents nBufferSize as ignored when the adjacent lpBuffer argument is NULL")]
+                0
+            },
             ptr::null_mut(),
             &raw mut available,
             ptr::null_mut(),
         )
     };
-    if result == 0 {
-        let error = io::Error::last_os_error();
-        return if error.raw_os_error() == Some(ERROR_BROKEN_PIPE.cast_signed()) {
-            // ERROR_BROKEN_PIPE: all writers have closed.
-            Ok(0)
-        } else {
-            Err(error)
-        };
-    }
+    let peek = if result == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(available)
+    };
+    read_available_windows_with(bytes, peek, ERROR_BROKEN_PIPE.cast_signed(), |bytes| reader.read(bytes))
+}
+
+#[cfg(any(windows, test))]
+fn read_available_windows_with(
+    bytes: &mut [u8],
+    peek: io::Result<u32>,
+    broken_pipe: i32,
+    read: impl FnOnce(&mut [u8]) -> io::Result<usize>,
+) -> io::Result<usize> {
+    let available = match peek {
+        Ok(available) => available,
+        Err(error) => {
+            return if error.raw_os_error() == Some(broken_pipe) {
+                // ERROR_BROKEN_PIPE: all writers have closed.
+                Ok(0)
+            } else {
+                Err(error)
+            };
+        }
+    };
     if available == 0 {
         return Err(io::ErrorKind::WouldBlock.into());
     }
     let count = bytes.len().min(available as usize);
     // This is the sole reader, so the bytes observed above cannot be consumed
     // by another reader between the peek and this bounded read.
-    reader.read(&mut bytes[..count])
+    read(&mut bytes[..count])
+}
+
+#[cfg(test)]
+mod november_survivor_tests {
+    #[test]
+    fn november6_log_storage_preserves_flush_errors_and_exact_seek_results() {
+        use std::io::{Seek as _, Write as _};
+
+        struct Storage(io::Cursor<Vec<u8>>);
+        impl io::Write for Storage {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.0.write(buf)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Err(io::Error::from_raw_os_error(5))
+            }
+        }
+        impl io::Seek for Storage {
+            fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+                self.0.seek(pos)
+            }
+        }
+        let mut file = LogFile::Scripted(Box::new(Storage(io::Cursor::new(vec![2, 3, 5, 7, 11]))));
+        assert_eq!(file.flush().unwrap_err().raw_os_error(), Some(5));
+        assert_eq!(file.seek(io::SeekFrom::Start(3)).unwrap(), 3);
+        assert_eq!(file.seek(io::SeekFrom::Current(1)).unwrap(), 4);
+        assert_eq!(file.seek(io::SeekFrom::End(-3)).unwrap(), 2);
+        assert_eq!(file.seek(io::SeekFrom::Start(0)).unwrap(), 0);
+        assert_eq!(
+            file.seek(io::SeekFrom::Current(-1)).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    fn november_pipe_preparation_preserves_each_native_error_and_releases_owned_ends_on_every_path_without_pipes() {
+        #[derive(Debug)]
+        struct Owned(&'static str, std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>);
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                self.1.borrow_mut().push(self.0);
+            }
+        }
+        for stage in 0..=3 {
+            let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let result = prepare_output_pipe(
+                || {
+                    events.borrow_mut().push("open");
+                    if stage == 0 {
+                        Err(io::Error::from_raw_os_error(5))
+                    } else {
+                        Ok((
+                            Owned("drop-reader", std::rc::Rc::clone(&events)),
+                            Owned("drop-writer", std::rc::Rc::clone(&events)),
+                        ))
+                    }
+                },
+                |reader| {
+                    assert_eq!(reader.0, "drop-reader");
+                    events.borrow_mut().push("prepare");
+                    if stage == 1 { Err(io::Error::from_raw_os_error(6)) } else { Ok(()) }
+                },
+                |writer| {
+                    assert_eq!(writer.0, "drop-writer");
+                    events.borrow_mut().push("clone");
+                    if stage == 2 {
+                        Err(io::Error::from_raw_os_error(7))
+                    } else {
+                        Ok(Owned("drop-stdout", std::rc::Rc::clone(&events)))
+                    }
+                },
+                |stdout, stderr| {
+                    events.borrow_mut().push("attach");
+                    assert_eq!(stdout.0, "drop-stdout");
+                    assert_eq!(stderr.0, "drop-writer");
+                    drop(stdout);
+                    drop(stderr);
+                },
+            );
+            if stage < 3 {
+                assert_eq!(result.err().unwrap().raw_os_error(), Some(5 + stage));
+            } else {
+                let reader = result.unwrap();
+                assert_eq!(reader.0, "drop-reader");
+                drop(reader);
+            }
+            let expected: &[&str] = match stage {
+                0 => &["open"],
+                1 => &["open", "prepare", "drop-writer", "drop-reader"],
+                2 => &["open", "prepare", "clone", "drop-writer", "drop-reader"],
+                _ => &["open", "prepare", "clone", "attach", "drop-stdout", "drop-writer", "drop-reader"],
+            };
+            assert_eq!(*events.borrow(), expected);
+        }
+    }
+
+    use super::*;
+
+    #[test]
+    fn windows_available_reads_distinguish_eof_would_block_and_errors_without_native_handles() {
+        let mut bytes = [0; 7];
+        for (available, count) in [(1, 1), (6, 6), (7, 7), (8, 7), (u32::MAX, 7)] {
+            assert_eq!(
+                read_available_windows_with(&mut bytes, Ok(available), 109, |output| {
+                    assert_eq!(output.len(), count);
+                    output.fill(0xa5);
+                    Ok(count)
+                })
+                .unwrap(),
+                count
+            );
+            assert_eq!(&bytes[..count], &vec![0xa5; count]);
+        }
+        let error = read_available_windows_with(&mut bytes, Ok(0), 109, |_| panic!("no available bytes")).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(
+            read_available_windows_with(&mut bytes, Err(io::Error::from_raw_os_error(109)), 109, |_| panic!("EOF")).unwrap(),
+            0
+        );
+        let error =
+            read_available_windows_with(&mut bytes, Err(io::Error::from_raw_os_error(5)), 109, |_| panic!("peek failed")).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(5));
+        let error = read_available_windows_with(&mut bytes, Ok(1), 109, |_| {
+            Err(io::Error::new(io::ErrorKind::Interrupted, "read interrupted"))
+        })
+        .unwrap_err();
+        assert_eq!(
+            (error.kind(), error.to_string()),
+            (io::ErrorKind::Interrupted, "read interrupted".into())
+        );
+    }
+
+    #[test]
+    fn persisted_tail_rewinds_and_writes_both_wrapped_slices_and_only_real_truncation_markers() {
+        for truncated in [false, true] {
+            let mut tail = VecDeque::with_capacity(8);
+            tail.extend(b"abcdef");
+            tail.drain(..4);
+            tail.extend(b"ghijkl");
+            assert!(!tail.as_slices().0.is_empty());
+            assert!(!tail.as_slices().1.is_empty());
+            let output = OutputTail {
+                tail,
+                truncated,
+                eof: false,
+            };
+            let mut writer = io::Cursor::new(Vec::new());
+            writer.set_position(13);
+            WorkerLog::persist_output(&output, &mut writer).unwrap();
+            let expected = if truncated {
+                [TRUNCATION, b"efghijkl"].concat()
+            } else {
+                b"efghijkl".to_vec()
+            };
+            assert_eq!(writer.into_inner(), expected);
+        }
+    }
+
+    #[test]
+    fn persisted_tail_propagates_seek_and_each_write_failure() {
+        struct FailingWriter {
+            operation: usize,
+            fail_at: usize,
+        }
+        impl io::Write for FailingWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.operation += 1;
+                if self.operation == self.fail_at {
+                    Err(io::Error::new(io::ErrorKind::BrokenPipe, "write refused"))
+                } else {
+                    Ok(buf.len())
+                }
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                panic!("persist does not flush")
+            }
+        }
+        impl io::Seek for FailingWriter {
+            fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+                assert_eq!(pos, io::SeekFrom::Start(0));
+                self.operation += 1;
+                if self.operation == self.fail_at {
+                    Err(io::Error::new(io::ErrorKind::PermissionDenied, "seek refused"))
+                } else {
+                    Ok(0)
+                }
+            }
+        }
+        let mut tail = VecDeque::with_capacity(4);
+        tail.extend(b"abcd");
+        tail.pop_front();
+        tail.push_back(b'e');
+        assert!(!tail.as_slices().1.is_empty());
+        let output = OutputTail {
+            tail,
+            truncated: true,
+            eof: false,
+        };
+        for fail_at in 1..=4 {
+            let mut writer = FailingWriter { operation: 0, fail_at };
+            let error = WorkerLog::persist_output(&output, &mut writer).unwrap_err();
+            assert_eq!(writer.operation, fail_at);
+            assert_eq!(error.to_string(), if fail_at == 1 { "seek refused" } else { "write refused" });
+        }
+    }
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -216,6 +547,42 @@ fn read_available_unsupported(_reader: &mut io::PipeReader, _bytes: &mut [u8]) -
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::io::Write as _;
+
+    #[test]
+    fn gamma_round2_eof_is_latched_and_idle_poll_reports_no_output() {
+        let mut tail = super::OutputTail::new();
+        let mut calls = 0;
+        assert_eq!(
+            tail.drain_with(|_| {
+                calls += 1;
+                Ok(0)
+            })
+            .unwrap(),
+            (true, false)
+        );
+        assert_eq!(
+            tail.drain_with(|_| {
+                calls += 1;
+                Err(std::io::Error::other("EOF must not be read again"))
+            })
+            .unwrap(),
+            (true, false)
+        );
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn gamma_survivor_diagnostic_excerpt_boundary() {
+        use super::OutputTail;
+        for length in [0_usize, 1, 8_191, 8_192, 8_193, 16_384] {
+            let bytes = (0..length).map(|index| u8::try_from(index % 251).unwrap()).collect::<Vec<_>>();
+            let mut tail = OutputTail::new();
+            tail.retain(&bytes);
+            assert_eq!(tail.excerpt(), bytes[length.saturating_sub(8_192)..]);
+        }
+    }
+
     use super::*;
 
     fn log() -> OutputTail {

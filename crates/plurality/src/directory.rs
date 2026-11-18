@@ -71,6 +71,7 @@ pub(crate) unsafe fn reserve_one<T>(cell: &UnsafeCell<Vec<T>>) -> Result<Displac
         // iterations and is itself bounded by the pool's chunk or layout cap,
         // so the loop terminates.
         debug_assert!(previous.is_none_or(|seen| capacity > seen), "reservation retried without growth");
+        // #[gamma::skip(stmt.delete_assign, option.some_to_none, reason = "previous is used only by the monotonic-growth debug assertion; each valid retry observes an actual larger directory capacity.")]
         previous = Some(capacity);
 
         // Doubling matches `Vec`'s own growth, keeping repeated reservation
@@ -107,5 +108,25 @@ pub(crate) unsafe fn reserve_one<T>(cell: &UnsafeCell<Vec<T>>) -> Result<Displac
             mem::replace(current, fresh)
         };
         return Ok(Displaced(displaced));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use super::*;
+
+    #[test]
+    fn gamma_round2_room_requires_strictly_unused_capacity() {
+        let empty = UnsafeCell::new(Vec::<u32>::new());
+        let partial = UnsafeCell::new(Vec::<u32>::with_capacity(2));
+        let full = UnsafeCell::new(vec![1_u32, 2]);
+        // SAFETY: the cells have no live borrows and are accessed only on this thread.
+        unsafe {
+            assert!(!has_room(&empty));
+            assert!(has_room(&partial));
+            assert!(!has_room(&full));
+        }
     }
 }

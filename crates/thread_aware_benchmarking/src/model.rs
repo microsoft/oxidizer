@@ -29,6 +29,7 @@ pub struct Payload {
     pub id: u64,
 }
 
+// #[gamma::skip(all, reason = "Benchmark support is exercised by its harnesses, not unit tests")]
 impl Payload {
     /// Creates a payload with a distinct identity.
     #[must_use]
@@ -63,6 +64,7 @@ struct Leaf {
     id: u64,
 }
 
+// #[gamma::skip(all, reason = "Benchmark support is exercised by its harnesses, not unit tests")]
 impl Leaf {
     fn new() -> Self {
         Self {
@@ -96,6 +98,7 @@ pub struct Tree {
     root: Box<Layer>,
 }
 
+// #[gamma::skip(all, reason = "Benchmark support is exercised by its harnesses, not unit tests")]
 impl Tree {
     /// Creates the benchmark object tree.
     #[must_use]

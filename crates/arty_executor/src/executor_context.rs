@@ -36,6 +36,7 @@ pub(crate) fn register(owner: ThreadId) {
         assert!(current.owner.is_none(), "only one live Executor may exist on a thread");
         current.owner = Some(owner);
         current.awakened = VecDeque::with_capacity(AWAKENED_CAPACITY);
+        // #[gamma::skip(stmt.delete_assign, reason = "The initial state and unregister both set executing to false; registration requires no existing owner.")]
         current.executing = false;
     });
 }
@@ -121,6 +122,65 @@ mod tests {
     use plurality::MultiPool;
 
     use super::*;
+
+    #[test]
+    fn gamma_round2_foreign_owner_cannot_remove_a_matching_live_pointer_from_the_registered_owner_queue() {
+        let owner = std::thread::current().id();
+        let foreign = std::thread::spawn(|| std::thread::current().id()).join().unwrap();
+        let pool = MultiPool::new();
+        register(owner);
+        let task = crate::allocate_test_task_in(&pool);
+        let pointer = task.as_ptr();
+        enqueue(owner, task).unwrap();
+        remove_wake(foreign, pointer);
+        assert!(has_wakes(owner));
+        clear_wakes(owner);
+        unregister(owner);
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn gamma_round2_registration_preallocates_the_owner_wake_queue() {
+        let owner = std::thread::current().id();
+        register(owner);
+        CURRENT.with_borrow(|current| {
+            assert_eq!(current.owner, Some(owner));
+            assert!(current.awakened.is_empty());
+            assert_eq!(current.awakened.capacity(), AWAKENED_CAPACITY);
+            assert!(!current.executing);
+        });
+        unregister(owner);
+    }
+
+    #[test]
+    fn gamma_survivor_foreign_owner_cannot_read_drain_or_clear_an_active_owner_queue() {
+        let owner = std::thread::current().id();
+        let foreign = std::thread::spawn(|| std::thread::current().id()).join().unwrap();
+        let pool = MultiPool::new();
+        register(owner);
+        enqueue(owner, crate::allocate_test_task_in(&pool)).unwrap();
+        let guard = enter_cycle(owner);
+        assert!(!is_executing(foreign));
+        assert!(!has_wakes(foreign));
+        let mut target = VecDeque::new();
+        append_wakes(foreign, &mut target);
+        clear_wakes(foreign);
+        assert_eq!(target.len(), 0);
+        assert!(has_wakes(owner));
+        unregister(owner);
+        assert!(pool.is_empty());
+        assert!(!is_executing(owner));
+        CURRENT.with_borrow(|current| {
+            assert!(current.owner.is_none());
+            assert!(!current.executing);
+            assert_eq!(current.awakened.len(), 0);
+        });
+        register(owner);
+        assert!(!has_wakes(owner));
+        assert!(!is_executing(owner));
+        drop(guard);
+        unregister(owner);
+    }
 
     #[test]
     fn foreign_owner_operations_leave_local_wakes_unchanged() {
