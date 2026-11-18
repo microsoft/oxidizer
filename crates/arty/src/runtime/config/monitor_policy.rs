@@ -119,12 +119,17 @@ fn is_test_environment_with(
 #[cfg(any(test, feature = "monitor"))]
 fn is_cargo_test_executable(executable: &std::path::Path) -> bool {
     // cfg(test) does not reach a dependency used by an integration test.
-    // Cargo places those test executables in the target profile's deps directory.
-    if executable
+    // Cargo places those test executables in the target profile's deps directory
+    // and appends a 16-digit hexadecimal crate hash to the target name.
+    let cargo_test_binary = executable
         .parent()
         .and_then(std::path::Path::file_name)
         .is_some_and(|directory| directory == "deps")
-    {
+        && executable.file_stem().and_then(std::ffi::OsStr::to_str).is_some_and(|stem| {
+            stem.rsplit_once('-')
+                .is_some_and(|(_, hash)| hash.len() == 16 && hash.as_bytes().iter().all(u8::is_ascii_hexdigit))
+        });
+    if cargo_test_binary {
         return true;
     }
 
@@ -178,6 +183,19 @@ mod tests {
             .join("debug")
             .join("deps")
             .join("runtime_contracts-0123456789abcdef");
+        let deployed_application = std::path::Path::new("opt").join("service").join("deps").join("service");
+        let hashed_deployed_application = std::path::Path::new("opt")
+            .join("service")
+            .join("runtime_contracts-0123456789abcdef");
+        let unhashed_cargo_artifact = std::path::Path::new("target").join("debug").join("deps").join("runtime_contracts");
+        let short_hash = std::path::Path::new("target")
+            .join("debug")
+            .join("deps")
+            .join("runtime_contracts-0123456789abcde");
+        let nonhex_hash = std::path::Path::new("target")
+            .join("debug")
+            .join("deps")
+            .join("runtime_contracts-g123456789abcdef");
         let doctest = std::path::Path::new("target")
             .join("debug")
             .join("doctest")
@@ -187,6 +205,11 @@ mod tests {
 
         assert!(is_test_environment_with(false, || Ok(integration_test)));
         assert!(is_test_environment_with(false, || Ok(doctest)));
+        assert!(!is_test_environment_with(false, || Ok(deployed_application)));
+        assert!(!is_test_environment_with(false, || Ok(hashed_deployed_application)));
+        assert!(!is_test_environment_with(false, || Ok(unhashed_cargo_artifact)));
+        assert!(!is_test_environment_with(false, || Ok(short_hash)));
+        assert!(!is_test_environment_with(false, || Ok(nonhex_hash)));
         assert!(!is_test_environment_with(false, || Ok(application)));
     }
 
