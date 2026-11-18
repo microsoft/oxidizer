@@ -121,6 +121,10 @@ impl DispatcherClient {
     pub(crate) fn stop(&self, cause: impl Into<ShutdownCause>) -> ShutdownCause {
         self.core.stop_inner(cause.into())
     }
+
+    pub(crate) fn release_retained_hooks(&self) {
+        self.core.release_retained_hooks();
+    }
 }
 
 impl Debug for DispatcherClient {

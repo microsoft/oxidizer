@@ -220,6 +220,7 @@ impl Runtime {
     )]
     fn wait(&mut self) -> Result<(), Error> {
         let wait_error = self.worker_joiner.join().err();
+        self.scheduler.dispatcher.release_retained_hooks();
         #[cfg(any(test, feature = "monitor"))]
         let monitor_error = self.diagnostics.take().and_then(|diagnostics| diagnostics.finish().err());
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {

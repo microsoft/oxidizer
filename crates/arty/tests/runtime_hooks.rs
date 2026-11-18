@@ -483,6 +483,36 @@ impl ThreadAware for RetainedContext {
     }
 }
 
+struct BlockingDrop {
+    retained: bool,
+    started: mpsc::Sender<()>,
+    release: Arc<Mutex<mpsc::Receiver<()>>>,
+}
+
+impl Clone for BlockingDrop {
+    fn clone(&self) -> Self {
+        Self {
+            retained: false,
+            started: self.started.clone(),
+            release: Arc::clone(&self.release),
+        }
+    }
+}
+
+#[expect(clippy::unwrap_used, reason = "test fixture failures use unwrap for concise backtraces")]
+impl Drop for BlockingDrop {
+    fn drop(&mut self) {
+        if self.retained {
+            self.started.send(()).unwrap();
+            self.release.lock().unwrap().recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+    }
+}
+
+impl ThreadAware for BlockingDrop {
+    fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+}
+
 #[test]
 fn retained_worker_init_data_is_released_during_shutdown() {
     let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
@@ -505,6 +535,37 @@ fn retained_worker_init_data_is_released_during_shutdown() {
     assert!(weak.upgrade().is_some());
     runtime.stop().unwrap();
     assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn request_stop_does_not_drop_retained_hook_data() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let (started, drop_started) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let control = runtime
+        .scheduler()
+        .block_on(async move |cx| {
+            cx.control().on(HookFn::<WorkerInit, _>::new(
+                BlockingDrop {
+                    retained: true,
+                    started,
+                    release: Arc::new(Mutex::new(released)),
+                },
+                |_event, _data| {},
+            ));
+            cx.control().clone()
+        })
+        .unwrap();
+
+    control.request_stop();
+    assert!(drop_started.try_recv().is_err());
+
+    let (stopped, stop_result) = mpsc::sync_channel(1);
+    let stop = std::thread::spawn(move || stopped.send(runtime.stop()).unwrap());
+    drop_started.recv_timeout(Duration::from_secs(5)).unwrap();
+    release.send(()).unwrap();
+    stop_result.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+    stop.join().unwrap();
 }
 
 #[test]

@@ -16,7 +16,7 @@ use support::{TEST_TIMEOUT, stop_bounded};
 use tokio::runtime::{Builder, Handle};
 
 #[test]
-fn owned_runtime_shutdown_is_safe_inside_a_tokio_task() {
+fn owned_runtime_stays_alive_until_blocking_shutdown_completes() {
     let tokio = Builder::new_multi_thread().worker_threads(1).build().unwrap();
     let handle = tokio.handle().clone();
     let runtime = Runtime::builder()
@@ -29,9 +29,11 @@ fn owned_runtime_shutdown_is_safe_inside_a_tokio_task() {
 
     caller.block_on(async { control.request_stop() });
 
+    assert_eq!(caller.block_on(handle.spawn(async { 42 })).unwrap(), 42);
+    stop_bounded(runtime);
+
     let error = caller.block_on(handle.spawn(async { 42 })).unwrap_err();
     assert!(error.is_cancelled());
-    stop_bounded(runtime);
 }
 
 #[test]

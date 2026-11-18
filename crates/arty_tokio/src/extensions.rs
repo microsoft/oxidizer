@@ -10,14 +10,20 @@ use tokio::runtime::{Handle, Runtime};
 
 use crate::TokioHandle;
 
+enum RuntimeState {
+    Uninitialized,
+    Running(Runtime),
+    ShutDown,
+}
+
 #[derive(ThreadAware)]
 struct TokioSupport {
     #[thread_aware(skip)]
     handle: Option<Handle>,
     #[thread_aware(skip)]
-    owned_runtime: Option<Arc<Mutex<Option<Runtime>>>>,
+    owned_runtime: Option<Arc<Mutex<RuntimeState>>>,
     #[thread_aware(skip)]
-    runtime: Weak<Mutex<Option<Runtime>>>,
+    runtime: Weak<Mutex<RuntimeState>>,
 }
 
 impl Clone for TokioSupport {
@@ -35,7 +41,13 @@ impl Drop for TokioSupport {
         let Some(owned_runtime) = self.owned_runtime.take() else {
             return;
         };
-        let runtime = owned_runtime.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        let runtime = {
+            let mut state = owned_runtime.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match std::mem::replace(&mut *state, RuntimeState::ShutDown) {
+                RuntimeState::Running(runtime) => Some(runtime),
+                RuntimeState::Uninitialized | RuntimeState::ShutDown => None,
+            }
+        };
         if let Some(runtime) = runtime {
             runtime.shutdown_background();
         }
@@ -44,7 +56,7 @@ impl Drop for TokioSupport {
 
 impl TokioSupport {
     fn new() -> Self {
-        let owned_runtime = Arc::new(Mutex::new(None));
+        let owned_runtime = Arc::new(Mutex::new(RuntimeState::Uninitialized));
         Self {
             handle: None,
             runtime: Arc::downgrade(&owned_runtime),
@@ -53,7 +65,8 @@ impl TokioSupport {
     }
 
     fn from_handle(tokio: TokioHandle) -> Self {
-        let owned_runtime = Arc::new(Mutex::new(tokio.owned_runtime));
+        let state = tokio.owned_runtime.map_or(RuntimeState::Uninitialized, RuntimeState::Running);
+        let owned_runtime = Arc::new(Mutex::new(state));
         Self {
             handle: Some(tokio.handle),
             runtime: Arc::downgrade(&owned_runtime),
@@ -70,13 +83,17 @@ impl TokioSupport {
             return Some(handle.clone());
         }
         let owned_runtime = self.runtime.upgrade()?;
-        let mut owned_runtime = owned_runtime.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        Some(
-            owned_runtime
-                .get_or_insert_with(|| Runtime::new().unwrap_or_else(|error| panic!("failed to create the default Tokio runtime: {error}")))
-                .handle()
-                .clone(),
-        )
+        let mut state = owned_runtime.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match &mut *state {
+            RuntimeState::Uninitialized => {
+                let runtime = Runtime::new().unwrap_or_else(|error| panic!("failed to create the default Tokio runtime: {error}"));
+                let handle = runtime.handle().clone();
+                *state = RuntimeState::Running(runtime);
+                Some(handle)
+            }
+            RuntimeState::Running(runtime) => Some(runtime.handle().clone()),
+            RuntimeState::ShutDown => None,
+        }
     }
 
     fn enter(&self) {
@@ -172,7 +189,7 @@ mod private {
 
 #[cfg(test)]
 mod tests {
-    use super::TokioSupport;
+    use super::{RuntimeState, TokioSupport};
 
     #[test]
     fn default_support_does_not_create_another_runtime_inside_tokio() {
@@ -182,7 +199,10 @@ mod tests {
 
         support.enter();
 
-        assert!(support.owned_runtime.as_ref().unwrap().lock().unwrap().is_none());
+        assert!(matches!(
+            *support.owned_runtime.as_ref().unwrap().lock().unwrap(),
+            RuntimeState::Uninitialized
+        ));
     }
 
     #[test]
@@ -193,5 +213,17 @@ mod tests {
         assert!(worker.owned_runtime.is_none());
         drop(support);
         assert!(worker.runtime.upgrade().is_none());
+    }
+
+    #[test]
+    fn shutdown_prevents_late_default_runtime_creation() {
+        let support = TokioSupport::new();
+        let worker = support.clone();
+        let runtime = worker.runtime.upgrade().unwrap();
+
+        drop(support);
+
+        assert!(worker.handle().is_none());
+        assert!(matches!(*runtime.lock().unwrap(), RuntimeState::ShutDown));
     }
 }

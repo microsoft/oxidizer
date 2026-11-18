@@ -160,15 +160,19 @@ impl DispatcherCore {
             return cause;
         }
 
-        let hooks = std::mem::take(&mut *self.retained_hooks.lock_result().expect(ERR_POISONED_HOOKS));
         for endpoint in &self.worker_endpoints {
             // A closed channel means that the worker no longer accepts commands.
             _ = endpoint.commands.system_sender().send(SystemCommand::Shutdown);
             endpoint.waker.wake_by_ref();
         }
-        // Hook data can hold a Context or register hooks from its destructor.
-        drop(hooks);
         cause
+    }
+
+    pub(crate) fn release_retained_hooks(&self) {
+        let hooks = std::mem::take(&mut *self.retained_hooks.lock_result().expect(ERR_POISONED_HOOKS));
+        // Hook data can hold a Context or register hooks from its destructor.
+        // Runtime shutdown calls this only after every worker has stopped.
+        drop(hooks);
     }
 
     #[expect(clippy::arithmetic_side_effects, reason = "impossible to divide by zero due to NonEmpty")]
@@ -487,6 +491,8 @@ mod tests {
 
         dispatcher.stop_inner(ShutdownCause::default());
         dispatcher.retain_hook(registration(HookFn::<WorkerInit, _>::new((), |_event, ()| {})));
+        assert_eq!(dispatcher.retained_hooks.lock_result().unwrap().len(), 2);
+        dispatcher.release_retained_hooks();
         assert!(dispatcher.retained_hooks.lock_result().unwrap().is_empty());
     }
 
