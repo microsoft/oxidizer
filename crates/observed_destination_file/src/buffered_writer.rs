@@ -26,6 +26,7 @@ impl BufferedWriter {
         // mean a prefix reached disk without being included in its byte count.
         // Retrying that batch can duplicate bytes. Prefer losing its remainder.
         let capacity = self.inner.capacity();
+        // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "The placeholder is replaced before any write, so its buffer capacity is never used.")]
         let failed = mem::replace(&mut self.inner, BufWriter::with_capacity(0, Box::new(io::sink())));
         let (writer, _) = failed.into_parts();
         self.inner = BufWriter::with_capacity(capacity, writer);
@@ -43,6 +44,7 @@ impl Write for BufferedWriter {
 
     fn flush(&mut self) -> io::Result<()> {
         let result = self.inner.flush();
+        // #[gamma::skip(cond.always_true, tag = "equivalent", reason = "A successful flush leaves the buffer empty, so discarding it rebuilds an identical empty buffer around the same writer.")]
         if result.is_err() {
             // After a downstream flush-only failure the buffer is already empty.
             self.discard_failed_batch();

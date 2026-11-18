@@ -128,14 +128,21 @@ mod tests {
     #[cfg(not(miri))]
     use std::thread;
 
-    use performables::sync::channel::{bounded, unbounded};
+    use performables::sync::channel::{Receiver, bounded, unbounded};
 
     use super::*;
 
-    fn processor_without_worker(flush_ack_timeout: Duration) -> BackgroundLogProcessor {
-        let (log_tx, _log_rx) = bounded(1);
-        let (control_tx, _control_rx) = unbounded();
-        let (wake_tx, _wake_rx) = bounded(1);
+    /// Receivers of a worker that never answers requests.
+    struct UnresponsiveWorker {
+        _records: Receiver<QueuedLog>,
+        requests: Receiver<ControlMessage>,
+        wakes: Receiver<()>,
+    }
+
+    fn processor_with_unresponsive_worker(flush_ack_timeout: Duration) -> (BackgroundLogProcessor, UnresponsiveWorker) {
+        let (log_tx, log_rx) = bounded(1);
+        let (control_tx, control_rx) = unbounded();
+        let (wake_tx, wake_rx) = bounded(1);
         let inner = Arc::new(BackgroundWriterInner {
             log_tx,
             control_tx,
@@ -145,8 +152,36 @@ mod tests {
             worker: Mutex::new(None),
             dropped_event_count: Arc::new(AtomicU64::new(0)),
         });
+        let worker = UnresponsiveWorker {
+            _records: log_rx,
+            requests: control_rx,
+            wakes: wake_rx,
+        };
 
-        BackgroundLogProcessor { inner }
+        (BackgroundLogProcessor { inner }, worker)
+    }
+
+    /// The worker inputs are closed, as after the worker stopped.
+    fn processor_without_worker(flush_ack_timeout: Duration) -> BackgroundLogProcessor {
+        processor_with_unresponsive_worker(flush_ack_timeout).0
+    }
+
+    #[test]
+    fn unanswered_requests_wake_the_worker_and_time_out() {
+        let (processor, worker) = processor_with_unresponsive_worker(Duration::ZERO);
+
+        let error = processor.force_flush().unwrap_err();
+
+        assert!(matches!(error, OTelSdkError::InternalFailure(message) if message.contains("timed out")));
+        assert!(matches!(worker.requests.try_recv(), Ok(ControlMessage::Flush(_))));
+        worker.wakes.try_recv().unwrap();
+
+        let error = processor.shutdown_with_timeout(Duration::ZERO).unwrap_err();
+
+        // An expired shutdown wait reports the caller's timeout, not a worker failure.
+        assert!(matches!(error, OTelSdkError::Timeout(timeout) if timeout.is_zero()));
+        assert!(matches!(worker.requests.try_recv(), Ok(ControlMessage::Shutdown(_))));
+        worker.wakes.try_recv().unwrap();
     }
 
     #[test]
@@ -190,7 +225,8 @@ mod tests {
         assert_eq!(processor.inner.dropped_event_count.load(Ordering::Relaxed), 1);
         assert!(processor.force_flush().is_err());
 
-        assert!(processor.shutdown().is_err());
+        let error = processor.shutdown().unwrap_err();
+        assert!(matches!(error, OTelSdkError::InternalFailure(message) if message.contains("stopped before shutdown completed")));
         processor.shutdown().unwrap();
         processor.force_flush().unwrap();
         processor.emit(&mut record, &InstrumentationScope::builder("test").build());
@@ -242,6 +278,7 @@ pub(super) struct BackgroundWriterInner {
 }
 
 impl BackgroundWriterInner {
+    // #[gamma::skip(fn_value.ok, tag = "timeout", reason = "Mutant 28a04dd84e88 drops control requests, so cold runs hang in tests that stop a real worker before disconnected_writer_drops_records_and_rejects_flush detects it.")]
     fn send_control(&self, message: ControlMessage) -> Result<(), ChannelError<ControlMessage>> {
         self.control_tx.send(message)?;
         self.wake_worker();

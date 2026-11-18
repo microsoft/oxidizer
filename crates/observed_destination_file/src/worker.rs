@@ -65,6 +65,7 @@ pub(crate) fn background_processor(
 
     let (log_tx, log_rx) = bounded(queue_capacity);
     let (control_tx, control_rx) = unbounded();
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "A wake carries no data and the worker examines both queues after any wake, so a second pending wake only adds an empty loop iteration.")]
     let (wake_tx, wake_rx) = bounded(1);
     let dropped_event_count = Arc::new(AtomicU64::new(0));
 
@@ -78,8 +79,9 @@ pub(crate) fn background_processor(
             format_config,
             worker_dropped_event_count,
             flush_interval,
+            SimpleClock::new_system(),
         );
-        worker.run()
+        worker.run(Receiver::recv_timeout)
     });
 
     let inner = Arc::new(BackgroundWriterInner {
@@ -116,6 +118,10 @@ struct Worker {
 
 impl Worker {
     /// The registration boundary validates that `flush_interval` is nonzero.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The worker owns each channel receiver, its writer, and its scheduling inputs"
+    )]
     fn new(
         writer: BufferedWriter,
         log_rx: Receiver<QueuedLog>,
@@ -124,8 +130,8 @@ impl Worker {
         format_config: LogFormatConfig,
         dropped_event_count: Arc<AtomicU64>,
         flush_interval: Duration,
+        clock: SimpleClock,
     ) -> Self {
-        let clock = SimpleClock::new_system();
         Self {
             log_rx,
             control_rx,
@@ -144,8 +150,8 @@ impl Worker {
         }
     }
 
-    fn run(mut self) -> Result<(), String> {
-        self.serve(Receiver::recv_timeout);
+    fn run(mut self, receive_wake: impl FnMut(&Receiver<()>, Duration) -> Result<(), ChannelError>) -> Result<(), String> {
+        self.serve(receive_wake);
         self.report_dropped_events(SystemTime::now());
         let result = self.flush_pending();
         let ack = self.shutdown_ack.take();
@@ -160,6 +166,7 @@ impl Worker {
     /// Drain logs and handle control messages until shutdown.
     fn serve(&mut self, mut receive_wake: impl FnMut(&Receiver<()>, Duration) -> Result<(), ChannelError>) {
         loop {
+            // #[gamma::skip(cond.always_false, tag = "timeout", reason = "Mutant b401d06c3556 never reads control requests, so cold runs stall in tests that run a real worker before closing_the_control_input_stops_the_worker_without_waiting detects it.")]
             if self.process_control_messages() {
                 return;
             }
@@ -211,7 +218,9 @@ impl Worker {
         timeout
     }
 
+    // #[gamma::skip(fn_value.bool_false, tag = "timeout", reason = "Mutant 212b1e712039 never reads control requests, so cold runs stall in tests that run a real worker before closing_the_control_input_stops_the_worker_without_waiting detects it.")]
     fn process_control_messages(&mut self) -> bool {
+        // #[gamma::skip(bool_expr.negate, tag = "equivalent", reason = "Every loop exit returns from the enclosing function, so negating the loop result can never run.")]
         loop {
             match self.control_rx.try_recv() {
                 Ok(ControlMessage::Shutdown(ack)) => {
@@ -258,6 +267,7 @@ impl Worker {
     fn drain_ready_logs(&mut self, max_logs: usize) {
         for _ in 0..max_logs {
             let Ok(log) = self.log_rx.try_recv() else {
+                // #[gamma::skip(loop.break_to_continue, reason = "Continuing after an empty receive only polls again within the same bounded batch; it cannot exceed max_logs records or reorder them.")]
                 break;
             };
             self.write_log(&log);
@@ -340,7 +350,9 @@ mod tests {
 
     use opentelemetry::logs::{LogRecord as _, Logger as _, LoggerProvider as _};
     use opentelemetry_sdk::Resource;
+    use opentelemetry_sdk::error::OTelSdkError;
     use opentelemetry_sdk::logs::{LogProcessor as _, SdkLoggerProvider};
+    use performables::sync::channel::{Sender, oneshot};
 
     use super::*;
 
@@ -353,6 +365,33 @@ mod tests {
 
         fn flush(&mut self) -> io::Result<()> {
             Err(io::Error::other("flush failed"))
+        }
+    }
+
+    /// Fails each write with its one-based call number.
+    #[derive(Default)]
+    struct NumberedFailWriter(usize);
+
+    impl Write for NumberedFailWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            self.0 += 1;
+            Err(io::Error::other(format!("write {} failed", self.0)))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct PanicWriter;
+
+    impl Write for PanicWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            panic!("writer panicked");
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            panic!("writer panicked");
         }
     }
 
@@ -379,6 +418,15 @@ mod tests {
         QueuedLog { record, scope }
     }
 
+    fn emit(processor: &BackgroundLogProcessor, body: &'static str) {
+        let QueuedLog { mut record, scope } = queued_log(body);
+        processor.emit(&mut record, &scope);
+    }
+
+    fn output_text(output: &Mutex<Vec<u8>>) -> String {
+        String::from_utf8(output.lock().clone()).unwrap()
+    }
+
     fn worker_with_writer(writer: Box<dyn Write + Send>, log_rx: Receiver<QueuedLog>) -> Worker {
         worker_with_buffer(writer, log_rx, 0)
     }
@@ -394,7 +442,41 @@ mod tests {
             LogFormatConfig::minimal(),
             Arc::new(AtomicU64::new(0)),
             DEFAULT_FLUSH_INTERVAL,
+            SimpleClock::new_system(),
         )
+    }
+
+    /// The processor side of a worker's inputs, which tests use to send work,
+    /// record losses, or close an input.
+    struct WorkerInputs {
+        log_tx: Sender<QueuedLog>,
+        control_tx: Sender<ControlMessage>,
+        wake_tx: Sender<()>,
+        dropped_event_count: Arc<AtomicU64>,
+    }
+
+    fn worker_with_inputs(writer: Box<dyn Write + Send>, buffer_size: usize, clock: SimpleClock) -> (Worker, WorkerInputs) {
+        let (log_tx, log_rx) = unbounded();
+        let (control_tx, control_rx) = unbounded();
+        let (wake_tx, wake_rx) = bounded(1);
+        let dropped_event_count = Arc::new(AtomicU64::new(0));
+        let worker = Worker::new(
+            BufferedWriter::with_capacity(buffer_size, writer),
+            log_rx,
+            control_rx,
+            wake_rx,
+            LogFormatConfig::minimal(),
+            Arc::clone(&dropped_event_count),
+            DEFAULT_FLUSH_INTERVAL,
+            clock,
+        );
+        let inputs = WorkerInputs {
+            log_tx,
+            control_tx,
+            wake_tx,
+            dropped_event_count,
+        };
+        (worker, inputs)
     }
 
     #[derive(Default)]
@@ -423,26 +505,22 @@ mod tests {
     #[test]
     fn idle_worker_flushes_without_another_record() {
         let stats = Arc::new(Mutex::new(WriteStats::default()));
-        let (log_tx, log_rx) = bounded(1);
-        let (control_tx, control_rx) = unbounded();
-        let (wake_tx, wake_rx) = bounded(1);
-        let mut worker = worker_with_buffer(Box::new(CountingWriter(Arc::clone(&stats))), log_rx, DEFAULT_BUFFER_SIZE);
-        worker.resource_header.set_resource(&Resource::builder_empty().build());
-        worker.control_rx = control_rx;
-        worker.wake_rx = wake_rx;
         let control = tick::ClockControl::new();
-        worker.clock = control.to_simple_clock();
-        worker.last_flush = worker.clock.instant();
-        worker.next_dropped_event_check = worker.last_flush + DROPPED_EVENT_WARN_INTERVAL;
+        let (mut worker, inputs) = worker_with_inputs(
+            Box::new(CountingWriter(Arc::clone(&stats))),
+            DEFAULT_BUFFER_SIZE,
+            control.to_simple_clock(),
+        );
+        worker.resource_header.set_resource(&Resource::builder_empty().build());
         let mut processor = Some(BackgroundLogProcessor {
             inner: Arc::new(BackgroundWriterInner {
-                log_tx,
-                control_tx,
-                wake_tx,
+                log_tx: inputs.log_tx,
+                control_tx: inputs.control_tx,
+                wake_tx: inputs.wake_tx,
                 flush_ack_timeout: DEFAULT_FLUSH_ACK_TIMEOUT,
                 is_shutdown: AtomicBool::new(false),
                 worker: Mutex::new(None),
-                dropped_event_count: Arc::clone(&worker.dropped_event_count),
+                dropped_event_count: inputs.dropped_event_count,
             }),
         });
         let mut waits = 0;
@@ -490,6 +568,35 @@ mod tests {
             }
         });
         assert_eq!(waits, 4);
+    }
+
+    #[test]
+    fn idle_worker_reports_losses_when_the_report_is_due() {
+        let control = tick::ClockControl::new();
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let (mut worker, inputs) = worker_with_inputs(Box::new(SharedWriter(Arc::clone(&output))), 0, control.to_simple_clock());
+        // Simulates two records that the processor dropped while the worker was busy.
+        inputs.dropped_event_count.store(2, Ordering::Relaxed);
+        let mut wake_tx = Some(inputs.wake_tx);
+        let mut waits = 0;
+
+        worker.serve(|receiver, timeout| {
+            waits += 1;
+            if waits == 1 {
+                // The first report is due one interval after the worker starts, not earlier.
+                assert!(output.lock().is_empty());
+                assert_eq!(timeout, DROPPED_EVENT_WARN_INTERVAL);
+                control.advance(timeout);
+                return receiver.recv_timeout(Duration::ZERO);
+            }
+
+            // The report is written while idle, without a record or flush to trigger it.
+            assert!(output_text(&output).contains("WARN: dropped 2 events since 1970-01-01T00:00:00.000000000Z\n"));
+            drop(wake_tx.take());
+            receiver.recv_timeout(Duration::ZERO)
+        });
+
+        assert_eq!(waits, 2);
     }
 
     #[test]
@@ -694,7 +801,7 @@ mod tests {
         assert_eq!(text.matches("later record").count(), 1);
     }
 
-    fn processor_with_writer(writer: Box<dyn Write + Send>, buffer_size: usize) -> BackgroundLogProcessor {
+    fn processor_with_writer(writer: Box<dyn Write + Send>, buffer_size: usize, queue_capacity: usize) -> BackgroundLogProcessor {
         let writer = Arc::new(Mutex::<_>::new(Some(writer)));
         let opener: WriterOpener = Arc::new(move |_: &Path| Ok(writer.lock().take().unwrap()))
             .coerce::<dyn Fn(&Path) -> io::Result<Box<dyn Write + Send>> + Send + Sync>(|arc| arc);
@@ -702,9 +809,10 @@ mod tests {
             LogFormatConfig::minimal(),
             &opener,
             Path::new("unused"),
-            DEFAULT_QUEUE_CAPACITY,
+            queue_capacity,
             buffer_size,
-            DEFAULT_FLUSH_INTERVAL,
+            // Bytes reach the writer only when a test flushes or the buffer fills.
+            Duration::from_hours(1),
             DEFAULT_FLUSH_ACK_TIMEOUT,
         )
         .unwrap()
@@ -718,7 +826,7 @@ mod tests {
             (Box::new(FlushFailWriter), DEFAULT_BUFFER_SIZE, "flush failed"),
             (Box::new(FailWriter), 0, "write failed"),
         ] {
-            let processor = processor_with_writer(writer, buffer_size);
+            let processor = processor_with_writer(writer, buffer_size, DEFAULT_QUEUE_CAPACITY);
             processor.inner.log_tx.send(queued_log("final record")).unwrap();
             processor.inner.wake_tx.try_send(()).unwrap();
             let result = processor.shutdown_with_timeout(Duration::from_secs(10)).unwrap_err();
@@ -729,16 +837,58 @@ mod tests {
         }
     }
 
+    #[test]
+    fn shutdown_reports_a_writer_panic() {
+        let processor = processor_with_writer(Box::new(PanicWriter), DEFAULT_BUFFER_SIZE, DEFAULT_QUEUE_CAPACITY);
+        emit(&processor, "final record");
+
+        // The final flush panics the worker thread; shutdown joins it to report the panic.
+        let error = processor.shutdown().unwrap_err();
+
+        assert!(matches!(error, OTelSdkError::InternalFailure(message) if message.contains("panicked")));
+    }
+
+    #[test]
+    fn buffered_records_reach_the_writer_in_one_write_when_flushed() {
+        let stats = Arc::new(Mutex::new(WriteStats::default()));
+        let processor = processor_with_writer(
+            Box::new(CountingWriter(Arc::clone(&stats))),
+            DEFAULT_BUFFER_SIZE,
+            DEFAULT_QUEUE_CAPACITY,
+        );
+        emit(&processor, "first record");
+        emit(&processor, "second record");
+
+        processor.force_flush().unwrap();
+
+        // The resource header and both records were buffered and are written together.
+        let stats = stats.lock();
+        assert_eq!(stats.writes, 1);
+        assert!(str::from_utf8(&stats.bytes).unwrap().ends_with("first record\nsecond record\n"));
+    }
+
+    /// Blocks the first write until the test releases it, then records all output.
     struct BlockingWriter {
-        entered: performables::sync::channel::Sender<()>,
-        release: Receiver<()>,
+        gate: Option<(Sender<()>, Receiver<()>)>,
+        output: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl BlockingWriter {
+        fn new(entered: Sender<()>, release: Receiver<()>, output: &Arc<Mutex<Vec<u8>>>) -> Self {
+            Self {
+                gate: Some((entered, release)),
+                output: Arc::clone(output),
+            }
+        }
     }
 
     impl Write for BlockingWriter {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.entered.send(()).unwrap();
-            self.release.recv().unwrap();
-            Ok(buf.len())
+            if let Some((entered, release)) = self.gate.take() {
+                entered.send(()).unwrap();
+                release.recv().unwrap();
+            }
+            self.output.lock().write(buf)
         }
 
         fn flush(&mut self) -> io::Result<()> {
@@ -748,16 +898,13 @@ mod tests {
 
     #[test]
     fn shutdown_timeout_does_not_join_blocked_writer_and_repeated_calls_are_noops() {
-        use opentelemetry_sdk::error::OTelSdkError;
         use opentelemetry_sdk::logs::LogProcessor as _;
         let (entered_tx, entered_rx) = bounded(1);
         let (release_tx, release_rx) = bounded(1);
         let processor = processor_with_writer(
-            Box::new(BlockingWriter {
-                entered: entered_tx,
-                release: release_rx,
-            }),
+            Box::new(BlockingWriter::new(entered_tx, release_rx, &Arc::new(Mutex::new(Vec::new())))),
             DEFAULT_BUFFER_SIZE,
+            DEFAULT_QUEUE_CAPACITY,
         );
         processor.inner.log_tx.send(queued_log("final record")).unwrap();
         assert!(matches!(
@@ -771,12 +918,66 @@ mod tests {
     }
 
     #[test]
+    fn records_beyond_queue_capacity_are_dropped_and_reported() {
+        let (entered_tx, entered_rx) = bounded(1);
+        let (release_tx, release_rx) = bounded(1);
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let processor = processor_with_writer(Box::new(BlockingWriter::new(entered_tx, release_rx, &output)), 0, 2);
+        emit(&processor, "first record");
+        // The worker has taken the first record and is blocked writing it, so the queue is empty.
+        entered_rx.recv().unwrap();
+
+        // Two records fill the queue; the third finds it full.
+        for body in ["second record", "third record", "overflow record"] {
+            emit(&processor, body);
+        }
+        release_tx.send(()).unwrap();
+        processor.shutdown().unwrap();
+
+        let output = output_text(&output);
+        assert!(output.contains("first record\nsecond record\nthird record\n"));
+        assert!(!output.contains("overflow record"));
+        assert_eq!(output.matches("WARN: dropped 1 events since ").count(), 1);
+    }
+
+    #[test]
     fn worker_exit_reports_a_remembered_error_even_after_recovery() {
         let (_log_tx, log_rx) = unbounded();
         let mut worker = worker_with_buffer(Box::new(io::sink()), log_rx, DEFAULT_BUFFER_SIZE);
         worker.record_write_error("stored error".to_owned());
         worker.write_log(&queued_log("later record"));
-        assert!(worker.run().unwrap_err().contains("stored error"));
+        assert!(worker.run(Receiver::recv_timeout).unwrap_err().contains("stored error"));
+    }
+
+    #[test]
+    fn shutdown_reports_remaining_losses() {
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let (worker, inputs) = worker_with_inputs(Box::new(SharedWriter(Arc::clone(&output))), 0, SimpleClock::new_system());
+        // Simulates three records that the processor dropped since the last report.
+        inputs.dropped_event_count.store(3, Ordering::Relaxed);
+        let (ack_tx, ack_rx) = oneshot();
+        inputs.control_tx.send(ControlMessage::Shutdown(ack_tx)).unwrap();
+
+        worker
+            .run(|_, _| panic!("a shutdown request must stop the worker without waiting"))
+            .unwrap();
+
+        // The final report is written even though the next periodic report is not due.
+        assert_eq!(ack_rx.recv().unwrap(), Ok(()));
+        assert!(output_text(&output).contains("WARN: dropped 3 events since "));
+    }
+
+    #[test]
+    fn flush_reports_the_first_of_several_write_errors() {
+        let (_log_tx, log_rx) = unbounded();
+        let mut worker = worker_with_writer(Box::new(NumberedFailWriter::default()), log_rx);
+
+        worker.write_log(&queued_log("first record"));
+        worker.write_log(&queued_log("second record"));
+
+        // A later failure must not replace the first error that the caller has not seen.
+        let error = worker.flush_pending().unwrap_err();
+        assert!(error.contains("write 1 failed"));
     }
 
     #[test]
@@ -843,41 +1044,96 @@ mod tests {
     }
 
     #[test]
-    fn closing_any_input_still_drains_pending_logs() {
-        for input in 0..3 {
-            let (log_tx, log_rx) = unbounded();
-            let (control_tx, control_rx) = unbounded();
-            let (wake_tx, wake_rx) = bounded(1);
-            let output = Arc::new(Mutex::new(Vec::new()));
-            let worker = Worker::new(
-                BufferedWriter::with_capacity(DEFAULT_BUFFER_SIZE, Box::new(SharedWriter(Arc::clone(&output)))),
-                log_rx,
-                control_rx,
-                wake_rx,
-                LogFormatConfig::minimal(),
-                Arc::new(AtomicU64::new(0)),
-                DEFAULT_FLUSH_INTERVAL,
+    fn closing_the_log_input_stops_the_worker_without_waiting() {
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let (mut worker, inputs) = worker_with_inputs(
+            Box::new(SharedWriter(Arc::clone(&output))),
+            DEFAULT_BUFFER_SIZE,
+            SimpleClock::new_frozen(),
+        );
+        worker.resource_header.set_resource(&Resource::builder_empty().build());
+        inputs.log_tx.send(queued_log("pending record")).unwrap();
+        drop(inputs.log_tx);
+
+        // The control and wake inputs stay open, so only the closed log input can stop the worker.
+        worker
+            .run(|_, _| panic!("a closed log input must stop the worker without a wait"))
+            .unwrap();
+
+        // Stopping must not lose the record that was queued before the input closed.
+        assert_eq!(output_text(&output), "<Resource: >\npending record\n");
+    }
+
+    #[test]
+    fn closing_the_control_input_stops_the_worker_without_waiting() {
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let (mut worker, inputs) = worker_with_inputs(
+            Box::new(SharedWriter(Arc::clone(&output))),
+            DEFAULT_BUFFER_SIZE,
+            SimpleClock::new_frozen(),
+        );
+        worker.resource_header.set_resource(&Resource::builder_empty().build());
+        inputs.log_tx.send(queued_log("pending record")).unwrap();
+        drop(inputs.control_tx);
+
+        // The log and wake inputs stay open, so only the closed control input can stop the worker.
+        worker
+            .run(|_, _| panic!("a closed control input must stop the worker without a wait"))
+            .unwrap();
+
+        // The worker stops before it reads the log input, so the final drain in `run` writes the record.
+        assert_eq!(output_text(&output), "<Resource: >\npending record\n");
+    }
+
+    /// Records output once the test opens the gate and panics on earlier output.
+    struct GatedWriter {
+        open: Arc<AtomicBool>,
+        output: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl Write for GatedWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            assert!(
+                self.open.load(Ordering::Relaxed),
+                "the worker wrote before the test expected output"
             );
-            log_tx.send(queued_log("pending record")).unwrap();
-            let _senders = match input {
-                0 => {
-                    drop(log_tx);
-                    (None, Some(control_tx), Some(wake_tx))
-                }
-                1 => {
-                    drop(control_tx);
-                    (Some(log_tx), None, Some(wake_tx))
-                }
-                _ => {
-                    drop(wake_tx);
-                    (Some(log_tx), Some(control_tx), None)
-                }
-            };
-
-            worker.run().unwrap();
-
-            assert!(String::from_utf8(output.lock().clone()).unwrap().contains("pending record"));
+            self.output.lock().write(buf)
         }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn closing_the_wake_input_stops_the_worker_at_its_first_wait() {
+        // The writer accepts output only after the first wait. Every clock read moves the time
+        // forward, so a worker that polls instead of waiting reaches its flush deadline and
+        // writes the buffered record too early.
+        let gate_open = Arc::new(AtomicBool::new(false));
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let writer = GatedWriter {
+            open: Arc::clone(&gate_open),
+            output: Arc::clone(&output),
+        };
+        let clock = tick::ClockControl::new().auto_advance(Duration::from_millis(10)).to_simple_clock();
+        let (mut worker, inputs) = worker_with_inputs(Box::new(writer), DEFAULT_BUFFER_SIZE, clock);
+        worker.resource_header.set_resource(&Resource::builder_empty().build());
+        inputs.log_tx.send(queued_log("pending record")).unwrap();
+        drop(inputs.wake_tx);
+        let mut waited = false;
+
+        worker
+            .run(|receiver, _| {
+                // The closed wake input must end this wait and stop the worker.
+                assert!(!waited, "the worker waited again after its wake input closed");
+                waited = true;
+                gate_open.store(true, Ordering::Relaxed);
+                receiver.recv_timeout(Duration::ZERO)
+            })
+            .unwrap();
+
+        assert_eq!(output_text(&output), "<Resource: >\npending record\n");
     }
 
     #[test]
@@ -912,25 +1168,32 @@ mod tests {
     }
 
     #[test]
-    fn ready_backlog_does_not_wait_for_another_wake() {
-        let (log_tx, log_rx) = unbounded();
-        let (_control_tx, control_rx) = unbounded();
-        let output = Arc::new(Mutex::new(Vec::new()));
-        let mut worker = worker_with_writer(Box::new(SharedWriter(Arc::clone(&output))), log_rx);
-        worker.control_rx = control_rx;
-        let log_count = MAX_LOG_DRAIN_PER_TICK + 2;
-        for _ in 0..log_count {
-            log_tx.send(queued_log("backlog record")).unwrap();
+    fn ready_backlog_is_written_in_bounded_batches_without_waiting() {
+        let control = tick::ClockControl::new();
+        let stats = Arc::new(Mutex::new(WriteStats::default()));
+        let (mut worker, inputs) = worker_with_inputs(
+            Box::new(CountingWriter(Arc::clone(&stats))),
+            DEFAULT_BUFFER_SIZE,
+            control.to_simple_clock(),
+        );
+        for _ in 0..MAX_LOG_DRAIN_PER_TICK + 2 {
+            inputs.log_tx.send(queued_log("backlog record")).unwrap();
         }
-        drop(log_tx);
+        drop(inputs.log_tx);
+        // The flush deadline has already passed when the backlog arrives.
+        control.advance(DEFAULT_FLUSH_INTERVAL);
 
-        // The wake input is closed, but already queued logs must not need another wake.
-        worker.serve(Receiver::recv_timeout);
-        worker.flush_pending().unwrap();
+        worker.serve(|_, _| panic!("already queued logs must not wait for another wake"));
 
+        // The first batch is one record plus a bounded drain. Sustained logging
+        // must not postpone the due flush, so that batch is flushed before the
+        // last record is written.
+        let stats = stats.lock();
+        assert_eq!(stats.writes, 1);
+        assert_eq!(stats.flushes, 1);
         assert_eq!(
-            String::from_utf8(output.lock().clone()).unwrap().matches("backlog record").count(),
-            log_count
+            str::from_utf8(&stats.bytes).unwrap().matches("backlog record").count(),
+            MAX_LOG_DRAIN_PER_TICK + 1
         );
     }
 
@@ -1008,6 +1271,7 @@ mod tests {
             LogFormatConfig::minimal(),
             Arc::clone(&dropped_event_count),
             DEFAULT_FLUSH_INTERVAL,
+            SimpleClock::new_system(),
         );
         let first_check = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10);
         let second_check = first_check + std::time::Duration::from_mins(1);
@@ -1034,6 +1298,7 @@ mod tests {
             LogFormatConfig::minimal(),
             Arc::new(AtomicU64::new(0)),
             DEFAULT_FLUSH_INTERVAL,
+            SimpleClock::new_system(),
         );
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(70);
 
