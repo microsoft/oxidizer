@@ -21,6 +21,8 @@
 //! [`snapshot::CaptureOptions::measure_for`]. The diagnostic caller waits for that
 //! interval, not the workers. Private observation windows prevent a poll from a
 //! previous request from entering a new measurement window.
+//! [`snapshot::decode`] accepts only wire version 1 and source schema 9.
+//! Other versions are rejected.
 //!
 //! Runtime-event recording is separate from task inspection. It retains only
 //! events emitted after recording starts. Missing creation times, wake ages,
@@ -213,11 +215,30 @@ impl RuntimeHandle {
     /// Returns an error for invalid limits or a runtime that already stopped.
     /// Worker timeouts and provider failures appear in the returned worker rows.
     pub fn capture(&self, options: snapshot::CaptureOptions) -> Result<Runtime, seismograph::Error> {
+        self.validate_capture(&options)?;
+        Ok(without_recording(|| collection::capture(&self.control, options)))
+    }
+
+    /// Dispatches a capture and simulates a timeout while waiting for responses.
+    ///
+    /// Uses a frozen clock and does not wait for measurement or responses.
+    /// Queued requests are canceled, just as after a real timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid limits or a runtime that already stopped.
+    #[cfg(feature = "test-util")]
+    pub fn capture_with_timeout(&self, options: snapshot::CaptureOptions) -> Result<Runtime, seismograph::Error> {
+        self.validate_capture(&options)?;
+        Ok(without_recording(|| collection::capture_with_timeout(&self.control, options)))
+    }
+
+    fn validate_capture(&self, options: &snapshot::CaptureOptions) -> Result<(), seismograph::Error> {
         options.validate()?;
         if self.control.state.load(Ordering::Acquire) == RuntimeState::Stopped.wire_value() {
             return Err(seismograph::Error::new("cannot inspect a stopped runtime"));
         }
-        Ok(without_recording(|| collection::capture(&self.control, options)))
+        Ok(())
     }
 
     /// Marks the runtime as stopping and records the transition once.

@@ -89,6 +89,7 @@ axum-core = { version = "0.5.6", default-features = false }
 azure_core = { version = "1.0.0", default-features = false }
 azure_identity = { version = "1.0.0", default-features = false }
 azure_storage_blob = { version = "1.0.0", default-features = false }
+backtrace = { version = "0.3.76", default-features = false }
 base64 = { version = "0.23.0", default-features = false, features = ["alloc"] }
 bolero = { version = "0.13.4", default-features = false }
 bon = { version = "3.10.3", default-features = false }
@@ -104,8 +105,6 @@ cachet_service = { path = "crates/cachet_service", default-features = false, ver
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.6.1" }
 cc = { version = "1.2", default-features = false }
 cfg_aliases = { version = "0.2.2", default-features = false }
-chrono = { version = "0.4.40", default-features = false }
-chrono-tz = { version = "0.10.4", default-features = false }
 chumsky = { version = "0.13.0", default-features = false }
 clap = { version = "4.6.4", default-features = false }
 # The latest command-group release still uses nix 0.27 on Unix; accept the duplicate until upstream updates.
@@ -218,7 +217,6 @@ ohno_macros_impl = { path = "crates/ohno_macros_impl", default-features = false,
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.33.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.33.0", default-features = false }
-opentelemetry-stdout = { version = "0.33.0", default-features = false }
 opentelemetry_sdk = { version = "0.33.0", default-features = false }
 opool = { version = "0.2.0", default-features = false }
 parking_lot = { version = "0.13.0", default-features = false }
@@ -258,7 +256,6 @@ rustc-hash = { version = "2.1.0", default-features = false }
 rustls = { version = "0.23.46", default-features = false }
 rustls-pki-types = { version = "1.14.1", default-features = false }
 rustls-platform-verifier = { version = "0.7.0", default-features = false }
-same-file = { version = "1.0.6", default-features = false }
 scopeguard = { version = "1.2.0", default-features = false }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.12.1" }
 seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.13.0" }
@@ -445,6 +442,13 @@ inherits = "test"
 debug = "none"
 # Disable incremental caches to reduce disk use across mutation builds.
 incremental = false
+
+# These tests resolve native function names and source locations during capture.
+[profile.mutants.package.seismograph]
+debug = "line-tables-only"
+
+[profile.mutants.package.seismograph_cli]
+debug = "line-tables-only"
 
 # Profile used by `cargo bolero` (it passes `--profile fuzz` by default).
 # Optimized build with single codegen unit, as recommended by cargo-bolero

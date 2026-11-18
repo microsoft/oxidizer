@@ -393,6 +393,7 @@ mod tests {
     #[test]
     fn worker_execution_registers_the_current_scheduler() {
         let runtime = crate::runtime::Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();
@@ -424,6 +425,7 @@ mod tests {
         }
 
         let runtime = crate::runtime::Runtime::builder()
+            .monitor(crate::runtime::MonitorPolicy::disabled())
             .workers(crate::runtime::WorkersPolicy::exactly(1))
             .build()
             .unwrap();

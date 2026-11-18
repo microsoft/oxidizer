@@ -42,7 +42,7 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
-    /// Sets the runtime name used in worker thread names.
+    /// Sets the runtime name used in worker thread names and monitoring.
     ///
     /// Async threads use `<name>-async-<index>`, with indices starting at zero.
     /// Shared blocking pools use `<name>-blocking-<thread index>`.
@@ -89,7 +89,9 @@ impl RuntimeBuilder {
     ///
     /// The default is [`MonitorPolicy::enabled`]. The `monitor` Cargo feature
     /// enables the Seismograph dependencies that monitoring needs.
-    /// This choice does not start a monitor or add task measurements.
+    /// Building an enabled runtime starts a local connection for the Seismograph CLI.
+    /// Task collection runs on request. This does not enable event recording or
+    /// change which tasks run. See the [monitoring guide](crate::runtime#monitoring).
     ///
     /// # Examples
     ///
@@ -217,6 +219,7 @@ impl RuntimeBuilder {
     ///
     /// Returns [`Error`] if the worker count or blocking-pool limit is zero,
     /// or if the runtime name contains a null character (`\0`).
+    /// With monitoring enabled, also returns an error if the local monitor cannot start.
     ///
     /// # Panics
     ///

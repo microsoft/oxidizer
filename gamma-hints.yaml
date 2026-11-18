@@ -1,8 +1,8 @@
 version: 4
-tool: cargo-gamma 0.6.0
+tool: cargo-gamma 0.4.0
 context:
-  repo_sha: 5995d83cf158096fced3bad41e6d884378dfa349
-  generated_on: 2026-11-07
+  repo_sha: db46e057501803e4080ddf7be03698f13f853da8
+  generated_on: 2026-11-17
 files:
 - path: crates/allocation_hints/src/heaps.rs
   killers:
@@ -1056,6 +1056,16 @@ files:
     killer: 1
   - id: fb6974495ed1
     killer: 0
+- path: crates/arty/src/runtime/monitoring/blocking.rs
+  killers:
+  - package: arty
+    target: lib:arty
+    test: runtime::monitoring::blocking::tests::a_monitored_callback_runs_and_delivers_its_result
+  mutants:
+  - id: 146314d7a500
+    killer: 0
+  - id: 398ada0e6510
+    killer: 0
 - path: crates/arty/src/runtime/shutdown.rs
   killers:
   - package: arty
@@ -1507,6 +1517,8 @@ files:
     killer: 1
   - id: 363f6c8cabe8
     killer: 21
+  - id: 3668ca192a6f
+    killer: 11
   - id: 36c9687358dd
     killer: 20
   - id: 393dd865f48e
@@ -1671,6 +1683,59 @@ files:
   mutants:
   - id: a42feaa5a3e7
     killer: 0
+- path: crates/arty/src/runtime/worker/blocking/queue.rs
+  killers:
+  - package: arty
+    target: lib:arty
+    test: runtime::worker::blocking::queue::tests::a_nonfirst_worker_collects_its_own_running_task
+  - package: arty
+    target: lib:arty
+    test: runtime::worker::blocking::queue::tests::a_stopped_queue_rejects_work_and_releases_the_rejected_callback
+  - package: arty
+    target: lib:arty
+    test: runtime::worker::blocking::queue::tests::an_empty_queue_records_parking_and_resumes_for_new_work
+  - package: arty
+    target: lib:arty
+    test: runtime::worker::blocking::queue::tests::an_idle_blocking_worker_releases_its_canceled_capture_before_waiting
+  - package: arty
+    target: lib:arty
+    test: runtime::worker::blocking::queue::tests::enabling_monitoring_wakes_every_waiting_worker
+  - package: arty
+    target: lib:arty
+    test: runtime::worker::blocking::queue::tests::stopping_the_queue_wakes_every_waiting_worker
+  mutants:
+  - id: 011f9e276508
+    killer: 2
+  - id: 22faceb9799b
+    killer: 1
+  - id: 3faa99d6c795
+    killer: 5
+  - id: 45b61dc99620
+    killer: 1
+  - id: 4ad008b2e5d3
+    killer: 1
+  - id: 527c32c3841e
+    killer: 3
+  - id: 73ad051639b0
+    killer: 2
+  - id: 7451b0230c1b
+    killer: 0
+  - id: 897ff87df23c
+    killer: 2
+  - id: 9280748298b7
+    killer: 3
+  - id: bbc23e05b95c
+    killer: 0
+  - id: c6a3d5248c0a
+    killer: 2
+  - id: cee0768d5c87
+    killer: 3
+  - id: e9e92006b3d2
+    killer: 2
+  - id: ef1a18c90852
+    killer: 4
+  - id: f65d8b242435
+    killer: 2
 - path: crates/arty/src/runtime/worker/blocking/worker.rs
   killers:
   - package: arty
@@ -1722,6 +1787,9 @@ files:
     target: lib:arty
     test: runtime::worker::blocking::worker::tests::runtime_releases_pool_even_when_a_scheduler_is_retained
   - package: arty
+    target: lib:arty
+    test: runtime::worker::blocking::worker::tests::shutting_down_a_pool_closes_its_queue_even_without_workers
+  - package: arty
     target: test:behavior_contracts
     test: application_errors_remain_results_for_async_and_blocking_tasks
   - package: arty
@@ -1748,11 +1816,11 @@ files:
   - id: 07c1de353ebd
     killer: 5
   - id: 08db87f07a09
-    killer: 18
+    killer: 19
   - id: 09d2e1b6c42f
-    killer: 18
+    killer: 19
   - id: 0c1dfe754b74
-    killer: 18
+    killer: 19
   - id: 0e260b8398dd
     killer: 9
   - id: 0e43fde94085
@@ -1767,16 +1835,18 @@ files:
     killer: 2
   - id: 209f287e1390
     killer: 1
+  - id: 2230c83e9de5
+    killer: 16
   - id: 25795d5f535d
     killer: 9
   - id: 2aefd45ae3cb
-    killer: 18
+    killer: 19
   - id: 2af70a4ce9c1
     killer: 12
   - id: 2b4d612b710a
-    killer: 21
+    killer: 22
   - id: 2b732cd282f4
-    killer: 18
+    killer: 19
   - id: 2d5fa1189264
     killer: 11
   - id: 2dbae09d1eea
@@ -1786,19 +1856,19 @@ files:
   - id: 2edc53311650
     killer: 0
   - id: 311a2ca4dec9
-    killer: 18
+    killer: 19
   - id: 31cad63fbfc7
-    killer: 18
+    killer: 19
   - id: 34714be1b84f
-    killer: 18
+    killer: 19
   - id: 36e45c8f9dd2
     killer: 11
   - id: 3748ce759d28
-    killer: 22
+    killer: 23
   - id: 3ba6cdf55824
-    killer: 18
+    killer: 19
   - id: 3e5a62457560
-    killer: 16
+    killer: 17
   - id: 42430468eb4c
     killer: 2
   - id: 44fbb6d1b74e
@@ -1806,27 +1876,27 @@ files:
   - id: '452631216150'
     killer: 1
   - id: 476d309a29c8
-    killer: 18
+    killer: 19
   - id: 47b9f6deebc9
     killer: 6
   - id: 47dc50bd6b88
     killer: 9
   - id: 4a3790a779a1
-    killer: 16
+    killer: 17
   - id: 4b40f24d35b3
     killer: 12
   - id: 4b6472c7ae9b
     killer: 9
   - id: 4ba84261b5d5
-    killer: 22
+    killer: 23
   - id: 4e9ef1d17bb8
-    killer: 19
+    killer: 20
   - id: 502ea2e4c8ae
     killer: 12
   - id: 509e3df7a0b7
     killer: 9
   - id: 53364d5ad22d
-    killer: 19
+    killer: 20
   - id: 543ba283a149
     killer: 7
   - id: 55733476e3de
@@ -1834,7 +1904,7 @@ files:
   - id: 56218aa57399
     killer: 14
   - id: 57a31652d79b
-    killer: 19
+    killer: 20
   - id: 5e3e506e3f2e
     killer: 12
   - id: 5e4fe8f85491
@@ -1842,13 +1912,13 @@ files:
   - id: 61a2762e5701
     killer: 7
   - id: 634d9e5cee3d
-    killer: 18
+    killer: 19
   - id: 65e80e40267b
-    killer: 17
+    killer: 18
   - id: 679e6e25e625
     killer: 7
   - id: 67a5ced26561
-    killer: 16
+    killer: 17
   - id: 6a0ab9a75d7f
     killer: 9
   - id: 70d29c72ea31
@@ -1856,7 +1926,9 @@ files:
   - id: 73c5e1e92255
     killer: 1
   - id: 7602676c055a
-    killer: 18
+    killer: 19
+  - id: 78dec7a9ed34
+    killer: 16
   - id: 7b7110c04417
     killer: 9
   - id: 7f69c8635207
@@ -1864,9 +1936,9 @@ files:
   - id: 81dd2688d471
     killer: 8
   - id: 828ba8d9c131
-    killer: 16
+    killer: 17
   - id: 831dd91c01fb
-    killer: 19
+    killer: 20
   - id: 8371abbf9a55
     killer: 9
   - id: 86ffc24979bb
@@ -1876,9 +1948,9 @@ files:
   - id: 90dfcb001951
     killer: 9
   - id: 92172c153caa
-    killer: 19
+    killer: 20
   - id: 935bbd9d2dd2
-    killer: 19
+    killer: 20
   - id: 95fecf13f0f3
     killer: 9
   - id: 9825f78ed143
@@ -1894,15 +1966,15 @@ files:
   - id: 9e787736e84e
     killer: 9
   - id: 9ed378b427d5
-    killer: 18
+    killer: 19
   - id: a3164d7bb628
     killer: 13
   - id: a574800093e5
     killer: 10
   - id: a69a3be80b1a
-    killer: 18
+    killer: 19
   - id: a7e1e3a9069b
-    killer: 22
+    killer: 23
   - id: a8b80a8d637d
     killer: 12
   - id: a9c7c25c6e64
@@ -1910,11 +1982,11 @@ files:
   - id: aacf75510cfb
     killer: 13
   - id: aee383b02cc5
-    killer: 17
+    killer: 18
   - id: b179177a7309
     killer: 9
   - id: b1e690d0828c
-    killer: 19
+    killer: 20
   - id: b3c3bb125cd5
     killer: 7
   - id: b42d822f376d
@@ -1936,7 +2008,7 @@ files:
   - id: cf7295bb9ab0
     killer: 7
   - id: d32308828cb1
-    killer: 22
+    killer: 23
   - id: d5d62ac98d91
     killer: 14
   - id: d717cabd3f3a
@@ -1946,7 +2018,7 @@ files:
   - id: da7ae85f8702
     killer: 9
   - id: de1160a3abb8
-    killer: 19
+    killer: 20
   - id: dfd75a0b6ced
     killer: 9
   - id: e25cc64876e1
@@ -1956,19 +2028,19 @@ files:
   - id: e6791b013a9b
     killer: 15
   - id: eb22afe31e5d
-    killer: 18
+    killer: 19
   - id: ee1fb53e021d
-    killer: 20
+    killer: 21
   - id: f174817de010
     killer: 14
   - id: f17eb4b8f9a0
-    killer: 18
+    killer: 19
   - id: f3929221d8e8
     killer: 13
   - id: f8897fc4a54f
-    killer: 19
+    killer: 20
   - id: feb1fc512b07
-    killer: 19
+    killer: 20
   - id: ff06e29874cf
     killer: 9
   - id: ff8933fa3c0b

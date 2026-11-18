@@ -14,6 +14,10 @@
 //! its cost. Events are kept in bounded per-thread buffers. Snapshots combine
 //! those events with state supplied by registered sources, such as allocators
 //! and runtimes.
+//! Each snapshot resolves captured stack addresses inside the application.
+//! The file stores available function names and source locations for offline use.
+//! This does not require an allocator or runtime source. Missing debug information
+//! remains unknown, and events recorded without backtraces cannot gain them later.
 //!
 //! # Usage
 //!
@@ -54,6 +58,7 @@
 //! - **`test-util`**: Enables `monitor`, the protocol's mock I/O controls,
 //!   `monitor::Builder::isolated` for native tests using a temporary registry,
 //!   and `recorder::current_thread_events` for thread-local event assertions.
+//!   It also provides controlled snapshot construction and symbol resolution.
 
 use std::fmt;
 use std::path::PathBuf;

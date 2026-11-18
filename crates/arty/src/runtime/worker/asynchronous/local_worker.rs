@@ -227,7 +227,7 @@ impl SchedulerContext {
     {
         let (handle, result_tx) = self.results.handle();
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        self.tasks.task(inner).placement(placement).register(result_tx);
+        crate::runtime::monitoring::add_task::<F, _, _, _>(&self.tasks, inner, placement, result_tx);
         handle
     }
 }

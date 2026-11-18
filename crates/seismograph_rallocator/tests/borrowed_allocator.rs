@@ -118,3 +118,40 @@ fn forged_maximum_inventory_with_invalid_first_owner_does_not_allocate() {
     assert_eq!(decoded.unwrap_err().kind(), ErrorKind::DuplicateOwner);
     assert_eq!(calls, 0);
 }
+
+#[test]
+fn backend_aware_borrowed_encoders_and_duplicate_validation_do_not_allocate() {
+    use seismograph_rallocator::{mimalloc, snapshot};
+    let header = snapshot::Header {
+        owner_count: 1025,
+        owners_complete: true,
+        ..Default::default()
+    };
+    let global = mimalloc::GlobalState::EMPTY;
+    let mut owners = (1..=1025)
+        .map(|id| mimalloc::Owner { id, ..Default::default() })
+        .collect::<Vec<_>>();
+    owners[0].source = mimalloc::ObservationSource::Published;
+    owners[0].observation = Some(mimalloc::Observation::EMPTY);
+    let length = snapshot::encoded_len_mimalloc(&header, &global, &owners).unwrap();
+    let mut output = vec![0; length];
+
+    CALLS.with(|calls| calls.set(Some(0)));
+    let actual_length = snapshot::encoded_len_mimalloc(&header, &global, &owners);
+    let encoded = snapshot::encode_mimalloc(&header, &global, &owners, &mut output);
+    let short = snapshot::encode_mimalloc(&header, &global, &owners, &mut output[..length - 1]);
+    owners[1024].id = owners[0].id;
+    let duplicate = snapshot::encoded_len_mimalloc(&header, &global, &owners);
+    let calls = CALLS.with(|calls| calls.replace(None).unwrap());
+
+    assert_eq!(
+        (
+            calls,
+            actual_length.unwrap(),
+            encoded,
+            short.unwrap_err().kind(),
+            duplicate.unwrap_err().kind()
+        ),
+        (0, length, Ok(()), ErrorKind::LengthMismatch, ErrorKind::DuplicateOwner)
+    );
+}

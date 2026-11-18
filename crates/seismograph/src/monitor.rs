@@ -543,6 +543,7 @@ fn handle_client_with_timeouts(
                 configuration.arc_dereferences,
                 configuration.runtime_tasks,
                 configuration.io,
+                configuration.cache,
                 configuration.event_capacity_per_thread.get(),
             ),
         },
@@ -708,14 +709,13 @@ fn apply_recording_configuration(configuration: RecordingConfiguration) -> Resul
     let event_capacity_per_thread = crate::recorder::EventBufferCapacity::new(
         usize::try_from(configuration.event_capacity_per_thread).expect("Seismograph requires a target whose usize can represent u32"),
     );
-    let current = crate::recorder::configuration();
     crate::recorder::try_configure(crate::recorder::Configuration {
         allocations: recorder_policy(configuration.allocations),
         general_events: recorder_policy(configuration.general_events),
         arc_dereferences: recorder_policy(configuration.arc_dereferences),
         runtime_tasks: recorder_policy(configuration.runtime_tasks),
         io: recorder_policy(configuration.io),
-        cache: current.cache,
+        cache: recorder_policy(configuration.cache),
         event_capacity_per_thread,
     })
 }
@@ -746,8 +746,7 @@ fn recorder_activity_response_from(result: Result<crate::recorder::Activity, cra
         Err(error) => return Response::Error(error.to_string()),
     };
     let [allocations, general_events, arc_dereferences, runtime_tasks, io, cache] = activity.class_events;
-    let mut statistics = protocol_recorder_statistics(activity.statistics);
-    statistics.recording.cache = protocol_recording_policy(activity.statistics.recording.cache);
+    let statistics = protocol_recorder_statistics(activity.statistics);
     Response::RecorderActivity(RecorderActivity {
         statistics,
         session_id: activity.session_id,
@@ -789,6 +788,7 @@ fn protocol_recorder_statistics(statistics: crate::recorder::Statistics) -> Reco
             statistics.recording.arc_dereferences,
             statistics.recording.runtime_tasks,
             statistics.recording.io,
+            statistics.recording.cache,
             // #[gamma::skip(expr.decrement, reason = "recorder statistics derive capacity from EventBufferCapacity, whose maximum 1048576 fits every supported usize; the fallback is unreachable")]
             usize::try_from(statistics.event_capacity_per_thread).unwrap_or(usize::MAX),
         ),
@@ -818,6 +818,7 @@ fn protocol_recording_configuration(
     arc_dereferences: crate::recorder::Policy,
     runtime_tasks: crate::recorder::Policy,
     io: crate::recorder::Policy,
+    cache: crate::recorder::Policy,
     event_capacity_per_thread: usize,
 ) -> RecordingConfiguration {
     RecordingConfiguration {
@@ -826,7 +827,7 @@ fn protocol_recording_configuration(
         arc_dereferences: protocol_recording_policy(arc_dereferences),
         runtime_tasks: protocol_recording_policy(runtime_tasks),
         io: protocol_recording_policy(io),
-        cache: seismograph_protocol::message::RecordingPolicy::default(),
+        cache: protocol_recording_policy(cache),
         event_capacity_per_thread: u32::try_from(event_capacity_per_thread).unwrap_or(u32::MAX),
     }
 }
@@ -1471,6 +1472,7 @@ mod tests {
                     enabled: true,
                     ..Default::default()
                 },
+                cache: cache_policy,
                 event_capacity_per_thread: 64,
                 ..Default::default()
             }),
@@ -1493,12 +1495,9 @@ mod tests {
         });
 
         seismograph_protocol::write_request(&mut stream, 5, &Request::ReadRecorderStatistics).unwrap();
-        let response = seismograph_protocol::read_response(&mut stream).unwrap();
-        assert!(matches!(response, (5, Response::RecorderStatistics(_))));
-        let mut before = RecorderStatistics::default();
-        if let (5, Response::RecorderStatistics(statistics)) = response {
-            before = statistics;
-        }
+        let (request_id, response) = seismograph_protocol::read_response(&mut stream).unwrap();
+        assert_eq!(request_id, 5);
+        let before = recorder_statistics(&response);
 
         seismograph_protocol::write_request(
             &mut stream,
@@ -1618,12 +1617,45 @@ mod tests {
                             configuration.arc_dereferences,
                             configuration.runtime_tasks,
                             configuration.io,
+                            configuration.cache,
                             configuration.event_capacity_per_thread.get(),
                         )
                     },
                 }
             )
         );
+    }
+
+    #[test]
+    fn a_failed_hello_response_write_preserves_the_protocol_error() {
+        use seismograph_protocol::io::IoOperation;
+
+        let (io, control) = MonitorIo::new_mocked();
+        let owner = io.current_owner().unwrap();
+        let process_id = io.process_id();
+        let instance_id = io.instance_id().unwrap();
+        let descriptor = MonitorDescriptor {
+            name: "test".into(),
+            instance: None,
+            process_id,
+            instance_id,
+            endpoint: MonitorEndpoint::for_instance(Path::new("mock-registry"), &owner, process_id, instance_id),
+            owner,
+        };
+        let (mut client, server) = control.connected_pair();
+        seismograph_protocol::write_request(&mut client, 1, &Request::Hello).unwrap();
+        control.fail_next(
+            IoOperation::Write,
+            io::Error::new(io::ErrorKind::PermissionDenied, "scripted hello write failure"),
+        );
+
+        let result = handle_client(&io, server, &descriptor, &AtomicBool::new(true));
+
+        assert!(matches!(
+            result,
+            Err(ClientError::Protocol(seismograph_protocol::Error::Io(error)))
+                if error.kind() == io::ErrorKind::PermissionDenied && error.to_string() == "scripted hello write failure"
+        ));
     }
 
     #[test]
@@ -1973,7 +2005,7 @@ mod tests {
             capture_backtraces: true,
             event_sampling: crate::recorder::EventSampling::one_in(7).unwrap(),
         };
-        let configuration = protocol_recording_configuration(policy, policy, policy, policy, policy, usize::MAX);
+        let configuration = protocol_recording_configuration(policy, policy, policy, policy, policy, policy, usize::MAX);
         assert_eq!(configuration.event_capacity_per_thread, u32::MAX);
         assert_eq!(configuration.allocations.sampling_one_in, 7);
         assert_eq!(recorder_policy(configuration.allocations), policy);
