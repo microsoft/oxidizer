@@ -101,6 +101,7 @@ impl Stopwatch {
     #[must_use]
     pub fn new_fast(source: impl AsRef<SimpleClock>) -> Self {
         let clock = source.as_ref().clone();
+        // #[gamma::skip(cond.always_false, reason = "Selecting precise system time preserves the elapsed-time contract; the benchmark owns fast-source performance coverage.")]
         if clock.is_system() {
             return Self {
                 source: StopwatchSource::Fast {
@@ -160,6 +161,7 @@ impl Stopwatch {
             StopwatchSource::Fast { start } => {
                 let now = crate::fast_stopwatch::now();
                 let elapsed = now.elapsed_since(*start);
+                // #[gamma::skip(stmt.delete_assign, reason = "The precise-clock branch has exact deterministic restart coverage; the fast branch differs only by its intentionally unmocked platform timestamp source.")]
                 *start = now;
                 elapsed
             }

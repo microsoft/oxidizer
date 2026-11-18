@@ -9,7 +9,7 @@ use std::time::Instant;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Timestamp(
-    #[cfg(all(any(target_os = "linux", windows), not(miri)))] u64,
+    #[cfg(all(any(target_os = "linux", windows), not(miri)))] Duration,
     #[cfg(any(miri, not(any(target_os = "linux", windows))))] Instant,
 );
 
@@ -17,7 +17,7 @@ impl Timestamp {
     pub(crate) fn elapsed_since(self, start: Self) -> Duration {
         #[cfg(all(any(target_os = "linux", windows), not(miri)))]
         {
-            Duration::from_nanos(self.0.saturating_sub(start.0))
+            self.0.saturating_sub(start.0)
         }
 
         #[cfg(any(miri, not(any(target_os = "linux", windows))))]
@@ -28,9 +28,7 @@ impl Timestamp {
 }
 
 #[cfg(all(target_os = "linux", not(miri)))]
-fn platform_time() -> u64 {
-    const NANOS_PER_SECOND: u64 = 1_000_000_000;
-
+fn platform_time() -> Duration {
     let mut timestamp = std::mem::MaybeUninit::<libc::timespec>::uninit();
 
     // SAFETY: `as_mut_ptr` is non-null, aligned, and writable for one `timespec`.
@@ -40,20 +38,16 @@ fn platform_time() -> u64 {
     // SAFETY: The checked successful return guarantees that `timestamp` was initialized.
     let timestamp = unsafe { timestamp.assume_init() };
     let seconds = u64::try_from(timestamp.tv_sec).expect("CLOCK_MONOTONIC_COARSE seconds are guaranteed to be nonnegative");
-    let nanoseconds = u64::try_from(timestamp.tv_nsec).expect("clock_gettime guarantees tv_nsec is between 0 and 999,999,999");
+    let nanoseconds = u32::try_from(timestamp.tv_nsec).expect("clock_gettime guarantees tv_nsec is between 0 and 999,999,999");
 
-    // Nanoseconds in u64 cover more than 584 years of uptime. Saturation keeps
-    // the timestamp monotonic beyond that range.
-    seconds.saturating_mul(NANOS_PER_SECOND).saturating_add(nanoseconds)
+    Duration::new(seconds, nanoseconds)
 }
 
 #[cfg(all(windows, not(miri)))]
-fn platform_time() -> u64 {
-    const NANOS_PER_MILLISECOND: u64 = 1_000_000;
-
+// #[gamma::skip(fn_value.default, tag = "adapter", reason = "This thin adapter reads the real monotonic platform clock; deterministic tests cover elapsed subtraction, and live-clock assertions violate the test policy.")]
+fn platform_time() -> Duration {
     // SAFETY: GetTickCount64 has no safety requirements.
-    let milliseconds = unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() };
-    milliseconds.saturating_mul(NANOS_PER_MILLISECOND)
+    Duration::from_millis(unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() })
 }
 
 #[must_use]
@@ -76,7 +70,13 @@ mod tests {
 
     #[test]
     fn elapsed_time_saturates_for_out_of_order_samples() {
-        assert_eq!(Timestamp(15).elapsed_since(Timestamp(10)), Duration::from_nanos(5));
-        assert_eq!(Timestamp(10).elapsed_since(Timestamp(15)), Duration::ZERO);
+        assert_eq!(
+            Timestamp(Duration::from_nanos(15)).elapsed_since(Timestamp(Duration::from_nanos(10))),
+            Duration::from_nanos(5)
+        );
+        assert_eq!(
+            Timestamp(Duration::from_nanos(10)).elapsed_since(Timestamp(Duration::from_nanos(15))),
+            Duration::ZERO
+        );
     }
 }
