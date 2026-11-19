@@ -47,7 +47,7 @@
 //! rallocator::rallocator!(backend = dynamic);
 //! ```
 //!
-//! Before starting the executable, set `RALLOCATOR_BACKEND` to `mimalloc`, `snmalloc`, or `system`.
+//! Before starting the executable, set `RALLOCATOR_DYNAMIC_PERSONALITY` to `mimalloc`, `snmalloc`, or `system`.
 //! The first allocation fixes the choice for the life of the process.
 //! An unset or empty value selects snmalloc. For any other unrecognized value, the allocator warns on standard error and uses snmalloc.
 //!
@@ -105,7 +105,7 @@ pub use allocator::Rallocator;
 ///
 /// Use `rallocator!(backend = mimalloc)` for the Rust mimalloc backend.
 /// Use `rallocator!(backend = dynamic)` to select `snmalloc`, `mimalloc`, or `system`
-/// with `RALLOCATOR_BACKEND` before the executable starts. See the [crate documentation](crate).
+/// with `RALLOCATOR_DYNAMIC_PERSONALITY` before the executable starts. See the [crate documentation](crate).
 #[macro_export]
 macro_rules! rallocator {
     () => {

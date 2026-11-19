@@ -34,14 +34,18 @@ fn launch_selects_the_backend_for_all_threads() {
             .args(["--exact", "launch_selects_the_backend_for_all_threads"])
             .env(EXPECTED, expected);
         if let Some(value) = setting {
-            child.env("RALLOCATOR_BACKEND", value);
+            child.env("RALLOCATOR_DYNAMIC_PERSONALITY", value);
         } else {
-            child.env_remove("RALLOCATOR_BACKEND");
+            child.env_remove("RALLOCATOR_DYNAMIC_PERSONALITY");
         }
         let output = child.output().unwrap();
         assert!(output.status.success(), "setting {setting:?}: {output:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(stderr.matches("unknown RALLOCATOR_BACKEND").count(), usize::from(warn), "{stderr}");
+        assert_eq!(
+            stderr.matches("unknown RALLOCATOR_DYNAMIC_PERSONALITY").count(),
+            usize::from(warn),
+            "{stderr}"
+        );
     }
 }
 
@@ -55,7 +59,10 @@ fn exercise(expected: &str) {
     #[cfg(windows)]
     // SAFETY: Windows serializes access to its process environment.
     unsafe {
-        std::env::set_var("RALLOCATOR_BACKEND", if expected == "system" { "mimalloc" } else { "system" });
+        std::env::set_var(
+            "RALLOCATOR_DYNAMIC_PERSONALITY",
+            if expected == "system" { "mimalloc" } else { "system" },
+        );
     }
     let mut buffer = std::thread::spawn(|| vec![0x5a_u8; 113]).join().unwrap();
     buffer.reserve(8192);

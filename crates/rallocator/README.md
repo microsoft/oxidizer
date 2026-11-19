@@ -55,7 +55,7 @@ To use the same executable with different allocators, install the dynamic backen
 rallocator::rallocator!(backend = dynamic);
 ```
 
-Before starting the executable, set `RALLOCATOR_BACKEND` to `mimalloc`, `snmalloc`, or `system`.
+Before starting the executable, set `RALLOCATOR_DYNAMIC_PERSONALITY` to `mimalloc`, `snmalloc`, or `system`.
 The first allocation fixes the choice for the life of the process.
 An unset or empty value selects snmalloc. For any other unrecognized value, the allocator warns on standard error and uses snmalloc.
 
@@ -80,7 +80,7 @@ rallocator::rallocator!(backend = mimalloc);
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb91LeXjezy1Uboll5llgYG2Qbg7r4p1N8h5sbf1cKAsy4FSNhZIGCanJhbGxvY2F0b3JlMC40LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQb2T12uRJngJMbHqbycxAzeWkbKRi8YaQd34MbfwL1w_dRL8lhZIGCanJhbGxvY2F0b3JlMC40LjA
  [__link0]: https://github.com/microsoft/snmalloc
  [__link1]: https://github.com/microsoft/mimalloc
  [__link2]: https://docs.rs/seismograph/latest/seismograph/fn.recorder.html

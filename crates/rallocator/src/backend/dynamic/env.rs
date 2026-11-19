@@ -24,7 +24,7 @@ pub(super) fn read() -> Option<Choice> {
     // SAFETY: The key is a static C string. On Linux and macOS, concurrent
     // readers do not invalidate getenv's result. As with all Unix environment
     // reads, a writer must exclude concurrent readers (std::env::set_var).
-    let value = unsafe { libc::getenv(c"RALLOCATOR_BACKEND".as_ptr()) };
+    let value = unsafe { libc::getenv(c"RALLOCATOR_DYNAMIC_PERSONALITY".as_ptr()) };
     if value.is_null() {
         return Some(Choice::Snmalloc);
     }
@@ -41,14 +41,14 @@ pub(super) fn read() -> Option<Choice> {
     const CAPACITY: u32 = 9;
     let mut value = [0u16; CAPACITY as usize];
     // SAFETY: The name is NUL-terminated and the buffer holds the supplied number of UTF-16 units.
-    let length = unsafe { GetEnvironmentVariableW(w!("RALLOCATOR_BACKEND"), value.as_mut_ptr(), CAPACITY) } as usize;
+    let length = unsafe { GetEnvironmentVariableW(w!("RALLOCATOR_DYNAMIC_PERSONALITY"), value.as_mut_ptr(), CAPACITY) } as usize;
     // Zero denotes an absent or empty value. An oversized result includes the
     // terminator and exceeds our buffer, so never parse a truncated prefix.
     value.get(..length).and_then(parse)
 }
 
 pub(super) fn warn_invalid() {
-    const MESSAGE: &[u8] = b"rallocator: unknown RALLOCATOR_BACKEND. Use snmalloc, mimalloc, or system. Using snmalloc.\n";
+    const MESSAGE: &[u8] = b"rallocator: unknown RALLOCATOR_DYNAMIC_PERSONALITY. Use snmalloc, mimalloc, or system. Using snmalloc.\n";
     // Best effort: avoid Rust's stderr lock and do not unwind if stderr is closed.
     #[cfg(unix)]
     // SAFETY: write only borrows the static message for its exact byte length.

@@ -51,7 +51,7 @@ fn benchmark(criterion: &mut Criterion) {
     group.bench_function("snmalloc", |b| b.iter(|| allocation_pair(&ALLOCATOR)));
     group.bench_function("mimalloc", |b| b.iter(|| allocation_pair(&mimalloc)));
     group.bench_function("system", |b| b.iter(|| allocation_pair(&System)));
-    let name = match std::env::var("RALLOCATOR_BACKEND").as_deref() {
+    let name = match std::env::var("RALLOCATOR_DYNAMIC_PERSONALITY").as_deref() {
         Ok("mimalloc") => "dynamic_mimalloc",
         Ok("system") => "dynamic_system",
         _ => "dynamic_snmalloc",
