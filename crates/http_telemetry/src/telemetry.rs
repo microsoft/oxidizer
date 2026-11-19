@@ -260,7 +260,8 @@ impl TelemetryLayer {
 
     /// Adds route parameters to log and their data classes for redaction.
     ///
-    /// By default, no route parameter is logged.
+    /// By default, no route parameter is logged. A layer logs route parameters only if it has a
+    /// [resolver](Self::route_resolver).
     #[must_use]
     pub fn route_parameter_data_classes(mut self, data_classes: impl IntoIterator<Item = (impl Into<String>, impl IntoDataClass)>) -> Self {
         for (name, class) in data_classes {

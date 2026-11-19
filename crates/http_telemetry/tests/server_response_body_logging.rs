@@ -131,17 +131,33 @@ fn body_is_logged_when_media_types_cover_content_type() {
 
 #[test]
 fn body_is_logged_only_without_content_coding() {
-    let logged = |coding: &'static str| {
+    let logged = |lines: &[&'static str]| {
         let mut request = request(Method::GET, "application/json", HttpBodyBuilder::new_fake().text("chunk"));
-        request.headers_mut().insert(CONTENT_ENCODING, HeaderValue::from_static(coding));
+        for line in lines {
+            request.headers_mut().append(CONTENT_ENCODING, HeaderValue::from_static(line));
+        }
         let (body, capture) = respond(logging(&["application/json"]), request);
         read_to_end(body);
         capture.single().log(BODY).cloned()
     };
 
     assert_eq!(
-        [logged("gzip"), logged("identity"), logged("Identity")],
-        [None, Some(Value::from("chunk")), Some(Value::from("chunk"))]
+        [
+            logged(&["gzip"]),
+            logged(&["identity"]),
+            logged(&["Identity"]),
+            logged(&["identity, gzip"]),
+            logged(&["identity", "gzip"]),
+            logged(&["identity,\tIDENTITY ,"]),
+        ],
+        [
+            None,
+            Some(Value::from("chunk")),
+            Some(Value::from("chunk")),
+            None,
+            None,
+            Some(Value::from("chunk"))
+        ]
     );
 }
 

@@ -7,15 +7,18 @@
 
 mod common;
 
+use std::future::poll_fn;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::task::Poll;
 
-use common::{COMPLETE, Capture, Captured, DURATION, PUBLIC, StopAt, duration, server};
+use common::{ABANDONED, COMPLETE, Capture, Captured, DURATION, ERROR, PUBLIC, StopAt, duration, server};
 use data_privacy::RedactionEngine;
 use future_assert::FutureTestExt;
 use http::{Method, StatusCode};
-use http_extensions::HttpRequest;
+use http_extensions::{HttpRequest, HttpResponse};
 use http_telemetry::TelemetryLayer;
-use layered::{Layer, Service};
+use layered::{Execute, Layer, Service};
 use observed::{Severity, Sink, SinkId, Value};
 use routerama::HttpMethod;
 use tick::SimpleClock;
@@ -107,6 +110,42 @@ fn http_route_is_template_of_route_that_matches_method_text_and_path() {
     assert_eq!(
         rows.map(|(method, uri, _)| route(method, uri)),
         rows.map(|(.., template)| template.map(Value::from))
+    );
+}
+
+#[test]
+fn error_and_abandoned_events_have_route_and_parameters() {
+    let layer_for = |capture: &Capture| routed(common::sink_with(capture)).route_parameter_data_classes([("book", PUBLIC)]);
+
+    let failed = Capture::new(|name| name == ERROR);
+    layer_for(&failed)
+        .layer(common::FAILING)
+        .execute(common::get_to("/books/1"))
+        .unwrap_ready()
+        .unwrap_err();
+    let panicked = Capture::new(|name| name == ERROR);
+    let panicking =
+        Execute::new(|_: HttpRequest| poll_fn(|_| -> Poll<http_extensions::Result<HttpResponse>> { panic!("the handler panicked") }));
+    let service = layer_for(&panicked).layer(panicking);
+    catch_unwind(AssertUnwindSafe(|| service.execute(common::get_to("/books/1")).unwrap_ready())).unwrap_err();
+    let abandoned = Capture::new(|name| name == ABANDONED);
+    drop(
+        layer_for(&abandoned)
+            .layer(common::NeverResponding)
+            .execute(common::get_to("/books/1")),
+    );
+
+    let route = |capture: Capture| {
+        let event = capture.single();
+        (
+            event.name,
+            ["http.route", "http.route.parameter.book"].map(|key| event.log(key).cloned()),
+        )
+    };
+    let fields = [Some(Value::from("/books/{book}")), Some(Value::from("1"))];
+    assert_eq!(
+        [failed, panicked, abandoned].map(route),
+        [(ERROR, fields.clone()), (ERROR, fields.clone()), (ABANDONED, fields)]
     );
 }
 

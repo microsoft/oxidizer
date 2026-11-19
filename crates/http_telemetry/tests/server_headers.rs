@@ -7,14 +7,17 @@
 
 mod common;
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
-use common::{COMPLETE, Capture, Captured, DURATION, Echoing, PUBLIC, StopAt, duration, server};
+use common::{
+    ABANDONED, COMPLETE, Capture, Captured, DURATION, ERROR, Echoing, PUBLIC, Step, StopAt, duration, poll_frame, scripted, server,
+};
 use data_privacy::RedactionEngine;
 use future_assert::FutureTestExt;
 use http::header::RETRY_AFTER;
 use http::{HeaderName, HeaderValue, StatusCode};
-use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
+use http_extensions::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse};
 use http_telemetry::TelemetryLayer;
 use layered::{Execute, Layer, Service};
 use observed::{Severity, Sink, SinkId, Value};
@@ -130,6 +133,41 @@ fn request_or_response_headers_alone_are_logged() {
             logged(|layer| layer.response_header_data_classes([(RETRY_AFTER, PUBLIC)])),
         ],
         [[Some(Value::from("7")), None], [None, Some(Value::from("120"))]]
+    );
+}
+
+#[test]
+fn error_and_abandoned_events_have_header_fields() {
+    let headers = |steps: Vec<Step>, finish: fn(HttpBody)| {
+        let capture = Capture::new(|name| name == ERROR || name == ABANDONED);
+        let body = server(common::sink_with(&capture))
+            .request_header_data_classes([(REQUEST_ID, PUBLIC)])
+            .response_header_data_classes([(RETRY_AFTER, PUBLIC)])
+            .layer(Echoing(StatusCode::OK))
+            .execute(get(&[(REQUEST_ID, b"7"), (RETRY_AFTER, b"120")]).map(|_| scripted(steps)))
+            .unwrap_ready()
+            .unwrap()
+            .into_body();
+        finish(body);
+        let event = capture.single();
+        (
+            event.name,
+            ["http.request.header.x-request-id", "http.response.header.retry-after"].map(|key| event.log(key).cloned()),
+        )
+    };
+
+    let fields = [Some(Value::from("7")), Some(Value::from("120"))];
+    assert_eq!(
+        [
+            headers(vec![Step::Error(HttpError::validation("the page is missing"))], |mut body| {
+                let _ = poll_frame(&mut body);
+            }),
+            headers(vec![Step::Panic], |mut body| {
+                catch_unwind(AssertUnwindSafe(|| poll_frame(&mut body))).unwrap_err();
+            }),
+            headers(vec![Step::Pending], drop),
+        ],
+        [(ERROR, fields.clone()), (ERROR, fields.clone()), (ABANDONED, fields)]
     );
 }
 

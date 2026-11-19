@@ -56,7 +56,11 @@ impl MediaTypes {
             && headers
                 .get_all(CONTENT_ENCODING)
                 .iter()
-                .all(|coding| coding.as_bytes().eq_ignore_ascii_case(b"identity"))
+                .flat_map(|value| value.as_bytes().split(|byte| *byte == b','))
+                .map(<[u8]>::trim_ascii)
+                // RFC 9110 section 5.6.1.2 requires recipients to ignore empty members that result from combined headers.
+                .filter(|coding| !coding.is_empty())
+                .all(|coding| coding.eq_ignore_ascii_case(b"identity"))
     }
 }
 

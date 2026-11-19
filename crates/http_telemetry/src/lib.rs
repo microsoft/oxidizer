@@ -138,10 +138,11 @@
 //!
 //! An empty list covers no `Content-Type`, so the middleware logs no body of that direction.
 //!
-//! The middleware does not redact the bodies that it logs. It does not log a body whose
-//! `Content-Encoding` names a coding other than `identity`, because the text of compressed bytes
-//! cannot be read. To log the bodies that the server layer of `http_compression` compresses or
-//! decompresses, put this layer after that layer in the tuple.
+//! The middleware does not redact the bodies that it logs, so the logs can contain personal data
+//! from the bodies. It does not log a body whose `Content-Encoding` names a coding other than
+//! `identity`, because the text of compressed bytes cannot be read. To log the bodies that the
+//! server layer of `http_compression` compresses or decompresses, put this layer after that layer
+//! in the tuple.
 //!
 //! The middleware copies the bytes of a logged request body while the handler reads the body, so
 //! the events show the bytes that the handler read before the request ended. The middleware does

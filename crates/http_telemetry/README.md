@@ -144,10 +144,11 @@ ASCII case and to the parameters of the `Content-Type`:
 
 An empty list covers no `Content-Type`, so the middleware logs no body of that direction.
 
-The middleware does not redact the bodies that it logs. It does not log a body whose
-`Content-Encoding` names a coding other than `identity`, because the text of compressed bytes
-cannot be read. To log the bodies that the server layer of `http_compression` compresses or
-decompresses, put this layer after that layer in the tuple.
+The middleware does not redact the bodies that it logs, so the logs can contain personal data
+from the bodies. It does not log a body whose `Content-Encoding` names a coding other than
+`identity`, because the text of compressed bytes cannot be read. To log the bodies that the
+server layer of `http_compression` compresses or decompresses, put this layer after that layer
+in the tuple.
 
 The middleware copies the bytes of a logged request body while the handler reads the body, so
 the events show the bytes that the handler read before the request ended. The middleware does
@@ -208,7 +209,7 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbJwefgthZhocbcmfNggPQUYkbhCUrdKPMB6AbAkD3F8HYx65hZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbQ-a6mKk2Hswb6KItTjH0CO0bQXZM9x1lO5Mb_4SnBOCtfAhhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
  [__link0]: https://crates.io/crates/observed/0.30.1
  [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
  [__link10]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::body_size_limit
