@@ -3,8 +3,9 @@
 
 //! Arty runtime integration for [`HttpClient`].
 //!
-//! Create [`ArtyDeps`] from one [`Context`] value and a memory pool. This keeps
-//! the scheduler, clock, and I/O route on the same Arty worker.
+//! Create [`ArtyDeps`](crate::arty::ArtyDeps) from one
+//! [`Context`](::arty::task::Context) value and a memory pool. This keeps the
+//! scheduler, clock, and I/O route on the same Arty worker.
 //!
 //! Enable the `arty` feature and one TLS feature. Use `rustls` for the default
 //! TLS backend or `native-tls` for the platform TLS backend.

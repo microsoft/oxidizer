@@ -71,7 +71,8 @@ impl TokioDeps {
 /// Options specific to the Tokio transport.
 ///
 /// These options control the `TCP` sockets that the bundled transport opens. They are separate
-/// from [`TransportOptions`] because a transport that does not own sockets cannot apply them.
+/// from [`TransportOptions`](fetch_options::TransportOptions) because a transport that does not
+/// own sockets cannot apply them.
 ///
 /// Pass an instance to [`HttpClient::builder_tokio_with_options`] to apply it.
 ///
