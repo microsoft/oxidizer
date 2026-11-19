@@ -500,6 +500,19 @@ mod tests {
         fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
     }
 
+    struct StopOnClone(Arc<DispatcherCore>);
+
+    impl Clone for StopOnClone {
+        fn clone(&self) -> Self {
+            self.0.stop_inner(ShutdownCause::default());
+            Self(self.0.clone())
+        }
+    }
+
+    impl ThreadAware for StopOnClone {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
+    }
+
     #[test]
     fn retained_hook_allows_registration_from_clone() {
         let threads = test_threads(1);
@@ -518,6 +531,20 @@ mod tests {
         assert_eq!(dispatcher.retained_hooks.lock_result().unwrap().len(), 2);
         dispatcher.release_retained_hooks();
         assert!(dispatcher.retained_hooks.lock_result().unwrap().is_empty());
+    }
+
+    #[test]
+    fn shutdown_from_clone_prevents_retention_and_delivery() {
+        let threads = test_threads(1);
+        let (worker, worker_rx) = endpoint(&threads[0]);
+        let dispatcher = DispatcherCore::new(NonEmpty::new(worker), Shutdown::default(), Vec::new());
+        let hook = registration(HookFn::<WorkerInit, _>::new(StopOnClone(dispatcher.clone()), |_event, _data| {}));
+
+        dispatcher.register_hook(hook);
+
+        assert!(dispatcher.retained_hooks.lock_result().unwrap().is_empty());
+        assert!(matches!(worker_rx.system_receiver().try_recv().unwrap(), SystemCommand::Shutdown));
+        worker_rx.system_receiver().try_recv().unwrap_err();
     }
 
     #[test]
