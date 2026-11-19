@@ -4,18 +4,26 @@
 use super::*;
 
 #[test]
-fn coarse_stopwatch_uses_and_replaces_the_coarse_timestamp() {
-    let mut stopwatch = Stopwatch::start_coarse(SimpleClock::new_system());
+fn coarse_stopwatch_tracks_running_state() {
+    let mut stopwatch = Stopwatch::new_coarse(SimpleClock::new_system());
+    assert!(!stopwatch.is_running());
     assert_eq!(stopwatch.elapsed(), Duration::ZERO);
 
-    let StopwatchSource::Coarse { start } = &mut stopwatch.source else {
+    stopwatch.start();
+    assert!(stopwatch.is_running());
+
+    let StopwatchSource::Coarse { started_at } = &mut stopwatch.source else {
         panic!("a system source creates a coarse stopwatch");
     };
-    *start = crate::coarse_time::Timestamp::for_test(Duration::from_nanos(5));
+    *started_at = Some(crate::coarse_time::Timestamp::for_test(Duration::from_nanos(5)));
 
-    assert_eq!(stopwatch.restart(), Duration::ZERO);
-    let StopwatchSource::Coarse { start } = stopwatch.source else {
+    stopwatch.restart();
+    assert_eq!(stopwatch.elapsed(), Duration::ZERO);
+
+    stopwatch.stop();
+    assert!(!stopwatch.is_running());
+    let StopwatchSource::Coarse { started_at } = stopwatch.source else {
         panic!("the test constructs a coarse stopwatch");
     };
-    assert_eq!(start, crate::coarse_time::Timestamp::for_test(Duration::ZERO));
+    assert_eq!(started_at, None);
 }

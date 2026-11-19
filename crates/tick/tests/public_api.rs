@@ -96,10 +96,10 @@ fn stopwatch_accepts_every_public_time_source_shape() {
     let clock_ref: &Clock = clock.as_ref();
 
     assert!(std::ptr::eq(std::ptr::from_ref(clock_ref), std::ptr::from_ref(&clock)));
-    let _ = Stopwatch::start_new(&clock);
-    let _ = Stopwatch::start_new(clock);
-    let _ = Stopwatch::start_new(&simple_clock);
-    let _ = Stopwatch::start_new(simple_clock);
+    let _ = Stopwatch::new(&clock);
+    let _ = Stopwatch::new(clock);
+    let _ = Stopwatch::new(&simple_clock);
+    let _ = Stopwatch::new(simple_clock);
 }
 
 #[cfg_attr(miri, ignore)] // Uses real elapsed time.

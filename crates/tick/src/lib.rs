@@ -116,7 +116,8 @@
 //! let _now = clock.system_time();
 //!
 //! // `Stopwatch` accepts a `SimpleClock` or a `Clock` (both are `AsRef<SimpleClock>`).
-//! let stopwatch = Stopwatch::start_new(&clock);
+//! let mut stopwatch = Stopwatch::new(&clock);
+//! stopwatch.start();
 //! let _elapsed = stopwatch.elapsed();
 //! ```
 //!
@@ -263,7 +264,7 @@
 //! - `test-util` adds [`ClockControl`] for deterministic tests. It can freeze
 //!   time, advance time, or advance timers automatically. Enable it only in
 //!   `dev-dependencies`.
-//! - `coarse-time` adds [`Stopwatch::start_coarse`]. This constructor uses a
+//! - `coarse-time` adds [`Stopwatch::new_coarse`]. This constructor uses a
 //!   lower-overhead, lower-precision instant source on Linux and Windows.
 //!   Other platforms use [`std::time::Instant::now`].
 //!
@@ -278,7 +279,8 @@
 //! # #[cfg(feature = "coarse-time")] {
 //! use tick::{SimpleClock, Stopwatch};
 //!
-//! let stopwatch = Stopwatch::start_coarse(SimpleClock::new_system());
+//! let mut stopwatch = Stopwatch::new_coarse(SimpleClock::new_system());
+//! stopwatch.start();
 //! let elapsed = stopwatch.elapsed();
 //! # let _ = elapsed;
 //! # }

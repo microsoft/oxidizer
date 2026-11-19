@@ -108,7 +108,8 @@ let clock = SimpleClock::new_system();
 let _now = clock.system_time();
 
 // `Stopwatch` accepts a `SimpleClock` or a `Clock` (both are `AsRef<SimpleClock>`).
-let stopwatch = Stopwatch::start_new(&clock);
+let mut stopwatch = Stopwatch::new(&clock);
+stopwatch.start();
 let _elapsed = stopwatch.elapsed();
 ```
 
@@ -242,7 +243,7 @@ You can enable these features in `Cargo.toml`:
 * `test-util` adds [`ClockControl`][__link39] for deterministic tests. It can freeze
   time, advance time, or advance timers automatically. Enable it only in
   `dev-dependencies`.
-* `coarse-time` adds [`Stopwatch::start_coarse`][__link40]. This constructor uses a
+* `coarse-time` adds [`Stopwatch::new_coarse`][__link40]. This constructor uses a
   lower-overhead, lower-precision instant source on Linux and Windows.
   Other platforms use [`std::time::Instant::now`][__link41].
 
@@ -255,7 +256,8 @@ be equal. The platform defines their precision.
 ```rust
 use tick::{SimpleClock, Stopwatch};
 
-let stopwatch = Stopwatch::start_coarse(SimpleClock::new_system());
+let mut stopwatch = Stopwatch::new_coarse(SimpleClock::new_system());
+stopwatch.start();
 let elapsed = stopwatch.elapsed();
 ```
 
@@ -270,7 +272,7 @@ show more uses of these types.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGjhawDv5ySobsCnsKY2hQuQb5u_mSGIfHOsbxDuEqmOJYJFhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjKCZHRpY2tlMC45LjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbDiMAK2cRq_MbyZcVrgKf53gbMuzJwvcqqq0b_xW_a7pSGOBhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjKCZHRpY2tlMC45LjE
  [__link0]: https://docs.rs/tick/0.9.1/tick/runtime/index.html
  [__link1]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
  [__link10]: https://docs.rs/tick/0.9.1/tick/?search=Error
@@ -306,7 +308,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link38]: https://docs.rs/tick/0.9.1/tick/?search=Clock::new_tokio
  [__link39]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
  [__link4]: https://docs.rs/tick/0.9.1/tick/?search=SimpleClock
- [__link40]: https://docs.rs/tick/0.9.1/tick/?search=Stopwatch::start_coarse
+ [__link40]: https://docs.rs/tick/0.9.1/tick/?search=Stopwatch::new_coarse
  [__link41]: https://doc.rust-lang.org/stable/std/?search=time::Instant::now
  [__link42]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
  [__link5]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html

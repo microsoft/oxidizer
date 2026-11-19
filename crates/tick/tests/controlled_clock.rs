@@ -191,22 +191,81 @@ fn controlled_simple_clock_stopwatch_observes_controlled_time() {
 }
 
 #[test]
-fn stopwatch_restart_returns_elapsed_time_and_starts_a_new_interval() {
-    let control = ClockControl::new().auto_advance(Duration::from_secs(1));
-    let mut watch = control.to_simple_clock().stopwatch();
+fn stopwatch_lifecycle_matches_cumulative_interval_semantics() {
+    let control = ClockControl::new();
+    let mut watch = Stopwatch::new(control.to_simple_clock());
 
-    assert_eq!(watch.restart(), Duration::from_secs(1));
+    assert!(!watch.is_running());
+    assert_eq!(watch.elapsed(), Duration::ZERO);
+    control.advance(Duration::from_secs(1));
+    assert_eq!(watch.elapsed(), Duration::ZERO);
 
-    control.set_time(SystemTime::UNIX_EPOCH + Duration::from_millis(500));
-    assert_eq!(watch.restart(), Duration::ZERO);
-    assert_eq!(watch.restart(), Duration::from_secs(1));
+    watch.start();
+    assert!(watch.is_running());
+    control.advance(Duration::from_secs(2));
+    watch.start();
+    control.advance(Duration::from_secs(1));
+    assert_eq!(watch.elapsed(), Duration::from_secs(3));
+
+    watch.stop();
+    assert!(!watch.is_running());
+    control.advance(Duration::from_secs(4));
+    watch.stop();
+    assert_eq!(watch.elapsed(), Duration::from_secs(3));
+
+    watch.start();
+    control.advance(Duration::from_secs(5));
+    watch.stop();
+    assert_eq!(watch.elapsed(), Duration::from_secs(8));
+
+    watch.reset();
+    assert!(!watch.is_running());
+    assert_eq!(watch.elapsed(), Duration::ZERO);
+}
+
+#[test]
+fn stopwatch_restart_resets_starts_and_rebases_after_backward_time() {
+    let control = ClockControl::new_at(SystemTime::UNIX_EPOCH + Duration::from_secs(10));
+    let mut watch = Stopwatch::new(control.to_simple_clock());
+    watch.start();
+
+    control.advance(Duration::from_secs(2));
+    assert_eq!(watch.elapsed(), Duration::from_secs(2));
+
+    watch.restart();
+    assert!(watch.is_running());
+    assert_eq!(watch.elapsed(), Duration::ZERO);
+
+    control.set_time(SystemTime::UNIX_EPOCH + Duration::from_secs(5));
+    assert_eq!(watch.elapsed(), Duration::ZERO);
+
+    watch.restart();
+    control.advance(Duration::from_secs(1));
+    assert_eq!(watch.elapsed(), Duration::from_secs(1));
+}
+
+#[test]
+fn stopwatch_start_and_stop_do_not_read_when_state_is_unchanged() {
+    let duration = Duration::from_secs(1);
+    let control = ClockControl::new().auto_advance(duration);
+    let clock = control.to_simple_clock();
+    let mut watch = Stopwatch::new(&clock);
+
+    watch.start();
+    watch.start();
+    assert_eq!(clock.system_time(), SystemTime::UNIX_EPOCH + duration);
+
+    watch.stop();
+    watch.stop();
+    assert_eq!(clock.system_time(), SystemTime::UNIX_EPOCH + duration * 3);
 }
 
 #[cfg(feature = "coarse-time")]
 #[test]
 fn coarse_stopwatch_observes_controlled_time() {
     let control = ClockControl::new();
-    let watch = Stopwatch::start_coarse(control.to_simple_clock());
+    let mut watch = Stopwatch::new_coarse(control.to_simple_clock());
+    watch.start();
 
     control.advance(Duration::from_secs(1));
 

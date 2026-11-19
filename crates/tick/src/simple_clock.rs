@@ -219,7 +219,9 @@ impl SimpleClock {
     /// Creates a [`Stopwatch`][crate::Stopwatch] and starts it.
     #[must_use]
     pub fn stopwatch(&self) -> crate::Stopwatch {
-        crate::Stopwatch::start_new(self)
+        let mut stopwatch = crate::Stopwatch::new(self);
+        stopwatch.start();
+        stopwatch
     }
 }
 

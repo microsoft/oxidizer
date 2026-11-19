@@ -28,7 +28,7 @@ all-features = true
 
 [features]
 default = []
-# Allows Stopwatch::start_coarse to use lower-overhead, lower-precision time
+# Allows Stopwatch::new_coarse to use lower-overhead, lower-precision time
 coarse-time = ["dep:libc", "dep:windows-sys"]
 # Enables additional test-specific APIs
 test-util = []
