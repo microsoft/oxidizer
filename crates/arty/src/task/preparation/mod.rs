@@ -11,7 +11,7 @@ mod cleanup;
 mod deferred_task;
 mod remote;
 
-pub(crate) use blocking::prepare_blocking;
+pub(crate) use blocking::{BlockingTask, prepare_blocking};
 pub(crate) use cleanup::discard_panicking_drop;
 #[cfg(test)]
 use deferred_task::DeferredTask;

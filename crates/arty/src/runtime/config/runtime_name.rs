@@ -5,13 +5,18 @@ use std::sync::Arc;
 
 use crate::runtime::error::Error;
 
-/// Creates thread names for one runtime.
+/// Names one runtime and its threads.
 #[derive(Clone, Debug)]
 pub(crate) struct RuntimeName(Arc<str>);
 
 impl RuntimeName {
     pub(crate) fn new(name: impl AsRef<str>) -> Self {
         Self(Arc::from(name.as_ref()))
+    }
+
+    #[cfg(any(test, feature = "monitor"))]
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
     }
 
     pub(crate) fn async_worker(&self, index: usize) -> String {

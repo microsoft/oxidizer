@@ -155,7 +155,7 @@ fn spawn_anywhere_keeps_round_robin_selection_and_local_children() {
 #[test]
 fn spawn_anywhere_relocates_results_on_the_source_worker() {
     for (runtime, workers) in [
-        (Runtime::new().unwrap(), 1),
+        (Runtime::builder().build().unwrap(), 1),
         (Runtime::builder().workers(WorkersPolicy::exactly(2)).build().unwrap(), 2),
     ] {
         runtime

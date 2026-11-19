@@ -16,8 +16,9 @@
 //! `$XDG_RUNTIME_DIR/seismograph`, with a private randomized `/tmp` directory
 //! as the fallback. Windows uses local application data. Discovery aggregates
 //! accessible user registries; unsafe existing permissions are never relaxed.
-//! Monitor protocol version 8 is incompatible with the earlier TCP/token
-//! protocol; saved telemetry snapshots have an independent, unchanged format.
+//! Monitor protocol version 9 carries all six recording policies in each
+//! configuration. Other protocol versions are rejected.
+//! Saved telemetry snapshots use a separate format.
 //!
 //! Construct an [`io::MonitorIo`] at the application boundary and pass it to
 //! discovery, descriptor, and transport constructors. Their returned objects
@@ -62,7 +63,7 @@ const FRAME_READ_CHUNK_BYTES: usize = 8_192;
 const MAX_CONTROL_BYTES: usize = 65_536;
 const MAX_SNAPSHOT_BYTES: usize = u32::MAX as usize;
 
-const VERSION: u16 = 8;
+const VERSION: u16 = 9;
 
 /// Protocol or discovery failure.
 #[derive(Debug)]
@@ -119,7 +120,7 @@ impl std::error::Error for Error {
 /// After an I/O error, the writer may contain a partial frame and must be
 /// discarded rather than reused for another frame.
 pub fn write_request(writer: &mut impl Write, request_id: u64, request: &Request) -> Result<(), Error> {
-    let (kind, payload) = message::encode_request(request)?;
+    let (kind, payload) = message::encode_request(request);
     write_frame(writer, kind, request_id, &payload)
 }
 
@@ -448,7 +449,7 @@ mod tests {
         assert_eq!(
             request_bytes,
             [
-                b'S', b'G', b'M', b'P', 8, 0, 5, 0, 8, 7, 6, 5, 4, 3, 2, 1, 6, 0, 0, 0, 1, 0, 16, 0, 0, 0,
+                b'S', b'G', b'M', b'P', 9, 0, 5, 0, 8, 7, 6, 5, 4, 3, 2, 1, 6, 0, 0, 0, 1, 0, 16, 0, 0, 0,
             ]
         );
 
@@ -462,7 +463,7 @@ mod tests {
         assert_eq!(
             response_bytes,
             [
-                b'S', b'G', b'M', b'P', 8, 0, 105, 0, 9, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+                b'S', b'G', b'M', b'P', 9, 0, 105, 0, 9, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 1, 0, 1, 0, 0,
             ]
         );
     }
@@ -509,7 +510,7 @@ mod tests {
         assert_eq!(
             (writer.header, writer.written, writer.flushed),
             (
-                [b'S', b'G', b'M', b'P', 8, 0, 103, 0, 8, 7, 6, 5, 4, 3, 2, 1, 17, 0, 0, 0],
+                [b'S', b'G', b'M', b'P', 9, 0, 103, 0, 8, 7, 6, 5, 4, 3, 2, 1, 17, 0, 0, 0],
                 FRAME_HEADER_BYTES + payload_len,
                 true,
             )

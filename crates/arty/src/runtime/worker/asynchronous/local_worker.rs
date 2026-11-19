@@ -4,11 +4,11 @@
 use std::cell::RefCell;
 
 use arty_executor::{Shutdown as ExecutorShutdown, ShutdownCause, TaskPlacement, TaskSet};
-use thread_aware::Thread;
+use thread_aware::{Thread, ThreadAware};
 
 use crate::io::RuntimeDriverHost;
 use crate::runtime::dispatch::DispatcherClient;
-use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, LocalHookGuard, Panic};
+use crate::runtime::hook::{ErasedHookFn, HookRegistration, LocalHook, LocalHookGuard, Panic, WorkerInit};
 use crate::runtime::worker::{self, WorkerMarker};
 use crate::task::Context;
 use crate::task::handle::{JoinHandle, JoinHandlePool};
@@ -106,12 +106,22 @@ impl LocalWorker {
     }
 
     pub(crate) fn install_hook(hook: HookRegistration, source: Option<&Thread>) {
-        let destination = Self::with_scheduler(|current| {
-            let current = current.expect("a running worker retains its scheduler while processing hook registration");
-            current.thread.clone()
-        });
         match hook {
-            HookRegistration::Panic(hook) => LOCAL_PANIC_HOOK.install(hook, source, &destination),
+            HookRegistration::Panic(hook) => {
+                let destination = Self::with_scheduler(|current| {
+                    let current = current.expect("a running worker retains its scheduler while processing hook registration");
+                    current.thread.clone()
+                });
+                LOCAL_PANIC_HOOK.install(hook, source, &destination);
+            }
+            HookRegistration::WorkerInit(mut hook) => {
+                let (destination, mut event) = Self::with_scheduler(|current| {
+                    let current = current.expect("a running worker retains its scheduler while processing hook registration");
+                    (current.thread.clone(), WorkerInit::new(current.thread.clone()))
+                });
+                hook.relocate(source, &destination);
+                hook.execute(&mut event);
+            }
         }
     }
 
@@ -227,7 +237,7 @@ impl SchedulerContext {
     {
         let (handle, result_tx) = self.results.handle();
         let inner = DeferredTaskFactory::new(future_factory, self.context.clone());
-        self.tasks.task(inner).placement(placement).register(result_tx);
+        crate::runtime::monitoring::add_task::<F, _, _, _>(&self.tasks, inner, placement, result_tx);
         handle
     }
 }
@@ -247,7 +257,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::config::RuntimeName;
-    use crate::runtime::dispatch::DispatcherCore;
+    use crate::runtime::dispatch::{DispatcherCore, WorkerEndpoint};
     use crate::runtime::shutdown::Shutdown;
     use crate::runtime::testing::worker_endpoint;
     use crate::runtime::worker::asynchronous::SpawnCommand;
@@ -266,6 +276,10 @@ mod tests {
         }
     }
 
+    fn test_dispatcher(endpoints: NonEmpty<WorkerEndpoint>, shutdown: Shutdown) -> Arc<DispatcherCore> {
+        DispatcherCore::new(endpoints, shutdown, Vec::new())
+    }
+
     #[test]
     fn panic_without_installed_scheduler_defaults_to_shutdown() {
         let (action, panic) = LocalWorker::on_panic(Box::new(42_u32));
@@ -281,7 +295,7 @@ mod tests {
             let wakes = std::sync::Arc::new(CountingWake::default());
             let shutdown = Shutdown::default();
             let (commands, command_rx) = crate::runtime::worker::asynchronous::command_channel();
-            let core = DispatcherCore::new(
+            let core = test_dispatcher(
                 NonEmpty::new(worker_endpoint(
                     commands,
                     Waker::from(std::sync::Arc::clone(&wakes)),
@@ -328,10 +342,9 @@ mod tests {
                 Poll::Ready(Ok((7, true)))
             );
             let nested_registered_locally = command_rx.spawn_receiver().try_recv().is_err();
-
             let other_thread = ThreadBuilder::default().build(std::thread::current().id());
             let (other_tx, other_rx) = crate::runtime::worker::asynchronous::command_channel();
-            let other_core = DispatcherCore::new(
+            let other_core = test_dispatcher(
                 NonEmpty::new(worker_endpoint(
                     other_tx,
                     Waker::noop().clone(),
@@ -343,7 +356,6 @@ mod tests {
             let _remote = other_core.spawn_relocating(&other_thread, |_| async { 9 });
             let other_owner_queued = matches!(other_rx.spawn_receiver().try_recv(), Ok(SpawnCommand { .. }));
             let other_owner_not_registered = !executor.has_tasks();
-
             shutdown.begin(ShutdownCause::default());
             let before = wakes.0.load(Ordering::Relaxed);
             let mut rejected = std::pin::pin!(core.spawn_relocating(&thread, |_| async { 11 }));

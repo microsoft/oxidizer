@@ -71,7 +71,12 @@ pub(crate) enum SystemCommand {
     #[debug("AccessIo")]
     AccessIo { access: QueuedIoAccess },
 
-    /// Appends one worker-local runtime hook.
+    /// Copies task descriptions from native executor storage between cycles.
+    #[cfg(any(test, feature = "monitor"))]
+    #[debug("Inspect")]
+    Inspect { request: seismograph_runtime::task::TaskRequest },
+
+    /// Registers or executes one runtime hook on this worker.
     #[debug("RegisterHook")]
     RegisterHook { hook: HookRegistration, source: Option<Thread> },
 
@@ -219,7 +224,12 @@ mod tests {
     #[test]
     fn queued_factory_disposal_contains_join_notification_panic() {
         let result_pool = crate::task::handle::JoinHandlePool::new(crate::runtime::shutdown::Shutdown::default());
-        let (factory, join) = prepare_remote(&result_pool, |_| async { 42 }, TaskPlacement::Any);
+        let (factory, join) = prepare_remote(
+            &result_pool,
+            |_| async { 42 },
+            TaskPlacement::Any,
+            crate::runtime::monitoring::TaskMonitoring::capture(),
+        );
         let mut join = pin!(join);
         let wake = Arc::new(PanicWake(AtomicBool::new(false)));
         let waker = Waker::from(Arc::clone(&wake));

@@ -28,7 +28,7 @@ fn canary() -> (impl Future<Output = ()>, BoxedReceiver<()>, std::sync::Weak<()>
 #[test]
 fn stop_via_runtime() {
     execute_or_abandon(|| {
-        let runtime = Runtime::new().unwrap();
+        let runtime = Runtime::builder().build().unwrap();
 
         let (canary, started, observer) = canary();
 
@@ -46,7 +46,7 @@ fn stop_via_runtime() {
 #[test]
 fn stop_via_async_task() {
     execute_or_abandon(|| {
-        let runtime = Runtime::new().unwrap();
+        let runtime = Runtime::builder().build().unwrap();
 
         let (canary, started, observer) = canary();
 
@@ -74,7 +74,7 @@ fn stop_via_async_task() {
 #[test]
 fn stop_scoped() {
     execute_or_abandon(move || {
-        _ = Runtime::new().unwrap();
+        _ = Runtime::builder().build().unwrap();
     })
     .unwrap();
 }
@@ -87,7 +87,8 @@ fn stop_in_run() {
         let task_was_executed = Arc::clone(&task_was_executed);
 
         move || {
-            Runtime::new()
+            Runtime::builder()
+                .build()
                 .unwrap()
                 .scheduler()
                 .block_on(async move |_| {

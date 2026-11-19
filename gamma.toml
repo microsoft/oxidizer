@@ -18,6 +18,7 @@ exclude-files = [
     # Terminal rendering, layout, mouse routing, and presentation-only formatting.
     "crates/seismograph_cli/src/commands/monitor/help.rs",
     "crates/seismograph_cli/src/commands/monitor/info_ui.rs",
+    "crates/seismograph_cli/src/commands/monitor/mimalloc_ui.rs",
     "crates/seismograph_cli/src/commands/monitor/mouse.rs",
     "crates/seismograph_cli/src/commands/monitor/native_ui.rs",
     "crates/seismograph_cli/src/commands/monitor/native_ui/**",
@@ -25,7 +26,7 @@ exclude-files = [
     "crates/seismograph_cli/src/commands/monitor/runtime_ui.rs",
     "crates/seismograph_cli/src/commands/monitor/task_events_ui.rs",
     "crates/seismograph_cli/src/commands/monitor/ui.rs",
-    "crates/seismograph_cli/src/native_view.rs",
+    "crates/seismograph_cli/src/mimalloc_view.rs",
 ]
 all-features = true
 profile = "mutants"

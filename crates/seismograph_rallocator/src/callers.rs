@@ -67,6 +67,8 @@ pub enum EventKind {
     Allocated,
     /// Deallocation event.
     Deallocated,
+    /// One successful resize, in place or by moving the allocation.
+    Reallocated,
 }
 
 /// Kind of heap that recorded an event.
@@ -82,7 +84,7 @@ pub enum HeapKind {
     Thread,
 }
 
-/// A retained allocation or deallocation event.
+/// A retained allocation, resize, or deallocation event.
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Event {
@@ -93,13 +95,15 @@ pub struct Event {
     pub allocation_recorded: bool,
     /// Owning thread-log identifier.
     pub thread_log_id: u64,
-    /// Thread that recorded this event.
+    /// Actor thread, including an allocator-supplied override when present.
     pub event_thread_id: u64,
+    /// Recorder thread that owns the sequence number, before actor overrides.
+    pub recorder_thread_id: u64,
     /// Sequence number within the log.
     pub sequence: u64,
     /// View-local allocation lifetime identifier, not the repeated address key.
     pub allocation_id: u64,
-    /// Allocation or deallocation kind.
+    /// Allocation, resize, or deallocation kind.
     pub kind: EventKind,
     /// Heap identifier.
     pub heap_id: u64,
@@ -113,8 +117,24 @@ pub struct Event {
     pub size: u64,
     /// Allocation alignment in bytes.
     pub align: u64,
+    /// Previous storage for a resize. The ordinary fields describe new storage.
+    pub reallocation: Option<Resize>,
+    /// Requested size after the last retained resize of this view-local lifetime.
+    ///
+    /// This summary survives filtering. It is not the size of this operation
+    /// and does not prove that the allocation remains live.
+    pub resized_size: Option<u64>,
     /// Captured instruction-pointer frames.
     pub call_stack: Vec<u64>,
+}
+
+/// Previous storage described by one successful resize.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Resize {
+    /// Previous recorded allocation address.
+    pub old_address: u64,
+    /// Previous requested size in bytes.
+    pub old_size: u64,
 }
 
 #[doc(hidden)]
@@ -154,6 +174,9 @@ impl Event {
         } = fields;
         Self {
             allocation_recorded: kind == EventKind::Allocated,
+            reallocation: None,
+            resized_size: None,
+            recorder_thread_id: event_thread_id,
             thread_log_id,
             event_thread_id,
             sequence,

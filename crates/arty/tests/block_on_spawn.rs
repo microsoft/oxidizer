@@ -11,7 +11,8 @@ use arty::runtime::Runtime;
 fn capture_by_value() {
     #[expect(clippy::useless_vec, reason = "using a vec to test with a type using pointers on the inside")]
     let vec = vec![10, 11];
-    let result = Runtime::new()
+    let result = Runtime::builder()
+        .build()
         .expect("Failed to create runtime")
         .scheduler()
         .block_on(async move |_ctx| vec.len() + 10)
@@ -23,7 +24,8 @@ fn capture_by_value() {
 fn move_and_spawn() {
     #[expect(clippy::useless_vec, reason = "using a vec to test with a type using pointers on the inside")]
     let vec = vec![10, 11];
-    let result = Runtime::new()
+    let result = Runtime::builder()
+        .build()
         .expect("Failed to create runtime")
         .scheduler()
         .block_on(async move |ctx| {
@@ -37,7 +39,8 @@ fn move_and_spawn() {
 #[test]
 fn capture_reference() {
     let vec = vec![10, 11];
-    let result = Runtime::new()
+    let result = Runtime::builder()
+        .build()
         .expect("Failed to create runtime")
         .scheduler()
         .block_on(async |_ctx| {
@@ -51,7 +54,8 @@ fn capture_reference() {
 #[test]
 fn capture_mut_reference() {
     let mut vec = vec![10, 11];
-    let result = Runtime::new()
+    let result = Runtime::builder()
+        .build()
         .expect("Failed to create runtime")
         .scheduler()
         .block_on(async |_ctx| {

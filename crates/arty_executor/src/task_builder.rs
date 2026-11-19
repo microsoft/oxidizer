@@ -33,7 +33,7 @@ impl<'a, F> TaskBuilder<'a, F> {
     }
 }
 
-impl<'a, F, I> TaskBuilder<'a, F, I> {
+impl<F, I> TaskBuilder<'_, F, I> {
     /// Sets the observed context for task polling, cleanup, and lifecycle events.
     ///
     /// By default, the task has no captured context.
@@ -50,13 +50,15 @@ impl<'a, F, I> TaskBuilder<'a, F, I> {
         self.metadata.placement = placement;
         self
     }
+}
 
+#[cfg(feature = "inspection")]
+impl<'a, F, I> TaskBuilder<'a, F, I> {
     /// Sets a callback that describes the converted future during explicit inspection.
     ///
     /// The callback is stored with the future without a separate task allocation.
     /// Ordinary execution cycles do not call it. Calling this method again replaces
     /// the previous callback.
-    #[cfg(feature = "inspection")]
     pub fn inspect<D, J>(self, inspect: J) -> TaskBuilder<'a, F, impl Inspector<F::IntoFuture> + use<F, I, D, J>>
     where
         F: IntoFuture,
@@ -87,6 +89,33 @@ where
     /// Registration does not wake the executor owner. The caller must arrange an
     /// [`execute_cycle`](crate::Executor::execute_cycle) after registration.
     pub fn register(self, completion: impl TaskCompletion<F::Output>) {
-        self.shared.add_task(self.future, self.metadata, completion, self.inspector);
+        self.shared.add_task(
+            self.future,
+            self.metadata,
+            completion,
+            crate::inspection::FutureInspector(self.inspector),
+        );
+    }
+}
+
+impl<F, I> TaskBuilder<'_, F, I>
+where
+    F: IntoFuture + 'static,
+    F::Output: 'static,
+{
+    /// Registers a task whose inspector borrows its future and completion target.
+    ///
+    /// The callback replaces any configured inspector. It runs only during
+    /// explicit inspection or observed polls. The completion target stores
+    /// metadata inline with the task and receives terminal results as usual.
+    #[cfg(feature = "inspection")]
+    pub fn register_with_inspection<T, D, J>(self, completion: T, inspect: J)
+    where
+        T: TaskCompletion<F::Output>,
+        D: 'static,
+        J: Fn(&F::IntoFuture, &T, crate::TaskState) -> Option<D> + 'static,
+    {
+        self.shared
+            .add_task(self.future, self.metadata, completion, crate::inspection::InspectWith::new(inspect));
     }
 }

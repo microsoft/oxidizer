@@ -242,7 +242,7 @@ fn test_worker_affinity() {
 
 #[test]
 fn remote_factories_create_non_send_futures_on_the_worker() {
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let (created, polled, associated) = runtime
         .scheduler()
         .spawn_anywhere((), |cx: arty::task::Context, ()| {
@@ -329,7 +329,7 @@ fn runtime_spawn_anywhere_relocates_payload_with_unknown_source() {
         }
     }
 
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let (source, destination, worker, executed_on) = runtime
         .scheduler()
         .spawn_anywhere(

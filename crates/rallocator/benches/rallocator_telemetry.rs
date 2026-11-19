@@ -11,19 +11,22 @@ use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 use seismograph::recorder::{Configuration, EventBufferCapacity, Policy};
 
+// SAFETY: The benchmark returns every block to this linked snmalloc instance.
+const ALLOCATOR: rallocator::Rallocator = unsafe { rallocator::Rallocator::new(rallocator::backend::Snmalloc) };
+
 // Keep the same measured call boundary in both recording modes.
 #[inline(never)]
 fn allocation_pair() {
     // A small fixed class isolates ordinary per-owner allocation and free work.
     let layout = Layout::new::<[u8; 64]>();
     // SAFETY: The allocator receives a valid nonzero layout.
-    let address = unsafe { rallocator::Rallocator.alloc(layout) };
+    let address = unsafe { ALLOCATOR.alloc(layout) };
     if address.is_null() {
         handle_alloc_error(layout);
     }
     black_box(address);
     // SAFETY: The allocation remains live and uses its original allocator and layout.
-    unsafe { rallocator::Rallocator.dealloc(address, layout) };
+    unsafe { ALLOCATOR.dealloc(address, layout) };
 }
 
 fn benchmark(criterion: &mut Criterion) {

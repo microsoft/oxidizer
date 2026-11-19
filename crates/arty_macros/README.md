@@ -29,10 +29,11 @@ starts one worker for each available processor. Both attributes use one
 worker by default.
 
 `monitor = enabled` or `monitor = disabled` selects whether the runtime is
-prepared for monitoring. `#[arty::main]` enables it by default.
-`#[arty::test]` disables it by default. `panic = shutdown` or
-`panic = ignore` selects whether the runtime stops after Arty catches a task
-panic. Both attributes use `shutdown` by default.
+prepared for monitoring. Both attributes use Arty’s automatic monitor
+policy by default. It disables monitoring in tests, doctests, documentation
+examples, and Miri. `panic = shutdown` or `panic = ignore` selects whether
+the runtime stops after Arty catches a task panic. Both attributes use
+`shutdown` by default.
 
 See [`arty::main`][__link2] and
 [`arty::test`][__link3] for signatures,
