@@ -57,7 +57,7 @@ fn get_retry_after_duration(headers: &HeaderMap, clock: &Clock) -> Option<Durati
 }
 
 fn parse_http_date(value: &str) -> Option<SystemTime> {
-    let datetime = strtime::parse(IMF_FIXDATE, value.trim_matches([' ', '\t']))
+    let datetime = strtime::parse(IMF_FIXDATE, value.trim_matches(|c| matches!(c, ' ' | '\t')))
         .ok()?
         .to_datetime()
         .ok()?;
@@ -157,6 +157,15 @@ mod tests {
     fn retry_after_invalid_calendar_date_none() {
         let mut headers = HeaderMap::new();
         headers.insert(RETRY_AFTER, "Fri, 31 Feb 2023 00:00:00 GMT".parse().unwrap());
+
+        let clock = Clock::new_frozen();
+        assert_eq!(get_retry_after_duration(&headers, &clock), None);
+    }
+
+    #[test]
+    fn retry_after_date_outside_timestamp_range_none() {
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, "Fri, 31 Dec 9999 00:00:00 GMT".parse().unwrap());
 
         let clock = Clock::new_frozen();
         assert_eq!(get_retry_after_duration(&headers, &clock), None);
