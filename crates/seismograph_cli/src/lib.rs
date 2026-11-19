@@ -11,7 +11,8 @@
 )]
 
 //! The Seismograph CLI shows thread activity, task execution, and memory allocations in your terminal.
-//! Run `seismograph monitor` to inspect a running application.
+//! For live data, [start a monitor in your application](https://github.com/microsoft/oxidizer/blob/main/crates/seismograph/README.md#live-monitoring)
+//! before running `seismograph monitor`.
 //! To open a saved snapshot, run `seismograph view capture.seismograph`.
 
 mod allocation_identities;
