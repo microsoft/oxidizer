@@ -4,28 +4,20 @@
 //! Tests of the route table of `#[resolver]` types.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
-#![allow(
+#![expect(
     dead_code,
-    reason = "most tests read the route tables of the route enums, not their captured fields"
+    reason = "most tests read the templates and raw values of the route enums, not their captured fields"
 )]
-
-use std::fmt::Write as _;
 
 use http_path_template::{Grammar, PathTemplate};
 use routerama::__rt::{RawResolver, Route};
 use routerama::{HttpMethod, ResolveError, RouteTable, resolver};
 
-/// Reads the template and the parameter names of each route, sorted, because the numbers of the routes follow no
-/// order. It takes a `dyn RouteTable`, as a telemetry layer keeps one.
-fn listing(table: &dyn RouteTable) -> Vec<(&str, Vec<&str>)> {
-    let mut routes: Vec<(&str, Vec<&str>)> = (0..table.route_count())
-        .map(|route| {
-            let parameters = table.parameters(route).unwrap();
-            (table.template(route).unwrap(), parameters.iter().map(AsRef::as_ref).collect())
-        })
-        .collect();
-    routes.sort_unstable();
-    routes
+/// Matches `GET path`, and returns the template of the route and the value of the parameter `name`. It takes a
+/// `dyn RouteTable`, as a telemetry layer keeps one.
+fn hit<'m, 'p>(table: &'m dyn RouteTable, path: &'p str, name: &str) -> Option<(&'m str, Option<&'p str>)> {
+    let hit = table.match_route("GET", path)?;
+    Some((hit.template().as_ref(), hit.parameter(name)))
 }
 
 #[resolver]
@@ -38,19 +30,17 @@ enum ProfileRoute<'p> {
 }
 
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "insta reads snapshot files; the other listing tests in this file check the same data under Miri"
-)]
-fn static_resolver_lists_each_route_attribute() {
+fn static_resolver_matches_each_route_attribute() {
     let resolver = ProfileRoute::resolver();
 
-    let mut printed = String::new();
-    for (template, parameters) in listing(&resolver) {
-        writeln!(printed, "{template} [{}]", parameters.join(", ")).unwrap();
-    }
-
-    insta::assert_snapshot!(printed);
+    assert_eq!(
+        ["/status", "/users/7", "/accounts/7"].map(|path| hit(&resolver, path, "user")),
+        [
+            Some(("/status", None)),
+            Some(("/users/{user}", Some("7"))),
+            Some(("/accounts/{user}", Some("7"))),
+        ]
+    );
 }
 
 #[resolver]
@@ -65,15 +55,15 @@ enum PluginRoute<'p> {
 }
 
 #[test]
-fn hybrid_resolver_lists_static_and_dynamic_routes() {
+fn hybrid_resolver_matches_static_and_dynamic_routes() {
     let resolver = PluginRoute::builder()
         .add_plugin(HttpMethod::GET, "/plugins/{name}")
         .build()
         .unwrap();
 
     assert_eq!(
-        listing(&resolver),
-        [("/books/{book}", vec!["book"]), ("/plugins/{name}", vec!["name"])]
+        [("/books/rust", "book"), ("/plugins/auth", "name")].map(|(path, name)| hit(&resolver, path, name)),
+        [Some(("/books/{book}", Some("rust"))), Some(("/plugins/{name}", Some("auth")))]
     );
 }
 
@@ -90,8 +80,8 @@ fn dotted_and_keyword_captures_keep_template_names() {
     let resolver = ExoticRoute::resolver();
 
     assert_eq!(
-        listing(&resolver),
-        [("/shelves/{shelf.id}", vec!["shelf.id"]), ("/x/{type}", vec!["type"])]
+        [("/shelves/7", "shelf.id"), ("/x/1", "type")].map(|(path, name)| hit(&resolver, path, name)),
+        [Some(("/shelves/{shelf.id}", Some("7"))), Some(("/x/{type}", Some("1")))]
     );
 }
 
@@ -112,7 +102,7 @@ enum TemplateRoute<'p> {
 }
 
 #[test]
-fn generated_and_raw_tables_print_same_templates() {
+fn generated_and_raw_resolvers_match_same_routes() {
     let raw = RawResolver::new(
         [
             ("ListBooks", HttpMethod::GET, "/books"),
@@ -131,7 +121,23 @@ fn generated_and_raw_tables_print_same_templates() {
         }),
     );
 
-    assert_eq!(listing(&TemplateRoute::resolver()), listing(&raw));
+    let matches = |table: &dyn RouteTable| {
+        [
+            ("GET", "/books"),
+            ("POST", "/books/rust:archive"),
+            ("GET", "/files/a/b"),
+            ("GET", "/static/a/b"),
+            ("GET", "/img-cat.png"),
+            ("GET", "/shelves/7/books/rust"),
+        ]
+        .map(|(method, path)| {
+            table.match_route(method, path).map(|hit| {
+                let parameters = ["book", "path", "id", "shelf.id"].map(|name| hit.parameter(name));
+                (hit.template().to_string(), parameters)
+            })
+        })
+    };
+    assert_eq!(matches(&TemplateRoute::resolver()), matches(&raw));
 }
 
 #[resolver]
@@ -184,9 +190,12 @@ fn match_route_agrees_with_resolve_on_parity_corpus() {
             ApiRoute::Files => ("/files/**", vec![]),
             ApiRoute::Search => ("/search", vec![]),
         });
-        let from_match_route = resolver
-            .match_route(method, path)
-            .map(|hit| (resolver.template(hit.route()).unwrap(), hit.captures().to_vec()));
+        let from_match_route = resolver.match_route(method, path).map(|hit| {
+            (
+                hit.template().as_ref(),
+                ["book", "review"].into_iter().filter_map(|name| hit.parameter(name)).collect(),
+            )
+        });
         assert_eq!(from_resolve, from_match_route, "`{method} {path}`");
     }
 }
@@ -232,11 +241,7 @@ fn verb_route_prefers_dynamic_like_resolve() {
         .collect();
     let from_match_route: Vec<Option<&str>> = dynamic_verb_paths
         .iter()
-        .map(|path| {
-            dynamic_verb
-                .match_route("GET", path)
-                .map(|hit| dynamic_verb.template(hit.route()).unwrap())
-        })
+        .map(|path| dynamic_verb.match_route("GET", path).map(|hit| hit.template().as_ref()))
         .collect();
     assert_eq!(from_resolve, [Some("/items/{id}:archive"), Some("/items/{id}"), None]);
     assert_eq!(from_match_route, from_resolve);
@@ -252,11 +257,7 @@ fn verb_route_prefers_dynamic_like_resolve() {
         .collect();
     let from_match_route: Vec<Option<&str>> = static_verb_paths
         .iter()
-        .map(|path| {
-            static_verb
-                .match_route("GET", path)
-                .map(|hit| static_verb.template(hit.route()).unwrap())
-        })
+        .map(|path| static_verb.match_route("GET", path).map(|hit| hit.template().as_ref()))
         .collect();
     assert_eq!(from_resolve, [Some("/docs/{id}:publish"), Some("/docs/{id}"), None]);
     assert_eq!(from_match_route, from_resolve);
@@ -281,8 +282,5 @@ fn match_route_reports_route_when_typed_capture_fails() {
     let hit = resolver.match_route("GET", "/issues/abc").unwrap();
 
     assert_eq!(resolver.resolve("GET", "/issues/abc"), Err(ResolveError::InvalidCapture("issue")));
-    assert_eq!(
-        (resolver.template(hit.route()), hit.captures()),
-        (Some("/issues/{issue}"), ["abc"].as_slice())
-    );
+    assert_eq!((hit.template().as_ref(), hit.parameter("issue")), ("/issues/{issue}", Some("abc")));
 }

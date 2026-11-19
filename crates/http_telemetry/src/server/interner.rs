@@ -2,16 +2,15 @@
 // Licensed under the MIT License.
 
 use std::collections::BTreeSet;
-use std::sync::Mutex;
 
-/// Each name stays in memory until the process ends, so only names from the setup of a layer may reach this set,
-/// never data from a request.
+use parking_lot::Mutex;
+
+/// Each name stays in memory until the process ends, so this set must get only names from the setup of a layer, never
+/// data from a request.
 static INTERNED: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
 
 pub(super) fn intern(name: &str) -> &'static str {
-    let mut interned = INTERNED
-        .lock()
-        .expect("only a lookup, a copy and an insert run under this lock, and none of them panics");
+    let mut interned = INTERNED.lock();
     if let Some(name) = interned.get(name) {
         return name;
     }

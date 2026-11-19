@@ -197,9 +197,8 @@ async fn main() -> Result<(), MediaTypeError> {
     let body_builder = HttpBodyBuilder::new_fake();
 
     // The application responds to the routes of `BookRoute`, and to the rest with 404. It routes
-    // with the same resolver as the middleware.
-    let resolver = Arc::new(BookRoute::resolver());
-    let routes = Arc::clone(&resolver);
+    // with a resolver of `BookRoute`, as the middleware does.
+    let routes = BookRoute::resolver();
     let bodies = body_builder.clone();
     let handler = Execute::new(move |request: HttpRequest| {
         let chunk = |text: String| Ok::<_, HttpError>(BytesView::copied_from_slice(text.as_bytes(), &bodies));
@@ -231,7 +230,7 @@ async fn main() -> Result<(), MediaTypeError> {
     });
     let telemetry = Telemetry::server(sink)
         .excluded_paths([BasePath::from_static("/health/")])
-        .route_resolver(resolver)
+        .route_resolver(BookRoute::resolver())
         .route_parameter_data_classes([("book", PUBLIC)])
         .request_header_data_classes([(REQUEST_ID, PUBLIC)])
         .request_body_media_types(["application/json"])?

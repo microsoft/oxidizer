@@ -159,11 +159,16 @@ impl TelemetryDropGuard {
                      route_fields,
                      path_and_query,
                  }| {
-                    let route_hit = route_fields.route_table.match_route(self.method.as_str(), path_and_query.path())?;
-                    Some((route_fields.routes.get(route_hit.route())?.as_ref()?, route_hit))
+                    let route_hit = route_fields
+                        .route_resolver
+                        .match_route(self.method.as_str(), path_and_query.path())?;
+                    Some((&*route_fields.parameters, route_hit))
                 },
             );
-            (route.as_ref().map(|(route, _)| route.template.clone()), RouteParameters(route))
+            (
+                route.as_ref().map(|(_, route_hit)| Text::from(route_hit.template().clone())),
+                RouteParameters(route),
+            )
         };
         match end {
             RequestEnd::Complete(status_code) => {

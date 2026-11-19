@@ -96,33 +96,35 @@ fn body_is_logged_when_media_types_cover_content_type() {
         }
         let (body, capture) = respond(logging(types), request);
         read_to_end(body);
-        capture.single().log(BODY).is_some()
+        capture.single().log(BODY).cloned()
     };
-    let rows: [(&[&'static str], Option<&'static str>, bool); 20] = [
-        (&["application/json"], Some("application/json"), true),
-        (&["image/png", "application/json"], Some("application/json"), true),
-        (&["application/json"], Some("image/png"), false),
-        (&["video/ogg"], Some("audio/ogg"), false),
-        (&["application/json"], None, false),
-        (&[], Some("text/plain"), false),
-        (&["application/json"], Some("text/csv"), true),
-        (&["application/json"], Some("application/xml"), false),
-        (&["application/json"], Some("application/problem+json"), true),
-        (&["application/json"], Some("application/soap+xml"), true),
-        (&["application/json"], Some("application/foo+ld"), false),
-        (&["application/json"], Some("image/svg+xml"), false),
-        (&["application/json"], Some("Application/JSON ; charset=utf-8"), true),
-        (&["application/json"], Some("application/json\t; charset=utf-8"), true),
-        (&["APPLICATION/JSON"], Some("application/json"), true),
-        (&["image/png"], Some("TEXT/csv"), true),
-        (&["image/png"], Some("Application/Problem+JSON"), true),
-        (&["application/json; charset=utf-8"], Some("application/json"), true),
-        (&["application/json"], Some("not a media type"), false),
-        (&["application/json"], Some("application/jsön"), false),
+    let chunk = || Some(Value::from("chunk"));
+    let rows: [(&[&'static str], Option<&'static str>, Option<Value>); 20] = [
+        (&["application/json"], Some("application/json"), chunk()),
+        (&["image/png", "application/json"], Some("application/json"), chunk()),
+        (&["application/json"], Some("image/png"), None),
+        (&["video/ogg"], Some("audio/ogg"), None),
+        (&["application/json"], None, None),
+        (&[], Some("text/plain"), None),
+        (&["application/json"], Some("text/csv"), chunk()),
+        (&["application/json"], Some("application/xml"), None),
+        (&["application/json"], Some("application/problem+json"), chunk()),
+        (&["application/json"], Some("application/soap+xml"), chunk()),
+        (&["application/json"], Some("application/foo+ld"), None),
+        (&["application/json"], Some("image/svg+xml"), None),
+        (&["application/json"], Some("Application/JSON ; charset=utf-8"), chunk()),
+        (&["application/json"], Some("application/json\t; charset=utf-8"), chunk()),
+        (&["APPLICATION/JSON"], Some("application/json"), chunk()),
+        (&["image/png"], Some("TEXT/csv"), chunk()),
+        (&["image/png"], Some("Application/Problem+JSON"), chunk()),
+        (&["application/json; charset=utf-8"], Some("application/json"), chunk()),
+        (&["application/json"], Some("not a media type"), None),
+        (&["application/json"], Some("application/jsön"), None),
     ];
 
     assert_eq!(
-        rows.map(|(types, content_type, _)| (types, content_type, logged(types, content_type))),
+        rows.clone()
+            .map(|(types, content_type, _)| (types, content_type, logged(types, content_type))),
         rows
     );
 }

@@ -7,7 +7,6 @@
 
 mod common;
 
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use common::{COMPLETE, Capture, Captured, DURATION, PUBLIC, StopAt, duration, server};
@@ -18,7 +17,6 @@ use http_extensions::HttpRequest;
 use http_telemetry::TelemetryLayer;
 use layered::{Layer, Service};
 use observed::{Severity, Sink, SinkId, Value};
-use routerama::{RouteHit, RouteTable};
 use tick::SimpleClock;
 
 #[routerama::resolver]
@@ -36,7 +34,7 @@ enum Route<'p> {
 }
 
 fn routed(sink: Sink) -> TelemetryLayer {
-    server(sink).route_resolver(Arc::new(Route::resolver()))
+    server(sink).route_resolver(Route::resolver())
 }
 
 fn request(method: &str, uri: &'static str) -> HttpRequest {
@@ -104,73 +102,6 @@ fn http_route_is_template_of_route_that_matches_method_text_and_path() {
     assert_eq!(
         rows.map(|(method, uri, _)| route(method, uri)),
         rows.map(|(.., template)| template.map(Value::from))
-    );
-}
-
-#[routerama::resolver]
-enum Books {
-    #[route(GET, "/books")]
-    List,
-}
-
-/// A route table that matches as the resolver of [`Books`] does, but that reports `count` routes, and `template` and
-/// `parameters` for every route number.
-struct Inconsistent {
-    count: usize,
-    template: Option<&'static str>,
-    parameters: Option<&'static [Cow<'static, str>]>,
-}
-
-impl RouteTable for Inconsistent {
-    fn route_count(&self) -> usize {
-        self.count
-    }
-
-    fn template(&self, _route: usize) -> Option<&str> {
-        self.template
-    }
-
-    fn parameters(&self, _route: usize) -> Option<&[Cow<'static, str>]> {
-        self.parameters
-    }
-
-    fn match_route<'p>(&self, method: &str, path: &'p str) -> Option<RouteHit<'p>> {
-        Books::resolver().match_route(method, path)
-    }
-}
-
-#[test]
-fn match_that_table_cannot_describe_has_no_route() {
-    let route = |table: Inconsistent| {
-        let capture = Capture::new(|name| name == COMPLETE);
-        server(common::sink_with(&capture))
-            .route_resolver(Arc::new(table))
-            .layer(common::responding(StatusCode::OK))
-            .execute(common::get_to("/books"))
-            .unwrap_ready()
-            .unwrap();
-        capture.single().log("http.route").cloned()
-    };
-
-    assert_eq!(
-        [
-            route(Inconsistent {
-                count: 1,
-                template: None,
-                parameters: Some(&[]),
-            }),
-            route(Inconsistent {
-                count: 1,
-                template: Some("/books"),
-                parameters: None,
-            }),
-            route(Inconsistent {
-                count: 0,
-                template: Some("/books"),
-                parameters: Some(&[]),
-            }),
-        ],
-        [None, None, None]
     );
 }
 

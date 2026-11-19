@@ -13,7 +13,7 @@ use observed::{Text, Value, VisitFields, event};
 use routerama::RouteHit;
 
 use super::HeaderValues;
-use super::route_fields::Route;
+use super::route_fields::RouteParameter;
 
 /// Produces the event `http.server.request.complete` when the handler returned a response and its body
 /// ended.
@@ -222,16 +222,17 @@ pub(crate) struct ActiveRequests {
     pub(crate) scheme: Option<&'static str>,
 }
 
-pub(crate) struct RouteParameters<'a>(pub(crate) Option<(&'a Route, RouteHit<'a>)>);
+pub(crate) struct RouteParameters<'a>(pub(crate) Option<(&'a [RouteParameter], RouteHit<'a, 'a>)>);
 
 impl VisitFields for RouteParameters<'_> {
     fn visit_fields(&self, visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
-        if let Some((route, hit)) = &self.0 {
-            for (capture, parameter) in hit.captures().iter().zip(&route.parameters) {
-                if let Some(parameter) = parameter {
-                    let value =
-                        |redactor: &dyn Redactor| Value::from_redacted(&Sensitive::new(*capture, parameter.data_class.clone()), redactor);
-                    visitor(&parameter.descriptor, &value)?;
+        if let Some((parameters, hit)) = &self.0 {
+            for parameter in *parameters {
+                if let Some(unredacted_value) = hit.parameter(&parameter.name) {
+                    let redacted_value = |redactor: &dyn Redactor| {
+                        Value::from_redacted(&Sensitive::new(unredacted_value, parameter.data_class.clone()), redactor)
+                    };
+                    visitor(&parameter.descriptor, &redacted_value)?;
                 }
             }
         }

@@ -272,18 +272,25 @@ fn events_log_bytes_that_handler_read() {
         let (sink, capture) = common::capture_sink();
         let service = logging(&["text/plain"])(server(sink)).layer(reading());
         let mut response = Box::pin(service.execute(request("text/plain", scripted([data("hel"), last]))));
-        let resumed = catch_unwind(AssertUnwindSafe(|| poll_once(&mut response))).is_err();
+        let panic = catch_unwind(AssertUnwindSafe(|| poll_once(&mut response)))
+            .err()
+            .map(|payload| *payload.downcast::<&str>().unwrap());
         drop(response);
         let event = capture.single();
-        (resumed, event.name, event.log("error.type").cloned(), event.log(BODY).cloned())
+        (panic, event.name, event.log("error.type").cloned(), event.log(BODY).cloned())
     };
 
     assert_eq!(
         [logged(Step::End), logged(Step::Panic), logged(Step::Pending)],
         [
-            (false, COMPLETE, None, Some(Value::from("hel"))),
-            (true, ERROR, Some(Value::from("panic")), Some(Value::from("hel"))),
-            (false, ABANDONED, Some(Value::from("abandoned")), Some(Value::from("hel")))
+            (None, COMPLETE, None, Some(Value::from("hel"))),
+            (
+                Some("the body panicked"),
+                ERROR,
+                Some(Value::from("panic")),
+                Some(Value::from("hel"))
+            ),
+            (None, ABANDONED, Some(Value::from("abandoned")), Some(Value::from("hel")))
         ]
     );
 }

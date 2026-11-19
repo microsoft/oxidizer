@@ -241,7 +241,7 @@ const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 /// parameter `book`. The stack already got `warm_up`, so that the redaction buffer of `observed`
 /// on this thread can hold each value of a request like it.
 fn routed_stack(class: Option<DataClass>, warm_up: HttpRequest) -> Telemetry<Responding> {
-    let mut layer = Telemetry::server(reading_sink(2)).route_resolver(Arc::new(Route::resolver()));
+    let mut layer = Telemetry::server(reading_sink(2)).route_resolver(Route::resolver());
     if let Some(class) = class {
         layer = layer.route_parameter_data_classes([("book", class)]);
     }

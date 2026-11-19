@@ -1,12 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The route fields of a layer with a resolver: the template and the configured parameters of each route.
+//! The route fields of a layer with a resolver: the resolver and the configured route parameters.
 
 use std::sync::Arc;
 
 use data_privacy::DataClass;
-use observed::Text;
 use observed::metadata::FieldDescriptor;
 use routerama::RouteTable;
 
@@ -14,37 +13,29 @@ use super::interner::intern;
 use crate::TelemetryLayer;
 
 pub(crate) struct RouteFields {
-    pub(crate) route_table: Arc<dyn RouteTable + Send + Sync>,
-    pub(crate) routes: Box<[Option<Route>]>,
+    pub(crate) route_resolver: Arc<dyn RouteTable + Send + Sync>,
+    pub(crate) parameters: Box<[RouteParameter]>,
 }
 
 impl RouteFields {
     pub(crate) fn new(layer: &TelemetryLayer) -> Option<Self> {
-        let route_table = layer.route_resolver.clone()?;
-        let routes = (0..route_table.route_count())
-            .map(|route| {
-                let parameters = route_table.parameters(route)?.iter().map(|name| {
-                    Some(RouteParameter {
-                        descriptor: FieldDescriptor::log_only(intern(&format!("http.route.parameter.{name}"))),
-                        data_class: layer.route_parameter_data_classes.get(name.as_ref())?.clone(),
-                    })
-                });
-                Some(Route {
-                    template: Text::from(Arc::<str>::from(route_table.template(route)?)),
-                    parameters: parameters.collect(),
+        Some(Self {
+            route_resolver: layer.route_resolver.clone()?,
+            parameters: layer
+                .route_parameter_data_classes
+                .iter()
+                .map(|(name, data_class)| RouteParameter {
+                    name: name.clone(),
+                    descriptor: FieldDescriptor::log_only(intern(&format!("http.route.parameter.{name}"))),
+                    data_class: data_class.clone(),
                 })
-            })
-            .collect();
-        Some(Self { route_table, routes })
+                .collect(),
+        })
     }
 }
 
-pub(crate) struct Route {
-    pub(crate) template: Text,
-    pub(crate) parameters: Box<[Option<RouteParameter>]>,
-}
-
 pub(crate) struct RouteParameter {
+    pub(crate) name: String,
     pub(crate) descriptor: FieldDescriptor,
     pub(crate) data_class: DataClass,
 }

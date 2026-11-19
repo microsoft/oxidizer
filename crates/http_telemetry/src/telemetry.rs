@@ -31,7 +31,9 @@ use crate::server::{
     header_fields,
 };
 
+/// Default logged body size in bytes.
 const DEFAULT_BODY_SIZE_LIMIT: usize = 32 * 1024;
+/// The maximum supported value for `body_size_limit`.
 const MAX_BODY_SIZE_LIMIT: usize = 1536 * 1024;
 
 /// Produces telemetry about the requests that go through it, in the form of `observed` events.
@@ -251,8 +253,8 @@ impl TelemetryLayer {
     /// The middleware does not see how the application routes a request, so it matches the request again with this
     /// resolver. If a route matches, the events of the request have the field `http.route`.
     #[must_use]
-    pub fn route_resolver(mut self, resolver: Arc<dyn RouteTable + Send + Sync>) -> Self {
-        self.route_resolver = Some(resolver);
+    pub fn route_resolver(mut self, resolver: impl RouteTable + Send + Sync + 'static) -> Self {
+        self.route_resolver = Some(Arc::new(resolver));
         self
     }
 

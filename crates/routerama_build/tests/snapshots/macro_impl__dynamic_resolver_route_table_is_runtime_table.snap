@@ -185,23 +185,11 @@ Returns `routerama::ConfigurationError` containing every invalid or missing dyna
 const _: () = {
     #[automatically_derived]
     impl ::routerama::RouteTable for RouteResolver {
-        fn route_count(&self) -> usize {
-            ::routerama::RouteTable::route_count(&self.__state)
-        }
-        fn template(&self, __route: usize) -> ::core::option::Option<&str> {
-            ::routerama::RouteTable::template(&self.__state, __route)
-        }
-        fn parameters(
-            &self,
-            __route: usize,
-        ) -> ::core::option::Option<&[::routerama::codegen_helpers::Cow<'static, str>]> {
-            ::routerama::RouteTable::parameters(&self.__state, __route)
-        }
         fn match_route<'p>(
             &self,
             __method: &str,
             __path: &'p str,
-        ) -> ::core::option::Option<::routerama::RouteHit<'p>> {
+        ) -> ::core::option::Option<::routerama::RouteHit<'_, 'p>> {
             ::routerama::RouteTable::match_route(&self.__state, __method, __path)
         }
     }

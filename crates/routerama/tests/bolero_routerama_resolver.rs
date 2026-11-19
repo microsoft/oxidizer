@@ -14,7 +14,7 @@
 use bolero::TypeGenerator;
 use http_path_template::{Grammar, PathTemplate};
 use routerama::__rt::{RawResolver, Route, RouteMatch};
-use routerama::{HttpMethod, ResolveError, RouteTable};
+use routerama::{HttpMethod, ResolveError, RouteHit, RouteTable};
 
 #[routerama::resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -234,6 +234,13 @@ fn dynamic_matches_static_on_structured_paths() {
 
 // Route-table differential.
 
+/// Returns the template of `hit` and the values of its parameters `book` and `review`, the only parameter names of
+/// the routes that these tests match.
+fn template_and_parameters<'r, 'p>(hit: &RouteHit<'r, 'p>) -> (&'r str, Vec<(&'static str, &'p str)>) {
+    let parameters = ["book", "review"].into_iter().filter_map(|name| Some((name, hit.parameter(name)?)));
+    (hit.template().as_ref(), parameters.collect())
+}
+
 #[test]
 fn raw_match_route_agrees_with_resolve() {
     let resolver = dynamic_resolver();
@@ -254,13 +261,7 @@ fn raw_match_route_agrees_with_resolve() {
                 };
                 (template, matched.captures().collect::<Vec<_>>())
             });
-            let from_match_route = resolver.match_route(method, &path).map(|hit| {
-                let names = resolver.parameters(hit.route()).unwrap().iter().map(AsRef::as_ref);
-                (
-                    resolver.template(hit.route()).unwrap(),
-                    names.zip(hit.captures().iter().copied()).collect::<Vec<_>>(),
-                )
-            });
+            let from_match_route = resolver.match_route(method, &path).map(|hit| template_and_parameters(&hit));
             assert_eq!(from_resolve, from_match_route, "route table disagreement on `{method} {path}`");
         });
 }
@@ -296,13 +297,7 @@ fn generated_match_route_agrees_with_resolve() {
                 HybridRoute::Search => ("/search", vec![]),
                 HybridRoute::Archive => ("/books/featured:archive", vec![]),
             });
-            let from_match_route = resolver.match_route(method, &path).map(|hit| {
-                let names = resolver.parameters(hit.route()).unwrap().iter().map(AsRef::as_ref);
-                (
-                    resolver.template(hit.route()).unwrap(),
-                    names.zip(hit.captures().iter().copied()).collect::<Vec<_>>(),
-                )
-            });
+            let from_match_route = resolver.match_route(method, &path).map(|hit| template_and_parameters(&hit));
             assert_eq!(from_resolve, from_match_route, "route table disagreement on `{method} {path}`");
         });
 }

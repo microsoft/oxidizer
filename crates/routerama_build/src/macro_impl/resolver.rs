@@ -484,12 +484,10 @@ fn expand_named_with_runtime(
         }
     };
 
-    // The dynamic routes keep their numbers from the runtime table, and the
-    // static routes follow them.
     let table = quote! { #runtime::RouteTable };
-    let (route_count, template, parameters, match_route) = if has_dynamic && has_static {
+    let match_route = if has_dynamic && has_static {
         let static_match = if static_any_verb {
-            quote! { __match_route(__method, __path, __first) }
+            quote! { __match_route(__method, __path) }
         } else {
             // As in `resolve`, a dynamic `:verb` route must not be consumed as a static capture.
             quote! {
@@ -498,49 +496,23 @@ fn expand_named_with_runtime(
                 {
                     ::core::result::Result::Ok(::core::option::Option::None)
                 } else {
-                    __match_route(__method, __path, __first)
+                    __match_route(__method, __path)
                 }
             }
         };
-        (
-            quote! { #table::route_count(&self.__state) + __TEMPLATES.len() },
-            quote! {
-                match __route.checked_sub(#table::route_count(&self.__state)) {
-                    ::core::option::Option::Some(__index) => __TEMPLATES.get(__index).copied(),
-                    ::core::option::Option::None => #table::template(&self.__state, __route),
+        quote! {
+            let __matched = #static_match;
+            match __matched {
+                ::core::result::Result::Ok(::core::option::Option::None) => {
+                    #table::match_route(&self.__state, __method, __path)
                 }
-            },
-            quote! {
-                match __route.checked_sub(#table::route_count(&self.__state)) {
-                    ::core::option::Option::Some(__index) => __PARAMETERS.get(__index).copied(),
-                    ::core::option::Option::None => #table::parameters(&self.__state, __route),
-                }
-            },
-            quote! {
-                let __first = #table::route_count(&self.__state);
-                let __matched = #static_match;
-                match __matched {
-                    ::core::result::Result::Ok(::core::option::Option::None) => {
-                        #table::match_route(&self.__state, __method, __path)
-                    }
-                    __matched => __matched.ok().flatten(),
-                }
-            },
-        )
+                __matched => __matched.ok().flatten(),
+            }
+        }
     } else if has_dynamic {
-        (
-            quote! { #table::route_count(&self.__state) },
-            quote! { #table::template(&self.__state, __route) },
-            quote! { #table::parameters(&self.__state, __route) },
-            quote! { #table::match_route(&self.__state, __method, __path) },
-        )
+        quote! { #table::match_route(&self.__state, __method, __path) }
     } else {
-        (
-            quote! { __TEMPLATES.len() },
-            quote! { __TEMPLATES.get(__route).copied() },
-            quote! { __PARAMETERS.get(__route).copied() },
-            quote! { __match_route(__method, __path, 0).ok().flatten() },
-        )
+        quote! { __match_route(__method, __path).ok().flatten() }
     };
     let static_table = (has_static || !has_dynamic).then(|| generator.generate_route_table());
     // The anonymous block keeps the generated items away from user names.
@@ -550,26 +522,11 @@ fn expand_named_with_runtime(
 
             #[automatically_derived]
             impl #table for #resolver_name {
-                fn route_count(&self) -> usize {
-                    #route_count
-                }
-
-                fn template(&self, __route: usize) -> ::core::option::Option<&str> {
-                    #template
-                }
-
-                fn parameters(
-                    &self,
-                    __route: usize,
-                ) -> ::core::option::Option<&[#runtime::codegen_helpers::Cow<'static, str>]> {
-                    #parameters
-                }
-
                 fn match_route<'p>(
                     &self,
                     __method: &str,
                     __path: &'p str,
-                ) -> ::core::option::Option<#runtime::RouteHit<'p>> {
+                ) -> ::core::option::Option<#runtime::RouteHit<'_, 'p>> {
                     #match_route
                 }
             }

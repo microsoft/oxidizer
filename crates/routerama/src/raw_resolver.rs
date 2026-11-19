@@ -44,7 +44,7 @@ pub struct RawResolver<T = ()> {
 
 /// The route template and the parameter names of one registered route.
 struct RouteRecord {
-    template: Box<str>,
+    template: Cow<'static, str>,
     parameters: Box<[Cow<'static, str>]>,
 }
 
@@ -82,7 +82,7 @@ impl<T> RawResolver<T> {
             .map(|route| {
                 let template = route.template();
                 RouteRecord {
-                    template: template.to_string().into_boxed_str(),
+                    template: Cow::Owned(template.to_string()),
                     parameters: capture_field_names(template.segments())
                         .iter()
                         .map(|name| Cow::Owned(name.join(".")))
@@ -251,26 +251,16 @@ impl<T> RawResolver<T> {
 }
 
 impl<T> RouteTable for RawResolver<T> {
-    fn route_count(&self) -> usize {
-        self.routes.len()
-    }
-
-    fn template(&self, route: usize) -> Option<&str> {
-        self.routes.get(route).map(|record| &*record.template)
-    }
-
-    fn parameters(&self, route: usize) -> Option<&[Cow<'static, str>]> {
-        self.routes.get(route).map(|record| &*record.parameters)
-    }
-
-    fn match_route<'p>(&self, method: &str, path: &'p str) -> Option<RouteHit<'p>> {
+    fn match_route<'p>(&self, method: &str, path: &'p str) -> Option<RouteHit<'_, 'p>> {
         self.resolve_scanned_checked(method, path, |leaf, _, path| {
+            let record = &self.routes[leaf.route_index];
             let mut captures = capture_values(leaf.vars.len());
             for plan in &leaf.vars {
                 captures.push(materialize(plan, path));
             }
             RouteHit {
-                route: leaf.route_index,
+                template: &record.template,
+                names: &record.parameters,
                 captures,
             }
         })
