@@ -267,7 +267,11 @@ impl DispatcherCore {
             return;
         }
 
+        // Clone before taking the retention lock because application Clone code
+        // can register another hook.
         let delivery = hook.clone();
+        // Retain the caller's original before a callback runs or a command can
+        // reach another worker. retain_hook releases the lock before delivery.
         if hook.is_retained() && !self.retain_hook(hook) {
             return;
         }
@@ -286,6 +290,8 @@ impl DispatcherCore {
             LocalWorker::install_hook(hook.clone(), Some(source));
         }
         while let Some(endpoint) = remote.next() {
+            // The prepared clone becomes the final worker's data. Earlier
+            // workers receive clones, so application Clone runs once per worker.
             if remote.peek().is_none() {
                 _ = endpoint.commands.system_sender().send(SystemCommand::RegisterHook {
                     hook,
