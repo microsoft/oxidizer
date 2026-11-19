@@ -284,7 +284,6 @@ fn system_time_error_conversion_preserves_message_and_source() {
 
     let error = Error::from(source);
 
-    assert!(!error.is_out_of_range());
     assert_eq!(write!(FailingWriter, "{error}"), Err(fmt::Error));
     let source = error.source().unwrap().downcast_ref::<std::time::SystemTimeError>().unwrap();
     assert_eq!(source.to_string(), expected);

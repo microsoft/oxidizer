@@ -19,8 +19,6 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/tick"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "serde_core::de::*",
-    "serde_core::ser::*",
     "thread_aware_core::thread_aware::ThreadAware",
     "thread_aware_core::thread::Thread",
 ]
@@ -34,18 +32,12 @@ default = []
 coarse-time = ["dep:libc", "dep:windows-sys"]
 # Enables additional test-specific APIs
 test-util = []
-# Serialization support for serde
-serde = ["dep:serde_core"]
 # Integration with tokio runtime
 tokio = ["dep:tokio"]
-# Exposes APIs for formatting of SystemTime
-fmt = ["dep:jiff"]
 
 [dependencies]
-jiff = { workspace = true, features = ["std"], optional = true }
 performables = { workspace = true }
 pin-project-lite = { workspace = true }
-serde_core = { workspace = true, features = ["std"], optional = true }
 thread_aware = { workspace = true, default-features = false, features = ["std"] }
 tokio = { workspace = true, optional = true, features = ["sync", "time", "rt"] }
 
@@ -64,13 +56,9 @@ futures = { workspace = true, features = ["default", "executor", "futures-execut
 jiff = { workspace = true, default-features = true }
 metabench = { path = "../metabench", default-features = false }
 ohno = { path = "../ohno", features = ["app-err"] }
-serde = { workspace = true, features = ["std", "derive"] }
-serde_core = { workspace = true, features = ["std"] }
-serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 thread_aware = { path = "../thread_aware", default-features = false, features = ["test-utils"] }
-time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 tokio = { workspace = true, features = ["sync", "test-util", "time", "rt", "macros", "rt-multi-thread"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
@@ -81,22 +69,14 @@ windows-sys = { workspace = true, features = ["Win32_System_SystemInformation"] 
 
 [[example]]
 name = "tick_basic"
-required-features = ["tokio", "fmt"]
+required-features = ["tokio"]
 
 [[example]]
 name = "clock"
-required-features = ["tokio", "fmt"]
+required-features = ["tokio"]
 
 [[example]]
 name = "clock_control"
-required-features = ["test-util"]
-
-[[example]]
-name = "data"
-required-features = ["test-util", "serde", "tokio"]
-
-[[example]]
-name = "interop_time"
 required-features = ["test-util"]
 
 [[example]]

@@ -124,13 +124,6 @@ fn new_at_accepts_system_time_and_format_values() {
     let system_time = SystemTime::UNIX_EPOCH + Duration::from_secs(222);
     let direct = ClockControl::new_at(system_time).to_clock();
     assert_eq!(direct.system_time(), system_time);
-
-    #[cfg(feature = "fmt")]
-    {
-        let timestamp = tick::fmt::UnixSeconds::from_secs(333).unwrap();
-        let formatted = ClockControl::new_at(timestamp).to_clock();
-        assert_eq!(formatted.system_time(), SystemTime::UNIX_EPOCH + Duration::from_secs(333));
-    }
 }
 
 #[test]

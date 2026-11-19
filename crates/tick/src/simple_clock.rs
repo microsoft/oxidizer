@@ -158,8 +158,8 @@ impl SimpleClock {
     ///
     /// This method is intentionally infallible for practical production use.
     /// Production data means a current value read from the operating system
-    /// clock without test-controlled offsets. All `tick::fmt` types cover that
-    /// range. Requiring
+    /// clock without test-controlled offsets. Common timestamp types, such as
+    /// `jiff::Timestamp`, cover that range. Requiring
     /// every caller to handle a conversion error would add an error path that
     /// supported production formats cannot reach.
     ///

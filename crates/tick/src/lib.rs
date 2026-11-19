@@ -4,7 +4,7 @@
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
-    not(all(feature = "test-util", feature = "tokio", feature = "fmt")),
+    not(all(feature = "test-util", feature = "tokio")),
     expect(rustdoc::broken_intra_doc_links, reason = "simpler docs")
 )]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/logo.png")]
@@ -81,7 +81,6 @@
 //! - [`Delay`] completes after a duration.
 //! - [`Timer`] produces periodic ticks.
 //! - [`Error`] reports failures and provides limited error inspection.
-//! - [`fmt`] parses and displays `SystemTime`. Enable `fmt` to use it.
 //! - [`runtime`] connects clocks to async runtimes.
 //!
 //! The [design guide](https://github.com/microsoft/oxidizer/blob/main/crates/tick/docs/design.md)
@@ -90,8 +89,6 @@
 //! # Extensions
 //!
 //! - [`FutureExt`] adds timeouts to `Future`.
-//! - [`SystemTimeExt`] adds display formats to
-//!   [`SystemTime`][`std::time::SystemTime`].
 //!
 //! # Time retrieval without timers
 //!
@@ -132,12 +129,28 @@
 //! - Human time uses calendars, local clock time, and time zones. These values
 //!   can be ambiguous.
 //!
-//! This crate focuses on machine time. Use [jiff] or [time] for
-//! human time. `tick` values can convert to types from these crates. See the
-//! `interop_*` examples.
+//! This crate focuses on machine time. Use [Jiff] for parsing, formatting,
+//! calendar arithmetic, local clock time, and time zones.
 //!
-//! [jiff]: https://crates.io/crates/jiff
-//! [time]: https://crates.io/crates/time
+//! [`Clock::system_time_as`] and [`SimpleClock::system_time_as`] convert the
+//! current time directly to types that implement `TryFrom<SystemTime>`.
+//! Jiff's [`Timestamp`][jiff::Timestamp] implements this conversion:
+//!
+//! ```
+//! # #[cfg(feature = "test-util")]
+//! # {
+//! use jiff::Timestamp;
+//! use tick::Clock;
+//!
+//! let clock = Clock::new_frozen();
+//! let timestamp: Timestamp = clock.system_time_as();
+//! assert_eq!(timestamp, Timestamp::UNIX_EPOCH);
+//! # }
+//! ```
+//!
+//! See the `interop_jiff` example for time zones and formatting.
+//!
+//! [Jiff]: https://crates.io/crates/jiff
 //!
 //! # Thread-aware relocation
 //!
@@ -249,8 +262,6 @@
 //! - `test-util` adds [`ClockControl`] for deterministic tests. It can freeze
 //!   time, advance time, or advance timers automatically. Enable it only in
 //!   `dev-dependencies`.
-//! - `serde` adds serialization through [serde](https://serde.rs/).
-//! - `fmt` adds the [`fmt`] module and formats such as ISO 8601 and RFC 2822.
 //! - `coarse-time` adds [`Stopwatch::start_coarse`]. This constructor uses a
 //!   lower-overhead, lower-precision instant source on Linux and Windows.
 //!   Other platforms use [`std::time::Instant::now`].
@@ -286,15 +297,10 @@ mod coarse_time;
 mod delay;
 mod error;
 
-#[cfg(any(feature = "fmt", test))]
-pub mod fmt;
-
 mod future_ext;
 mod simple_clock;
 mod state;
 mod stopwatch;
-#[cfg(any(feature = "fmt", test))]
-mod system_time_ext;
 mod timer;
 mod timers;
 #[cfg(any(feature = "tokio", test))]
@@ -310,8 +316,6 @@ pub use error::Error;
 pub use future_ext::FutureExt;
 pub use simple_clock::SimpleClock;
 pub use stopwatch::Stopwatch;
-#[cfg(any(feature = "fmt", test))]
-pub use system_time_ext::SystemTimeExt;
 pub use timeout::Timeout;
 pub use timer::{Timer, TimerTick};
 

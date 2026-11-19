@@ -5,11 +5,15 @@ use std::time::{Duration, SystemTime};
 
 use http::header::RETRY_AFTER;
 use http::{HeaderMap, Response};
+#[cfg(test)]
+use jiff::Timestamp;
+use jiff::fmt::strtime;
 use recoverable::{RecoveryInfo, RecoveryKind};
 use tick::Clock;
-use tick::fmt::Rfc2822;
 
 use crate::{HeaderMapExt, StatusExt};
+
+const IMF_FIXDATE: &str = "%a, %d %b %Y %H:%M:%S GMT";
 
 /// Response recovery information with `Retry-After` support.
 ///
@@ -46,13 +50,23 @@ fn get_retry_after_duration(headers: &HeaderMap, clock: &Clock) -> Option<Durati
         return Some(Duration::from_secs(seconds));
     }
 
-    if let Ok(timestamp) = retry_after_raw.parse::<Rfc2822>() {
-        let timestamp: SystemTime = timestamp.into();
-
+    if let Some(timestamp) = parse_http_date(retry_after_raw) {
         return Some(timestamp.duration_since(clock.system_time()).unwrap_or(Duration::ZERO));
     }
 
     None
+}
+
+fn parse_http_date(value: &str) -> Option<SystemTime> {
+    let datetime = strtime::parse(IMF_FIXDATE, value).ok()?.to_datetime().ok()?;
+    let timestamp = datetime.in_tz("UTC").ok()?.timestamp();
+    SystemTime::try_from(timestamp).ok()
+}
+
+#[cfg(test)]
+fn format_http_date(value: SystemTime) -> String {
+    let timestamp = Timestamp::try_from(value).expect("the test timestamps are within Jiff's range");
+    strtime::format(IMF_FIXDATE, timestamp).expect("the IMF-fixdate format is valid for a timestamp")
 }
 
 mod sealed {
@@ -87,8 +101,7 @@ mod tests {
         let future = now.checked_add(Duration::from_secs(5)).unwrap();
 
         let mut headers = HeaderMap::new();
-        let rfc = Rfc2822::try_from(future).unwrap();
-        headers.insert(RETRY_AFTER, rfc.to_string().parse().unwrap());
+        headers.insert(RETRY_AFTER, format_http_date(future).parse().unwrap());
 
         let delay = get_retry_after_duration(&headers, &clock).unwrap();
         assert_eq!(delay, Duration::from_secs(5));
@@ -102,8 +115,7 @@ mod tests {
         let past = now.checked_sub(Duration::from_secs(5)).unwrap();
 
         let mut headers = HeaderMap::new();
-        let rfc = Rfc2822::try_from(past).unwrap();
-        headers.insert(RETRY_AFTER, rfc.to_string().parse().unwrap());
+        headers.insert(RETRY_AFTER, format_http_date(past).parse().unwrap());
 
         let delay = get_retry_after_duration(&headers, &clock).unwrap();
         assert_eq!(delay, Duration::ZERO);
