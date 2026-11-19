@@ -4950,7 +4950,6 @@ dependencies = [
  "criterion",
  "gungraun",
  "http_path_template",
- "insta",
  "itoa",
  "matchit 0.9.2",
  "metabench",
