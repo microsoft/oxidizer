@@ -32,8 +32,7 @@ const _: () = {
         [T; N]: ::observed::__private::RedactedDisplay,
         [T; N]: ::core::marker::Send + ::core::marker::Sync,
     {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

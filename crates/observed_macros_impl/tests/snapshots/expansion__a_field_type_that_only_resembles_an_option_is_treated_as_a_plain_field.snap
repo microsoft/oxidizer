@@ -12,8 +12,7 @@ struct Shapes<'a, T> {
 }
 const _: () = {
     impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T> {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -64,8 +63,7 @@ struct Shapes<'a, T> {
 }
 const _: () = {
     impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T> {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -116,8 +114,7 @@ struct Shapes<'a, T> {
 }
 const _: () = {
     impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T> {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -168,8 +165,7 @@ struct Shapes<'a, T> {
 }
 const _: () = {
     impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T> {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -220,8 +216,7 @@ struct Shapes<'a, T> {
 }
 const _: () = {
     impl<'a, T: 'static> ::observed::VisitFields for Shapes<'a, T> {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -276,8 +271,7 @@ const _: () = {
         [T; 4]: ::observed::__private::RedactedDisplay,
         [T; 4]: ::core::marker::Send + ::core::marker::Sync,
     {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
@@ -336,8 +330,7 @@ const _: () = {
         (T, u8): ::observed::__private::RedactedDisplay,
         (T, u8): ::core::marker::Send + ::core::marker::Sync,
     {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

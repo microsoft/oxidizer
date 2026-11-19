@@ -9,8 +9,7 @@ struct FromMacro<'a> {
 }
 const _: () = {
     impl<'a> ::observed::VisitFields for FromMacro<'a> {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = true;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

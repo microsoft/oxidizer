@@ -61,6 +61,8 @@ pub trait VisitFields {
     /// closure. The getter takes a `&dyn Redactor` and returns the redacted
     /// [`Value`](crate::Value). It is only invoked if the processor wants the value.
     ///
+    /// If the visitor returns [`ControlFlow::Break`], stop and return `ControlFlow::Break`.
+    ///
     /// Fields follow one of three redaction paths:
     /// - **Default**: the type must implement [`data_privacy::RedactedDisplay`].
     /// - **`data_class = <expr>`**: wraps the value in [`data_privacy::Sensitive`] before redaction.

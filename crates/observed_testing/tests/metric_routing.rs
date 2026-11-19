@@ -385,7 +385,7 @@ fn gauge_records_a_float_value() {
 }
 
 /// A processor that selects metric events receives an event whose only measurement comes from a `#[flatten]` field,
-/// and does not receive an event that flattens only log fields.
+/// and does not receive an event that flattens only log fields or only an event-level counter.
 #[test]
 fn metric_processor_receives_measurement_of_flattened_value() {
     #[event("test.timing")]
@@ -415,6 +415,17 @@ fn metric_processor_receives_measurement_of_flattened_value() {
         note: Note,
     }
 
+    #[event("test.tick")]
+    #[counter(name = "test.tick.total")]
+    struct Tick;
+
+    #[event("test.ticked")]
+    #[info]
+    struct Ticked {
+        #[flatten]
+        tick: Tick,
+    }
+
     let processor = MockProcessor::with_filter(EventDescription::contains_metrics);
     let sink = Sink::builder("test")
         .clock(tick::SimpleClock::new_frozen())
@@ -422,6 +433,7 @@ fn metric_processor_receives_measurement_of_flattened_value() {
         .build();
 
     emit!(sink, Noted { note: Note { value: 1 } });
+    emit!(sink, Ticked { tick: Tick });
     emit!(
         sink,
         Timed {

@@ -428,7 +428,7 @@ pub use observed_macros::Enrichment;
 /// | `#[unredacted]` | Escape hatch: bypass redaction for a value that carries no user data. Never implicit. The type must implement `Into<Value>`. |
 /// | `#[data_class(<expr>)]` | Wrap the value in `Sensitive::new(value, <expr>)` for classification. |
 /// | `#[if_none(drop)]` / `#[if_none("...")]` | Control how a `None` `Option<T>` is recorded. The default is `#[if_none("n/a")]`. |
-/// | `#[flatten]` | Visit the fields of the value as fields of the event. The type must implement [`VisitFields`]. |
+/// | `#[flatten]` | Visit the fields of the value as fields of the event. The type must implement [`VisitFields`]. If the type is an `#[event]`, its fields reach the log only if it has a severity attribute, such as `#[info]`. |
 ///
 /// `#[unredacted]` and `#[data_class(...)]` are mutually exclusive.
 ///

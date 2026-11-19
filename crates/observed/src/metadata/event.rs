@@ -103,7 +103,7 @@ impl EventDescription {
 
     /// Returns `true` if this event produces metric data points: it has an
     /// event-level metric, a field-level metric, or a `#[flatten]` field whose
-    /// type has metrics.
+    /// type has field-level metrics.
     #[must_use]
     #[inline]
     pub const fn contains_metrics(&self) -> bool {

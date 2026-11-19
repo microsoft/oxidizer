@@ -7,8 +7,7 @@ struct Heartbeat {
 }
 const _: () = {
     impl ::observed::VisitFields for Heartbeat {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

@@ -14,8 +14,9 @@ const _: () = {
         T: ::observed::VisitFields,
         T: ::core::marker::Send + ::core::marker::Sync,
     {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = false
+            || <Parameters<'a> as ::observed::VisitFields>::CONTAINS_METRICS
+            || <T as ::observed::VisitFields>::CONTAINS_METRICS;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,

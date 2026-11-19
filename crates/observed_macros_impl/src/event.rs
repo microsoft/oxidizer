@@ -1099,7 +1099,7 @@ fn generate_event_impl(def: &EventDef<'_>) -> TokenStream {
     quote! {
         const _: () = {
             impl #impl_generics ::observed::VisitFields for #struct_ident #ty_generics #where_clause {
-                const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION.contains_metrics();
+                const CONTAINS_METRICS: bool = #has_field_metrics;
 
                 fn visit_fields(
                     &self,

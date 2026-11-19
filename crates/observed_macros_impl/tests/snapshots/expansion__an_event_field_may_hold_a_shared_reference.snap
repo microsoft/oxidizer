@@ -9,8 +9,7 @@ struct SharedRefs<'a> {
 }
 const _: () = {
     impl<'a> ::observed::VisitFields for SharedRefs<'a> {
-        const CONTAINS_METRICS: bool = <Self as ::observed::Event>::DESCRIPTION
-            .contains_metrics();
+        const CONTAINS_METRICS: bool = false;
         fn visit_fields(
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
