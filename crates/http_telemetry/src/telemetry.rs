@@ -258,7 +258,7 @@ impl TelemetryLayer {
         self
     }
 
-    /// Sets the route parameters to log and their data classes for redaction.
+    /// Adds route parameters to log and their data classes for redaction.
     ///
     /// By default, no route parameter is logged.
     #[must_use]
@@ -269,7 +269,7 @@ impl TelemetryLayer {
         self
     }
 
-    /// Sets the request headers to log and their data classes for redaction.
+    /// Adds request headers to log and their data classes for redaction.
     ///
     /// By default, no request header is logged.
     #[must_use]
@@ -280,7 +280,7 @@ impl TelemetryLayer {
         self
     }
 
-    /// Sets the response headers to log and their data classes for redaction.
+    /// Adds response headers to log and their data classes for redaction.
     ///
     /// By default, no response header is logged.
     #[must_use]

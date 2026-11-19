@@ -17,6 +17,7 @@ use http_extensions::HttpRequest;
 use http_telemetry::TelemetryLayer;
 use layered::{Layer, Service};
 use observed::{Severity, Sink, SinkId, Value};
+use routerama::HttpMethod;
 use tick::SimpleClock;
 
 #[routerama::resolver]
@@ -31,10 +32,13 @@ enum Route<'p> {
     GetReview { book: &'p str, review: &'p str },
     #[route(PURGE, "/cache/{key}")]
     Purge { key: &'p str },
+    /// A route that `routed` adds at run time.
+    Plugin { name: String },
 }
 
 fn routed(sink: Sink) -> TelemetryLayer {
-    server(sink).route_resolver(Route::resolver())
+    let resolver = Route::builder().add_plugin(HttpMethod::GET, "/plugins/{name}").build().unwrap();
+    server(sink).route_resolver(resolver)
 }
 
 fn request(method: &str, uri: &'static str) -> HttpRequest {
@@ -86,6 +90,7 @@ fn http_route_is_template_of_route_that_matches_method_text_and_path() {
     let rows = [
         ("GET", "/books/1", Some("/books/{book}")),
         ("PURGE", "/cache/1", Some("/cache/{key}")),
+        ("GET", "/plugins/1", Some("/plugins/{name}")),
         ("GET", "/missing", None),
         ("CONNECT", "example.com:443", None),
     ];

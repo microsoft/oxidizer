@@ -68,11 +68,11 @@ pub(crate) struct RequestComplete<'a> {
     pub(crate) request_headers: Headers<'a>,
     #[flatten]
     pub(crate) response_headers: Headers<'a>,
-    #[dimension(log = "http.request.body")]
+    #[dimension(log = "http.request.body.content")]
     #[unredacted]
     #[if_none(drop)]
     pub(crate) request_body: Option<Text>,
-    #[dimension(log = "http.response.body")]
+    #[dimension(log = "http.response.body.content")]
     #[unredacted]
     #[if_none(drop)]
     pub(crate) response_body: Option<Text>,
@@ -131,11 +131,11 @@ pub(crate) struct RequestError<'a> {
     pub(crate) request_headers: Headers<'a>,
     #[flatten]
     pub(crate) response_headers: Headers<'a>,
-    #[dimension(log = "http.request.body")]
+    #[dimension(log = "http.request.body.content")]
     #[unredacted]
     #[if_none(drop)]
     pub(crate) request_body: Option<Text>,
-    #[dimension(log = "http.response.body")]
+    #[dimension(log = "http.response.body.content")]
     #[unredacted]
     #[if_none(drop)]
     pub(crate) response_body: Option<Text>,
@@ -194,11 +194,11 @@ pub(crate) struct RequestAbandoned<'a> {
     pub(crate) request_headers: Headers<'a>,
     #[flatten]
     pub(crate) response_headers: Headers<'a>,
-    #[dimension(log = "http.request.body")]
+    #[dimension(log = "http.request.body.content")]
     #[unredacted]
     #[if_none(drop)]
     pub(crate) request_body: Option<Text>,
-    #[dimension(log = "http.response.body")]
+    #[dimension(log = "http.response.body.content")]
     #[unredacted]
     #[if_none(drop)]
     pub(crate) response_body: Option<Text>,

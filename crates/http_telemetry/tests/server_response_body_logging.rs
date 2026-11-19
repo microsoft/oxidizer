@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The response body that the server middleware logs as `http.response.body`.
+//! The response body that the server middleware logs as `http.response.body.content`.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
@@ -20,7 +20,7 @@ use layered::{Layer, Service};
 use observed::{Severity, Sink, Value};
 use ohno::ErrorExt;
 
-const BODY: &str = "http.response.body";
+const BODY: &str = "http.response.body.content";
 
 /// Sends `request` through a server layer that `configure` sets up, to [`Echoing`] with 200. Returns the response
 /// body and a capture of every event except the deltas of `http.server.active_requests`.
@@ -171,16 +171,20 @@ fn logged_text_is_cut_at_limit_and_lossy() {
         read_to_end(body);
         capture.single().log(BODY).cloned()
     };
-    let invalid = Step::Data(BytesView::copied_from_slice(b"caf\xe9", &HttpBodyBuilder::new_fake()));
+    let bytes = |slice: &[u8]| Step::Data(BytesView::copied_from_slice(slice, &HttpBodyBuilder::new_fake()));
 
     assert_eq!(
         [
             logged(5, vec![data("hel"), data("lo wo"), data("rld")]),
             logged(4, vec![data("café")]),
-            logged(32, vec![invalid]),
+            logged(5, vec![data("ab\u{1f600}")]),
+            logged(4, vec![bytes(b"caf\xff")]),
+            logged(32, vec![bytes(b"caf\xe9")]),
         ],
         [
             Some(Value::from("hello")),
+            Some(Value::from("caf")),
+            Some(Value::from("ab")),
             Some(Value::from("caf\u{fffd}")),
             Some(Value::from("caf\u{fffd}"))
         ]

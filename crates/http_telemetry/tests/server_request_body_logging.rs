@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The request body that the server middleware copies while the handler reads it, and logs as `http.request.body`.
+//! The request body that the server middleware copies while the handler reads it, and logs as `http.request.body.content`.
 
 #![allow(clippy::unwrap_used, reason = "test code")]
 
@@ -27,7 +27,7 @@ use observed::{Severity, Sink, Value};
 use ohno::{ErrorExt, Labeled};
 use tick::ClockControl;
 
-const BODY: &str = "http.request.body";
+const BODY: &str = "http.request.body.content";
 
 /// A server layer that logs the request bodies of `types`.
 fn logging(types: &[&'static str]) -> impl FnOnce(TelemetryLayer) -> TelemetryLayer {

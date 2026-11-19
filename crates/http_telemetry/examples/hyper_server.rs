@@ -13,7 +13,7 @@
 //!   `http.route.parameter.book=1`.
 //! - `POST /books/1/reviews` with a short JSON body: the handler reads the review and responds with
 //!   201, the location of the review and no body. The middleware copies the body while the handler
-//!   reads it, so the event shows it as `http.request.body`.
+//!   reads it, so the event shows it as `http.request.body.content`.
 //! - `GET /missing`: no route matches, so the server responds with 404 and no body. The middleware
 //!   emits the complete event when the handler returns. The event has no `http.route`.
 //! - `GET /books/1/chapters`: the server sends one chunk of the body and then waits. The client
@@ -27,8 +27,8 @@
 //! printer shows unchanged, so each event shows its value as `http.request.header.x-request-id`.
 //!
 //! The layer also logs the bodies of `application/json` requests and responses. So each event of a
-//! `GET` request to a path under `/books/1` shows, as `http.response.body`, the part of the body
-//! that the server read before the request ended: the whole body, or the first chunk.
+//! `GET` request to a path under `/books/1` shows, as `http.response.body.content`, the part of the
+//! body that the server read before the request ended: the whole body, or the first chunk.
 //!
 //! The middleware also emits the `1` and the `-1` of `http.server.active_requests` for each
 //! request that it does not exclude. The client waits for that `-1` before it prints its line and

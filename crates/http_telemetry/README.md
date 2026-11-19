@@ -60,8 +60,8 @@ Each event has the [attributes](#metric-httpserverrequestduration) of the metric
 |`http.route.parameter.<name>`|string|The value of a [configured route parameter][__link5], percent-encoded as in the request, redacted according to its data class.|`1`|If the request matches a route that has the parameter.|
 |`http.request.header.<name>`|string|The value of a [configured request header][__link6], redacted according to its data class. The values of repeated header lines are joined with `, `, and bytes that are not valid UTF-8 become `�`.|`0f3a9c`|If the request has the header.|
 |`http.response.header.<name>`|string|The value of a [configured response header][__link7], as for a request header.|`120`|If the response has the header.|
-|`http.request.body`|string|The start of the request body, up to the [size limit][__link8], as text. Bytes that are not valid UTF-8 become `�`. It holds only the bytes that the handler read, unless the body is in memory. See [Bodies](#bodies).|`{"stars":5}`|If the [request body media types][__link9] cover the `Content-Type` of the request.|
-|`http.response.body`|string|The start of the response body, up to the [size limit][__link10], as text. Bytes that are not valid UTF-8 become `�`. Empty for a response without content. See [Bodies](#bodies).|`{"book":"1"}`|If the [response body media types][__link11] cover the `Content-Type` of the response.|
+|`http.request.body.content`|string|The start of the request body, up to the [size limit][__link8], as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. It holds only the bytes that the handler read, unless the body is in memory. See [Bodies](#bodies).|`{"stars":5}`|If the [request body media types][__link9] cover the `Content-Type` of the request.|
+|`http.response.body.content`|string|The start of the response body, up to the [size limit][__link10], as text. If it reaches the limit, an incomplete character at its end is left out. Bytes that are not valid UTF-8 become `�`. Empty for a response without content. See [Bodies](#bodies).|`{"book":"1"}`|If the [response body media types][__link11] cover the `Content-Type` of the response.|
 
 ## Metrics
 
@@ -208,7 +208,7 @@ let response = async { service.execute(request).await }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbL8y7t2iMScAbKEC6exPDuTUbNRUpPhZwPacbTPw2Ke_ICCVhZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbJwefgthZhocbcmfNggPQUYkbhCUrdKPMB6AbAkD3F8HYx65hZIWDaWh0dHAtYm9keWUxLjEuMGlodHRwX2JvZHmCb2h0dHBfZXh0ZW5zaW9uc2YwLjE1LjCCbmh0dHBfdGVsZW1ldHJ5ZTAuMS4wgmdsYXllcmVkZTAuMy45gmhvYnNlcnZlZGYwLjMwLjE
  [__link0]: https://crates.io/crates/observed/0.30.1
  [__link1]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=Telemetry::server
  [__link10]: https://docs.rs/http_telemetry/0.1.0/http_telemetry/?search=TelemetryLayer::body_size_limit

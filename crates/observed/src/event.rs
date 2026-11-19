@@ -46,7 +46,8 @@ pub trait Event: VisitFields + Send + Sync {
 /// Visits the fields of an [`Event`], or of a value in a field marked `#[flatten]`.
 ///
 /// An [`event`](macro@crate::event) can get fields whose names are known only at run time from a field marked
-/// `#[flatten]`.
+/// `#[flatten]`. A field name is a `&'static str`, so a name that is built at run time must stay in memory until the
+/// process ends, for example through [`String::leak`].
 pub trait VisitFields {
     /// Whether the visited fields can include metric measurements.
     ///

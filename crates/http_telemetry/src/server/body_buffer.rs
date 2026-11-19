@@ -27,17 +27,36 @@ impl BodyBuffer {
         }
     }
 
-    /// Convert bytes into lossy UTF-8 text.
+    /// Convert bytes into lossy UTF-8 text. If the bytes reach the limit, the text leaves out an incomplete character at
+    /// their end.
     pub(crate) fn text(&self) -> Text {
         // #[gamma::skip(cond.always_false, tag = "equivalent", reason = "Empty bytes give the same empty text either way; the check only saves an allocation.")]
         if self.bytes.is_empty() {
             return Text::from("");
         }
 
-        let text = match str::from_utf8(&self.bytes) {
+        let bytes = if self.bytes.len() == self.limit {
+            without_incomplete_character(&self.bytes)
+        } else {
+            &self.bytes
+        };
+        let text = match str::from_utf8(bytes) {
             Ok(text) => Arc::from(text),
-            Err(_) => Arc::from(String::from_utf8_lossy(&self.bytes)),
+            Err(_) => Arc::from(String::from_utf8_lossy(bytes)),
         };
         Text::from(text)
     }
+}
+
+fn without_incomplete_character(bytes: &[u8]) -> &[u8] {
+    // A character has at most 4 bytes, so an incomplete one has at most 3.
+    // #[gamma::skip(literal.int_increment, tag = "equivalent", reason = "A longer end has the same last chunk, because an incomplete character has at most 3 bytes.")]
+    let end = &bytes[bytes.len().saturating_sub(3)..];
+    let incomplete = end
+        .utf8_chunks()
+        .last()
+        .map(|chunk| chunk.invalid())
+        .filter(|invalid| str::from_utf8(invalid).is_err_and(|error| error.error_len().is_none()))
+        .map_or(0, <[u8]>::len);
+    &bytes[..bytes.len() - incomplete]
 }
