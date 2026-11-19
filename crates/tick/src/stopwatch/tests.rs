@@ -27,3 +27,27 @@ fn coarse_stopwatch_tracks_running_state() {
     };
     assert_eq!(started_at, None);
 }
+
+#[test]
+fn coarse_start_and_restart_preserve_lifecycle_invariants() {
+    let existing = crate::coarse_time::Timestamp::for_test(Duration::from_nanos(5));
+    let mut stopwatch = Stopwatch {
+        source: StopwatchSource::Coarse {
+            started_at: Some(existing),
+        },
+        elapsed: Duration::from_nanos(7),
+    };
+
+    stopwatch.start();
+    let StopwatchSource::Coarse { started_at } = &stopwatch.source else {
+        panic!("the test constructs a coarse stopwatch");
+    };
+    assert_eq!(*started_at, Some(existing));
+
+    stopwatch.restart();
+    assert_eq!(stopwatch.elapsed, Duration::ZERO);
+    let StopwatchSource::Coarse { started_at } = stopwatch.source else {
+        panic!("the test constructs a coarse stopwatch");
+    };
+    assert_eq!(started_at, Some(crate::coarse_time::Timestamp::for_test(Duration::ZERO)));
+}
