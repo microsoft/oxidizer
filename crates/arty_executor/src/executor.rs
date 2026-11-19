@@ -137,7 +137,7 @@ impl Executor {
     #[must_use]
     pub(crate) fn new(owner_waker: task::Waker, sink: Sink, thread_id: ThreadId, panic_policy: crate::PanicPolicy) -> Self {
         let shared = ExecutorShared::new(owner_waker, sink, thread_id, panic_policy);
-        let stopwatch = Stopwatch::new_fast(SimpleClock::new_system());
+        let stopwatch = Stopwatch::start_coarse(SimpleClock::new_system());
         // Register before creating an executor because its Drop unregisters this thread.
         executor_context::register(thread_id);
         Self {
@@ -547,9 +547,9 @@ mod gamma_round2_tests {
     }
 
     #[test]
-    fn gamma_round2_new_executor_uses_a_fast_stopwatch() {
+    fn gamma_round2_new_executor_uses_a_coarse_stopwatch() {
         let executor = Executor::builder().build();
-        assert!(format!("{:?}", executor.stopwatch).contains("Fast"));
+        assert!(format!("{:?}", executor.stopwatch).contains("Coarse"));
     }
 
     #[test]
@@ -668,7 +668,7 @@ mod gamma_round2_tests {
     #[test]
     fn gamma_round2_accept_poll_reactivate_and_abort_each_report_exact_task_totals() {
         let mut executor = Executor::builder().build();
-        executor.stopwatch = Stopwatch::new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
+        executor.stopwatch = Stopwatch::start_new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
         let captured = Rc::new(RefCell::new(None));
         let observed = Rc::clone(&captured);
         executor
@@ -713,7 +713,7 @@ mod gamma_round2_tests {
     #[test]
     fn gamma_round2_shutdown_during_poll_counts_and_cancels_every_remaining_task() {
         let mut executor = Executor::builder().build();
-        executor.stopwatch = Stopwatch::new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
+        executor.stopwatch = Stopwatch::start_new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
         let shutdown = executor.shutdown();
         executor
             .tasks()
@@ -741,7 +741,7 @@ mod gamma_round2_tests {
     #[test]
     fn gamma_round2_executor_drop_flushes_abort_metrics_without_counting_them_as_normal_drops() {
         let mut executor = Executor::builder().build();
-        executor.stopwatch = Stopwatch::new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
+        executor.stopwatch = Stopwatch::start_new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
         executor.tasks().task(std::future::pending()).register(Completion);
         executor.tasks().task(std::future::pending()).register(Completion);
         assert!(matches!(executor.execute_cycle(), CycleOutcome::Suspend));
@@ -757,7 +757,7 @@ mod gamma_round2_tests {
     fn gamma_round2_finish_cycle_records_the_exact_frozen_elapsed_time() {
         let control = tick::ClockControl::new_at(SystemTime::UNIX_EPOCH);
         let mut executor = Executor::builder().build();
-        executor.stopwatch = Stopwatch::new(control.to_simple_clock());
+        executor.stopwatch = Stopwatch::start_new(control.to_simple_clock());
         let duration = metric(&CYCLE_DURATION_MILLIS);
         let gap = metric(&CYCLE_GAP_MILLIS);
         assert!(executor.last_cycle_ended.is_none());
@@ -777,7 +777,7 @@ mod gamma_round2_tests {
     #[test]
     fn gamma_round2_abort_preparation_clears_queued_wakes_before_task_retirement() {
         let mut executor = Executor::builder().build();
-        executor.stopwatch = Stopwatch::new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
+        executor.stopwatch = Stopwatch::start_new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
         let captured = Rc::new(RefCell::new(None));
         let observed = Rc::clone(&captured);
         executor
@@ -824,7 +824,7 @@ mod gamma_round2_tests {
     #[test]
     fn gamma_round2_remote_only_wakes_keep_the_executor_runnable() {
         let mut executor = Executor::builder().build();
-        executor.stopwatch = Stopwatch::new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
+        executor.stopwatch = Stopwatch::start_new(SimpleClock::new_frozen_at(SystemTime::UNIX_EPOCH));
         let captured = Rc::new(RefCell::new(None));
         let observed = Rc::clone(&captured);
         executor

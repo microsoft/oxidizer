@@ -210,11 +210,11 @@ fn stopwatch_restart_returns_elapsed_time_and_starts_a_new_interval() {
     assert_eq!(watch.elapsed(), Duration::from_secs(2));
 }
 
-#[cfg(feature = "fast-time")]
+#[cfg(feature = "coarse-time")]
 #[test]
-fn fast_stopwatch_observes_controlled_time() {
+fn coarse_stopwatch_observes_controlled_time() {
     let control = ClockControl::new();
-    let watch = Stopwatch::new_fast(control.to_simple_clock());
+    let watch = Stopwatch::start_coarse(control.to_simple_clock());
 
     control.advance(Duration::from_secs(1));
 

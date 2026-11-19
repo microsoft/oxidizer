@@ -119,7 +119,7 @@
 //! let _now = clock.system_time();
 //!
 //! // `Stopwatch` accepts a `SimpleClock` or a `Clock` (both are `AsRef<SimpleClock>`).
-//! let stopwatch = Stopwatch::new(&clock);
+//! let stopwatch = Stopwatch::start_new(&clock);
 //! let _elapsed = stopwatch.elapsed();
 //! ```
 //!
@@ -251,22 +251,22 @@
 //!   `dev-dependencies`.
 //! - `serde` adds serialization through [serde](https://serde.rs/).
 //! - `fmt` adds the [`fmt`] module and formats such as ISO 8601 and RFC 2822.
-//! - `fast-time` adds [`Stopwatch::new_fast`]. This constructor uses a
+//! - `coarse-time` adds [`Stopwatch::start_coarse`]. This constructor uses a
 //!   lower-overhead, lower-precision instant source on Linux and Windows.
 //!   Other platforms use [`std::time::Instant::now`].
 //!
-//! ## Fast stopwatch
+//! ## Coarse stopwatch
 //!
-//! Use a fast stopwatch only if measurements show that elapsed-time reads are
+//! Use a coarse stopwatch only if measurements show that elapsed-time reads are
 //! a performance bottleneck. Values do not decrease, but consecutive reads can
 //! be equal. The platform defines their precision.
 //!
 //! ```
 //! # fn main() {
-//! # #[cfg(feature = "fast-time")] {
+//! # #[cfg(feature = "coarse-time")] {
 //! use tick::{SimpleClock, Stopwatch};
 //!
-//! let stopwatch = Stopwatch::new_fast(SimpleClock::new_system());
+//! let stopwatch = Stopwatch::start_coarse(SimpleClock::new_system());
 //! let elapsed = stopwatch.elapsed();
 //! # let _ = elapsed;
 //! # }
@@ -281,10 +281,10 @@
 mod clock;
 #[cfg(any(feature = "test-util", test))]
 mod clock_control;
+#[cfg(any(feature = "coarse-time", test))]
+mod coarse_time;
 mod delay;
 mod error;
-#[cfg(any(feature = "fast-time", test))]
-mod fast_stopwatch;
 
 #[cfg(any(feature = "fmt", test))]
 pub mod fmt;

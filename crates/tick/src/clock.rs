@@ -388,7 +388,7 @@ impl Clock {
 
     /// Creates a [`Stopwatch`][crate::Stopwatch] and starts it.
     ///
-    /// This method calls [`Stopwatch::new`][crate::Stopwatch::new].
+    /// This method calls [`Stopwatch::start_new`][crate::Stopwatch::start_new].
     ///
     /// # Examples
     ///
@@ -408,7 +408,7 @@ impl Clock {
     /// ```
     #[must_use]
     pub fn stopwatch(&self) -> crate::Stopwatch {
-        crate::Stopwatch::new(self)
+        crate::Stopwatch::start_new(self)
     }
 
     /// Returns time in the comparison domain of this clock's timers.

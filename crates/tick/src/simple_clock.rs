@@ -62,7 +62,7 @@ impl SimpleClock {
         Self(TimeKind::System)
     }
 
-    #[cfg(any(feature = "fast-time", test))]
+    #[cfg(any(feature = "coarse-time", test))]
     #[must_use]
     pub(crate) const fn is_system(&self) -> bool {
         matches!(self.0, TimeKind::System)
@@ -219,7 +219,7 @@ impl SimpleClock {
     /// Creates a [`Stopwatch`][crate::Stopwatch] and starts it.
     #[must_use]
     pub fn stopwatch(&self) -> crate::Stopwatch {
-        crate::Stopwatch::new(self)
+        crate::Stopwatch::start_new(self)
     }
 }
 

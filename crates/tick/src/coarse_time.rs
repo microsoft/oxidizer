@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Lower-overhead timestamps for fast stopwatches.
+//! Lower-overhead timestamps for coarse stopwatches.
 
 use std::time::Duration;
 #[cfg(any(miri, not(any(target_os = "linux", windows))))]

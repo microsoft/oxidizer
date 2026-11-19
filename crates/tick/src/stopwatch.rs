@@ -8,8 +8,8 @@ use crate::SimpleClock;
 /// A stopwatch that measures elapsed time.
 ///
 /// Create a `Stopwatch` from [`Clock::stopwatch()`][crate::Clock::stopwatch],
-/// [`SimpleClock::stopwatch()`], or [`Stopwatch::new()`]. With the
-/// `fast-time` feature, [`Stopwatch::new_fast()`] uses a lower-precision
+/// [`SimpleClock::stopwatch()`], or [`Stopwatch::start_new()`]. With the
+/// `coarse-time` feature, [`Stopwatch::start_coarse()`] uses a lower-precision
 /// source with lower overhead.
 ///
 /// # Examples
@@ -36,9 +36,9 @@ enum StopwatchSource {
         clock: SimpleClock,
         start: Instant,
     },
-    #[cfg(any(feature = "fast-time", test))]
-    Fast {
-        start: crate::fast_stopwatch::Timestamp,
+    #[cfg(any(feature = "coarse-time", test))]
+    Coarse {
+        start: crate::coarse_time::Timestamp,
     },
 }
 
@@ -62,13 +62,13 @@ impl Stopwatch {
     /// use tick::{Clock, Stopwatch};
     ///
     /// # fn measure(clock: &Clock) -> Duration {
-    /// let stopwatch = Stopwatch::new(clock);
+    /// let stopwatch = Stopwatch::start_new(clock);
     /// // Perform some operation...
     /// stopwatch.elapsed()
     /// # }
     /// ```
     #[must_use]
-    pub fn new(source: impl AsRef<SimpleClock>) -> Self {
+    pub fn start_new(source: impl AsRef<SimpleClock>) -> Self {
         let clock = source.as_ref().clone();
         let start = clock.instant();
         Self {
@@ -87,28 +87,28 @@ impl Stopwatch {
     /// [`Instant::now`].
     ///
     /// Use this constructor only if measurements show that [`Stopwatch::elapsed`]
-    /// is a performance bottleneck. Otherwise, use [`Stopwatch::new`].
+    /// is a performance bottleneck. Otherwise, use [`Stopwatch::start_new`].
     ///
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "fast-time")] {
+    /// # #[cfg(feature = "coarse-time")] {
     /// use tick::{SimpleClock, Stopwatch};
     ///
-    /// let stopwatch = Stopwatch::new_fast(SimpleClock::new_system());
+    /// let stopwatch = Stopwatch::start_coarse(SimpleClock::new_system());
     /// let elapsed = stopwatch.elapsed();
     /// # let _ = elapsed;
     /// # }
     /// ```
-    #[cfg(any(feature = "fast-time", test))]
+    #[cfg(any(feature = "coarse-time", test))]
     #[must_use]
-    pub fn new_fast(source: impl AsRef<SimpleClock>) -> Self {
+    pub fn start_coarse(source: impl AsRef<SimpleClock>) -> Self {
         let clock = source.as_ref().clone();
-        // #[gamma::skip(cond.always_false, reason = "Selecting precise system time preserves the elapsed-time contract; the benchmark owns fast-source performance coverage.")]
+        // #[gamma::skip(cond.always_false, reason = "Selecting precise system time preserves the elapsed-time contract; the benchmark owns coarse-source performance coverage.")]
         if clock.is_system() {
             return Self {
-                source: StopwatchSource::Fast {
-                    start: crate::fast_stopwatch::now(),
+                source: StopwatchSource::Coarse {
+                    start: crate::coarse_time::now(),
                 },
             };
         }
@@ -124,8 +124,8 @@ impl Stopwatch {
     pub fn elapsed(&self) -> Duration {
         match &self.source {
             StopwatchSource::Clock { clock, start } => clock.instant().saturating_duration_since(*start),
-            #[cfg(any(feature = "fast-time", test))]
-            StopwatchSource::Fast { start } => crate::fast_stopwatch::now().elapsed_since(*start),
+            #[cfg(any(feature = "coarse-time", test))]
+            StopwatchSource::Coarse { start } => crate::coarse_time::now().elapsed_since(*start),
         }
     }
 
@@ -144,7 +144,7 @@ impl Stopwatch {
     /// use tick::{ClockControl, Stopwatch};
     ///
     /// let control = ClockControl::new();
-    /// let mut stopwatch = Stopwatch::new(control.to_simple_clock());
+    /// let mut stopwatch = Stopwatch::start_new(control.to_simple_clock());
     ///
     /// control.advance(Duration::from_secs(2));
     /// assert_eq!(stopwatch.restart(), Duration::from_secs(2));
@@ -160,11 +160,11 @@ impl Stopwatch {
                 *start = now;
                 elapsed
             }
-            #[cfg(any(feature = "fast-time", test))]
-            StopwatchSource::Fast { start } => {
-                let now = crate::fast_stopwatch::now();
+            #[cfg(any(feature = "coarse-time", test))]
+            StopwatchSource::Coarse { start } => {
+                let now = crate::coarse_time::now();
                 let elapsed = now.elapsed_since(*start);
-                // #[gamma::skip(stmt.delete_assign, reason = "The precise-clock branch has exact deterministic restart coverage; the fast branch differs only by its intentionally unmocked platform timestamp source.")]
+                // #[gamma::skip(stmt.delete_assign, reason = "The precise-clock branch has exact deterministic restart coverage; the coarse branch differs only by its intentionally unmocked platform timestamp source.")]
                 *start = now;
                 elapsed
             }
