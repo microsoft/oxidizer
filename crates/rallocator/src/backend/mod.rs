@@ -57,11 +57,48 @@ pub(crate) mod sealed {
 
         /// Prepares and copies a resize without retiring the old block.
         ///
-        /// Both old and replacement storage stay live on success.
+        /// Both old and replacement storage stay live on success. The default
+        /// moves the block when its size changes. A backend can resize in place.
         ///
         /// # Safety
         /// The pointer and requested size satisfy the same resize contract.
-        unsafe fn prepare_reallocation(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8;
+        unsafe fn prepare_reallocation(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            if new_size == layout.size() {
+                return ptr;
+            }
+            let Ok(new_layout) = Layout::from_size_align(new_size, layout.align()) else {
+                return std::ptr::null_mut();
+            };
+            // SAFETY: The new layout is valid and the caller supplies a nonzero size.
+            let replacement = unsafe { self.allocate::<false>(new_layout) };
+            if !replacement.is_null() {
+                // SAFETY: Both blocks are live and disjoint for the length of the copy.
+                unsafe { std::ptr::copy_nonoverlapping(ptr, replacement, layout.size().min(new_size)) };
+            }
+            replacement
+        }
+
+        /// Records a successful change before the old block can be reused.
+        ///
+        /// # Safety
+        /// The pointer and size satisfy the `reallocate` contract. `record` must not
+        /// unwind or invalidate either block.
+        unsafe fn reallocate_recorded(&self, ptr: *mut u8, layout: Layout, new_size: usize, record: impl FnOnce(*mut u8)) -> *mut u8 {
+            // SAFETY: The caller supplies a live block and a valid resize request.
+            let replacement = unsafe { self.prepare_reallocation(ptr, layout, new_size) };
+            if replacement.is_null() {
+                return replacement;
+            }
+            if replacement != ptr || new_size != layout.size() {
+                record(replacement);
+            }
+            if replacement != ptr {
+                // SAFETY: Preparation copied the payload and kept the old block live until recording finished.
+                unsafe { self.deallocate(ptr, layout) };
+            }
+            self.publish_state();
+            replacement
+        }
 
         fn publish_state(&self);
     }

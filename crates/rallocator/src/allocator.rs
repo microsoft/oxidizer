@@ -85,26 +85,8 @@ impl<B: Backend> Rallocator<B> {
     #[inline(never)]
     unsafe fn reallocate_recorded(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let record = |replacement| crate::recording::resize(pointer, replacement, layout.size(), new_size, layout.align());
-        // SAFETY: The caller forwards the live block and complete resize contract.
-        unsafe { self.reallocate_recorded_with(pointer, layout, new_size, record) }
-    }
-
-    unsafe fn reallocate_recorded_with(&self, pointer: *mut u8, layout: Layout, new_size: usize, record: impl FnOnce(*mut u8)) -> *mut u8 {
-        // SAFETY: The caller supplies a live block and a valid resize request.
-        let replacement = unsafe { self.backend.prepare_reallocation(pointer, layout, new_size) };
-        if replacement.is_null() {
-            return replacement;
-        }
-        if replacement != pointer || new_size != layout.size() {
-            record(replacement);
-        }
-        if replacement != pointer {
-            // SAFETY: Preparation copied the payload and kept the old block live
-            // until its successful resize event was recorded.
-            unsafe { self.backend.deallocate(pointer, layout) };
-        }
-        self.backend.publish_state();
-        replacement
+        // SAFETY: The caller supplies a valid resize. Recording only observes the block addresses.
+        unsafe { self.backend.reallocate_recorded(pointer, layout, new_size, record) }
     }
 }
 
@@ -230,7 +212,7 @@ mod tests {
         };
 
         // SAFETY: The fixture transfers its live old block for this valid resize.
-        let new = unsafe { allocator.reallocate_recorded_with(old, layout, 128, record) };
+        let new = unsafe { allocator.backend.reallocate_recorded(old, layout, 128, record) };
 
         assert_ne!(old, new);
         assert_eq!(phase.get(), Phase::Published);

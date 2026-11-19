@@ -72,8 +72,7 @@ unsafe impl Operations for Dynamic {
             match selected() {
                 Choice::Snmalloc => Snmalloc.allocate::<ZEROED>(layout),
                 Choice::Mimalloc => Mimalloc.allocate::<ZEROED>(layout),
-                Choice::System if ZEROED => System.alloc_zeroed(layout),
-                Choice::System => System.alloc(layout),
+                Choice::System => System.allocate::<ZEROED>(layout),
             }
         }
     }
@@ -97,18 +96,18 @@ unsafe impl Operations for Dynamic {
             match selected() {
                 Choice::Snmalloc => Snmalloc.reallocate(ptr, layout, new_size),
                 Choice::Mimalloc => Mimalloc.reallocate(ptr, layout, new_size),
-                Choice::System => System.realloc(ptr, layout, new_size),
+                Choice::System => System.reallocate(ptr, layout, new_size),
             }
         }
     }
 
-    unsafe fn prepare_reallocation(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        // SAFETY: The creating backend receives the caller's live block and resize contract.
+    unsafe fn reallocate_recorded(&self, ptr: *mut u8, layout: Layout, new_size: usize, record: impl FnOnce(*mut u8)) -> *mut u8 {
+        // SAFETY: The creating backend handles the full resize, including retirement after the callback.
         unsafe {
             match selected() {
-                Choice::Snmalloc => Snmalloc.prepare_reallocation(ptr, layout, new_size),
-                Choice::Mimalloc => Mimalloc.prepare_reallocation(ptr, layout, new_size),
-                Choice::System => prepare_system_reallocation(ptr, layout, new_size),
+                Choice::Snmalloc => Snmalloc.reallocate_recorded(ptr, layout, new_size, record),
+                Choice::Mimalloc => Mimalloc.reallocate_recorded(ptr, layout, new_size, record),
+                Choice::System => System.reallocate_recorded(ptr, layout, new_size, record),
             }
         }
     }
@@ -122,18 +121,28 @@ unsafe impl Operations for Dynamic {
     }
 }
 
-unsafe fn prepare_system_reallocation(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-    if new_size == layout.size() {
-        return ptr;
+// SAFETY: System owns every block. Resize preparation allocates disjoint storage
+// without releasing the original, as required by the recorded resize protocol.
+unsafe impl Operations for System {
+    unsafe fn allocate<const ZEROED: bool>(&self, layout: Layout) -> *mut u8 {
+        if ZEROED {
+            // SAFETY: The caller supplies a valid nonzero allocation layout.
+            unsafe { self.alloc_zeroed(layout) }
+        } else {
+            // SAFETY: The same layout is valid for an uninitialized allocation.
+            unsafe { self.alloc(layout) }
+        }
     }
-    let Ok(new_layout) = Layout::from_size_align(new_size, layout.align()) else {
-        return std::ptr::null_mut();
-    };
-    // SAFETY: The new layout is valid and the caller supplies a nonzero size.
-    let replacement = unsafe { System.alloc(new_layout) };
-    if !replacement.is_null() {
-        // SAFETY: Both blocks remain live and disjoint until the facade records the resize.
-        unsafe { std::ptr::copy_nonoverlapping(ptr, replacement, layout.size().min(new_size)) };
+
+    unsafe fn deallocate(&self, ptr: *mut u8, layout: Layout) {
+        // SAFETY: The caller supplies a live System block and its exact layout.
+        unsafe { self.dealloc(ptr, layout) };
     }
-    replacement
+
+    unsafe fn reallocate(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // SAFETY: The live System block, layout and new size meet GlobalAlloc's resize contract.
+        unsafe { self.realloc(ptr, layout, new_size) }
+    }
+
+    fn publish_state(&self) {}
 }
