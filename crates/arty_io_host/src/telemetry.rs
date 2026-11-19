@@ -91,6 +91,7 @@ pub(crate) struct IoDriverShutdownFailed {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    // These assertions inspect private classified values before an event emits them.
     use arty_io_core::{DriverError, DriverRole};
 
     use super::{IoDriverErrorMessage, IoDriverRoleLabel};

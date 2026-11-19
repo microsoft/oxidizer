@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(test)]
+
 #[cfg(all(not(miri), target_os = "linux"))]
 #[cfg_attr(coverage_nightly, coverage(off))] // Test utility function, not meant to be covered
 pub(crate) fn system_memory() -> usize {
