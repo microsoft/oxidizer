@@ -3,6 +3,8 @@
 
 //! Cache contracts through public builders, operations, and event handlers.
 
+#![cfg(test)]
+
 testing_aids::init_tracing!();
 mod cache {
 
@@ -1149,7 +1151,7 @@ mod wrapper {
 
         // Entry without TTL should not be expired
         let entry = CacheEntry::new(42);
-        assert!(!read_entry(&inner_check, &wrapper, Some(entry)).is_none());
+        assert!(read_entry(&inner_check, &wrapper, Some(entry)).is_some());
     }
 
     #[test]
@@ -1186,7 +1188,7 @@ mod wrapper {
 
         // Entry cached exactly TTL ago → elapsed == ttl → should NOT be expired (uses >)
         let entry = CacheEntry::expires_at(42, ttl, clock.system_time() - ttl);
-        assert!(!read_entry(&inner_check, &wrapper, Some(entry)).is_none());
+        assert!(read_entry(&inner_check, &wrapper, Some(entry)).is_some());
     }
 
     #[test]
@@ -1293,7 +1295,7 @@ mod serialization {
 
     #[test]
     fn encode_serialization_failure_returns_err() {
-        assert!(encode(FailSerialize, GlobalPool::new().into()).is_err());
+        encode(FailSerialize, GlobalPool::new().into()).unwrap_err();
     }
 
     #[test]
@@ -1594,7 +1596,7 @@ mod events {
         let ids = Arc::new(Mutex::new(Vec::new()));
         let cache = Cache::builder::<i32, i32>(Clock::new_frozen())
             .storage(MockCache::new())
-            .event_handler(Ids(ids.clone()))
+            .event_handler(Ids(Arc::clone(&ids)))
             .build();
         for _ in 0..3 {
             assert!(futures::executor::block_on(cache.get(&7)).unwrap().is_none());
@@ -1719,7 +1721,7 @@ mod refresh_paths {
     impl CacheTier<String, i32> for StalePrimary {
         async fn get(&self, _: &String) -> Result<Option<CacheEntry<i32>>, Error> {
             let mut entry = CacheEntry::new(0);
-            entry.ensure_cached_at(self.clock.system_time() - Duration::from_secs(60));
+            entry.ensure_cached_at(self.clock.system_time() - Duration::from_mins(1));
             Ok(Some(entry))
         }
         async fn insert(&self, key: String, entry: CacheEntry<i32>) -> Result<InsertOutcome, Error> {

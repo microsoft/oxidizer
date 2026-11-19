@@ -182,7 +182,6 @@ where
 /// Unit tests for internal fallback cache implementation details.
 ///
 /// Public API tests are in `tests/fallback.rs`.
-
 // Cache hides the fallback's Debug representation and construction state.
 // Public reads call do_refresh only when refresh is configured.
 #[cfg(test)]
