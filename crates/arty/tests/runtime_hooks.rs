@@ -627,3 +627,15 @@ fn control_ignores_registration_after_shutdown_starts() {
     assert_eq!(clones.load(Ordering::SeqCst), 0);
     runtime.stop().unwrap();
 }
+
+#[test]
+fn control_clones_nonretained_hook_data_for_each_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let control = support::runtime_control(&runtime);
+    let clones = Arc::new(AtomicUsize::new(0));
+
+    control.on(HookFn::<Panic, _>::new(CloneCount(Arc::clone(&clones)), |_event, _data| {}));
+
+    assert_eq!(clones.load(Ordering::SeqCst), 1);
+    runtime.stop().unwrap();
+}

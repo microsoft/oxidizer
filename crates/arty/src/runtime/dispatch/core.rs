@@ -267,15 +267,11 @@ impl DispatcherCore {
             return;
         }
 
-        let hook = if hook.is_retained() {
-            let delivery = hook.clone();
-            if !self.retain_hook(hook) {
-                return;
-            }
-            delivery
-        } else {
-            hook
-        };
+        let delivery = hook.clone();
+        if hook.is_retained() && !self.retain_hook(hook) {
+            return;
+        }
+        let hook = delivery;
         let source = LocalWorker::current_thread().filter(|thread| self.owns(thread));
         let mut remote = self
             .worker_endpoints
