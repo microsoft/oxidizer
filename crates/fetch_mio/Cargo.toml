@@ -47,7 +47,6 @@ fetch_hyper = { workspace = true }
 fetch_options = { workspace = true }
 http_extensions = { workspace = true }
 layered = { workspace = true }
-libc = { workspace = true }
 ohno = { workspace = true }
 seatbelt = { workspace = true }
 templated_uri = { workspace = true }
@@ -60,6 +59,9 @@ hyper = { workspace = true }
 hyper-util = { workspace = true, features = ["client-legacy"] }
 mio = { workspace = true, features = ["net", "os-poll"] }
 socket2 = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
 
 [dev-dependencies]
 arty = { path = "../arty", features = ["macros", "rt", "test-util"] }
