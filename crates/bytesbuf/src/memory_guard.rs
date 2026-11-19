@@ -47,6 +47,7 @@ impl Default for MemoryGuard {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    // The assertion inspects the private block-reference collection.
     use super::*;
 
     #[expect(clippy::used_underscore_binding, reason = "Sometimes, you gotta do what you gotta do.")]

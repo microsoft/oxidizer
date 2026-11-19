@@ -252,6 +252,7 @@ impl IoRuntime {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    // The public API cannot pause both resolutions between slot lookup and initialization.
     #[test]
     fn gamma_survivor_resolve_context_preserves_prior_registry_failure_without_panicking() {
         let runtime = IoRuntime::new(Sink::noop());
