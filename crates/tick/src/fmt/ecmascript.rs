@@ -157,7 +157,8 @@ impl From<EcmaScript> for SystemTime {
     fn from(value: EcmaScript) -> Self {
         // Every constructor routes through `new_checked`, and the constants are
         // within the range of every platform's `SystemTime`.
-        value.0.into()
+        crate::fmt::checked_system_time(value.0)
+            .expect("every EcmaScript constructor checks that the timestamp fits this platform's SystemTime")
     }
 }
 

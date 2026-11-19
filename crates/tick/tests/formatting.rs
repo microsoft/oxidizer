@@ -147,7 +147,7 @@ fn ecmascript_max_truncates_to_milliseconds() {
 
 #[test]
 fn ecmascript_rejects_system_time_above_its_range() {
-    let overflow = SystemTime::from(Timestamp::MAX) + Duration::from_hours(24);
+    let overflow = SystemTime::try_from(Timestamp::MAX).unwrap() + Duration::from_hours(24);
 
     assert!(EcmaScript::try_from(overflow).unwrap_err().is_out_of_range());
 }
@@ -225,7 +225,7 @@ fn iso8601_round_trips_system_time() {
 
 #[test]
 fn iso8601_classifies_system_time_above_its_range() {
-    let overflow = SystemTime::from(Timestamp::MAX) + Duration::from_hours(24);
+    let overflow = SystemTime::try_from(Timestamp::MAX).unwrap() + Duration::from_hours(24);
     let error = Iso8601::try_from(overflow).unwrap_err();
 
     assert!(error.is_out_of_range());
@@ -370,7 +370,7 @@ fn rfc2822_rejects_unencodable_negative_years_when_system_time_can_express_them(
 
 #[test]
 fn rfc2822_classifies_system_time_above_its_range() {
-    let overflow = SystemTime::from(Timestamp::MAX) + Duration::from_hours(24);
+    let overflow = SystemTime::try_from(Timestamp::MAX).unwrap() + Duration::from_hours(24);
 
     assert!(Rfc2822::try_from(overflow).unwrap_err().is_out_of_range());
 }
@@ -487,7 +487,7 @@ fn system_time_extension_handles_pre_epoch_and_saturating_values() {
         "1969-12-31T23:59:59.000Z"
     );
 
-    let above_max = SystemTime::from(Timestamp::MAX) + Duration::from_secs(12_345);
+    let above_max = SystemTime::try_from(Timestamp::MAX).unwrap() + Duration::from_secs(12_345);
     assert_eq!(above_max.display_iso_8601().to_string(), "9999-12-30T22:00:00.999999999Z");
     assert_eq!(above_max.display_ecmascript().to_string(), "9999-12-30T22:00:00.999Z");
 }

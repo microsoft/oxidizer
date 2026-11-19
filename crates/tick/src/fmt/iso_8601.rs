@@ -129,11 +129,10 @@ impl Display for Iso8601 {
 
 impl From<Iso8601> for SystemTime {
     fn from(value: Iso8601) -> Self {
-        // jiff's conversion panics for an instant this platform's `SystemTime` cannot hold,
-        // which no `Iso8601` can be: parsing runs the instant through
-        // `ensure_system_time_representable`, `TryFrom<SystemTime>` starts from a
-        // `SystemTime` in the first place, and the constants are within range everywhere.
-        value.0.into()
+        // Parsing checks the platform range, conversion from SystemTime starts
+        // within that range, and the constants fit every supported platform.
+        crate::fmt::checked_system_time(value.0)
+            .expect("every Iso8601 constructor checks that the timestamp fits this platform's SystemTime")
     }
 }
 

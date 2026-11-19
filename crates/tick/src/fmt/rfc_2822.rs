@@ -180,10 +180,10 @@ impl Display for Rfc2822 {
 
 impl From<Rfc2822> for SystemTime {
     fn from(value: Rfc2822) -> Self {
-        // jiff's conversion panics for an instant this platform's `SystemTime` cannot hold,
-        // which no `Rfc2822` can be: every constructor routes through `new_checked`, and the
-        // constants are within range everywhere.
-        value.0.into()
+        // Every constructor checks the platform range, and the constants fit
+        // every supported platform.
+        crate::fmt::checked_system_time(value.0)
+            .expect("every Rfc2822 constructor checks that the timestamp fits this platform's SystemTime")
     }
 }
 
