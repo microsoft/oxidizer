@@ -146,7 +146,7 @@ deadline.
 
 ## Errors
 
-`tick::Error` owns the crate error contract. It provides timeout and range
+`tick::Error` owns the crate error contract. It provides timeout
 classification, retains upstream causes, and captures a backtrace.
 
 Display output includes the backtrace when capture is enabled. Callers must use
