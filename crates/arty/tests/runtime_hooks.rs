@@ -148,6 +148,33 @@ impl ThreadAware for CloneCount {
     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 }
 
+struct LocalRegistrationProbe {
+    clones: Arc<AtomicUsize>,
+    relocated: mpsc::Sender<(ThreadId, ThreadId)>,
+}
+
+impl Clone for LocalRegistrationProbe {
+    fn clone(&self) -> Self {
+        self.clones.fetch_add(1, Ordering::SeqCst);
+        Self {
+            clones: Arc::clone(&self.clones),
+            relocated: self.relocated.clone(),
+        }
+    }
+}
+
+impl ThreadAware for LocalRegistrationProbe {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
+        let source = source
+            .expect("runtime control supplies the source worker for worker-local registration")
+            .id();
+        assert!(
+            self.relocated.send((source, destination.id())).is_ok(),
+            "the test retains the relocation receiver until registration completes"
+        );
+    }
+}
+
 struct ShutdownDuringRegistration {
     control: RuntimeControl,
     original_dropped: Option<Arc<AtomicBool>>,
@@ -368,6 +395,32 @@ fn control_registration_applies_before_local_spawn() {
         .unwrap();
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    runtime.stop().unwrap();
+}
+
+#[test]
+fn local_registration_clones_once_and_relocates_from_the_current_worker() {
+    let runtime = Runtime::builder().workers(WorkersPolicy::exactly(1)).build().unwrap();
+    let clones = Arc::new(AtomicUsize::new(0));
+    let (relocated, relocation) = mpsc::channel();
+
+    let source = runtime
+        .scheduler()
+        .block_on(async |cx| {
+            let source = cx.thread().id();
+            cx.control().on(HookFn::<Panic, _>::new(
+                LocalRegistrationProbe {
+                    clones: Arc::clone(&clones),
+                    relocated,
+                },
+                |_event, _data| {},
+            ));
+            assert_eq!(clones.load(Ordering::SeqCst), 1);
+            source
+        })
+        .unwrap();
+
+    assert_eq!(relocation.try_recv().unwrap(), (source, source));
     runtime.stop().unwrap();
 }
 
