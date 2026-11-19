@@ -20,6 +20,11 @@ fn coarse_stopwatch_tracks_running_state() {
     stopwatch.restart();
     assert_eq!(stopwatch.elapsed(), Duration::ZERO);
 
+    stopwatch.reset();
+    assert!(!stopwatch.is_running());
+    assert_eq!(stopwatch.elapsed(), Duration::ZERO);
+
+    stopwatch.start();
     stopwatch.stop();
     assert!(!stopwatch.is_running());
     let StopwatchSource::Coarse { started_at } = stopwatch.source else {
