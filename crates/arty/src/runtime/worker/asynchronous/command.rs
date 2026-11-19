@@ -75,7 +75,8 @@ pub(crate) enum SystemCommand {
     #[cfg(any(test, feature = "monitor"))]
     #[debug("Inspect")]
     Inspect { request: seismograph_runtime::task::TaskRequest },
-    /// Appends one worker-local runtime hook.
+
+    /// Registers or executes one runtime hook on this worker.
     #[debug("RegisterHook")]
     RegisterHook { hook: HookRegistration, source: Option<Thread> },
 

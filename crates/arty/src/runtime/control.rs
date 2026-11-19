@@ -65,6 +65,11 @@ impl RuntimeControl {
     /// when it processes that command. If runtime shutdown has started, Arty
     /// ignores the registration.
     ///
+    /// [`WorkerInit`](crate::runtime::hook::WorkerInit) runs once on each live
+    /// worker. The runtime keeps that registration for workers that start
+    /// later and releases it during shutdown. Each worker discards its
+    /// callback after it runs.
+    ///
     /// Arty does not catch a panic from the callback. You must make sure that
     /// the callback completes without a panic.
     ///
@@ -88,7 +93,7 @@ impl RuntimeControl {
         D: thread_aware::ThreadAware + Clone + 'static,
     {
         let hook = registration(hook.into());
-        self.dispatcher.register_hook(&hook);
+        self.dispatcher.register_hook(hook);
     }
 
     /// Requests shutdown without blocking the calling thread.

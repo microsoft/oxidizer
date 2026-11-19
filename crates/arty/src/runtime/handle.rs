@@ -220,6 +220,7 @@ impl Runtime {
     )]
     fn wait(&mut self) -> Result<(), Error> {
         let wait_error = self.worker_joiner.join().err();
+        self.scheduler.dispatcher.release_retained_hooks();
         #[cfg(any(test, feature = "monitor"))]
         let monitor_error = self.diagnostics.take().and_then(|diagnostics| diagnostics.finish().err());
         if let Some(error) = self.scheduler.dispatcher.shutdown().error() {
@@ -312,7 +313,7 @@ mod tests {
                 shutdown.clone(),
             ),
         );
-        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown));
+        let dispatcher = DispatcherClient::new(DispatcherCore::new(nonempty::NonEmpty::new(endpoint), shutdown, Vec::new()));
         let mut runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(Vec::new()));
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             runtime.stop_with(true, |_| panic!("worker stop must not join its own workers"))
@@ -353,6 +354,7 @@ mod tests {
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
+            Vec::new(),
         ));
         let runtime = Runtime::with_dispatcher(dispatcher, WorkerJoiner::new(vec![worker]));
         assert!(runtime.stop().unwrap_err().to_string().contains("panicked"));
@@ -374,6 +376,7 @@ mod tests {
         let dispatcher = DispatcherClient::new(DispatcherCore::new(
             nonempty::NonEmpty::new(endpoint),
             crate::runtime::shutdown::Shutdown::default(),
+            Vec::new(),
         ));
         let runtime = Runtime::with_dispatcher(dispatcher.clone(), WorkerJoiner::new(vec![worker]));
         dispatcher.stop(Error::new(std::io::Error::other("first runtime failure")).into_shutdown_cause());
