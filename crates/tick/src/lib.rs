@@ -134,7 +134,8 @@
 //!
 //! [`Clock::system_time_as`] and [`SimpleClock::system_time_as`] convert the
 //! current time directly to types that implement `TryFrom<SystemTime>`.
-//! Jiff's [`Timestamp`][jiff::Timestamp] implements this conversion:
+//! Jiff's [`Timestamp`](https://docs.rs/jiff/latest/jiff/struct.Timestamp.html)
+//! implements this conversion:
 //!
 //! ```
 //! # #[cfg(feature = "test-util")]

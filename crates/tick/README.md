@@ -126,7 +126,8 @@ calendar arithmetic, local clock time, and time zones.
 
 [`Clock::system_time_as`][__link24] and [`SimpleClock::system_time_as`][__link25] convert the
 current time directly to types that implement `TryFrom<SystemTime>`.
-Jiff’s [`Timestamp`][__link26] implements this conversion:
+Jiff’s [`Timestamp`][__link26]
+implements this conversion:
 
 ```rust
 use jiff::Timestamp;
@@ -269,7 +270,7 @@ show more uses of these types.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbhtK2lgppMZIbCc11AuRm53Ab1y91Msl0WtcbqsCbpI4bugthZIOCZGppZmZlMS4wLjGCbHRocmVhZF9hd2FyZWYwLjEyLjKCZHRpY2tlMC45LjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjNhdIQborR2_k_xJd4bTcf2krrNPIcbP72Pw1UdRjkbim_eMDe2BBthYvRhcoQbGjhawDv5ySobsCnsKY2hQuQb5u_mSGIfHOsbxDuEqmOJYJFhZIKCbHRocmVhZF9hd2FyZWYwLjEyLjKCZHRpY2tlMC45LjE
  [__link0]: https://docs.rs/tick/0.9.1/tick/runtime/index.html
  [__link1]: https://docs.rs/tick/0.9.1/tick/?search=ClockControl
  [__link10]: https://docs.rs/tick/0.9.1/tick/?search=Error
@@ -289,7 +290,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link23]: https://crates.io/crates/jiff
  [__link24]: https://docs.rs/tick/0.9.1/tick/?search=Clock::system_time_as
  [__link25]: https://docs.rs/tick/0.9.1/tick/?search=SimpleClock::system_time_as
- [__link26]: https://docs.rs/jiff/1.0.1/jiff/?search=Timestamp
+ [__link26]: https://docs.rs/jiff/latest/jiff/struct.Timestamp.html
  [__link27]: https://docs.rs/thread_aware/0.12.2/thread_aware/?search=ThreadAware
  [__link28]: https://docs.rs/tick/0.9.1/tick/?search=runtime::InactiveClock
  [__link29]: https://docs.rs/tick/0.9.1/tick/?search=Clock
