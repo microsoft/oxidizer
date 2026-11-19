@@ -1378,7 +1378,8 @@ mod refresh {
 
     fn starts_refresh(refresh: TimeToRefresh<String>, cached_at: SystemTime, now: SystemTime) -> bool {
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
-        runtime.block_on(async {
+        let _runtime_guard = runtime.enter();
+        futures::executor::block_on(async {
             let clock = Clock::new_frozen_at(now);
             let primary = MockCache::new();
             let fallback = MockCache::<String, i32>::new();
@@ -1387,12 +1388,11 @@ mod refresh {
             primary.insert("key".to_string(), entry).await.unwrap();
             let cache = Cache::builder(clock.clone())
                 .storage(primary)
-                .fallback(Cache::builder(clock).storage(fallback.clone()))
+                .fallback(Cache::builder(clock).storage(fallback))
                 .time_to_refresh(refresh)
                 .build();
             assert_eq!(*cache.get("key").await.unwrap().unwrap().value(), 42);
-            tokio::task::yield_now().await;
-            !fallback.operations().is_empty()
+            runtime.metrics().num_alive_tasks() != 0
         })
     }
     #[test]
@@ -1565,7 +1565,9 @@ mod events {
             let capture = Capture::new();
             let _guard = tracing::subscriber::set_default(capture.subscriber());
             assert!(cache.get("key").await.unwrap().is_some());
-            capture.assert_contains("DEBUG");
+            let output = capture.output();
+            let hit = output.lines().find(|line| line.contains("cache.hit")).unwrap();
+            assert_eq!(hit.split_whitespace().next(), Some("DEBUG"), "{output}");
         });
     }
 
