@@ -57,7 +57,10 @@ fn get_retry_after_duration(headers: &HeaderMap, clock: &Clock) -> Option<Durati
 }
 
 fn parse_http_date(value: &str) -> Option<SystemTime> {
-    let datetime = strtime::parse(IMF_FIXDATE, value).ok()?.to_datetime().ok()?;
+    let datetime = strtime::parse(IMF_FIXDATE, value.trim_matches([' ', '\t']))
+        .ok()?
+        .to_datetime()
+        .ok()?;
     let timestamp = Offset::UTC.to_timestamp(datetime).ok()?;
     SystemTime::try_from(timestamp).ok()
 }
@@ -122,6 +125,18 @@ mod tests {
     }
 
     #[test]
+    fn retry_after_date_with_optional_whitespace() {
+        let clock = Clock::new_frozen();
+        let future = clock.system_time().checked_add(Duration::from_secs(5)).unwrap();
+        let value = format!(" \t{}\t ", format_http_date(future));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, value.parse().unwrap());
+
+        assert_eq!(get_retry_after_duration(&headers, &clock), Some(Duration::from_secs(5)));
+    }
+
+    #[test]
     fn retry_after_missing_none() {
         let headers = HeaderMap::new();
         let clock = Clock::new_frozen();
@@ -133,6 +148,15 @@ mod tests {
     fn retry_after_invalid_none() {
         let mut headers = HeaderMap::new();
         headers.insert(RETRY_AFTER, "not-a-date".parse().unwrap());
+
+        let clock = Clock::new_frozen();
+        assert_eq!(get_retry_after_duration(&headers, &clock), None);
+    }
+
+    #[test]
+    fn retry_after_invalid_calendar_date_none() {
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, "Fri, 31 Feb 2023 00:00:00 GMT".parse().unwrap());
 
         let clock = Clock::new_frozen();
         assert_eq!(get_retry_after_duration(&headers, &clock), None);
